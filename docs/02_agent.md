@@ -24,3 +24,13 @@ Responsibilities:
 - Coordinate planetary roles
 - Manage time-latency tradeoffs
 - Maintain resilience over optimality
+
+## Phased Large-Scale Operation
+
+At large scale, the agent operates in phases:
+
+1. Measure (metrics)
+2. Judge (policy evaluation)
+3. Propose (intent generation)
+4. Plan (deterministic planning)
+5. Execute (RL / heuristic)

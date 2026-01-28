@@ -51,6 +51,15 @@ Examples:
 Supervisory interventions are triggered by metric thresholds,
 not reactive failures.
 
+## Intent Generation
+
+Policy signals are translated into high-level intents.
+Intents describe what kind of change is required,
+not how or when it is executed.
+
+Intents are consumed by planners,
+not by executors.
+
 ---
 
 ## 3. Intervention Types
