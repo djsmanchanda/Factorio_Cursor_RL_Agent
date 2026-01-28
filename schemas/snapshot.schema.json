@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FactorySnapshot",
+  "type": "object",
+  "required": ["tick", "surface", "entities"],
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "surface": { "type": "string" },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "position"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "position": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          },
+          "direction": { "type": "integer" },
+          "recipe": { "type": ["string", "null"] },
+          "force": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Block",
+  "type": "object",
+  "required": ["block_id", "category", "size", "inputs", "outputs"],
+  "properties": {
+    "block_id": { "type": "string" },
+    "category": { "type": "string" },
+    "size": {
+      "type": "object",
+      "required": ["w", "h"],
+      "properties": {
+        "w": { "type": "integer" },
+        "h": { "type": "integer" }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item", "rate"],
+        "properties": {
+          "item": { "type": "string" },
+          "rate": { "type": "number" }
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item", "rate"],
+        "properties": {
+          "item": { "type": "string" },
+          "rate": { "type": "number" }
+        }
+      }
+    }
+  }
+}

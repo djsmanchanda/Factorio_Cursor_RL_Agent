@@ -1,0 +1,4 @@
+# Path: requirements.txt
+# Purpose: Python dependencies for validation tools.
+
+jsonschema==4.21.1

@@ -1,0 +1,14 @@
+{
+  "tick": -1,
+  "surface": "nauvis",
+  "entities": [
+    {
+      "name": "assembling-machine-1",
+      "type": "assembling-machine",
+      "position": { "x": 10.0, "y": 5.0 },
+      "direction": 2,
+      "recipe": "iron-gear-wheel",
+      "force": "player"
+    }
+  ]
+}

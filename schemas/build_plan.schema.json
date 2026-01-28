@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BuildPlan",
+  "type": "object",
+  "required": ["phases"],
+  "properties": {
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "actions"],
+        "properties": {
+          "name": { "type": "string" },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["action_type"],
+              "properties": {
+                "action_type": {
+                  "type": "string",
+                  "enum": ["place_ghost", "place_entity", "remove_entity"]
+                },
+                "entity": { "type": "string" },
+                "position": {
+                  "type": "object",
+                  "properties": {
+                    "x": { "type": "number" },
+                    "y": { "type": "number" }
+                  }
+                },
+                "blueprint": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "factorio_cursor_rl_agent",
+  "version": "0.1.0",
+  "title": "Factorio Cursor RL Agent",
+  "author": "Factorio_Cursor_RL_Agent",
+  "factorio_version": "1.1",
+  "description": "Minimal deterministic snapshot exporter for schema validation."
+}
