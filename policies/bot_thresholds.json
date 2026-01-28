@@ -1,0 +1,5 @@
+{
+  "max_bot_density": 0.004,
+  "max_active_construction_bots": 300,
+  "warn_bot_density": 0.003
+}

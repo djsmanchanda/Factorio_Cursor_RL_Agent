@@ -19,6 +19,13 @@
 - [ ] RL executor (Targeted at build efficiency)
 - [ ] Reward function definition (Invariants-checked)
 
+## Phase 2.5 – Metrics & Policies
+- [ ] FactoryGraph-derived metrics
+- [ ] Bot saturation detection
+- [ ] Power structure analysis
+- [ ] Resource structure analysis
+- [ ] Policy threshold definitions
+
 ## Phase 3 – Scaling (CityPlanner)
 - [ ] Block schema & template system
 - [ ] Rail corridor automation (Invariants-based)

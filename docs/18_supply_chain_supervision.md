@@ -40,6 +40,17 @@ The agent continuously evaluates:
 
 These trigger interventions.
 
+Stress detection is driven by derived metrics, not heuristics.
+
+Examples:
+- Bot saturation thresholds
+- Power margin erosion
+- Resource depletion projections
+- Transport utilization ratios
+
+Supervisory interventions are triggered by metric thresholds,
+not reactive failures.
+
 ---
 
 ## 3. Intervention Types

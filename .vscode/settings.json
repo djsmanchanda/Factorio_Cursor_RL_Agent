@@ -1,5 +1,17 @@
 {
     "chat.tools.terminal.autoApprove": {
-        "Out-File": true
+        "Out-File": true,
+        "/^python C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tools\\\\inspect_metrics\\.py C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tests\\\\fixtures\\\\sample_snapshot\\.json$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tools\\\\inspect_snapshot\\.py C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tests\\\\fixtures\\\\sample_snapshot\\.json$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^python C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tools\\\\validate_snapshot\\.py C:\\\\Users\\\\djsma\\\\Downloads\\\\Github_Desktop\\\\Factorio_Cursor_RL_Agent\\\\tests\\\\fixtures\\\\sample_snapshot\\.json$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

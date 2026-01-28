@@ -20,6 +20,13 @@ The validator loads [schemas/snapshot.schema.json](schemas/snapshot.schema.json)
 
 This tool validates the snapshot and prints deterministic facts about entities and bounds.
 
+## Metrics Inspector
+
+### Run
+- `python tools/inspect_metrics.py <path-to-snapshot.json>`
+
+This tool validates the snapshot and prints derived metrics without making decisions.
+
 ## Fixture Smoke Tests
 
 ### Valid fixture

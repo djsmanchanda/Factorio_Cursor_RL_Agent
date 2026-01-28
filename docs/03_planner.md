@@ -40,3 +40,21 @@ Planning occurs at multiple levels:
 
 Each level consumes outputs from the level below
 and imposes constraints from above.
+
+## Derived Metrics Layer
+
+Before any planning or decision-making occurs, the system computes
+derived metrics over the FactoryGraph.
+
+Metrics include:
+- Bot workload and density
+- Production structure counts
+- Power producer/consumer structure
+- Resource extraction structure
+
+Metrics are:
+- Deterministic
+- Read-only
+- Used by supervisory policies
+
+Planners must not make decisions without consulting metrics.

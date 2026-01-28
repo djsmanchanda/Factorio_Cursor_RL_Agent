@@ -260,7 +260,19 @@ When modifying the system:
 
 ---
 
-## 10. Enforcement
+## 10. Metrics Invariant
+
+All planning and supervisory decisions must be based on
+explicitly computed derived metrics.
+
+Heuristic or intuition-based decisions are forbidden.
+
+If a metric is not available, the system must compute it
+before acting.
+
+---
+
+## 11. Enforcement
 
 If an invariant is violated:
 - The agent must stop
@@ -271,7 +283,7 @@ Working code that violates invariants is considered incorrect.
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 These invariants define the identity of the system.
 
