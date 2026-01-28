@@ -34,3 +34,5 @@ At large scale, the agent operates in phases:
 3. Propose (intent generation)
 4. Plan (deterministic planning)
 5. Execute (RL / heuristic)
+
+Intent outputs conform to [schemas/intent.schema.json](schemas/intent.schema.json).

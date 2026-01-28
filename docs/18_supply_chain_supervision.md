@@ -60,6 +60,8 @@ not how or when it is executed.
 Intents are consumed by planners,
 not by executors.
 
+Intents conform to [schemas/intent.schema.json](schemas/intent.schema.json).
+
 ---
 
 ## 3. Intervention Types
