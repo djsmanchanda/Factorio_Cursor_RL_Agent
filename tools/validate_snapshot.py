@@ -24,6 +24,13 @@ def format_error_path(error):
     return "/".join(str(part) for part in error.path)
 
 
+def validate_snapshot_file(snapshot_path: Path, schema_path: Path):
+    schema = load_json(schema_path)
+    snapshot = load_json(snapshot_path)
+    validator = Draft7Validator(schema)
+    return sorted(validator.iter_errors(snapshot), key=lambda err: list(err.path))
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: python tools/validate_snapshot.py <snapshot.json>")
@@ -33,11 +40,7 @@ def main() -> int:
     schema_path = repo_root / "schemas" / "snapshot.schema.json"
     snapshot_path = Path(sys.argv[1]).resolve()
 
-    schema = load_json(schema_path)
-    snapshot = load_json(snapshot_path)
-
-    validator = Draft7Validator(schema)
-    errors = sorted(validator.iter_errors(snapshot), key=lambda err: list(err.path))
+    errors = validate_snapshot_file(snapshot_path, schema_path)
 
     if errors:
         print("Snapshot validation FAILED:")

@@ -13,6 +13,13 @@
 
 The validator loads [schemas/snapshot.schema.json](schemas/snapshot.schema.json) and fails loudly on any schema mismatch.
 
+## Snapshot Inspector
+
+### Run
+- `python tools/inspect_snapshot.py <path-to-snapshot.json>`
+
+This tool validates the snapshot and prints deterministic facts about entities and bounds.
+
 ## Fixture Smoke Tests
 
 ### Valid fixture
