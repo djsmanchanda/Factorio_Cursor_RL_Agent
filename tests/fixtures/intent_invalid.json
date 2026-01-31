@@ -1,0 +1,10 @@
+{
+  "intent": "prepare_transport_migration",
+  "urgency": "urgent",
+  "confidence": 0.9,
+  "evidence": [
+    { "source": "bot_density", "value": 0.0043 }
+  ],
+  "notes": "Missing scope, invalid urgency, extra field present",
+  "extra": "not allowed"
+}

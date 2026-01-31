@@ -1,0 +1,10 @@
+{
+  "intent": "prepare_transport_migration",
+  "scope": "city",
+  "urgency": "high",
+  "confidence": 0.9,
+  "evidence": [
+    { "source": "bot_density", "value": 0.0043 }
+  ],
+  "notes": "Bot density exceeded safe threshold"
+}

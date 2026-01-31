@@ -58,3 +58,9 @@ Metrics are:
 - Used by supervisory policies
 
 Planners must not make decisions without consulting metrics.
+
+## Intent Routing
+
+Planners do not act directly on intents.
+Intents are first routed to determine which planning
+capabilities are required and whether prerequisites exist.

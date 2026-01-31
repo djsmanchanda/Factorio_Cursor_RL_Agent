@@ -27,6 +27,14 @@ This tool validates the snapshot and prints deterministic facts about entities a
 
 This tool validates the snapshot and prints derived metrics without making decisions.
 
+## Intent Inspector
+
+### Run
+- `python tools/inspect_intents.py <path-to-intent.json>`
+
+This tool validates an intent against [schemas/intent.schema.json](schemas/intent.schema.json)
+and prints it in a human-readable format.
+
 ## Fixture Smoke Tests
 
 ### Valid fixture

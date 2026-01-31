@@ -62,6 +62,11 @@ not by executors.
 
 Intents conform to [schemas/intent.schema.json](schemas/intent.schema.json).
 
+## Intent Validation
+
+All intents must validate against intent.schema.json.
+Fixtures are used to lock semantics and prevent regression.
+
 ---
 
 ## 3. Intervention Types
