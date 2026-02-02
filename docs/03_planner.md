@@ -70,3 +70,11 @@ capabilities are required and whether prerequisites exist.
 After intent routing, the planner resolves whether the
 required planning capabilities are available and what
 prerequisites are missing before planning can begin.
+
+## Planning Readiness Gate
+
+Before any planner generates plans, a readiness gate
+verifies that required capabilities are available and
+prerequisites are satisfied.
+
+No planning occurs without an explicit READY decision.
