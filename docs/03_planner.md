@@ -64,3 +64,9 @@ Planners must not make decisions without consulting metrics.
 Planners do not act directly on intents.
 Intents are first routed to determine which planning
 capabilities are required and whether prerequisites exist.
+
+## Capability Resolution
+
+After intent routing, the planner resolves whether the
+required planning capabilities are available and what
+prerequisites are missing before planning can begin.
