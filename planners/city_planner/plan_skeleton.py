@@ -58,6 +58,16 @@ _PHASES_BY_INTENT: Dict[str, List[PlanPhase]] = {
             constraints=["no_throughput_reduction"],
         ),
         PlanPhase(
+            phase="block_boundary_definition",
+            requires_capabilities=["block_planning"],
+            constraints=[],
+        ),
+        PlanPhase(
+            phase="block_topology_planning",
+            requires_capabilities=["block_planning", "dependency_graph_planning"],
+            constraints=[],
+        ),
+        PlanPhase(
             phase="migration_planning",
             requires_capabilities=["block_level_dependency_analysis"],
             constraints=["shadow_blocks_only"],

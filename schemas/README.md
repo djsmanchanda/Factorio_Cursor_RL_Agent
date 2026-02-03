@@ -17,3 +17,4 @@ Documentation for each schema is maintained in this README.
 - `intent.schema.json` — Supervisor → Planner intent contract
 - `plan_skeleton.schema.json` — Planner readiness → plan skeleton contract
 - `phase_result.schema.json` — Phase planner → phase result contract
+- `planning_bundle.schema.json` — Phase orchestrator → planning bundle contract

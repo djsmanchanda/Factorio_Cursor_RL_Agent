@@ -30,6 +30,14 @@ CAPABILITIES = {
         "requires": ["city_grid"],
         "provides": ["buffer_capacity"],
     },
+    "block_planning": {
+        "requires": ["city_grid"],
+        "provides": ["block_boundaries"],
+    },
+    "dependency_graph_planning": {
+        "requires": [],
+        "provides": ["block_dependency_graph"],
+    },
     "flow_balancing_planning": {
         "requires": ["city_grid"],
         "provides": ["flow_balance"],

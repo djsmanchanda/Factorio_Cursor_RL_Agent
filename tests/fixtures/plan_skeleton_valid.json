@@ -10,6 +10,14 @@
     {
       "phase": "interface_definition",
       "requires_capabilities": ["station_interface_definition"]
+    },
+    {
+      "phase": "block_boundary_definition",
+      "requires_capabilities": ["block_planning"]
+    },
+    {
+      "phase": "block_topology_planning",
+      "requires_capabilities": ["block_planning", "dependency_graph_planning"]
     }
   ],
   "explicitly_not_doing": [

@@ -1,5 +1,5 @@
-# Path: planners/city_planner/phases/transport_strategy_phase.py
-# Purpose: Produce a read-only transport strategy phase result.
+# Path: planners/city_planner/phases/interface_definition_phase.py
+# Purpose: Produce a read-only interface definition phase result.
 
 from __future__ import annotations
 
@@ -46,35 +46,67 @@ def _validate_phase_result(result: PhaseResult, schema_path: Path) -> None:
         raise ValueError("Phase result validation FAILED:\n" + "\n".join(messages))
 
 
-def evaluate_transport_strategy(
+def _find_transport_decision(prior_results: List[dict]) -> Optional[str]:
+    for result in prior_results:
+        if result.get("phase") == "transport_strategy_selection":
+            return result.get("decision")
+    return None
+
+
+def evaluate_interface_definition(
     phase_entry: dict,
     capability_resolution: dict,
-    prior_phase_results: Optional[List[dict]] = None,
+    prior_phase_results: List[dict],
     metrics: Optional[dict] = None,
     schema_path: Optional[Path] = None,
 ) -> PhaseResult:
     scope = capability_resolution.get("scope", "local")
     available = set(capability_resolution.get("available", []))
-    blocked = set(capability_resolution.get("blocked", []))
 
-    decision = "belt_backbone"
+    transport_decision = _find_transport_decision(prior_phase_results)
+    if transport_decision is None:
+        raise ValueError("Missing transport_strategy_selection phase result")
+
+    decision = "belt_only_interfaces"
     alternatives: List[str] = []
     rationale: List[str] = []
+    constraints: List[str] = []
 
-    if scope == "city" and "rail_corridor_planning" in available:
-        decision = "rail_preferred"
-        alternatives = ["belt_backbone"]
-        rationale.append("city_scope")
-        rationale.append("rail_capability_available")
+    if transport_decision == "rail_preferred":
+        if "rail_corridor_planning" not in available:
+            raise ValueError("Missing capability: rail_corridor_planning")
+
+        decision = "station_based_interfaces"
+        alternatives = ["hybrid_interfaces"]
+        rationale.extend(["rail_preferred_transport", "city_scope"])
+        constraints.extend(
+            [
+                "no_mainline_stations",
+                "station_on_siding_only",
+                "fixed_train_length",
+                "no_cross_block_belts",
+                "no_cross_block_bots",
+            ]
+        )
+    elif transport_decision == "belt_preferred" and scope in {"local", "block"}:
+        decision = "belt_only_interfaces"
+        alternatives = ["hybrid_interfaces"]
+        rationale.extend(["belt_preferred_transport", f"{scope}_scope"])
+        constraints.extend(["limited_distance_only", "no_cross_block_rails"])
+    elif transport_decision == "belt_preferred" and scope == "city":
+        decision = "hybrid_interfaces"
+        alternatives = ["belt_only_interfaces"]
+        rationale.extend(["belt_preferred_transport", "city_scope"])
+        constraints.extend(["no_cross_block_belts", "station_required_for_long_distance", "belts_internal_only"])
     else:
-        decision = "belt_backbone"
-        alternatives = ["rail_preferred"] if "rail_corridor_planning" not in blocked else []
-        rationale.append("rail_capability_unavailable" if "rail_corridor_planning" in blocked else "local_scope")
+        decision = "belt_only_interfaces"
+        alternatives = ["hybrid_interfaces"]
+        rationale.append("transport_strategy_unrecognized")
 
     if metrics and metrics.get("bot_density_high"):
         rationale.append("bot_density_high")
 
-    constraints = list(phase_entry.get("constraints", []))
+    constraints.extend(list(phase_entry.get("constraints", [])))
 
     result = PhaseResult(
         phase=phase_entry.get("phase"),

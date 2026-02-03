@@ -51,6 +51,13 @@ and prints it in a human-readable format.
 
 This tool evaluates a read-only phase result from a plan skeleton and prints it.
 
+## Planning Bundle Inspector
+
+### Run
+- `python tools/inspect_planning_bundle.py <path-to-plan-skeleton.json>`
+
+This tool runs the phase orchestrator and prints a validated planning bundle.
+
 ## Fixture Smoke Tests
 
 ### Valid fixture
