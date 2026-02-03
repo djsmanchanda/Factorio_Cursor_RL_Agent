@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlanningRequest",
+  "description": "Routed planning request derived from intent routing.",
+  "type": "object",
+  "required": ["intent", "scope", "required_capabilities"],
+  "properties": {
+    "intent": { "type": "string" },
+    "scope": {
+      "type": "string",
+      "enum": ["local", "block", "city", "planet", "interplanetary"]
+    },
+    "required_capabilities": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked_by": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

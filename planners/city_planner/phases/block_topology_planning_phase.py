@@ -100,10 +100,10 @@ def evaluate_block_topology_planning(
 
     if boundary_decision is None:
         raise ValueError("Missing block_boundary_definition phase result")
-        if transport_decision is None:
-            raise ValueError("Missing transport_strategy_selection phase result")
-        if interface_decision is None:
-            raise ValueError("Missing interface_definition phase result")
+    if transport_decision is None:
+        raise ValueError("Missing transport_strategy_selection phase result")
+    if interface_decision is None:
+        raise ValueError("Missing interface_definition phase result")
 
     decision = "single_block"
     alternatives: List[str] = []

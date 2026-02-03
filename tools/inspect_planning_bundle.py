@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from jsonschema import Draft7Validator
+
 from planners.city_planner.capability_resolver import resolve_capabilities
 from planners.city_planner.planning_gate import decide_planning
 from planners.city_planner.phase_orchestrator import build_planning_bundle
@@ -18,6 +20,19 @@ def load_json(path: Path):
         raise SystemExit(f"ERROR: File not found: {path}") from exc
     except json.JSONDecodeError as exc:
         raise SystemExit(f"ERROR: Invalid JSON in {path}: {exc}") from exc
+
+
+def _validate_request(request: dict, schema_path: Path) -> None:
+    with schema_path.open("r", encoding="utf-8") as handle:
+        schema = json.load(handle)
+    validator = Draft7Validator(schema)
+    errors = list(validator.iter_errors(request))
+    if errors:
+        messages = []
+        for error in errors:
+            path = "/".join(str(part) for part in error.path) if error.path else "<root>"
+            messages.append(f"- {path}: {error.message}")
+        raise SystemExit("Planning request validation FAILED:\n" + "\n".join(messages))
 
 
 def main() -> int:
@@ -44,6 +59,9 @@ def main() -> int:
         "scope": skeleton.get("scope"),
         "required_capabilities": sorted(set(required_capabilities)),
     }
+
+    request_schema_path = Path(__file__).resolve().parents[1] / "schemas" / "planning_request.schema.json"
+    _validate_request(request, request_schema_path)
 
     capability_resolution = resolve_capabilities(request, context)
     gate_decision = decide_planning(capability_resolution.to_dict())

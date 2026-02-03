@@ -20,3 +20,4 @@ Documentation for each schema is maintained in this README.
 - `planning_bundle.schema.json` — Phase orchestrator → planning bundle contract
 - `capability_resolution.schema.json` — Capability resolver → resolution contract
 - `planning_gate.schema.json` — Planning gate → readiness decision contract
+- `planning_request.schema.json` — Intent router → planning request contract

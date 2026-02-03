@@ -45,6 +45,16 @@ Rules:
 
 Cross-layer shortcuts are forbidden.
 
+### 1.3 Analysis Layer Exemption
+
+FactoryGraph construction and LocalLayoutPlanner inspection may read
+raw entity snapshots for analysis only.
+
+These analysis layers must:
+- Remain read-only
+- Produce abstract outputs (metrics, graphs, summaries)
+- Never emit plans, layouts, or execution instructions
+
 ---
 
 ## 2. Determinism Invariants
