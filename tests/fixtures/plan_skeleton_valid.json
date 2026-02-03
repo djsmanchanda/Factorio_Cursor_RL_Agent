@@ -1,0 +1,21 @@
+{
+  "intent": "prepare_transport_migration",
+  "scope": "city",
+  "phases": [
+    {
+      "phase": "transport_strategy_selection",
+      "requires_capabilities": ["rail_corridor_planning"],
+      "constraints": ["no_existing_blocks_modified"]
+    },
+    {
+      "phase": "interface_definition",
+      "requires_capabilities": ["station_interface_definition"]
+    }
+  ],
+  "explicitly_not_doing": [
+    "placing_blocks",
+    "placing_rails",
+    "issuing_construction_orders"
+  ],
+  "notes": "Skeleton only; no geometry"
+}

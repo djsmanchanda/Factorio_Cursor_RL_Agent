@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlanSkeleton",
+  "description": "High-level, non-executable plan outline produced after planning readiness.",
+  "type": "object",
+  "required": ["intent", "scope", "phases"],
+  "properties": {
+    "intent": { "type": "string" },
+    "scope": {
+      "type": "string",
+      "enum": ["local", "block", "city", "planet", "interplanetary"]
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "requires_capabilities"],
+        "properties": {
+          "phase": { "type": "string" },
+          "requires_capabilities": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "constraints": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "explicitly_not_doing": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

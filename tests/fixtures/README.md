@@ -28,3 +28,13 @@ This directory contains JSON fixtures for validating the
 - Intentionally invalid intent
 - Missing required fields, invalid enum, extra property
 - Used to verify intent validation failure behavior
+
+### plan_skeleton_valid.json
+- Valid plan skeleton
+- Conforms exactly to plan_skeleton.schema.json
+- Used for plan skeleton validation smoke tests
+
+### plan_skeleton_invalid.json
+- Intentionally invalid plan skeleton
+- Invalid scope, empty phases, extra property
+- Used to verify plan skeleton validation failure behavior

@@ -1,0 +1,10 @@
+{
+  "intent": "prepare_transport_migration",
+  "scope": "galaxy",
+  "phases": [],
+  "explicitly_not_doing": [
+    "placing_blocks"
+  ],
+  "notes": "Invalid scope, empty phases, extra field",
+  "extra": "not allowed"
+}

@@ -35,6 +35,22 @@ This tool validates the snapshot and prints derived metrics without making decis
 This tool validates an intent against [schemas/intent.schema.json](schemas/intent.schema.json)
 and prints it in a human-readable format.
 
+## Plan Skeleton Inspector
+
+### Run
+- `python tools/inspect_plan_skeleton.py <path-to-plan-skeleton.json>`
+
+This tool validates a plan skeleton against
+[schemas/plan_skeleton.schema.json](schemas/plan_skeleton.schema.json)
+and prints it in a human-readable format.
+
+## Phase Result Inspector
+
+### Run
+- `python tools/inspect_phase_result.py <path-to-plan-skeleton.json>`
+
+This tool evaluates a read-only phase result from a plan skeleton and prints it.
+
 ## Fixture Smoke Tests
 
 ### Valid fixture

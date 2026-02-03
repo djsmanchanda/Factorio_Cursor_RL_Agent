@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PlanningBundle",
+  "description": "Read-only bundle of phase results produced from a plan skeleton.",
+  "type": "object",
+  "required": ["intent", "scope", "phase_results"],
+  "properties": {
+    "intent": { "type": "string" },
+    "scope": {
+      "type": "string",
+      "enum": ["local", "block", "city", "planet", "interplanetary"]
+    },
+    "phase_results": {
+      "type": "array",
+      "items": { "$ref": "phase_result.schema.json" }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}
