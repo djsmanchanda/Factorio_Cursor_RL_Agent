@@ -73,8 +73,8 @@ def evaluate_interface_definition(
     constraints: List[str] = []
 
     if transport_decision == "rail_preferred":
-        if "rail_corridor_planning" not in available:
-            raise ValueError("Missing capability: rail_corridor_planning")
+        if "station_interface_definition" not in available:
+            raise ValueError("Missing capability: station_interface_definition")
 
         decision = "station_based_interfaces"
         alternatives = ["hybrid_interfaces"]
@@ -99,12 +99,7 @@ def evaluate_interface_definition(
         rationale.extend(["belt_preferred_transport", "city_scope"])
         constraints.extend(["no_cross_block_belts", "station_required_for_long_distance", "belts_internal_only"])
     else:
-        decision = "belt_only_interfaces"
-        alternatives = ["hybrid_interfaces"]
-        rationale.append("transport_strategy_unrecognized")
-
-    if metrics and metrics.get("bot_density_high"):
-        rationale.append("bot_density_high")
+        raise ValueError(f"Unsupported transport decision: {transport_decision}")
 
     constraints.extend(list(phase_entry.get("constraints", [])))
 

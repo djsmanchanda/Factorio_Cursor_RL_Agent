@@ -39,7 +39,7 @@ def main() -> int:
         "blocked": [],
     }
 
-    result = evaluate_transport_strategy(phase_entry, capability_resolution)
+    result = evaluate_transport_strategy(phase_entry, capability_resolution, [])
 
     print("Phase Result")
     print(f"Phase: {result.phase}")

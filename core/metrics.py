@@ -176,3 +176,22 @@ def compute_power_metrics(graph: FactoryGraph) -> PowerMetrics:
 
 def compute_all_metrics(graph: FactoryGraph) -> Tuple[BotMetrics, ProductionMetrics, PowerMetrics]:
     return compute_bot_metrics(graph), compute_production_metrics(graph), compute_power_metrics(graph)
+
+
+def build_phase_metrics(graph: FactoryGraph) -> Dict[str, object]:
+    """Return a minimal, explicit metrics dictionary for phase planners."""
+    production = compute_production_metrics(graph)
+    circuits_recipes = {
+        "electronic-circuit",
+        "advanced-circuit",
+        "processing-unit",
+    }
+
+    circuits_present = any(recipe in circuits_recipes for recipe in production.assemblers_per_recipe)
+    smelters_present = bool(production.furnaces_by_name)
+
+    return {
+        "labs_count": production.labs_count,
+        "smelters_present": smelters_present,
+        "circuits_present": circuits_present,
+    }

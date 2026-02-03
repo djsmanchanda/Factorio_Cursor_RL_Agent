@@ -106,18 +106,15 @@ def evaluate_block_boundary_definition(
                 "no_cross_block_mainline_belts",
             ]
         )
-    elif interface_decision == "belt_only_interfaces" and scope == "local":
+    elif interface_decision == "belt_only_interfaces" and scope in {"local", "block"}:
         decision = "monolithic_layout"
         alternatives = []
-        rationale.extend(["belt_only_interfaces", "local_scope"])
+        rationale.extend(["belt_only_interfaces", f"{scope}_scope"])
         constraints.append("organic_growth_allowed")
     else:
-        decision = "monolithic_layout"
-        alternatives = []
-        rationale.append("interface_scope_unrecognized")
-
-    if metrics and metrics.get("bot_density_high"):
-        rationale.append("bot_density_high")
+        raise ValueError(
+            f"Unsupported interface decision/scope combination: {interface_decision} / {scope}"
+        )
 
     constraints.extend(list(phase_entry.get("constraints", [])))
 

@@ -3,6 +3,7 @@
   "title": "FactorySnapshot",
   "type": "object",
   "required": ["tick", "surface", "entities"],
+  "additionalProperties": false,
   "properties": {
     "tick": { "type": "integer", "minimum": 0 },
     "surface": { "type": "string" },
@@ -11,12 +12,14 @@
       "items": {
         "type": "object",
         "required": ["name", "type", "position"],
+        "additionalProperties": false,
         "properties": {
           "name": { "type": "string" },
           "type": { "type": "string" },
           "position": {
             "type": "object",
             "required": ["x", "y"],
+            "additionalProperties": false,
             "properties": {
               "x": { "type": "number" },
               "y": { "type": "number" }

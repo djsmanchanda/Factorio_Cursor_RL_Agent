@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from planners.city_planner.capability_resolver import resolve_capabilities
+from planners.city_planner.planning_gate import decide_planning
 from planners.city_planner.phase_orchestrator import build_planning_bundle
 
 
@@ -19,25 +21,43 @@ def load_json(path: Path):
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("Usage: python tools/inspect_planning_bundle.py <plan_skeleton.json>")
+    if len(sys.argv) not in {3, 4}:
+        print(
+            "Usage: python tools/inspect_planning_bundle.py <plan_skeleton.json> <context.json> [metrics.json]"
+        )
         return 2
 
     skeleton_path = Path(sys.argv[1]).resolve()
+    context_path = Path(sys.argv[2]).resolve()
+    metrics_path = Path(sys.argv[3]).resolve() if len(sys.argv) == 4 else None
+
     skeleton = load_json(skeleton_path)
+    context = load_json(context_path)
+    metrics = load_json(metrics_path) if metrics_path else None
 
     required_capabilities = []
     for phase in skeleton.get("phases", []):
         required_capabilities.extend(phase.get("requires_capabilities", []))
 
-    capability_resolution = {
+    request = {
         "intent": skeleton.get("intent"),
         "scope": skeleton.get("scope"),
-        "available": sorted(set(required_capabilities)),
-        "blocked": [],
+        "required_capabilities": sorted(set(required_capabilities)),
     }
 
-    bundle = build_planning_bundle(skeleton, capability_resolution)
+    capability_resolution = resolve_capabilities(request, context)
+    gate_decision = decide_planning(capability_resolution.to_dict())
+    if gate_decision.status != "ready":
+        print("Planning gate not ready:")
+        print(f"  status: {gate_decision.status}")
+        print(f"  reason: {gate_decision.reason}")
+        if gate_decision.required_actions:
+            print("  required_actions:")
+            for action in gate_decision.required_actions:
+                print(f"    - {action}")
+        return 1
+
+    bundle = build_planning_bundle(skeleton, capability_resolution.to_dict(), metrics)
     bundle_dict = bundle.to_dict()
 
     print("Planning Bundle")

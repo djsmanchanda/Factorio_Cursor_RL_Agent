@@ -57,25 +57,23 @@ def _find_phase_decision(prior_results: List[dict], phase_name: str) -> Optional
     return None
 
 
-def _build_topology_from_metrics(metrics: Optional[dict]) -> Dict[str, dict]:
+def _build_topology_from_metrics(metrics: dict) -> Dict[str, dict]:
+    required_keys = {"labs_count", "smelters_present", "circuits_present"}
+    missing = required_keys.difference(metrics.keys())
+    if missing:
+        raise ValueError(f"Missing required metrics: {sorted(missing)}")
+
     blocks: Dict[str, int] = {}
-
-    if not metrics:
-        return {"blocks": {"factory": 1}, "dependencies": []}
-
     labs_count = metrics.get("labs_count", 0)
     smelters_present = metrics.get("smelters_present", False)
     circuits_present = metrics.get("circuits_present", False)
 
     if smelters_present:
-        blocks["smelting"] = max(1, int(metrics.get("smelting_blocks", 1)))
+        blocks["smelting"] = 1
     if circuits_present:
-        blocks["circuits"] = max(1, int(metrics.get("circuit_blocks", 1)))
+        blocks["circuits"] = 1
     if labs_count and int(labs_count) > 0:
         blocks["science"] = 1
-
-    if not blocks:
-        blocks["factory"] = 1
 
     dependencies: List[List[str]] = []
     if "smelting" in blocks and "circuits" in blocks:
@@ -102,6 +100,10 @@ def evaluate_block_topology_planning(
 
     if boundary_decision is None:
         raise ValueError("Missing block_boundary_definition phase result")
+        if transport_decision is None:
+            raise ValueError("Missing transport_strategy_selection phase result")
+        if interface_decision is None:
+            raise ValueError("Missing interface_definition phase result")
 
     decision = "single_block"
     alternatives: List[str] = []
@@ -119,6 +121,8 @@ def evaluate_block_topology_planning(
             raise ValueError("Missing capability: dependency_graph_planning")
         if "block_planning" not in available:
             raise ValueError("Missing capability: block_planning")
+        if metrics is None:
+            raise ValueError("Missing metrics for block topology planning")
 
         decision = "multi_block_dag"
         alternatives = ["federated_blocks"]
@@ -136,6 +140,8 @@ def evaluate_block_topology_planning(
             raise ValueError("Missing capability: dependency_graph_planning")
         if "block_planning" not in available:
             raise ValueError("Missing capability: block_planning")
+        if metrics is None:
+            raise ValueError("Missing metrics for block topology planning")
 
         decision = "federated_blocks"
         alternatives = ["multi_block_dag"]
@@ -143,10 +149,7 @@ def evaluate_block_topology_planning(
         constraints.extend(["core_blocks_immutable", "aux_blocks_mutable"])
         topology = _build_topology_from_metrics(metrics)
     else:
-        decision = "single_block"
-        alternatives = []
-        rationale.append("boundary_decision_unrecognized")
-        topology = {"blocks": {"factory": 1}, "dependencies": []}
+        raise ValueError(f"Unsupported block boundary decision: {boundary_decision}")
 
     if interface_decision == "station_based_interfaces":
         rationale.append("station_based_interfaces")

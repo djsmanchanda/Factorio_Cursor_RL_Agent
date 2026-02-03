@@ -67,11 +67,6 @@ _PHASES_BY_INTENT: Dict[str, List[PlanPhase]] = {
             requires_capabilities=["block_planning", "dependency_graph_planning"],
             constraints=[],
         ),
-        PlanPhase(
-            phase="migration_planning",
-            requires_capabilities=["block_level_dependency_analysis"],
-            constraints=["shadow_blocks_only"],
-        ),
     ],
     "reduce_bot_dependency": [
         PlanPhase(

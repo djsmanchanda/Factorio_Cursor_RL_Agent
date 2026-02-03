@@ -18,3 +18,5 @@ Documentation for each schema is maintained in this README.
 - `plan_skeleton.schema.json` — Planner readiness → plan skeleton contract
 - `phase_result.schema.json` — Phase planner → phase result contract
 - `planning_bundle.schema.json` — Phase orchestrator → planning bundle contract
+- `capability_resolution.schema.json` — Capability resolver → resolution contract
+- `planning_gate.schema.json` — Planning gate → readiness decision contract

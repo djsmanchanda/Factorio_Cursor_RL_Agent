@@ -57,22 +57,19 @@ def evaluate_transport_strategy(
     available = set(capability_resolution.get("available", []))
     blocked = set(capability_resolution.get("blocked", []))
 
-    decision = "belt_backbone"
+    decision = "belt_preferred"
     alternatives: List[str] = []
     rationale: List[str] = []
 
     if scope == "city" and "rail_corridor_planning" in available:
         decision = "rail_preferred"
-        alternatives = ["belt_backbone"]
+        alternatives = ["belt_preferred"]
         rationale.append("city_scope")
         rationale.append("rail_capability_available")
     else:
-        decision = "belt_backbone"
+        decision = "belt_preferred"
         alternatives = ["rail_preferred"] if "rail_corridor_planning" not in blocked else []
         rationale.append("rail_capability_unavailable" if "rail_corridor_planning" in blocked else "local_scope")
-
-    if metrics and metrics.get("bot_density_high"):
-        rationale.append("bot_density_high")
 
     constraints = list(phase_entry.get("constraints", []))
 

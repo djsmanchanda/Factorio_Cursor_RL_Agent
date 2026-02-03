@@ -17,7 +17,12 @@ class PlanningRequest:
 
 _INTENT_CAPABILITIES: Dict[str, List[str]] = {
     "reduce_bot_dependency": ["belt_backbone_planning"],
-    "prepare_transport_migration": ["rail_corridor_planning", "station_interface_definition"],
+    "prepare_transport_migration": [
+        "rail_corridor_planning",
+        "station_interface_definition",
+        "block_planning",
+        "dependency_graph_planning",
+    ],
     "increase_transport_capacity": ["rail_corridor_planning", "station_interface_definition"],
     "stabilize_power_margin": ["power_block_planning"],
     "prepare_upgrade_phase": ["upgrade_phase_planning"],
@@ -42,6 +47,9 @@ _INTENT_NOTES: Dict[str, str] = {
 
 def _to_request(intent: dict) -> PlanningRequest:
     intent_name = intent.get("intent")
+    if intent_name not in _INTENT_CAPABILITIES:
+        raise ValueError(f"Unknown intent: {intent_name}")
+
     required = list(_INTENT_CAPABILITIES.get(intent_name, []))
     blockers = list(_INTENT_BLOCKERS.get(intent_name, []))
     notes = _INTENT_NOTES.get(intent_name)

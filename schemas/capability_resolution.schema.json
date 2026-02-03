@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CapabilityResolution",
+  "description": "Resolved availability of planning capabilities for an intent.",
+  "type": "object",
+  "required": ["intent", "available", "blocked", "missing_prerequisites"],
+  "properties": {
+    "intent": { "type": ["string", "null"] },
+    "scope": {
+      "type": "string",
+      "enum": ["local", "block", "city", "planet", "interplanetary"]
+    },
+    "available": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "blocked": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "missing_prerequisites": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
