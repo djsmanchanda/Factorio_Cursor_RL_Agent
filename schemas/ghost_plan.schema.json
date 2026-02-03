@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GhostPlan",
+  "description": "Ghost-only projection produced from build intents; no positions or execution.",
+  "type": "object",
+  "required": ["ghosts"],
+  "properties": {
+    "ghosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["prototype", "tags"],
+        "properties": {
+          "prototype": { "type": "string" },
+          "tags": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -17,6 +17,24 @@ Outputs:
 - Blueprint replication plan
 - Construction dependency graph
 
+## Progress State
+
+Progress State is a read-only summary of where the factory is versus target.
+It is derived from snapshots, metrics, and prior intents.
+Progress State does not modify plans; it provides context for deterministic planning.
+
+## Capacity Phasing
+
+Planning targets the ultimate capacity (e.g., 1000), while construction proceeds
+in deterministic phases (e.g., 50 → 100 → 250 → 1000).
+Phasing realizes a single plan without redesign or re-planning.
+
+## BuildIntent and GhostPlan
+
+BuildIntent represents the ultimate intent of what should exist.
+GhostPlan represents the current materialization as ghost-only artifacts.
+Early-game efficiency choices are encoded as policy, not heuristics.
+
 ## City-Level Planning
 
 At city scale, the planner operates on blocks instead of entities.

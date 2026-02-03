@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CapacityPhasing",
+  "description": "Supervisory capacity phasing decision derived from ProgressState and BuildIntent.",
+  "type": "object",
+  "required": [
+    "desired_active_capacity",
+    "previous_active_capacity",
+    "reason",
+    "next_allowed_actions"
+  ],
+  "properties": {
+    "desired_active_capacity": { "type": "integer", "minimum": 0 },
+    "previous_active_capacity": { "type": "integer", "minimum": 0 },
+    "reason": { "type": "string" },
+    "next_allowed_actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["ghost_expand", "ghost_upgrade"]
+      }
+    }
+  },
+  "additionalProperties": false
+}

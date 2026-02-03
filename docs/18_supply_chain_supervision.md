@@ -51,6 +51,9 @@ Examples:
 Supervisory interventions are triggered by metric thresholds,
 not reactive failures.
 
+Progress awareness is derived from snapshot + metrics + prior intents.
+It provides context about current capacity phase versus ultimate targets.
+
 ## Intent Generation
 
 Policy signals are translated into high-level intents.
@@ -66,6 +69,11 @@ Intents conform to [schemas/intent.schema.json](schemas/intent.schema.json).
 
 All intents must validate against intent.schema.json.
 Fixtures are used to lock semantics and prevent regression.
+
+## Capacity Phasing Context
+
+Supervisory policies reason about phased realization of a fixed target.
+Phasing does not change the target; it sequences safe construction steps.
 
 ---
 

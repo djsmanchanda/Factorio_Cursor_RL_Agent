@@ -26,6 +26,12 @@
 - [ ] Resource structure analysis
 - [ ] Policy threshold definitions
 
+## Phase 2.6 – Progress & Phasing
+- [ ] ProgressState schema
+- [ ] Capacity phasing policy (deterministic)
+- [ ] Ghost-only incremental expansion
+- [ ] Deferred execution/RL (explicit future)
+
 ## Phase 3 – Scaling (CityPlanner)
 - [ ] Block schema & template system
 - [ ] Rail corridor automation (Invariants-based)

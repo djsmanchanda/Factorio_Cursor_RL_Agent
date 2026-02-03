@@ -15,6 +15,14 @@ The agent is hierarchical.
 The agent never reasons about recipes or ratios.
 Those are fixed, external knowledge.
 
+## Observer → Supervisor → Executor
+
+The system is explicitly separated into:
+
+- Observer: read-only snapshot, metrics, and Progress State
+- Supervisor: policy evaluation and intent generation
+- Executor: future execution layer (not active yet)
+
 ## Supervisory Intelligence
 
 At large scale, the agent shifts from planning to supervision.
@@ -36,3 +44,6 @@ At large scale, the agent operates in phases:
 5. Execute (RL / heuristic)
 
 Intent outputs conform to [schemas/intent.schema.json](schemas/intent.schema.json).
+
+Progress State is derived from snapshots, metrics, and prior intents.
+It is read-only and used to contextualize planning without reinterpreting history.

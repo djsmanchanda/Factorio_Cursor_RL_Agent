@@ -85,6 +85,17 @@ If save/load breaks behavior, the implementation is invalid.
 
 ---
 
+### 2.3 Phased Realization
+
+Planning may define an ultimate capacity while construction is realized
+in deterministic phases. Phasing must not rewrite the target plan.
+
+Reserved capacity is permitted, even when unbuilt, as long as it is explicit.
+
+Ghost-only control is allowed before execution.
+
+---
+
 ## 3. Layout & City Invariants
 
 ### 3.1 Layout Primitives

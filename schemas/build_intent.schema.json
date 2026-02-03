@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BuildIntent",
+  "description": "Declarative description of what should exist, without geometry or execution details.",
+  "type": "object",
+  "required": ["intents"],
+  "properties": {
+    "intents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "block_type", "count"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["block_placeholder"]
+          },
+          "block_type": { "type": "string" },
+          "count": { "type": "integer", "minimum": 1 },
+          "interfaces": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": []
+          },
+          "capacity_class": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
