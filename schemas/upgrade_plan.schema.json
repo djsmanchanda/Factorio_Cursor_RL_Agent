@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UpgradePlan",
+  "description": "Authorized upgrade actions for existing entities.",
+  "type": "object",
+  "required": ["actions"],
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "position"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["assembler_tier_upgrade", "module_upgrade"]
+          },
+          "position": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            },
+            "additionalProperties": false
+          },
+          "from_name": { "type": "string" },
+          "to_name": { "type": "string" },
+          "module_to": { "type": "string" },
+          "module_count": { "type": "integer", "minimum": 1 },
+          "block": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
