@@ -27,6 +27,7 @@ Supervision:
 - Execution authorization is mandatory before any execution actions are allowed.
 - Authorized ghost execution is limited to ghost placement only and remains sandboxed.
 - Bot-assisted construction is limited to building sandbox ghosts and never places real entities directly.
+- Construction progress updates current capacity without advancing phases.
 
 ## Tooling
 
@@ -46,3 +47,5 @@ Supervision:
 	- `python tools/execution_reporter.py <execution_report.json>`
 - Construction report validation:
 	- `python tools/construction_reporter.py <construction_report.json>`
+- Construction progress update:
+	- `python -c "from core.construction_progress_updater import update_progress_from_construction; import json; print(update_progress_from_construction(json.load(open('progress_state.json')), json.load(open('construction_report.json')))[0].to_dict())"`
