@@ -100,6 +100,67 @@ local function write_snapshot(snapshot)
   return path
 end
 
+local function get_or_create_sandbox_surface()
+  local surface = game.surfaces["planner-sandbox"]
+  if surface then
+    return surface
+  end
+
+  return game.create_surface("planner-sandbox")
+end
+
+local function parse_ghost_plan(json_text)
+  if not json_text or json_text == "" then
+    return nil, "Missing GhostPlan JSON"
+  end
+
+  local ok, payload = pcall(function()
+    return game.json_to_table(json_text)
+  end)
+  if not ok or type(payload) ~= "table" then
+    return nil, "Invalid GhostPlan JSON"
+  end
+  if type(payload.ghosts) ~= "table" then
+    return nil, "GhostPlan must include ghosts array"
+  end
+
+  return payload, nil
+end
+
+local function apply_ghost_plan(payload)
+  local surface = get_or_create_sandbox_surface()
+  local force = game.forces["player"] or game.forces[1]
+
+  local origin_x = 0
+  local origin_y = 0
+  local spacing = 2
+
+  for index, ghost in ipairs(payload.ghosts) do
+    if type(ghost) ~= "table" then
+      error("Ghost entry must be an object")
+    end
+
+    local prototype = ghost.prototype or "assembling-machine-1"
+    local tags = ghost.tags
+    if type(tags) ~= "table" then
+      error("Ghost tags must be an object")
+    end
+
+    local position = {
+      x = origin_x + ((index - 1) * spacing),
+      y = origin_y
+    }
+
+    surface.create_entity({
+      name = "entity-ghost",
+      inner_name = prototype,
+      position = position,
+      force = force,
+      tags = tags
+    })
+  end
+end
+
 commands.add_command("snapshot", "Export deterministic factory snapshot JSON.", function(command)
   local surface = pick_surface()
   local snapshot = build_snapshot(surface)
@@ -112,6 +173,46 @@ commands.add_command("snapshot", "Export deterministic factory snapshot JSON.", 
     end
   else
     game.print("Snapshot written to script-output/" .. path)
+  end
+end)
+
+commands.add_command("apply_ghost_plan", "Render GhostPlan JSON as ghosts in a sandbox surface.", function(command)
+  local payload, err = parse_ghost_plan(command.parameter)
+  if err then
+    if command.player_index then
+      local player = game.get_player(command.player_index)
+      if player then
+        player.print("GhostPlan error: " .. err)
+      end
+    else
+      game.print("GhostPlan error: " .. err)
+    end
+    return
+  end
+
+  local ok, apply_err = pcall(function()
+    apply_ghost_plan(payload)
+  end)
+  if not ok then
+    local message = "GhostPlan error: " .. tostring(apply_err)
+    if command.player_index then
+      local player = game.get_player(command.player_index)
+      if player then
+        player.print(message)
+      end
+    else
+      game.print(message)
+    end
+    return
+  end
+
+  if command.player_index then
+    local player = game.get_player(command.player_index)
+    if player then
+      player.print("GhostPlan applied to planner-sandbox")
+    end
+  else
+    game.print("GhostPlan applied to planner-sandbox")
   end
 end)
 
