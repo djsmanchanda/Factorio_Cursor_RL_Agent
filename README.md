@@ -23,6 +23,7 @@ Supervision:
 	without executing or placing anything.
 - Progress reconciliation compares observed ghosts with planned progress state
 	and emits a read-only reconciliation status.
+- Execution readiness proposes permitted next actions without executing them.
 
 ## Tooling
 
@@ -34,3 +35,5 @@ Supervision:
 	- `python tools/ghost_observer.py <ghost_observation.json>`
 - Progress reconciliation:
 	- `python -c "from core.progress_reconciler import reconcile_progress_state; import json; print(reconcile_progress_state(json.load(open('progress_state.json')), json.load(open('ghost_observation.json'))).to_dict())"`
+- Execution readiness:
+	- `python -c "from core.execution_readiness import propose_execution; import json; print(propose_execution(json.load(open('progress_state.json')), json.load(open('capacity_phasing.json')), json.load(open('build_intent.json')), 'OK').to_dict())"`
