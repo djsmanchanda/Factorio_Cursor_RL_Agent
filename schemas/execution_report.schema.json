@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutionReport",
+  "description": "Read-only report of authorized ghost execution outcomes.",
+  "type": "object",
+  "required": ["tick", "surface", "actions"],
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "surface": { "type": "string" },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "status"],
+        "properties": {
+          "action": { "type": "string" },
+          "status": { "type": "string", "enum": ["success", "skipped", "failed"] },
+          "reason": { "type": "string" },
+          "count": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
