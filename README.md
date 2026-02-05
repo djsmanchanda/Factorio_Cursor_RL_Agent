@@ -24,6 +24,7 @@ Supervision:
 - Progress reconciliation compares observed ghosts with planned progress state
 	and emits a read-only reconciliation status.
 - Execution readiness proposes permitted next actions without executing them.
+- Execution authorization is mandatory before any execution actions are allowed.
 
 ## Tooling
 
@@ -37,3 +38,5 @@ Supervision:
 	- `python -c "from core.progress_reconciler import reconcile_progress_state; import json; print(reconcile_progress_state(json.load(open('progress_state.json')), json.load(open('ghost_observation.json'))).to_dict())"`
 - Execution readiness:
 	- `python -c "from core.execution_readiness import propose_execution; import json; print(propose_execution(json.load(open('progress_state.json')), json.load(open('capacity_phasing.json')), json.load(open('build_intent.json')), 'OK').to_dict())"`
+- Execution authorization:
+	- `python -c "from core.execution_authorizer import authorize_execution; import json; proposal=json.load(open('execution_proposal.json')); print(authorize_execution(proposal, proposal['allowed_actions'], 'test').to_dict())"`
