@@ -26,3 +26,5 @@ Supervision:
 
 - Inspect Progress State:
 	- `python tools/inspect_progress.py <snapshot.json> <metrics.json> <build_intent.json>`
+- Phase-aware Ghost Projection:
+	- Requires BuildIntent + ProgressState + CapacityPhasing (no CLI yet)
