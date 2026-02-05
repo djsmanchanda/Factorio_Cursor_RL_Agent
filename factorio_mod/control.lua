@@ -161,6 +161,65 @@ local function apply_ghost_plan(payload)
   end
 end
 
+local function export_ghost_observation()
+  local surface = get_or_create_sandbox_surface()
+  local ghosts = surface.find_entities_filtered({ name = "entity-ghost" })
+
+  local entries = {}
+  for _, ghost in ipairs(ghosts) do
+    local tags = ghost.tags
+    if type(tags) ~= "table" then
+      error("Ghost tags missing")
+    end
+    if not tags.block or not tags.phase or not tags.capacity_slice then
+      error("Ghost tags must include block, phase, capacity_slice")
+    end
+
+    local prototype = ghost.ghost_name
+    if not prototype then
+      error("Ghost prototype missing")
+    end
+
+    table.insert(entries, {
+      prototype = prototype,
+      tags = {
+        block = tostring(tags.block),
+        phase = tostring(tags.phase),
+        capacity_slice = tostring(tags.capacity_slice)
+      }
+    })
+  end
+
+  table.sort(entries, function(a, b)
+    if a.tags.block ~= b.tags.block then
+      return a.tags.block < b.tags.block
+    end
+    if a.tags.phase ~= b.tags.phase then
+      return a.tags.phase < b.tags.phase
+    end
+    if a.tags.capacity_slice ~= b.tags.capacity_slice then
+      return a.tags.capacity_slice < b.tags.capacity_slice
+    end
+    return a.prototype < b.prototype
+  end)
+
+  local payload = {
+    tick = game.tick,
+    surface = surface.name,
+    ghosts = entries
+  }
+
+  local json = game.table_to_json(payload)
+  local path = "factorio_mod/ghost_observations/ghost_observation_" .. game.tick .. ".json"
+  game.write_file(path, json, false)
+
+  local storage = ensure_storage()
+  storage.last_ghost_observation_path = path
+  storage.last_ghost_observation_tick = game.tick
+
+  return path
+end
+
 commands.add_command("snapshot", "Export deterministic factory snapshot JSON.", function(command)
   local surface = pick_surface()
   local snapshot = build_snapshot(surface)
@@ -213,6 +272,34 @@ commands.add_command("apply_ghost_plan", "Render GhostPlan JSON as ghosts in a s
     end
   else
     game.print("GhostPlan applied to planner-sandbox")
+  end
+end)
+
+commands.add_command("export_ghost_observation", "Export GhostPlan observation JSON from planner-sandbox.", function(command)
+  local ok, result = pcall(function()
+    return export_ghost_observation()
+  end)
+
+  if not ok then
+    local message = "Ghost observation error: " .. tostring(result)
+    if command.player_index then
+      local player = game.get_player(command.player_index)
+      if player then
+        player.print(message)
+      end
+    else
+      game.print(message)
+    end
+    return
+  end
+
+  if command.player_index then
+    local player = game.get_player(command.player_index)
+    if player then
+      player.print("Ghost observation written to script-output/" .. result)
+    end
+  else
+    game.print("Ghost observation written to script-output/" .. result)
   end
 end)
 

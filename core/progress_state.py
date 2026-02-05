@@ -53,6 +53,10 @@ def _validate_schema(payload: dict, schema_path: Path, label: str) -> None:
         raise ValueError(f"{label} validation FAILED:\n" + "\n".join(messages))
 
 
+def validate_progress_state(payload: dict, schema_path: Path) -> None:
+    _validate_schema(payload, schema_path, "ProgressState")
+
+
 def _derive_ultimate_capacity(build_intent: dict) -> int:
     intents = build_intent.get("intents")
     if not intents:
@@ -86,7 +90,7 @@ def _derive_active_phase(phase_targets: List[int], current: int, committed: int,
     return ultimate
 
 
-def _derive_completed_phases(phase_targets: List[int], current: int) -> List[int]:
+def compute_completed_phases(phase_targets: List[int], current: int) -> List[int]:
     return sorted([phase for phase in phase_targets if phase <= current])
 
 
@@ -125,7 +129,7 @@ def build_progress_state(
         committed_capacity,
         ultimate_capacity,
     )
-    completed_phases = _derive_completed_phases(DEFAULT_PHASE_CAPACITIES, current_capacity)
+    completed_phases = compute_completed_phases(DEFAULT_PHASE_CAPACITIES, current_capacity)
 
     rationale = (
         f"Active phase selected for target {max(current_capacity, committed_capacity)} "

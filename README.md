@@ -21,6 +21,8 @@ Additional principles:
 Supervision:
 - Capacity phasing is a supervisory policy that selects the next allowed capacity phase
 	without executing or placing anything.
+- Progress reconciliation compares observed ghosts with planned progress state
+	and emits a read-only reconciliation status.
 
 ## Tooling
 
@@ -28,3 +30,7 @@ Supervision:
 	- `python tools/inspect_progress.py <snapshot.json> <metrics.json> <build_intent.json>`
 - Phase-aware Ghost Projection:
 	- Requires BuildIntent + ProgressState + CapacityPhasing (no CLI yet)
+- Observe GhostPlan sandbox:
+	- `python tools/ghost_observer.py <ghost_observation.json>`
+- Progress reconciliation:
+	- `python -c "from core.progress_reconciler import reconcile_progress_state; import json; print(reconcile_progress_state(json.load(open('progress_state.json')), json.load(open('ghost_observation.json'))).to_dict())"`

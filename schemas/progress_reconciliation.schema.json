@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProgressReconciliation",
+  "description": "Reconciled ProgressState derived from ghost observations.",
+  "type": "object",
+  "required": ["status", "reason", "progress_state"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["OK", "PARTIAL", "BLOCKED"]
+    },
+    "reason": { "type": "string" },
+    "progress_state": { "$ref": "progress_state.schema.json" }
+  },
+  "additionalProperties": false
+}

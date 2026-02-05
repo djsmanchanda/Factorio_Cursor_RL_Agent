@@ -37,3 +37,17 @@ surface named `planner-sandbox` using deterministic spacing.
 - No geometry inference
 - No construction orders
 - No upgrades or deletions
+
+## Ghost observation export
+
+Export a read-only snapshot of ghosts in the `planner-sandbox` surface.
+
+### Command
+- `/export_ghost_observation`
+
+### Output
+- `script-output/factorio_mod/ghost_observations/ghost_observation_<tick>.json`
+
+### Notes
+- Observation only (no placement, no deletion)
+- Errors are reported if required tags are missing
