@@ -28,6 +28,7 @@ Supervision:
 - Authorized ghost execution is limited to ghost placement only and remains sandboxed.
 - Bot-assisted construction is limited to building sandbox ghosts and never places real entities directly.
 - Construction progress updates current capacity without advancing phases.
+- Phase advancement requires explicit proposal and authorization.
 
 ## Tooling
 
@@ -49,3 +50,7 @@ Supervision:
 	- `python tools/construction_reporter.py <construction_report.json>`
 - Construction progress update:
 	- `python -c "from core.construction_progress_updater import update_progress_from_construction; import json; print(update_progress_from_construction(json.load(open('progress_state.json')), json.load(open('construction_report.json')))[0].to_dict())"`
+- Phase advance proposal:
+	- `python -c "from core.phase_advance_evaluator import propose_phase_advance; import json; print(propose_phase_advance(json.load(open('progress_state.json')), json.load(open('construction_progress.json'))).to_dict())"`
+- Phase advance authorization:
+	- `python -c "from core.phase_advance_evaluator import authorize_phase_advance; import json; proposal=json.load(open('phase_advance_proposal.json')); print(authorize_phase_advance(proposal, True, 'test', 'approved').to_dict())"`

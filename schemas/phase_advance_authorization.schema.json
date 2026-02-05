@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PhaseAdvanceAuthorization",
+  "description": "Explicit authorization for advancing capacity phase.",
+  "type": "object",
+  "required": ["approved", "reason", "authorization_timestamp", "authorization_source"],
+  "properties": {
+    "approved": { "type": "boolean" },
+    "reason": { "type": "string" },
+    "authorization_timestamp": { "type": "string" },
+    "authorization_source": { "type": "string", "enum": ["human", "policy", "test"] },
+    "approved_next_phase": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": false
+}

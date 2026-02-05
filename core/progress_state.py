@@ -94,6 +94,15 @@ def compute_completed_phases(phase_targets: List[int], current: int) -> List[int
     return sorted([phase for phase in phase_targets if phase <= current])
 
 
+def compute_next_phase_capacity(phase_targets: List[int], current_phase: int, ultimate: int) -> int:
+    if current_phase not in phase_targets:
+        raise ValueError("Current phase is not in the phase schedule")
+    index = phase_targets.index(current_phase)
+    if index + 1 >= len(phase_targets):
+        return ultimate
+    return phase_targets[index + 1]
+
+
 def build_progress_state(
     snapshot_path: Path,
     metrics_path: Path,
