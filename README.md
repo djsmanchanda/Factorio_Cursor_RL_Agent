@@ -26,6 +26,7 @@ Supervision:
 - Execution readiness proposes permitted next actions without executing them.
 - Execution authorization is mandatory before any execution actions are allowed.
 - Authorized ghost execution is limited to ghost placement only and remains sandboxed.
+- Bot-assisted construction is limited to building sandbox ghosts and never places real entities directly.
 
 ## Tooling
 
@@ -43,3 +44,5 @@ Supervision:
 	- `python -c "from core.execution_authorizer import authorize_execution; import json; proposal=json.load(open('execution_proposal.json')); print(authorize_execution(proposal, proposal['allowed_actions'], 'test').to_dict())"`
 - Execution report validation:
 	- `python tools/execution_reporter.py <execution_report.json>`
+- Construction report validation:
+	- `python tools/construction_reporter.py <construction_report.json>`

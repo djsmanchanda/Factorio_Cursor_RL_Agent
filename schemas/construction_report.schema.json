@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ConstructionReport",
+  "description": "Read-only report of construction progress on sandbox ghosts.",
+  "type": "object",
+  "required": ["tick", "surface", "started", "completed", "blocked"],
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "surface": { "type": "string" },
+    "started": { "type": "integer", "minimum": 0 },
+    "completed": { "type": "integer", "minimum": 0 },
+    "blocked": { "type": "boolean" },
+    "blocked_reason": { "type": "string" }
+  },
+  "additionalProperties": false
+}
