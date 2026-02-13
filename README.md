@@ -46,6 +46,12 @@ Supervision:
 	- `python -c "from core.execution_readiness import propose_execution; import json; print(propose_execution(json.load(open('progress_state.json')), json.load(open('capacity_phasing.json')), json.load(open('build_intent.json')), 'OK').to_dict())"`
 - Execution authorization:
 	- `python -c "from core.execution_authorizer import authorize_execution; import json; proposal=json.load(open('execution_proposal.json')); print(authorize_execution(proposal, proposal['allowed_actions'], 'test').to_dict())"`
+- RL advisor (non-authoritative):
+	- `python rl_advisor.py <rl_observation.json> [seed]`
+	- The RL advisor is advisory only and cannot execute actions.
+	- Every RL proposal sets `requires_authorization = true` and must flow through readiness, authorization, and then execution.
+	- Safety boundaries: read-only inputs, no state mutation, no Lua calls, and no bypass of human/bot authorization.
+	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - Execution report validation:
 	- `python tools/execution_reporter.py <execution_report.json>`
 - Construction report validation:
