@@ -12,7 +12,8 @@
     "power_stress_ratio",
     "construction_backlog_estimate",
     "phase_completion_ratio",
-    "factory_density_score"
+    "factory_density_score",
+    "spatial_pressure_index"
   ],
   "properties": {
     "progress_state": {
@@ -104,6 +105,11 @@
     "factory_density_score": {
       "type": "number",
       "minimum": 0.0
+    },
+    "spatial_pressure_index": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
     }
   },
   "additionalProperties": false

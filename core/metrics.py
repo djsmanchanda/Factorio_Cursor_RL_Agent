@@ -197,6 +197,44 @@ def build_phase_metrics(graph: FactoryGraph) -> Dict[str, object]:
     }
 
 
+def derive_spatial_pressure(metrics_summary: dict, factory_density_score: float) -> float:
+    """
+    Derive deterministic normalized spatial pressure [0, 1] from summary metrics.
+    Requires bounds-derived dimensions and entity/bbox counts.
+    """
+    required_metrics = {"entity_count", "factory_area_tiles", "surface_bounds_width", "surface_bounds_height"}
+    missing = sorted(required_metrics.difference(metrics_summary.keys()))
+    if missing:
+        raise ValueError(f"latest metrics summary missing required fields for spatial pressure: {missing}")
+
+    entity_count = int(metrics_summary["entity_count"])
+    bbox_area = float(metrics_summary["factory_area_tiles"])
+    surface_bounds_width = float(metrics_summary["surface_bounds_width"])
+    surface_bounds_height = float(metrics_summary["surface_bounds_height"])
+
+    if entity_count < 0:
+        raise ValueError("entity_count must be >= 0 for spatial pressure")
+    if bbox_area <= 0.0:
+        raise ValueError("factory_area_tiles must be > 0 for spatial pressure")
+    if surface_bounds_width <= 0.0 or surface_bounds_height <= 0.0:
+        raise ValueError("surface bounds must be > 0 for spatial pressure")
+
+    surface_area = surface_bounds_width * surface_bounds_height
+    if surface_area <= 0.0:
+        raise ValueError("surface bounds area must be > 0 for spatial pressure")
+
+    # Normalized deterministic components:
+    # - density_component: local crowding inside occupied bbox.
+    # - fill_component: how much of available bounded surface is already occupied.
+    # - count_component: saturation proxy from absolute scale.
+    density_component = min(1.0, max(0.0, float(factory_density_score) / 0.06))
+    fill_component = min(1.0, max(0.0, bbox_area / surface_area))
+    count_component = min(1.0, max(0.0, float(entity_count) / 5000.0))
+
+    pressure = (0.50 * density_component) + (0.30 * fill_component) + (0.20 * count_component)
+    return float(round(min(1.0, max(0.0, pressure)), 6))
+
+
 def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) -> Dict[str, object]:
     """
     Derive deterministic RL observation health indicators from existing metrics/progress.
@@ -259,6 +297,7 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
     if area_tiles <= 0.0:
         raise ValueError("factory_area_tiles must be > 0 for factory_density_score")
     factory_density_score = float(entity_count) / area_tiles
+    spatial_pressure_index = derive_spatial_pressure(metrics_summary, factory_density_score)
 
     return {
         "bot_utilization_ratio": float(round(bot_utilization_ratio, 6)),
@@ -266,4 +305,5 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
         "construction_backlog_estimate": int(construction_backlog_estimate),
         "phase_completion_ratio": float(round(phase_completion_ratio, 6)),
         "factory_density_score": float(round(factory_density_score, 6)),
+        "spatial_pressure_index": float(spatial_pressure_index),
     }

@@ -101,6 +101,7 @@ def propose_rl_action(
     construction_backlog_estimate = int(observation["construction_backlog_estimate"])
     phase_completion_ratio = float(observation["phase_completion_ratio"])
     factory_density_score = float(observation["factory_density_score"])
+    spatial_pressure_index = float(observation["spatial_pressure_index"])
 
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
@@ -133,6 +134,8 @@ def propose_rl_action(
                 confidence -= 0.08
             if factory_density_score >= 1.0:
                 confidence -= 0.06
+            if spatial_pressure_index >= 0.80:
+                confidence -= 0.10
             candidates.append(
                 (
                     "project_more_ghosts",
@@ -147,6 +150,8 @@ def propose_rl_action(
                 confidence += 0.05
             if construction_backlog_estimate > 0:
                 confidence -= 0.04
+            if spatial_pressure_index >= 0.70:
+                confidence += 0.03
             candidates.append(
                 (
                     "request_phase_advance",
@@ -161,6 +166,8 @@ def propose_rl_action(
                 confidence += 0.05
             if bot_utilization_ratio >= 0.9:
                 confidence += 0.04
+            if spatial_pressure_index >= 0.75:
+                confidence += 0.05
             candidates.append(
                 (
                     "request_module_upgrade",
