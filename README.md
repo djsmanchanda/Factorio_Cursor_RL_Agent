@@ -57,7 +57,8 @@ Supervision:
 	- Block-level attribution now includes `pressure_attribution_map` (`block_id -> [0,1]`) for localized pressure visibility.
 	- Production shortfall awareness now includes `production_gap_estimate` (`recipe_name -> integer`) for conservative per-recipe gap estimation.
 	- Expansion target selection now includes an `ExpansionTarget` (`target_block`, `target_recipe`, `confidence`, `rationale`) chosen deterministically from pressure and gap telemetry.
-	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, and `core.target_selector.select_expansion_target`).
+	- Phase budget allocation now includes `CapacityAllocation` (`phase_capacity`, `allocated_now`, `reserved_for_later`) computed conservatively from current headroom and throughput stress.
+	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `core.target_selector.select_expansion_target`, and `core.capacity_allocator.allocate_phase_capacity`).
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):
 	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`

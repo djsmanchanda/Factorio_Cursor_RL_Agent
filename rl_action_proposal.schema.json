@@ -37,6 +37,9 @@
     },
     "expansion_target": {
       "$ref": "schemas/expansion_target.schema.json"
+    },
+    "capacity_allocation": {
+      "$ref": "schemas/capacity_allocation.schema.json"
     }
   },
   "additionalProperties": false

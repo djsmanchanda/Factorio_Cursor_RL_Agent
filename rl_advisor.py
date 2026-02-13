@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from jsonschema import Draft7Validator
+from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
 from core.target_selector import ExpansionTarget, select_expansion_target
 
 
@@ -20,6 +21,7 @@ class RLActionProposal:
     requires_authorization: bool = True
     target_block: Optional[str] = None
     expansion_target: Optional[ExpansionTarget] = None
+    capacity_allocation: Optional[CapacityAllocation] = None
 
     def to_dict(self) -> dict:
         payload = {
@@ -32,6 +34,8 @@ class RLActionProposal:
             payload["target_block"] = self.target_block
         if self.expansion_target:
             payload["expansion_target"] = self.expansion_target.to_dict()
+        if self.capacity_allocation:
+            payload["capacity_allocation"] = self.capacity_allocation.to_dict()
         return payload
 
 
@@ -139,6 +143,12 @@ def propose_rl_action(
         throughput_stress_index=throughput_stress_index,
         phase_completion_ratio=phase_completion_ratio,
     )
+    capacity_allocation = allocate_phase_capacity(
+        expansion_target=expansion_target.to_dict(),
+        progress_state=progress,
+        capacity_phasing=phasing,
+        throughput_stress_index=throughput_stress_index,
+    )
 
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
@@ -188,6 +198,12 @@ def propose_rl_action(
             if dominant_gap >= 2 and (dominant_gap - second_gap) >= 1:
                 confidence += 0.03
             confidence += 0.02 * expansion_target.confidence
+            if capacity_allocation.allocated_now <= 0 and capacity_allocation.reserved_for_later <= 0:
+                confidence -= 0.08
+            else:
+                phase_capacity = max(1, capacity_allocation.phase_capacity)
+                allocation_ratio = float(capacity_allocation.allocated_now) / float(phase_capacity)
+                confidence += 0.04 * allocation_ratio
             candidates.append(
                 (
                     "project_more_ghosts",
@@ -246,6 +262,7 @@ def propose_rl_action(
         rationale=best_rationale,
         target_block=target_block,
         expansion_target=expansion_target,
+        capacity_allocation=capacity_allocation,
         requires_authorization=True,
     )
 
