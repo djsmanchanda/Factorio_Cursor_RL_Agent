@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RLFeedback",
+  "description": "Deterministic, read-only RL feedback telemetry for future training.",
+  "type": "object",
+  "required": [
+    "reward_signal",
+    "progress_delta",
+    "capacity_delta",
+    "phase_progress",
+    "anomalies_detected",
+    "attribution_hint",
+    "deterministic_timestamp"
+  ],
+  "properties": {
+    "reward_signal": {
+      "type": "number"
+    },
+    "progress_delta": {
+      "type": "number"
+    },
+    "capacity_delta": {
+      "type": "number"
+    },
+    "phase_progress": {
+      "type": "object",
+      "required": [
+        "active_phase_capacity",
+        "current_capacity",
+        "completion_ratio"
+      ],
+      "properties": {
+        "active_phase_capacity": { "type": "integer", "minimum": 0 },
+        "current_capacity": { "type": "integer", "minimum": 0 },
+        "completion_ratio": { "type": "number", "minimum": 0.0 }
+      },
+      "additionalProperties": false
+    },
+    "anomalies_detected": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "attribution_hint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "deterministic_timestamp": {
+      "type": "string",
+      "pattern": "^tick:[0-9]+$"
+    }
+  },
+  "additionalProperties": false
+}

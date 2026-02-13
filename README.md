@@ -52,6 +52,11 @@ Supervision:
 	- Every RL proposal sets `requires_authorization = true` and must flow through readiness, authorization, and then execution.
 	- Safety boundaries: read-only inputs, no state mutation, no Lua calls, and no bypass of human/bot authorization.
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
+- RL feedback builder (pre-training instrumentation):
+	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`
+	- Builds deterministic, schema-validated RL feedback telemetry from read-only artifacts.
+	- Closes the observational loop by attributing outcomes of authorized execution/construction without granting any control authority.
+	- This is signal plumbing only for future training; no learning, no policy updates, and no state mutation are performed.
 - Execution report validation:
 	- `python tools/execution_reporter.py <execution_report.json>`
 - Construction report validation:
