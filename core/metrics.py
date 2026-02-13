@@ -195,3 +195,75 @@ def build_phase_metrics(graph: FactoryGraph) -> Dict[str, object]:
         "smelters_present": smelters_present,
         "circuits_present": circuits_present,
     }
+
+
+def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) -> Dict[str, object]:
+    """
+    Derive deterministic RL observation health indicators from existing metrics/progress.
+    Fails loudly when required source fields are unavailable.
+    """
+    required_progress = {"current_capacity", "committed_capacity", "active_phase_capacity"}
+    missing_progress = sorted(required_progress.difference(progress_state.keys()))
+    if missing_progress:
+        raise ValueError(f"ProgressState missing required fields for RL enrichment: {missing_progress}")
+
+    current_capacity = int(progress_state["current_capacity"])
+    committed_capacity = int(progress_state["committed_capacity"])
+    active_phase_capacity = int(progress_state["active_phase_capacity"])
+
+    # Bot utilization: prefer explicit active/total counts; otherwise fail loudly.
+    if "total_bots" not in metrics_summary:
+        raise ValueError("latest metrics summary missing total_bots for bot_utilization_ratio")
+    total_bots = int(metrics_summary["total_bots"])
+    active_logistic = int(metrics_summary.get("active_logistic_bots", 0))
+    active_construction = int(metrics_summary.get("active_construction_bots", 0))
+    active_bots = active_logistic + active_construction
+    bot_utilization_ratio = 0.0 if total_bots <= 0 else min(1.0, float(active_bots) / float(total_bots))
+
+    # Power stress: consumers/production when present; else deterministic conservative proxy.
+    if "power_consumers_total" in metrics_summary and "power_producers_total" in metrics_summary:
+        consumers = float(metrics_summary["power_consumers_total"])
+        producers = float(metrics_summary["power_producers_total"])
+        if producers <= 0.0:
+            power_stress_ratio = 1.0 if consumers <= 0.0 else float(consumers)
+        else:
+            power_stress_ratio = consumers / producers
+    elif "estimated_peak_draw" in metrics_summary and "estimated_power_supply" in metrics_summary:
+        draw = float(metrics_summary["estimated_peak_draw"])
+        supply = float(metrics_summary["estimated_power_supply"])
+        if supply <= 0.0:
+            power_stress_ratio = 1.0 if draw <= 0.0 else float(draw)
+        else:
+            power_stress_ratio = draw / supply
+    else:
+        # Conservative proxy if direct power accounting is unavailable.
+        labs_count = int(metrics_summary.get("labs_count", 0))
+        entity_count = int(metrics_summary.get("entity_count", 0))
+        if entity_count <= 0 and labs_count <= 0:
+            raise ValueError(
+                "latest metrics summary missing power fields and proxy fields for power_stress_ratio"
+            )
+        power_stress_ratio = float(labs_count + max(1, entity_count // 50)) / float(max(1, entity_count // 40))
+
+    # Construction backlog estimate: deterministic proxy from progress deltas.
+    construction_backlog_estimate = max(0, committed_capacity - current_capacity)
+
+    # Phase completion ratio.
+    phase_completion_ratio = 0.0 if active_phase_capacity <= 0 else float(current_capacity) / float(active_phase_capacity)
+
+    # Factory density score: entity_count / area_tiles when available.
+    if "entity_count" not in metrics_summary or "factory_area_tiles" not in metrics_summary:
+        raise ValueError("latest metrics summary must include entity_count and factory_area_tiles for factory_density_score")
+    entity_count = int(metrics_summary["entity_count"])
+    area_tiles = float(metrics_summary["factory_area_tiles"])
+    if area_tiles <= 0.0:
+        raise ValueError("factory_area_tiles must be > 0 for factory_density_score")
+    factory_density_score = float(entity_count) / area_tiles
+
+    return {
+        "bot_utilization_ratio": float(round(bot_utilization_ratio, 6)),
+        "power_stress_ratio": float(round(power_stress_ratio, 6)),
+        "construction_backlog_estimate": int(construction_backlog_estimate),
+        "phase_completion_ratio": float(round(phase_completion_ratio, 6)),
+        "factory_density_score": float(round(factory_density_score, 6)),
+    }

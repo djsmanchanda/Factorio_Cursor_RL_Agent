@@ -7,7 +7,12 @@
     "progress_state",
     "capacity_phasing",
     "latest_metrics_summary",
-    "phase_completion_status"
+    "phase_completion_status",
+    "bot_utilization_ratio",
+    "power_stress_ratio",
+    "construction_backlog_estimate",
+    "phase_completion_ratio",
+    "factory_density_score"
   ],
   "properties": {
     "progress_state": {
@@ -74,11 +79,31 @@
           }
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "phase_completion_status": {
       "type": "string",
       "enum": ["OK", "PARTIAL", "BLOCKED", "COMPLETE", "INCOMPLETE"]
+    },
+    "bot_utilization_ratio": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "power_stress_ratio": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "construction_backlog_estimate": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "phase_completion_ratio": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "factory_density_score": {
+      "type": "number",
+      "minimum": 0.0
     }
   },
   "additionalProperties": false

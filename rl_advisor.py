@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -97,8 +96,24 @@ def propose_rl_action(
     next_allowed = set(phasing.get("next_allowed_actions", []))
     bot_headroom = metrics.get("bot_headroom")
     target_block = _select_target_block(metrics)
+    bot_utilization_ratio = float(observation["bot_utilization_ratio"])
+    power_stress_ratio = float(observation["power_stress_ratio"])
+    construction_backlog_estimate = int(observation["construction_backlog_estimate"])
+    phase_completion_ratio = float(observation["phase_completion_ratio"])
+    factory_density_score = float(observation["factory_density_score"])
 
-    rng = random.Random(seed)
+    if seed != 0:
+        raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
+
+    derived_phase_completion_ratio = 0.0
+    if active > 0:
+        derived_phase_completion_ratio = float(current) / float(active)
+    if abs(phase_completion_ratio - derived_phase_completion_ratio) > 1e-6:
+        raise ValueError("phase_completion_ratio does not match ProgressState-derived ratio")
+
+    derived_backlog = max(0, int(progress["committed_capacity"]) - current)
+    if construction_backlog_estimate != derived_backlog:
+        raise ValueError("construction_backlog_estimate does not match ProgressState-derived backlog")
 
     candidates = []
     if phase_status == "BLOCKED":
@@ -110,6 +125,14 @@ def propose_rl_action(
             confidence = 0.74
             if isinstance(bot_headroom, (int, float)) and float(bot_headroom) < 0:
                 confidence -= 0.20
+            if bot_utilization_ratio >= 0.95:
+                confidence -= 0.12
+            if power_stress_ratio >= 1.0:
+                confidence -= 0.10
+            if construction_backlog_estimate > 0:
+                confidence -= 0.08
+            if factory_density_score >= 1.0:
+                confidence -= 0.06
             candidates.append(
                 (
                     "project_more_ghosts",
@@ -119,24 +142,40 @@ def propose_rl_action(
             )
 
         if desired > previous and current >= active:
+            confidence = 0.79
+            if phase_completion_ratio >= 1.0:
+                confidence += 0.05
+            if construction_backlog_estimate > 0:
+                confidence -= 0.04
             candidates.append(
-                ("request_phase_advance", 0.79, "Current capacity has reached active phase; advance can be requested.")
+                (
+                    "request_phase_advance",
+                    max(0.0, min(1.0, confidence)),
+                    "Current capacity has reached active phase; advance can be requested.",
+                )
             )
 
         if "ghost_upgrade" in next_allowed and current < desired:
+            confidence = 0.62
+            if power_stress_ratio >= 1.0:
+                confidence += 0.05
+            if bot_utilization_ratio >= 0.9:
+                confidence += 0.04
             candidates.append(
-                ("request_module_upgrade", 0.62, "Upgrade path is allowed and may improve throughput toward target.")
+                (
+                    "request_module_upgrade",
+                    max(0.0, min(1.0, confidence)),
+                    "Upgrade path is allowed and may improve throughput toward target.",
+                )
             )
 
         if not candidates:
             candidates.append(("hold_position", 0.86, "No strong advisory signal for expansion or advance."))
 
-    # Deterministic tie-break: confidence desc, then seeded pseudo-random jitter, then action name.
-    scored = []
-    for action, confidence, rationale in candidates:
-        scored.append((confidence, rng.random(), action, rationale))
-    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
-    best_confidence, _, best_action, best_rationale = scored[0]
+    # Deterministic tie-break: confidence desc, then lexical action name.
+    scored = [(confidence, action, rationale) for action, confidence, rationale in candidates]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    best_confidence, best_action, best_rationale = scored[0]
 
     proposal = RLActionProposal(
         proposed_action_type=best_action,

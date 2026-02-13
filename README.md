@@ -51,6 +51,8 @@ Supervision:
 	- The RL advisor is advisory only and cannot execute actions.
 	- Every RL proposal sets `requires_authorization = true` and must flow through readiness, authorization, and then execution.
 	- Safety boundaries: read-only inputs, no state mutation, no Lua calls, and no bypass of human/bot authorization.
+	- Enriched observation fields now include `bot_utilization_ratio`, `power_stress_ratio`, `construction_backlog_estimate`, `phase_completion_ratio`, and `factory_density_score`.
+	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`).
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):
 	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`
