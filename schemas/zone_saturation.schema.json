@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ZoneSaturationSignal",
+  "description": "Deterministic saturation signal for expansion confidence shaping.",
+  "type": "object",
+  "required": [
+    "block_id",
+    "fill_ratio",
+    "saturation_level",
+    "expansion_damping",
+    "rationale"
+  ],
+  "properties": {
+    "block_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fill_ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "saturation_level": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH"]
+    },
+    "expansion_damping": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

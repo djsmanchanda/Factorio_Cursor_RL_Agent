@@ -62,6 +62,7 @@ Supervision:
 	- Production shortfall awareness now includes `production_gap_estimate` (`recipe_name -> integer`) for conservative per-recipe gap estimation.
 	- Expansion target selection now includes an `ExpansionTarget` (`target_block`, `target_recipe`, `confidence`, `rationale`) chosen deterministically from pressure and gap telemetry.
 	- Phase budget allocation now includes `CapacityAllocation` (`phase_capacity`, `allocated_now`, `reserved_for_later`) computed conservatively from current headroom and throughput stress.
+	- Zone saturation shaping uses `metadata.zone_fill` to produce a deterministic `ZoneSaturationSignal` for the dominant block and dampens `project_more_ghosts` confidence as zone fill rises.
 	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `core.target_selector.select_expansion_target`, and `core.capacity_allocator.allocate_phase_capacity`).
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):

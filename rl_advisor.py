@@ -11,6 +11,7 @@ from typing import Optional
 from jsonschema import Draft7Validator
 from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
 from core.target_selector import ExpansionTarget, select_expansion_target
+from core.zone_saturation_policy import compute_zone_saturation_signal
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,14 @@ def propose_rl_action(
     if proposal_schema_path is None:
         proposal_schema_path = repo_root / "rl_action_proposal.schema.json"
 
-    _validate_schema(observation, observation_schema_path, "RLObservation")
+    metadata = observation.get("metadata")
+    validation_payload = observation
+    if metadata is not None:
+        if type(metadata) is not dict:
+            raise ValueError("RL observation metadata must be an object")
+        validation_payload = dict(observation)
+        validation_payload.pop("metadata", None)
+    _validate_schema(validation_payload, observation_schema_path, "RLObservation")
 
     progress = observation["progress_state"]
     phasing = observation["capacity_phasing"]
@@ -142,6 +150,12 @@ def propose_rl_action(
         production_gap_estimate=production_gap_estimate,
         throughput_stress_index=throughput_stress_index,
         phase_completion_ratio=phase_completion_ratio,
+    )
+    if type(metadata) is not dict or type(metadata.get("zone_fill")) is not list:
+        raise ValueError("RL observation metadata must include zone_fill array for saturation shaping")
+    zone_saturation_signal = compute_zone_saturation_signal(
+        zone_fill_entries=metadata.get("zone_fill"),
+        block_id=expansion_target.target_block,
     )
     capacity_allocation = allocate_phase_capacity(
         expansion_target=expansion_target.to_dict(),
@@ -198,6 +212,7 @@ def propose_rl_action(
             if dominant_gap >= 2 and (dominant_gap - second_gap) >= 1:
                 confidence += 0.03
             confidence += 0.02 * expansion_target.confidence
+            confidence -= zone_saturation_signal.expansion_damping
             if capacity_allocation.allocated_now <= 0 and capacity_allocation.reserved_for_later <= 0:
                 confidence -= 0.08
             else:
