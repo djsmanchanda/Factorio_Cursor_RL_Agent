@@ -141,6 +141,7 @@
     },
     "pressure_attribution_map": {
       "type": "object",
+      "minProperties": 1,
       "additionalProperties": {
         "type": "number",
         "minimum": 0.0,
@@ -149,6 +150,7 @@
     },
     "production_gap_estimate": {
       "type": "object",
+      "minProperties": 1,
       "additionalProperties": {
         "type": "integer",
         "minimum": 0

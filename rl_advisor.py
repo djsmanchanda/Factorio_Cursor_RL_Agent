@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from jsonschema import Draft7Validator
+from core.target_selector import ExpansionTarget, select_expansion_target
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class RLActionProposal:
     rationale: str
     requires_authorization: bool = True
     target_block: Optional[str] = None
+    expansion_target: Optional[ExpansionTarget] = None
 
     def to_dict(self) -> dict:
         payload = {
@@ -28,6 +30,8 @@ class RLActionProposal:
         }
         if self.target_block:
             payload["target_block"] = self.target_block
+        if self.expansion_target:
+            payload["expansion_target"] = self.expansion_target.to_dict()
         return payload
 
 
@@ -129,6 +133,13 @@ def propose_rl_action(
             raise ValueError("production_gap_estimate values must be non-negative integers")
         recipe_gaps.append(int(value))
 
+    expansion_target = select_expansion_target(
+        pressure_attribution_map=pressure_attribution_map,
+        production_gap_estimate=production_gap_estimate,
+        throughput_stress_index=throughput_stress_index,
+        phase_completion_ratio=phase_completion_ratio,
+    )
+
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
 
@@ -176,6 +187,7 @@ def propose_rl_action(
             second_gap = sorted_gaps[1] if len(sorted_gaps) > 1 else 0
             if dominant_gap >= 2 and (dominant_gap - second_gap) >= 1:
                 confidence += 0.03
+            confidence += 0.02 * expansion_target.confidence
             candidates.append(
                 (
                     "project_more_ghosts",
@@ -233,6 +245,7 @@ def propose_rl_action(
         confidence=round(float(best_confidence), 3),
         rationale=best_rationale,
         target_block=target_block,
+        expansion_target=expansion_target,
         requires_authorization=True,
     )
 

@@ -34,6 +34,9 @@
     },
     "requires_authorization": {
       "const": true
+    },
+    "expansion_target": {
+      "$ref": "schemas/expansion_target.schema.json"
     }
   },
   "additionalProperties": false
