@@ -12,6 +12,7 @@ from jsonschema import Draft7Validator
 from core.bot_capacity_policy import compute_bot_capacity_signal
 from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
 from core.construction_pressure_policy import compute_construction_pressure_signal
+from core.material_supply_policy import compute_material_supply_signal
 from core.target_selector import ExpansionTarget, select_expansion_target
 from core.zone_saturation_policy import compute_zone_saturation_signal
 
@@ -164,6 +165,14 @@ def propose_rl_action(
         throughput_stress_index=throughput_stress_index,
         phase_completion_ratio=phase_completion_ratio,
     )
+    material_metrics = dict(metrics)
+    material_metrics["throughput_stress_index"] = throughput_stress_index
+    material_metrics["bot_utilization_ratio"] = bot_utilization_ratio
+    material_supply_signal = compute_material_supply_signal(
+        progress_state=progress,
+        metrics_summary=material_metrics,
+        production_gap_estimate=production_gap_estimate,
+    )
     bot_capacity_signal = compute_bot_capacity_signal({"bot_utilization_ratio": bot_utilization_ratio})
     construction_pressure_signal = compute_construction_pressure_signal(progress)
     if type(metadata) is not dict or type(metadata.get("zone_fill")) is not list:
@@ -230,6 +239,7 @@ def propose_rl_action(
             confidence -= zone_saturation_signal.expansion_damping
             confidence -= construction_pressure_signal.expansion_damping
             confidence -= bot_capacity_signal.expansion_damping
+            confidence -= material_supply_signal.expansion_damping
             if capacity_allocation.allocated_now <= 0 and capacity_allocation.reserved_for_later <= 0:
                 confidence -= 0.08
             else:

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MaterialSupplySignal",
+  "description": "Deterministic advisory signal for supply-constrained expansion risk.",
+  "type": "object",
+  "required": [
+    "backlog_ratio",
+    "supply_level",
+    "expansion_damping",
+    "rationale"
+  ],
+  "properties": {
+    "backlog_ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "supply_level": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH"]
+    },
+    "expansion_damping": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}
