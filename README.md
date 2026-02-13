@@ -41,6 +41,7 @@ Supervision:
 	- Target-aware slicing is read-only and deterministic: `GhostSlice` focuses projection by `target_block` and `target_recipe` using capacity allocation.
 	- Projection emits only delta ghosts for the current slice; no geometry synthesis or Lua changes are introduced.
 	- Deterministic sandbox zoning assigns stable per-block regions (fixed spacing by sorted block id) so different blocks project into separate planner-sandbox zones.
+	- Zone fill telemetry (`ZoneFill`) reports deterministic per-block zone capacity estimate, projected ghost count, and fill ratio in GhostPlan metadata.
 - Observe GhostPlan sandbox:
 	- `python tools/ghost_observer.py <ghost_observation.json>`
 - Progress reconciliation:

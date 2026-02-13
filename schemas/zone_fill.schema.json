@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ZoneFill",
+  "description": "Deterministic read-only telemetry for sandbox zone fill state.",
+  "type": "object",
+  "required": [
+    "block_id",
+    "zone_capacity_estimate",
+    "ghosts_present",
+    "fill_ratio",
+    "rationale"
+  ],
+  "properties": {
+    "block_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "zone_capacity_estimate": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ghosts_present": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fill_ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

@@ -49,14 +49,19 @@ from typing import Dict, List, Optional
 from jsonschema import Draft7Validator
 from core.ghost_slice_planner import derive_ghost_slice, sort_intents_for_slice
 from core.sandbox_zoning import derive_sandbox_zones
+from core.zone_fill_tracker import derive_zone_fill
 
 
 @dataclass(frozen=True)
 class GhostPlan:
     ghosts: List[dict]
+    metadata: Optional[dict] = None
 
     def to_dict(self) -> dict:
-        return {"ghosts": list(self.ghosts)}
+        payload = {"ghosts": list(self.ghosts)}
+        if self.metadata is not None:
+            payload["metadata"] = self.metadata
+        return payload
 
 
 def _load_schema(schema_path: Path) -> dict:
@@ -163,6 +168,7 @@ def generate_ghost_plan(
     )
 
     ghosts: List[dict] = []
+    ghosts_present_by_block: Dict[str, int] = {}
     remaining = min(int(delta_capacity), int(ghost_slice.ghost_count))
     ordered_intents = sort_intents_for_slice(build_intent, ghost_slice.target_recipe)
     block_ids = [str(intent.get("block_type", "")) for _, intent in ordered_intents if str(intent.get("block_type", "")) != ""]
@@ -201,6 +207,7 @@ def generate_ghost_plan(
                 tags["capacity_class"] = str(capacity_class)
 
             ghosts.append({"prototype": prototype, "tags": tags})
+            ghosts_present_by_block[str(block_type)] = int(ghosts_present_by_block.get(str(block_type), 0)) + 1
         remaining -= to_emit
         if remaining == 0:
             break
@@ -208,6 +215,9 @@ def generate_ghost_plan(
     if remaining > 0:
         raise ValueError("Delta capacity could not be allocated from BuildIntent")
 
-    plan = GhostPlan(ghosts=ghosts)
-    _validate_payload(plan.to_dict(), ghost_plan_schema_path, "Ghost plan")
+    zone_fill = derive_zone_fill(zones=zones, ghosts_present_by_block=ghosts_present_by_block)
+    metadata = {"zone_fill": [item.to_dict() for item in zone_fill]}
+    plan = GhostPlan(ghosts=ghosts, metadata=metadata)
+    # Preserve existing GhostPlan schema validation over the ghosts payload.
+    _validate_payload({"ghosts": list(plan.ghosts)}, ghost_plan_schema_path, "Ghost plan")
     return plan
