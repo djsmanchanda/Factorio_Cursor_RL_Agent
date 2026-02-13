@@ -30,6 +30,7 @@ Supervision:
 - Construction progress updates current capacity without advancing phases.
 - Phase advancement requires explicit proposal and authorization.
 - Authorized upgrades are limited to planner-sandbox entities and require explicit approval.
+- Authorized deconstruction is bot-mediated only and limited to planner-sandbox entities.
 
 ## Tooling
 
@@ -51,6 +52,8 @@ Supervision:
 	- `python tools/construction_reporter.py <construction_report.json>`
 - Upgrade report validation:
 	- `python tools/execution_reporter.py <upgrade_report.json>`
+- Deconstruction report validation:
+	- `python tools/execution_reporter.py <deconstruction_report.json>`
 - Construction progress update:
 	- `python -c "from core.construction_progress_updater import update_progress_from_construction; import json; print(update_progress_from_construction(json.load(open('progress_state.json')), json.load(open('construction_report.json')))[0].to_dict())"`
 - Phase advance proposal:
