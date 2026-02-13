@@ -14,7 +14,8 @@
     "phase_completion_ratio",
     "factory_density_score",
     "spatial_pressure_index",
-    "throughput_stress_index"
+    "throughput_stress_index",
+    "pressure_attribution_map"
   ],
   "properties": {
     "progress_state": {
@@ -136,6 +137,14 @@
       "type": "number",
       "minimum": 0.0,
       "maximum": 1.0
+    },
+    "pressure_attribution_map": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      }
     }
   },
   "additionalProperties": false

@@ -291,6 +291,105 @@ def derive_throughput_stress(
     return float(round(min(1.0, max(0.0, stress)), 6))
 
 
+def derive_block_pressure_attribution(
+    progress_state: dict,
+    metrics_summary: dict,
+    throughput_stress_index: float,
+) -> Dict[str, float]:
+    """
+    Derive deterministic block-level pressure attribution from existing summary signals.
+    Returns a map block_id -> normalized pressure in [0, 1], sorted by block_id when emitted.
+    """
+    required_progress = {"current_capacity", "committed_capacity"}
+    missing_progress = sorted(required_progress.difference(progress_state.keys()))
+    if missing_progress:
+        raise ValueError(f"ProgressState missing required fields for block attribution: {missing_progress}")
+
+    required_metrics = {"priority_blocks", "assemblers_per_recipe", "entity_count", "factory_area_tiles"}
+    missing_metrics = sorted(required_metrics.difference(metrics_summary.keys()))
+    if missing_metrics:
+        raise ValueError(f"latest metrics summary missing required fields for block attribution: {missing_metrics}")
+
+    if not isinstance(throughput_stress_index, (int, float)):
+        raise ValueError("throughput_stress_index must be numeric for block attribution")
+    if throughput_stress_index < 0.0 or throughput_stress_index > 1.0:
+        raise ValueError("throughput_stress_index must be in [0,1] for block attribution")
+
+    priority_blocks = metrics_summary["priority_blocks"]
+    if type(priority_blocks) is not list or len(priority_blocks) == 0:
+        raise ValueError("priority_blocks must be a non-empty array for block attribution")
+
+    blocks = []
+    for entry in priority_blocks:
+        if type(entry) is not dict:
+            raise ValueError("priority_blocks entries must be objects")
+        block = entry.get("block")
+        score = entry.get("score")
+        if not isinstance(block, str) or block == "":
+            raise ValueError("priority_blocks.block must be a non-empty string")
+        if not isinstance(score, (int, float)):
+            raise ValueError("priority_blocks.score must be numeric")
+        blocks.append((block, float(score)))
+
+    assemblers_per_recipe = metrics_summary["assemblers_per_recipe"]
+    if type(assemblers_per_recipe) is not dict:
+        raise ValueError("assemblers_per_recipe must be an object for block attribution")
+
+    recipe_total = 0
+    recipe_peak = 0
+    for _, value in assemblers_per_recipe.items():
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("assemblers_per_recipe values must be non-negative integers")
+        recipe_total += int(value)
+        if int(value) > recipe_peak:
+            recipe_peak = int(value)
+
+    entity_count = int(metrics_summary["entity_count"])
+    area_tiles = float(metrics_summary["factory_area_tiles"])
+    if entity_count < 0:
+        raise ValueError("entity_count must be >= 0 for block attribution")
+    if area_tiles <= 0.0:
+        raise ValueError("factory_area_tiles must be > 0 for block attribution")
+
+    current_capacity = int(progress_state["current_capacity"])
+    committed_capacity = int(progress_state["committed_capacity"])
+    if current_capacity < 0 or committed_capacity < 0:
+        raise ValueError("capacity fields must be non-negative for block attribution")
+
+    committed_ratio = float(committed_capacity) / float(max(1, committed_capacity + current_capacity))
+    factory_density_score = float(entity_count) / area_tiles
+    density_component = min(1.0, max(0.0, factory_density_score / 0.05))
+    recipe_skew = 0.0 if recipe_total <= 0 else min(1.0, float(recipe_peak) / float(recipe_total))
+
+    global_pressure = (
+        0.45 * float(throughput_stress_index)
+        + 0.25 * committed_ratio
+        + 0.15 * density_component
+        + 0.15 * recipe_skew
+    )
+    global_pressure = min(1.0, max(0.0, global_pressure))
+
+    # Deterministic rank by declared priority score desc, then block_id asc.
+    ranked_blocks = sorted(blocks, key=lambda item: (-item[1], item[0]))
+
+    score_total = sum(max(0.0, score) for _, score in ranked_blocks)
+    base_weights = {}
+    for idx, (block_id, score) in enumerate(ranked_blocks, start=1):
+        priority_weight = (max(0.0, score) / score_total) if score_total > 0.0 else (1.0 / len(ranked_blocks))
+        rank_weight = 1.0 / float(idx)
+        base_weights[block_id] = (0.70 * priority_weight) + (0.30 * rank_weight)
+
+    max_weight = max(base_weights.values()) if base_weights else 1.0
+    raw = {}
+    for block_id, weight in base_weights.items():
+        raw[block_id] = global_pressure * (weight / max_weight)
+
+    normalized = {}
+    for block_id in sorted(raw.keys()):
+        normalized[block_id] = float(round(min(1.0, max(0.0, raw[block_id])), 6))
+    return normalized
+
+
 def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) -> Dict[str, object]:
     """
     Derive deterministic RL observation health indicators from existing metrics/progress.
@@ -355,6 +454,9 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
     factory_density_score = float(entity_count) / area_tiles
     spatial_pressure_index = derive_spatial_pressure(metrics_summary, factory_density_score)
     throughput_stress_index = derive_throughput_stress(metrics_summary, phase_completion_ratio, factory_density_score)
+    pressure_attribution_map = derive_block_pressure_attribution(
+        progress_state, metrics_summary, throughput_stress_index
+    )
 
     return {
         "bot_utilization_ratio": float(round(bot_utilization_ratio, 6)),
@@ -364,4 +466,5 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
         "factory_density_score": float(round(factory_density_score, 6)),
         "spatial_pressure_index": float(spatial_pressure_index),
         "throughput_stress_index": float(throughput_stress_index),
+        "pressure_attribution_map": pressure_attribution_map,
     }

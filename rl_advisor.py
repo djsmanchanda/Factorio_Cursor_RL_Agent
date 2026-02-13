@@ -103,6 +103,20 @@ def propose_rl_action(
     factory_density_score = float(observation["factory_density_score"])
     spatial_pressure_index = float(observation["spatial_pressure_index"])
     throughput_stress_index = float(observation["throughput_stress_index"])
+    pressure_attribution_map = observation["pressure_attribution_map"]
+
+    if type(pressure_attribution_map) is not dict or len(pressure_attribution_map) == 0:
+        raise ValueError("pressure_attribution_map must be a non-empty object")
+    pressure_values = []
+    for block_id, value in pressure_attribution_map.items():
+        if not isinstance(block_id, str) or block_id == "":
+            raise ValueError("pressure_attribution_map keys must be non-empty strings")
+        if not isinstance(value, (int, float)):
+            raise ValueError("pressure_attribution_map values must be numeric")
+        numeric = float(value)
+        if numeric < 0.0 or numeric > 1.0:
+            raise ValueError("pressure_attribution_map values must be in [0,1]")
+        pressure_values.append(numeric)
 
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
@@ -141,6 +155,11 @@ def propose_rl_action(
             if spatial_pressure_index >= 0.80:
                 throughput_boost = throughput_boost * 0.35
             confidence += throughput_boost
+            sorted_pressures = sorted(pressure_values, reverse=True)
+            dominant = sorted_pressures[0]
+            second = sorted_pressures[1] if len(sorted_pressures) > 1 else 0.0
+            if dominant >= 0.70 and (dominant - second) >= 0.15:
+                confidence += 0.03
             candidates.append(
                 (
                     "project_more_ghosts",

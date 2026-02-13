@@ -54,7 +54,8 @@ Supervision:
 	- Enriched observation fields now include `bot_utilization_ratio`, `power_stress_ratio`, `construction_backlog_estimate`, `phase_completion_ratio`, and `factory_density_score`.
 	- Spatial awareness now includes `spatial_pressure_index` (normalized `[0,1]`) to indicate crowding/expansion pressure from bounds area, entity count, and density.
 	- Throughput awareness now includes `throughput_stress_index` (normalized `[0,1]`) to indicate production pressure from assembler distribution, lab/assembler balance, concentration, and phase progress.
-	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, and `core.metrics.derive_throughput_stress`).
+	- Block-level attribution now includes `pressure_attribution_map` (`block_id -> [0,1]`) for localized pressure visibility.
+	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, and `core.metrics.derive_block_pressure_attribution`).
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):
 	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`
