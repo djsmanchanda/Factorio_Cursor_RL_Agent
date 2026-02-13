@@ -64,6 +64,7 @@ Supervision:
 	- Phase budget allocation now includes `CapacityAllocation` (`phase_capacity`, `allocated_now`, `reserved_for_later`) computed conservatively from current headroom and throughput stress.
 	- Zone saturation shaping uses `metadata.zone_fill` to produce a deterministic `ZoneSaturationSignal` for the dominant block and dampens `project_more_ghosts` confidence as zone fill rises.
 	- Construction pressure shaping computes deterministic backlog pressure from ProgressState and dampens `project_more_ghosts` confidence when committed work outpaces current progress.
+	- Bot capacity shaping reads `metrics_summary.bot_utilization_ratio` and applies deterministic expansion damping as robot utilization rises.
 	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `core.target_selector.select_expansion_target`, and `core.capacity_allocator.allocate_phase_capacity`).
 	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):

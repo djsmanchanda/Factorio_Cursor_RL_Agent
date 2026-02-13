@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BotCapacitySignal",
+  "description": "Deterministic advisory signal for bot network capacity pressure.",
+  "type": "object",
+  "required": [
+    "bot_utilization_ratio",
+    "capacity_level",
+    "expansion_damping",
+    "rationale"
+  ],
+  "properties": {
+    "bot_utilization_ratio": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "capacity_level": {
+      "type": "string",
+      "enum": ["LOW", "MEDIUM", "HIGH"]
+    },
+    "expansion_damping": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

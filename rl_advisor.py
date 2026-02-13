@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from jsonschema import Draft7Validator
+from core.bot_capacity_policy import compute_bot_capacity_signal
 from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
 from core.construction_pressure_policy import compute_construction_pressure_signal
 from core.target_selector import ExpansionTarget, select_expansion_target
@@ -99,6 +100,11 @@ def propose_rl_action(
             raise ValueError("RL observation metadata must be an object")
         validation_payload = dict(observation)
         validation_payload.pop("metadata", None)
+    if "latest_metrics_summary" in validation_payload and type(validation_payload["latest_metrics_summary"]) is dict:
+        validation_payload = dict(validation_payload)
+        metrics_copy = dict(validation_payload["latest_metrics_summary"])
+        metrics_copy.pop("bot_utilization_ratio", None)
+        validation_payload["latest_metrics_summary"] = metrics_copy
     _validate_schema(validation_payload, observation_schema_path, "RLObservation")
 
     progress = observation["progress_state"]
@@ -113,7 +119,13 @@ def propose_rl_action(
     next_allowed = set(phasing.get("next_allowed_actions", []))
     bot_headroom = metrics.get("bot_headroom")
     target_block = _select_target_block(metrics)
-    bot_utilization_ratio = float(observation["bot_utilization_ratio"])
+    bot_utilization_ratio = None
+    if type(metrics) is dict and metrics.get("bot_utilization_ratio") is not None:
+        bot_utilization_ratio = float(metrics["bot_utilization_ratio"])
+    elif observation.get("bot_utilization_ratio") is not None:
+        bot_utilization_ratio = float(observation["bot_utilization_ratio"])
+    else:
+        raise ValueError("bot_utilization_ratio missing (expected latest_metrics_summary first, then top-level fallback)")
     power_stress_ratio = float(observation["power_stress_ratio"])
     construction_backlog_estimate = int(observation["construction_backlog_estimate"])
     phase_completion_ratio = float(observation["phase_completion_ratio"])
@@ -152,6 +164,7 @@ def propose_rl_action(
         throughput_stress_index=throughput_stress_index,
         phase_completion_ratio=phase_completion_ratio,
     )
+    bot_capacity_signal = compute_bot_capacity_signal({"bot_utilization_ratio": bot_utilization_ratio})
     construction_pressure_signal = compute_construction_pressure_signal(progress)
     if type(metadata) is not dict or type(metadata.get("zone_fill")) is not list:
         raise ValueError("RL observation metadata must include zone_fill array for saturation shaping")
@@ -216,6 +229,7 @@ def propose_rl_action(
             confidence += 0.02 * expansion_target.confidence
             confidence -= zone_saturation_signal.expansion_damping
             confidence -= construction_pressure_signal.expansion_damping
+            confidence -= bot_capacity_signal.expansion_damping
             if capacity_allocation.allocated_now <= 0 and capacity_allocation.reserved_for_later <= 0:
                 confidence -= 0.08
             else:
