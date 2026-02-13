@@ -235,6 +235,62 @@ def derive_spatial_pressure(metrics_summary: dict, factory_density_score: float)
     return float(round(min(1.0, max(0.0, pressure)), 6))
 
 
+def derive_throughput_stress(
+    metrics_summary: dict,
+    phase_completion_ratio: float,
+    factory_density_score: float,
+) -> float:
+    """
+    Derive deterministic normalized throughput stress [0, 1] from existing metrics outputs.
+    No simulation; uses only summary aggregates.
+    """
+    required = {"assemblers_per_recipe", "entity_count", "labs_count"}
+    missing = sorted(required.difference(metrics_summary.keys()))
+    if missing:
+        raise ValueError(f"latest metrics summary missing required fields for throughput stress: {missing}")
+
+    assemblers_per_recipe = metrics_summary["assemblers_per_recipe"]
+    if type(assemblers_per_recipe) is not dict:
+        raise ValueError("assemblers_per_recipe must be an object for throughput stress")
+
+    recipe_counts = []
+    for _, value in assemblers_per_recipe.items():
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("assemblers_per_recipe values must be non-negative integers")
+        recipe_counts.append(value)
+
+    assemblers_total = int(metrics_summary.get("assemblers_total", sum(recipe_counts)))
+    labs_count = int(metrics_summary["labs_count"])
+    entity_count = int(metrics_summary["entity_count"])
+
+    if assemblers_total < 0 or labs_count < 0 or entity_count < 0:
+        raise ValueError("throughput stress inputs must be non-negative")
+    if entity_count == 0:
+        return 0.0
+
+    # Distribution skew: concentration of assembler capacity into a narrow recipe set.
+    if assemblers_total <= 0 or len(recipe_counts) == 0:
+        skew_component = 1.0
+    else:
+        top_recipe = max(recipe_counts)
+        skew_component = min(1.0, max(0.0, float(top_recipe) / float(assemblers_total)))
+
+    # Lab-to-assembler pressure: high lab demand relative to assembler base.
+    lab_pressure_component = min(1.0, float(labs_count) / float(max(1, assemblers_total)))
+
+    # Concentration pressure from global density and overall completion pressure.
+    entity_concentration_component = min(1.0, max(0.0, float(factory_density_score) / 0.05))
+    phase_component = min(1.0, max(0.0, float(phase_completion_ratio)))
+
+    stress = (
+        0.40 * skew_component
+        + 0.20 * lab_pressure_component
+        + 0.20 * entity_concentration_component
+        + 0.20 * phase_component
+    )
+    return float(round(min(1.0, max(0.0, stress)), 6))
+
+
 def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) -> Dict[str, object]:
     """
     Derive deterministic RL observation health indicators from existing metrics/progress.
@@ -298,6 +354,7 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
         raise ValueError("factory_area_tiles must be > 0 for factory_density_score")
     factory_density_score = float(entity_count) / area_tiles
     spatial_pressure_index = derive_spatial_pressure(metrics_summary, factory_density_score)
+    throughput_stress_index = derive_throughput_stress(metrics_summary, phase_completion_ratio, factory_density_score)
 
     return {
         "bot_utilization_ratio": float(round(bot_utilization_ratio, 6)),
@@ -306,4 +363,5 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
         "phase_completion_ratio": float(round(phase_completion_ratio, 6)),
         "factory_density_score": float(round(factory_density_score, 6)),
         "spatial_pressure_index": float(spatial_pressure_index),
+        "throughput_stress_index": float(throughput_stress_index),
     }

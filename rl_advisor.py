@@ -102,6 +102,7 @@ def propose_rl_action(
     phase_completion_ratio = float(observation["phase_completion_ratio"])
     factory_density_score = float(observation["factory_density_score"])
     spatial_pressure_index = float(observation["spatial_pressure_index"])
+    throughput_stress_index = float(observation["throughput_stress_index"])
 
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
@@ -136,6 +137,10 @@ def propose_rl_action(
                 confidence -= 0.06
             if spatial_pressure_index >= 0.80:
                 confidence -= 0.10
+            throughput_boost = 0.06 * throughput_stress_index
+            if spatial_pressure_index >= 0.80:
+                throughput_boost = throughput_boost * 0.35
+            confidence += throughput_boost
             candidates.append(
                 (
                     "project_more_ghosts",
@@ -152,6 +157,10 @@ def propose_rl_action(
                 confidence -= 0.04
             if spatial_pressure_index >= 0.70:
                 confidence += 0.03
+            throughput_boost = 0.05 * throughput_stress_index
+            if spatial_pressure_index >= 0.80:
+                throughput_boost = throughput_boost * 0.40
+            confidence += throughput_boost
             candidates.append(
                 (
                     "request_phase_advance",

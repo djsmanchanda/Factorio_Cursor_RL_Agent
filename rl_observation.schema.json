@@ -13,7 +13,8 @@
     "construction_backlog_estimate",
     "phase_completion_ratio",
     "factory_density_score",
-    "spatial_pressure_index"
+    "spatial_pressure_index",
+    "throughput_stress_index"
   ],
   "properties": {
     "progress_state": {
@@ -66,6 +67,26 @@
       "required": ["current_capacity"],
       "properties": {
         "current_capacity": { "type": "integer", "minimum": 0 },
+        "entity_count": { "type": "integer", "minimum": 0 },
+        "factory_area_tiles": { "type": "number", "exclusiveMinimum": 0.0 },
+        "surface_bounds_width": { "type": "number", "exclusiveMinimum": 0.0 },
+        "surface_bounds_height": { "type": "number", "exclusiveMinimum": 0.0 },
+        "total_bots": { "type": "integer", "minimum": 0 },
+        "active_logistic_bots": { "type": "integer", "minimum": 0 },
+        "active_construction_bots": { "type": "integer", "minimum": 0 },
+        "power_consumers_total": { "type": "number", "minimum": 0.0 },
+        "power_producers_total": { "type": "number", "minimum": 0.0 },
+        "estimated_peak_draw": { "type": "number", "minimum": 0.0 },
+        "estimated_power_supply": { "type": "number", "minimum": 0.0 },
+        "labs_count": { "type": "integer", "minimum": 0 },
+        "assemblers_total": { "type": "integer", "minimum": 0 },
+        "assemblers_per_recipe": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
         "bot_headroom": { "type": "number" },
         "priority_blocks": {
           "type": "array",
@@ -107,6 +128,11 @@
       "minimum": 0.0
     },
     "spatial_pressure_index": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "throughput_stress_index": {
       "type": "number",
       "minimum": 0.0,
       "maximum": 1.0
