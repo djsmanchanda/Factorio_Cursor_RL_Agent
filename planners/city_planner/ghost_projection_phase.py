@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from jsonschema import Draft7Validator
+from core.ghost_slice_planner import derive_ghost_slice, sort_intents_for_slice
 
 
 @dataclass(frozen=True)
@@ -109,9 +110,12 @@ def generate_ghost_plan(
     build_intent: dict,
     progress_state: dict,
     capacity_phasing: dict,
+    capacity_allocation: Optional[dict] = None,
+    expansion_target: Optional[dict] = None,
     build_intent_schema_path: Optional[Path] = None,
     progress_schema_path: Optional[Path] = None,
     capacity_phasing_schema_path: Optional[Path] = None,
+    ghost_slice_schema_path: Optional[Path] = None,
     ghost_plan_schema_path: Optional[Path] = None,
 ) -> GhostPlan:
     repo_root = Path(__file__).resolve().parents[2]
@@ -121,6 +125,8 @@ def generate_ghost_plan(
         progress_schema_path = repo_root / "schemas" / "progress_state.schema.json"
     if capacity_phasing_schema_path is None:
         capacity_phasing_schema_path = repo_root / "schemas" / "capacity_phasing.schema.json"
+    if ghost_slice_schema_path is None:
+        ghost_slice_schema_path = repo_root / "schemas" / "ghost_slice.schema.json"
     if ghost_plan_schema_path is None:
         ghost_plan_schema_path = repo_root / "schemas" / "ghost_plan.schema.json"
 
@@ -131,10 +137,34 @@ def generate_ghost_plan(
     delta_capacity = _derive_delta_capacity(build_intent, progress_state, capacity_phasing)
     previous = int(capacity_phasing.get("previous_active_capacity", 0))
     desired = int(capacity_phasing.get("desired_active_capacity", 0))
+    default_target = {
+        "target_block": str(build_intent.get("intents", [{}])[0].get("block_type", "default")) if build_intent.get("intents") else "default",
+        "target_recipe": str(build_intent.get("intents", [{}])[0].get("block_type", "default")) if build_intent.get("intents") else "default",
+    }
+    if expansion_target is None:
+        expansion_target = default_target
+    if capacity_allocation is None:
+        capacity_allocation = {
+            "target_block": expansion_target["target_block"],
+            "target_recipe": expansion_target["target_recipe"],
+            "phase_capacity": int(progress_state.get("active_phase_capacity", 0)),
+            "allocated_now": int(max(0, delta_capacity)),
+            "reserved_for_later": 0,
+            "rationale": "Fallback allocation derived from delta capacity.",
+        }
+
+    ghost_slice = derive_ghost_slice(
+        build_intent=build_intent,
+        progress_state=progress_state,
+        capacity_allocation=capacity_allocation,
+        expansion_target=expansion_target,
+        schema_path=ghost_slice_schema_path,
+    )
 
     ghosts: List[dict] = []
-    remaining = delta_capacity
-    for intent in build_intent.get("intents", []):
+    remaining = min(int(delta_capacity), int(ghost_slice.ghost_count))
+    ordered_intents = sort_intents_for_slice(build_intent, ghost_slice.target_recipe)
+    for _, intent in ordered_intents:
         kind = intent.get("kind")
         block_type = intent.get("block_type")
         count = int(intent.get("count", 0))
@@ -148,11 +178,11 @@ def generate_ghost_plan(
         to_emit = min(count, remaining)
         for _ in range(to_emit):
             tags: Dict[str, str] = {
-                "block": str(block_type),
+                "block": str(ghost_slice.target_block if ghost_slice.target_block else block_type),
                 "block_type": str(block_type),
                 "kind": str(kind),
                 "phase": "capacity_phase",
-                "capacity_slice": f"{previous}->{desired}",
+                "capacity_slice": str(ghost_slice.capacity_slice),
             }
             if interfaces:
                 tags["interfaces"] = ",".join(interfaces)
@@ -164,7 +194,7 @@ def generate_ghost_plan(
         if remaining == 0:
             break
 
-    if remaining != 0:
+    if remaining > 0:
         raise ValueError("Delta capacity could not be allocated from BuildIntent")
 
     plan = GhostPlan(ghosts=ghosts)

@@ -38,6 +38,8 @@ Supervision:
 	- `python tools/inspect_progress.py <snapshot.json> <metrics.json> <build_intent.json>`
 - Phase-aware Ghost Projection:
 	- Requires BuildIntent + ProgressState + CapacityPhasing (no CLI yet)
+	- Target-aware slicing is read-only and deterministic: `GhostSlice` focuses projection by `target_block` and `target_recipe` using capacity allocation.
+	- Projection emits only delta ghosts for the current slice; no geometry synthesis or Lua changes are introduced.
 - Observe GhostPlan sandbox:
 	- `python tools/ghost_observer.py <ghost_observation.json>`
 - Progress reconciliation:

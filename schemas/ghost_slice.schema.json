@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "GhostSlice",
+  "description": "Deterministic read-only ghost emission slice focused on selected target.",
+  "type": "object",
+  "required": [
+    "target_block",
+    "target_recipe",
+    "ghost_count",
+    "capacity_slice",
+    "rationale"
+  ],
+  "properties": {
+    "target_block": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_recipe": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ghost_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "capacity_slice": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}
