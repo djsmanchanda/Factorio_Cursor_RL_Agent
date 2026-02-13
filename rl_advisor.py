@@ -10,6 +10,7 @@ from typing import Optional
 
 from jsonschema import Draft7Validator
 from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
+from core.construction_pressure_policy import compute_construction_pressure_signal
 from core.target_selector import ExpansionTarget, select_expansion_target
 from core.zone_saturation_policy import compute_zone_saturation_signal
 
@@ -151,6 +152,7 @@ def propose_rl_action(
         throughput_stress_index=throughput_stress_index,
         phase_completion_ratio=phase_completion_ratio,
     )
+    construction_pressure_signal = compute_construction_pressure_signal(progress)
     if type(metadata) is not dict or type(metadata.get("zone_fill")) is not list:
         raise ValueError("RL observation metadata must include zone_fill array for saturation shaping")
     zone_saturation_signal = compute_zone_saturation_signal(
@@ -213,6 +215,7 @@ def propose_rl_action(
                 confidence += 0.03
             confidence += 0.02 * expansion_target.confidence
             confidence -= zone_saturation_signal.expansion_damping
+            confidence -= construction_pressure_signal.expansion_damping
             if capacity_allocation.allocated_now <= 0 and capacity_allocation.reserved_for_later <= 0:
                 confidence -= 0.08
             else:
