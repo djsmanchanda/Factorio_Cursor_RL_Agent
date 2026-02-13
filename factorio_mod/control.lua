@@ -959,6 +959,54 @@ local function execute_deconstruction(authorization, plan)
 
   local results = {}
   local processed = 0
+  local function compare_entities_for_deconstruction(a, b)
+    if a.name ~= b.name then
+      return a.name < b.name
+    end
+    if a.type ~= b.type then
+      return a.type < b.type
+    end
+    if a.position.x ~= b.position.x then
+      return a.position.x < b.position.x
+    end
+    if a.position.y ~= b.position.y then
+      return a.position.y < b.position.y
+    end
+    local a_force = (a.force and a.force.name) or ""
+    local b_force = (b.force and b.force.name) or ""
+    if a_force ~= b_force then
+      return a_force < b_force
+    end
+    local a_unit = a.unit_number or -1
+    local b_unit = b.unit_number or -1
+    return a_unit < b_unit
+  end
+
+  local function select_target(entry, position)
+    if entry.name ~= nil then
+      return surface.find_entity(entry.name, position)
+    end
+
+    local candidates = surface.find_entities_filtered({ position = position })
+    if #candidates == 0 then
+      return nil
+    end
+
+    local exact = {}
+    for _, candidate in ipairs(candidates) do
+      if candidate.position.x == position.x and candidate.position.y == position.y then
+        table.insert(exact, candidate)
+      end
+    end
+
+    if #exact > 0 then
+      table.sort(exact, compare_entities_for_deconstruction)
+      return exact[1]
+    end
+
+    table.sort(candidates, compare_entities_for_deconstruction)
+    return candidates[1]
+  end
 
   for _, entry in ipairs(plan.actions) do
     if max_count and processed >= max_count then
@@ -978,9 +1026,9 @@ local function execute_deconstruction(authorization, plan)
       error("Deconstruction action must include position")
     end
 
-    local target = surface.find_entity(entry.name, position)
+    local target = select_target(entry, position)
     if not target then
-      table.insert(results, { action = entry.action, status = "failed", reason = "target_missing" })
+      table.insert(results, { action = entry.action, status = "failed", reason = "entity_not_found" })
       goto continue
     end
 
@@ -1020,22 +1068,7 @@ commands.add_command("execute_deconstruction_plan", "Execute authorized deconstr
     return
   end
 
-  local ok, results = pcall(function()
-    return execute_deconstruction(validated.authorization, validated.deconstruction_plan)
-  end)
-
-  if not ok then
-    local message = "Deconstruction error: " .. tostring(results)
-    if command.player_index then
-      local player = game.get_player(command.player_index)
-      if player then
-        player.print(message)
-      end
-    else
-      game.print(message)
-    end
-    return
-  end
+  local results = execute_deconstruction(validated.authorization, validated.deconstruction_plan)
 
   local report = {
     tick = game.tick,

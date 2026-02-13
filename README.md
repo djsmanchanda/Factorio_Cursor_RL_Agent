@@ -54,6 +54,7 @@ Supervision:
 	- `python tools/execution_reporter.py <upgrade_report.json>`
 - Deconstruction report validation:
 	- `python tools/execution_reporter.py <deconstruction_report.json>`
+	- Deconstruction actions support both named targeting and position-only targeting.
 - Construction progress update:
 	- `python -c "from core.construction_progress_updater import update_progress_from_construction; import json; print(update_progress_from_construction(json.load(open('progress_state.json')), json.load(open('construction_report.json')))[0].to_dict())"`
 - Phase advance proposal:
