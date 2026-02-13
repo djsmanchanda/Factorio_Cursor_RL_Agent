@@ -131,11 +131,36 @@ local function apply_ghost_plan(payload)
   local surface = get_or_create_sandbox_surface()
   local force = game.forces["player"] or game.forces[1]
 
-  local origin_x = 0
-  local origin_y = 0
-  local spacing = 2
+  local function zoned_position_from_tags(tags, zone_index)
+    if tags.zone_origin_x == nil or tags.zone_origin_y == nil or tags.zone_stride_x == nil or tags.zone_stride_y == nil then
+      error("Ghost tags must include zone_origin_x, zone_origin_y, zone_stride_x, zone_stride_y")
+    end
 
-  for index, ghost in ipairs(payload.ghosts) do
+    local origin_x = tonumber(tags.zone_origin_x)
+    local origin_y = tonumber(tags.zone_origin_y)
+    local stride_x = tonumber(tags.zone_stride_x)
+    local stride_y = tonumber(tags.zone_stride_y)
+
+    if origin_x == nil or origin_y == nil or stride_x == nil or stride_y == nil then
+      error("Ghost zone values must be numeric")
+    end
+    if stride_x <= 0 or stride_y <= 0 then
+      error("Ghost zone strides must be > 0")
+    end
+
+    local columns = 8
+    local column = zone_index % columns
+    local row = math.floor(zone_index / columns)
+
+    return {
+      x = origin_x + (column * stride_x),
+      y = origin_y + (row * stride_y)
+    }
+  end
+
+  local zone_counts = {}
+
+  for _, ghost in ipairs(payload.ghosts) do
     if type(ghost) ~= "table" then
       error("Ghost entry must be an object")
     end
@@ -146,10 +171,10 @@ local function apply_ghost_plan(payload)
       error("Ghost tags must be an object")
     end
 
-    local position = {
-      x = origin_x + ((index - 1) * spacing),
-      y = origin_y
-    }
+    local zone_key = tostring(tags.zone_block_id or tags.block or "") .. ":" .. tostring(tags.zone_origin_x) .. ":" .. tostring(tags.zone_origin_y)
+    local zone_index = zone_counts[zone_key] or 0
+    local position = zoned_position_from_tags(tags, zone_index)
+    zone_counts[zone_key] = zone_index + 1
 
     surface.create_entity({
       name = "entity-ghost",
@@ -277,13 +302,37 @@ local function execute_ghost_plan(authorization, ghost_plan)
 
   local surface = get_or_create_sandbox_surface()
   local force = game.forces["player"] or game.forces[1]
-  local origin_x = 0
-  local origin_y = 10
-  local spacing = 2
+  local function zoned_position_from_tags(tags, zone_index)
+    if tags.zone_origin_x == nil or tags.zone_origin_y == nil or tags.zone_stride_x == nil or tags.zone_stride_y == nil then
+      error("Ghost tags must include zone_origin_x, zone_origin_y, zone_stride_x, zone_stride_y")
+    end
+
+    local origin_x = tonumber(tags.zone_origin_x)
+    local origin_y = tonumber(tags.zone_origin_y)
+    local stride_x = tonumber(tags.zone_stride_x)
+    local stride_y = tonumber(tags.zone_stride_y)
+
+    if origin_x == nil or origin_y == nil or stride_x == nil or stride_y == nil then
+      error("Ghost zone values must be numeric")
+    end
+    if stride_x <= 0 or stride_y <= 0 then
+      error("Ghost zone strides must be > 0")
+    end
+
+    local columns = 8
+    local column = zone_index % columns
+    local row = math.floor(zone_index / columns)
+
+    return {
+      x = origin_x + (column * stride_x),
+      y = origin_y + (row * stride_y)
+    }
+  end
 
   local placed = 0
+  local zone_counts = {}
   local ghosts = ghost_plan.ghosts
-  for index, ghost in ipairs(ghosts) do
+  for _, ghost in ipairs(ghosts) do
     if max_count and placed >= max_count then
       break
     end
@@ -305,10 +354,10 @@ local function execute_ghost_plan(authorization, ghost_plan)
     end
 
     local prototype = ghost.prototype or "assembling-machine-1"
-    local position = {
-      x = origin_x + ((index - 1) * spacing),
-      y = origin_y
-    }
+    local zone_key = tostring(tags.zone_block_id or tags.block or "") .. ":" .. tostring(tags.zone_origin_x) .. ":" .. tostring(tags.zone_origin_y)
+    local zone_index = zone_counts[zone_key] or 0
+    local position = zoned_position_from_tags(tags, zone_index)
+    zone_counts[zone_key] = zone_index + 1
 
     local existing = surface.find_entities_filtered({ name = "entity-ghost", position = position, limit = 1 })
     if #existing == 0 then

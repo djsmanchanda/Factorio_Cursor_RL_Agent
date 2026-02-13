@@ -48,6 +48,7 @@ from typing import Dict, List, Optional
 
 from jsonschema import Draft7Validator
 from core.ghost_slice_planner import derive_ghost_slice, sort_intents_for_slice
+from core.sandbox_zoning import derive_sandbox_zones
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,8 @@ def generate_ghost_plan(
     ghosts: List[dict] = []
     remaining = min(int(delta_capacity), int(ghost_slice.ghost_count))
     ordered_intents = sort_intents_for_slice(build_intent, ghost_slice.target_recipe)
+    block_ids = [str(intent.get("block_type", "")) for _, intent in ordered_intents if str(intent.get("block_type", "")) != ""]
+    zones = derive_sandbox_zones(block_ids)
     for _, intent in ordered_intents:
         kind = intent.get("kind")
         block_type = intent.get("block_type")
@@ -176,13 +179,21 @@ def generate_ghost_plan(
 
         prototype = _placeholder_prototype(block_type)
         to_emit = min(count, remaining)
+        zone = zones.get(str(block_type))
+        if zone is None:
+            raise ValueError(f"Missing sandbox zone for block: {block_type}")
         for _ in range(to_emit):
             tags: Dict[str, str] = {
-                "block": str(ghost_slice.target_block if ghost_slice.target_block else block_type),
+                "block": str(block_type),
                 "block_type": str(block_type),
                 "kind": str(kind),
                 "phase": "capacity_phase",
                 "capacity_slice": str(ghost_slice.capacity_slice),
+                "zone_block_id": str(zone.block_id),
+                "zone_origin_x": str(zone.origin_x),
+                "zone_origin_y": str(zone.origin_y),
+                "zone_stride_x": str(zone.stride_x),
+                "zone_stride_y": str(zone.stride_y),
             }
             if interfaces:
                 tags["interfaces"] = ",".join(interfaces)
