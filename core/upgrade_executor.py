@@ -66,31 +66,18 @@ def prepare_upgrade_actions(
     for entry in upgrade_plan.get("actions", []):
         if block_filter and entry.get("block") not in block_filter:
             continue
-+        actions.append(
-+            UpgradeAction(
-+                action=entry.get("action"),
-+                position=entry.get("position"),
-+                from_name=entry.get("from_name"),
-+                to_name=entry.get("to_name"),
-+                module_to=entry.get("module_to"),
-+                module_count=entry.get("module_count"),
-+                block=entry.get("block"),
-+            )
-+        )
-+        if max_count is not None and len(actions) >= int(max_count):
-+            break
--
--    for entry in upgrade_plan.get("actions", []):
--        actions.append(
--            UpgradeAction(
--                action=entry.get("action"),
--                position=entry.get("position"),
--                from_name=entry.get("from_name"),
--                to_name=entry.get("to_name"),
--                module_to=entry.get("module_to"),
--                module_count=entry.get("module_count"),
--                block=entry.get("block"),
--            )
--        )
--
-     return actions
+        actions.append(
+            UpgradeAction(
+                action=entry.get("action"),
+                position=entry.get("position"),
+                from_name=entry.get("from_name"),
+                to_name=entry.get("to_name"),
+                module_to=entry.get("module_to"),
+                module_count=entry.get("module_count"),
+                block=entry.get("block"),
+            )
+        )
+        if max_count is not None and len(actions) >= int(max_count):
+            break
+
+    return actions

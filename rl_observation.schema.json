@@ -15,7 +15,8 @@
     "factory_density_score",
     "spatial_pressure_index",
     "throughput_stress_index",
-    "pressure_attribution_map"
+    "pressure_attribution_map",
+    "production_gap_estimate"
   ],
   "properties": {
     "progress_state": {
@@ -144,6 +145,13 @@
         "type": "number",
         "minimum": 0.0,
         "maximum": 1.0
+      }
+    },
+    "production_gap_estimate": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
       }
     }
   },

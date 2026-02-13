@@ -390,6 +390,87 @@ def derive_block_pressure_attribution(
     return normalized
 
 
+def derive_production_gap_estimate(
+    progress_state: dict,
+    metrics_summary: dict,
+    throughput_stress_index: float,
+    pressure_attribution_map: dict,
+) -> Dict[str, int]:
+    """
+    Derive conservative deterministic per-recipe production shortfall estimates.
+    Returns a map recipe_name -> integer gap, sorted by recipe_name.
+    """
+    required_progress = {"current_capacity", "committed_capacity", "active_phase_capacity"}
+    missing_progress = sorted(required_progress.difference(progress_state.keys()))
+    if missing_progress:
+        raise ValueError(f"ProgressState missing required fields for production gap estimate: {missing_progress}")
+
+    if "assemblers_per_recipe" not in metrics_summary:
+        raise ValueError("latest metrics summary missing assemblers_per_recipe for production gap estimate")
+    assemblers_per_recipe = metrics_summary["assemblers_per_recipe"]
+    if type(assemblers_per_recipe) is not dict or len(assemblers_per_recipe) == 0:
+        raise ValueError("assemblers_per_recipe must be a non-empty object for production gap estimate")
+
+    if not isinstance(throughput_stress_index, (int, float)):
+        raise ValueError("throughput_stress_index must be numeric for production gap estimate")
+    throughput_stress = float(throughput_stress_index)
+    if throughput_stress < 0.0 or throughput_stress > 1.0:
+        raise ValueError("throughput_stress_index must be in [0,1] for production gap estimate")
+
+    if type(pressure_attribution_map) is not dict:
+        raise ValueError("pressure_attribution_map must be an object for production gap estimate")
+    pressure_peak = 0.0
+    for block_id, value in pressure_attribution_map.items():
+        if not isinstance(block_id, str) or block_id == "":
+            raise ValueError("pressure_attribution_map keys must be non-empty strings")
+        if not isinstance(value, (int, float)):
+            raise ValueError("pressure_attribution_map values must be numeric")
+        numeric = float(value)
+        if numeric < 0.0 or numeric > 1.0:
+            raise ValueError("pressure_attribution_map values must be in [0,1]")
+        if numeric > pressure_peak:
+            pressure_peak = numeric
+
+    current_capacity = int(progress_state["current_capacity"])
+    committed_capacity = int(progress_state["committed_capacity"])
+    active_phase_capacity = int(progress_state["active_phase_capacity"])
+    if current_capacity < 0 or committed_capacity < 0 or active_phase_capacity < 0:
+        raise ValueError("capacity fields must be non-negative for production gap estimate")
+
+    phase_completion_ratio = 0.0 if active_phase_capacity == 0 else float(current_capacity) / float(active_phase_capacity)
+    phase_completion_ratio = min(1.0, max(0.0, phase_completion_ratio))
+    backlog_ratio = float(max(0, committed_capacity - current_capacity)) / float(max(1, committed_capacity))
+
+    total_assemblers = 0
+    for recipe, value in assemblers_per_recipe.items():
+        if not isinstance(recipe, str) or recipe == "":
+            raise ValueError("assemblers_per_recipe keys must be non-empty strings")
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("assemblers_per_recipe values must be non-negative integers")
+        total_assemblers += int(value)
+
+    stress_scale = min(
+        1.0,
+        max(
+            0.0,
+            (0.55 * throughput_stress) + (0.30 * phase_completion_ratio * throughput_stress) + (0.15 * backlog_ratio),
+        ),
+    )
+    block_weight = 1.0 + (0.25 * pressure_peak)
+    global_gap_budget = int(round(12.0 * stress_scale * block_weight))
+
+    recipe_names = sorted(assemblers_per_recipe.keys())
+    gaps = {}
+    for recipe in recipe_names:
+        count = int(assemblers_per_recipe[recipe])
+        scarcity = 1.0 if total_assemblers <= 0 else 1.0 - (float(count) / float(total_assemblers))
+        raw_gap = float(global_gap_budget) * scarcity
+        gap = int(max(0, round(raw_gap)))
+        gaps[recipe] = gap
+
+    return gaps
+
+
 def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) -> Dict[str, object]:
     """
     Derive deterministic RL observation health indicators from existing metrics/progress.
@@ -457,6 +538,9 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
     pressure_attribution_map = derive_block_pressure_attribution(
         progress_state, metrics_summary, throughput_stress_index
     )
+    production_gap_estimate = derive_production_gap_estimate(
+        progress_state, metrics_summary, throughput_stress_index, pressure_attribution_map
+    )
 
     return {
         "bot_utilization_ratio": float(round(bot_utilization_ratio, 6)),
@@ -467,4 +551,5 @@ def derive_rl_observation_health(progress_state: dict, metrics_summary: dict) ->
         "spatial_pressure_index": float(spatial_pressure_index),
         "throughput_stress_index": float(throughput_stress_index),
         "pressure_attribution_map": pressure_attribution_map,
+        "production_gap_estimate": production_gap_estimate,
     }

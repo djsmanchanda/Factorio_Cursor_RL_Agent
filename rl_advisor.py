@@ -104,6 +104,7 @@ def propose_rl_action(
     spatial_pressure_index = float(observation["spatial_pressure_index"])
     throughput_stress_index = float(observation["throughput_stress_index"])
     pressure_attribution_map = observation["pressure_attribution_map"]
+    production_gap_estimate = observation["production_gap_estimate"]
 
     if type(pressure_attribution_map) is not dict or len(pressure_attribution_map) == 0:
         raise ValueError("pressure_attribution_map must be a non-empty object")
@@ -117,6 +118,16 @@ def propose_rl_action(
         if numeric < 0.0 or numeric > 1.0:
             raise ValueError("pressure_attribution_map values must be in [0,1]")
         pressure_values.append(numeric)
+
+    if type(production_gap_estimate) is not dict or len(production_gap_estimate) == 0:
+        raise ValueError("production_gap_estimate must be a non-empty object")
+    recipe_gaps = []
+    for recipe_name, value in production_gap_estimate.items():
+        if not isinstance(recipe_name, str) or recipe_name == "":
+            raise ValueError("production_gap_estimate keys must be non-empty strings")
+        if not isinstance(value, int) or value < 0:
+            raise ValueError("production_gap_estimate values must be non-negative integers")
+        recipe_gaps.append(int(value))
 
     if seed != 0:
         raise ValueError("RL advisor is deterministic-only in this phase; seed must be 0")
@@ -159,6 +170,11 @@ def propose_rl_action(
             dominant = sorted_pressures[0]
             second = sorted_pressures[1] if len(sorted_pressures) > 1 else 0.0
             if dominant >= 0.70 and (dominant - second) >= 0.15:
+                confidence += 0.03
+            sorted_gaps = sorted(recipe_gaps, reverse=True)
+            dominant_gap = sorted_gaps[0]
+            second_gap = sorted_gaps[1] if len(sorted_gaps) > 1 else 0
+            if dominant_gap >= 2 and (dominant_gap - second_gap) >= 1:
                 confidence += 0.03
             candidates.append(
                 (
