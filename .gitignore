@@ -1,0 +1,20 @@
+# Path: Factorio_Cursor_RL_Agent/.gitignore
+# Purpose: Keep generated artifacts (bytecode, game output, local scratch) out of version control.
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# Game-produced JSON artifacts (snapshots, observations, reports)
+script-output/
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
