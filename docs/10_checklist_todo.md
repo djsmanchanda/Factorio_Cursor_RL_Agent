@@ -36,10 +36,11 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] Deferred execution/RL (explicit future) — authorization gates enforced throughout
 
 ## Phase 2.7 – Game Bridge (added 2026-07-18; prerequisite for everything below)
-- [ ] Port `factorio_mod` to Factorio 2.0 (info.json, global→storage, game.*→helpers.*, created_entity→entity)
-- [ ] Deploy script → `%APPDATA%\Factorio\mods`
-- [ ] Verified live snapshot from Factorio 2.0.77 validates against `snapshot.schema.json`
-- [ ] RCON transport (Python→game commands) + script-output watcher (game→Python)
+- [x] Port `factorio_mod` to Factorio 2.0 (info.json, global→storage, game.*→helpers.*, created_entity→entity, get_recipe type gate)
+- [x] Deploy script → `%APPDATA%\Factorio\mods` (`scripts/deploy_mod.ps1`)
+- [x] Verified live snapshot from Factorio 2.0.77 validates against `snapshot.schema.json` (headless server + RCON, 2026-07-18)
+- [x] RCON transport, Python→game commands (`tools/rcon_client.py`)
+- [ ] script-output watcher (game→Python file ingestion)
 - [ ] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution
 - [ ] Automated test suite (fixtures exist in `tests/fixtures/`; zero tests written)
 

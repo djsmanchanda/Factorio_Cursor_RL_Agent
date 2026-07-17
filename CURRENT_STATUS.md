@@ -33,6 +33,12 @@ backfilled from git history because this file did not exist yet.
 - Why: Restore the charter-mandated continuity artifact and an honest repo state before new work.
 - Next: Port factorio_mod to Factorio 2.0 (info.json 2.0, global→storage, game.*→helpers.*, created_entity→entity, module payload shape) and deploy to %APPDATA%\Factorio\mods.
 
+## [2026-07-18] Factorio 2.0 mod port verified live — first closed loop
+- Files: factorio_mod/control.lua, factorio_mod/info.json, scripts/deploy_mod.ps1, tools/rcon_client.py, docs/10_checklist_todo.md
+- What: Mod ported to 2.0 API and verified end-to-end against Factorio 2.0.77 — headless server, /snapshot via new stdlib RCON client, output validated by validate_snapshot.py and consumed by inspect_metrics.py. Extra 2.0 fix found live: get_recipe() now hard-errors on non-crafting entities (and a command error kills a dedicated server), so recipe read is gated by entity type.
+- Why: The game bridge was the blocking gap; the system had never observed a live game before today.
+- Next: script-output watcher + top-level orchestrator loop (snapshot → metrics → supervisor → planner → authorization).
+
 ## Audit snapshot (2026-07-18) — where things stand
 - Mature: core/ (~2.7k LOC — metrics, progress state, authorization, phasing, advisory policies); schema validation pervasive.
 - Partial: CityPlanner (symbolic decisions only, no geometry; 2 of 9 intents have phase chains); Lua mod logic complete but targets Factorio 1.1 and was never deployed.

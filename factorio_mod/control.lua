@@ -13,6 +13,13 @@ local function pick_surface()
   return game.surfaces[1]
 end
 
+-- Factorio 2.0: get_recipe() hard-errors on non-crafting entities, so gate by type.
+local CRAFTING_ENTITY_TYPES = {
+  ["assembling-machine"] = true,
+  ["furnace"] = true,
+  ["rocket-silo"] = true
+}
+
 local function entity_to_snapshot(entity)
   local data = {
     name = entity.name,
@@ -28,7 +35,7 @@ local function entity_to_snapshot(entity)
     data.force = entity.force.name
   end
 
-  if entity.get_recipe then
+  if CRAFTING_ENTITY_TYPES[entity.type] then
     local recipe = entity.get_recipe()
     if recipe and recipe.name then
       data.recipe = recipe.name
