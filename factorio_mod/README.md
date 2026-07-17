@@ -8,12 +8,18 @@
 - `control.lua`: Implements the `/snapshot` command and writes deterministic JSON snapshots.
 
 ## Assumptions / Constraints
+- Targets **Factorio 2.0** (`factorio_version: 2.0`); uses the 2.0 API (`storage`, `helpers.*`, `event.entity`).
 - Lua remains "dumb" and only exports raw state.
-- All persistent state lives in `storage` (stored as `global.storage`).
-- Snapshot output is written via `game.write_file` to Factorio's `script-output` directory.
+- All persistent state lives in the engine-provided `storage` table.
+- Snapshot output is written via `helpers.write_file` to Factorio's `script-output` directory.
+
+## Install / deploy
+Run `scripts/deploy_mod.ps1` from the repo root — it copies this folder into
+`%APPDATA%\Factorio\mods\factorio_cursor_rl_agent`. Factorio enables newly
+discovered mods on next launch.
 
 ## How to run the snapshot export
-1. Enable this mod in Factorio (use this folder as the mod source).
+1. Deploy the mod (above) and launch Factorio.
 2. Load a save and open the in-game console.
 3. Run:
    - `/snapshot`

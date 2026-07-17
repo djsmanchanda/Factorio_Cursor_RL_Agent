@@ -1,11 +1,9 @@
 -- Path: factorio_mod/control.lua
 -- Purpose: Export deterministic factory snapshots as JSON for schema validation.
 
+-- Factorio 2.0: the engine-provided persistent table is `storage` (was `global` in 1.1).
 local function ensure_storage()
-  if not global.storage then
-    global.storage = {}
-  end
-  return global.storage
+  return storage
 end
 
 local function pick_surface()
@@ -88,10 +86,10 @@ local function build_snapshot(surface)
 end
 
 local function write_snapshot(snapshot)
-  local json = game.table_to_json(snapshot)
+  local json = helpers.table_to_json(snapshot)
   local path = "factorio_mod/snapshots/snapshot_" .. snapshot.tick .. ".json"
 
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   local storage = ensure_storage()
   storage.last_snapshot_path = path
@@ -115,7 +113,7 @@ local function parse_ghost_plan(json_text)
   end
 
   local ok, payload = pcall(function()
-    return game.json_to_table(json_text)
+    return helpers.json_to_table(json_text)
   end)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid GhostPlan JSON"
@@ -234,9 +232,9 @@ local function export_ghost_observation()
     ghosts = entries
   }
 
-  local json = game.table_to_json(payload)
+  local json = helpers.table_to_json(payload)
   local path = "factorio_mod/ghost_observations/ghost_observation_" .. game.tick .. ".json"
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   local storage = ensure_storage()
   storage.last_ghost_observation_path = path
@@ -251,7 +249,7 @@ local function parse_execution_payload(json_text)
   end
 
   local ok, payload = pcall(function()
-    return game.json_to_table(json_text)
+    return helpers.json_to_table(json_text)
   end)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid execution payload JSON"
@@ -383,7 +381,7 @@ local function parse_construction_payload(json_text)
   end
 
   local ok, payload = pcall(function()
-    return game.json_to_table(json_text)
+    return helpers.json_to_table(json_text)
   end)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid construction payload JSON"
@@ -480,8 +478,9 @@ local function check_materials(network, ghosts)
     if not items then
       error("Ghost prototype missing items_to_place_this")
     end
-    for item, count in pairs(items) do
-      required[item] = (required[item] or 0) + count
+    -- Factorio 2.0: items_to_place_this is an array of ItemToPlace {name, count}.
+    for _, item in pairs(items) do
+      required[item.name] = (required[item.name] or 0) + item.count
     end
   end
 
@@ -675,9 +674,9 @@ commands.add_command("execute_ghost_plan", "Execute authorized ghost placement i
     }
   }
 
-  local json = game.table_to_json(report)
+  local json = helpers.table_to_json(report)
   local path = "factorio_mod/execution_reports/execution_report_" .. game.tick .. ".json"
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   if command.player_index then
     local player = game.get_player(command.player_index)
@@ -736,9 +735,9 @@ commands.add_command("execute_construction", "Allow construction bots to build a
     report.completed = result.completed
   end
 
-  local json = game.table_to_json(report)
+  local json = helpers.table_to_json(report)
   local path = "factorio_mod/construction_reports/construction_report_" .. game.tick .. ".json"
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   if report.blocked then
     local message = "Construction blocked: " .. report.blocked_reason
@@ -769,7 +768,7 @@ local function parse_upgrade_payload(json_text)
   end
 
   local ok, payload = pcall(function()
-    return game.json_to_table(json_text)
+    return helpers.json_to_table(json_text)
   end)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid upgrade payload JSON"
@@ -866,10 +865,25 @@ local function execute_upgrades(authorization, upgrade_plan)
       if not module_name or not module_count then
         error("Module upgrade requires module_to and module_count")
       end
+      -- Factorio 2.0: module requests are BlueprintInsertPlan entries targeting
+      -- explicit module-inventory slots, not a name→count map.
+      local insert_plans = {}
+      for slot = 1, module_count do
+        table.insert(insert_plans, {
+          id = { name = module_name },
+          items = {
+            in_inventory = {
+              { inventory = defines.inventory.crafter_modules, stack = slot - 1, count = 1 }
+            }
+          }
+        })
+      end
       surface.create_entity({
         name = "item-request-proxy",
+        position = target.position,
+        force = force,
         target = target,
-        modules = { [module_name] = module_count }
+        modules = insert_plans
       })
       table.insert(results, { action = entry.action, status = "success" })
     else
@@ -933,9 +947,9 @@ commands.add_command("execute_upgrade_plan", "Execute authorized upgrades in pla
     actions = results
   }
 
-  local json = game.table_to_json(report)
+  local json = helpers.table_to_json(report)
   local path = "factorio_mod/execution_reports/upgrade_report_" .. game.tick .. ".json"
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   if command.player_index then
     local player = game.get_player(command.player_index)
@@ -953,7 +967,7 @@ local function parse_deconstruction_payload(json_text)
   end
 
   local ok, payload = pcall(function()
-    return game.json_to_table(json_text)
+    return helpers.json_to_table(json_text)
   end)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid deconstruction payload JSON"
@@ -1125,9 +1139,9 @@ commands.add_command("execute_deconstruction_plan", "Execute authorized deconstr
     actions = results
   }
 
-  local json = game.table_to_json(report)
+  local json = helpers.table_to_json(report)
   local path = "factorio_mod/execution_reports/deconstruction_report_" .. game.tick .. ".json"
-  game.write_file(path, json, false)
+  helpers.write_file(path, json, false)
 
   if command.player_index then
     local player = game.get_player(command.player_index)
@@ -1140,11 +1154,12 @@ commands.add_command("execute_deconstruction_plan", "Execute authorized deconstr
 end)
 
 script.on_event(defines.events.on_robot_built_entity, function(event)
-  if not event or not event.created_entity then
+  -- Factorio 2.0: event field renamed from created_entity to entity.
+  if not event or not event.entity then
     return
   end
 
-  local entity = event.created_entity
+  local entity = event.entity
   if entity.surface and entity.surface.name == "planner-sandbox" then
     local storage = ensure_storage()
     if storage.construction_session then
