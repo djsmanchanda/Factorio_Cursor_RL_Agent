@@ -18,3 +18,4 @@ script-output/
 .idea/
 Thumbs.db
 .DS_Store
+runs/

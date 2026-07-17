@@ -40,8 +40,9 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] Deploy script → `%APPDATA%\Factorio\mods` (`scripts/deploy_mod.ps1`)
 - [x] Verified live snapshot from Factorio 2.0.77 validates against `snapshot.schema.json` (headless server + RCON, 2026-07-18)
 - [x] RCON transport, Python→game commands (`tools/rcon_client.py`)
-- [ ] script-output watcher (game→Python file ingestion)
-- [ ] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution
+- [x] script-output watcher (game→Python file ingestion) (`orchestrator/game_bridge.py`)
+- [x] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution (`orchestrator/run_cycle.py`, one-shot cycle; recurring loop still TODO)
+- [ ] Fix capacity model: `build_progress_state` pins committed=ultimate, so auto-derived phasing can never produce a nonzero ghost delta (orchestrator currently needs a hand-authored `--progress-state`)
 - [ ] Automated test suite (fixtures exist in `tests/fixtures/`; zero tests written)
 
 ## Phase 3 – Scaling (CityPlanner)

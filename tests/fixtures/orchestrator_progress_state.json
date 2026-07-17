@@ -1,0 +1,8 @@
+{
+  "ultimate_capacity": 100,
+  "current_capacity": 10,
+  "committed_capacity": 60,
+  "active_phase_capacity": 50,
+  "completed_phases": [],
+  "rationale": "Hand-authored orchestrator demo state: phase 50 active, committed 60, expanding toward 100."
+}
