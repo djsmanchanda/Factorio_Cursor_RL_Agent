@@ -121,16 +121,18 @@ def project_ghosts(
     build_intent = load_json(build_intent_path)
 
     if progress_state_path is not None:
-        # Hand-authored progress state (same precedent as the inspect_* CLIs).
-        # build_progress_state pins committed_capacity to ultimate_capacity, which
-        # makes desired == previous in the phasing policy and the delta always 0.
+        # Hand-authored progress state override (same precedent as the inspect_* CLIs).
         progress_dict = load_json(progress_state_path)
         _validate_against(progress_dict, "progress_state.schema.json", "ProgressState")
     else:
+        # Pending sandbox ghosts count toward committed capacity, so export the
+        # current ghost observation before deriving progress.
+        ghost_observation_path = bridge.export_ghost_observation()
         progress = build_progress_state(
             snapshot_path=observation["snapshot_path"],
             metrics_path=observation["metrics_path"],
             build_intent_path=build_intent_path,
+            ghost_observation_path=ghost_observation_path,
         )
         progress_dict = progress.to_dict()
 

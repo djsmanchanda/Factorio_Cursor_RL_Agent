@@ -240,6 +240,10 @@ local function export_ghost_observation()
   }
 
   local json = helpers.table_to_json(payload)
+  -- Empty Lua tables serialize as {} but the schema requires an array.
+  if #entries == 0 then
+    json = json:gsub('"ghosts":{}', '"ghosts":[]')
+  end
   local path = "factorio_mod/ghost_observations/ghost_observation_" .. game.tick .. ".json"
   helpers.write_file(path, json, false)
 

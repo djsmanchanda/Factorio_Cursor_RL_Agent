@@ -10,6 +10,7 @@ from typing import List
 
 from jsonschema import Draft7Validator
 
+from core.block_prototypes import placeholder_prototype
 from tools.validate_snapshot import validate_snapshot_file
 
 
@@ -67,8 +68,18 @@ def _derive_ultimate_capacity(build_intent: dict) -> int:
     return sum(counts)
 
 
-def _derive_committed_capacity(build_intent: dict) -> int:
-    return _derive_ultimate_capacity(build_intent)
+def _derive_committed_capacity(current_capacity: int, pending_ghosts: int, ultimate_capacity: int) -> int:
+    # Committed = what exists plus what is already projected as ghosts, never
+    # beyond the build intent's ultimate capacity. Pinning committed to
+    # ultimate (the old behavior) made the phasing delta permanently zero.
+    return min(current_capacity + max(0, pending_ghosts), ultimate_capacity)
+
+
+def _derive_pending_ghosts(ghost_observation: dict) -> int:
+    ghosts = ghost_observation.get("ghosts")
+    if not isinstance(ghosts, list):
+        raise ValueError("GhostObservation must include a ghosts array")
+    return len(ghosts)
 
 
 def _derive_current_capacity(metrics: dict) -> int:
@@ -78,6 +89,20 @@ def _derive_current_capacity(metrics: dict) -> int:
     if value < 0:
         raise ValueError("current_capacity must be non-negative")
     return value
+
+
+def _derive_current_capacity_from_snapshot(snapshot: dict, build_intent: dict) -> int:
+    # Built capacity = entities in the snapshot whose prototype matches a
+    # placeholder prototype of a block type named in the build intent.
+    target_prototypes = {
+        placeholder_prototype(str(intent.get("block_type", "")))
+        for intent in build_intent.get("intents", [])
+    }
+    count = 0
+    for entity in snapshot.get("entities", []):
+        if entity.get("name") in target_prototypes:
+            count += 1
+    return count
 
 
 def _derive_active_phase(phase_targets: List[int], current: int, committed: int, ultimate: int) -> int:
@@ -109,6 +134,7 @@ def build_progress_state(
     build_intent_path: Path,
     progress_schema_path: Path | None = None,
     build_intent_schema_path: Path | None = None,
+    ghost_observation_path: Path | None = None,
 ) -> ProgressState:
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -128,9 +154,23 @@ def build_progress_state(
         build_intent_schema_path = repo_root / "schemas" / "build_intent.schema.json"
     _validate_schema(build_intent, build_intent_schema_path, "BuildIntent")
 
+    pending_ghosts = 0
+    if ghost_observation_path is not None:
+        ghost_observation = _load_json(ghost_observation_path)
+        _validate_schema(
+            ghost_observation,
+            repo_root / "schemas" / "ghost_observation.schema.json",
+            "GhostObservation",
+        )
+        pending_ghosts = _derive_pending_ghosts(ghost_observation)
+
     ultimate_capacity = _derive_ultimate_capacity(build_intent)
-    committed_capacity = _derive_committed_capacity(build_intent)
-    current_capacity = _derive_current_capacity(metrics)
+    if "current_capacity" in metrics:
+        current_capacity = _derive_current_capacity(metrics)
+    else:
+        snapshot = _load_json(snapshot_path)
+        current_capacity = _derive_current_capacity_from_snapshot(snapshot, build_intent)
+    committed_capacity = _derive_committed_capacity(current_capacity, pending_ghosts, ultimate_capacity)
 
     active_phase_capacity = _derive_active_phase(
         DEFAULT_PHASE_CAPACITIES,

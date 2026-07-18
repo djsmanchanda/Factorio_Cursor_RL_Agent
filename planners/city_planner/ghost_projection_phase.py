@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from jsonschema import Draft7Validator
+from core.block_prototypes import placeholder_prototype
 from core.ghost_slice_planner import derive_ghost_slice, sort_intents_for_slice
 from core.sandbox_zoning import derive_sandbox_zones
 from core.zone_fill_tracker import derive_zone_fill
@@ -82,17 +83,14 @@ def _validate_payload(payload: dict, schema_path: Path, label: str) -> None:
 
 
 def _placeholder_prototype(block_type: str) -> str:
-    mapping = {
-        "circuits": "assembling-machine-1",
-        "smelting": "stone-furnace",
-        "science": "lab",
-    }
-    return mapping.get(block_type, "assembling-machine-1")
+    return placeholder_prototype(block_type)
 
 
 def _derive_delta_capacity(build_intent: dict, progress_state: dict, capacity_phasing: dict) -> int:
     ultimate_capacity = int(progress_state.get("ultimate_capacity", 0))
     active_phase = int(progress_state.get("active_phase_capacity", 0))
+    current = int(progress_state.get("current_capacity", 0))
+    committed = int(progress_state.get("committed_capacity", 0))
 
     previous = int(capacity_phasing.get("previous_active_capacity", 0))
     desired = int(capacity_phasing.get("desired_active_capacity", 0))
@@ -104,12 +102,13 @@ def _derive_delta_capacity(build_intent: dict, progress_state: dict, capacity_ph
     if previous != active_phase:
         raise ValueError("Capacity phasing previous_active_capacity must match ProgressState active_phase_capacity")
 
-    remaining = ultimate_capacity - previous
-    delta = desired - previous
-    if delta > remaining:
-        raise ValueError("Delta capacity exceeds remaining capacity")
-
-    return delta
+    # Delta fills the desired phase: everything already built or already
+    # projected as ghosts counts against it. The old formula (desired -
+    # previous) only produced ghosts at phase jumps, which auto-derived
+    # state can never trigger, making the pipeline inert.
+    committed_effective = max(current, committed)
+    delta = min(desired, ultimate_capacity) - committed_effective
+    return max(0, delta)
 
 
 def generate_ghost_plan(

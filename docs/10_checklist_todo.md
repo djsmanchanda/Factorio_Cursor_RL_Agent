@@ -42,8 +42,10 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] RCON transport, Python→game commands (`tools/rcon_client.py`)
 - [x] script-output watcher (game→Python file ingestion) (`orchestrator/game_bridge.py`)
 - [x] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution (`orchestrator/run_cycle.py`, one-shot cycle; recurring loop still TODO)
-- [ ] Fix capacity model: `build_progress_state` pins committed=ultimate, so auto-derived phasing can never produce a nonzero ghost delta (orchestrator currently needs a hand-authored `--progress-state`)
-- [ ] Automated test suite (fixtures exist in `tests/fixtures/`; zero tests written)
+- [x] Fix capacity model: committed = current + pending ghosts; fill-delta semantics in ghost projection and execution readiness; snapshot-derived current capacity (verified live: cycle 1 projects 50 ghosts from pure observation, cycle 2 holds at delta 0)
+- [x] First automated test suite: `tests/test_capacity_model.py` (9 tests; run `python -m pytest tests/`)
+- [ ] Broaden test coverage beyond the capacity model (planners, executors, bridge)
+- [ ] Recurring loop daemon on top of the one-shot cycle (with construction execution + authorized phase advance)
 
 ## Phase 3 – Scaling (CityPlanner)
 - [ ] Block schema & template system

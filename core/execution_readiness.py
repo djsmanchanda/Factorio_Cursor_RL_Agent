@@ -97,13 +97,20 @@ def propose_execution(
     elif reconciliation_status == "OK":
         desired = int(capacity_phasing["desired_active_capacity"])
         previous = int(capacity_phasing["previous_active_capacity"])
-        if desired > previous:
+        ultimate = int(progress_state["ultimate_capacity"])
+        current = int(progress_state["current_capacity"])
+        committed = int(progress_state["committed_capacity"])
+        # Fill delta: unprojected headroom within the desired phase. Matches
+        # the ghost projection delta; the old desired > previous gate only
+        # opened at phase jumps and kept auto-derived state permanently held.
+        fill_delta = min(desired, ultimate) - max(current, committed)
+        if fill_delta > 0 or desired > previous:
             allowed_actions = ["project_more_ghosts", "request_phase_advance"]
             proposal = ExecutionProposal(
                 allowed_actions=allowed_actions,
                 blocked_actions=[],
                 requires_human_approval=True,
-                next_recommended_step="request_phase_advance",
+                next_recommended_step="project_more_ghosts" if fill_delta > 0 else "request_phase_advance",
             )
         else:
             allowed_actions = ["hold_position"]
