@@ -156,6 +156,26 @@ def test_zone_stride_exceeds_placeholder_footprint():
         assert zone.stride_y > footprint, f"{block_id} ghosts would overlap"
 
 
+def test_ghost_plan_skips_satisfied_blocks_and_continues_zone_indices():
+    # Phase 50 already built as circuits; the next batch must not re-project
+    # circuits cells 0..49, and new circuit ghosts continue at cell 50.
+    state = progress(current=50, committed=50, active=100)
+    phasing = evaluate_capacity_phasing(state, BUILD_INTENT).to_dict()
+    plan = generate_ghost_plan(
+        build_intent=BUILD_INTENT,
+        progress_state=state,
+        capacity_phasing=phasing,
+        existing_by_block={"circuits": 50},
+    )
+    assert len(plan.ghosts) == 50
+    by_block: dict = {}
+    for ghost in plan.ghosts:
+        block = ghost["tags"]["block"]
+        by_block.setdefault(block, []).append(int(ghost["tags"]["zone_index"]))
+    assert sorted(by_block["circuits"]) == list(range(50, 60))
+    assert sorted(by_block["smelting"]) == list(range(0, 40))
+
+
 def test_desired_capacity_never_exceeds_ultimate():
     state = progress(current=10, committed=10, active=50, ultimate=40)
     with pytest.raises(ValueError):

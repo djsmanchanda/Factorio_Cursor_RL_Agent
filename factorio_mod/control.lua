@@ -94,6 +94,10 @@ end
 
 local function write_snapshot(snapshot)
   local json = helpers.table_to_json(snapshot)
+  -- Empty Lua tables serialize as {} but the schema requires an array.
+  if #snapshot.entities == 0 then
+    json = json:gsub('"entities":{}', '"entities":[]')
+  end
   local path = "factorio_mod/snapshots/snapshot_" .. snapshot.tick .. ".json"
 
   helpers.write_file(path, json, false)
@@ -181,9 +185,14 @@ local function apply_ghost_plan(payload)
     end
 
     local zone_key = tostring(tags.zone_block_id or tags.block or "") .. ":" .. tostring(tags.zone_origin_x) .. ":" .. tostring(tags.zone_origin_y)
-    local zone_index = zone_counts[zone_key] or 0
+    -- Planner-assigned cell index wins: it accounts for cells already
+    -- occupied by earlier batches. The per-apply counter is only a fallback.
+    local zone_index = tonumber(tags.zone_index)
+    if zone_index == nil then
+      zone_index = zone_counts[zone_key] or 0
+    end
     local position = zoned_position_from_tags(tags, zone_index)
-    zone_counts[zone_key] = zone_index + 1
+    zone_counts[zone_key] = (zone_counts[zone_key] or 0) + 1
 
     surface.create_entity({
       name = "entity-ghost",
@@ -368,9 +377,14 @@ local function execute_ghost_plan(authorization, ghost_plan)
 
     local prototype = ghost.prototype or "assembling-machine-1"
     local zone_key = tostring(tags.zone_block_id or tags.block or "") .. ":" .. tostring(tags.zone_origin_x) .. ":" .. tostring(tags.zone_origin_y)
-    local zone_index = zone_counts[zone_key] or 0
+    -- Planner-assigned cell index wins: it accounts for cells already
+    -- occupied by earlier batches. The per-apply counter is only a fallback.
+    local zone_index = tonumber(tags.zone_index)
+    if zone_index == nil then
+      zone_index = zone_counts[zone_key] or 0
+    end
     local position = zoned_position_from_tags(tags, zone_index)
-    zone_counts[zone_key] = zone_index + 1
+    zone_counts[zone_key] = (zone_counts[zone_key] or 0) + 1
 
     local existing = surface.find_entities_filtered({ name = "entity-ghost", position = position, limit = 1 })
     if #existing == 0 then
@@ -1205,35 +1219,42 @@ local function ensure_scaffolding(payload)
 
   local created = 0
   local bots_target = tonumber(payload.bots_per_roboport) or 30
-  for _, x in ipairs(anchors) do
+  local inserted = {}
+
+  -- Anchors are far enough apart to form separate logistic networks, so
+  -- every anchor gets its own power, bots, chests, and materials.
+  for _, anchor in ipairs(anchors) do
+    local x = tonumber(anchor.x or anchor)
+    if x == nil then
+      error("Scaffolding anchor must be a number or an object with x")
+    end
+
     local _, new_eei = ensure_entity(surface, force, "electric-energy-interface", { x - 4, -8 })
     local _, new_sub = ensure_entity(surface, force, "substation", { x, -7 })
     local roboport, new_rp = ensure_entity(surface, force, "roboport", { x, -3 })
     created = created + (new_eei and 1 or 0) + (new_sub and 1 or 0) + (new_rp and 1 or 0)
 
     local robot_inventory = roboport.get_inventory(defines.inventory.roboport_robot)
-    local have = robot_inventory.get_item_count("construction-robot")
-    if have < bots_target then
-      roboport.insert({ name = "construction-robot", count = bots_target - have })
+    local have_bots = robot_inventory.get_item_count("construction-robot")
+    if have_bots < bots_target then
+      roboport.insert({ name = "construction-robot", count = bots_target - have_bots })
     end
-  end
 
-  local anchor0 = anchors[1]
-  local provider, new_chest = ensure_entity(surface, force, "passive-provider-chest", { anchor0 + 10, -8 })
-  created = created + (new_chest and 1 or 0)
-  local _, new_s1 = ensure_entity(surface, force, "storage-chest", { anchor0 + 12, -8 })
-  local _, new_s2 = ensure_entity(surface, force, "storage-chest", { anchor0 + 14, -8 })
-  created = created + (new_s1 and 1 or 0) + (new_s2 and 1 or 0)
+    local provider, new_chest = ensure_entity(surface, force, "passive-provider-chest", { x + 4, -8 })
+    local _, new_storage = ensure_entity(surface, force, "storage-chest", { x + 6, -8 })
+    created = created + (new_chest and 1 or 0) + (new_storage and 1 or 0)
 
-  local materials = payload.materials or {}
-  local network = surface.find_logistic_network_by_position({ anchor0, -3 }, force)
-  local inserted = {}
-  for item, count in pairs(materials) do
-    local target = tonumber(count) or 0
-    local have = network and network.get_item_count(item) or 0
-    if target > have then
-      local added = provider.insert({ name = item, count = target - have })
-      inserted[item] = added
+    local materials = type(anchor) == "table" and anchor.materials or nil
+    if materials then
+      local network = surface.find_logistic_network_by_position({ x, -3 }, force)
+      for item, count in pairs(materials) do
+        local target = tonumber(count) or 0
+        local have = network and network.get_item_count(item) or 0
+        if target > have then
+          local added = provider.insert({ name = item, count = target - have })
+          inserted[item] = (inserted[item] or 0) + added
+        end
+      end
     end
   end
 

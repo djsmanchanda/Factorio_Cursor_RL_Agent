@@ -67,7 +67,9 @@ def _validate_schema(payload: dict, schema_path: Path, label: str) -> None:
 
 
 def _next_phase(current_phase: int, ultimate: int) -> int:
-    return compute_next_phase_capacity(DEFAULT_PHASE_CAPACITIES, current_phase, ultimate)
+    # The schedule's next threshold can overshoot a build intent whose
+    # ultimate capacity ends mid-phase; the advance target is always capped.
+    return min(compute_next_phase_capacity(DEFAULT_PHASE_CAPACITIES, current_phase, ultimate), ultimate)
 
 
 def propose_phase_advance(

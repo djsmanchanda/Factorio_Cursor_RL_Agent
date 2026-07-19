@@ -117,6 +117,7 @@ def generate_ghost_plan(
     capacity_phasing: dict,
     capacity_allocation: Optional[dict] = None,
     expansion_target: Optional[dict] = None,
+    existing_by_block: Optional[Dict[str, int]] = None,
     build_intent_schema_path: Optional[Path] = None,
     progress_schema_path: Optional[Path] = None,
     capacity_phasing_schema_path: Optional[Path] = None,
@@ -172,6 +173,7 @@ def generate_ghost_plan(
     ordered_intents = sort_intents_for_slice(build_intent, ghost_slice.target_recipe)
     block_ids = [str(intent.get("block_type", "")) for _, intent in ordered_intents if str(intent.get("block_type", "")) != ""]
     zones = derive_sandbox_zones(block_ids)
+    existing_by_block = dict(existing_by_block or {})
     for _, intent in ordered_intents:
         kind = intent.get("kind")
         block_type = intent.get("block_type")
@@ -183,11 +185,14 @@ def generate_ghost_plan(
             raise ValueError(f"Unsupported build intent kind: {kind}")
 
         prototype = _placeholder_prototype(block_type)
-        to_emit = min(count, remaining)
+        # Blocks already satisfied (built or pending) must not be re-projected,
+        # and new ghosts continue the zone grid after the occupied cells.
+        already = int(existing_by_block.get(str(block_type), 0))
+        to_emit = min(max(0, count - already), remaining)
         zone = zones.get(str(block_type))
         if zone is None:
             raise ValueError(f"Missing sandbox zone for block: {block_type}")
-        for _ in range(to_emit):
+        for offset in range(to_emit):
             tags: Dict[str, str] = {
                 "block": str(block_type),
                 "block_type": str(block_type),
@@ -199,6 +204,7 @@ def generate_ghost_plan(
                 "zone_origin_y": str(zone.origin_y),
                 "zone_stride_x": str(zone.stride_x),
                 "zone_stride_y": str(zone.stride_y),
+                "zone_index": str(already + offset),
             }
             if interfaces:
                 tags["interfaces"] = ",".join(interfaces)

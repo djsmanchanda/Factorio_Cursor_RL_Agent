@@ -56,12 +56,14 @@ def run_iteration(bridge: GameBridge, build_intent: dict, build_intent_path: Pat
     iter_dir = work_dir / f"iter_{iteration:03d}"
     iter_dir.mkdir(parents=True, exist_ok=True)
 
+    # Observation first: it creates the sandbox surface if missing, so the
+    # surface-scoped snapshot below cannot fail on a fresh save.
+    ghost_observation_path = bridge.export_ghost_observation()
+
     snapshot_path = bridge.request_snapshot(surface=SANDBOX_SURFACE, timeout=120.0)
     snapshot = load_json(snapshot_path)
     metrics_path = iter_dir / "metrics.json"
     metrics_path.write_text(json.dumps({"labs_count": 0}), encoding="utf-8")
-
-    ghost_observation_path = bridge.export_ghost_observation()
 
     progress = build_progress_state(
         snapshot_path=snapshot_path,
@@ -101,24 +103,84 @@ def run_iteration(bridge: GameBridge, build_intent: dict, build_intent_path: Pat
             status["active_phase"] = progress["active_phase_capacity"]
             status["actions"].append(f"phase_advance->{progress['active_phase_capacity']}")
 
+    ghost_observation = load_json(ghost_observation_path)
+    pending_by_block: dict = {}
+    for entry in ghost_observation.get("ghosts", []):
+        block = entry.get("tags", {}).get("block", "?")
+        pending_by_block[block] = pending_by_block.get(block, 0) + 1
+
+    current_by_prototype = _count_by_prototype(snapshot, build_intent)
+    built_by_block = {
+        block: current_by_prototype.get(placeholder_prototype(block), 0) for block in _block_types(build_intent)
+    }
+    existing_by_block = {
+        block: built_by_block.get(block, 0) + pending_by_block.get(block, 0) for block in _block_types(build_intent)
+    }
+
     phasing = evaluate_capacity_phasing(progress, build_intent).to_dict()
-    ghost_plan = generate_ghost_plan(build_intent=build_intent, progress_state=progress, capacity_phasing=phasing)
+    ghost_plan = generate_ghost_plan(
+        build_intent=build_intent,
+        progress_state=progress,
+        capacity_phasing=phasing,
+        existing_by_block=existing_by_block,
+    )
 
     # Scaffolding is provisioned every iteration; the mod command is idempotent.
+    # Each zone anchor gets its own network and its own material stock.
     zones = derive_sandbox_zones(_block_types(build_intent))
-    anchors = sorted(zone.origin_x + 10 for zone in zones.values())
-    materials = _material_targets(build_intent, _count_by_prototype(snapshot, build_intent))
-    bridge.ensure_scaffolding({"anchors": anchors, "materials": materials, "bots_per_roboport": 30})
+    intent_totals = {
+        str(i.get("block_type", "")): int(i.get("count", 0)) for i in build_intent.get("intents", [])
+    }
+    anchor_payload = []
+    for block_id, zone in sorted(zones.items()):
+        remaining = max(0, intent_totals.get(block_id, 0) - built_by_block.get(block_id, 0))
+        anchor_materials = {placeholder_prototype(block_id): remaining} if remaining else {}
+        anchor_payload.append({"x": zone.origin_x + 10, "materials": anchor_materials})
+    materials = _material_targets(build_intent, current_by_prototype)
+    bridge.ensure_scaffolding({"anchors": anchor_payload, "bots_per_roboport": 30})
     status["actions"].append("scaffolding_ensured")
+
+    # Full decision trace: every intermediate payload the pipeline reasoned
+    # with, so external viewers (dashboard) can show the agent's thinking.
+    ghost_summary: dict = {}
+    for ghost in ghost_plan.ghosts:
+        block = ghost["tags"].get("block", "?")
+        ghost_summary[block] = ghost_summary.get(block, 0) + 1
+    map_names = {placeholder_prototype(b) for b in _block_types(build_intent)} | {
+        "roboport", "passive-provider-chest", "storage-chest", "substation", "electric-energy-interface"
+    }
+    intent_counts: dict = {}
+    for intent in build_intent.get("intents", []):
+        block = str(intent.get("block_type", ""))
+        intent_counts[block] = intent_counts.get(block, 0) + int(intent.get("count", 0))
+
+    status["thinking"] = {
+        "intent_counts": intent_counts,
+        "progress_state": dict(progress),
+        "capacity_phasing": phasing,
+        "fill_delta": len(ghost_plan.ghosts),
+        "ghosts_planned_by_block": ghost_summary,
+        "pending_ghosts_by_block": pending_by_block,
+        "materials_requested": materials,
+        "built_by_prototype": current_by_prototype,
+        "zones": {block_id: zone.to_dict() for block_id, zone in zones.items()},
+        "map_entities": [
+            {"name": e["name"], "x": e["position"]["x"], "y": e["position"]["y"]}
+            for e in snapshot.get("entities", [])
+            if e.get("name") in map_names
+        ],
+    }
 
     if ghost_plan.ghosts:
         proposal = propose_execution(progress, phasing, build_intent, "OK").to_dict()
+        status["thinking"]["execution_proposal"] = proposal
         if "project_more_ghosts" in proposal.get("allowed_actions", []):
             authorization = authorize_execution(
                 proposal=proposal,
                 approved_actions=["project_more_ghosts"],
                 authorization_source="policy",
             ).to_dict()
+            status["thinking"]["authorization"] = authorization
             execution_report_path = bridge.execute_ghost_plan(authorization, {"ghosts": list(ghost_plan.ghosts)})
             execution_report = load_json(execution_report_path)
             placed = execution_report["actions"][0].get("count", 0)
