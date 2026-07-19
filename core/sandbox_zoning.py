@@ -10,6 +10,8 @@ from typing import Dict, Iterable
 
 from jsonschema import Draft7Validator
 
+from core.block_prototypes import placeholder_stride
+
 
 @dataclass(frozen=True)
 class SandboxZone:
@@ -50,14 +52,16 @@ def derive_sandbox_zones(
     block_ids: Iterable[str],
     spacing: int = 64,
     origin_y: int = 0,
-    stride_x: int = 2,
-    stride_y: int = 2,
+    stride_x: int | None = None,
+    stride_y: int | None = None,
     schema_path: Path | None = None,
 ) -> Dict[str, SandboxZone]:
     if spacing <= 0:
         raise ValueError("spacing must be > 0")
-    if stride_x <= 0 or stride_y <= 0:
-        raise ValueError("stride_x and stride_y must be > 0")
+    if stride_x is not None and stride_x <= 0:
+        raise ValueError("stride_x must be > 0")
+    if stride_y is not None and stride_y <= 0:
+        raise ValueError("stride_y must be > 0")
 
     unique = sorted({str(block_id) for block_id in block_ids if str(block_id) != ""})
     if len(unique) == 0:
@@ -65,12 +69,16 @@ def derive_sandbox_zones(
 
     zones: Dict[str, SandboxZone] = {}
     for index, block_id in enumerate(unique):
+        # Stride defaults to the placeholder footprint plus one tile of
+        # spacing; a fixed 2x2 stride made 3x3 ghosts overlap, so only the
+        # first of each cluster could ever be revived by bots.
+        block_stride = placeholder_stride(block_id)
         zone = SandboxZone(
             block_id=block_id,
             origin_x=index * spacing,
             origin_y=origin_y,
-            stride_x=stride_x,
-            stride_y=stride_y,
+            stride_x=stride_x if stride_x is not None else block_stride,
+            stride_y=stride_y if stride_y is not None else block_stride,
         )
         zones[block_id] = zone
 

@@ -145,6 +145,17 @@ def test_execution_readiness_allows_projection_for_fill_delta():
     assert held_proposal["next_recommended_step"] == "hold_position"
 
 
+def test_zone_stride_exceeds_placeholder_footprint():
+    from core.sandbox_zoning import derive_sandbox_zones
+    from core.block_prototypes import PROTOTYPE_FOOTPRINTS, placeholder_prototype
+
+    zones = derive_sandbox_zones(["circuits", "smelting", "science"])
+    for block_id, zone in zones.items():
+        footprint = PROTOTYPE_FOOTPRINTS[placeholder_prototype(block_id)]
+        assert zone.stride_x > footprint, f"{block_id} ghosts would overlap"
+        assert zone.stride_y > footprint, f"{block_id} ghosts would overlap"
+
+
 def test_desired_capacity_never_exceeds_ultimate():
     state = progress(current=10, committed=10, active=50, ultimate=40)
     with pytest.raises(ValueError):

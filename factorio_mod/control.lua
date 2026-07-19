@@ -111,7 +111,11 @@ local function get_or_create_sandbox_surface()
     return surface
   end
 
-  return game.create_surface("planner-sandbox")
+  surface = game.create_surface("planner-sandbox")
+  -- Deterministic buildable canvas: default mapgen can produce alien terrain
+  -- (ice, oil ocean) where bots cannot place entities.
+  surface.generate_with_lab_tiles = true
+  return surface
 end
 
 local function parse_ghost_plan(json_text)

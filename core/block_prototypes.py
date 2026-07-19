@@ -13,6 +13,22 @@ BLOCK_PLACEHOLDER_PROTOTYPES: Dict[str, str] = {
 
 DEFAULT_PLACEHOLDER_PROTOTYPE = "assembling-machine-1"
 
+# Tile footprints (square side) of the placeholder prototypes. Zone strides
+# must exceed the footprint or adjacent ghosts overlap and cannot be revived.
+PROTOTYPE_FOOTPRINTS: Dict[str, int] = {
+    "assembling-machine-1": 3,
+    "stone-furnace": 2,
+    "lab": 3,
+}
+
+DEFAULT_PROTOTYPE_FOOTPRINT = 3
+
 
 def placeholder_prototype(block_type: str) -> str:
     return BLOCK_PLACEHOLDER_PROTOTYPES.get(block_type, DEFAULT_PLACEHOLDER_PROTOTYPE)
+
+
+def placeholder_stride(block_type: str, spacing: int = 1) -> int:
+    prototype = placeholder_prototype(block_type)
+    footprint = PROTOTYPE_FOOTPRINTS.get(prototype, DEFAULT_PROTOTYPE_FOOTPRINT)
+    return footprint + spacing
