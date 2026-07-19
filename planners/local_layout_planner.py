@@ -1,5 +1,5 @@
 # Path: planners/local_layout_planner.py
-# Purpose: Read-only planner skeleton that inspects snapshot facts.
+# Purpose: Entity-level line layouts by deterministic math, plus snapshot inspection.
 
 from __future__ import annotations
 
@@ -8,8 +8,20 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+from jsonschema import Draft7Validator
+
 from core.factory_graph import FactoryGraph
 from tools.validate_snapshot import validate_snapshot_file
+
+# Minimal deterministic recipe knowledge for line layouts. A full recipe DAG
+# loader replaces this table when multi-ingredient chains are planned.
+LINE_RECIPES: Dict[str, dict] = {
+    "iron-gear-wheel": {"machine": "assembling-machine-2", "input_item": "iron-plate"},
+    "copper-cable": {"machine": "assembling-machine-2", "input_item": "copper-plate"},
+    "iron-stick": {"machine": "assembling-machine-2", "input_item": "iron-plate"},
+}
+
+MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3
 
 
 class LocalLayoutPlanner:
@@ -70,3 +82,102 @@ class LocalLayoutPlanner:
         if not error.path:
             return "<root>"
         return "/".join(str(part) for part in error.path)
+
+    def generate_line_layout(
+        self,
+        recipe: str,
+        machine_count: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+    ) -> dict:
+        """Deterministic single-recipe production line.
+
+        Row layout (y offsets from origin, y grows south):
+          0: input belt flowing east          4: (machine bottom row)
+          1: input inserters + power poles    5: output inserters
+          2: machine top row                  6: output belt flowing east
+        Feed (infinity chest) at the west end, collection chest at the east end.
+        Inserters face their pickup side; drop is the opposite tile.
+        """
+        if recipe not in LINE_RECIPES:
+            raise ValueError(f"No line recipe knowledge for: {recipe}")
+        if machine_count <= 0:
+            raise ValueError("machine_count must be positive")
+
+        spec = LINE_RECIPES[recipe]
+        machine = spec["machine"]
+        input_item = spec["input_item"]
+        length = machine_count * MACHINE_WIDTH
+        ox, oy = origin_x, origin_y
+
+        def at(x: float, y: float) -> dict:
+            return {"x": ox + x, "y": oy + y}
+
+        ghosts: List[dict] = []
+        # Belts: input lane must cover the feeder inserter's drop tile (-2).
+        for x in range(-2, length):
+            ghosts.append({"action_type": "place_ghost", "entity": "transport-belt",
+                           "position": at(x + 0.5, 0.5), "direction": "east"})
+        for x in range(0, length):
+            ghosts.append({"action_type": "place_ghost", "entity": "transport-belt",
+                           "position": at(x + 0.5, 6.5), "direction": "east"})
+
+        for i in range(machine_count):
+            base = i * MACHINE_WIDTH
+            center = base + 1.5
+            ghosts.append({"action_type": "place_ghost", "entity": machine,
+                           "position": at(center, 3.5), "recipe": recipe})
+            ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
+                           "position": at(center, 1.5), "direction": "north"})
+            ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
+                           "position": at(center, 5.5), "direction": "north"})
+
+        # Two pole rows: medium-pole supply is 7x7, so one row cannot reach
+        # both the input inserters (y=1) and the output row (y=5).
+        for x in range(0, length + 1, 6):
+            ghosts.append({"action_type": "place_ghost", "entity": "medium-electric-pole",
+                           "position": at(x + 0.5, 1.5)})
+            ghosts.append({"action_type": "place_ghost", "entity": "medium-electric-pole",
+                           "position": at(x + 0.5, 5.5)})
+
+        # Feed and collection endpoints plus dedicated power are placed as real
+        # entities: they are line scaffolding, not part of the planned build.
+        scaffolding: List[dict] = [
+            {"action_type": "place_entity", "entity": "electric-energy-interface", "position": at(-7.5, 3.5)},
+            {"action_type": "place_entity", "entity": "substation", "position": at(-4.0, 2.0)},
+            {"action_type": "place_entity", "entity": "infinity-chest",
+             "position": at(-3.5, 0.5), "infinity_filter": input_item},
+            {"action_type": "place_entity", "entity": "fast-inserter",
+             "position": at(-2.5, 0.5), "direction": "west"},
+            {"action_type": "place_entity", "entity": "steel-chest", "position": at(length + 1.5, 6.5)},
+            {"action_type": "place_entity", "entity": "fast-inserter",
+             "position": at(length + 0.5, 6.5), "direction": "west"},
+        ]
+
+        plan = {
+            "phases": [
+                {"name": "line_scaffolding", "actions": scaffolding},
+                {"name": f"line_{recipe}", "actions": ghosts},
+            ]
+        }
+
+        repo_root = Path(__file__).resolve().parents[1]
+        schema_path = repo_root / "schemas" / "build_plan.schema.json"
+        with schema_path.open("r", encoding="utf-8") as handle:
+            schema = json.load(handle)
+        errors = list(Draft7Validator(schema).iter_errors(plan))
+        if errors:
+            messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
+            raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
+        return plan
+
+    @staticmethod
+    def material_requirements(plan: dict) -> Dict[str, int]:
+        """Items construction bots need: one per ghost, keyed by entity name."""
+        needs: Dict[str, int] = {}
+        for phase in plan.get("phases", []):
+            for action in phase.get("actions", []):
+                if action.get("action_type") == "place_ghost":
+                    entity = action["entity"]
+                    needs[entity] = needs.get(entity, 0) + 1
+        return needs

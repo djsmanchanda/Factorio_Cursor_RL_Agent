@@ -1286,6 +1286,109 @@ commands.add_command("ensure_sandbox_scaffolding", "Idempotently provision power
   helpers.write_file("factorio_mod/scaffold_reports/scaffold_" .. game.tick .. ".json", json, false)
 end)
 
+local function execute_build_plan(authorization, build_plan)
+  local approved = {}
+  for _, action in ipairs(authorization.approved_actions or {}) do
+    approved[action] = true
+  end
+  if not approved["project_more_ghosts"] then
+    error("Authorization does not permit project_more_ghosts")
+  end
+  if type(build_plan.phases) ~= "table" then
+    error("BuildPlan must include phases")
+  end
+
+  local surface = get_or_create_sandbox_surface()
+  local force = game.forces["player"]
+  local placed_ghosts = 0
+  local placed_entities = 0
+  local recipe_failures = 0
+
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      local position = action.position
+      if type(position) ~= "table" then
+        error("BuildPlan action requires position")
+      end
+      local direction = nil
+      if action.direction then
+        direction = defines.direction[action.direction]
+        if direction == nil then
+          error("Unknown direction: " .. tostring(action.direction))
+        end
+      end
+
+      if action.action_type == "place_ghost" then
+        local ghost = surface.create_entity({
+          name = "entity-ghost",
+          inner_name = action.entity,
+          position = { position.x, position.y },
+          direction = direction,
+          force = force
+        })
+        if ghost and action.recipe then
+          local ok = pcall(function() ghost.set_recipe(action.recipe) end)
+          if not ok then
+            recipe_failures = recipe_failures + 1
+          end
+        end
+        placed_ghosts = placed_ghosts + 1
+      elseif action.action_type == "place_entity" then
+        local existing = surface.find_entities_filtered({
+          name = action.entity,
+          area = { { position.x - 1, position.y - 1 }, { position.x + 1, position.y + 1 } },
+          limit = 1
+        })
+        if #existing == 0 then
+          local entity = surface.create_entity({
+            name = action.entity,
+            position = { position.x, position.y },
+            direction = direction,
+            force = force
+          })
+          if entity and action.infinity_filter then
+            entity.set_infinity_container_filter(1, {
+              name = action.infinity_filter, count = 1000, mode = "exactly", index = 1
+            })
+            entity.remove_unfiltered_items = true
+          end
+          placed_entities = placed_entities + 1
+        end
+      else
+        error("Unsupported build plan action: " .. tostring(action.action_type))
+      end
+    end
+  end
+
+  return { placed_ghosts = placed_ghosts, placed_entities = placed_entities, recipe_failures = recipe_failures }
+end
+
+commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
+  local ok, payload = pcall(function()
+    return helpers.json_to_table(command.parameter or "")
+  end)
+  if not ok or type(payload) ~= "table" or type(payload.authorization) ~= "table" or type(payload.build_plan) ~= "table" then
+    game.print("BuildPlan error: payload must include authorization and build_plan")
+    return
+  end
+
+  local run_ok, result = pcall(function()
+    return execute_build_plan(payload.authorization, payload.build_plan)
+  end)
+
+  local report = { tick = game.tick, ok = run_ok }
+  if run_ok then
+    report.placed_ghosts = result.placed_ghosts
+    report.placed_entities = result.placed_entities
+    report.recipe_failures = result.recipe_failures
+  else
+    report.error = tostring(result)
+  end
+
+  local json = helpers.table_to_json(report)
+  helpers.write_file("factorio_mod/layout_reports/layout_" .. game.tick .. ".json", json, false)
+end)
+
 script.on_event(defines.events.on_robot_built_entity, function(event)
   -- Factorio 2.0: event field renamed from created_entity to entity.
   if not event or not event.entity then

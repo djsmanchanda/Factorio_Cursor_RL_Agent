@@ -15,6 +15,7 @@ GHOST_OBSERVATION_SUBDIR = Path("factorio_mod") / "ghost_observations"
 EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "execution_reports"
 CONSTRUCTION_REPORT_SUBDIR = Path("factorio_mod") / "construction_reports"
 SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
+LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
 
 
 class BridgeError(RuntimeError):
@@ -103,6 +104,10 @@ class GameBridge:
     def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(f"/ensure_sandbox_scaffolding {body}", SCAFFOLD_REPORT_SUBDIR, timeout)
+
+    def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
+        body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
+        return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
 
 
 def load_json(path: Path) -> dict:

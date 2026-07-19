@@ -176,6 +176,36 @@ def test_ghost_plan_skips_satisfied_blocks_and_continues_zone_indices():
     assert sorted(by_block["smelting"]) == list(range(0, 40))
 
 
+def test_line_layout_is_deterministic_and_collision_free():
+    from planners.local_layout_planner import LocalLayoutPlanner
+
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_line_layout("iron-gear-wheel", 8, 0, 40)
+    plan2 = planner.generate_line_layout("iron-gear-wheel", 8, 0, 40)
+    assert plan == plan2
+
+    ghosts = [a for p in plan["phases"] for a in p["actions"] if a["action_type"] == "place_ghost"]
+    machines = [g for g in ghosts if g["entity"] == "assembling-machine-2"]
+    assert len(machines) == 8
+    assert all(g["recipe"] == "iron-gear-wheel" for g in machines)
+
+    # 1x1 entities must not share a tile; 3x3 machines must not overlap anything.
+    small = [(g["position"]["x"], g["position"]["y"]) for g in ghosts if g["entity"] != "assembling-machine-2"]
+    assert len(small) == len(set(small))
+    machine_tiles = set()
+    for m in machines:
+        mx, my = m["position"]["x"], m["position"]["y"]
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                machine_tiles.add((mx + dx, my + dy))
+    assert not machine_tiles & set(small)
+
+    materials = planner.material_requirements(plan)
+    assert materials["assembling-machine-2"] == 8
+    assert materials["fast-inserter"] == 16
+    assert materials["transport-belt"] == 50
+
+
 def test_desired_capacity_never_exceeds_ultimate():
     state = progress(current=10, committed=10, active=50, ultimate=40)
     with pytest.raises(ValueError):

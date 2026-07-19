@@ -29,6 +29,12 @@
                     "y": { "type": "number" }
                   }
                 },
+                "direction": {
+                  "type": "string",
+                  "enum": ["north", "east", "south", "west"]
+                },
+                "recipe": { "type": "string" },
+                "infinity_filter": { "type": "string" },
                 "blueprint": { "type": "string" }
               }
             }
