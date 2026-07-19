@@ -1,0 +1,6 @@
+{
+  "intents": [
+    { "kind": "block_placeholder", "block_type": "circuits", "count": 60 },
+    { "kind": "block_placeholder", "block_type": "smelting", "count": 40 }
+  ]
+}

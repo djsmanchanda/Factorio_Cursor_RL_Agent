@@ -550,8 +550,23 @@ local function execute_construction(authorization, execution_report)
   return { started = #eligible, completed = 0 }
 end
 
-commands.add_command("snapshot", "Export deterministic factory snapshot JSON.", function(command)
-  local surface = pick_surface()
+commands.add_command("snapshot", "Export deterministic factory snapshot JSON. Optional parameter: surface name.", function(command)
+  local surface
+  if command.parameter and command.parameter ~= "" then
+    surface = game.surfaces[command.parameter]
+    if not surface then
+      local message = "Snapshot error: unknown surface " .. command.parameter
+      if command.player_index then
+        local player = game.get_player(command.player_index)
+        if player then player.print(message) end
+      else
+        game.print(message)
+      end
+      return
+    end
+  else
+    surface = pick_surface()
+  end
   local snapshot = build_snapshot(surface)
   local path = write_snapshot(snapshot)
 
@@ -1166,6 +1181,88 @@ commands.add_command("execute_deconstruction_plan", "Execute authorized deconstr
   else
     game.print("Deconstruction report written to script-output/" .. path)
   end
+end)
+
+local function ensure_entity(surface, force, name, position)
+  local existing = surface.find_entities_filtered({
+    name = name,
+    area = { { position[1] - 2, position[2] - 2 }, { position[1] + 2, position[2] + 2 } },
+    limit = 1
+  })
+  if #existing > 0 then
+    return existing[1], false
+  end
+  return surface.create_entity({ name = name, position = position, force = force }), true
+end
+
+local function ensure_scaffolding(payload)
+  local surface = get_or_create_sandbox_surface()
+  local force = game.forces["player"]
+  local anchors = payload.anchors
+  if type(anchors) ~= "table" or #anchors == 0 then
+    error("Scaffolding payload must include anchors array")
+  end
+
+  local created = 0
+  local bots_target = tonumber(payload.bots_per_roboport) or 30
+  for _, x in ipairs(anchors) do
+    local _, new_eei = ensure_entity(surface, force, "electric-energy-interface", { x - 4, -8 })
+    local _, new_sub = ensure_entity(surface, force, "substation", { x, -7 })
+    local roboport, new_rp = ensure_entity(surface, force, "roboport", { x, -3 })
+    created = created + (new_eei and 1 or 0) + (new_sub and 1 or 0) + (new_rp and 1 or 0)
+
+    local robot_inventory = roboport.get_inventory(defines.inventory.roboport_robot)
+    local have = robot_inventory.get_item_count("construction-robot")
+    if have < bots_target then
+      roboport.insert({ name = "construction-robot", count = bots_target - have })
+    end
+  end
+
+  local anchor0 = anchors[1]
+  local provider, new_chest = ensure_entity(surface, force, "passive-provider-chest", { anchor0 + 10, -8 })
+  created = created + (new_chest and 1 or 0)
+  local _, new_s1 = ensure_entity(surface, force, "storage-chest", { anchor0 + 12, -8 })
+  local _, new_s2 = ensure_entity(surface, force, "storage-chest", { anchor0 + 14, -8 })
+  created = created + (new_s1 and 1 or 0) + (new_s2 and 1 or 0)
+
+  local materials = payload.materials or {}
+  local network = surface.find_logistic_network_by_position({ anchor0, -3 }, force)
+  local inserted = {}
+  for item, count in pairs(materials) do
+    local target = tonumber(count) or 0
+    local have = network and network.get_item_count(item) or 0
+    if target > have then
+      local added = provider.insert({ name = item, count = target - have })
+      inserted[item] = added
+    end
+  end
+
+  return { created_entities = created, inserted = inserted }
+end
+
+commands.add_command("ensure_sandbox_scaffolding", "Idempotently provision power, roboports, bots, and materials on planner-sandbox.", function(command)
+  local ok, payload = pcall(function()
+    return helpers.json_to_table(command.parameter or "")
+  end)
+  if not ok or type(payload) ~= "table" then
+    game.print("Scaffolding error: invalid JSON payload")
+    return
+  end
+
+  local run_ok, result = pcall(function()
+    return ensure_scaffolding(payload)
+  end)
+
+  local report = { tick = game.tick, ok = run_ok }
+  if run_ok then
+    report.created_entities = result.created_entities
+    report.inserted = result.inserted
+  else
+    report.error = tostring(result)
+  end
+
+  local json = helpers.table_to_json(report)
+  helpers.write_file("factorio_mod/scaffold_reports/scaffold_" .. game.tick .. ".json", json, false)
 end)
 
 script.on_event(defines.events.on_robot_built_entity, function(event)

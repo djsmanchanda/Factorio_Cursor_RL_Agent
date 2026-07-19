@@ -13,6 +13,8 @@ from tools.rcon_client import RconClient
 SNAPSHOT_SUBDIR = Path("factorio_mod") / "snapshots"
 GHOST_OBSERVATION_SUBDIR = Path("factorio_mod") / "ghost_observations"
 EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "execution_reports"
+CONSTRUCTION_REPORT_SUBDIR = Path("factorio_mod") / "construction_reports"
+SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 
 
 class BridgeError(RuntimeError):
@@ -81,8 +83,9 @@ class GameBridge:
                 raise BridgeError(f"Command {command_text!r} failed: {response.strip()}")
         return self._wait_for_new_file(subdir, known, timeout)
 
-    def request_snapshot(self, timeout: float = 300.0) -> Path:
-        return self._run_and_collect("/snapshot", SNAPSHOT_SUBDIR, timeout)
+    def request_snapshot(self, timeout: float = 300.0, surface: Optional[str] = None) -> Path:
+        command = f"/snapshot {surface}" if surface else "/snapshot"
+        return self._run_and_collect(command, SNAPSHOT_SUBDIR, timeout)
 
     def export_ghost_observation(self, timeout: float = 120.0) -> Path:
         return self._run_and_collect("/export_ghost_observation", GHOST_OBSERVATION_SUBDIR, timeout)
@@ -90,6 +93,16 @@ class GameBridge:
     def execute_ghost_plan(self, authorization: dict, ghost_plan: dict, timeout: float = 120.0) -> Path:
         payload = json.dumps({"authorization": authorization, "ghost_plan": ghost_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/execute_ghost_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
+
+    def execute_construction(self, authorization: dict, execution_report: dict, timeout: float = 120.0) -> Path:
+        payload = json.dumps(
+            {"authorization": authorization, "execution_report": execution_report}, separators=(",", ":")
+        )
+        return self._run_and_collect(f"/execute_construction {payload}", CONSTRUCTION_REPORT_SUBDIR, timeout)
+
+    def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
+        body = json.dumps(payload, separators=(",", ":"))
+        return self._run_and_collect(f"/ensure_sandbox_scaffolding {body}", SCAFFOLD_REPORT_SUBDIR, timeout)
 
 
 def load_json(path: Path) -> dict:
