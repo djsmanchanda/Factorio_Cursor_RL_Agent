@@ -84,7 +84,7 @@ def test_generate_ghost_plan_emits_fill_delta():
     plan = generate_ghost_plan(build_intent=BUILD_INTENT, progress_state=state, capacity_phasing=phasing)
     assert len(plan.ghosts) == 40
     prototypes = {ghost["prototype"] for ghost in plan.ghosts}
-    assert prototypes <= {"assembling-machine-1", "stone-furnace"}
+    assert prototypes <= {"assembling-machine-1", "electric-furnace"}
 
 
 def test_build_progress_state_derives_from_snapshot_and_ghosts(tmp_path: Path):
@@ -204,6 +204,27 @@ def test_line_layout_is_deterministic_and_collision_free():
     assert materials["assembling-machine-2"] == 8
     assert materials["fast-inserter"] == 16
     assert materials["transport-belt"] == 50
+
+
+def test_mining_fed_smelting_line_layout():
+    from planners.local_layout_planner import LocalLayoutPlanner
+
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_line_layout("iron-plate", 6, 96, 40, mining_feed=True)
+    actions = [a for p in plan["phases"] for a in p["actions"]]
+
+    drills = [a for a in actions if a["entity"] == "electric-mining-drill"]
+    assert len(drills) == 6
+    assert all(d["direction"] == "south" for d in drills)
+    # Drill drop tile (center + 2 south) must be the input belt row (y=40).
+    assert all(d["position"]["y"] == 38.5 for d in drills)
+
+    furnaces = [a for a in actions if a["entity"] == "electric-furnace"]
+    assert len(furnaces) == 6
+    assert all("recipe" not in f for f in furnaces)
+
+    # Miner-fed lines have no infinity chest for the ore.
+    assert not any(a["entity"] == "infinity-chest" for a in actions)
 
 
 def test_desired_capacity_never_exceeds_ultimate():

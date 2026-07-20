@@ -5,9 +5,10 @@ from __future__ import annotations
 
 from typing import Dict
 
+# Electric-only invariant (docs/20 §12): no fuel-burning placeholders.
 BLOCK_PLACEHOLDER_PROTOTYPES: Dict[str, str] = {
     "circuits": "assembling-machine-1",
-    "smelting": "stone-furnace",
+    "smelting": "electric-furnace",
     "science": "lab",
 }
 
@@ -17,7 +18,7 @@ DEFAULT_PLACEHOLDER_PROTOTYPE = "assembling-machine-1"
 # must exceed the footprint or adjacent ghosts overlap and cannot be revived.
 PROTOTYPE_FOOTPRINTS: Dict[str, int] = {
     "assembling-machine-1": 3,
-    "stone-furnace": 2,
+    "electric-furnace": 3,
     "lab": 3,
 }
 

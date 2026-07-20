@@ -1258,7 +1258,25 @@ local function ensure_scaffolding(payload)
     end
   end
 
-  return { created_entities = created, inserted = inserted }
+  -- Test-surface ore seeding: resources are not buildable, so patches for
+  -- mining layouts are provisioned here.
+  local seeded = 0
+  for _, patch in ipairs(payload.ore_patches or {}) do
+    local amount = tonumber(patch.amount) or 100000
+    for x = math.floor(patch.x1), math.floor(patch.x2) do
+      for y = math.floor(patch.y1), math.floor(patch.y2) do
+        local existing = surface.find_entities_filtered({
+          name = patch.item, area = { { x, y }, { x + 1, y + 1 } }, limit = 1
+        })
+        if #existing == 0 then
+          surface.create_entity({ name = patch.item, position = { x + 0.5, y + 0.5 }, amount = amount })
+          seeded = seeded + 1
+        end
+      end
+    end
+  end
+
+  return { created_entities = created, inserted = inserted, seeded_ore_tiles = seeded }
 end
 
 commands.add_command("ensure_sandbox_scaffolding", "Idempotently provision power, roboports, bots, and materials on planner-sandbox.", function(command)

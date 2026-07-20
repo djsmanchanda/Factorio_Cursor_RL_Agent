@@ -304,7 +304,21 @@ Working code that violates invariants is considered incorrect.
 
 ---
 
-## 12. Summary
+## 12. Electric-Only Equipment (user standard, 2026-07-18)
+
+All planned and executed equipment MUST be electric:
+
+- No burner mining drills — electric mining drills only
+- No fuel-burning furnaces (stone/steel) — electric furnaces only
+- No burner inserters — electric inserter family only
+- No coal-based electricity (boilers / steam engines) — electric grid sources only
+
+Any plan containing fuel-burning equipment is invalid and must be rejected
+at validation time, not silently corrected.
+
+---
+
+## 13. Summary
 
 These invariants define the identity of the system.
 

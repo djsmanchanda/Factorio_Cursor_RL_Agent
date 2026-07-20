@@ -23,7 +23,37 @@ LINE_RECIPES: Dict[str, dict] = {
     "iron-stick": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"]},
     "electronic-circuit": {"machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"]},
     "automation-science-pack": {"machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"]},
+    # Smelting: furnaces auto-select their recipe from the input, so no
+    # recipe is set on the ghost. Electric furnaces avoid a fuel lane.
+    "iron-plate": {"machine": "electric-furnace", "ingredients": ["iron-ore"], "set_recipe": False},
+    "copper-plate": {"machine": "electric-furnace", "ingredients": ["copper-ore"], "set_recipe": False},
 }
+
+# Vertical pitch between stacked lines: 8 rows of layout plus 8 reserved for
+# expansion, so lines can grow east (more machines) and south (more lines).
+LINE_PITCH_Y = 16
+
+# Invariant (docs/20 §12): all equipment is electric. Plans containing any of
+# these fuel-burning entities are rejected at validation time.
+FORBIDDEN_FUEL_ENTITIES = {
+    "burner-mining-drill",
+    "stone-furnace",
+    "steel-furnace",
+    "burner-inserter",
+    "boiler",
+    "steam-engine",
+}
+
+
+def _reject_fuel_entities(plan: dict) -> None:
+    offenders = sorted({
+        action["entity"]
+        for phase in plan.get("phases", [])
+        for action in phase.get("actions", [])
+        if action.get("entity") in FORBIDDEN_FUEL_ENTITIES
+    })
+    if offenders:
+        raise ValueError(f"Electric-only invariant violated by: {', '.join(offenders)}")
 
 MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3
 
@@ -93,6 +123,7 @@ class LocalLayoutPlanner:
         machine_count: int,
         origin_x: int = 0,
         origin_y: int = 0,
+        mining_feed: bool = False,
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -128,11 +159,14 @@ class LocalLayoutPlanner:
             ghosts.append({"action_type": "place_ghost", "entity": "transport-belt",
                            "position": at(x + 0.5, 6.5), "direction": "east"})
 
+        set_recipe = spec.get("set_recipe", True)
         for i in range(machine_count):
             base = i * MACHINE_WIDTH
             center = base + 1.5
-            ghosts.append({"action_type": "place_ghost", "entity": machine,
-                           "position": at(center, 3.5), "recipe": recipe})
+            machine_action = {"action_type": "place_ghost", "entity": machine, "position": at(center, 3.5)}
+            if set_recipe:
+                machine_action["recipe"] = recipe
+            ghosts.append(machine_action)
             ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
                            "position": at(center, 1.5), "direction": "north"})
             ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
@@ -153,14 +187,17 @@ class LocalLayoutPlanner:
         scaffolding: List[dict] = [
             {"action_type": "place_entity", "entity": "electric-energy-interface", "position": at(-7.5, 3.5)},
             {"action_type": "place_entity", "entity": "substation", "position": at(-4.0, 2.0)},
-            {"action_type": "place_entity", "entity": "infinity-chest",
-             "position": at(-1.5, -1.5), "infinity_filter": ingredients[0]},
-            {"action_type": "place_entity", "entity": "fast-inserter",
-             "position": at(-1.5, -0.5), "direction": "north"},
             {"action_type": "place_entity", "entity": "steel-chest", "position": at(length + 1.5, 6.5)},
             {"action_type": "place_entity", "entity": "fast-inserter",
              "position": at(length + 0.5, 6.5), "direction": "west"},
         ]
+        if not mining_feed:
+            scaffolding.extend([
+                {"action_type": "place_entity", "entity": "infinity-chest",
+                 "position": at(-1.5, -1.5), "infinity_filter": ingredients[0]},
+                {"action_type": "place_entity", "entity": "fast-inserter",
+                 "position": at(-1.5, -0.5), "direction": "north"},
+            ])
         if len(ingredients) == 2:
             scaffolding.extend([
                 {"action_type": "place_entity", "entity": "infinity-chest",
@@ -169,12 +206,13 @@ class LocalLayoutPlanner:
                  "position": at(-1.5, 1.5), "direction": "south"},
             ])
 
-        plan = {
-            "phases": [
-                {"name": "line_scaffolding", "actions": scaffolding},
-                {"name": f"line_{recipe}", "actions": ghosts},
-            ]
-        }
+        phases = [
+            {"name": "line_scaffolding", "actions": scaffolding},
+            {"name": f"line_{recipe}", "actions": ghosts},
+        ]
+        if mining_feed:
+            phases.append(self.generate_mining_feed(machine_count, origin_x, origin_y)["phases"][0])
+        plan = {"phases": phases}
 
         repo_root = Path(__file__).resolve().parents[1]
         schema_path = repo_root / "schemas" / "build_plan.schema.json"
@@ -184,6 +222,48 @@ class LocalLayoutPlanner:
         if errors:
             messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
             raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
+        _reject_fuel_entities(plan)
+        return plan
+
+    def generate_mining_feed(
+        self,
+        machine_count: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+    ) -> dict:
+        """Miners north of the line's input belt, outputting directly onto it.
+
+        Electric drills are 3x3; a drill at rows -3..-1 facing south drops its
+        ore onto the y=0 input belt of the line at the same origin. Combined
+        with a smelting line this is: ORE -> BELT -> FURNACE -> PLATE BELT,
+        with no scripted item source. Requires an ore patch under the drills
+        (seeded by sandbox scaffolding on the test surface).
+        """
+        if machine_count <= 0:
+            raise ValueError("machine_count must be positive")
+        ox, oy = origin_x, origin_y
+        actions: List[dict] = []
+        for i in range(machine_count):
+            center = i * MACHINE_WIDTH + 1.5
+            # Drill drop tile is 2 tiles south of center (footprint edge + 1),
+            # so a center at oy-1.5 lands the ore exactly on the y=0 belt row.
+            actions.append({
+                "action_type": "place_ghost",
+                "entity": "electric-mining-drill",
+                "position": {"x": ox + center, "y": oy - 1.5},
+                "direction": "south",
+            })
+        plan = {"phases": [{"name": "mining_feed", "actions": actions}]}
+
+        repo_root = Path(__file__).resolve().parents[1]
+        schema_path = repo_root / "schemas" / "build_plan.schema.json"
+        with schema_path.open("r", encoding="utf-8") as handle:
+            schema = json.load(handle)
+        errors = list(Draft7Validator(schema).iter_errors(plan))
+        if errors:
+            messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
+            raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
+        _reject_fuel_entities(plan)
         return plan
 
     @staticmethod

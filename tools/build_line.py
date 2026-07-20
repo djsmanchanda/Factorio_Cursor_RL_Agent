@@ -29,11 +29,12 @@ def main() -> int:
     parser.add_argument("--origin-x", type=int, default=0)
     parser.add_argument("--origin-y", type=int, default=40)
     parser.add_argument("--anchors", default="10", help="Comma-separated scaffolding anchor x positions to stock")
+    parser.add_argument("--mine", action="store_true", help="Feed the line with real miners over a seeded ore patch")
     parser.add_argument("--verify-seconds", type=float, default=60.0)
     args = parser.parse_args()
 
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout(args.recipe, args.machines, args.origin_x, args.origin_y)
+    plan = planner.generate_line_layout(args.recipe, args.machines, args.origin_x, args.origin_y, mining_feed=args.mine)
     materials = planner.material_requirements(plan)
     print(f"Plan: {sum(len(p['actions']) for p in plan['phases'])} actions; materials: {materials}")
 
@@ -44,9 +45,21 @@ def main() -> int:
         password=args.rcon_password,
     )
     try:
-        # Stock construction materials in every covering anchor network.
+        # Stock construction materials in every covering anchor network, and
+        # seed the ore patch when the line is miner-fed.
         anchor_payload = [{"x": int(x), "materials": materials} for x in args.anchors.split(",")]
-        bridge.ensure_scaffolding({"anchors": anchor_payload, "bots_per_roboport": 30})
+        scaffold_request: dict = {"anchors": anchor_payload, "bots_per_roboport": 30}
+        if args.mine:
+            from planners.local_layout_planner import LINE_RECIPES
+
+            ore = LINE_RECIPES[args.recipe]["ingredients"][0]
+            scaffold_request["ore_patches"] = [{
+                "item": ore,
+                "x1": args.origin_x - 1, "y1": args.origin_y - 5,
+                "x2": args.origin_x + args.machines * 3, "y2": args.origin_y - 1,
+                "amount": 100000,
+            }]
+        bridge.ensure_scaffolding(scaffold_request)
 
         # The proposal step needs progress/phasing context; a layout build is a
         # direct, bounded action, so authorization is granted explicitly here
