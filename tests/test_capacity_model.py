@@ -204,8 +204,8 @@ def test_line_layout_is_deterministic_and_collision_free():
     assert materials["assembling-machine-2"] == 8
     assert materials["fast-inserter"] == 16
     # Gear demand is 24 plates/s; fast feeders move ~4/s, so the input belt
-    # extends west to host 6 feed points: 31 input + 24 output tiles.
-    assert materials["transport-belt"] == 55
+    # extends west to host 8 feed points (25% headroom): 33 input + 24 output.
+    assert materials["transport-belt"] == 57
 
 
 def test_feeder_count_scales_with_ingredient_demand():

@@ -37,6 +37,10 @@ MACHINE_SPEEDS = {"assembling-machine-2": 0.75, "electric-furnace": 2.0}
 # per-ingredient demand: feeders = ceil(demand / rate).
 FEEDER_RATES = {"fast-inserter": 4.0, "bulk-inserter": 8.0, "stack-inserter": 12.0}
 
+# Capacity headroom (user standard, 2026-07-18): provision feed capacity with
+# a 20-25% buffer over raw demand so supply never runs at the ragged edge.
+FEED_HEADROOM = 1.25
+
 # Vertical pitch between stacked lines: 8 rows of layout plus 8 reserved for
 # expansion, so lines can grow east (more machines) and south (more lines).
 LINE_PITCH_Y = 16
@@ -204,6 +208,8 @@ class LocalLayoutPlanner:
             raise ValueError(f"Unknown inserter tier: {inserter_type}")
         if feed_style not in FEED_STYLES:
             raise ValueError(f"Unknown feed style: {feed_style}")
+        if feed_style == "sideload" and not mining_feed:
+            self._check_sideload_lane_capacity(recipe, machine_count, belt_type)
 
         spec = LINE_RECIPES[recipe]
         machine = spec["machine"]
@@ -276,7 +282,7 @@ class LocalLayoutPlanner:
         ]
         # Collectors scale with output demand just like feeders; extras drain
         # from the south side of the output belt into their own chests.
-        extra_collectors = max(0, -(-int(crafts_per_second * 10) // int(feeder_rate * 10)) - 1)
+        extra_collectors = max(0, -(-int(crafts_per_second * FEED_HEADROOM * 100) // int(feeder_rate * 100)) - 1)
         for i in range(extra_collectors):
             x = length - 1.5 - 2 * i
             scaffolding.extend([
@@ -402,19 +408,46 @@ class LocalLayoutPlanner:
         return plan
 
     def _feeders_needed(self, recipe: str, machine_count: int, inserter_type: str) -> List[int]:
-        """Per-ingredient feed-point count = ceil(demand / inserter rate).
+        """Per-ingredient feed-point count = ceil(demand * headroom / rate).
 
-        Shared by generate_line_layout and generate_chain_link so both agree on
-        how far west a line's input belt extends. Integer scaling by 10 keeps the
+        Feed capacity is provisioned with FEED_HEADROOM (user standard: 20-25%
+        buffer) so lines never run at the ragged edge of supply. Shared by
+        generate_line_layout and generate_chain_link so both agree on how far
+        west a line's input belt extends. Integer scaling by 100 keeps the
         arithmetic deterministic (no float division rounding drift).
         """
         spec = LINE_RECIPES[recipe]
         crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
         feeder_rate = FEEDER_RATES[inserter_type]
         return [
-            max(1, -(-int(amount * crafts_per_second * 10) // int(feeder_rate * 10)))
+            max(1, -(-int(amount * crafts_per_second * FEED_HEADROOM * 100) // int(feeder_rate * 100)))
             for amount in spec["amounts"]
         ]
+
+    def _check_sideload_lane_capacity(self, recipe: str, machine_count: int, belt_type: str) -> None:
+        """Sideload gives each ingredient ONE lane; demand must fit it.
+
+        Hard failure below raw demand (physically cannot keep up — measured
+        live: express lane 22.5/s vs 27/s cable demand ran at 8.27/s of a
+        9.6/s cap). The error names the cheapest tier meeting demand with
+        FEED_HEADROOM so callers can upgrade or switch feed style.
+        """
+        spec = LINE_RECIPES[recipe]
+        crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+        lane_rate = BELT_TIERS[belt_type] / 2
+        for ingredient, amount in zip(spec["ingredients"], spec["amounts"]):
+            demand = amount * crafts_per_second
+            if lane_rate < demand:
+                target = demand * FEED_HEADROOM
+                adequate = sorted(
+                    (name for name, rate in BELT_TIERS.items() if rate / 2 >= target),
+                    key=lambda name: BELT_TIERS[name],
+                )
+                suggestion = adequate[0] if adequate else "no tier suffices; use chest feeding or a dedicated both-lane belt"
+                raise ValueError(
+                    f"Sideload lane rate {lane_rate}/s < {ingredient} demand {demand}/s "
+                    f"for {machine_count} machines; smallest tier with {FEED_HEADROOM}x headroom: {suggestion}"
+                )
 
     def _belt_west(self, recipe: str, machine_count: int, feed_style: str,
                    inserter_type: str, mining_feed: bool) -> int:

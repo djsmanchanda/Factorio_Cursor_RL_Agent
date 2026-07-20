@@ -77,6 +77,12 @@ demand; otherwise use chest feeding, a dedicated both-lane belt for the hot
 ingredient, or a higher belt tier. These are exactly the tradeoffs the RL
 decision layer (docs/22) will weigh as catalog actions.
 
+**Capacity headroom (user standard, 2026-07-18):** provision feed and drain
+capacity with a 20-25% buffer over raw demand (FEED_HEADROOM = 1.25 in the
+planner) — feeder counts, collector counts, and the belt-tier suggestion in
+the sideload lane check all use it. Hard lane-check failure only below raw
+demand; the suggested tier always meets demand x headroom.
+
 ## Quality system (wiki + user, 2026-07-18)
 Encoded in `core/quality_modules.py`.
 

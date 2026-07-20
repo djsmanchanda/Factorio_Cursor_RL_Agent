@@ -47,8 +47,8 @@ def _all_actions(plan: dict) -> list:
 
 def test_sideload_plan_is_deterministic():
     planner = LocalLayoutPlanner()
-    a = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
-    b = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
+    a = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
+    b = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
     assert a == b
 
 
@@ -63,7 +63,7 @@ def test_chest_mode_unchanged_by_new_param():
 def test_sideload_has_no_tile_collisions():
     planner = LocalLayoutPlanner()
     # Two ingredients, several feed points per side -> a busy west region.
-    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
+    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
 
     seen: dict = {}
     for action in _all_actions(plan):
@@ -80,11 +80,11 @@ def test_sideload_has_no_tile_collisions():
 
 def test_sideload_feeder_belts_are_adjacent_to_input_belt():
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
+    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
 
     belts = [
         a for a in _all_actions(plan)
-        if a["action_type"] == "place_ghost" and a["entity"] == "transport-belt"
+        if a["action_type"] == "place_ghost" and a["entity"].endswith("transport-belt")
     ]
     input_tiles = {
         (math.floor(b["position"]["x"]), math.floor(b["position"]["y"]))
@@ -115,12 +115,13 @@ def test_sideload_feeder_belts_are_adjacent_to_input_belt():
 
 def test_sideload_feeder_counts_match_demand():
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
+    plan = planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
     actions = _all_actions(plan)
-    # Same demand math as chest feeders: 27 cables/s -> 7 fast feeders, 9 plates/s -> 3.
+    # Demand with 25% headroom: 27*1.25=33.75 cables/s -> 9 fast feeders,
+    # 9*1.25=11.25 plates/s -> 3.
     cable_chests = [a for a in actions if a.get("infinity_filter") == "copper-cable"]
     plate_chests = [a for a in actions if a.get("infinity_filter") == "iron-plate"]
-    assert len(cable_chests) == 7
+    assert len(cable_chests) == 9
     assert len(plate_chests) == 3
     # Every loading inserter faces west (picks from chest, drops east onto belt).
     loaders = [
@@ -133,10 +134,10 @@ def test_sideload_feeder_counts_match_demand():
 
 def test_sideload_single_ingredient_has_only_north_feeder():
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="sideload")
+    plan = planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="sideload", belt_type="express-transport-belt")
     belts = [
         a for a in _all_actions(plan)
-        if a["action_type"] == "place_ghost" and a["entity"] == "transport-belt"
+        if a["action_type"] == "place_ghost" and a["entity"].endswith("transport-belt")
     ]
     assert any(b.get("direction") == "south" for b in belts)   # north feeder present
     assert not any(b.get("direction") == "north" for b in belts)  # no south feeder
@@ -272,14 +273,14 @@ def test_chain_link_rejects_misplaced_consumer_x():
 def test_generated_plans_pass_schema():
     # generate_* methods validate internally; returning without raising proves it.
     planner = LocalLayoutPlanner()
-    assert planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload")
+    assert planner.generate_line_layout("electronic-circuit", 6, 0, 0, feed_style="sideload", belt_type="turbo-transport-belt")
     cx = _consumer_x(planner, 0, 4, "iron-gear-wheel", 4)
     assert planner.generate_chain_link((0, 0), "iron-gear-wheel", 4, (cx, 20), "iron-gear-wheel", 4)
 
 
 def test_fuel_guard_fires_on_doctored_plan():
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout("electronic-circuit", 4, 0, 0, feed_style="sideload")
+    plan = planner.generate_line_layout("electronic-circuit", 4, 0, 0, feed_style="sideload", belt_type="express-transport-belt")
     plan["phases"][0]["actions"].append(
         {"action_type": "place_entity", "entity": "stone-furnace", "position": {"x": 0, "y": 0}}
     )
