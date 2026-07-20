@@ -14,11 +14,15 @@ from core.factory_graph import FactoryGraph
 from tools.validate_snapshot import validate_snapshot_file
 
 # Minimal deterministic recipe knowledge for line layouts. A full recipe DAG
-# loader replaces this table when multi-ingredient chains are planned.
+# loader replaces this table when arbitrary chains are planned. Up to two
+# ingredients ride the two lanes of the single input belt (wiki heuristic:
+# split items across both lanes; inserters only grab what the target accepts).
 LINE_RECIPES: Dict[str, dict] = {
-    "iron-gear-wheel": {"machine": "assembling-machine-2", "input_item": "iron-plate"},
-    "copper-cable": {"machine": "assembling-machine-2", "input_item": "copper-plate"},
-    "iron-stick": {"machine": "assembling-machine-2", "input_item": "iron-plate"},
+    "iron-gear-wheel": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"]},
+    "copper-cable": {"machine": "assembling-machine-2", "ingredients": ["copper-plate"]},
+    "iron-stick": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"]},
+    "electronic-circuit": {"machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"]},
+    "automation-science-pack": {"machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"]},
 }
 
 MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3
@@ -106,7 +110,9 @@ class LocalLayoutPlanner:
 
         spec = LINE_RECIPES[recipe]
         machine = spec["machine"]
-        input_item = spec["input_item"]
+        ingredients = spec["ingredients"]
+        if not 1 <= len(ingredients) <= 2:
+            raise ValueError("Line layouts support one or two ingredients (two belt lanes)")
         length = machine_count * MACHINE_WIDTH
         ox, oy = origin_x, origin_y
 
@@ -142,17 +148,26 @@ class LocalLayoutPlanner:
 
         # Feed and collection endpoints plus dedicated power are placed as real
         # entities: they are line scaffolding, not part of the planned build.
+        # Feeders sit on opposite sides of the input belt so each ingredient
+        # lands on its own lane (an inserter drops onto the far lane).
         scaffolding: List[dict] = [
             {"action_type": "place_entity", "entity": "electric-energy-interface", "position": at(-7.5, 3.5)},
             {"action_type": "place_entity", "entity": "substation", "position": at(-4.0, 2.0)},
             {"action_type": "place_entity", "entity": "infinity-chest",
-             "position": at(-3.5, 0.5), "infinity_filter": input_item},
+             "position": at(-1.5, -1.5), "infinity_filter": ingredients[0]},
             {"action_type": "place_entity", "entity": "fast-inserter",
-             "position": at(-2.5, 0.5), "direction": "west"},
+             "position": at(-1.5, -0.5), "direction": "north"},
             {"action_type": "place_entity", "entity": "steel-chest", "position": at(length + 1.5, 6.5)},
             {"action_type": "place_entity", "entity": "fast-inserter",
              "position": at(length + 0.5, 6.5), "direction": "west"},
         ]
+        if len(ingredients) == 2:
+            scaffolding.extend([
+                {"action_type": "place_entity", "entity": "infinity-chest",
+                 "position": at(-1.5, 2.5), "infinity_filter": ingredients[1]},
+                {"action_type": "place_entity", "entity": "fast-inserter",
+                 "position": at(-1.5, 1.5), "direction": "south"},
+            ])
 
         plan = {
             "phases": [

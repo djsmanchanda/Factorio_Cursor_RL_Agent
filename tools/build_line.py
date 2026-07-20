@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--machines", type=int, default=8)
     parser.add_argument("--origin-x", type=int, default=0)
     parser.add_argument("--origin-y", type=int, default=40)
+    parser.add_argument("--anchors", default="10", help="Comma-separated scaffolding anchor x positions to stock")
     parser.add_argument("--verify-seconds", type=float, default=60.0)
     args = parser.parse_args()
 
@@ -43,8 +44,9 @@ def main() -> int:
         password=args.rcon_password,
     )
     try:
-        # Stock construction materials in the nearest anchor network.
-        bridge.ensure_scaffolding({"anchors": [{"x": 10, "materials": materials}], "bots_per_roboport": 30})
+        # Stock construction materials in every covering anchor network.
+        anchor_payload = [{"x": int(x), "materials": materials} for x in args.anchors.split(",")]
+        bridge.ensure_scaffolding({"anchors": anchor_payload, "bots_per_roboport": 30})
 
         # The proposal step needs progress/phasing context; a layout build is a
         # direct, bounded action, so authorization is granted explicitly here
