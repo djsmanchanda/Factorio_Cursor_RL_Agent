@@ -224,6 +224,16 @@ class LocalLayoutPlanner:
             {"action_type": "place_entity", "entity": inserter_type,
              "position": at(length + 0.5, 6.5), "direction": "west"},
         ]
+        # Collectors scale with output demand just like feeders; extras drain
+        # from the south side of the output belt into their own chests.
+        extra_collectors = max(0, -(-int(crafts_per_second * 10) // int(feeder_rate * 10)) - 1)
+        for i in range(extra_collectors):
+            x = length - 1.5 - 2 * i
+            scaffolding.extend([
+                {"action_type": "place_entity", "entity": inserter_type,
+                 "position": at(x, 7.5), "direction": "north"},
+                {"action_type": "place_entity", "entity": "steel-chest", "position": at(x, 8.5)},
+            ])
         if not mining_feed:
             # Ingredient 0 feeds from the north side, ingredient 1 from the
             # south; each west-extension tile hosts one feed point per side.

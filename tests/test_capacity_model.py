@@ -223,6 +223,19 @@ def test_feeder_count_scales_with_ingredient_demand():
     assert len(plate_chests) == 1
 
 
+def test_collectors_scale_with_output_demand():
+    from planners.local_layout_planner import LocalLayoutPlanner
+
+    planner = LocalLayoutPlanner()
+    # 12 gear machines = 18 gears/s; stack collectors drain ~12/s -> 2 collectors.
+    plan = planner.generate_line_layout(
+        "iron-gear-wheel", 12, 0, 0, belt_type="express-transport-belt", inserter_type="stack-inserter"
+    )
+    actions = [a for p in plan["phases"] for a in p["actions"]]
+    chests = [a for a in actions if a["entity"] == "steel-chest"]
+    assert len(chests) == 2
+
+
 def test_mining_fed_smelting_line_layout():
     from planners.local_layout_planner import LocalLayoutPlanner
 

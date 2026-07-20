@@ -46,6 +46,23 @@ Per docs/19: reference data only — validated before use, never authoritative o
 - Planner consequence: feed points scale with per-ingredient demand
   (feeders = ceil(demand / feeder_rate); LINE_RECIPES amounts × craft rate).
 
+## Advanced feeding patterns (user-provided, 2026-07-18 — next to implement)
+- **Dedicated belt per ingredient**: fill the entire input belt (both lanes)
+  with the high-demand ingredient; run a second parallel belt for the other
+  ingredient, reached by long-handed inserters (2-tile reach, slower swing).
+- **T-junction sideloading**: a belt can empty onto one lane of another belt.
+  Feeder belts running perpendicular continuously top up a lane; gaps on one
+  lane are compensated by the other. Belt-fed lanes beat chest+inserter
+  feeding because the belt buffer absorbs inserter swing gaps.
+
+## Production growth axes (user standard)
+Throughput grows over time along these axes, in roughly this order:
+1. Faster belts (yellow → red → blue → turbo)
+2. Stacked items (stack inserters, 4-high belt stacking)
+3. More machines per line (X) and parallel lines (Y, LINE_PITCH_Y)
+4. Better machine tiers (assembling machine 1 → 2 → 3)
+5. Quality tiers (normal → uncommon → rare → epic → legendary)
+
 ## Implications adopted (validated against our invariants)
 - Two-lane belt feeding supports 2-ingredient recipes on a single input belt
   (inserters only pick up items their destination accepts).
