@@ -45,7 +45,17 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] Fix capacity model: committed = current + pending ghosts; fill-delta semantics in ghost projection and execution readiness; snapshot-derived current capacity (verified live: cycle 1 projects 50 ghosts from pure observation, cycle 2 holds at delta 0)
 - [x] First automated test suite: `tests/test_capacity_model.py` (9 tests; run `python -m pytest tests/`)
 - [ ] Broaden test coverage beyond the capacity model (planners, executors, bridge)
-- [ ] Recurring loop daemon on top of the one-shot cycle (with construction execution + authorized phase advance)
+
+## Phase N1 – Nauvis Core Mechanics (added 2026-07-18; see docs/22 curriculum)
+- [x] Production lines: belts, inserters, machines with recipes (verified live, 9.6/s circuit line)
+- [x] Miner-fed smelting chains; electric-only invariant; demand-scaled feeders/collectors
+- [ ] T-junction sideload feeding + dedicated ingredient belts (docs/21 patterns)
+- [ ] Line-to-line chaining: smelter output belt feeds assembler input
+- [ ] Machine tier parameter (assembling-machine-1/2/3) and quality tiers
+- [ ] Full science chain: ore → automation-science-pack → labs, research progressing (Phase N2 gate)
+- [ ] Loop daemon builds lines (not placeholder grids); bottleneck diagnosis per line
+- [ ] Action catalog + deterministic baseline policy (greedy bottleneck relief)
+- [ ] Transition logging for the RL decision layer (docs/22)
 
 ## Phase 3 – Scaling (CityPlanner)
 - [ ] Block schema & template system
