@@ -69,6 +69,12 @@ backfilled from git history because this file did not exist yet.
 - Why: Prior builds placed disconnected placeholders; this is the first build where items move — input → craft → transport → collect.
 - Next: multi-ingredient recipes (multiple input lanes), recipe DAG chaining (line feeding line), collector throughput (multiple drain inserters), and wiring line construction into the loop daemon.
 
+## [2026-07-18] Multi-ingredient lines — electronic circuits flowing
+- Files: planners/local_layout_planner.py, tools/build_line.py, docs/21_external_game_knowledge.md
+- What: Recipes carry ingredient lists; two-ingredient recipes feed via the input belt's two lanes (opposite-side feeders). Wiki knowledge ingested as data-only reference. Verified live first-try: 6-machine electronic-circuit line, first output 36.5s, 72 circuits/120s.
+- Why: Circuits are the gateway to automated science; dual-lane feeding is the deterministic pattern for all 2-ingredient assembly.
+- Next: line chaining (gear line output belt → science line input), then automation-science-pack line feeding labs — the first full science chain. Then teach the loop daemon to build lines instead of placeholder grids.
+
 ## Audit snapshot (2026-07-18) — where things stand
 - Mature: core/ (~2.7k LOC — metrics, progress state, authorization, phasing, advisory policies); schema validation pervasive.
 - Partial: CityPlanner (symbolic decisions only, no geometry; 2 of 9 intents have phase chains); Lua mod logic complete but targets Factorio 1.1 and was never deployed.
