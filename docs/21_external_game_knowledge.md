@@ -63,6 +63,66 @@ Throughput grows over time along these axes, in roughly this order:
 4. Better machine tiers (assembling machine 1 → 2 → 3)
 5. Quality tiers (normal → uncommon → rare → epic → legendary)
 
+## Feed-style tradeoffs (measured live, 2026-07-18)
+Same 6-machine electronic-circuit line (27/s cable + 9/s plate demand),
+stack inserters throughout, steady-state collector rates:
+- chest-fed, express belts: **9.6/s** — chest feeders spray the high-demand
+  ingredient onto BOTH lanes, so no lane cap; but limited feeder buffer.
+- sideload-fed, express belts: **8.27/s** — each ingredient gets ONE dedicated
+  lane; cable capped at an express lane's 22.5/s < 27/s demand (lane-limited).
+- sideload-fed, turbo belts: **9.07/s** — turbo lane (30/s) clears the 27/s
+  demand; residual ~0.5/s vs chest is junction/hop latency.
+Planner rule of thumb: sideload feeding needs lane rate >= per-ingredient
+demand; otherwise use chest feeding, a dedicated both-lane belt for the hot
+ingredient, or a higher belt tier. These are exactly the tradeoffs the RL
+decision layer (docs/22) will weigh as catalog actions.
+
+## Quality system (wiki + user, 2026-07-18)
+Encoded in `core/quality_modules.py`.
+
+- Tiers and strength (effects are per-strength, additive): normal 0,
+  uncommon 1, rare 2, epic 3, legendary 5.
+- Per-entity quality effects, per strength point: assembling machines +30%
+  crafting speed; inserters +30% rotation speed; electric poles +1 tile
+  supply reach and +2 wire reach; beacons -16.67% power; modules +30%
+  positive effects. Transport belts and walls gain health only — no
+  throughput effect, so they are planner-irrelevant and excluded from the
+  effects table.
+- Crafting: quality modules give a chance to upgrade output one tier (then a
+  repeated 10% chance per further tier). Ingredient quality match is exact,
+  not minimum — a recipe set to a quality tier requires ALL item ingredients
+  at exactly that tier; fluids have no quality and are exempt. Recyclers
+  return 25% of inputs.
+- **Safety rule (user-mandated):** mixed-quality items on a shared line jam
+  production irrecoverably. Quality production requires dedicated, sorted
+  lines per tier. `validate_uniform_quality()` rejects any line/feed spec
+  whose ingredient quality tiers are not uniform and equal to the recipe's
+  tier.
+- Planet notes: none needed — quality tiers and effects are planet-agnostic.
+
+## Modules (wiki, 2026-07-18)
+Encoded in `core/quality_modules.py`.
+
+- speed-module 1/2/3: speed +20/+30/+50%, energy +50/+60/+70%.
+- productivity-module 1/2/3: productivity +4/+6/+10%, energy +40/+60/+80%,
+  speed -5/-10/-15%.
+- efficiency-module 1/2/3: energy -30/-40/-50%.
+- quality-module 1/2/3: quality chance +1/+2/+2.5%, speed -5% each.
+- Stacking rule: machine properties (speed/energy/pollution) cannot drop
+  below 20% of their original value regardless of how many modules stack —
+  `apply_modules()` enforces this floor.
+- Productivity modules only apply to intermediate-product recipes. In our
+  LINE_RECIPES world (`planners/local_layout_planner.py`) the intermediates
+  are: iron-gear-wheel, copper-cable, iron-stick, electronic-circuit,
+  iron-plate, copper-plate — plus automation-science-pack, since science
+  packs accept productivity in Factorio. Productivity modules are never
+  allowed in beacons.
+- Module slots (verified live against 2.0.77 prototypes via RCON,
+  2026-07-18): assembling-machine-1: 0, assembling-machine-2: 2,
+  assembling-machine-3: 4, electric-furnace: 2, beacon: 2.
+- Planet notes: none needed — module effects and slot counts are
+  planet-agnostic.
+
 ## Implications adopted (validated against our invariants)
 - Two-lane belt feeding supports 2-ingredient recipes on a single input belt
   (inserters only pick up items their destination accepts).

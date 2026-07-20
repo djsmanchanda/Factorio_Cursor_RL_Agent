@@ -47,6 +47,19 @@ LINE_PITCH_Y = 16
 BELT_TIERS = {"transport-belt": 15, "fast-transport-belt": 30, "express-transport-belt": 45, "turbo-transport-belt": 60}
 INSERTER_TIERS = {"fast-inserter", "bulk-inserter", "stack-inserter"}
 
+# Sideload feeder geometry (feed_style="sideload"). Instead of chest+inserter
+# pairs placed directly on the input belt, each ingredient rides a dedicated
+# feeder BELT column that T-junctions into the input belt (belt buffering
+# sustains far higher throughput than chest+inserter feeding). Both feeder
+# columns sit WEST of x=0 so they never touch machines (x>=0), input inserters
+# (x=3i+1.5) or poles (x=6j+0.5). Ingredient 0 approaches from the north side
+# (belt runs south into the belt's north edge); ingredient 1 from the south
+# side (belt runs north into the south edge). Loading chest+inserter pairs sit
+# two/one tiles further west of each feeder belt.
+SIDELOAD_NORTH_COL = -2  # tile column of the north feeder belt (ingredient 0)
+SIDELOAD_SOUTH_COL = -3  # tile column of the south feeder belt (ingredient 1)
+FEED_STYLES = {"chest", "sideload"}
+
 # Invariant (docs/20 §12): all equipment is electric. Plans containing any of
 # these fuel-burning entities are rejected at validation time.
 FORBIDDEN_FUEL_ENTITIES = {
@@ -140,6 +153,7 @@ class LocalLayoutPlanner:
         mining_feed: bool = False,
         belt_type: str = "transport-belt",
         inserter_type: str = "fast-inserter",
+        feed_style: str = "chest",
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -149,6 +163,35 @@ class LocalLayoutPlanner:
           2: machine top row                  6: output belt flowing east
         Feed (infinity chest) at the west end, collection chest at the east end.
         Inserters face their pickup side; drop is the opposite tile.
+
+        feed_style="chest" (default): each ingredient's infinity chest + inserter
+        pairs sit directly on the input belt at the west extension - ingredient 0
+        on the north side (inserter faces north, drops onto the far lane),
+        ingredient 1 on the south side.
+
+        feed_style="sideload": ingredients ride dedicated feeder BELT columns
+        that T-junction into the input belt, which sustains higher throughput
+        than chest+inserter feeding because the feeder belt buffers. Geometry
+        (columns are tile indices, all WEST of x=0; N0/N1 = feeders_needed per
+        ingredient, sized by demand exactly like the chest feeders):
+
+          col:  -5    -4    -3      -2      -1  0  1 .. machines ->
+                                    [belt  ]  input belt (row 0) flows east >>
+          north (rows y<0, ingredient 0):
+                            ins-> [Nbelt v]              feeder belt runs SOUTH,
+                     chest  ins-> [Nbelt v]              its last tile (row -1)
+                            ...   [Nbelt v]              sideloads input row 0.
+          south (rows y>0, ingredient 1):
+              chest  ins->        [Sbelt ^]              feeder belt runs NORTH,
+              chest  ins->        [Sbelt ^]              its last tile (row 1)
+              ...                 [Sbelt ^]              sideloads input row 0.
+
+        North feeder belt occupies column -2, its loading inserters column -3
+        (facing west: pick from the chest, drop east onto the belt) and chests
+        column -4. South feeder belt occupies column -3, loaders column -4,
+        chests column -5. The input belt extends west to include both junction
+        tiles (-2 and, for two ingredients, -3). Power scaffolding is pushed
+        further west of every feeder tile so nothing overlaps.
         """
         if recipe not in LINE_RECIPES:
             raise ValueError(f"No line recipe knowledge for: {recipe}")
@@ -159,6 +202,8 @@ class LocalLayoutPlanner:
             raise ValueError(f"Unknown belt tier: {belt_type}")
         if inserter_type not in INSERTER_TIERS:
             raise ValueError(f"Unknown inserter tier: {inserter_type}")
+        if feed_style not in FEED_STYLES:
+            raise ValueError(f"Unknown feed style: {feed_style}")
 
         spec = LINE_RECIPES[recipe]
         machine = spec["machine"]
@@ -173,15 +218,11 @@ class LocalLayoutPlanner:
 
         # Per-ingredient demand (items/s) sets how many feed points each
         # ingredient needs; the input belt extends west to host them.
-        amounts = spec["amounts"]
         crafts_per_second = machine_count * MACHINE_SPEEDS[machine] / spec["craft_time"]
         feeder_rate = FEEDER_RATES[inserter_type]
-        feeders_needed = [
-            max(1, -(-int(amount * crafts_per_second * 10) // int(feeder_rate * 10)))
-            for amount in amounts
-        ]
+        feeders_needed = self._feeders_needed(recipe, machine_count, inserter_type)
         feed_slots = max(feeders_needed) if not mining_feed else 0
-        belt_west = -(1 + max(1, feed_slots))
+        belt_west = self._belt_west(recipe, machine_count, feed_style, inserter_type, mining_feed)
 
         ghosts: List[dict] = []
         # Belts: input lane must cover every feeder inserter's drop tile.
@@ -217,9 +258,18 @@ class LocalLayoutPlanner:
         # entities: they are line scaffolding, not part of the planned build.
         # Feeders sit on opposite sides of the input belt so each ingredient
         # lands on its own lane (an inserter drops onto the far lane).
+        if feed_style == "sideload" and not mining_feed:
+            # Push power west of every feeder tile so its 2x2 footprint cannot
+            # collide with a feeder belt, inserter or chest.
+            westmost = (SIDELOAD_SOUTH_COL if len(ingredients) == 2 else SIDELOAD_NORTH_COL) - 2
+            interface_pos = at(westmost - 6.0, 3.5)
+            substation_pos = at(westmost - 3.0, 2.0)
+        else:
+            interface_pos = at(-7.5, 3.5)
+            substation_pos = at(-4.0, 2.0)
         scaffolding: List[dict] = [
-            {"action_type": "place_entity", "entity": "electric-energy-interface", "position": at(-7.5, 3.5)},
-            {"action_type": "place_entity", "entity": "substation", "position": at(-4.0, 2.0)},
+            {"action_type": "place_entity", "entity": "electric-energy-interface", "position": interface_pos},
+            {"action_type": "place_entity", "entity": "substation", "position": substation_pos},
             {"action_type": "place_entity", "entity": "steel-chest", "position": at(length + 1.5, 6.5)},
             {"action_type": "place_entity", "entity": inserter_type,
              "position": at(length + 0.5, 6.5), "direction": "west"},
@@ -234,7 +284,7 @@ class LocalLayoutPlanner:
                  "position": at(x, 7.5), "direction": "north"},
                 {"action_type": "place_entity", "entity": "steel-chest", "position": at(x, 8.5)},
             ])
-        if not mining_feed:
+        if not mining_feed and feed_style == "chest":
             # Ingredient 0 feeds from the north side, ingredient 1 from the
             # south; each west-extension tile hosts one feed point per side.
             for slot in range(feeders_needed[0]):
@@ -253,6 +303,42 @@ class LocalLayoutPlanner:
                          "position": at(x, 2.5), "infinity_filter": ingredients[1]},
                         {"action_type": "place_entity", "entity": inserter_type,
                          "position": at(x, 1.5), "direction": "south"},
+                    ])
+        elif not mining_feed and feed_style == "sideload":
+            # North feeder belt (ingredient 0): a column of belt ghosts running
+            # SOUTH, its last tile (row -1) sideloading the input belt. Loaded
+            # from the west by infinity-chest + inserter pairs (one per demand
+            # feed point) so the buffered belt saturates the input.
+            north_needed = feeders_needed[0]
+            for row in range(-(north_needed + 1), 0):  # rows -(N+1)..-1
+                ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                               "position": at(SIDELOAD_NORTH_COL + 0.5, row + 0.5),
+                               "direction": "south"})
+            for slot in range(north_needed):
+                row = -(2 + slot)  # loading tiles sit above the junction (row -1)
+                scaffolding.extend([
+                    {"action_type": "place_entity", "entity": "infinity-chest",
+                     "position": at(SIDELOAD_NORTH_COL - 1.5, row + 0.5),
+                     "infinity_filter": ingredients[0]},
+                    {"action_type": "place_entity", "entity": inserter_type,
+                     "position": at(SIDELOAD_NORTH_COL - 0.5, row + 0.5), "direction": "west"},
+                ])
+            if len(ingredients) == 2:
+                # South feeder belt (ingredient 1): column running NORTH, its
+                # last tile (row 1) sideloading the input belt from the south.
+                south_needed = feeders_needed[1]
+                for row in range(1, south_needed + 2):  # rows 1..S+1
+                    ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                                   "position": at(SIDELOAD_SOUTH_COL + 0.5, row + 0.5),
+                                   "direction": "north"})
+                for slot in range(south_needed):
+                    row = 2 + slot  # loading tiles sit below the junction (row 1)
+                    scaffolding.extend([
+                        {"action_type": "place_entity", "entity": "infinity-chest",
+                         "position": at(SIDELOAD_SOUTH_COL - 1.5, row + 0.5),
+                         "infinity_filter": ingredients[1]},
+                        {"action_type": "place_entity", "entity": inserter_type,
+                         "position": at(SIDELOAD_SOUTH_COL - 0.5, row + 0.5), "direction": "west"},
                     ])
 
         phases = [
@@ -313,6 +399,158 @@ class LocalLayoutPlanner:
             messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
             raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
         _reject_fuel_entities(plan)
+        return plan
+
+    def _feeders_needed(self, recipe: str, machine_count: int, inserter_type: str) -> List[int]:
+        """Per-ingredient feed-point count = ceil(demand / inserter rate).
+
+        Shared by generate_line_layout and generate_chain_link so both agree on
+        how far west a line's input belt extends. Integer scaling by 10 keeps the
+        arithmetic deterministic (no float division rounding drift).
+        """
+        spec = LINE_RECIPES[recipe]
+        crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+        feeder_rate = FEEDER_RATES[inserter_type]
+        return [
+            max(1, -(-int(amount * crafts_per_second * 10) // int(feeder_rate * 10)))
+            for amount in spec["amounts"]
+        ]
+
+    def _belt_west(self, recipe: str, machine_count: int, feed_style: str,
+                   inserter_type: str, mining_feed: bool) -> int:
+        """Westmost input-belt tile column for a line.
+
+        Chest feeders push the belt one tile west per feed slot; sideload feeders
+        only need the belt to reach their junction columns (-2, and -3 when a
+        second ingredient feeds from the south).
+        """
+        if feed_style == "sideload" and not mining_feed:
+            ingredients = LINE_RECIPES[recipe]["ingredients"]
+            return SIDELOAD_SOUTH_COL if len(ingredients) == 2 else SIDELOAD_NORTH_COL
+        feeders = self._feeders_needed(recipe, machine_count, inserter_type)
+        feed_slots = max(feeders) if not mining_feed else 0
+        return -(1 + max(1, feed_slots))
+
+    def _validate_and_reject_fuel(self, plan: dict) -> None:
+        """Schema-validate a BuildPlan then enforce the electric-only invariant."""
+        repo_root = Path(__file__).resolve().parents[1]
+        schema_path = repo_root / "schemas" / "build_plan.schema.json"
+        with schema_path.open("r", encoding="utf-8") as handle:
+            schema = json.load(handle)
+        errors = list(Draft7Validator(schema).iter_errors(plan))
+        if errors:
+            messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
+            raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
+        _reject_fuel_entities(plan)
+
+    def generate_chain_link(
+        self,
+        producer_origin: tuple,
+        producer_recipe: str,
+        producer_machines: int,
+        consumer_origin: tuple,
+        consumer_recipe: str,
+        consumer_machines: int,
+        belt_type: str = "transport-belt",
+        inserter_type: str = "fast-inserter",
+        consumer_feed_style: str = "chest",
+    ) -> dict:
+        """Route a producer line's OUTPUT belt into a consumer line's INPUT belt.
+
+        A producer built by generate_line_layout dumps its output (row 6, flowing
+        east) into a terminal collector (inserter at column length, chest at
+        column length+1). This method emits one BuildPlan phase that reclaims the
+        collector's tiles and lays a belt connector:
+
+          1. remove the terminal collector inserter + chest (freeing two tiles);
+          2. extend the output belt one tile east onto the freed inserter tile;
+          3. corner SOUTH in a dedicated "turn column" (producer x + length + 1,
+             the freed chest tile) and run straight down;
+          4. corner EAST into the consumer's input-belt west extension.
+
+        Geometry (absolute tiles; py/px = producer origin, cy/cx = consumer):
+          out_row  = py + 6, turn_col = px + producer_len + 1
+          row out_row:      .. [belt >][corner v]              (past the collector)
+          rows out_row+1..cy-1:          [belt v]              (dedicated column)
+          row cy (consumer input): [corner >]--> consumer input belt west end
+
+        Deterministic x-offset RULE for the consumer: the connector corners east
+        exactly one tile WEST of the consumer's input-belt west extension and
+        feeds into it, so the consumer origin x is pinned by the producer:
+
+            consumer_x == turn_col + 1 - consumer_belt_west
+
+        where consumer_belt_west comes from the same demand math the consumer
+        line uses. The method raises if consumer_origin's x does not match, and
+        the error states the required value. Constraint: the consumer must sit at
+        cy >= py + LINE_PITCH_Y so the vertical run has room and never overlaps
+        the producer's own rows.
+        """
+        if producer_recipe not in LINE_RECIPES:
+            raise ValueError(f"No line recipe knowledge for producer: {producer_recipe}")
+        if consumer_recipe not in LINE_RECIPES:
+            raise ValueError(f"No line recipe knowledge for consumer: {consumer_recipe}")
+        if belt_type not in BELT_TIERS:
+            raise ValueError(f"Unknown belt tier: {belt_type}")
+        if inserter_type not in INSERTER_TIERS:
+            raise ValueError(f"Unknown inserter tier: {inserter_type}")
+        if consumer_feed_style not in FEED_STYLES:
+            raise ValueError(f"Unknown feed style: {consumer_feed_style}")
+        if producer_machines <= 0 or consumer_machines <= 0:
+            raise ValueError("machine counts must be positive")
+
+        px, py = producer_origin
+        cx, cy = consumer_origin
+        if cy < py + LINE_PITCH_Y:
+            raise ValueError(
+                f"consumer must sit at y >= producer_y + {LINE_PITCH_Y} (got cy={cy}, py={py})"
+            )
+
+        producer_len = producer_machines * MACHINE_WIDTH
+        out_row = py + 6
+        in_row = cy  # consumer input belt is at offset 0 from its origin
+
+        consumer_belt_west = self._belt_west(
+            consumer_recipe, consumer_machines, consumer_feed_style, inserter_type, False
+        )
+        turn_col = px + producer_len + 1
+        required_cx = turn_col + 1 - consumer_belt_west
+        if cx != required_cx:
+            raise ValueError(
+                f"consumer_origin x must be {required_cx} so the connector lands on the "
+                f"consumer input-belt west extension (got {cx}); "
+                f"turn_col={turn_col}, consumer_belt_west={consumer_belt_west}"
+            )
+
+        actions: List[dict] = []
+        # 1) Reclaim the producer's terminal collector so the belt can continue.
+        actions.append({"action_type": "remove_entity", "entity": inserter_type,
+                        "position": {"x": px + producer_len + 0.5, "y": out_row + 0.5}})
+        actions.append({"action_type": "remove_entity", "entity": "steel-chest",
+                        "position": {"x": px + producer_len + 1.5, "y": out_row + 0.5}})
+        # 2) Extend the output belt east onto the freed inserter tile.
+        actions.append({"action_type": "place_ghost", "entity": belt_type,
+                        "position": {"x": px + producer_len + 0.5, "y": out_row + 0.5},
+                        "direction": "east"})
+        # 3) Corner south into the dedicated turn column, then run straight down.
+        actions.append({"action_type": "place_ghost", "entity": belt_type,
+                        "position": {"x": turn_col + 0.5, "y": out_row + 0.5},
+                        "direction": "south"})
+        for y in range(out_row + 1, in_row):
+            actions.append({"action_type": "place_ghost", "entity": belt_type,
+                            "position": {"x": turn_col + 0.5, "y": y + 0.5},
+                            "direction": "south"})
+        # 4) Corner east into the consumer input-belt west extension (feeds the
+        #    tile at turn_col+1, which is the consumer input belt's westmost tile).
+        actions.append({"action_type": "place_ghost", "entity": belt_type,
+                        "position": {"x": turn_col + 0.5, "y": in_row + 0.5},
+                        "direction": "east"})
+
+        plan = {"phases": [{
+            "name": f"chain_{producer_recipe}_to_{consumer_recipe}",
+            "actions": actions,
+        }]}
+        self._validate_and_reject_fuel(plan)
         return plan
 
     @staticmethod

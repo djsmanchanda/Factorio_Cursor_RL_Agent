@@ -32,6 +32,7 @@ def main() -> int:
     parser.add_argument("--mine", action="store_true", help="Feed the line with real miners over a seeded ore patch")
     parser.add_argument("--belt", default="transport-belt", help="Belt tier entity name")
     parser.add_argument("--inserter", default="fast-inserter", help="Inserter tier entity name")
+    parser.add_argument("--feed-style", default="chest", choices=["chest", "sideload"])
     parser.add_argument("--verify-seconds", type=float, default=60.0)
     args = parser.parse_args()
 
@@ -39,6 +40,7 @@ def main() -> int:
     plan = planner.generate_line_layout(
         args.recipe, args.machines, args.origin_x, args.origin_y,
         mining_feed=args.mine, belt_type=args.belt, inserter_type=args.inserter,
+        feed_style=args.feed_style,
     )
     materials = planner.material_requirements(plan)
     print(f"Plan: {sum(len(p['actions']) for p in plan['phases'])} actions; materials: {materials}")
