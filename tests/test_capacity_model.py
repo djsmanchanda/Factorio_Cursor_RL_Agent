@@ -203,7 +203,24 @@ def test_line_layout_is_deterministic_and_collision_free():
     materials = planner.material_requirements(plan)
     assert materials["assembling-machine-2"] == 8
     assert materials["fast-inserter"] == 16
-    assert materials["transport-belt"] == 50
+    # Gear demand is 24 plates/s; fast feeders move ~4/s, so the input belt
+    # extends west to host 6 feed points: 31 input + 24 output tiles.
+    assert materials["transport-belt"] == 55
+
+
+def test_feeder_count_scales_with_ingredient_demand():
+    from planners.local_layout_planner import LocalLayoutPlanner
+
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_line_layout(
+        "electronic-circuit", 6, 0, 0, belt_type="express-transport-belt", inserter_type="stack-inserter"
+    )
+    actions = [a for p in plan["phases"] for a in p["actions"]]
+    cable_chests = [a for a in actions if a.get("infinity_filter") == "copper-cable"]
+    plate_chests = [a for a in actions if a.get("infinity_filter") == "iron-plate"]
+    # 6 machines x 1.5 crafts/s x 3 cables = 27/s -> 3 stack feeders; plates 9/s -> 1.
+    assert len(cable_chests) == 3
+    assert len(plate_chests) == 1
 
 
 def test_mining_fed_smelting_line_layout():

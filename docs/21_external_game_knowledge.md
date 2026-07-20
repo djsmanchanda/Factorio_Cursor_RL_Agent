@@ -25,6 +25,27 @@ Per docs/19: reference data only — validated before use, never authoritative o
 - Train signals (rail standard alignment check for docs/14).
 - Circuit network cookbook (control logic, far future).
 
+## Logistics tiers (user-provided, 2026-07-18)
+- Belts (items/s): transport-belt 15, fast-transport-belt 30,
+  express-transport-belt 45, turbo-transport-belt 60 (**Vulcanus-only
+  production** — must be imported off-planet).
+- Inserters: fast-inserter baseline; bulk-inserter high hand capacity
+  (upgradable +11); stack-inserter (**Gleba-only production**) stacks items
+  4-high on belts, effectively quadrupling belt throughput.
+- Planet-sourcing constraints are supply-chain facts for PlanetPlanner-era
+  planning; on the test sandbox all tiers are available via scaffolding.
+
+## Throughput physics (user-provided, validated live 2026-07-18)
+- Inserter swings are rotation-bound: 180° to load, 180° to unload. One
+  feeder cannot supply a hungry line; the first machines strip the belt and
+  downstream machines starve (observed: 6-machine circuit line at 2/s of a
+  9/s cap, machines 3-6 idle).
+- Slower belts worsen unload time. Belt tier + inserter tier upgrades
+  measured: fast-inserter + transport-belt 0.6/s → stack-inserter +
+  express-belt 7.68/s on the same 6-machine circuit line (12.8x).
+- Planner consequence: feed points scale with per-ingredient demand
+  (feeders = ceil(demand / feeder_rate); LINE_RECIPES amounts × craft rate).
+
 ## Implications adopted (validated against our invariants)
 - Two-lane belt feeding supports 2-ingredient recipes on a single input belt
   (inserters only pick up items their destination accepts).

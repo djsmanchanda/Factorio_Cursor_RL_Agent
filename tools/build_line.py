@@ -30,11 +30,16 @@ def main() -> int:
     parser.add_argument("--origin-y", type=int, default=40)
     parser.add_argument("--anchors", default="10", help="Comma-separated scaffolding anchor x positions to stock")
     parser.add_argument("--mine", action="store_true", help="Feed the line with real miners over a seeded ore patch")
+    parser.add_argument("--belt", default="transport-belt", help="Belt tier entity name")
+    parser.add_argument("--inserter", default="fast-inserter", help="Inserter tier entity name")
     parser.add_argument("--verify-seconds", type=float, default=60.0)
     args = parser.parse_args()
 
     planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout(args.recipe, args.machines, args.origin_x, args.origin_y, mining_feed=args.mine)
+    plan = planner.generate_line_layout(
+        args.recipe, args.machines, args.origin_x, args.origin_y,
+        mining_feed=args.mine, belt_type=args.belt, inserter_type=args.inserter,
+    )
     materials = planner.material_requirements(plan)
     print(f"Plan: {sum(len(p['actions']) for p in plan['phases'])} actions; materials: {materials}")
 

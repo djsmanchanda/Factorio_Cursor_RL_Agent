@@ -18,20 +18,34 @@ from tools.validate_snapshot import validate_snapshot_file
 # ingredients ride the two lanes of the single input belt (wiki heuristic:
 # split items across both lanes; inserters only grab what the target accepts).
 LINE_RECIPES: Dict[str, dict] = {
-    "iron-gear-wheel": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"]},
-    "copper-cable": {"machine": "assembling-machine-2", "ingredients": ["copper-plate"]},
-    "iron-stick": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"]},
-    "electronic-circuit": {"machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"]},
-    "automation-science-pack": {"machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"]},
+    "iron-gear-wheel": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"], "amounts": [2], "craft_time": 0.5},
+    "copper-cable": {"machine": "assembling-machine-2", "ingredients": ["copper-plate"], "amounts": [1], "craft_time": 0.5},
+    "iron-stick": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"], "amounts": [1], "craft_time": 0.5},
+    "electronic-circuit": {"machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"], "amounts": [3, 1], "craft_time": 0.5},
+    "automation-science-pack": {"machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"], "amounts": [1, 1], "craft_time": 5.0},
     # Smelting: furnaces auto-select their recipe from the input, so no
     # recipe is set on the ghost. Electric furnaces avoid a fuel lane.
-    "iron-plate": {"machine": "electric-furnace", "ingredients": ["iron-ore"], "set_recipe": False},
-    "copper-plate": {"machine": "electric-furnace", "ingredients": ["copper-ore"], "set_recipe": False},
+    "iron-plate": {"machine": "electric-furnace", "ingredients": ["iron-ore"], "amounts": [1], "craft_time": 3.2, "set_recipe": False},
+    "copper-plate": {"machine": "electric-furnace", "ingredients": ["copper-ore"], "amounts": [1], "craft_time": 3.2, "set_recipe": False},
 }
+
+MACHINE_SPEEDS = {"assembling-machine-2": 0.75, "electric-furnace": 2.0}
+
+# Feeder inserter chest->belt throughput estimates (items/s, research-boosted;
+# docs/21). Inserter swings are rotation-bound: 180 degrees to load, 180 to
+# unload, so one feeder cannot supply a hungry line - feed points scale with
+# per-ingredient demand: feeders = ceil(demand / rate).
+FEEDER_RATES = {"fast-inserter": 4.0, "bulk-inserter": 8.0, "stack-inserter": 12.0}
 
 # Vertical pitch between stacked lines: 8 rows of layout plus 8 reserved for
 # expansion, so lines can grow east (more machines) and south (more lines).
 LINE_PITCH_Y = 16
+
+# Logistics tiers (docs/21): higher tiers raise line throughput. Turbo belts
+# and stack inserters have off-planet sourcing constraints in real supply
+# chains; on the sandbox they arrive via scaffolding.
+BELT_TIERS = {"transport-belt": 15, "fast-transport-belt": 30, "express-transport-belt": 45, "turbo-transport-belt": 60}
+INSERTER_TIERS = {"fast-inserter", "bulk-inserter", "stack-inserter"}
 
 # Invariant (docs/20 §12): all equipment is electric. Plans containing any of
 # these fuel-burning entities are rejected at validation time.
@@ -124,6 +138,8 @@ class LocalLayoutPlanner:
         origin_x: int = 0,
         origin_y: int = 0,
         mining_feed: bool = False,
+        belt_type: str = "transport-belt",
+        inserter_type: str = "fast-inserter",
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -139,6 +155,11 @@ class LocalLayoutPlanner:
         if machine_count <= 0:
             raise ValueError("machine_count must be positive")
 
+        if belt_type not in BELT_TIERS:
+            raise ValueError(f"Unknown belt tier: {belt_type}")
+        if inserter_type not in INSERTER_TIERS:
+            raise ValueError(f"Unknown inserter tier: {inserter_type}")
+
         spec = LINE_RECIPES[recipe]
         machine = spec["machine"]
         ingredients = spec["ingredients"]
@@ -150,13 +171,25 @@ class LocalLayoutPlanner:
         def at(x: float, y: float) -> dict:
             return {"x": ox + x, "y": oy + y}
 
+        # Per-ingredient demand (items/s) sets how many feed points each
+        # ingredient needs; the input belt extends west to host them.
+        amounts = spec["amounts"]
+        crafts_per_second = machine_count * MACHINE_SPEEDS[machine] / spec["craft_time"]
+        feeder_rate = FEEDER_RATES[inserter_type]
+        feeders_needed = [
+            max(1, -(-int(amount * crafts_per_second * 10) // int(feeder_rate * 10)))
+            for amount in amounts
+        ]
+        feed_slots = max(feeders_needed) if not mining_feed else 0
+        belt_west = -(1 + max(1, feed_slots))
+
         ghosts: List[dict] = []
-        # Belts: input lane must cover the feeder inserter's drop tile (-2).
-        for x in range(-2, length):
-            ghosts.append({"action_type": "place_ghost", "entity": "transport-belt",
+        # Belts: input lane must cover every feeder inserter's drop tile.
+        for x in range(belt_west, length):
+            ghosts.append({"action_type": "place_ghost", "entity": belt_type,
                            "position": at(x + 0.5, 0.5), "direction": "east"})
         for x in range(0, length):
-            ghosts.append({"action_type": "place_ghost", "entity": "transport-belt",
+            ghosts.append({"action_type": "place_ghost", "entity": belt_type,
                            "position": at(x + 0.5, 6.5), "direction": "east"})
 
         set_recipe = spec.get("set_recipe", True)
@@ -167,9 +200,9 @@ class LocalLayoutPlanner:
             if set_recipe:
                 machine_action["recipe"] = recipe
             ghosts.append(machine_action)
-            ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
+            ghosts.append({"action_type": "place_ghost", "entity": inserter_type,
                            "position": at(center, 1.5), "direction": "north"})
-            ghosts.append({"action_type": "place_ghost", "entity": "fast-inserter",
+            ghosts.append({"action_type": "place_ghost", "entity": inserter_type,
                            "position": at(center, 5.5), "direction": "north"})
 
         # Two pole rows: medium-pole supply is 7x7, so one row cannot reach
@@ -188,23 +221,29 @@ class LocalLayoutPlanner:
             {"action_type": "place_entity", "entity": "electric-energy-interface", "position": at(-7.5, 3.5)},
             {"action_type": "place_entity", "entity": "substation", "position": at(-4.0, 2.0)},
             {"action_type": "place_entity", "entity": "steel-chest", "position": at(length + 1.5, 6.5)},
-            {"action_type": "place_entity", "entity": "fast-inserter",
+            {"action_type": "place_entity", "entity": inserter_type,
              "position": at(length + 0.5, 6.5), "direction": "west"},
         ]
         if not mining_feed:
-            scaffolding.extend([
-                {"action_type": "place_entity", "entity": "infinity-chest",
-                 "position": at(-1.5, -1.5), "infinity_filter": ingredients[0]},
-                {"action_type": "place_entity", "entity": "fast-inserter",
-                 "position": at(-1.5, -0.5), "direction": "north"},
-            ])
-        if len(ingredients) == 2:
-            scaffolding.extend([
-                {"action_type": "place_entity", "entity": "infinity-chest",
-                 "position": at(-1.5, 2.5), "infinity_filter": ingredients[1]},
-                {"action_type": "place_entity", "entity": "fast-inserter",
-                 "position": at(-1.5, 1.5), "direction": "south"},
-            ])
+            # Ingredient 0 feeds from the north side, ingredient 1 from the
+            # south; each west-extension tile hosts one feed point per side.
+            for slot in range(feeders_needed[0]):
+                x = -1.5 - slot
+                scaffolding.extend([
+                    {"action_type": "place_entity", "entity": "infinity-chest",
+                     "position": at(x, -1.5), "infinity_filter": ingredients[0]},
+                    {"action_type": "place_entity", "entity": inserter_type,
+                     "position": at(x, -0.5), "direction": "north"},
+                ])
+            if len(ingredients) == 2:
+                for slot in range(feeders_needed[1]):
+                    x = -1.5 - slot
+                    scaffolding.extend([
+                        {"action_type": "place_entity", "entity": "infinity-chest",
+                         "position": at(x, 2.5), "infinity_filter": ingredients[1]},
+                        {"action_type": "place_entity", "entity": inserter_type,
+                         "position": at(x, 1.5), "direction": "south"},
+                    ])
 
         phases = [
             {"name": "line_scaffolding", "actions": scaffolding},
