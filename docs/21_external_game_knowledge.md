@@ -81,7 +81,11 @@ decision layer (docs/22) will weigh as catalog actions.
 capacity with a 20-25% buffer over raw demand (FEED_HEADROOM = 1.25 in the
 planner) — feeder counts, collector counts, and the belt-tier suggestion in
 the sideload lane check all use it. Hard lane-check failure only below raw
-demand; the suggested tier always meets demand x headroom.
+demand; the suggested tier always meets demand x headroom. Two purposes:
+supply never runs at the ragged edge, AND the slack pre-pays expansion — a
+line can grow ~25% (more machines in X) before its feed/drain infrastructure
+needs rework, which the RL decision layer should count when costing
+"extend_line_x" against other catalog actions.
 
 ## Quality system (wiki + user, 2026-07-18)
 Encoded in `core/quality_modules.py`.
