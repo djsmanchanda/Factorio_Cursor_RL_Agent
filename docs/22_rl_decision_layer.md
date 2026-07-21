@@ -68,6 +68,23 @@ Earlier stages shape; the final stage dominates as capability grows.
 - **S3: Interplanetary supply** — transporting finished/semi-finished
   products between planets; PlanetPlanner + InterplanetarySupervisor era.
 
+## Force isolation (REQUIRED for the reward to exist)
+
+The agent's factory MUST run on its own Factorio force with its own tech
+tree. Measured on a completed megabase save, research-per-time is identically
+zero — every finite technology is already researched, and a researched tech
+cannot even be un-researched (Factorio reverts it to keep prerequisites
+consistent with its researched successors). The terminal reward would be
+silently dead.
+
+Bootstrap (verified live 2026-07-18): create the force, friend it with
+"player", reassign every sandbox entity to it (electric networks are
+per-force, so power scaffolding must convert too), and mark the
+`automation-science-pack` trigger technology researched — Space Age gates the
+whole tree behind it, and a fresh force cannot queue anything without it.
+Result: 15 automation-pack technologies available, and infinite technologies
+beyond them, so the reward is attributable and unbounded.
+
 ## Training mechanics (implementation plan)
 
 1. Log transitions from live cycles: (observation, catalog action, staged

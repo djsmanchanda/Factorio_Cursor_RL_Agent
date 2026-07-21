@@ -49,10 +49,10 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 ## Phase N1 – Nauvis Core Mechanics (added 2026-07-18; see docs/22 curriculum)
 - [x] Production lines: belts, inserters, machines with recipes (verified live, 9.6/s circuit line)
 - [x] Miner-fed smelting chains; electric-only invariant; demand-scaled feeders/collectors
-- [ ] T-junction sideload feeding + dedicated ingredient belts (docs/21 patterns)
-- [ ] Line-to-line chaining: smelter output belt feeds assembler input
+- [x] T-junction sideload feeding (measured: needs lane rate >= per-ingredient demand)
+- [x] Line-to-line chaining incl. two-producer lane junctions (north/south entry)
 - [ ] Machine tier parameter (assembling-machine-1/2/3) and quality tiers
-- [ ] Full science chain: ore → automation-science-pack → labs, research progressing (Phase N2 gate)
+- [x] Full science chain: ore → automation-science-pack → labs, 4 techs researched at ~0.4 units/s (Phase N2 gate CLEARED)
 - [ ] Loop daemon builds lines (not placeholder grids); bottleneck diagnosis per line
 - [ ] Action catalog + deterministic baseline policy (greedy bottleneck relief)
 - [ ] Transition logging for the RL decision layer (docs/22)
