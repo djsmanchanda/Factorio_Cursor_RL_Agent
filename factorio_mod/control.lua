@@ -1377,10 +1377,20 @@ local function execute_build_plan(authorization, build_plan)
             force = force
           })
           if entity and action.infinity_filter then
-            entity.set_infinity_container_filter(1, {
-              name = action.infinity_filter, count = 1000, mode = "exactly", index = 1
-            })
-            entity.remove_unfiltered_items = true
+            -- Infinity CHESTS and infinity PIPES take different APIs; a fluid
+            -- source is a pipe, so branch on the entity type.
+            if entity.type == "infinity-pipe" then
+              entity.set_infinity_pipe_filter({
+                name = action.infinity_filter,
+                percentage = tonumber(action.fill_percentage) or 1.0,
+                mode = "at-least"
+              })
+            else
+              entity.set_infinity_container_filter(1, {
+                name = action.infinity_filter, count = 1000, mode = "exactly", index = 1
+              })
+              entity.remove_unfiltered_items = true
+            end
           end
           placed_entities = placed_entities + 1
         end

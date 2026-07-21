@@ -23,6 +23,17 @@ LINE_RECIPES: Dict[str, dict] = {
     "iron-stick": {"machine": "assembling-machine-2", "ingredients": ["iron-plate"], "amounts": [1], "craft_time": 0.5},
     "electronic-circuit": {"machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"], "amounts": [3, 1], "craft_time": 0.5},
     "automation-science-pack": {"machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"], "amounts": [1, 1], "craft_time": 5.0},
+    # Electronics chain toward processing units (recipe data read from the live
+    # game, 2026-07-22). advanced-circuit takes THREE ingredients, one more than
+    # the two belt lanes generate_line_layout can feed, so the data is recorded
+    # here but a line for it needs a third feed path (chained ingredient or a
+    # second input belt) before generate_line_layout will accept it.
+    "advanced-circuit": {"machine": "assembling-machine-2", "ingredients": ["plastic-bar", "copper-cable", "electronic-circuit"], "amounts": [2, 4, 2], "craft_time": 6.0},
+    # processing-unit ALSO consumes sulfuric-acid (5 per craft, a FLUID), which
+    # no belt can carry: build it with planners.fluid_layouts
+    # .generate_fluid_machine_row, never with generate_line_layout. The entry
+    # exists so demand/capacity math and the action catalog can cost the recipe.
+    "processing-unit": {"machine": "assembling-machine-2", "ingredients": ["electronic-circuit", "advanced-circuit"], "amounts": [20, 2], "craft_time": 10.0},
     # Smelting: furnaces auto-select their recipe from the input, so no
     # recipe is set on the ghost. Electric furnaces avoid a fuel lane.
     "iron-plate": {"machine": "electric-furnace", "ingredients": ["iron-ore"], "amounts": [1], "craft_time": 3.2, "set_recipe": False},

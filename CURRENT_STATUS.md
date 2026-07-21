@@ -115,6 +115,15 @@ backfilled from git history because this file did not exist yet.
 - Why: Fluids make machine ORIENTATION a planning variable for the first time - connection points rotate/flip with the entity. Verified the chemical plant (in north / out south) and oil refinery (in south / out north) are opposite-handed, so chaining them requires rotating one.
 - Next: fluid-aware layout primitives (pipe runs, underground crossings, pump breaks) in the planner, then an oil chain as the first fluid production line.
 
+## [2026-07-22] Fluid layouts built live: refineries + chemical plants on the sandbox
+- Files: planners/fluid_layouts.py, tools/build_processing_units.py, factorio_mod/control.lua, schemas/build_plan.schema.json, tests/test_fluid_layouts.py (219 tests green)
+- What: Six fluid stages built by bots at x200,y200-330: crude + water infinity-pipe sources, 2 oil refineries, and chemical plant pairs for sulfur, plastic and sulfuric acid. Every machine's fluid box verified CONNECTED to its header, recipes set.
+- Verified live (sub-agent): the pipe tile is `target_position`, ONE TILE OUTSIDE the footprint - `position` sits inside the body and connects to nothing. core/fluid_systems.py + docs/23 list `position`, so anyone laying pipe from connection_points() is off by one; fold a pipe_tile offset into core.
+- Purity rule changed the layout, not just checked it: at 3-tile pitch a sulfur row's water and gas tiles are orthogonally adjacent (unrecoverable mixing), so pitch is probed against validate_network_purity and widened - 4 for sulfur, 5 for refineries, 3 elsewhere.
+- Mod: place_entity now branches on entity type for infinity filters (pipes need set_infinity_pipe_filter, chests set_infinity_container_filter); build_plan schema gained fill_percentage.
+- GAP found live: stages are isolated islands. generate_fluid_machine_row emits a row's own headers but NO connector from a source/producer to the row that consumes it, so refineries sat at fluid_ingredient_shortage with empty boxes while the crude source was full. Hand-connecting proved the row geometry is sound. Next: a fluid chain-link (the analogue of generate_chain_link), including which header row to join - headers sit further out than the machine stub row (crude header at y226, not the stub row y223).
+- Also open: advanced-circuit needs 3 item ingredients vs 2 belt lanes, so processing-unit assembly needs a third feed path.
+
 ## Audit snapshot (2026-07-18) — where things stand
 - Mature: core/ (~2.7k LOC — metrics, progress state, authorization, phasing, advisory policies); schema validation pervasive.
 - Partial: CityPlanner (symbolic decisions only, no geometry; 2 of 9 intents have phase chains); Lua mod logic complete but targets Factorio 1.1 and was never deployed.

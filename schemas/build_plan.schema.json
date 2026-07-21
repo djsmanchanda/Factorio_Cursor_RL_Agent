@@ -2,40 +2,75 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "BuildPlan",
   "type": "object",
-  "required": ["phases"],
+  "required": [
+    "phases"
+  ],
   "properties": {
     "phases": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["name", "actions"],
+        "required": [
+          "name",
+          "actions"
+        ],
         "properties": {
-          "name": { "type": "string" },
+          "name": {
+            "type": "string"
+          },
           "actions": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["action_type"],
+              "required": [
+                "action_type"
+              ],
               "properties": {
                 "action_type": {
                   "type": "string",
-                  "enum": ["place_ghost", "place_entity", "remove_entity"]
+                  "enum": [
+                    "place_ghost",
+                    "place_entity",
+                    "remove_entity"
+                  ]
                 },
-                "entity": { "type": "string" },
+                "entity": {
+                  "type": "string"
+                },
                 "position": {
                   "type": "object",
                   "properties": {
-                    "x": { "type": "number" },
-                    "y": { "type": "number" }
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    }
                   }
                 },
                 "direction": {
                   "type": "string",
-                  "enum": ["north", "east", "south", "west"]
+                  "enum": [
+                    "north",
+                    "east",
+                    "south",
+                    "west"
+                  ]
                 },
-                "recipe": { "type": "string" },
-                "infinity_filter": { "type": "string" },
-                "blueprint": { "type": "string" }
+                "recipe": {
+                  "type": "string"
+                },
+                "infinity_filter": {
+                  "type": "string"
+                },
+                "blueprint": {
+                  "type": "string"
+                },
+                "fill_percentage": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
               }
             }
           }
