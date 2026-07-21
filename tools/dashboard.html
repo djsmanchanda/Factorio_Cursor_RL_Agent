@@ -38,6 +38,19 @@
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
   .empty { color: var(--dim); padding: 30px; text-align: center; }
   #log { max-height: 260px; overflow-y: auto; }
+  .subhead { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); margin: 18px 0 8px; }
+  .subhead:first-of-type { margin-top: 0; }
+  .explain { font-size: 13.5px; color: var(--text); margin: 8px 0 16px; padding: 8px 10px;
+             background: #232a33; border-left: 3px solid var(--amber); border-radius: 4px; }
+  .rationale { color: var(--dim); font-size: 11.5px; }
+  .verdict-green { border-color: var(--green); color: var(--green); }
+  .verdict-amber { border-color: var(--amber); color: var(--amber); }
+  .verdict-blue { border-color: var(--blue); color: var(--blue); }
+  .verdict-red { border-color: var(--red); color: var(--red); }
+  .verdict-dim { border-color: var(--edge); color: var(--dim); }
+  tr.chosen td { background: #22301f; }
+  tr.chosen td:first-child { color: var(--green); font-weight: 600; }
+  #decisions-timeline { max-height: 260px; overflow-y: auto; }
 </style>
 </head>
 <body>
@@ -71,6 +84,17 @@
   <div class="panel full">
     <h2>Iteration log</h2>
     <div id="log"><div class="empty">no iterations yet</div></div>
+  </div>
+
+  <div class="panel full">
+    <h2>Agent decisions</h2>
+    <div class="sub" id="decisions-meta">connecting…</div>
+    <div id="decisions-body"><div class="empty">waiting for the expansion daemon's first step…</div></div>
+  </div>
+
+  <div class="panel full">
+    <h2>Decisions timeline</h2>
+    <div id="decisions-timeline"><div class="empty">no steps yet</div></div>
   </div>
 </div>
 
@@ -190,6 +214,95 @@ function render(state) {
     `<table><tr><th>#</th><th>tick</th><th>built</th><th>pending</th><th>phase</th><th>actions</th></tr>${rows}</table>`;
 }
 
+// --- Agent decisions (runs/expansion_*/step_*.json via /api/expansion) ---
+
+const VERDICT_CLASS = {
+  machine_limited: "amber", healthy_ramping: "green",
+  feed_limited: "blue", drain_limited: "blue",
+  input_starved: "red", power_limited: "red", resource_depleted: "red",
+  unknown: "dim",
+};
+
+function verdictClass(verdict) {
+  return VERDICT_CLASS[verdict] || "dim";
+}
+
+function fmtNum(value, digits) {
+  return (value === null || value === undefined || Number.isNaN(Number(value))) ? "—" : Number(value).toFixed(digits);
+}
+
+function renderDecisions(expState) {
+  document.getElementById("decisions-meta").textContent = expState.run
+    ? `run ${expState.run} — ${expState.steps.length} steps — refreshed ${new Date().toLocaleTimeString()}`
+    : (expState.message || "no expansion runs yet");
+
+  const body = document.getElementById("decisions-body");
+  const timeline = document.getElementById("decisions-timeline");
+  const step = expState.latest;
+  if (!step) {
+    body.innerHTML = '<div class="empty">waiting for the expansion daemon\'s first step…</div>';
+    timeline.innerHTML = '<div class="empty">no steps yet</div>';
+    return;
+  }
+
+  const diagnosis = step.diagnosis || {};
+  const diagRows = Object.entries(diagnosis).map(([line, d]) => `
+    <tr><td>${line}</td>
+        <td><span class="tag verdict-${verdictClass(d.verdict)}">${d.verdict || "unknown"}</span></td>
+        <td>${d.confidence || ""}</td>
+        <td>${d.recommended_action || ""}</td>
+        <td class="rationale">${d.rationale || ""}</td></tr>`).join("");
+
+  const chosen = step.chosen || null;
+  const chosenKey = chosen ? JSON.stringify(chosen) : null;
+  const catalog = step.catalog || [];
+  const catalogRows = catalog.map(a => {
+    const isChosen = chosenKey !== null && JSON.stringify(a) === chosenKey;
+    return `<tr class="${isChosen ? "chosen" : ""}">
+      <td>${isChosen ? "▶ " : ""}${a.action || "?"}</td>
+      <td>${a.line || a.target || ""}</td>
+      <td>${fmtNum(a.predicted_delta, 3)}</td></tr>`;
+  }).join("");
+
+  const result = step.result || {};
+  const resultTag = result.ok === true ? '<span class="tag act">ok</span>'
+    : result.ok === false ? '<span class="tag deny">failed</span>' : "";
+
+  body.innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="v">${fmtNum(step.research_rate, 3)}</div><div class="l">research rate</div></div>
+      <div class="stat"><div class="v">${step.step ?? "—"}</div><div class="l">step</div></div>
+      <div class="stat"><div class="v">${step.tick ?? "—"}</div><div class="l">tick</div></div>
+    </div>
+    <p class="explain">${step.explain || "(no explanation recorded)"}</p>
+    <div class="subhead">Per-line diagnosis</div>
+    <table><tr><th>line</th><th>verdict</th><th>confidence</th><th>recommended action</th><th>rationale</th></tr>
+      ${diagRows || '<tr><td colspan="5" class="empty">no diagnosis recorded</td></tr>'}</table>
+    <div class="subhead">Candidate catalog</div>
+    <table><tr><th>action</th><th>line</th><th>predicted &Delta;</th></tr>
+      ${catalogRows || '<tr><td colspan="3" class="empty">no candidates recorded</td></tr>'}</table>
+    <p style="margin-top:10px">Outcome: ${resultTag} ${(result.detail || "").toString()}</p>
+  `;
+
+  const rows = expState.steps.slice().reverse().map((st, idx) => {
+    const verdicts = Object.values(st.diagnosis || {}).map(d => d.verdict);
+    const summary = verdicts.length ? [...new Set(verdicts)].join(", ") : "—";
+    const chosenAction = st.chosen ? `${st.chosen.action || "?"}${st.chosen.line ? " → " + st.chosen.line : ""}` : "none";
+    return `<tr class="${idx === 0 ? "now" : ""}"><td>${st.step}</td><td>${summary}</td>
+      <td>${chosenAction}</td><td>${fmtNum(st.research_rate, 3)}</td></tr>`;
+  }).join("");
+  timeline.innerHTML = `<table><tr><th>step</th><th>verdicts</th><th>chosen action</th><th>research rate</th></tr>${rows}</table>`;
+}
+
+async function pollExpansion() {
+  try {
+    const response = await fetch("/api/expansion");
+    renderDecisions(await response.json());
+  } catch (err) {
+    document.getElementById("decisions-meta").textContent = "dashboard server unreachable — retrying…";
+  }
+}
+
 async function poll() {
   try {
     const response = await fetch("/api/state");
@@ -199,7 +312,9 @@ async function poll() {
   }
 }
 poll();
+pollExpansion();
 setInterval(poll, 3000);
+setInterval(pollExpansion, 3000);
 </script>
 </body>
 </html>

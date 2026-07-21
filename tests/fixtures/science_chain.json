@@ -1,0 +1,67 @@
+{
+  "surface": "planner-sandbox",
+  "force": "planner",
+  "target_product": "automation-science-pack",
+  "lines": [
+    {
+      "name": "iron_smelter",
+      "recipe": "iron-plate",
+      "machines": 4,
+      "origin": [0, 100],
+      "belt_type": "express-transport-belt",
+      "inserter_type": "stack-inserter",
+      "feed_style": "chest",
+      "mining_feed": true,
+      "has_terminal_collector": false,
+      "producers": [],
+      "consumers": ["gear_line"]
+    },
+    {
+      "name": "copper_smelter",
+      "recipe": "copper-plate",
+      "machines": 2,
+      "origin": [20, 100],
+      "belt_type": "express-transport-belt",
+      "inserter_type": "stack-inserter",
+      "feed_style": "chest",
+      "mining_feed": true,
+      "has_terminal_collector": false,
+      "producers": [],
+      "consumers": ["science_line"]
+    },
+    {
+      "name": "gear_line",
+      "recipe": "iron-gear-wheel",
+      "machines": 2,
+      "origin": [17, 116],
+      "belt_type": "express-transport-belt",
+      "inserter_type": "stack-inserter",
+      "feed_style": "chained",
+      "mining_feed": false,
+      "has_terminal_collector": false,
+      "producers": ["iron_smelter"],
+      "consumers": ["science_line"]
+    },
+    {
+      "name": "science_line",
+      "recipe": "automation-science-pack",
+      "machines": 4,
+      "origin": [28, 132],
+      "belt_type": "express-transport-belt",
+      "inserter_type": "stack-inserter",
+      "feed_style": "chained",
+      "mining_feed": false,
+      "has_terminal_collector": false,
+      "producers": ["copper_smelter", "gear_line"],
+      "consumers": ["lab_row"]
+    }
+  ],
+  "lab_row": {
+    "name": "lab_row",
+    "labs": 4,
+    "origin": [45, 148],
+    "belt_type": "express-transport-belt",
+    "inserter_type": "stack-inserter"
+  },
+  "anchors": [[10, 92], [40, 158]]
+}

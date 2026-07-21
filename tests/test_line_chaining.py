@@ -500,3 +500,221 @@ def test_connector_never_stacks_two_belts_on_one_tile():
         positions = [(a["position"]["x"], a["position"]["y"])
                      for a in plan["phases"][0]["actions"] if a["action_type"] == "place_ghost"]
         assert len(positions) == len(set(positions)), f"{side}: duplicate belt tile"
+
+
+# --------------------------------------------------------------------------- #
+# In-place line growth (the "extend_line_x" catalog action)
+# --------------------------------------------------------------------------- #
+
+import json  # noqa: E402  (kept with the extension block it serves)
+
+from planners.local_layout_planner import MACHINE_WIDTH  # noqa: E402
+
+
+def _key(action: dict) -> str:
+    return json.dumps(action, sort_keys=True)
+
+
+def _placements(plan: dict) -> set:
+    return {_key(a) for a in _all_actions(plan)}
+
+
+def _removals(plan: dict) -> set:
+    return {
+        _key({"entity": a["entity"], "position": a["position"]})
+        for a in _all_actions(plan) if a["action_type"] == "remove_entity"
+    }
+
+
+def _additions(plan: dict) -> set:
+    return {_key(a) for a in _all_actions(plan) if a["action_type"] != "remove_entity"}
+
+
+def _terminal_pair(machine_count, origin_x=0, origin_y=0):
+    length = machine_count * MACHINE_WIDTH
+    return [{"x": origin_x + length + 0.5, "y": origin_y + 6.5},
+            {"x": origin_x + length + 1.5, "y": origin_y + 6.5}]
+
+
+def _strip_terminal(plan: dict, machine_count, inserter_type="fast-inserter",
+                    origin_x=0, origin_y=0) -> list:
+    pair = _terminal_pair(machine_count, origin_x, origin_y)
+    return [
+        a for a in _all_actions(plan)
+        if not (a["action_type"] == "place_entity"
+                and a["entity"] in {inserter_type, "steel-chest"}
+                and a["position"] in pair)
+    ]
+
+
+def test_extension_is_exactly_the_difference_of_the_two_full_layouts():
+    planner = LocalLayoutPlanner()
+    small = planner.generate_line_layout("iron-gear-wheel", 4, 0, 0)
+    large = planner.generate_line_layout("iron-gear-wheel", 6, 0, 0)
+    ext = planner.generate_line_extension("iron-gear-wheel", 4, 6)
+
+    small_keys, large_keys = _placements(small), _placements(large)
+    # Everything the extension places is in the big layout and not in the small
+    # one; everything it removes is in the small layout and not in the big one.
+    assert _additions(ext) == large_keys - small_keys
+    removed = {
+        _key({"entity": json.loads(k)["entity"], "position": json.loads(k)["position"]})
+        for k in small_keys - large_keys
+    }
+    assert _removals(ext) == removed
+
+    # Exactly the two new machines, with their input and output inserters.
+    machines = [a for a in _all_actions(ext) if a["entity"] == "assembling-machine-2"]
+    assert len(machines) == 2
+    assert {a["position"]["x"] for a in machines} == {13.5, 16.5}
+    assert all(a["recipe"] == "iron-gear-wheel" for a in machines)
+
+
+def test_extension_never_duplicates_existing_poles_or_belts():
+    planner = LocalLayoutPlanner()
+    small = planner.generate_line_layout("iron-gear-wheel", 4, 0, 0)
+    ext = planner.generate_line_extension("iron-gear-wheel", 4, 6)
+
+    reused = {"transport-belt", "medium-electric-pole"}
+    old_tiles = _tiles_of([a for a in _all_actions(small) if a["entity"] in reused], reused)
+    new_tiles = _tiles_of(
+        [a for a in _all_actions(ext)
+         if a["action_type"] == "place_ghost" and a["entity"] in reused], reused
+    )
+    assert new_tiles, "extension must lay new belt/pole tiles"
+    assert not (old_tiles & new_tiles), "extension re-places already-built belts/poles"
+
+    # The x=6j pole pattern continues rather than restarting: length 12 already
+    # carried poles at 0/6/12, so only x=18 is new (on both pole rows).
+    pole_x = {a["position"]["x"] for a in _all_actions(ext)
+              if a["entity"] == "medium-electric-pole"}
+    assert pole_x == {18.5}
+
+
+def test_extension_moves_the_terminal_collector():
+    planner = LocalLayoutPlanner()
+    ext = planner.generate_line_extension("iron-gear-wheel", 4, 6)
+    actions = _all_actions(ext)
+
+    old_pair = _terminal_pair(4)
+    new_pair = _terminal_pair(6)
+    removed = {(a["entity"], a["position"]["x"], a["position"]["y"])
+               for a in actions if a["action_type"] == "remove_entity"}
+    placed = {(a["entity"], a["position"]["x"], a["position"]["y"])
+              for a in actions if a["action_type"] == "place_entity"}
+    assert ("fast-inserter", old_pair[0]["x"], old_pair[0]["y"]) in removed
+    assert ("steel-chest", old_pair[1]["x"], old_pair[1]["y"]) in removed
+    assert ("fast-inserter", new_pair[0]["x"], new_pair[0]["y"]) in placed
+    assert ("steel-chest", new_pair[1]["x"], new_pair[1]["y"]) in placed
+
+    # Reclaim runs first: the new output belt lands on the old inserter's tile.
+    assert ext["phases"][0]["name"] == "extension_reclaim"
+    assert any(a["entity"] == "transport-belt" and a["position"] == {"x": 12.5, "y": 6.5}
+               for a in actions)
+
+
+def test_extension_skips_collector_move_when_line_is_chained_onward():
+    planner = LocalLayoutPlanner()
+    ext = planner.generate_line_extension("iron-gear-wheel", 4, 6, has_terminal_collector=False)
+    touched = {(a["position"]["x"], a["position"]["y"]) for a in _all_actions(ext)
+               if a["entity"] in {"fast-inserter", "steel-chest"}
+               and a["position"]["y"] == 6.5}
+    assert not touched, "chained-onward line must not touch the terminal collector"
+
+    # The rest of the delta is unchanged apart from that pair.
+    with_collector = planner.generate_line_extension("iron-gear-wheel", 4, 6)
+    dropped = _placements(with_collector) - _placements(ext)
+    assert len(dropped) == 4  # 2 removes + 2 places, all on row 6.5
+    assert planner.line_extension_cost(
+        "iron-gear-wheel", 4, 6, has_terminal_collector=False)["moves_collector"] is False
+
+    # Both variants still describe the same larger line where it matters.
+    large = planner.generate_line_layout("iron-gear-wheel", 6, 0, 0)
+    small = planner.generate_line_layout("iron-gear-wheel", 4, 0, 0)
+    expected = {_key(a) for a in _strip_terminal(large, 6)} - {_key(a) for a in _strip_terminal(small, 4)}
+    assert _additions(ext) == expected
+
+
+def test_extension_adds_feed_points_only_across_a_feeder_boundary():
+    planner = LocalLayoutPlanner()
+    # iron-gear-wheel needs 2 plates/craft: 4 machines -> 4 feeders,
+    # 6 machines -> 6, so growth crosses two boundaries.
+    grow = planner.line_extension_cost("iron-gear-wheel", 4, 6)
+    assert grow["adds_feeders"] == 2
+    assert grow["materials"]["infinity-chest"] == 2
+
+    # iron-plate smelting is slow: 4 and 5 furnaces both fit inside one feeder
+    # (0.78 and 0.98 feed points with headroom), so nothing is added.
+    flat = planner.line_extension_cost("iron-plate", 4, 5)
+    assert flat["adds_feeders"] == 0
+    assert "infinity-chest" not in flat["materials"]
+    ext = planner.generate_line_extension("iron-plate", 4, 5)
+    assert not [a for a in _all_actions(ext) if a["entity"] == "infinity-chest"]
+
+
+def test_extension_adds_mining_drills_when_mining_fed():
+    planner = LocalLayoutPlanner()
+    ext = planner.generate_line_extension("iron-plate", 4, 6, mining_feed=True)
+    drills = [a for a in _all_actions(ext) if a["entity"] == "electric-mining-drill"]
+    assert len(drills) == 2
+    assert {a["position"]["x"] for a in drills} == {13.5, 16.5}
+    assert all(a["direction"] == "south" for a in drills)
+    # Mining-fed lines have no chest feeders at either size.
+    assert not [a for a in _all_actions(ext) if a["entity"] == "infinity-chest"]
+
+
+def test_extension_rejects_shrinking_or_flat_growth():
+    planner = LocalLayoutPlanner()
+    with pytest.raises(ValueError):
+        planner.generate_line_extension("iron-gear-wheel", 6, 4)
+    with pytest.raises(ValueError):
+        planner.generate_line_extension("iron-gear-wheel", 4, 4)
+    with pytest.raises(ValueError):
+        planner.generate_line_extension("iron-gear-wheel", 0, 4)
+
+
+def test_extension_is_deterministic():
+    planner = LocalLayoutPlanner()
+    kwargs = dict(origin_x=40, origin_y=16, belt_type="express-transport-belt",
+                  inserter_type="stack-inserter", feed_style="chained")
+    a = planner.generate_line_extension("automation-science-pack", 4, 8, **kwargs)
+    b = planner.generate_line_extension("automation-science-pack", 4, 8, **kwargs)
+    assert a == b
+    assert (planner.line_extension_cost("automation-science-pack", 4, 8, **kwargs)
+            == planner.line_extension_cost("automation-science-pack", 4, 8, **kwargs))
+
+
+def test_extension_plan_passes_build_plan_schema():
+    from jsonschema import Draft7Validator
+
+    schema_path = REPO_ROOT / "schemas" / "build_plan.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    planner = LocalLayoutPlanner()
+    cases = [
+        planner.generate_line_extension("iron-gear-wheel", 4, 6),
+        planner.generate_line_extension("iron-plate", 4, 6, mining_feed=True),
+        planner.generate_line_extension("electronic-circuit", 4, 6, feed_style="sideload",
+                                        belt_type="turbo-transport-belt"),
+        planner.generate_line_extension("automation-science-pack", 4, 6, feed_style="chained",
+                                        has_terminal_collector=False),
+    ]
+    for plan in cases:
+        assert not list(Draft7Validator(schema).iter_errors(plan))
+        assert plan["phases"] and all(p["actions"] for p in plan["phases"])
+        _reject_fuel_entities(plan)
+
+
+def test_extension_cost_reports_materials_moves_and_feeders():
+    planner = LocalLayoutPlanner()
+    cost = planner.line_extension_cost("iron-gear-wheel", 4, 6)
+    assert set(cost) == {"materials", "moves_collector", "adds_feeders"}
+    assert cost["moves_collector"] is True
+
+    ext = planner.generate_line_extension("iron-gear-wheel", 4, 6)
+    ghosts = planner.material_requirements(ext)
+    assert cost["materials"]["assembling-machine-2"] == ghosts["assembling-machine-2"] == 2
+    assert cost["materials"]["transport-belt"] == ghosts["transport-belt"]
+    # The relocated collector is reclaimed, so its inserter+chest net to zero;
+    # only the extra drain collector shows up as a new steel chest.
+    assert cost["materials"]["steel-chest"] == 1
+    assert all(count > 0 for count in cost["materials"].values())

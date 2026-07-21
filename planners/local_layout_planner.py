@@ -701,6 +701,185 @@ class LocalLayoutPlanner:
         self._validate_and_reject_fuel(plan)
         return plan
 
+    def _terminal_collector_tiles(self, machine_count: int, origin_x: int, origin_y: int) -> list:
+        """Absolute positions of a line's terminal collector inserter + chest."""
+        length = machine_count * MACHINE_WIDTH
+        return [
+            {"x": origin_x + length + 0.5, "y": origin_y + 6.5},
+            {"x": origin_x + length + 1.5, "y": origin_y + 6.5},
+        ]
+
+    @staticmethod
+    def _action_key(action: dict) -> str:
+        """Canonical identity of a placement (entity + tile + every field)."""
+        return json.dumps(action, sort_keys=True)
+
+    def generate_line_extension(
+        self,
+        recipe: str,
+        current_machines: int,
+        new_machines: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+        belt_type: str = "transport-belt",
+        inserter_type: str = "fast-inserter",
+        feed_style: str = "chest",
+        chained_ingredients: "set | list | None" = None,
+        mining_feed: bool = False,
+        has_terminal_collector: bool = True,
+    ) -> dict:
+        """Grow an existing line from current_machines to new_machines IN PLACE.
+
+        This is the planner half of the "extend_line_x" catalog action: it emits
+        only the DELTA, so an agent never rebuilds (or duplicates) what already
+        stands. The delta is computed as the exact set difference between the
+        full layout of the larger line and the full layout of the smaller one,
+        both produced by generate_line_layout with identical parameters, so the
+        world after applying this plan is byte-identical to a line built at
+        new_machines from scratch.
+
+        Delta rules (all follow from that difference; listed because callers
+        cost them individually):
+
+        * machines — new_machines - current_machines machine ghosts at their
+          usual centers (3i+1.5, 3.5), each with its input inserter (row 1) and
+          output inserter (row 5).
+        * belts — input row 0 and output row 6 gain the tiles east of the old
+          east end. If the extra demand also needs more feed slots, the input
+          row additionally gains the tiles WEST of the old west end (chest
+          feeding pushes _belt_west further west per feed slot). Existing belt
+          tiles are never re-emitted.
+        * poles — the x=6j pattern simply continues: poles are emitted only for
+          the multiples of 6 that the old length did not already cover (rows 1
+          and 5). No duplicates.
+        * mining drills — with mining_feed, one more drill per added machine,
+          continuing the same 3-tile pitch.
+        * feed points — _feeders_needed is evaluated at BOTH counts; only the
+          difference is emitted (infinity chest + loading inserter per new
+          slot, chest or sideload geometry per feed_style). Because feed
+          capacity is provisioned with FEED_HEADROOM, a modest growth step
+          usually crosses no feeder boundary and adds nothing here.
+        * drain collectors — same rule by count; the extra drain collectors are
+          anchored to the east end, so the ones that must shift are emitted as
+          a remove/place pair (the resulting count matches the full layout).
+        * terminal collector — MOVES: remove_entity for the inserter at
+          (length_old, row 6) and the steel chest at (length_old+1, row 6),
+          place_entity for both at the new east end. Pass
+          has_terminal_collector=False when the line feeds a chain link instead
+          of a terminal collector: the pair is then neither removed nor placed.
+
+        Phase order is reclaim -> scaffolding -> ghosts. Reclaim must run first:
+        the new output-belt tiles land exactly on the old collector's tiles.
+
+        Caller responsibility (NOT emitted here): when has_terminal_collector is
+        False, the downstream chain link laid by generate_chain_link starts at
+        the OLD east end and is invalidated by the growth — regenerate it for
+        the new machine count after applying this plan.
+
+        Raises ValueError if new_machines <= current_machines.
+        """
+        if current_machines <= 0:
+            raise ValueError("current_machines must be positive")
+        if new_machines <= current_machines:
+            raise ValueError(
+                f"extension must grow the line: new_machines={new_machines} "
+                f"must exceed current_machines={current_machines}"
+            )
+
+        def full(count: int) -> List[dict]:
+            plan = self.generate_line_layout(
+                recipe, count, origin_x, origin_y, mining_feed=mining_feed,
+                belt_type=belt_type, inserter_type=inserter_type,
+                feed_style=feed_style, chained_ingredients=chained_ingredients,
+            )
+            actions = [a for phase in plan["phases"] for a in phase["actions"]]
+            if has_terminal_collector:
+                return actions
+            terminal = self._terminal_collector_tiles(count, origin_x, origin_y)
+            return [
+                a for a in actions
+                if not (a["action_type"] == "place_entity"
+                        and a["entity"] in {inserter_type, "steel-chest"}
+                        and a.get("position") in terminal)
+            ]
+
+        old_actions = full(current_machines)
+        new_actions = full(new_machines)
+        old_keys = {self._action_key(a) for a in old_actions}
+        new_keys = {self._action_key(a) for a in new_actions}
+
+        additions = [a for a in new_actions if self._action_key(a) not in old_keys]
+        reclaim = [
+            {"action_type": "remove_entity", "entity": a["entity"], "position": a["position"]}
+            for a in old_actions if self._action_key(a) not in new_keys
+        ]
+
+        phases = [
+            {"name": "extension_reclaim", "actions": reclaim},
+            {"name": "extension_scaffolding",
+             "actions": [a for a in additions if a["action_type"] == "place_entity"]},
+            {"name": f"extend_line_{recipe}",
+             "actions": [a for a in additions if a["action_type"] == "place_ghost"]},
+        ]
+        plan = {"phases": [phase for phase in phases if phase["actions"]]}
+        self._validate_and_reject_fuel(plan)
+        return plan
+
+    def line_extension_cost(
+        self,
+        recipe: str,
+        current_machines: int,
+        new_machines: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+        belt_type: str = "transport-belt",
+        inserter_type: str = "fast-inserter",
+        feed_style: str = "chest",
+        chained_ingredients: "set | list | None" = None,
+        mining_feed: bool = False,
+        has_terminal_collector: bool = True,
+    ) -> dict:
+        """Cost of the extend_line_x action, read off the generated delta plan.
+
+        Returns:
+          materials — items the extension consumes, keyed by entity name:
+            ghost requirements (material_requirements) plus directly placed
+            scaffolding, MINUS reclaimed entities (a moved collector returns its
+            inserter and chest to inventory, so it nets to zero). Entities whose
+            net is <= 0 are omitted.
+          moves_collector — True when the terminal collector pair is relocated.
+          adds_feeders — number of new feed points (one infinity chest each);
+            0 when the extra demand still fits the existing feeders.
+        """
+        plan = self.generate_line_extension(
+            recipe, current_machines, new_machines, origin_x, origin_y,
+            belt_type, inserter_type, feed_style, chained_ingredients,
+            mining_feed, has_terminal_collector,
+        )
+        materials = Counter(self.material_requirements(plan))
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                if action["action_type"] == "place_entity":
+                    materials[action["entity"]] += 1
+                elif action["action_type"] == "remove_entity":
+                    materials[action["entity"]] -= 1
+
+        terminal = self._terminal_collector_tiles(current_machines, origin_x, origin_y)
+        moves_collector = any(
+            action["action_type"] == "remove_entity" and action["position"] in terminal
+            for phase in plan["phases"] for action in phase["actions"]
+        )
+        adds_feeders = sum(
+            1
+            for phase in plan["phases"] for action in phase["actions"]
+            if action["action_type"] == "place_entity" and action["entity"] == "infinity-chest"
+        )
+        return {
+            "materials": {name: count for name, count in sorted(materials.items()) if count > 0},
+            "moves_collector": moves_collector,
+            "adds_feeders": adds_feeders,
+        }
+
     def generate_lab_row(
         self,
         lab_count: int,
