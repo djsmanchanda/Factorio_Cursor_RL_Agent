@@ -109,6 +109,12 @@ backfilled from git history because this file did not exist yet.
 - Dashboard moved to port 9137 (8765 collided with a user app) and gained an Agent decisions panel + decisions timeline.
 - Next: executors for tier upgrades / new mines; diminishing-returns awareness (the baseline repeats one action while it stays binding - the first thing a learned policy should improve); a second science type to extend the tech ceiling.
 
+## [2026-07-18] Fluid systems knowledge encoded
+- Files: core/fluid_systems.py, docs/23_fluid_systems.md, tests/test_fluid_systems.py (147 tests green)
+- What: Fluid mechanics as planner data + hard validators. Entity tables, connection offsets, and the pump's half-tile geometry all verified live against 2.0.77 prototypes via RCON (not recalled). validate_network_purity is a hard guard - two fluids in one network deletes all but one and needs flushing/deconstruction, so mixing is a correctness failure like the quality jam, never a warning. Also: underground span <= 10 (the only legal fluid crossing), pipelines over 320x320 without a pump stop entirely, pumps separate networks AND refresh long runs.
+- Why: Fluids make machine ORIENTATION a planning variable for the first time - connection points rotate/flip with the entity. Verified the chemical plant (in north / out south) and oil refinery (in south / out north) are opposite-handed, so chaining them requires rotating one.
+- Next: fluid-aware layout primitives (pipe runs, underground crossings, pump breaks) in the planner, then an oil chain as the first fluid production line.
+
 ## Audit snapshot (2026-07-18) — where things stand
 - Mature: core/ (~2.7k LOC — metrics, progress state, authorization, phasing, advisory policies); schema validation pervasive.
 - Partial: CityPlanner (symbolic decisions only, no geometry; 2 of 9 intents have phase chains); Lua mod logic complete but targets Factorio 1.1 and was never deployed.
