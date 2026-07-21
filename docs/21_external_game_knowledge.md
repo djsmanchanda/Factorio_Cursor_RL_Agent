@@ -87,6 +87,21 @@ line can grow ~25% (more machines in X) before its feed/drain infrastructure
 needs rework, which the RL decision layer should count when costing
 "extend_line_x" against other catalog actions.
 
+## Roboport ranges (user-provided, verified live 2026-07-22)
+Two distinct radii, and confusing them wastes materials or strands builds:
+- **construction area**: `construction_radius = 55` -> 110x110 tiles. This is
+  where construction bots may place ghosts. Overlapping construction areas do
+  NOT merge networks.
+- **supply / logistic area**: `logistic_radius = 25` -> 50x50 tiles. This is
+  what links roboports into ONE network; in practice roboports must be within
+  **~46 tiles** of each other to connect.
+Consequence for scaffolding anchors: anchors further apart than ~46 tiles are
+separate logistic networks, so each needs its own materials and bots (verified
+live: anchors at (10,92) and (40,158), 68 tiles apart, report
+`same_network=false`). Either space anchors <= 46 apart to form one network and
+stock it once, or keep them separate and stock every anchor - the planner must
+choose deliberately rather than assume.
+
 ## Quality system (wiki + user, 2026-07-18)
 Encoded in `core/quality_modules.py`.
 
