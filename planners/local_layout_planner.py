@@ -62,7 +62,40 @@ INSERTER_TIERS = {"fast-inserter", "bulk-inserter", "stack-inserter"}
 # two/one tiles further west of each feeder belt.
 SIDELOAD_NORTH_COL = -2  # tile column of the north feeder belt (ingredient 0)
 SIDELOAD_SOUTH_COL = -3  # tile column of the south feeder belt (ingredient 1)
-FEED_STYLES = {"chest", "sideload"}
+# feed_style="chained": one or more ingredients arrive over a chain-link belt
+# (generate_chain_link) instead of local scaffolding. Chained ingredients emit
+# NO infinity chest / feeder at all; the input belt still extends west to host
+# the chain junction tile, and non-chained ingredients keep their chest feeders.
+FEED_STYLES = {"chest", "sideload", "chained"}
+
+# generate_chain_link junction modes. "head_on" (default, legacy): connector
+# corners east straight into the consumer input-belt west end. "north"/"south":
+# the connector sideloads one lane of the consumer input belt from that edge, so
+# two producers can feed one consumer on opposite lanes (verified: north entry
+# fills lane 1, south entry lane 2).
+CHAIN_JUNCTION_SIDES = {"head_on", "north", "south"}
+
+# Chained-line geometry (all columns are tile indices relative to the consumer
+# origin, all WEST of x=0 so nothing touches machines/inserters/poles):
+#   -1  north junction: connector descends here, its last tile at row -1 faces
+#       south and sideloads the input belt tile (-1, 0) onto the north lane.
+#   -2  south junction: connector's last tile at row +1 faces north and
+#       sideloads (-2, 0) onto the south lane.
+#   -4  south approach: the south connector descends here (west of the input
+#       belt so it can pass row 0 safely), then runs east along row +1.
+# Output inserters drop onto one lane only, so a chain delivers a single lane -
+# hence two producers must enter on opposite sides to stay separated.
+CHAINED_BELT_WEST = -3
+CHAIN_NORTH_JUNCTION_COL = -1
+CHAIN_SOUTH_JUNCTION_COL = -2
+CHAIN_SOUTH_APPROACH_COL = -4
+
+# Poles connect only within the SHORTER of the two wire reaches, so a
+# substation must sit within a medium pole's 9 tiles of the line's first pole
+# (x=0.5) or the line has no power at all. -7 clears the connector columns
+# (-4 approach, -2/-1 junctions) and the south connector's row +1 run.
+MEDIUM_POLE_WIRE_REACH = 9.0
+CHAINED_SUBSTATION_X = -7.0
 
 # Invariant (docs/20 §12): all equipment is electric. Plans containing any of
 # these fuel-burning entities are rejected at validation time.
@@ -158,6 +191,7 @@ class LocalLayoutPlanner:
         belt_type: str = "transport-belt",
         inserter_type: str = "fast-inserter",
         feed_style: str = "chest",
+        chained_ingredients: "set | list | None" = None,
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -196,6 +230,13 @@ class LocalLayoutPlanner:
         chests column -5. The input belt extends west to include both junction
         tiles (-2 and, for two ingredients, -3). Power scaffolding is pushed
         further west of every feeder tile so nothing overlaps.
+
+        feed_style="chained": ingredients listed in chained_ingredients (by
+        index; default = all of them) arrive over a chain link from an upstream
+        line and get NO local feeders at all. Any ingredient NOT in that set
+        keeps its chest feeders. The input belt still extends west to
+        CHAINED_BELT_WEST so generate_chain_link has junction tiles to land on,
+        and power is pushed west of the south connector's approach column.
         """
         if recipe not in LINE_RECIPES:
             raise ValueError(f"No line recipe knowledge for: {recipe}")
@@ -216,6 +257,20 @@ class LocalLayoutPlanner:
         ingredients = spec["ingredients"]
         if not 1 <= len(ingredients) <= 2:
             raise ValueError("Line layouts support one or two ingredients (two belt lanes)")
+
+        # A chain delivers one lane, so chained ingredients face the same lane
+        # ceiling as sideload feeding.
+        if feed_style == "chained" and not mining_feed:
+            chained = set(range(len(ingredients))) if chained_ingredients is None else set(chained_ingredients)
+            if not chained:
+                raise ValueError("feed_style='chained' requires at least one chained ingredient index")
+            if any(index not in range(len(ingredients)) for index in chained):
+                raise ValueError(f"chained_ingredients out of range for {recipe}: {sorted(chained)}")
+            if len(chained) > 2:
+                raise ValueError("At most two ingredients can be chained (one per lane)")
+            self._check_sideload_lane_capacity(recipe, machine_count, belt_type, only_indices=chained)
+        else:
+            chained = set()
         length = machine_count * MACHINE_WIDTH
         ox, oy = origin_x, origin_y
 
@@ -270,6 +325,14 @@ class LocalLayoutPlanner:
             westmost = (SIDELOAD_SOUTH_COL if len(ingredients) == 2 else SIDELOAD_NORTH_COL) - 2
             interface_pos = at(westmost - 6.0, 3.5)
             substation_pos = at(westmost - 3.0, 2.0)
+        elif chained:
+            # Clear of the south connector's approach column and its row +1 run,
+            # but still within MEDIUM_POLE_WIRE_REACH of the first line pole
+            # (x=0.5) - a substation 9.5 tiles away silently fails to connect,
+            # which reads as no_power on every machine (found live).
+            westmost = CHAIN_SOUTH_APPROACH_COL - 2
+            interface_pos = at(westmost - 6.0, 3.5)
+            substation_pos = at(CHAINED_SUBSTATION_X, 2.0)
         else:
             interface_pos = at(-7.5, 3.5)
             substation_pos = at(-4.0, 2.0)
@@ -290,18 +353,21 @@ class LocalLayoutPlanner:
                  "position": at(x, 7.5), "direction": "north"},
                 {"action_type": "place_entity", "entity": "steel-chest", "position": at(x, 8.5)},
             ])
-        if not mining_feed and feed_style == "chest":
+        if not mining_feed and feed_style in {"chest", "chained"}:
             # Ingredient 0 feeds from the north side, ingredient 1 from the
             # south; each west-extension tile hosts one feed point per side.
-            for slot in range(feeders_needed[0]):
-                x = -1.5 - slot
-                scaffolding.extend([
-                    {"action_type": "place_entity", "entity": "infinity-chest",
-                     "position": at(x, -1.5), "infinity_filter": ingredients[0]},
-                    {"action_type": "place_entity", "entity": inserter_type,
-                     "position": at(x, -0.5), "direction": "north"},
-                ])
-            if len(ingredients) == 2:
+            # Chained ingredients are supplied by an upstream line instead, so
+            # they emit no feeders at all.
+            if 0 not in chained:
+                for slot in range(feeders_needed[0]):
+                    x = -1.5 - slot
+                    scaffolding.extend([
+                        {"action_type": "place_entity", "entity": "infinity-chest",
+                         "position": at(x, -1.5), "infinity_filter": ingredients[0]},
+                        {"action_type": "place_entity", "entity": inserter_type,
+                         "position": at(x, -0.5), "direction": "north"},
+                    ])
+            if len(ingredients) == 2 and 1 not in chained:
                 for slot in range(feeders_needed[1]):
                     x = -1.5 - slot
                     scaffolding.extend([
@@ -424,18 +490,24 @@ class LocalLayoutPlanner:
             for amount in spec["amounts"]
         ]
 
-    def _check_sideload_lane_capacity(self, recipe: str, machine_count: int, belt_type: str) -> None:
+    def _check_sideload_lane_capacity(self, recipe: str, machine_count: int, belt_type: str,
+                                      only_indices: "set | None" = None) -> None:
         """Sideload gives each ingredient ONE lane; demand must fit it.
 
         Hard failure below raw demand (physically cannot keep up — measured
         live: express lane 22.5/s vs 27/s cable demand ran at 8.27/s of a
         9.6/s cap). The error names the cheapest tier meeting demand with
         FEED_HEADROOM so callers can upgrade or switch feed style.
+
+        only_indices restricts the check to specific ingredient indices, used
+        by chained lines where just some ingredients arrive one-lane.
         """
         spec = LINE_RECIPES[recipe]
         crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
         lane_rate = BELT_TIERS[belt_type] / 2
-        for ingredient, amount in zip(spec["ingredients"], spec["amounts"]):
+        for index, (ingredient, amount) in enumerate(zip(spec["ingredients"], spec["amounts"])):
+            if only_indices is not None and index not in only_indices:
+                continue
             demand = amount * crafts_per_second
             if lane_rate < demand:
                 target = demand * FEED_HEADROOM
@@ -457,6 +529,8 @@ class LocalLayoutPlanner:
         only need the belt to reach their junction columns (-2, and -3 when a
         second ingredient feeds from the south).
         """
+        if feed_style == "chained" and not mining_feed:
+            return CHAINED_BELT_WEST
         if feed_style == "sideload" and not mining_feed:
             ingredients = LINE_RECIPES[recipe]["ingredients"]
             return SIDELOAD_SOUTH_COL if len(ingredients) == 2 else SIDELOAD_NORTH_COL
@@ -487,6 +561,7 @@ class LocalLayoutPlanner:
         belt_type: str = "transport-belt",
         inserter_type: str = "fast-inserter",
         consumer_feed_style: str = "chest",
+        junction_side: str = "head_on",
     ) -> dict:
         """Route a producer line's OUTPUT belt into a consumer line's INPUT belt.
 
@@ -518,6 +593,20 @@ class LocalLayoutPlanner:
         the error states the required value. Constraint: the consumer must sit at
         cy >= py + LINE_PITCH_Y so the vertical run has room and never overlaps
         the producer's own rows.
+
+        junction_side selects how the connector enters the consumer, because
+        output inserters drop onto ONE lane - so two producers feeding one
+        consumer must enter from opposite edges to keep their items separated:
+
+          "head_on" (default): corners east into the input belt's west end
+              (pinned consumer_x = turn_col + 1 - consumer_belt_west).
+          "north": the connector descends in the consumer's own
+              CHAIN_NORTH_JUNCTION_COL and its last tile (row -1) faces south,
+              sideloading the north lane (pinned consumer_x = turn_col + 1).
+          "south": the connector descends in CHAIN_SOUTH_APPROACH_COL (west of
+              the input belt so it passes row 0 safely), corners east along row
+              +1, and its last tile at CHAIN_SOUTH_JUNCTION_COL faces north,
+              sideloading the south lane (pinned consumer_x = turn_col + 4).
         """
         if producer_recipe not in LINE_RECIPES:
             raise ValueError(f"No line recipe knowledge for producer: {producer_recipe}")
@@ -529,6 +618,8 @@ class LocalLayoutPlanner:
             raise ValueError(f"Unknown inserter tier: {inserter_type}")
         if consumer_feed_style not in FEED_STYLES:
             raise ValueError(f"Unknown feed style: {consumer_feed_style}")
+        if junction_side not in CHAIN_JUNCTION_SIDES:
+            raise ValueError(f"Unknown junction side: {junction_side}")
         if producer_machines <= 0 or consumer_machines <= 0:
             raise ValueError("machine counts must be positive")
 
@@ -547,11 +638,16 @@ class LocalLayoutPlanner:
             consumer_recipe, consumer_machines, consumer_feed_style, inserter_type, False
         )
         turn_col = px + producer_len + 1
-        required_cx = turn_col + 1 - consumer_belt_west
+        if junction_side == "head_on":
+            required_cx = turn_col + 1 - consumer_belt_west
+        elif junction_side == "north":
+            required_cx = turn_col - CHAIN_NORTH_JUNCTION_COL
+        else:  # south: the connector descends in the approach column
+            required_cx = turn_col - CHAIN_SOUTH_APPROACH_COL
         if cx != required_cx:
             raise ValueError(
-                f"consumer_origin x must be {required_cx} so the connector lands on the "
-                f"consumer input-belt west extension (got {cx}); "
+                f"consumer_origin x must be {required_cx} for junction_side='{junction_side}' "
+                f"so the connector lands on the consumer input belt (got {cx}); "
                 f"turn_col={turn_col}, consumer_belt_west={consumer_belt_west}"
             )
 
@@ -566,23 +662,106 @@ class LocalLayoutPlanner:
                         "position": {"x": px + producer_len + 0.5, "y": out_row + 0.5},
                         "direction": "east"})
         # 3) Corner south into the dedicated turn column, then run straight down.
+        #    "north" stops one row above the input belt and pushes into it;
+        #    the others descend to (head_on) or past (south) the input row.
+        # "south" descends THROUGH the input row to corner east below it; the
+        # others stop one row short so the junction/corner tile is free.
+        last_descent_row = in_row if junction_side == "south" else in_row - 1
         actions.append({"action_type": "place_ghost", "entity": belt_type,
                         "position": {"x": turn_col + 0.5, "y": out_row + 0.5},
                         "direction": "south"})
-        for y in range(out_row + 1, in_row):
+        for y in range(out_row + 1, last_descent_row + 1):
             actions.append({"action_type": "place_ghost", "entity": belt_type,
                             "position": {"x": turn_col + 0.5, "y": y + 0.5},
                             "direction": "south"})
-        # 4) Corner east into the consumer input-belt west extension (feeds the
-        #    tile at turn_col+1, which is the consumer input belt's westmost tile).
-        actions.append({"action_type": "place_ghost", "entity": belt_type,
-                        "position": {"x": turn_col + 0.5, "y": in_row + 0.5},
-                        "direction": "east"})
+
+        # 4) Enter the consumer.
+        if junction_side == "north":
+            # The last descending tile (row in_row-1, facing south) already
+            # sideloads the input belt tile below it - nothing more to place.
+            pass
+        elif junction_side == "head_on":
+            actions.append({"action_type": "place_ghost", "entity": belt_type,
+                            "position": {"x": turn_col + 0.5, "y": in_row + 0.5},
+                            "direction": "east"})
+        else:  # south: corner east below the line, then push north into it
+            junction_col = cx + CHAIN_SOUTH_JUNCTION_COL
+            for x in range(turn_col, junction_col):
+                actions.append({"action_type": "place_ghost", "entity": belt_type,
+                                "position": {"x": x + 0.5, "y": in_row + 1.5},
+                                "direction": "east"})
+            actions.append({"action_type": "place_ghost", "entity": belt_type,
+                            "position": {"x": junction_col + 0.5, "y": in_row + 1.5},
+                            "direction": "north"})
 
         plan = {"phases": [{
             "name": f"chain_{producer_recipe}_to_{consumer_recipe}",
             "actions": actions,
         }]}
+        self._validate_and_reject_fuel(plan)
+        return plan
+
+    def generate_lab_row(
+        self,
+        lab_count: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+        belt_type: str = "transport-belt",
+        inserter_type: str = "fast-inserter",
+    ) -> dict:
+        """Row of labs fed science packs by a belt - the end of every chain.
+
+        Rows (y offsets from origin, y grows south):
+          0: input belt flowing east (extends west to CHAINED_BELT_WEST so a
+             chain link can land on it)
+          1: inserters facing north (pick from the belt, drop south into the
+             lab) + medium poles at x=6j
+          2-4: labs, 3x3 at 3-tile pitch, centered (3i+1.5, 3.5)
+
+        Labs consume and produce nothing on a belt, so there is no output side
+        and no collectors. Lab consumption is slow (one science pack per
+        research unit over seconds), so one inserter per lab is ample.
+        """
+        if lab_count <= 0:
+            raise ValueError("lab_count must be positive")
+        if belt_type not in BELT_TIERS:
+            raise ValueError(f"Unknown belt tier: {belt_type}")
+        if inserter_type not in INSERTER_TIERS:
+            raise ValueError(f"Unknown inserter tier: {inserter_type}")
+
+        ox, oy = origin_x, origin_y
+        length = lab_count * MACHINE_WIDTH
+
+        def at(x: float, y: float) -> dict:
+            return {"x": ox + x, "y": oy + y}
+
+        ghosts: List[dict] = []
+        for x in range(CHAINED_BELT_WEST, length):
+            ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                           "position": at(x + 0.5, 0.5), "direction": "east"})
+        for i in range(lab_count):
+            center = i * MACHINE_WIDTH + 1.5
+            ghosts.append({"action_type": "place_ghost", "entity": "lab",
+                           "position": at(center, 3.5)})
+            ghosts.append({"action_type": "place_ghost", "entity": inserter_type,
+                           "position": at(center, 1.5), "direction": "north"})
+        for x in range(0, length + 1, 6):
+            ghosts.append({"action_type": "place_ghost", "entity": "medium-electric-pole",
+                           "position": at(x + 0.5, 1.5)})
+
+        # Power sits west of the chain junction columns, like chained lines.
+        westmost = CHAIN_SOUTH_APPROACH_COL - 2
+        scaffolding = [
+            {"action_type": "place_entity", "entity": "electric-energy-interface",
+             "position": at(westmost - 6.0, 3.5)},
+            {"action_type": "place_entity", "entity": "substation",
+             "position": at(CHAINED_SUBSTATION_X, 2.0)},
+        ]
+
+        plan = {"phases": [
+            {"name": "lab_scaffolding", "actions": scaffolding},
+            {"name": "lab_row", "actions": ghosts},
+        ]}
         self._validate_and_reject_fuel(plan)
         return plan
 

@@ -1228,10 +1228,21 @@ local function ensure_scaffolding(payload)
     if x == nil then
       error("Scaffolding anchor must be a number or an object with x")
     end
+    -- Optional per-anchor y (default -3, today's roboport row) so southern
+    -- anchor rows can be provisioned for lines built at y>=52. Every entity
+    -- offset below is relative to this anchor y, so y=-3 reproduces the
+    -- original layout byte-for-byte.
+    local y = -3
+    if type(anchor) == "table" and anchor.y ~= nil then
+      y = tonumber(anchor.y)
+      if y == nil then
+        error("Scaffolding anchor y must be a number")
+      end
+    end
 
-    local _, new_eei = ensure_entity(surface, force, "electric-energy-interface", { x - 4, -8 })
-    local _, new_sub = ensure_entity(surface, force, "substation", { x, -7 })
-    local roboport, new_rp = ensure_entity(surface, force, "roboport", { x, -3 })
+    local _, new_eei = ensure_entity(surface, force, "electric-energy-interface", { x - 4, y - 5 })
+    local _, new_sub = ensure_entity(surface, force, "substation", { x, y - 4 })
+    local roboport, new_rp = ensure_entity(surface, force, "roboport", { x, y })
     created = created + (new_eei and 1 or 0) + (new_sub and 1 or 0) + (new_rp and 1 or 0)
 
     local robot_inventory = roboport.get_inventory(defines.inventory.roboport_robot)
@@ -1240,13 +1251,13 @@ local function ensure_scaffolding(payload)
       roboport.insert({ name = "construction-robot", count = bots_target - have_bots })
     end
 
-    local provider, new_chest = ensure_entity(surface, force, "passive-provider-chest", { x + 4, -8 })
-    local _, new_storage = ensure_entity(surface, force, "storage-chest", { x + 6, -8 })
+    local provider, new_chest = ensure_entity(surface, force, "passive-provider-chest", { x + 4, y - 5 })
+    local _, new_storage = ensure_entity(surface, force, "storage-chest", { x + 6, y - 5 })
     created = created + (new_chest and 1 or 0) + (new_storage and 1 or 0)
 
     local materials = type(anchor) == "table" and anchor.materials or nil
     if materials then
-      local network = surface.find_logistic_network_by_position({ x, -3 }, force)
+      local network = surface.find_logistic_network_by_position({ x, y }, force)
       for item, count in pairs(materials) do
         local target = tonumber(count) or 0
         local have = network and network.get_item_count(item) or 0
@@ -1321,6 +1332,7 @@ local function execute_build_plan(authorization, build_plan)
   local placed_ghosts = 0
   local placed_entities = 0
   local recipe_failures = 0
+  local removed_entities = 0
 
   for _, phase in ipairs(build_plan.phases) do
     for _, action in ipairs(phase.actions or {}) do
@@ -1372,13 +1384,39 @@ local function execute_build_plan(authorization, build_plan)
           end
           placed_entities = placed_entities + 1
         end
+      elseif action.action_type == "remove_entity" then
+        -- Chain links reclaim a producer's terminal collector so its output
+        -- belt can continue east. Missing targets are not an error: the plan
+        -- may be re-run, or bots may not have built the collector yet.
+        local doomed = surface.find_entities_filtered({
+          name = action.entity,
+          area = { { position.x - 0.6, position.y - 0.6 }, { position.x + 0.6, position.y + 0.6 } }
+        })
+        for _, entity in pairs(doomed) do
+          if entity.valid then
+            entity.destroy()
+            removed_entities = removed_entities + 1
+          end
+        end
+        -- Ghosts of the same entity would rebuild it; clear those too.
+        local ghosts = surface.find_entities_filtered({
+          name = "entity-ghost",
+          area = { { position.x - 0.6, position.y - 0.6 }, { position.x + 0.6, position.y + 0.6 } }
+        })
+        for _, ghost in pairs(ghosts) do
+          if ghost.valid and ghost.ghost_name == action.entity then
+            ghost.destroy()
+            removed_entities = removed_entities + 1
+          end
+        end
       else
         error("Unsupported build plan action: " .. tostring(action.action_type))
       end
     end
   end
 
-  return { placed_ghosts = placed_ghosts, placed_entities = placed_entities, recipe_failures = recipe_failures }
+  return { placed_ghosts = placed_ghosts, placed_entities = placed_entities,
+           recipe_failures = recipe_failures, removed_entities = removed_entities }
 end
 
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
@@ -1397,6 +1435,7 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
   local report = { tick = game.tick, ok = run_ok }
   if run_ok then
     report.placed_ghosts = result.placed_ghosts
+    report.removed_entities = result.removed_entities
     report.placed_entities = result.placed_entities
     report.recipe_failures = result.recipe_failures
   else
@@ -1405,6 +1444,100 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
 
   local json = helpers.table_to_json(report)
   helpers.write_file("factorio_mod/layout_reports/layout_" .. game.tick .. ".json", json, false)
+end)
+
+local function parse_research_payload(json_text)
+  if not json_text or json_text == "" then
+    return nil, "Missing research payload JSON"
+  end
+
+  local ok, payload = pcall(function()
+    return helpers.json_to_table(json_text)
+  end)
+  if not ok or type(payload) ~= "table" then
+    return nil, "Invalid research payload JSON"
+  end
+  if type(payload.technology) ~= "string" or payload.technology == "" then
+    return nil, "Research payload must include technology"
+  end
+
+  return payload, nil
+end
+
+local function set_research(technology)
+  local force = game.forces["player"]
+  local tech = force.technologies[technology]
+  if not tech then
+    error("Unknown technology: " .. tostring(technology))
+  end
+  if tech.researched then
+    error("Technology already researched: " .. technology)
+  end
+
+  -- Factorio 2.0: force.add_research appends to the research queue, so clear
+  -- it first for deterministic single-target behavior.
+  force.research_queue = {}
+  force.add_research(technology)
+end
+
+commands.add_command("set_research", "Set the current research target for force player. Parameter: JSON {technology}.", function(command)
+  local payload, parse_err = parse_research_payload(command.parameter)
+
+  local report = { tick = game.tick }
+  report.technology = payload and payload.technology or nil
+
+  if parse_err then
+    report.ok = false
+    report.error = parse_err
+  else
+    local ok, run_err = pcall(function()
+      set_research(payload.technology)
+    end)
+    report.ok = ok
+    if not ok then
+      report.error = tostring(run_err)
+    end
+  end
+
+  local json = helpers.table_to_json(report)
+  helpers.write_file("factorio_mod/research_reports/research_" .. game.tick .. ".json", json, false)
+end)
+
+local function build_research_status()
+  local force = game.forces["player"]
+  local current = force.current_research
+
+  local queue = {}
+  for _, tech in ipairs(force.research_queue) do
+    table.insert(queue, tech.name)
+  end
+
+  local science_packs = {}
+  if current then
+    for _, ingredient in pairs(current.research_unit_ingredients) do
+      science_packs[ingredient.name] = ingredient.amount
+    end
+  end
+
+  return {
+    tick = game.tick,
+    current_research = current and current.name or nil,
+    research_progress = force.research_progress or 0,
+    research_queue = queue,
+    science_packs = science_packs
+  }
+end
+
+commands.add_command("research_status", "Export current research status JSON (current research, progress, queue, science packs).", function(command)
+  local status = build_research_status()
+
+  local json = helpers.table_to_json(status)
+  -- Empty Lua tables serialize as {} but the schema requires an array.
+  if #status.research_queue == 0 then
+    json = json:gsub('"research_queue":{}', '"research_queue":[]')
+  end
+  local path = "factorio_mod/research_reports/research_status_" .. game.tick .. ".json"
+  helpers.write_file(path, json, false)
 end)
 
 script.on_event(defines.events.on_robot_built_entity, function(event)

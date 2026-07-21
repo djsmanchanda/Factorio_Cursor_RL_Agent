@@ -291,3 +291,212 @@ def test_fuel_guard_fires_on_doctored_plan():
 def test_sideload_constants_are_west_of_origin():
     assert SIDELOAD_NORTH_COL < 0
     assert SIDELOAD_SOUTH_COL < 0
+
+
+# --- chained feeds, lane junctions, and lab rows (science chain wave) ---
+
+def _all_actions(plan):
+    return [a for phase in plan["phases"] for a in phase["actions"]]
+
+
+def _tiles_of(actions, entity_names, footprint=1):
+    """Occupied tiles for the named entities (footprint 1 or 3 per side)."""
+    tiles = set()
+    for action in actions:
+        if action["entity"] not in entity_names:
+            continue
+        px, py = action["position"]["x"], action["position"]["y"]
+        if footprint == 1:
+            tiles.add((px, py))
+        else:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    tiles.add((px + dx, py + dy))
+    return tiles
+
+
+def test_chained_line_emits_no_feeders_but_keeps_belt_extension():
+    from planners.local_layout_planner import CHAINED_BELT_WEST
+
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_line_layout(
+        "automation-science-pack", 6, 0, 0, feed_style="chained",
+        belt_type="express-transport-belt", inserter_type="stack-inserter",
+    )
+    actions = _all_actions(plan)
+    assert not [a for a in actions if a["entity"] == "infinity-chest"]
+    input_belt_x = {a["position"]["x"] for a in actions
+                    if a["entity"] == "express-transport-belt" and a["position"]["y"] == 0.5}
+    assert min(input_belt_x) == CHAINED_BELT_WEST + 0.5
+
+
+def test_chained_line_keeps_feeders_for_unchained_ingredient():
+    planner = LocalLayoutPlanner()
+    # Only ingredient 1 (iron-gear-wheel) arrives by chain; copper stays local.
+    plan = planner.generate_line_layout(
+        "automation-science-pack", 6, 0, 0, feed_style="chained", chained_ingredients={1},
+        belt_type="express-transport-belt", inserter_type="stack-inserter",
+    )
+    filters = {a.get("infinity_filter") for a in _all_actions(plan) if a["entity"] == "infinity-chest"}
+    assert filters == {"copper-plate"}
+
+
+def test_chained_line_rejects_bad_ingredient_indices():
+    planner = LocalLayoutPlanner()
+    with pytest.raises(ValueError):
+        planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="chained",
+                                     chained_ingredients={5})
+    with pytest.raises(ValueError):
+        planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="chained",
+                                     chained_ingredients=set())
+
+
+def test_two_producers_enter_consumer_on_opposite_lanes():
+    from planners.local_layout_planner import (
+        CHAIN_NORTH_JUNCTION_COL, CHAIN_SOUTH_APPROACH_COL, CHAIN_SOUTH_JUNCTION_COL,
+    )
+
+    planner = LocalLayoutPlanner()
+    turn_col = 0 + 6 * 3 + 1
+    kwargs = dict(belt_type="express-transport-belt", inserter_type="stack-inserter",
+                  consumer_feed_style="chained")
+
+    north_cx = turn_col - CHAIN_NORTH_JUNCTION_COL
+    north = planner.generate_chain_link((0, 0), "copper-plate", 6, (north_cx, 16),
+                                        "automation-science-pack", 6, junction_side="north", **kwargs)
+    last = [a for a in north["phases"][0]["actions"] if a["action_type"] == "place_ghost"][-1]
+    # Final tile sits one row ABOVE the consumer input belt, pushing south into it.
+    assert last["direction"] == "south"
+    assert last["position"] == {"x": north_cx + CHAIN_NORTH_JUNCTION_COL + 0.5, "y": 15.5}
+
+    south_cx = turn_col - CHAIN_SOUTH_APPROACH_COL
+    south = planner.generate_chain_link((0, 0), "iron-gear-wheel", 6, (south_cx, 16),
+                                        "automation-science-pack", 6, junction_side="south", **kwargs)
+    last = [a for a in south["phases"][0]["actions"] if a["action_type"] == "place_ghost"][-1]
+    # Final tile sits one row BELOW, pushing north into the other lane.
+    assert last["direction"] == "north"
+    assert last["position"] == {"x": south_cx + CHAIN_SOUTH_JUNCTION_COL + 0.5, "y": 17.5}
+
+
+def test_chain_link_rejects_mismatched_consumer_x_per_side():
+    planner = LocalLayoutPlanner()
+    with pytest.raises(ValueError, match="north"):
+        planner.generate_chain_link((0, 0), "copper-plate", 6, (999, 16),
+                                    "automation-science-pack", 6, junction_side="north",
+                                    consumer_feed_style="chained")
+    with pytest.raises(ValueError, match="Unknown junction side"):
+        planner.generate_chain_link((0, 0), "copper-plate", 6, (20, 16),
+                                    "automation-science-pack", 6, junction_side="sideways")
+
+
+def test_south_connector_clears_consumer_input_belt_column():
+    from planners.local_layout_planner import CHAIN_SOUTH_APPROACH_COL, CHAINED_BELT_WEST
+
+    planner = LocalLayoutPlanner()
+    turn_col = 0 + 6 * 3 + 1
+    cx = turn_col - CHAIN_SOUTH_APPROACH_COL
+    link = planner.generate_chain_link((0, 0), "iron-gear-wheel", 6, (cx, 16),
+                                       "automation-science-pack", 6, junction_side="south",
+                                       consumer_feed_style="chained")
+    consumer = planner.generate_line_layout("automation-science-pack", 6, cx, 16,
+                                            feed_style="chained")
+    link_tiles = _tiles_of(link["phases"][0]["actions"], {"transport-belt"})
+    consumer_small = _tiles_of(_all_actions(consumer),
+                               {"transport-belt", "fast-inserter", "infinity-chest", "steel-chest",
+                                "medium-electric-pole"})
+    assert not (link_tiles & consumer_small)
+    # The descending column passes west of the consumer's westmost belt tile.
+    assert cx + CHAIN_SOUTH_APPROACH_COL < cx + CHAINED_BELT_WEST
+
+
+def test_lab_row_geometry_and_determinism():
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_lab_row(6, 0, 32, belt_type="express-transport-belt",
+                                    inserter_type="stack-inserter")
+    assert plan == planner.generate_lab_row(6, 0, 32, belt_type="express-transport-belt",
+                                            inserter_type="stack-inserter")
+    actions = _all_actions(plan)
+    labs = [a for a in actions if a["entity"] == "lab"]
+    assert len(labs) == 6
+    assert all("recipe" not in lab for lab in labs)
+
+    # One inserter per lab, all feeding south into their lab.
+    inserters = [a for a in actions if a["entity"] == "stack-inserter"]
+    assert len(inserters) == 6
+    assert all(i["direction"] == "north" for i in inserters)
+
+    # Input belt only: no output row, no collectors.
+    belt_rows = {a["position"]["y"] for a in actions if a["entity"] == "express-transport-belt"}
+    assert belt_rows == {32.5}
+    assert not [a for a in actions if a["entity"] == "steel-chest"]
+
+    # No tile collisions between 1x1 entities and the 3x3 labs.
+    small = _tiles_of(actions, {"express-transport-belt", "stack-inserter", "medium-electric-pole"})
+    lab_tiles = _tiles_of(actions, {"lab"}, footprint=3)
+    assert not (small & lab_tiles)
+
+
+def test_lab_row_input_belt_reaches_chain_junctions():
+    from planners.local_layout_planner import CHAINED_BELT_WEST, CHAIN_SOUTH_JUNCTION_COL
+
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_lab_row(4, 100, 60)
+    belt_x = {a["position"]["x"] for a in _all_actions(plan) if a["entity"] == "transport-belt"}
+    assert min(belt_x) == 100 + CHAINED_BELT_WEST + 0.5
+    # Both junction columns exist on the belt so either side can feed labs.
+    assert 100 + CHAIN_SOUTH_JUNCTION_COL + 0.5 in belt_x
+
+
+def test_substation_reaches_first_pole_in_every_feed_style():
+    """A substation further than a medium pole's wire reach silently leaves the
+    whole line unpowered - found live when chained lines all read no_power."""
+    from planners.local_layout_planner import LocalLayoutPlanner, MEDIUM_POLE_WIRE_REACH
+
+    planner = LocalLayoutPlanner()
+    cases = [
+        planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="chest"),
+        planner.generate_line_layout("iron-gear-wheel", 4, 0, 0, feed_style="sideload",
+                                     belt_type="express-transport-belt"),
+        planner.generate_line_layout("automation-science-pack", 4, 0, 0, feed_style="chained"),
+        planner.generate_line_layout("iron-plate", 4, 0, 0, mining_feed=True),
+        planner.generate_lab_row(4, 0, 0),
+    ]
+    for plan in cases:
+        actions = _all_actions(plan)
+        subs = [a for a in actions if a["entity"] == "substation"]
+        poles = [a for a in actions if a["entity"] == "medium-electric-pole"]
+        assert subs and poles
+        first_pole = min(poles, key=lambda p: p["position"]["x"])
+        best = min(
+            max(abs(s["position"]["x"] - first_pole["position"]["x"]),
+                abs(s["position"]["y"] - first_pole["position"]["y"]))
+            for s in subs
+        )
+        assert best <= MEDIUM_POLE_WIRE_REACH, (
+            f"substation {best} tiles from first pole exceeds medium pole reach"
+        )
+
+
+def test_connector_never_stacks_two_belts_on_one_tile():
+    """A descent that runs through the junction row leaves a south-facing belt
+    where the east corner must go - the connector then dead-ends (found live:
+    every connector tile full, consumer belt empty)."""
+    from planners.local_layout_planner import (
+        CHAIN_NORTH_JUNCTION_COL, CHAIN_SOUTH_APPROACH_COL, CHAINED_BELT_WEST,
+    )
+
+    planner = LocalLayoutPlanner()
+    turn_col = 0 + 6 * 3 + 1
+    cases = [
+        ("head_on", turn_col + 1 - CHAINED_BELT_WEST),
+        ("north", turn_col - CHAIN_NORTH_JUNCTION_COL),
+        ("south", turn_col - CHAIN_SOUTH_APPROACH_COL),
+    ]
+    for side, cx in cases:
+        plan = planner.generate_chain_link(
+            (0, 0), "iron-plate", 6, (cx, 16), "automation-science-pack", 6,
+            junction_side=side, consumer_feed_style="chained",
+        )
+        positions = [(a["position"]["x"], a["position"]["y"])
+                     for a in plan["phases"][0]["actions"] if a["action_type"] == "place_ghost"]
+        assert len(positions) == len(set(positions)), f"{side}: duplicate belt tile"
