@@ -20,8 +20,21 @@ if (Test-Path $target) {
 }
 New-Item -ItemType Directory -Path $target | Out-Null
 
-# Only ship what the game needs; README is harmless but keeps the deploy honest.
+# Ship info.json plus EVERY Lua module. control.lua requires the others by
+# name, so copying only control.lua makes the save fail to load with
+# "module <name> not found".
 Copy-Item (Join-Path $source "info.json") $target
-Copy-Item (Join-Path $source "control.lua") $target
+$luaFiles = Get-ChildItem -Path $source -Filter "*.lua" -File
+if ($luaFiles.Count -eq 0) { throw "No Lua files found in $source" }
+foreach ($file in $luaFiles) { Copy-Item $file.FullName $target }
 
-Write-Host "Deployed factorio_cursor_rl_agent to $target"
+# Fail loudly if any module control.lua requires did not make it across.
+$controlText = Get-Content (Join-Path $target "control.lua") -Raw
+$missing = @()
+foreach ($match in [regex]::Matches($controlText, 'require\s*\(?\s*"([^"]+)"')) {
+    $moduleName = $match.Groups[1].Value -replace '^__[^_]+__/', ''
+    if (-not (Test-Path (Join-Path $target "$moduleName.lua"))) { $missing += $moduleName }
+}
+if ($missing.Count -gt 0) { throw "Deployed mod is missing required modules: $($missing -join ', ')" }
+
+Write-Host "Deployed factorio_cursor_rl_agent ($($luaFiles.Count) Lua modules) to $target"
