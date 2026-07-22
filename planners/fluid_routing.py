@@ -106,19 +106,23 @@ def _link_route(from_point: tuple, to_points: List[tuple], trunk_x: int,
     return sorted(pipes), undergrounds
 
 
-def fluid_chain_link_segments(from_point: tuple, to_points: List[tuple], fluid: str,
-                              trunk_x: int, foreign: List[dict] = ()) -> List[dict]:
+def fluid_chain_link_segments(
+    from_point: tuple, to_points: List[tuple], fluid: str, trunk_x: int,
+    foreign: List[dict] = (), obstacle_tiles=(),
+) -> List[dict]:
     """The link's single purity segment, in world tiles. Buried tiles are left
     out for the same reason generate_fluid_machine_row leaves its underground
     spans out: a tile a pipe merely passes UNDER is not part of the network."""
     pipes, undergrounds = _link_route(from_point, to_points, trunk_x,
-                                      _obstacles(list(foreign), fluid))
+                                      _obstacles(list(foreign), fluid) | set(obstacle_tiles))
     return [{"fluid": fluid, "separated_by_pump": False,
              "tiles": pipes + [tile for tile, _ in undergrounds]}]
 
 
-def generate_fluid_chain_link(from_point: tuple, to_points: List[tuple], fluid: str,
-                              trunk_x: int, foreign: List[dict] = ()) -> dict:
+def generate_fluid_chain_link(
+    from_point: tuple, to_points: List[tuple], fluid: str, trunk_x: int,
+    foreign: List[dict] = (), obstacle_tiles=(),
+) -> dict:
     """Pipe route carrying `fluid` from one producer/source to N consumers.
 
     The rows built by generate_fluid_machine_row are islands: each carries its
@@ -157,7 +161,7 @@ def generate_fluid_chain_link(from_point: tuple, to_points: List[tuple], fluid: 
     foreign = list(foreign)
 
     pipes, undergrounds = _link_route(tuple(from_point), to_points, trunk_x,
-                                      _obstacles(foreign, fluid))
+                                      _obstacles(foreign, fluid) | set(obstacle_tiles))
     actions = [{"action_type": "place_ghost", "entity": "pipe",
                 "position": {"x": x + 0.5, "y": y + 0.5}} for x, y in pipes]
     actions += [{"action_type": "place_ghost", "entity": "pipe-to-ground",
@@ -167,6 +171,8 @@ def generate_fluid_chain_link(from_point: tuple, to_points: List[tuple], fluid: 
     plan = {"phases": [{"name": f"fluid_link_{fluid}", "actions": actions}]}
     _validate(plan)
     validate_network_purity(
-        fluid_chain_link_segments(from_point, to_points, fluid, trunk_x, foreign) + foreign
+        fluid_chain_link_segments(
+            from_point, to_points, fluid, trunk_x, foreign, obstacle_tiles
+        ) + foreign
     )
     return plan

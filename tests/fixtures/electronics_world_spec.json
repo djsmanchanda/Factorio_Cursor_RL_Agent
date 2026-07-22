@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "surface": "planner-sandbox",
+  "survey_tick": 0,
+  "map_bounds": {"x1": -250, "y1": -250, "x2": 250, "y2": 250},
+  "ore_patches": [
+    {"id": "iron_north", "item": "iron-ore", "x1": 0, "y1": -225, "x2": 20, "y2": -215},
+    {"id": "copper_north", "item": "copper-ore", "x1": 40, "y1": -195, "x2": 80, "y2": -185},
+    {"id": "copper_mid", "item": "copper-ore", "x1": 0, "y1": -105, "x2": 20, "y2": -95},
+    {"id": "iron_acid", "item": "iron-ore", "x1": 40, "y1": 90, "x2": 55, "y2": 100},
+    {"id": "copper_south", "item": "copper-ore", "x1": -40, "y1": 110, "x2": 15, "y2": 120},
+    {"id": "iron_south", "item": "iron-ore", "x1": 40, "y1": 135, "x2": 70, "y2": 145},
+    {"id": "coal", "item": "coal", "x1": 18, "y1": -2, "x2": 30, "y2": 4}
+  ],
+  "ore_lines": [
+    {"stage": "iron_plate", "resource": "iron-ore", "patch_id": "iron_north", "capacity_per_second": 3.0, "drill_positions": [[1.5, -221.5], [4.5, -221.5], [7.5, -221.5], [10.5, -221.5], [13.5, -221.5], [16.5, -221.5]]},
+    {"stage": "copper_plate_ec", "resource": "copper-ore", "patch_id": "copper_north", "capacity_per_second": 6.0, "drill_positions": [[41.5, -191.5], [44.5, -191.5], [47.5, -191.5], [50.5, -191.5], [53.5, -191.5], [56.5, -191.5], [59.5, -191.5], [62.5, -191.5], [65.5, -191.5], [68.5, -191.5], [71.5, -191.5], [74.5, -191.5]]},
+    {"stage": "copper_plate_ac", "resource": "copper-ore", "patch_id": "copper_mid", "capacity_per_second": 3.0, "drill_positions": [[1.5, -101.5], [4.5, -101.5], [7.5, -101.5], [10.5, -101.5], [13.5, -101.5], [16.5, -101.5]]},
+    {"stage": "iron_plate_acid", "resource": "iron-ore", "patch_id": "iron_acid", "capacity_per_second": 2.0, "drill_positions": [[41.5, 93.5], [44.5, 93.5], [47.5, 93.5], [50.5, 93.5]]},
+    {"stage": "copper_plate_pu", "resource": "copper-ore", "patch_id": "copper_south", "capacity_per_second": 9.0, "drill_positions": [[-38.5, 113.5], [-35.5, 113.5], [-32.5, 113.5], [-29.5, 113.5], [-26.5, 113.5], [-23.5, 113.5], [-20.5, 113.5], [-17.5, 113.5], [-14.5, 113.5], [-11.5, 113.5], [-8.5, 113.5], [-5.5, 113.5], [-2.5, 113.5], [0.5, 113.5], [3.5, 113.5], [6.5, 113.5], [9.5, 113.5], [12.5, 113.5]]},
+    {"stage": "iron_plate_pu", "resource": "iron-ore", "patch_id": "iron_south", "capacity_per_second": 4.5, "drill_positions": [[41.5, 138.5], [44.5, 138.5], [47.5, 138.5], [50.5, 138.5], [53.5, 138.5], [56.5, 138.5], [59.5, 138.5], [62.5, 138.5], [65.5, 138.5]]}
+  ],
+  "coal_patch_id": "coal",
+  "coal_drill_positions": [[20.5, 0.5], [23.5, 0.5], [26.5, 0.5]],
+  "coal_output_y": 2.5,
+  "coal_output_x": 40.5,
+  "coal_capacity_per_second": 1.5,
+  "pumpjack_sites": [{"position": [20.5, -43.5], "output": [20, -47], "resource": "crude-oil", "capacity_per_second": 60.0}],
+  "crude_pipe_tiles": [[20, -47]],
+  "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 80], "resource": "water", "capacity_per_second": 1200.0}],
+  "water_pipe_tiles": [[20, 80]]
+}

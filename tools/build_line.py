@@ -13,7 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator.game_bridge import GameBridge, load_json
-from planners.local_layout_planner import LINE_RECIPES, LocalLayoutPlanner
+from planners.local_layout_planner import LocalLayoutPlanner
 from planners.sandbox_infrastructure import (
     build_layout_authorization,
     compose_managed_sandbox,
@@ -33,12 +33,21 @@ def main() -> int:
     parser.add_argument("--origin-x", type=int, default=0)
     parser.add_argument("--origin-y", type=int, default=40)
     parser.add_argument("--anchors", default="10", help="Comma-separated scaffolding anchor x positions to stock")
-    parser.add_argument("--mine", action="store_true", help="Feed the line with real miners over a seeded ore patch")
+    parser.add_argument("--mine", action="store_true", help="Feed from miners on an already-observed ore patch; never seeds resources")
+    parser.add_argument(
+        "--legacy-existing-resources", action="store_true",
+        help="Acknowledge that fixed legacy mining coordinates were independently surveyed.",
+    )
     parser.add_argument("--belt", default="transport-belt", help="Belt tier entity name")
     parser.add_argument("--inserter", default="fast-inserter", help="Inserter tier entity name")
     parser.add_argument("--feed-style", default="chest", choices=["chest", "sideload"])
     parser.add_argument("--verify-seconds", type=float, default=60.0)
     args = parser.parse_args()
+    if args.mine and not args.legacy_existing_resources:
+        parser.error(
+            "--mine requires a surveyed resource source; use --legacy-existing-resources "
+            "only after independently verifying these fixed coordinates"
+        )
 
     planner = LocalLayoutPlanner()
     plan = planner.generate_line_layout(
@@ -47,21 +56,11 @@ def main() -> int:
         feed_style=args.feed_style,
     )
     materials = planner.material_requirements(plan)
-    ore_patches = []
-    if args.mine:
-        ore = LINE_RECIPES[args.recipe]["ingredients"][0]
-        ore_patches.append({
-            "item": ore,
-            "x1": args.origin_x - 1, "y1": args.origin_y - 5,
-            "x2": args.origin_x + args.machines * 3, "y2": args.origin_y - 1,
-            "amount": 100000,
-        })
     composition = compose_managed_sandbox(
         [("line", plan)],
         [int(x) for x in args.anchors.split(",")],
         materials,
         bots_per_roboport=30,
-        ore_patches=ore_patches,
     )
     plan = dict(composition["plans"])["line"]
     print(f"Plan: {sum(len(p['actions']) for p in plan['phases'])} actions; materials: {materials}")

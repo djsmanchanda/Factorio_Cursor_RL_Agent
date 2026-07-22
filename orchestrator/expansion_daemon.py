@@ -70,7 +70,7 @@ def _limits() -> dict:
         "belt_tiers": dict(BELT_TIERS),
         "inserter_rates": dict(FEEDER_RATES),
         "machine_rates": {
-            recipe: MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+            recipe: MACHINE_SPEEDS[spec["machine"]] * spec.get("product_amount", 1) / spec["craft_time"]
             for recipe, spec in LINE_RECIPES.items()
         },
     }
@@ -78,7 +78,7 @@ def _limits() -> dict:
 
 def _diagnosis_spec(line: dict) -> dict:
     spec = LINE_RECIPES[line["recipe"]]
-    rate = MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+    rate = MACHINE_SPEEDS[spec["machine"]] * spec.get("product_amount", 1) / spec["craft_time"]
     return {
         "name": line["name"],
         "machines": line["machines"],
@@ -232,7 +232,7 @@ def _telemetry_spec(line: dict) -> dict:
     return {
         **line,
         "output_item": line["recipe"],
-        "machine_rate": MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"],
+        "machine_rate": MACHINE_SPEEDS[spec["machine"]] * spec.get("product_amount", 1) / spec["craft_time"],
     }
 
 
@@ -260,7 +260,7 @@ def run_step(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict, step:
             capacity = float(measurement.get(f"input_belt_{side}_capacity", 0) or 0)
             measurement[f"input_belt_{side}_fill"] = (count / capacity) if capacity > 0 else 0.0
         spec = LINE_RECIPES[line["recipe"]]
-        rate = MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+        rate = MACHINE_SPEEDS[spec["machine"]] * spec.get("product_amount", 1) / spec["craft_time"]
         measurement["theoretical_capacity_per_s"] = line["machines"] * rate
         measurement.setdefault("measured_output_per_s", measurement.get("output_rate_per_s"))
         # A chained line has no terminal chest by design; telemetry reports

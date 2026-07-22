@@ -23,3 +23,4 @@ Documentation for each schema is maintained in this README.
 - `planning_request.schema.json` — Intent router → planning request contract
 - `build_intent.schema.json` — Planner → build intent contract
 - `ghost_plan.schema.json` — Ghost projection → ghost plan contract
+- `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract

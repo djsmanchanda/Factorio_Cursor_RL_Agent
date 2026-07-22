@@ -65,6 +65,14 @@ local function configuration_error(entity, action, direction)
   if direction ~= nil and entity.direction ~= direction then
     return "direction_mismatch"
   end
+  if action.underground_type then
+    local ok, actual = pcall(function() return entity.belt_to_ground_type end)
+    if not ok then return "underground_type_read_failed" end
+    if actual ~= action.underground_type then
+      return "underground_type_mismatch:expected=" .. action.underground_type
+        .. ",actual=" .. tostring(actual)
+    end
+  end
   if action.recipe then
     local actual, read_error = recipe_name(entity)
     if read_error then return read_error end
@@ -220,6 +228,7 @@ local function execute_build_plan(authorization, build_plan)
             inner_name = action.entity,
             position = { position.x, position.y },
             direction = direction,
+            type = action.underground_type,
             force = force
           })
           if ghost and ghost.valid then
@@ -256,6 +265,7 @@ local function execute_build_plan(authorization, build_plan)
             name = action.entity,
             position = { position.x, position.y },
             direction = direction,
+            type = action.underground_type,
             force = force
           })
           if entity and entity.valid then

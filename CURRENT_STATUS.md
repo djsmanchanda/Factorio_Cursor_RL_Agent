@@ -156,3 +156,18 @@ backfilled from git history because this file did not exist yet.
 - What: Split deterministic infrastructure tests from managed sandbox runtime/topology/Lua contract tests without changing coverage.
 - Why: Restore the repository invariant that every source file remains at or below 500 lines.
 - Verified: Both files have Path/Purpose headers, are 252 and 308 lines, and all 25 focused tests passed; no live Factorio or git operation was run.
+## [2026-07-22] Raw-resource electronics block (2A/2B)
+- Files: planners/electronics_block.py, planners/fluid_routing.py, planners/{line_layouts,chain_layouts,recipe_data,item_routing,resource_layouts,plan_validation}.py, planners/local_layout_planner.py, planners/fluid_layouts.py, orchestrator/expansion_daemon.py, tools/build_advanced_circuits.py, tools/build_processing_units.py, tests/test_{electronics_block,three_input_layout,item_routing,resource_layouts}.py
+- What: Added one bounded immutable managed block from observed iron/copper/coal/crude/water through advanced circuits and processing units, including sulfur consumption, predeclared output interfaces, collision-aware routing, and plan-only tools.
+- Why: Replace fragmented power/robot networks and scripted production inputs with deterministic raw-resource autonomy.
+- Next: Supply a live-observed world-spec and validate the generated plan in a disposable planner sandbox before any execution authorization.
+## [2026-07-22] Milestone 2 final - surveyed immutable electronics contract
+- Files: planners/{electronics_block,electronics_contracts,electronics_world,item_routing,resource_layouts,sandbox_infrastructure}.py, schemas/electronics_world_spec.schema.json, tools/{build_advanced_circuits,build_processing_units,build_line,build_science_chain}.py, tests/test_{electronics_block,electronics_cli,item_routing,resource_layouts,three_input_layout}.py
+- What: Finalized schema-loaded surveyed sources, versioned item/fluid throughput interfaces with 25% headroom, exact underground pairs, strict 2A-as-subset-of-2B placement, and collision-free connected shared infrastructure.
+- Why: Ensure raw-resource autonomy fails closed without observed resources and never rewrites the deployed advanced-circuit phase while adding sulfuric acid and processing units.
+- Verified: 45 focused tests passed; the full suite reached 280 passed with one environment-only WinError 5 creating the pytest temp directory. Escalated rerun was unavailable; no live Factorio or git operation was run.
+## [2026-07-22] Milestone 2 contract correction - aggregate crude and underground roles
+- Files: planners/{electronics_contracts,item_routing}.py, schemas/build_plan.schema.json, factorio_mod/layout_executor.lua, tests/{test_electronics_block,test_item_routing,test_sandbox_contracts}.py
+- What: Crude capacity now covers plastic plus sulfur gas demand; every underground belt pair declares input/output through planning, schema, Lua creation, and exact idempotency checks.
+- Why: Prevent undersized oil supply and ambiguous same-direction underground endpoints.
+- Verified: 24 focused tests passed; no live Factorio or git operation was run.

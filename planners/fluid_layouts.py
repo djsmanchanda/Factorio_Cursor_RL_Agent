@@ -42,32 +42,32 @@ FLUID_RECIPES: Dict[str, dict] = {
         "machine": "oil-refinery", "craft_time": 5.0,
         "item_ingredients": [], "item_amounts": [],
         "fluid_ingredients": {"crude-oil": 100},
-        "item_products": [], "fluid_products": {"petroleum-gas": 45},
+        "item_products": [], "item_product_amounts": {}, "fluid_products": {"petroleum-gas": 45},
     },
     "sulfur": {
         "machine": "chemical-plant", "craft_time": 1.0,
         "item_ingredients": [], "item_amounts": [],
         "fluid_ingredients": {"water": 30, "petroleum-gas": 30},
-        "item_products": ["sulfur"], "fluid_products": {},
+        "item_products": ["sulfur"], "item_product_amounts": {"sulfur": 2}, "fluid_products": {},
     },
     "sulfuric-acid": {
         "machine": "chemical-plant", "craft_time": 1.0,
         "item_ingredients": ["iron-plate", "sulfur"], "item_amounts": [1, 5],
         "fluid_ingredients": {"water": 100},
-        "item_products": [], "fluid_products": {"sulfuric-acid": 50},
+        "item_products": [], "item_product_amounts": {}, "fluid_products": {"sulfuric-acid": 50},
     },
     "plastic-bar": {
         "machine": "chemical-plant", "craft_time": 1.0,
         "item_ingredients": ["coal"], "item_amounts": [1],
         "fluid_ingredients": {"petroleum-gas": 20},
-        "item_products": ["plastic-bar"], "fluid_products": {},
+        "item_products": ["plastic-bar"], "item_product_amounts": {"plastic-bar": 2}, "fluid_products": {},
     },
     "processing-unit": {
         "machine": "assembling-machine-2", "craft_time": 10.0,
         "item_ingredients": ["electronic-circuit", "advanced-circuit"],
         "item_amounts": [20, 2],
         "fluid_ingredients": {"sulfuric-acid": 5},
-        "item_products": ["processing-unit"], "fluid_products": {},
+        "item_products": ["processing-unit"], "item_product_amounts": {"processing-unit": 1}, "fluid_products": {},
     },
 }
 
@@ -102,15 +102,12 @@ def _validate(plan: dict) -> None:
                            for e in errors)
         raise ValueError("BuildPlan validation FAILED:\n" + joined)
     _reject_fuel_entities(plan)
-
 def _stub_row(width: int, dy: int) -> int:
     """Tile row of a pipe tile whose centre offset is dy, machines on rows 2..
-
     Machine centre sits at y = 2 + width/2, so the north stub row is always 1
     and the south stub row is always width + 2, for both 3x3 and 5x5 bodies.
     """
     return int(2 + width / 2 + dy - 0.5)
-
 def header_row(origin_y: int, footprint: int, side: str, slot: int = 0) -> int:
     """World y of header row `slot` on `side` of a row at `origin_y`.
 
@@ -240,6 +237,8 @@ def generate_fluid_machine_row(
     origin_y: int = 0,
     belt_type: str = "transport-belt",
     inserter_type: str = "fast-inserter",
+    chained_items: set[str] | None = None,
+    terminal_collector: bool = True,
 ) -> dict:
     """Deterministic row of fluid-using machines with piped headers.
 
@@ -288,6 +287,10 @@ def generate_fluid_machine_row(
         raise ValueError(f"Unknown inserter tier: {inserter_type}")
 
     spec = FLUID_RECIPES[recipe]
+    chained_items = set(chained_items or ())
+    unknown_chained = chained_items - set(spec["item_ingredients"])
+    if unknown_chained:
+        raise ValueError(f"Unknown chained item ingredients for {recipe}: {sorted(unknown_chained)}")
     machine = spec["machine"]
     width = MACHINE_FOOTPRINTS[machine]
     if len(spec["item_ingredients"]) > 2:
@@ -354,7 +357,7 @@ def generate_fluid_machine_row(
 
     # --- item belts, chest feeders, terminal collector ------------------------
     feeders = _item_feeders(recipe, machine_count, inserter_type)
-    belt_west = -(1 + max(feeders)) if feeders else 0
+    belt_west = -3 if chained_items else (-(1 + max(feeders)) if feeders else 0)
     if spec["item_ingredients"]:
         for col in range(belt_west, length):
             ghosts.append({"action_type": "place_ghost", "entity": belt_type,
@@ -362,6 +365,8 @@ def generate_fluid_machine_row(
         # Ingredient 0 loads from the north side of the belt, ingredient 1 from
         # the south, so each lands on its own lane (an inserter drops far-lane).
         for index, ingredient in enumerate(spec["item_ingredients"]):
+            if ingredient in chained_items:
+                continue
             chest_row, ins_row = (-2, -1) if index == 0 else (2, 1)
             facing = "north" if index == 0 else "south"
             for slot in range(feeders[index]):
@@ -374,10 +379,11 @@ def generate_fluid_machine_row(
         for col in range(0, length):
             ghosts.append({"action_type": "place_ghost", "entity": belt_type,
                            "position": at(col, width + 3), "direction": "east"})
-        scaffolding.append({"action_type": "place_entity", "entity": inserter_type,
-                            "position": at(length, width + 3), "direction": "west"})
-        scaffolding.append({"action_type": "place_entity", "entity": "steel-chest",
-                            "position": at(length + 1, width + 3)})
+        if terminal_collector:
+            scaffolding.append({"action_type": "place_entity", "entity": inserter_type,
+                                "position": at(length, width + 3), "direction": "west"})
+            scaffolding.append({"action_type": "place_entity", "entity": "steel-chest",
+                                "position": at(length + 1, width + 3)})
 
     # --- power scaffolding ----------------------------------------------------
     # Parked south-west: rows width+3 and width+4 are empty west of x=0 whatever

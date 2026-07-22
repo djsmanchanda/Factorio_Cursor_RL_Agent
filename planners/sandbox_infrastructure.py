@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from core.execution_authorizer import authorize_execution
+from planners.infrastructure_geometry import boxes_overlap
+from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.infrastructure import (
+    POLE_SPECS,
     local_power_anchors,
     plan_power_network,
     plan_roboport_network,
@@ -99,25 +102,25 @@ def _anchor(anchor: object) -> dict:
 
 
 def roboport_power_sites(positions: Sequence[tuple]) -> list[dict]:
-    """Group adjacent bridge ports onto buildable, covering substations."""
-    clusters: list[list[tuple]] = []
-    for position in positions:
-        point = (round(position[0]), round(position[1]))
-        if clusters and max(
-            abs(point[0] - clusters[-1][-1][0]),
-            abs(point[1] - clusters[-1][-1][1]),
-        ) <= 20:
-            clusters[-1].append(point)
-        else:
-            clusters.append([point])
+    """Give every roboport a non-overlapping substation within supply range."""
     sites = []
-    for index, cluster in enumerate(clusters):
-        x = round(sum(point[0] for point in cluster) / len(cluster))
-        y = round(sum(point[1] for point in cluster) / len(cluster))
+    substations: list[tuple[int, int]] = []
+    offsets = ((-7, 0), (7, 0), (0, -7), (0, 7), (-7, -7), (7, -7), (-7, 7), (7, 7))
+    for index, position in enumerate(positions):
+        point = (round(position[0]), round(position[1]))
+        candidates = [(point[0] + dx, point[1] + dy) for dx, dy in offsets]
+        substation = next((
+            candidate for candidate in candidates
+            if not any(boxes_overlap(candidate, 2, other, 4) for other in positions)
+            and not any(boxes_overlap(candidate, 2, other, 2) for other in substations)
+        ), None)
+        if substation is None:
+            raise ValueError(f"Cannot place a non-overlapping power site for roboport {point}")
+        substations.append(substation)
         sites.append({
             "name": f"roboport_{index}",
-            "substation": (x - 8, y),
-            "pole_anchor": (x - 13, y),
+            "substation": substation,
+            "pole_anchor": (substation[0] - 5, substation[1]),
         })
     return sites
 
@@ -132,13 +135,59 @@ def _combined_plan(plans: Iterable[tuple[str, dict]]) -> dict:
     }
 
 
+def _resolve_spine_pole_overlaps(
+    power: dict, obstacle_plans: Sequence[tuple[str, dict]],
+) -> None:
+    """Relocate colliding spine poles within routing slack; never disconnect by deletion."""
+    obstacles = [
+        (
+            (action["position"]["x"], action["position"]["y"]),
+            ENTITY_FOOTPRINTS.get(action["entity"], 1),
+        )
+        for _, plan in obstacle_plans
+        for action in actions(plan)
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+    ]
+    fixed_power = [
+        (
+            (action["position"]["x"], action["position"]["y"]),
+            ENTITY_FOOTPRINTS.get(action["entity"], 1),
+        )
+        for phase in power["phases"]
+        if phase["name"] != "power_spine"
+        for action in phase["actions"]
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+    ]
+    offsets = [(0, 0)] + [
+        (dx, dy)
+        for radius in range(1, 5)
+        for dx in range(-radius, radius + 1)
+        for dy in range(-radius, radius + 1)
+        if abs(dx) + abs(dy) == radius
+    ]
+    claimed = list(fixed_power)
+    spine = next(phase for phase in power["phases"] if phase["name"] == "power_spine")
+    for action in spine["actions"]:
+        original = (action["position"]["x"], action["position"]["y"])
+        size = POLE_SPECS[action["entity"]]["size"]
+        candidates = [(original[0] + dx, original[1] + dy) for dx, dy in offsets]
+        position = next((
+            candidate for candidate in candidates
+            if not any(boxes_overlap(candidate, size, other, other_size)
+                       for other, other_size in obstacles + claimed)
+        ), None)
+        if position is None:
+            raise ValueError(f"Cannot relocate colliding spine pole at {original}")
+        action["position"] = {"x": position[0], "y": position[1]}
+        claimed.append((position, size))
+
+
 def compose_managed_sandbox(
     plans: Sequence[tuple[str, dict]],
     anchors: Sequence[object],
     materials: dict,
     *,
     bots_per_roboport: int = 30,
-    ore_patches: Sequence[dict] = (),
 ) -> dict:
     """Strip local sources and extend the canonical sandbox backbone."""
     normalized = [_anchor(anchor) for anchor in anchors]
@@ -178,6 +227,7 @@ def compose_managed_sandbox(
 
 
     power = plan_power_network(power_sites, source=CANONICAL_POWER_SOURCE)
+    _resolve_spine_pole_overlaps(power, stripped + [("unified_roboports", robots)])
     infrastructure = [("unified_power", power), ("unified_roboports", robots)]
     validate_power_connectivity(_combined_plan(infrastructure + stripped))
 
@@ -195,6 +245,5 @@ def compose_managed_sandbox(
         "anchors": scaffold_anchors,
         "bots_per_roboport": bots_per_roboport,
     }
-    if ore_patches:
-        scaffolding["ore_patches"] = list(ore_patches)
+
     return {"infrastructure": infrastructure, "plans": stripped, "scaffolding": scaffolding}

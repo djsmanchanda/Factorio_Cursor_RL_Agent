@@ -306,3 +306,34 @@ def test_legacy_scaffolding_requires_explicit_opt_in() -> None:
     control = _lua_source()
     assert "payload.legacy_infrastructure ~= true" in control
     assert "Scaffolding mode must be explicit" in control
+
+
+def test_underground_belt_type_is_schema_validated_and_exactly_idempotent_in_lua() -> None:
+    import json
+
+    from jsonschema import Draft7Validator
+
+    schema = json.loads(
+        (REPO_ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8")
+    )
+    action = {
+        "action_type": "place_ghost",
+        "entity": "express-underground-belt",
+        "position": {"x": 1.5, "y": 2.5},
+        "direction": "east",
+        "underground_type": "input",
+    }
+    plan = {"phases": [{"name": "route", "actions": [action]}]}
+    validator = Draft7Validator(schema)
+    assert not list(validator.iter_errors(plan))
+
+    del action["underground_type"]
+    assert list(validator.iter_errors(plan))
+    action["underground_type"] = "sideways"
+    assert list(validator.iter_errors(plan))
+
+    lua = (REPO_ROOT / "factorio_mod" / "layout_executor.lua").read_text(encoding="utf-8")
+    assert "entity.belt_to_ground_type" in lua
+    assert '"underground_type_mismatch:expected="' in lua
+    assert lua.count("type = action.underground_type") == 2
+    assert "configuration_error(existing, action, direction)" in lua

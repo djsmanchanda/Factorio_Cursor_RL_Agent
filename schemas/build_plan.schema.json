@@ -63,6 +63,13 @@
                     "west"
                   ]
                 },
+                "underground_type": {
+                  "type": "string",
+                  "enum": [
+                    "input",
+                    "output"
+                  ]
+                },
                 "recipe": {
                   "type": "string"
                 },
@@ -77,7 +84,19 @@
                   "minimum": 0,
                   "maximum": 1
                 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "required": ["entity", "action_type"],
+                    "properties": {
+                      "entity": {"pattern": "underground-belt$"},
+                      "action_type": {"enum": ["place_ghost", "place_entity"]}
+                    }
+                  },
+                  "then": {"required": ["underground_type"]}
+                }
+              ]
             }
           }
         }

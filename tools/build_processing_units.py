@@ -16,6 +16,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.fluid_systems import validate_network_purity
 from orchestrator.game_bridge import GameBridge, load_json
+from planners.electronics_block import build_electronics_block
+from planners.electronics_world import load_electronics_world_spec
 from planners.fluid_layouts import (
     fluid_chain_link_segments,
     fluid_chain_link_trunk,
@@ -406,17 +408,40 @@ def verify_processing_snapshot(raw: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the unified fluid stages of processing units.")
-    parser.add_argument("--script-output", required=True)
-    parser.add_argument("--rcon-password", required=True)
+    parser.add_argument("--script-output")
+    parser.add_argument("--rcon-password")
     parser.add_argument("--rcon-host", default="127.0.0.1")
     parser.add_argument("--rcon-port", type=int, default=27015)
     parser.add_argument("--plan-only", action="store_true")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--world-spec", type=Path)
+    source.add_argument(
+        "--legacy-fluid-only", action="store_true",
+        help="Explicitly opt into the scripted-source legacy fluid demo.",
+    )
     parser.add_argument("--settle-ticks", type=int, default=5400)
     parser.add_argument("--settle-timeout-seconds", type=float, default=180.0)
     parser.add_argument(
         "--existing-topology", choices=["refuse", "reconcile", "reset"], default="refuse"
     )
     args = parser.parse_args()
+    if args.world_spec:
+        if not args.plan_only:
+            parser.error("surveyed electronics execution is disabled; inspect it with --plan-only")
+        try:
+            world = load_electronics_world_spec(args.world_spec)
+            bundle = build_electronics_block(include_processing=True, world=world)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            parser.error(str(error))
+        print(
+            f"Managed plans: {len(bundle['infrastructure'])}; "
+            f"production plans: {len(bundle['plans'])}; live execution: disabled"
+        )
+        return 0
+    if not args.legacy_fluid_only:
+        parser.error("--world-spec is required unless --legacy-fluid-only is explicitly selected")
+    if not args.plan_only and (not args.script_output or not args.rcon_password):
+        parser.error("live execution needs --script-output and --rcon-password")
 
     infrastructure = build_infrastructure_plans()
     production = build_plans() + build_link_plans()

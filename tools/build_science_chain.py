@@ -34,11 +34,6 @@ LAB_ROW = {"labs": 4, "origin": (45, 148)}
 
 # Roboport anchors covering the whole region (construction radius ~55 tiles).
 ANCHORS = [(10, 92), (40, 158)]
-ORE_PATCHES = [
-    {"item": "iron-ore", "x1": -1, "y1": 95, "x2": 12, "y2": 99, "amount": 500000},
-    {"item": "copper-ore", "x1": 19, "y1": 95, "x2": 26, "y2": 99, "amount": 500000},
-]
-
 
 # Chain telemetry. Global research progress is NOT proof on a megabase save:
 # the base's own nauvis labs research everything instantly. What proves this
@@ -116,16 +111,27 @@ def build_plans(belt: str, inserter: str) -> list:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the ore-to-research science chain.")
-    parser.add_argument("--script-output", required=True)
-    parser.add_argument("--rcon-password", required=True)
+    parser.add_argument("--script-output")
+    parser.add_argument("--rcon-password")
     parser.add_argument("--rcon-host", default="127.0.0.1")
     parser.add_argument("--rcon-port", type=int, default=27015)
     parser.add_argument("--belt", default="express-transport-belt")
     parser.add_argument("--inserter", default="stack-inserter")
+    parser.add_argument(
+        "--legacy-existing-resources", action="store_true",
+        help="Acknowledge that fixed legacy mining coordinates were independently surveyed.",
+    )
     parser.add_argument("--technology", default="physical-projectile-damage-1")
     parser.add_argument("--watch-seconds", type=float, default=300.0)
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args()
+    if not args.legacy_existing_resources:
+        parser.error(
+            "legacy science-chain coordinates require --legacy-existing-resources after survey; "
+            "production scaffolding no longer creates ore patches"
+        )
+    if not args.plan_only and (not args.script_output or not args.rcon_password):
+        parser.error("live execution needs --script-output and --rcon-password")
 
     planner = LocalLayoutPlanner()
     plans = build_plans(args.belt, args.inserter)
@@ -138,7 +144,7 @@ def main() -> int:
     # rebuilds should not starve.
     materials = {item: count * 3 for item, count in materials.items()}
     composition = compose_managed_sandbox(
-        plans, ANCHORS, materials, bots_per_roboport=50, ore_patches=ORE_PATCHES
+        plans, ANCHORS, materials, bots_per_roboport=50
     )
     plans = composition["plans"]
     print(f"Stages: {len(plans)}; materials: {materials}")
@@ -162,7 +168,7 @@ def main() -> int:
                 print(f"INFRASTRUCTURE {name} FAILED: {report.get('error')}", file=sys.stderr)
                 return 1
         bridge.ensure_scaffolding(composition["scaffolding"])
-        print(f"Managed scaffolding + ore patches provisioned at anchors {ANCHORS}.")
+        print(f"Managed scaffolding provisioned; resource tiles were not created at anchors {ANCHORS}.")
 
         for name, plan in plans:
             report = load_json(bridge.build_layout(authorization, plan))

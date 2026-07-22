@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "electronics_world_spec.schema.json",
+  "title": "ElectronicsWorldSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "surface", "survey_tick", "map_bounds", "ore_patches", "ore_lines", "coal_patch_id", "coal_drill_positions", "coal_output_y", "coal_output_x", "coal_capacity_per_second", "pumpjack_sites", "crude_pipe_tiles", "offshore_pump_sites", "water_pipe_tiles"],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "surface": {"type": "string", "minLength": 1},
+    "survey_tick": {"type": "integer", "minimum": 0},
+    "map_bounds": {"type": "object", "additionalProperties": false, "required": ["x1", "y1", "x2", "y2"], "properties": {"x1": {"const": -250}, "y1": {"const": -250}, "x2": {"const": 250}, "y2": {"const": 250}}},
+    "ore_patches": {"type": "array", "minItems": 7, "items": {"type": "object", "additionalProperties": false, "required": ["id", "item", "x1", "y1", "x2", "y2"], "properties": {"id": {"type": "string", "minLength": 1}, "item": {"enum": ["iron-ore", "copper-ore", "coal"]}, "x1": {"type": "number", "minimum": -250, "maximum": 250}, "y1": {"type": "number", "minimum": -250, "maximum": 250}, "x2": {"type": "number", "minimum": -250, "maximum": 250}, "y2": {"type": "number", "minimum": -250, "maximum": 250}}}},
+    "ore_lines": {"type": "array", "minItems": 6, "items": {"type": "object", "additionalProperties": false, "required": ["stage", "resource", "patch_id", "drill_positions", "capacity_per_second"], "properties": {"stage": {"type": "string", "minLength": 1}, "resource": {"enum": ["iron-ore", "copper-ore"]}, "patch_id": {"type": "string", "minLength": 1}, "drill_positions": {"$ref": "#/definitions/positions"}, "capacity_per_second": {"type": "number", "exclusiveMinimum": 0}}}},
+    "coal_patch_id": {"type": "string", "minLength": 1},
+    "coal_drill_positions": {"$ref": "#/definitions/positions"},
+    "coal_output_y": {"type": "number", "minimum": -250, "maximum": 250},
+    "coal_output_x": {"type": "number", "minimum": -250, "maximum": 250},
+    "coal_capacity_per_second": {"type": "number", "exclusiveMinimum": 0},
+    "pumpjack_sites": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["position", "output", "resource", "capacity_per_second"], "properties": {"position": {"$ref": "#/definitions/position"}, "output": {"$ref": "#/definitions/position"}, "resource": {"const": "crude-oil"}, "capacity_per_second": {"type": "number", "exclusiveMinimum": 0}, "direction": {"enum": ["north", "east", "south", "west"]}}}},
+    "crude_pipe_tiles": {"$ref": "#/definitions/positions"},
+    "offshore_pump_sites": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["position", "output", "resource", "capacity_per_second"], "properties": {"position": {"$ref": "#/definitions/position"}, "output": {"$ref": "#/definitions/position"}, "resource": {"const": "water"}, "capacity_per_second": {"type": "number", "exclusiveMinimum": 0}, "direction": {"enum": ["north", "east", "south", "west"]}}}},
+    "water_pipe_tiles": {"$ref": "#/definitions/positions"}
+  },
+  "definitions": {
+    "position": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -250, "maximum": 250}},
+    "positions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/definitions/position"}}
+  }
+}
