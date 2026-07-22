@@ -17,16 +17,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.fluid_systems import validate_network_purity
+from core.fluid_systems import MAX_UNDERGROUND_SPAN, validate_network_purity
 from planners.fluid_layouts import (
     FLUID_RECIPES,
+    LINK_TUNNEL_CLEARANCE,
     MACHINE_FOOTPRINTS,
     VERIFIED_PIPE_TILES,
     _pitch,
     _validate,
+    fluid_chain_link_segments,
+    fluid_chain_link_trunk,
     fluid_network_segments,
+    generate_fluid_chain_link,
     generate_fluid_machine_row,
     generate_fluid_source,
+    header_attachment,
+    header_row,
+    source_attachment,
 )
 
 # Footprints that the collision guarantee covers. 2x2 power scaffolding is
@@ -274,3 +281,190 @@ def test_unknown_tiers_are_refused():
         generate_fluid_machine_row("sulfur", 1, belt_type="wooden-belt")
     with pytest.raises(ValueError, match="Unknown inserter tier"):
         generate_fluid_machine_row("sulfur", 1, inserter_type="long-handed-inserter")
+
+
+# --- header rows and attachment points ---------------------------------------
+
+def test_header_row_matches_the_rows_the_generator_actually_pipes():
+    # The rule and the placed pipes must agree for every fluid of every recipe;
+    # a chain link that trusted header_row() but missed by a row would connect
+    # to nothing, which is exactly the failure this whole feature exists to fix.
+    for recipe in sorted(FLUID_RECIPES):
+        count, ox, oy = 3, 60, 30
+        plan = generate_fluid_machine_row(recipe, count, ox, oy)
+        width = MACHINE_FOOTPRINTS[FLUID_RECIPES[recipe]["machine"]]
+        piped_rows = {int(a["position"]["y"] - 0.5)
+                      for a in _actions(plan) if a["entity"] == "pipe"}
+        for fluid in list(VERIFIED_PIPE_TILES[recipe]["inputs"]) + \
+                list(VERIFIED_PIPE_TILES[recipe]["outputs"]):
+            spot = header_attachment(recipe, fluid, count, ox, oy)
+            assert spot["row"] == header_row(oy, width, spot["side"], spot["slot"])
+            assert spot["row"] in piped_rows
+            assert spot["west"] == (ox - 1, spot["row"])
+            # The attachment sits one row further from the machines than the
+            # header, and that row carries no pipe of this row at all.
+            assert abs(spot["attach"][1] - spot["row"]) == 1
+            assert spot["attach"][1] not in piped_rows
+
+
+def test_attachment_touches_the_header_and_nothing_else_in_the_row():
+    count, ox, oy = 2, 0, 0
+    for recipe in sorted(FLUID_RECIPES):
+        segments = {s["fluid"]: set(s["tiles"])
+                    for s in fluid_network_segments(recipe, count, ox, oy)}
+        for fluid, tiles in segments.items():
+            attach = header_attachment(recipe, fluid, count, ox, oy)["attach"]
+            neighbours = {(attach[0] + dx, attach[1] + dy)
+                          for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))}
+            assert neighbours & tiles, f"{recipe}/{fluid}: attachment touches no header tile"
+            for other, other_tiles in segments.items():
+                if other != fluid:
+                    assert not neighbours & other_tiles
+                    assert attach not in other_tiles
+
+
+def test_header_row_rejects_a_bad_side_or_slot():
+    with pytest.raises(ValueError, match="Unknown header side"):
+        header_row(0, 3, "east", 0)
+    with pytest.raises(ValueError, match="slot must be non-negative"):
+        header_row(0, 3, "north", -1)
+
+
+def test_attachment_refuses_a_fluid_the_recipe_does_not_use():
+    with pytest.raises(ValueError, match="no 'lubricant' header"):
+        header_attachment("sulfur", "lubricant", 2)
+
+
+def test_source_attachment_is_west_of_the_infinity_pipe():
+    # generate_fluid_source runs its pipes EAST, so the west end is always free.
+    assert source_attachment(200, 244) == (199, 244)
+
+
+# --- chain link routing ------------------------------------------------------
+
+def _link_tiles(plan: dict) -> dict:
+    return {(int(a["position"]["x"] - 0.5), int(a["position"]["y"] - 0.5)): a
+            for a in _actions(plan)}
+
+
+def test_chain_link_is_deterministic_and_z_shaped():
+    args = ((20, 5), [(20, 40)], "water", 10)
+    assert generate_fluid_chain_link(*args) == generate_fluid_chain_link(*args)
+    tiles = _link_tiles(generate_fluid_chain_link(*args))
+    assert set(tiles) == (
+        {(x, 5) for x in range(10, 21)}
+        | {(10, y) for y in range(5, 41)}
+        | {(x, 40) for x in range(10, 21)}
+    )
+    assert {a["entity"] for a in tiles.values()} == {"pipe"}
+
+
+def test_chain_link_branches_once_per_consumer_on_a_single_trunk():
+    plan = generate_fluid_chain_link((20, 5), [(20, 20), (20, 40)], "water", 10)
+    tiles = set(_link_tiles(plan))
+    assert {(10, y) for y in range(5, 41)} <= tiles       # one shared trunk
+    for row in (5, 20, 40):
+        assert {(x, row) for x in range(10, 21)} <= tiles  # one leg each
+    assert not any(y for _, y in tiles if y > 40)
+
+
+def test_chain_link_dives_under_a_foreign_fluid_and_leaves_it_a_clear_tile():
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(15, y) for y in range(0, 50)]}]
+    plan = generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+    tiles = _link_tiles(plan)
+    clear = LINK_TUNNEL_CLEARANCE
+    for row in (5, 40):
+        for offset in range(-clear + 1, clear):
+            assert (15 + offset, row) not in tiles, "link ran straight over the foreign fluid"
+        west, east = tiles[(15 - clear, row)], tiles[(15 + clear, row)]
+        assert west["entity"] == east["entity"] == "pipe-to-ground"
+        # `direction` is where the NORMAL end points, so the two ends of one
+        # tunnel face away from each other and only mate underground.
+        assert (west["direction"], east["direction"]) == ("west", "east")
+    assert 2 * clear <= MAX_UNDERGROUND_SPAN
+    # And the emitted set is still pure against the fluid it crossed.
+    validate_network_purity(
+        fluid_chain_link_segments((20, 5), [(20, 40)], "water", 10, foreign) + foreign
+    )
+
+
+def test_chain_link_refuses_a_trunk_column_that_is_not_clear():
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(10, 20)]}]
+    with pytest.raises(ValueError, match="Trunk column 10 is not clear"):
+        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+
+
+def test_chain_link_refuses_a_crossing_it_cannot_tunnel_under():
+    # Foreign fluid one tile from the leg's end: no room for the pipe-to-ground
+    # pair plus a pipe on each side, so refuse rather than emit a mixing hazard.
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(19, 5)]}]
+    with pytest.raises(ValueError, match="No room to tunnel under"):
+        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+
+
+def test_chain_link_refuses_two_crossings_too_close_to_separate():
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(14, 5), (16, 5)]}]
+    with pytest.raises(ValueError, match="too close to tunnel under separately"):
+        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+
+
+def test_chain_link_refuses_a_trunk_east_of_its_attachments():
+    with pytest.raises(ValueError, match="must lie strictly WEST"):
+        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 25)
+
+
+def test_chain_link_refuses_no_consumer():
+    with pytest.raises(ValueError, match="at least one consumer"):
+        generate_fluid_chain_link((20, 5), [], "water", 10)
+
+
+def test_chain_link_purity_guard_bites_when_a_route_runs_beside_a_foreign_fluid():
+    # A foreign fluid one tile east of the trunk is not ON the route, so the
+    # router has nothing to tunnel under -- the purity guard is what catches it.
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(11, y) for y in range(10, 30)]}]
+    with pytest.raises(ValueError, match="Fluid mixing"):
+        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+
+
+def test_chain_link_trunk_is_just_the_column():
+    assert fluid_chain_link_trunk((20, 5), [(20, 20), (20, 40)], 10) == \
+        [(10, y) for y in range(5, 41)]
+
+
+def test_chain_link_plans_validate_against_the_schema():
+    _validate(generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10))
+
+
+# --- the real processing-unit chain ------------------------------------------
+
+def test_processing_unit_chain_links_are_pure_against_every_stage():
+    from tools.build_processing_units import (
+        LINKS,
+        build_link_plans,
+        link_routes,
+        stage_segments,
+    )
+
+    routes = link_routes()
+    assert sorted(routes) == sorted(fluid for fluid, _, _ in LINKS)
+    plans = build_link_plans()  # raises on any mixing hazard or double-claimed tile
+    assert [name for name, _ in plans] == [f"link_{fluid}" for fluid, _, _ in LINKS]
+
+    stages = {s["fluid"] for s in stage_segments()}
+    assert {"crude-oil", "petroleum-gas", "water", "sulfuric-acid"} <= stages
+
+    # Each branch must END next to the header tile it is supposed to feed.
+    stage_tiles = {}
+    for segment in stage_segments():
+        stage_tiles.setdefault(segment["fluid"], set()).update(map(tuple, segment["tiles"]))
+    for fluid, (from_point, to_points, trunk_x) in routes.items():
+        for point in [from_point] + to_points:
+            touching = {(point[0] + dx, point[1] + dy)
+                        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))}
+            assert touching & stage_tiles[fluid], f"{fluid}: {point} touches no {fluid} pipe"
+        assert trunk_x < min(p[0] for p in [from_point] + to_points)

@@ -43,7 +43,7 @@ def _lua_str(value: str) -> str:
 # returns 0 rather than erroring - required by the orchestrator brief.
 _FILL_HELPER = (
     "local function fill(x,y) "
-    "local es=s.find_entities_filtered{type='transport-belt',area={{x-0.4,y-0.4},{x+0.4,y+0.4}}} "
+    "local es=s.find_entities_filtered{type='transport-belt',force=f,area={{x-0.4,y-0.4},{x+0.4,y+0.4}}} "
     "if #es==0 then return 0 end local b=es[1] "
     "return b.get_transport_line(1).get_item_count()+b.get_transport_line(2).get_item_count() end "
 )
@@ -78,7 +78,7 @@ def _build_line_query(line: dict) -> str:
     parts.append(_FILL_HELPER)
     parts.append("local names={} for k,v in pairs(defines.entity_status) do names[v]=k end ")
     parts.append(
-        "local ms=s.find_entities_filtered{name='" + _lua_str(machine_name) + "',area={{"
+        "local ms=s.find_entities_filtered{name='" + _lua_str(machine_name) + "',force=f,area={{"
         + repr(area_x1) + "," + repr(area_y1) + "},{" + repr(area_x2) + "," + repr(area_y2) + "}}} "
     )
     parts.append("local sc={} for _,e in pairs(ms) do local nm=names[e.status] or 'unknown' sc[nm]=(sc[nm] or 0)+1 end ")
@@ -94,7 +94,7 @@ def _build_line_query(line: dict) -> str:
         parts.append("local prod=-1 ")
     parts.append(
         "local full=1 "
-        "for _,c in pairs(s.find_entities_filtered{type={'container','logistic-container'},area={{"
+        "for _,c in pairs(s.find_entities_filtered{type={'container','logistic-container'},force=f,area={{"
         + repr(area_x1) + "," + repr(oy + 5) + "},{" + repr(area_x2) + "," + repr(oy + 8) + "}}}) do "
         "local ok,inv=pcall(function() return c.get_inventory(defines.inventory.chest) end) "
         "if ok and inv and inv.valid and inv.count_empty_stacks()>0 then full=0 end end "

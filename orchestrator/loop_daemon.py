@@ -23,6 +23,11 @@ from core.progress_state import build_progress_state
 from core.sandbox_zoning import derive_sandbox_zones
 from orchestrator.game_bridge import BridgeError, GameBridge, load_json
 from planners.city_planner.ghost_projection_phase import generate_ghost_plan
+from planners.sandbox_infrastructure import (
+    build_layout_authorization,
+    compose_managed_sandbox,
+    require_compatible_topology,
+)
 
 SANDBOX_SURFACE = "planner-sandbox"
 
@@ -137,8 +142,19 @@ def run_iteration(bridge: GameBridge, build_intent: dict, build_intent_path: Pat
         anchor_materials = {placeholder_prototype(block_id): remaining} if remaining else {}
         anchor_payload.append({"x": zone.origin_x + 10, "materials": anchor_materials})
     materials = _material_targets(build_intent, current_by_prototype)
-    bridge.ensure_scaffolding({"anchors": anchor_payload, "bots_per_roboport": 30})
-    status["actions"].append("scaffolding_ensured")
+    require_compatible_topology(bridge)
+    composition = compose_managed_sandbox(
+        [], anchor_payload, materials, bots_per_roboport=30
+    )
+    infrastructure_authorization = build_layout_authorization(
+        composition["infrastructure"]
+    )
+    for name, infrastructure_plan in composition["infrastructure"]:
+        report = load_json(bridge.build_layout(infrastructure_authorization, infrastructure_plan))
+        if not report.get("ok"):
+            raise BridgeError(f"Managed infrastructure {name} failed: {report.get('error')}")
+    bridge.ensure_scaffolding(composition["scaffolding"])
+    status["actions"].append("managed_scaffolding_ensured")
 
     # Full decision trace: every intermediate payload the pipeline reasoned
     # with, so external viewers (dashboard) can show the agent's thinking.

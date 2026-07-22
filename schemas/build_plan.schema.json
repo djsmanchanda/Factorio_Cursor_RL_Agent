@@ -23,7 +23,9 @@
             "items": {
               "type": "object",
               "required": [
-                "action_type"
+                "action_type",
+                "entity",
+                "position"
               ],
               "properties": {
                 "action_type": {
@@ -39,6 +41,10 @@
                 },
                 "position": {
                   "type": "object",
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "properties": {
                     "x": {
                       "type": "number"

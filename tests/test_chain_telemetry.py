@@ -112,6 +112,7 @@ def test_measure_line_query_stays_under_1500_chars_single_round_trip():
     query = _build_line_query(SCIENCE_LINE)
     assert len(query) < 1500
     assert query.startswith("/sc ")
+    assert query.count("force=f") >= 3
 
     bridge = FakeBridge(["machines=4 input_belt_start=0 input_belt_end=0 output_belt=0 produced=-1 collectors_full=1"])
     measure_line(bridge, SCIENCE_LINE)

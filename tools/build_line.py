@@ -12,9 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.execution_authorizer import authorize_execution
 from orchestrator.game_bridge import GameBridge, load_json
-from planners.local_layout_planner import LocalLayoutPlanner
+from planners.local_layout_planner import LINE_RECIPES, LocalLayoutPlanner
+from planners.sandbox_infrastructure import (
+    build_layout_authorization,
+    compose_managed_sandbox,
+    require_compatible_topology,
+)
 from tools.rcon_client import RconClient
 
 
@@ -43,8 +47,24 @@ def main() -> int:
         feed_style=args.feed_style,
     )
     materials = planner.material_requirements(plan)
+    ore_patches = []
+    if args.mine:
+        ore = LINE_RECIPES[args.recipe]["ingredients"][0]
+        ore_patches.append({
+            "item": ore,
+            "x1": args.origin_x - 1, "y1": args.origin_y - 5,
+            "x2": args.origin_x + args.machines * 3, "y2": args.origin_y - 1,
+            "amount": 100000,
+        })
+    composition = compose_managed_sandbox(
+        [("line", plan)],
+        [int(x) for x in args.anchors.split(",")],
+        materials,
+        bots_per_roboport=30,
+        ore_patches=ore_patches,
+    )
+    plan = dict(composition["plans"])["line"]
     print(f"Plan: {sum(len(p['actions']) for p in plan['phases'])} actions; materials: {materials}")
-
     bridge = GameBridge(
         script_output=Path(args.script_output),
         host=args.rcon_host,
@@ -52,37 +72,16 @@ def main() -> int:
         password=args.rcon_password,
     )
     try:
-        # Stock construction materials in every covering anchor network, and
-        # seed the ore patch when the line is miner-fed.
-        anchor_payload = [{"x": int(x), "materials": materials} for x in args.anchors.split(",")]
-        scaffold_request: dict = {"anchors": anchor_payload, "bots_per_roboport": 30}
-        if args.mine:
-            from planners.local_layout_planner import LINE_RECIPES
-
-            ore = LINE_RECIPES[args.recipe]["ingredients"][0]
-            scaffold_request["ore_patches"] = [{
-                "item": ore,
-                "x1": args.origin_x - 1, "y1": args.origin_y - 5,
-                "x2": args.origin_x + args.machines * 3, "y2": args.origin_y - 1,
-                "amount": 100000,
-            }]
-        bridge.ensure_scaffolding(scaffold_request)
-
-        # The proposal step needs progress/phasing context; a layout build is a
-        # direct, bounded action, so authorization is granted explicitly here
-        # against a minimal proposal envelope.
-        proposal = {
-            "allowed_actions": ["project_more_ghosts"],
-            "blocked_actions": [],
-            "requires_human_approval": False,
-            "next_recommended_step": "project_more_ghosts",
-        }
-        authorization = authorize_execution(
-            proposal=proposal,
-            approved_actions=["project_more_ghosts"],
-            authorization_source="policy",
-        ).to_dict()
-
+        require_compatible_topology(bridge)
+        authorization = build_layout_authorization(
+            composition["infrastructure"] + composition["plans"]
+        )
+        for name, infrastructure_plan in composition["infrastructure"]:
+            infrastructure_report = load_json(bridge.build_layout(authorization, infrastructure_plan))
+            if not infrastructure_report.get("ok"):
+                print(f"INFRASTRUCTURE {name} FAILED: {infrastructure_report.get('error')}", file=sys.stderr)
+                return 1
+        bridge.ensure_scaffolding(composition["scaffolding"])
         report_path = bridge.build_layout(authorization, plan)
         report = load_json(report_path)
         if not report.get("ok"):
@@ -101,7 +100,7 @@ def main() -> int:
     output_item = args.recipe
     query = (
         f"/sc local s=game.surfaces['planner-sandbox'] "
-        f"local c=s.find_entity('steel-chest', {{{chest_x},{chest_y}}}) "
+        f"local c=s.find_entities_filtered{{name='steel-chest',force='planner',position={{{chest_x},{chest_y}}},limit=1}}[1] "
         f"if c then rcon.print(c.get_item_count('{output_item}')) else rcon.print('-1') end"
     )
 

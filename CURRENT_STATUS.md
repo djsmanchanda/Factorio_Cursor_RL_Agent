@@ -128,3 +128,31 @@ backfilled from git history because this file did not exist yet.
 - Mature: core/ (~2.7k LOC — metrics, progress state, authorization, phasing, advisory policies); schema validation pervasive.
 - Partial: CityPlanner (symbolic decisions only, no geometry; 2 of 9 intents have phase chains); Lua mod logic complete but targets Factorio 1.1 and was never deployed.
 - Absent: PlanetPlanner, InterplanetarySupervisor, real LocalLayoutPlanner layout math (stub inspector only), rail standard, block deployment, any transport (no RCON), any orchestrator/main loop, all automated tests, any actual learned RL (heuristics only; sole dep is jsonschema).
+
+## [2026-07-22] Milestone 1 - unified sandbox infrastructure and planner force
+- Files: factorio_mod/control.lua, planners/{infrastructure,infrastructure_geometry}.py, tools/build_processing_units.py, tests/test_infrastructure.py
+- What: Processing fluid stages now compose one validated electric grid and one five-roboport network on force `planner`; managed scaffolding only seeds bots/materials, and layout reports distinguish attempted, placed, existing, and failed placements.
+- Why: Remove isolated power/logistic islands and make partial placement failures observable before completing the production chain.
+- Next: Build the real advanced-circuit solid-item dependency chain; sulfur utilization belongs to the later processing-unit slice.
+
+## [2026-07-22] Milestone 1 correction - explicit topology ownership
+- Files: factorio_mod/control.lua, schemas/build_plan.schema.json, planners/{sandbox_infrastructure,fluid_routing,fluid_layouts}.py, orchestrator/{game_bridge,chain_telemetry,loop_daemon,expansion_daemon}.py, tools/{build_line,build_science_chain,build_processing_units}.py, tests/{test_infrastructure,test_chain_telemetry}.py
+- What: Existing topology is read-only until confirm-gated reconcile/reset; all active builders use managed unified infrastructure; placement configuration/auth failures are reported; sandbox snapshots and telemetry are force-filtered; live verification now asserts stage fluids and network counts.
+- Why: Prevent silent force mutation, split-network recreation, false idempotent success, and player-factory contamination.
+- Next: Split factorio_mod/control.lua (now over 500 LOC) by command domain before further Lua growth; no live reset/reconcile was run.
+## [2026-07-22] Milestone 1 final - canonical managed sandbox backbone
+- Files: factorio_mod/{control,sandbox_shared,snapshot,ghost_plans,construction,upgrades,deconstruction,sandbox_topology,scaffolding,layout_executor,research}.lua, planners/{infrastructure,sandbox_infrastructure,fluid_layouts,fluid_routing}.py, orchestrator/{game_bridge,chain_telemetry,loop_daemon,expansion_daemon}.py, tools/{build_line,build_science_chain,build_processing_units}.py, schemas/build_plan.schema.json, tests/{test_infrastructure,test_chain_telemetry}.py
+- What: Every managed builder now extends one exact canonical power source and roboport hub; topology checks fail closed, authorizations match actual mutations, infinity configuration/network identity are verified exactly, and Lua commands are split into bounded require-able modules.
+- Why: Make sequential autonomous builds converge on one buildable electric/logistic graph without implicit migration, excess permissions, or false idempotent success.
+- Verified: 261 tests passed; science-chain and processing-unit plan-only builds passed; all Lua files are at most 435 lines. No live Factorio reset, reconcile, deploy, or build was run.
+- Next: Milestone 2 - construct and validate the advanced-circuit dependency chain on this canonical backbone.
+## [2026-07-22] Milestone 1 topology report contract correction
+- Files: factorio_mod/sandbox_topology.lua, tests/test_infrastructure.py
+- What: Topology JSON now emits the computed canonical power-source and roboport-hub booleans, including explicit false values for an absent surface; repeat managed inspections remain compatible.
+- Why: Python correctly fails closed when these keys are absent, so dropping them made every second nonempty managed invocation refuse its own canonical topology.
+- Verified: 25 focused infrastructure tests passed; no live Factorio or git operation was run.
+## [2026-07-22] Milestone 1 test-module charter correction
+- Files: tests/test_infrastructure.py, tests/test_sandbox_contracts.py
+- What: Split deterministic infrastructure tests from managed sandbox runtime/topology/Lua contract tests without changing coverage.
+- Why: Restore the repository invariant that every source file remains at or below 500 lines.
+- Verified: Both files have Path/Purpose headers, are 252 and 308 lines, and all 25 focused tests passed; no live Factorio or git operation was run.

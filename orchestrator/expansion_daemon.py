@@ -16,9 +16,13 @@ if str(REPO_ROOT) not in sys.path:
 from core.action_catalog import build_catalog
 from core.baseline_policy import choose_action, explain
 from core.bottleneck_diagnosis import diagnose_line
-from core.execution_authorizer import authorize_execution
 from orchestrator.chain_telemetry import measure_chain, rate_tracker
 from orchestrator.game_bridge import GameBridge, load_json
+from planners.sandbox_infrastructure import (
+    build_layout_authorization,
+    compose_managed_sandbox,
+    require_compatible_topology,
+)
 from planners.local_layout_planner import (
     BELT_TIERS, FEEDER_RATES, FEED_HEADROOM, LINE_RECIPES, MACHINE_SPEEDS, LocalLayoutPlanner,
 )
@@ -120,6 +124,31 @@ def relay_chain_link(line: dict, old_machines: int, new_machines: int, belt_type
     return {"phases": [{"name": f"relay_{line['name']}", "actions": actions}]}
 
 
+def _prepare_managed_plan(
+    bridge: GameBridge,
+    plan: dict,
+    chain: dict,
+    materials: dict,
+    ore_patches: list | None = None,
+) -> tuple[dict, dict]:
+    require_compatible_topology(bridge)
+    composition = compose_managed_sandbox(
+        [("action", plan)],
+        chain["anchors"],
+        materials,
+        bots_per_roboport=50,
+        ore_patches=ore_patches or [],
+    )
+    authorization = build_layout_authorization(
+        composition["infrastructure"] + composition["plans"]
+    )
+    for name, infrastructure_plan in composition["infrastructure"]:
+        report = load_json(bridge.build_layout(authorization, infrastructure_plan))
+        if not report.get("ok"):
+            raise RuntimeError(f"Managed infrastructure {name} failed: {report.get('error')}")
+    bridge.ensure_scaffolding(composition["scaffolding"])
+    return dict(composition["plans"])["action"], authorization
+
 def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict, action: dict) -> dict:
     """Execute a catalog action. Unsupported actions are reported, never faked."""
     if action is None:
@@ -131,12 +160,6 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
     if line is None:
         return {"ok": False, "detail": f"unknown target line {target}"}
 
-    authorization = authorize_execution(
-        proposal={"allowed_actions": ["project_more_ghosts"], "blocked_actions": [],
-                  "requires_human_approval": False, "next_recommended_step": "project_more_ghosts"},
-        approved_actions=["project_more_ghosts"],
-        authorization_source="policy",
-    ).to_dict()
 
     if name == "add_collectors" and "lab_row" in line.get("consumers", []):
         # A line drained by labs is relieved by MORE LABS: extra lab capacity
@@ -146,10 +169,7 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
         plan = planner.generate_lab_row(new_labs, labs["origin"][0], labs["origin"][1],
                                         belt_type=labs["belt_type"], inserter_type=labs["inserter_type"])
         materials = {item: count * 2 for item, count in planner.material_requirements(plan).items()}
-        bridge.ensure_scaffolding({
-            "anchors": [{"x": ax, "y": ay, "materials": materials} for ax, ay in chain["anchors"]],
-            "bots_per_roboport": 50,
-        })
+        plan, authorization = _prepare_managed_plan(bridge, plan, chain, materials)
         report = load_json(bridge.build_layout(authorization, plan))
         if not report.get("ok"):
             return {"ok": False, "detail": report.get("error", "lab build failed")}
@@ -177,18 +197,17 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
     )
     materials = {item: count * 2 for item, count in planner.material_requirements(plan).items()}
 
-    anchors = [{"x": ax, "y": ay, "materials": materials} for ax, ay in chain["anchors"]]
-    scaffold: dict = {"anchors": anchors, "bots_per_roboport": 50}
+    ore_patches = []
     if line.get("mining_feed"):
-        # Growing a mining line needs ore under the new drills.
         ox, oy = line["origin"]
         ore = LINE_RECIPES[line["recipe"]]["ingredients"][0]
-        scaffold["ore_patches"] = [{
+        ore_patches.append({
             "item": ore, "x1": ox - 1, "y1": oy - 5,
             "x2": ox + new_machines * 3, "y2": oy - 1, "amount": 500000,
-        }]
-    bridge.ensure_scaffolding(scaffold)
-
+        })
+    plan, authorization = _prepare_managed_plan(
+        bridge, plan, chain, materials, ore_patches
+    )
     report = load_json(bridge.build_layout(authorization, plan))
     if not report.get("ok"):
         return {"ok": False, "detail": report.get("error", "build failed")}
@@ -199,7 +218,8 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
     # A chained-onward line must be reconnected or its new machines strand.
     if not line.get("has_terminal_collector", True) and line.get("consumers"):
         relay = relay_chain_link(line, line["machines"], new_machines, line["belt_type"])
-        relay_report = load_json(bridge.build_layout(authorization, relay))
+        relay_authorization = build_layout_authorization([relay])
+        relay_report = load_json(bridge.build_layout(relay_authorization, relay))
         detail += f"; relayed connector ({relay_report.get('placed_ghosts', 0)} belts)"
 
     line["machines"] = new_machines  # registry follows reality
@@ -309,6 +329,7 @@ def main() -> int:
     previous_raw: dict | None = None
     last_time = 0.0
     try:
+        require_compatible_topology(bridge)
         for step in range(1, args.steps + 1):
             now = time.monotonic()
             elapsed = (now - last_time) if last_time else 0.0

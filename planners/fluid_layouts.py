@@ -1,72 +1,9 @@
 # Path: planners/fluid_layouts.py
 # Purpose: Deterministic layout primitives for FLUID-using production rows
 # (chemical plants, oil refineries, fluid-recipe assemblers) plus the sandbox
-# fluid sources that feed them. Complements planners/local_layout_planner.py,
-# which only knows how to build item-on-belt lines.
-#
-# ---------------------------------------------------------------------------
-# LIVE VERIFICATION (Factorio 2.0.77 via RCON, surface 'planner-sandbox',
-# force 'planner', 2026-07-22). Nothing below is inferred; every offset was
-# read off the running game and then confirmed with real placed pipes.
-#
-# THE CONNECTION-TILE RULE
-#   LuaFluidBox.get_pipe_connections(i) reports TWO positions per connection:
-#     * `position`        -- sits ON the machine footprint's outer ring, i.e.
-#                            INSIDE the 3x3 / 5x5 body. A pipe here is illegal.
-#     * `target_position` -- exactly one tile further out along the connection
-#                            direction. THIS is the tile the pipe must occupy.
-#   So: pipe_tile = target_position = position + one step outward.
-#   Command used (abridged): python tools/rcon_client.py --password planner_test
-#     "/sc local e=s.create_entity{name='chemical-plant',...,recipe='sulfur'} for
-#      i=1,#e.fluidbox do for j,c in pairs(e.fluidbox.get_pipe_connections(i)) do
-#      ... c.position ... c.target_position ... e.fluidbox.get_filter(i) ... end
-#      end rcon.print(...)"
-#   Offsets relative to entity.position, machine facing north (position ->
-#   target_position); "x2" marks a box exposing both mirrored connections, of
-#   which VERIFIED_PIPE_TILES below keeps one:
-#     chemical-plant / sulfur        water         in  (-1,-1) -> (-1,-2)
-#                                    petroleum-gas in  ( 1,-1) -> ( 1,-2)
-#     chemical-plant / sulfuric-acid water         in  (-1,-1) -> (-1,-2)  x2
-#                                    sulfuric-acid out (-1, 1) -> (-1, 2)  x2
-#     chemical-plant / plastic-bar   petroleum-gas in  (-1,-1) -> (-1,-2)  x2
-#     oil-refinery / basic-oil-processing
-#                                    crude-oil     in  ( 1, 2) -> ( 1, 3)
-#                                    petroleum-gas out ( 2,-2) -> ( 2,-3)
-#     assembling-machine-2 / processing-unit
-#                                    sulfuric-acid in  ( 0,-1) -> ( 0,-2)
-#   Confirmation: a pipe placed on target_position lists the machine in
-#   `pipe.neighbours`; the machine lists that pipe under the matching fluidbox.
-#   A pipe on `position` overlaps the machine body and connects to nothing.
-#   NOTE the recipe dependence: which fluidbox is active, and which of its
-#   connections exist, is decided by the RECIPE, not by the prototype alone --
-#   hence the per-recipe table below rather than a per-entity one.
-#
-# THE CROSSING RULE (why item belts and fluid headers can share one side)
-#   A pipe-to-ground pair carries its fluid UNDER intervening rows, including
-#   transport belts and a FOREIGN fluid's header, without joining them. Verified
-#   with two chemical-plant inputs whose undergrounds spanned 2 and 6 tiles
-#   across a belt row and across the water header row: get_fluid_segment_id
-#   returned 4697 for the whole water network and 4699 for the whole
-#   petroleum-gas network -- two disjoint segments. Direction semantics
-#   (verified): a pipe-to-ground's `direction` is where its NORMAL (above-
-#   ground) connection points and the underground end faces the opposite way, so
-#   a stub touching a machine to its south faces "south" and its riser, which
-#   touches a header to its north, faces "north".
-#
-# OTHER LIVE READINGS
-#   get_crafting_speed(): chemical-plant 1, oil-refinery 1, assembler-2 0.75.
-#   medium-electric-pole: supply_area_distance 3.5, max_wire_distance 9.
-#   'infinity-pipe' exists, is 1x1, and takes
-#   set_infinity_pipe_filter{name=..., percentage=..., mode='at-least'}.
-#   Whole generated rows were rebuilt on the sandbox and read back: every
-#   machine's boxes reported connected, with exactly one fluid segment per fluid.
-#
-# COULD NOT VERIFY
-#   No plan was executed through factorio_mod/control.lua: its place_entity
-#   handler applies `infinity_filter` with set_infinity_container_filter, the
-#   CHEST api, which errors on an infinity-pipe -- see generate_fluid_source().
-# ---------------------------------------------------------------------------
-
+# fluid sources that feed them.
+# Connection offsets and fluid-purity rules are documented in docs/23_fluid_systems.md.
+# All geometry remains deterministic planner data; cross-stage links live in fluid_routing.py.
 from __future__ import annotations
 
 import json
@@ -75,7 +12,11 @@ from typing import Dict, List
 
 from jsonschema import Draft7Validator
 
-from core.fluid_systems import validate_network_purity, validate_underground_span
+from core.fluid_systems import (
+    validate_network_purity,
+    validate_pipeline_span,
+    validate_underground_span,
+)
 from planners.local_layout_planner import (
     BELT_TIERS,
     FEEDER_RATES,
@@ -148,9 +89,7 @@ HEADER_WEST = -1  # westmost header column: one tile clear of the machines
 SOURCE_PERCENTAGE = 1.0  # infinity-pipe fill target, mode "at-least"
 FLUID_SOURCES = {"water": "water", "crude-oil": "crude-oil"}
 _MAX_EXTRA_PITCH = 3  # how far generate_* may spread machines to stay pure
-
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-
 
 def _validate(plan: dict) -> None:
     """Schema-validate a BuildPlan, then enforce the electric-only invariant."""
@@ -164,7 +103,6 @@ def _validate(plan: dict) -> None:
         raise ValueError("BuildPlan validation FAILED:\n" + joined)
     _reject_fuel_entities(plan)
 
-
 def _stub_row(width: int, dy: int) -> int:
     """Tile row of a pipe tile whose centre offset is dy, machines on rows 2..
 
@@ -173,6 +111,26 @@ def _stub_row(width: int, dy: int) -> int:
     """
     return int(2 + width / 2 + dy - 0.5)
 
+def header_row(origin_y: int, footprint: int, side: str, slot: int = 0) -> int:
+    """World y of header row `slot` on `side` of a row at `origin_y`.
+
+    THE header row rule, and the only place it is written down: _networks()
+    below calls this, so a caller that wants to attach to a header can never
+    disagree with the pipes the generator actually places. Slot n sits 3 rows
+    further out than slot n-1 (header, riser, one clear row), which is what
+    keeps two fluids on the same face apart.
+    """
+    if slot < 0:
+        raise ValueError("header slot must be non-negative")
+    if side == "north":
+        return origin_y - 2 - 3 * slot
+    if side == "south":
+        return origin_y + footprint + 5 + 3 * slot
+    raise ValueError(f"Unknown header side: {side!r} (expected 'north' or 'south')")
+
+def _outward(side: str) -> int:
+    """Step that leads AWAY from the machines: -1 north of the row, +1 south."""
+    return -1 if side == "north" else 1
 
 def _networks(recipe: str, machine_count: int, pitch: int) -> List[dict]:
     """Per-fluid geometry in TILE INDICES, deterministic and origin-relative.
@@ -202,21 +160,18 @@ def _networks(recipe: str, machine_count: int, pitch: int) -> List[dict]:
         on_side = sorted((e for e in entries if e["side"] == side),
                          key=lambda e: (e["dx"], e["fluid"]))
         for slot, entry in enumerate(on_side):
-            if side == "north":
-                riser_row, header_row = -1 - 3 * slot, -2 - 3 * slot
-            else:
-                riser_row, header_row = width + 4 + 3 * slot, width + 5 + 3 * slot
+            head = header_row(0, width, side, slot)
+            riser_row = head - _outward(side)  # one row back towards the machines
             cols = [i * pitch + (width - 1) // 2 + entry["dx"] for i in range(machine_count)]
             networks.append({
                 "fluid": entry["fluid"], "role": entry["role"], "side": side, "slot": slot,
-                "stub_row": entry["row"], "riser_row": riser_row, "header_row": header_row,
+                "stub_row": entry["row"], "riser_row": riser_row, "header_row": head,
                 "cols": cols,
                 "stubs": [(c, entry["row"]) for c in cols],
                 "risers": [(c, riser_row) for c in cols],
-                "header": [(c, header_row) for c in range(HEADER_WEST, max(cols) + 1)],
+                "header": [(c, head) for c in range(HEADER_WEST, max(cols) + 1)],
             })
     return networks
-
 
 def fluid_network_segments(recipe: str, machine_count: int, origin_x: int = 0,
                            origin_y: int = 0, pitch: int | None = None) -> List[dict]:
@@ -234,7 +189,6 @@ def fluid_network_segments(recipe: str, machine_count: int, origin_x: int = 0,
             "tiles": [(origin_x + c, origin_y + r) for c, r in tiles],
         })
     return segments
-
 
 def _pitch(recipe: str) -> int:
     """Smallest machine pitch >= the footprint that keeps every fluid pure.
@@ -254,7 +208,6 @@ def _pitch(recipe: str) -> int:
         return pitch
     raise ValueError(f"No pitch <= {width + _MAX_EXTRA_PITCH} keeps '{recipe}' fluid-pure")
 
-
 def _check_recipe(recipe: str, machine_count: int) -> None:
     if recipe not in FLUID_RECIPES:
         raise ValueError(f"No fluid recipe knowledge for: {recipe}")
@@ -263,14 +216,12 @@ def _check_recipe(recipe: str, machine_count: int) -> None:
     if machine_count <= 0:
         raise ValueError("machine_count must be positive")
 
-
 def _free_columns(recipe: str, machine_count: int, pitch: int, row: int) -> List[int]:
     """Machine-relative column offsets on `row` not taken by a fluid pipe tile."""
     width = MACHINE_FOOTPRINTS[FLUID_RECIPES[recipe]["machine"]]
     taken = {n["cols"][0] for n in _networks(recipe, machine_count, pitch) if n["stub_row"] == row}
     base = (width - 1) // 2
     return [d for d in range(-base, pitch - base) if base + d not in taken]
-
 
 def _item_feeders(recipe: str, machine_count: int, inserter_type: str) -> List[int]:
     """Feed points per item ingredient = ceil(demand * headroom / inserter rate).
@@ -281,7 +232,6 @@ def _item_feeders(recipe: str, machine_count: int, inserter_type: str) -> List[i
     rate = FEEDER_RATES[inserter_type]
     return [max(1, -(-int(a * crafts * FEED_HEADROOM * 100) // int(rate * 100)))
             for a in spec["item_amounts"]]
-
 
 def generate_fluid_machine_row(
     recipe: str,
@@ -453,7 +403,6 @@ def generate_fluid_machine_row(
     validate_network_purity(fluid_network_segments(recipe, machine_count, ox, oy, pitch))
     return plan
 
-
 def generate_fluid_source(kind: str, origin_x: int = 0, origin_y: int = 0,
                           run_length: int = 0) -> dict:
     """Raw fluid input for a header: an infinity-pipe plus an optional pipe run.
@@ -493,8 +442,52 @@ def generate_fluid_source(kind: str, origin_x: int = 0, origin_y: int = 0,
 
     plan = {"phases": [{"name": f"fluid_source_{fluid}", "actions": actions}]}
     _validate(plan)
-    validate_network_purity([{
-        "fluid": fluid, "separated_by_pump": False,
-        "tiles": [(origin_x + c, origin_y) for c in range(run_length + 1)],
-    }])
+    validate_network_purity([fluid_source_segment(kind, origin_x, origin_y, run_length)])
     return plan
+
+def fluid_source_segment(kind: str, origin_x: int = 0, origin_y: int = 0,
+                         run_length: int = 0) -> dict:
+    """The purity segment of a generate_fluid_source() run, in world tiles."""
+    return {"fluid": FLUID_SOURCES[kind], "separated_by_pump": False,
+            "tiles": [(origin_x + c, origin_y) for c in range(run_length + 1)]}
+
+def source_attachment(origin_x: int, origin_y: int) -> tuple:
+    """Where a chain link touches a fluid source: the tile west of its
+    infinity-pipe. The run itself grows EAST, so its west end is always free."""
+    return (origin_x - 1, origin_y)
+
+def header_attachment(recipe: str, fluid: str, machine_count: int = 1,
+                      origin_x: int = 0, origin_y: int = 0) -> dict:
+    """Where a chain link must touch to feed or drain `fluid` on a machine row.
+
+    Side and slot come straight out of _networks(), i.e. from the generator's
+    OWN ordering (fluids on a face sorted by connection column then name, slot n
+    pushed 3 rows further out than slot n-1) -- nothing here is guessed.
+
+    Returns {fluid, role, side, slot, row, west, attach}. `west` is the header's
+    west end; `attach` is one row FURTHER OUT than the header. Attaching from
+    outside rather than along the header row itself is deliberate: the row 3
+    tiles beyond a header is empty by construction (that is the clear row the
+    slot pitch reserves), whereas the header row can be occupied further west --
+    live-verified, plastic-bar's coal chest sits on the gas header row one tile
+    west of its west end, and sulfuric-acid's iron-plate chest does the same on
+    its water header row.
+    """
+    _check_recipe(recipe, machine_count)
+    for net in _networks(recipe, machine_count, _pitch(recipe)):
+        if net["fluid"] != fluid:
+            continue
+        row = origin_y + net["header_row"]
+        west = origin_x + HEADER_WEST
+        return {"fluid": fluid, "role": net["role"], "side": net["side"],
+                "slot": net["slot"], "row": row, "west": (west, row),
+                "attach": (west, row + _outward(net["side"]))}
+    raise ValueError(f"Recipe '{recipe}' has no '{fluid}' header to attach to")
+# Backward-compatible exports; routing lives in its own file to keep row layout
+# generation separate from cross-stage network composition.
+from planners.fluid_routing import (  # noqa: E402
+    LINK_TUNNEL_CLEARANCE,
+    fluid_chain_link_segments,
+    fluid_chain_link_trunk,
+    generate_fluid_chain_link,
+)

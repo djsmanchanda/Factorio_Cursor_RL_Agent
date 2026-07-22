@@ -17,6 +17,7 @@ CONSTRUCTION_REPORT_SUBDIR = Path("factorio_mod") / "construction_reports"
 SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
+TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 
 
 class BridgeError(RuntimeError):
@@ -102,6 +103,20 @@ class GameBridge:
         )
         return self._run_and_collect(f"/execute_construction {payload}", CONSTRUCTION_REPORT_SUBDIR, timeout)
 
+    def inspect_sandbox_topology(self, timeout: float = 60.0) -> Path:
+        return self._run_and_collect(
+            "/inspect_sandbox_topology", TOPOLOGY_REPORT_SUBDIR, timeout
+        )
+
+    def reconcile_sandbox_topology(
+        self, mode: str, *, confirm: bool = False, timeout: float = 120.0
+    ) -> Path:
+        if mode not in {"reset", "reconcile"}:
+            raise ValueError("topology mode must be reset or reconcile")
+        payload = json.dumps({"mode": mode, "confirm": confirm}, separators=(",", ":"))
+        return self._run_and_collect(
+            f"/reconcile_sandbox_topology {payload}", TOPOLOGY_REPORT_SUBDIR, timeout
+        )
     def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(f"/ensure_sandbox_scaffolding {body}", SCAFFOLD_REPORT_SUBDIR, timeout)

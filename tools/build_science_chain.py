@@ -12,9 +12,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.execution_authorizer import authorize_execution
 from orchestrator.game_bridge import GameBridge, load_json
 from planners.local_layout_planner import LocalLayoutPlanner
+from planners.sandbox_infrastructure import (
+    build_layout_authorization,
+    compose_managed_sandbox,
+    require_compatible_topology,
+)
 
 # Stage layout. Every x is PINNED by generate_chain_link's junction math -
 # see the comment on each stage for the equation it satisfies. Machine counts
@@ -43,11 +47,11 @@ TELEMETRY_QUERY = (
     "/sc local s=game.surfaces['planner-sandbox'] "
     "local area={{-20,90},{70,165}} "
     "local function belt(n) local t=0 "
-    "for _,b in pairs(s.find_entities_filtered{type='transport-belt', area=area}) do "
+    "for _,b in pairs(s.find_entities_filtered{type='transport-belt', force='planner', area=area}) do "
     "t=t+b.get_transport_line(1).get_item_count(n)+b.get_transport_line(2).get_item_count(n) end "
     "return t end "
     "local packs,working,total=0,0,0 "
-    "for _,l in pairs(s.find_entities_filtered{name='lab', area=area}) do total=total+1 "
+    "for _,l in pairs(s.find_entities_filtered{name='lab', force='planner', area=area}) do total=total+1 "
     "packs=packs+l.get_inventory(defines.inventory.lab_input).get_item_count('automation-science-pack') "
     "if l.status==defines.entity_status.working then working=working+1 end end "
     "rcon.print('ore='..belt('iron-ore')+belt('copper-ore')..' plates='..belt('iron-plate')+belt('copper-plate')"
@@ -64,20 +68,6 @@ def _telemetry(bridge: GameBridge) -> dict:
             key, value = part.split("=", 1)
             fields[key] = value
     return fields
-
-
-def _authorization() -> dict:
-    proposal = {
-        "allowed_actions": ["project_more_ghosts"],
-        "blocked_actions": [],
-        "requires_human_approval": False,
-        "next_recommended_step": "project_more_ghosts",
-    }
-    return authorize_execution(
-        proposal=proposal,
-        approved_actions=["project_more_ghosts"],
-        authorization_source="policy",
-    ).to_dict()
 
 
 def build_plans(belt: str, inserter: str) -> list:
@@ -147,6 +137,10 @@ def main() -> int:
     # Generous stock: bots consume exactly one item per ghost, but re-runs and
     # rebuilds should not starve.
     materials = {item: count * 3 for item, count in materials.items()}
+    composition = compose_managed_sandbox(
+        plans, ANCHORS, materials, bots_per_roboport=50, ore_patches=ORE_PATCHES
+    )
+    plans = composition["plans"]
     print(f"Stages: {len(plans)}; materials: {materials}")
     if args.plan_only:
         return 0
@@ -158,12 +152,18 @@ def main() -> int:
         password=args.rcon_password,
     )
     try:
-        anchors = [{"x": x, "y": y, "materials": materials} for x, y in ANCHORS]
-        bridge.ensure_scaffolding({"anchors": anchors, "bots_per_roboport": 50,
-                                   "ore_patches": ORE_PATCHES})
-        print(f"Scaffolding + ore patches provisioned at anchors {ANCHORS}.")
+        require_compatible_topology(bridge)
+        authorization = build_layout_authorization(
+            composition["infrastructure"] + composition["plans"]
+        )
+        for name, infrastructure_plan in composition["infrastructure"]:
+            report = load_json(bridge.build_layout(authorization, infrastructure_plan))
+            if not report.get("ok"):
+                print(f"INFRASTRUCTURE {name} FAILED: {report.get('error')}", file=sys.stderr)
+                return 1
+        bridge.ensure_scaffolding(composition["scaffolding"])
+        print(f"Managed scaffolding + ore patches provisioned at anchors {ANCHORS}.")
 
-        authorization = _authorization()
         for name, plan in plans:
             report = load_json(bridge.build_layout(authorization, plan))
             if not report.get("ok"):
