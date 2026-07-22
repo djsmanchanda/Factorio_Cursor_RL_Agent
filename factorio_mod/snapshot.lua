@@ -79,6 +79,55 @@ local function sort_entities(entities)
   end)
 end
 
+local function build_world_observation(surface)
+  local saved = storage.planner_world
+  if not saved or saved.surface ~= surface.name or not saved.bounds then
+    return nil
+  end
+  local bounds = saved.bounds
+  local resources = {}
+  for _, entity in pairs(surface.find_entities_filtered({
+      type = "resource",
+      area = {
+        { bounds.x_min, bounds.y_min },
+        { bounds.x_max_exclusive, bounds.y_max_exclusive }
+      }
+  })) do
+    if entity.amount and entity.amount > 0 then
+      resources[#resources + 1] = {
+        resource = entity.name,
+        position = { x = entity.position.x, y = entity.position.y },
+        amount = entity.amount
+      }
+    end
+  end
+  table.sort(resources, function(a, b)
+    if a.resource ~= b.resource then return a.resource < b.resource end
+    if a.position.y ~= b.position.y then return a.position.y < b.position.y end
+    return a.position.x < b.position.x
+  end)
+
+  local water_tiles = {}
+  for y = bounds.y_min, bounds.y_max_exclusive - 1 do
+    for x = bounds.x_min, bounds.x_max_exclusive - 1 do
+      local name = surface.get_tile(x, y).name
+      if name == "water" or name == "deepwater" then
+        water_tiles[#water_tiles + 1] = { x = x, y = y }
+      end
+    end
+  end
+  return {
+    version = "1.0.0",
+    seed = saved.seed,
+    bounds = {
+      x_min = bounds.x_min, y_min = bounds.y_min,
+      x_max_exclusive = bounds.x_max_exclusive,
+      y_max_exclusive = bounds.y_max_exclusive
+    },
+    resource_tiles = resources,
+    water_tiles = water_tiles
+  }
+end
 local function build_snapshot(surface, force)
   local entities = {}
   local observed = force and surface.find_entities_filtered({ force = force }) or surface.find_entities()
@@ -94,11 +143,14 @@ local function build_snapshot(surface, force)
   end
   sort_entities(entities)
 
-  return {
+  local snapshot = {
     tick = game.tick,
     surface = surface.name,
     entities = entities
   }
+  local world_observation = build_world_observation(surface)
+  if world_observation then snapshot.world_observation = world_observation end
+  return snapshot
 end
 
 local function write_snapshot(snapshot)
@@ -106,6 +158,14 @@ local function write_snapshot(snapshot)
   -- Empty Lua tables serialize as {} but the schema requires an array.
   if #snapshot.entities == 0 then
     json = json:gsub('"entities":{}', '"entities":[]')
+  end
+  if snapshot.world_observation then
+    if #snapshot.world_observation.resource_tiles == 0 then
+      json = json:gsub('"resource_tiles":{}', '"resource_tiles":[]')
+    end
+    if #snapshot.world_observation.water_tiles == 0 then
+      json = json:gsub('"water_tiles":{}', '"water_tiles":[]')
+    end
   end
   local path = "factorio_mod/snapshots/snapshot_" .. snapshot.tick .. ".json"
 

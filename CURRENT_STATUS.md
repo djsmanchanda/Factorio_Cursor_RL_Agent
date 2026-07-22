@@ -183,3 +183,13 @@ backfilled from git history because this file did not exist yet.
 - What: World creation now rejects malformed bounds, resources, lake edges, starter items, and electronics-survey drift before mutation; reset refuses surfaces without the exact persisted planner owner marker.
 - Why: Prevent a confirmed command from deleting an unowned surface or partially creating a world from cross-contract data.
 - Verified: 45 focused world, sandbox, infrastructure, and electronics tests passed; no live Factorio or git operation was run.
+## [2026-07-22] Milestone 4 - observed resource survey and site allocation
+- Files: factorio_mod/{snapshot,README}.lua/md, schemas/{snapshot,README}, planners/resource_survey.py, tools/survey_electronics_world.py, tests/test_resource_survey.py
+- What: Added bounded resource/water observations, deterministic contiguous-patch clustering, capacity-aware drill/pump allocation, generated ElectronicsWorldSpec v1.0.0, and full-bundle collision validation.
+- Why: Remove hand-authored source coordinates while preserving local-block boundaries and failing closed to a CityPlanner rail handoff for out-of-block resources.
+- Verified: 42 focused offline tests passed; no live Factorio, save, mod deployment, or git operation was run.
+## [2026-07-22] Milestone 4 correction - explicit locality and strict observations
+- Files: planners/resource_survey.py, schemas/electronics_world_spec.schema.json, tools/survey_electronics_world.py, tests/test_resource_survey.py, factorio_mod/README.md
+- What: Required explicit bounded macro-block acknowledgement, validated snapshot identity/uniqueness/bounds before access, derived oil capacity from observed yield with headroom, and proved offshore intake plus dry output geometry.
+- Why: Prevent whole-map locality assumptions, malformed observations, overstated oil supply, and invalid shoreline placement.
+- Verified: 46 focused offline tests passed; no live Factorio, save, mod deployment, or git operation was run.

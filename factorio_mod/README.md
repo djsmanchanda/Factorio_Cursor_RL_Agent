@@ -67,3 +67,11 @@ and the matching `CREATE_PLANNER_WORLD` or `RESET_PLANNER_WORLD` token. It only
 targets `planner-sandbox`; reset is never implicit. Autoplace is disabled and
 all resources and water are placed from the spec. The starter-kit contract
 contains construction equipment only; production ingredients remain empty.
+## Resource survey
+
+`/snapshot planner-sandbox` includes the persisted 500x500 bounds and seed,
+neutral resource positions/amounts, and bounded water tiles. It remains a
+read-only export. Compile it offline with
+`python tools/survey_electronics_world.py <snapshot.json> --block-bounds -250 -250 250 250 --single-macro-block --output <world.json>`. The explicit bounds acknowledge one self-contained local macro district.
+The compiler fails closed when local source footprints are unavailable; it
+does not create inter-block belts or bot routes.

@@ -10,7 +10,7 @@ Documentation for each schema is maintained in this README.
 
 ## Files
 
-- `snapshot.schema.json` — Lua → Planner snapshot contract
+- `snapshot.schema.json` - Lua to Planner snapshot contract; planner-owned bounded surfaces include versioned resource and water observations
 - `build_plan.schema.json` — Planner → Lua build plan contract
 - `goal.schema.json` — Instruction → Planner goal contract
 - `block.schema.json` — City/Planet block contract

@@ -30,6 +30,52 @@
           "force": { "type": "string" }
         }
       }
+    },
+    "world_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "seed", "bounds", "resource_tiles", "water_tiles"],
+      "properties": {
+        "version": { "const": "1.0.0" },
+        "seed": { "type": "integer", "minimum": 0 },
+        "bounds": {
+          "type": "object", "additionalProperties": false,
+          "required": ["x_min", "y_min", "x_max_exclusive", "y_max_exclusive"],
+          "properties": {
+            "x_min": { "type": "integer" }, "y_min": { "type": "integer" },
+            "x_max_exclusive": { "type": "integer" },
+            "y_max_exclusive": { "type": "integer" }
+          }
+        },
+        "resource_tiles": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["resource", "position", "amount"],
+            "properties": {
+              "resource": { "enum": ["iron-ore", "copper-ore", "coal", "stone", "crude-oil"] },
+              "position": { "$ref": "#/definitions/position" },
+              "amount": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        },
+        "water_tiles": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/tile_position" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+    },
+    "tile_position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } }
     }
   }
 }
