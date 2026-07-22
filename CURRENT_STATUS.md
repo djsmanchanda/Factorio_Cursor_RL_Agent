@@ -171,3 +171,15 @@ backfilled from git history because this file did not exist yet.
 - What: Crude capacity now covers plastic plus sulfur gas demand; every underground belt pair declares input/output through planning, schema, Lua creation, and exact idempotency checks.
 - Why: Prevent undersized oil supply and ambiguous same-direction underground endpoints.
 - Verified: 24 focused tests passed; no live Factorio or git operation was run.
+
+## [2026-07-22] Milestone 3 - deterministic bounded planner world
+- Files: schemas/world_spec.schema.json, planners/world_generation.py, factorio_mod/{world_generation,control,sandbox_shared}.lua, tools/build_world_spec.py, tests/{test_world_generation,test_sandbox_contracts}.py, factorio_mod/README.md, schemas/README.md
+- What: Added a fixed-seed 500x500 planner-owned surface contract with disabled autoplace, dispersed ores, crude oil, a pumpable lake, an exported electronics survey, and a construction-only starter kit.
+- Why: Make raw-resource electronics reproducible from a declared world while keeping surface reset explicit and production inputs non-scripted.
+- Verified: 43 focused world, infrastructure, sandbox, and electronics contract tests passed; no live Factorio, save, mod install, or world command was touched.
+- Next: Survey arbitrary resource patches and allocate production sites from observations instead of fixed fixture coordinates.
+## [2026-07-22] Milestone 3 correction - pre-mutation world validation and ownership
+- Files: factorio_mod/world_generation.lua, planners/world_generation.py, tests/test_world_generation.py
+- What: World creation now rejects malformed bounds, resources, lake edges, starter items, and electronics-survey drift before mutation; reset refuses surfaces without the exact persisted planner owner marker.
+- Why: Prevent a confirmed command from deleting an unowned surface or partially creating a world from cross-contract data.
+- Verified: 45 focused world, sandbox, infrastructure, and electronics tests passed; no live Factorio or git operation was run.

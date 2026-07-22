@@ -16,11 +16,7 @@ local function get_or_create_sandbox_surface()
     return surface
   end
 
-  surface = game.create_surface("planner-sandbox")
-  -- Deterministic buildable canvas: default mapgen can produce alien terrain
-  -- (ice, oil ocean) where bots cannot place entities.
-  surface.generate_with_lab_tiles = true
-  return surface
+  error("planner-sandbox does not exist; run the confirmed WorldSpec command first")
 end
 
 local function get_or_create_planner_force()

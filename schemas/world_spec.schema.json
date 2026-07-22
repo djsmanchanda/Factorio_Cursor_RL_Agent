@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "world_spec.schema.json",
+  "title": "PlannerWorldSpec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "surface", "seed", "bounds", "map_generation", "resource_patches", "crude_oil_spots", "water_lake", "electronics_world", "starter_kit"],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "surface": {"const": "planner-sandbox"},
+    "seed": {"type": "integer", "minimum": 0},
+    "bounds": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x_min", "y_min", "x_max_exclusive", "y_max_exclusive", "width", "height"],
+      "properties": {
+        "x_min": {"const": -250}, "y_min": {"const": -250},
+        "x_max_exclusive": {"const": 250}, "y_max_exclusive": {"const": 250},
+        "width": {"const": 500}, "height": {"const": 500}
+      }
+    },
+    "map_generation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["autoplace_enabled", "generate_with_lab_tiles"],
+      "properties": {
+        "autoplace_enabled": {"const": false},
+        "generate_with_lab_tiles": {"const": true}
+      }
+    },
+    "resource_patches": {
+      "type": "array", "minItems": 8,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "resource", "x1", "y1", "x2", "y2", "amount_per_tile"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "resource": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+          "x1": {"type": "integer", "minimum": -250, "maximum": 249},
+          "y1": {"type": "integer", "minimum": -250, "maximum": 249},
+          "x2": {"type": "integer", "minimum": -250, "maximum": 249},
+          "y2": {"type": "integer", "minimum": -250, "maximum": 249},
+          "amount_per_tile": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "crude_oil_spots": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "position", "amount"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "position": {"$ref": "#/definitions/position"},
+          "amount": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "water_lake": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x1", "y1", "x2", "y2", "tile", "offshore_edge_candidates"],
+      "properties": {
+        "x1": {"type": "integer"}, "y1": {"type": "integer"},
+        "x2": {"type": "integer"}, "y2": {"type": "integer"},
+        "tile": {"const": "water"},
+        "offshore_edge_candidates": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/definitions/offshore_site"}}
+      }
+    },
+    "electronics_world": {"$ref": "electronics_world_spec.schema.json"},
+    "starter_kit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["power_source", "roboport_hub", "bots_per_roboport", "construction_materials", "production_ingredients"],
+      "properties": {
+        "power_source": {"type": "object", "additionalProperties": false, "required": ["entity", "position"], "properties": {"entity": {"const": "electric-energy-interface"}, "position": {"$ref": "#/definitions/position"}}},
+        "roboport_hub": {"type": "object", "additionalProperties": false, "required": ["entity", "position", "network_policy"], "properties": {"entity": {"const": "roboport"}, "position": {"$ref": "#/definitions/position"}, "network_policy": {"const": "single-connected"}}},
+        "bots_per_roboport": {"type": "integer", "minimum": 1},
+        "construction_materials": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "integer", "minimum": 1}},
+        "production_ingredients": {"type": "object", "maxProperties": 0}
+      }
+    }
+  },
+  "definitions": {
+    "position": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -250, "exclusiveMaximum": 250}},
+    "offshore_site": {"type": "object", "additionalProperties": false, "required": ["position", "output", "direction"], "properties": {"position": {"$ref": "#/definitions/position"}, "output": {"$ref": "#/definitions/position"}, "direction": {"enum": ["north", "east", "south", "west"]}}}
+  }
+}

@@ -2,6 +2,7 @@
 -- Purpose: Load planner command modules and register lifecycle event handlers.
 
 local shared = require("sandbox_shared")
+require("world_generation")
 require("snapshot")
 require("ghost_plans")
 require("construction")

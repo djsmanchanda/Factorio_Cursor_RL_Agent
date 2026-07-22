@@ -57,3 +57,13 @@ Export a read-only snapshot of ghosts in the `planner-sandbox` surface.
 ### Notes
 - Observation only (no placement, no deletion)
 - Errors are reported if required tags are missing
+
+## Deterministic planner world
+
+Generate the versioned 500x500 contract offline with
+`python tools/build_world_spec.py --output <path>`. The
+`/create_planner_world <json>` command accepts that spec only with `confirm=true`
+and the matching `CREATE_PLANNER_WORLD` or `RESET_PLANNER_WORLD` token. It only
+targets `planner-sandbox`; reset is never implicit. Autoplace is disabled and
+all resources and water are placed from the spec. The starter-kit contract
+contains construction equipment only; production ingredients remain empty.

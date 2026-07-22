@@ -24,3 +24,4 @@ Documentation for each schema is maintained in this README.
 - `build_intent.schema.json` — Planner → build intent contract
 - `ghost_plan.schema.json` — Ghost projection → ghost plan contract
 - `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract
+- `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
