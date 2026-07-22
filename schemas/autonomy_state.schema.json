@@ -1,0 +1,4 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#","$id":"autonomy_state.schema.json","title":"AutonomyState","type":"object","additionalProperties":false,
+  "required":["version","program_hash","snapshot_tick","last_verified_tick","phases"],
+  "properties":{"version":{"const":"1.0.0"},"program_hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"snapshot_tick":{"type":"integer","minimum":0},"last_verified_tick":{"type":["integer","null"],"minimum":0},"phases":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["id","phase_hash","status","attempts"],"properties":{"id":{"type":"string"},"phase_hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"status":{"enum":["pending","running","verified","failed"]},"attempts":{"type":"integer","minimum":0}}}}}}

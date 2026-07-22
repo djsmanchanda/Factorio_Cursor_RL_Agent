@@ -1,0 +1,5 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#","$id":"autonomy_program.schema.json","title":"AutonomyProgram","type":"object","additionalProperties":false,
+  "required":["version","program_hash","goal","recipe_graph","artifacts","executable","phases"],
+  "properties":{"version":{"const":"1.0.0"},"program_hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"goal":{"type":"object"},"recipe_graph":{"type":"object"},"artifacts":{"type":"object"},"executable":{"type":"boolean"},"phases":{"type":"array","minItems":6,"maxItems":6,"items":{"type":"object","additionalProperties":false,"required":["id","kind","phase_hash","status","requirements"],"properties":{"id":{"type":"string"},"kind":{"enum":["survey","allocate","plan","authorize","build","verify"]},"phase_hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"status":{"const":"pending"},"requirements":{"type":"array","items":{"type":"string"}}}}}}
+}

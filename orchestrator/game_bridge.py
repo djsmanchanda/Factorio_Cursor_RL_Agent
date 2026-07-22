@@ -18,6 +18,7 @@ SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
+RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 
 
 class BridgeError(RuntimeError):
@@ -117,6 +118,13 @@ class GameBridge:
         return self._run_and_collect(
             f"/reconcile_sandbox_topology {payload}", TOPOLOGY_REPORT_SUBDIR, timeout
         )
+    def export_recipe_catalog(self, timeout: float = 120.0) -> Path:
+        return self._run_and_collect("/export_recipe_catalog", RECIPE_CATALOG_SUBDIR, timeout)
+
+    def execute_upgrade_plan(self, authorization: dict, upgrade_plan: dict, timeout: float = 120.0) -> Path:
+        payload = json.dumps({"authorization": authorization, "upgrade_plan": upgrade_plan}, separators=(",", ":"))
+        return self._run_and_collect(f"/execute_upgrade_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
+
     def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(f"/ensure_sandbox_scaffolding {body}", SCAFFOLD_REPORT_SUBDIR, timeout)

@@ -86,6 +86,11 @@ local function execute_upgrades(authorization, upgrade_plan)
       error("Upgrade action must include position")
     end
 
+    local upgraded = entry.to_name and find_exact_entity(surface, force, entry.to_name, position) or nil
+    if upgraded then
+      table.insert(results, { action = entry.action, status = "skipped", reason = "already_upgraded" })
+      goto continue
+    end
     local target = find_exact_entity(surface, force, entry.from_name, position)
     if not target then
       table.insert(results, { action = entry.action, status = "failed", reason = "target_missing" })

@@ -271,14 +271,14 @@ def test_lua_modules_are_bounded_headered_and_register_each_command_once() -> No
 
     control = (mod_root / "control.lua").read_text(encoding="utf-8")
     modules = {
-        "sandbox_shared", "world_generation", "snapshot", "ghost_plans", "construction", "upgrades",
+        "sandbox_shared", "world_generation", "snapshot", "recipe_catalog", "ghost_plans", "construction", "upgrades",
         "deconstruction", "sandbox_topology", "scaffolding", "layout_executor", "research",
     }
     for module in modules:
         assert f'require("{module}")' in control
 
     expected_commands = {
-        "snapshot", "apply_ghost_plan", "export_ghost_observation", "execute_ghost_plan",
+        "snapshot", "export_recipe_catalog", "apply_ghost_plan", "export_ghost_observation", "execute_ghost_plan",
         "execute_construction", "execute_upgrade_plan", "execute_deconstruction_plan",
         "inspect_sandbox_topology", "reconcile_sandbox_topology",
         "ensure_sandbox_scaffolding", "build_layout_plan", "set_research", "research_status",

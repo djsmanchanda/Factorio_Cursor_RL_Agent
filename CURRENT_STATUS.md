@@ -193,3 +193,9 @@ backfilled from git history because this file did not exist yet.
 - What: Required explicit bounded macro-block acknowledgement, validated snapshot identity/uniqueness/bounds before access, derived oil capacity from observed yield with headroom, and proved offshore intake plus dry output geometry.
 - Why: Prevent whole-map locality assumptions, malformed observations, overstated oil supply, and invalid shoreline placement.
 - Verified: 46 focused offline tests passed; no live Factorio, save, mod deployment, or git operation was run.
+
+## [2026-07-22] Deterministic autonomy compiler and restart runtime
+- Files: core/autonomy_*.py, core/recipe_dag.py, schemas/*autonomy*.json, schemas/recipe_catalog.schema.json, factorio_mod/recipe_catalog.lua, orchestrator/game_bridge.py, orchestrator/expansion_daemon.py, tools/compile_autonomy_goal.py, tests/test_autonomy.py
+- What: Added live recipe contracts, exact DAG expansion, surveyed electronics program compilation, immutable phases, restart-safe state, and fail-closed executable action selection.
+- Why: Goals must compile from observed resources into authorized deterministic plans without structural RL, production cheats, or unsupported runtime actions.
+- Next: Live validation requires explicit approval and a running planner sandbox.

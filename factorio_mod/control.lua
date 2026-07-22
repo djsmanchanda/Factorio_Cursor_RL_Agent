@@ -4,6 +4,7 @@
 local shared = require("sandbox_shared")
 require("world_generation")
 require("snapshot")
+require("recipe_catalog")
 require("ghost_plans")
 require("construction")
 require("upgrades")

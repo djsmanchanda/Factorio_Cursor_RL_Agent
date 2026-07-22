@@ -129,7 +129,6 @@ def _prepare_managed_plan(
     plan: dict,
     chain: dict,
     materials: dict,
-    ore_patches: list | None = None,
 ) -> tuple[dict, dict]:
     require_compatible_topology(bridge)
     composition = compose_managed_sandbox(
@@ -137,7 +136,6 @@ def _prepare_managed_plan(
         chain["anchors"],
         materials,
         bots_per_roboport=50,
-        ore_patches=ore_patches or [],
     )
     authorization = build_layout_authorization(
         composition["infrastructure"] + composition["plans"]
@@ -197,17 +195,9 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
     )
     materials = {item: count * 2 for item, count in planner.material_requirements(plan).items()}
 
-    ore_patches = []
     if line.get("mining_feed"):
-        ox, oy = line["origin"]
-        ore = LINE_RECIPES[line["recipe"]]["ingredients"][0]
-        ore_patches.append({
-            "item": ore, "x1": ox - 1, "y1": oy - 5,
-            "x2": ox + new_machines * 3, "y2": oy - 1, "amount": 500000,
-        })
-    plan, authorization = _prepare_managed_plan(
-        bridge, plan, chain, materials, ore_patches
-    )
+        return {"ok": False, "detail": "mine expansion requires surveyed allocation and a CityPlanner rail handoff"}
+    plan, authorization = _prepare_managed_plan(bridge, plan, chain, materials)
     report = load_json(bridge.build_layout(authorization, plan))
     if not report.get("ok"):
         return {"ok": False, "detail": report.get("error", "build failed")}
@@ -225,6 +215,13 @@ def execute_action(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict,
     line["machines"] = new_machines  # registry follows reality
     return {"ok": True, "detail": detail}
 
+
+def _is_executable_action(entry: dict, chain: dict) -> bool:
+    """Exclude recommendations without a deterministic executor before policy selection."""
+    line = next((item for item in chain["lines"] if item["name"] == entry.get("target_line")), None)
+    if line is None: return False
+    if entry["action"] == "extend_line_x": return not line.get("mining_feed", False)
+    return entry["action"] == "add_collectors" and "lab_row" in line.get("consumers", [])
 
 def _telemetry_spec(line: dict) -> dict:
     """Line spec enriched with what the telemetry needs to measure real rates."""
@@ -281,7 +278,10 @@ def run_step(bridge: GameBridge, planner: LocalLayoutPlanner, chain: dict, step:
     for line in chain["lines"]:
         diagnosis[line["name"]] = diagnose_line(_diagnosis_spec(line), per_line.get(line["name"], {}))
 
-    catalog = build_catalog(chain["lines"], measurements, _limits())
+    catalog = [
+        entry for entry in build_catalog(chain["lines"], measurements, _limits())
+        if _is_executable_action(entry, chain)
+    ]
     state = {"chain": chain["lines"], "measurements": measurements,
              "target_product": chain["target_product"],
              "diagnosis": diagnosis, "research": research}

@@ -1,30 +1,10 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Goal",
-  "type": "object",
-  "required": ["target", "delta"],
-  "properties": {
-    "target": { "type": "string" },
-    "delta": {
-      "type": "object",
-      "required": ["rate", "unit"],
-      "properties": {
-        "rate": { "type": "number" },
-        "unit": { "type": "string", "enum": ["per_second"] }
-      }
-    },
-    "area": {
-      "type": "object",
-      "properties": {
-        "x1": { "type": "number" },
-        "y1": { "type": "number" },
-        "x2": { "type": "number" },
-        "y2": { "type": "number" }
-      }
-    },
-    "preferences": {
-      "type": "object",
-      "additionalProperties": { "type": "string" }
-    }
+  "$schema":"http://json-schema.org/draft-07/schema#","$id":"goal.schema.json","title":"Goal","type":"object","additionalProperties":false,
+  "required":["version","target","delta"],
+  "properties":{
+    "version":{"const":"1.0.0"},"target":{"type":"string","minLength":1},
+    "delta":{"type":"object","additionalProperties":false,"required":["rate","unit"],"properties":{"rate":{"type":"number","exclusiveMinimum":0},"unit":{"const":"per_second"}}},
+    "area":{"type":"object","additionalProperties":false,"required":["x1","y1","x2","y2"],"properties":{"x1":{"type":"number"},"y1":{"type":"number"},"x2":{"type":"number"},"y2":{"type":"number"}}},
+    "preferences":{"type":"object","additionalProperties":false,"properties":{"recipes":{"type":"object","additionalProperties":{"type":"string","minLength":1}},"layout":{"enum":["line","grid"]}}}
   }
 }

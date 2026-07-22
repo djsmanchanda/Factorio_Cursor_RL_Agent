@@ -1,0 +1,272 @@
+{
+    "version":  "1.0.0",
+    "force":  "planner",
+    "tick":  0,
+    "recipes":  [
+                    {
+                        "name":  "advanced-circuit",
+                        "enabled":  true,
+                        "category":  "crafting",
+                        "energy_ticks":  360,
+                        "ingredients":  [
+                                            {
+                                                "name":  "plastic-bar",
+                                                "type":  "item",
+                                                "amount":  2
+                                            },
+                                            {
+                                                "name":  "copper-cable",
+                                                "type":  "item",
+                                                "amount":  4
+                                            },
+                                            {
+                                                "name":  "electronic-circuit",
+                                                "type":  "item",
+                                                "amount":  2
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "advanced-circuit",
+                                             "type":  "item",
+                                             "amount":  1
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "basic-oil-processing",
+                        "enabled":  true,
+                        "category":  "oil-processing",
+                        "energy_ticks":  300,
+                        "ingredients":  [
+                                            {
+                                                "name":  "crude-oil",
+                                                "type":  "fluid",
+                                                "amount":  100
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "petroleum-gas",
+                                             "type":  "fluid",
+                                             "amount":  45
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "copper-cable",
+                        "enabled":  true,
+                        "category":  "crafting",
+                        "energy_ticks":  30,
+                        "ingredients":  [
+                                            {
+                                                "name":  "copper-plate",
+                                                "type":  "item",
+                                                "amount":  1
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "copper-cable",
+                                             "type":  "item",
+                                             "amount":  2
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "copper-plate",
+                        "enabled":  true,
+                        "category":  "smelting",
+                        "energy_ticks":  192,
+                        "ingredients":  [
+                                            {
+                                                "name":  "copper-ore",
+                                                "type":  "item",
+                                                "amount":  1
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "copper-plate",
+                                             "type":  "item",
+                                             "amount":  1
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "electronic-circuit",
+                        "enabled":  true,
+                        "category":  "crafting",
+                        "energy_ticks":  30,
+                        "ingredients":  [
+                                            {
+                                                "name":  "copper-cable",
+                                                "type":  "item",
+                                                "amount":  3
+                                            },
+                                            {
+                                                "name":  "iron-plate",
+                                                "type":  "item",
+                                                "amount":  1
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "electronic-circuit",
+                                             "type":  "item",
+                                             "amount":  1
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "iron-plate",
+                        "enabled":  true,
+                        "category":  "smelting",
+                        "energy_ticks":  192,
+                        "ingredients":  [
+                                            {
+                                                "name":  "iron-ore",
+                                                "type":  "item",
+                                                "amount":  1
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "iron-plate",
+                                             "type":  "item",
+                                             "amount":  1
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "plastic-bar",
+                        "enabled":  true,
+                        "category":  "chemistry",
+                        "energy_ticks":  60,
+                        "ingredients":  [
+                                            {
+                                                "name":  "coal",
+                                                "type":  "item",
+                                                "amount":  1
+                                            },
+                                            {
+                                                "name":  "petroleum-gas",
+                                                "type":  "fluid",
+                                                "amount":  20
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "plastic-bar",
+                                             "type":  "item",
+                                             "amount":  2
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "processing-unit",
+                        "enabled":  true,
+                        "category":  "crafting-with-fluid",
+                        "energy_ticks":  600,
+                        "ingredients":  [
+                                            {
+                                                "name":  "electronic-circuit",
+                                                "type":  "item",
+                                                "amount":  20
+                                            },
+                                            {
+                                                "name":  "advanced-circuit",
+                                                "type":  "item",
+                                                "amount":  2
+                                            },
+                                            {
+                                                "name":  "sulfuric-acid",
+                                                "type":  "fluid",
+                                                "amount":  5
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "processing-unit",
+                                             "type":  "item",
+                                             "amount":  1
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "sulfur",
+                        "enabled":  true,
+                        "category":  "chemistry",
+                        "energy_ticks":  60,
+                        "ingredients":  [
+                                            {
+                                                "name":  "water",
+                                                "type":  "fluid",
+                                                "amount":  30
+                                            },
+                                            {
+                                                "name":  "petroleum-gas",
+                                                "type":  "fluid",
+                                                "amount":  30
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "sulfur",
+                                             "type":  "item",
+                                             "amount":  2
+                                         }
+                                     ],
+                        "supported":  true
+                    },
+                    {
+                        "name":  "sulfuric-acid",
+                        "enabled":  true,
+                        "category":  "chemistry",
+                        "energy_ticks":  60,
+                        "ingredients":  [
+                                            {
+                                                "name":  "sulfur",
+                                                "type":  "item",
+                                                "amount":  5
+                                            },
+                                            {
+                                                "name":  "iron-plate",
+                                                "type":  "item",
+                                                "amount":  1
+                                            },
+                                            {
+                                                "name":  "water",
+                                                "type":  "fluid",
+                                                "amount":  100
+                                            }
+                                        ],
+                        "products":  [
+                                         {
+                                             "name":  "sulfuric-acid",
+                                             "type":  "fluid",
+                                             "amount":  50
+                                         }
+                                     ],
+                        "supported":  true
+                    }
+                ],
+    "raw_resources":  [
+                          "coal",
+                          "copper-ore",
+                          "crude-oil",
+                          "iron-ore",
+                          "stone",
+                          "uranium-ore",
+                          "water",
+                          "wood"
+                      ]
+}
