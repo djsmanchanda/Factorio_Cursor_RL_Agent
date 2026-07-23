@@ -16,6 +16,7 @@ EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "execution_reports"
 CONSTRUCTION_REPORT_SUBDIR = Path("factorio_mod") / "construction_reports"
 SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
+LIVE_EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "live_execution_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
@@ -132,6 +133,18 @@ class GameBridge:
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
+
+    def verify_electronics_execution(self, timeout: float = 120.0) -> Path:
+        return self._run_and_collect(
+            "/verify_electronics_execution", LIVE_EXECUTION_REPORT_SUBDIR, timeout
+        )
+
+    def save_game(self) -> str:
+        """Persist mutations without stopping a server owned by another process."""
+        response = self.command("/server-save")
+        if "error" in response.lower():
+            raise BridgeError(f"Server save failed: {response.strip()}")
+        return response
 
     def set_research(self, technology: str, timeout: float = 60.0) -> Path:
         payload = json.dumps({"technology": technology}, separators=(",", ":"))

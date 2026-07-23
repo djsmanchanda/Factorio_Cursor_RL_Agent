@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from planners.electronics_block import _block_anchors, build_electronics_block
+from planners.electronics_world import load_electronics_world_spec
 from planners.infrastructure import (
     POWER_SOURCE_ENTITY,
     plan_power_network,
@@ -21,15 +23,22 @@ from planners.infrastructure import (
     validate_power_connectivity,
     validate_roboport_network,
 )
-from tools.build_processing_units import (
-    POWER_SOURCE,
-    ROBOPORT_SITES,
-    build_infrastructure_plans,
-    build_link_plans,
-    build_plans,
-    managed_scaffolding_payload,
-    validate_processing_bundle,
-)
+from planners.plan_validation import validate_no_collisions
+from planners.sandbox_infrastructure import CANONICAL_POWER_SOURCE, CANONICAL_ROBOPORT_HUB
+from tools.electronics_execution import scaffolding_with_materials
+
+# NOTE ON THE MOVED SYMBOLS THIS TEST USED TO IMPORT FROM tools.build_processing_units:
+#   POWER_SOURCE                -> planners.sandbox_infrastructure.CANONICAL_POWER_SOURCE
+#   ROBOPORT_SITES              -> no longer a standalone constant; the real production
+#                                   anchors now live in planners.electronics_block._block_anchors
+#   build_infrastructure_plans  -> planners.electronics_block.build_electronics_block(...)["infrastructure"]
+#   build_plans/build_link_plans-> build_electronics_block(...)["plans"]
+#   validate_processing_bundle  -> planners.plan_validation.validate_no_collisions(infrastructure + plans)
+#   managed_scaffolding_payload -> tools.electronics_execution.scaffolding_with_materials(scaffolding, materials)
+# tools/build_processing_units.py is now a thin CLI over build_electronics_block; it does not
+# re-export any of the planning helpers any more.
+
+_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "electronics_world_spec.json"
 
 
 def _actions(plan: dict) -> list:
@@ -42,17 +51,37 @@ def _lua_source() -> str:
         for path in sorted((REPO_ROOT / "factorio_mod").glob("*.lua"))
     )
 
-def _processing_bundle() -> tuple[list, list]:
-    return build_infrastructure_plans(), build_plans() + build_link_plans()
+
+def _processing_bundle() -> dict:
+    world = load_electronics_world_spec(_FIXTURE)
+    return build_electronics_block(include_processing=True, world=world)
+
+
+def _robot_sites_for(include_processing: bool) -> list[dict]:
+    """Rebuild the real site list compose_managed_sandbox validates the network
+    against, from the same anchors build_electronics_block feeds it, so the
+    coverage check below exercises actual production geometry rather than a
+    trivial self-covering proxy."""
+    sites = [
+        {
+            "name": anchor["name"],
+            "position": (anchor["x"], anchor["y"]),
+            **({"extent": anchor["extent"]} if anchor.get("extent") else {}),
+        }
+        for anchor in _block_anchors(include_processing)
+    ]
+    if not any(site["position"] == CANONICAL_ROBOPORT_HUB for site in sites):
+        sites.insert(0, {"name": "canonical_hub", "position": CANONICAL_ROBOPORT_HUB})
+    return sites
 
 
 def test_power_plan_has_one_source_and_every_pole_reaches_it() -> None:
-    infrastructure, _ = _processing_bundle()
-    power = dict(infrastructure)["unified_power"]
+    bundle = _processing_bundle()
+    power = dict(bundle["infrastructure"])["unified_power"]
 
     sources = [action for action in _actions(power) if action["entity"] == POWER_SOURCE_ENTITY]
     assert [action["position"] for action in sources] == [
-        {"x": POWER_SOURCE[0], "y": POWER_SOURCE[1]}
+        {"x": round(CANONICAL_POWER_SOURCE[0]), "y": round(CANONICAL_POWER_SOURCE[1])}
     ]
     validate_power_connectivity(power)
 
@@ -71,13 +100,12 @@ def test_power_validator_rejects_a_disconnected_site() -> None:
 
 
 def test_robot_plan_is_one_connected_canonical_network_covering_every_stage() -> None:
-    infrastructure, _ = _processing_bundle()
-    robots = dict(infrastructure)["unified_roboports"]
+    bundle = _processing_bundle()
+    robots = dict(bundle["infrastructure"])["unified_roboports"]
 
     positions = roboport_positions(robots)
-    assert positions[0] == (-128, -128)
-    assert {(196, 196), (196, 250), (196, 310)} <= set(positions)
-    validate_roboport_network(robots, ROBOPORT_SITES)
+    assert positions[0] == CANONICAL_ROBOPORT_HUB
+    validate_roboport_network(robots, _robot_sites_for(True))
 
 
 def test_roboport_validator_rejects_a_split_network() -> None:
@@ -91,35 +119,40 @@ def test_roboport_validator_rejects_a_split_network() -> None:
 
 
 def test_composed_processing_bundle_has_one_source_no_local_power_and_no_collisions() -> None:
-    infrastructure, production = _processing_bundle()
-    validate_processing_bundle(infrastructure, production)
+    bundle = _processing_bundle()
+    infrastructure, plans = bundle["infrastructure"], bundle["plans"]
+    validate_no_collisions(infrastructure + plans)
 
     infrastructure_actions = _actions(dict(infrastructure)["unified_power"])
-    production_actions = [action for _, plan in production for action in _actions(plan)]
+    production_actions = [action for _, plan in plans for action in _actions(plan)]
     assert sum(a["entity"] == POWER_SOURCE_ENTITY for a in infrastructure_actions) == 1
     assert all(a["entity"] not in {POWER_SOURCE_ENTITY, "substation"} for a in production_actions)
 
 
 def test_composed_bundle_validator_detects_cross_plan_collision() -> None:
-    infrastructure, production = _processing_bundle()
-    broken = copy.deepcopy(production)
-    broken[0][1]["phases"][0]["actions"].append({
+    bundle = _processing_bundle()
+    infrastructure = bundle["infrastructure"]
+    plans = copy.deepcopy(bundle["plans"])
+    collision_position = roboport_positions(dict(infrastructure)["unified_roboports"])[0]
+    plans[0][1]["phases"][0]["actions"].append({
         "action_type": "place_entity",
         "entity": "pipe",
-        "position": {"x": 196, "y": 196},
+        "position": {"x": collision_position[0], "y": collision_position[1]},
     })
 
-    with pytest.raises(ValueError, match="Composed plan collision"):
-        validate_processing_bundle(infrastructure, broken)
+    with pytest.raises(ValueError, match="Plan collision"):
+        validate_no_collisions(infrastructure + plans)
 
 
 def test_managed_scaffolding_targets_every_planned_roboport_without_infrastructure() -> None:
-    payload = managed_scaffolding_payload({"pipe": 12})
+    bundle = _processing_bundle()
+    robots = dict(bundle["infrastructure"])["unified_roboports"]
+    payload = scaffolding_with_materials(bundle["scaffolding"], {"pipe": 12})
 
     assert payload["managed_infrastructure"] is True
     positions = [(anchor["x"], anchor["y"]) for anchor in payload["anchors"]]
-    assert positions == roboport_positions(dict(build_infrastructure_plans())["unified_roboports"])
-    assert positions[0] == (-128, -128)
+    assert positions == roboport_positions(robots)
+    assert positions[0] == CANONICAL_ROBOPORT_HUB
     assert payload["anchors"][0]["materials"] == {"pipe": 12}
     assert payload["anchors"][0]["provider_position"] == {"x": -124.0, "y": -133.0}
     assert payload["bots_per_roboport"] == 50

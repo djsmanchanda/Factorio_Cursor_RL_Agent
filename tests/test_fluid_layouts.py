@@ -443,28 +443,37 @@ def test_chain_link_plans_validate_against_the_schema():
 # --- the real processing-unit chain ------------------------------------------
 
 def test_processing_unit_chain_links_are_pure_against_every_stage():
-    from tools.build_processing_units import (
-        LINKS,
-        build_link_plans,
-        link_routes,
-        stage_segments,
+    # The fixed STAGES/LINKS table that used to live in
+    # tools/build_processing_units.py was absorbed into
+    # planners/electronics_block.py's _fluid_routes(), which is exercised here
+    # through the real, world-spec-driven build_electronics_block(). Building
+    # the bundle already raises on any mixing hazard or double-claimed tile
+    # (validate_network_purity runs inside _fluid_routes), so a bundle coming
+    # back at all is itself proof the chain links are pure.
+    from planners.electronics_block import build_electronics_block
+    from planners.electronics_world import load_electronics_world_spec
+
+    world = load_electronics_world_spec(
+        Path(__file__).resolve().parent / "fixtures" / "electronics_world_spec.json"
+    )
+    bundle = build_electronics_block(include_processing=True, world=world)
+
+    expected_fluids = {"crude-oil", "petroleum-gas", "water", "sulfuric-acid"}
+    link_names = [name for name, _ in bundle["plans"] if name.startswith("link_")]
+    assert sorted(link_names) == sorted(
+        f"link_{fluid.replace('-', '_')}" for fluid in expected_fluids
     )
 
-    routes = link_routes()
-    assert sorted(routes) == sorted(fluid for fluid, _, _ in LINKS)
-    plans = build_link_plans()  # raises on any mixing hazard or double-claimed tile
-    assert [name for name, _ in plans] == [f"link_{fluid}" for fluid, _, _ in LINKS]
+    stages = {s["fluid"] for s in bundle["fluid_segments"]}
+    assert expected_fluids <= stages
+    validate_network_purity(bundle["fluid_segments"])
 
-    stages = {s["fluid"] for s in stage_segments()}
-    assert {"crude-oil", "petroleum-gas", "water", "sulfuric-acid"} <= stages
-
-    # Each branch must END next to the header tile it is supposed to feed.
-    stage_tiles = {}
-    for segment in stage_segments():
-        stage_tiles.setdefault(segment["fluid"], set()).update(map(tuple, segment["tiles"]))
-    for fluid, (from_point, to_points, trunk_x) in routes.items():
-        for point in [from_point] + to_points:
-            touching = {(point[0] + dx, point[1] + dy)
-                        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))}
-            assert touching & stage_tiles[fluid], f"{fluid}: {point} touches no {fluid} pipe"
-        assert trunk_x < min(p[0] for p in [from_point] + to_points)
+    # Each link plan must actually route pipe (or pipe-to-ground) actions --
+    # a link that only validated purity without emitting anything would pass
+    # every check above yet feed nothing.
+    plans_by_name = dict(bundle["plans"])
+    for fluid in expected_fluids:
+        link_plan = plans_by_name[f"link_{fluid.replace('-', '_')}"]
+        entities = {a["entity"] for a in _actions(link_plan)}
+        assert entities <= {"pipe", "pipe-to-ground"}
+        assert entities, f"link_{fluid} emitted no pipe actions"

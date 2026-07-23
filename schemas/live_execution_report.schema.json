@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "live_execution_report.schema.json",
+  "title": "LiveExecutionReport",
+  "description": "Measured invariants of the live planner-sandbox factory after a build settles.",
+  "type": "object",
+  "required": [
+    "tick",
+    "ok",
+    "power_sources",
+    "electric_samples",
+    "logistic_roboports",
+    "ghosts",
+    "fluid_machines",
+    "violations"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "tick": { "type": "integer", "minimum": 0 },
+    "ok": { "type": "boolean" },
+    "error": { "type": "string" },
+    "power_sources": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of electric-energy-interface entities owned by the planner force."
+    },
+    "electric_samples": {
+      "type": "object",
+      "required": ["network_ids", "missing", "sampled_by_category"],
+      "additionalProperties": true,
+      "properties": {
+        "network_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Distinct electric_network_id values (as strings) across sampled machines, drills, inserters and roboports."
+        },
+        "missing": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Description of each sampled entity with no electric_network_id."
+        },
+        "sampled_by_category": {
+          "type": "object",
+          "required": ["machines", "drills", "inserters", "roboports"],
+          "additionalProperties": true,
+          "properties": {
+            "machines": { "type": "integer", "minimum": 0 },
+            "drills": { "type": "integer", "minimum": 0 },
+            "inserters": { "type": "integer", "minimum": 0 },
+            "roboports": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "logistic_roboports": {
+      "type": "object",
+      "required": ["network_ids", "missing"],
+      "additionalProperties": true,
+      "properties": {
+        "network_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Distinct logistic_network.network_id values (as strings) across every planner roboport."
+        },
+        "missing": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Description of each roboport with no logistic_network."
+        }
+      }
+    },
+    "ghosts": {
+      "type": "object",
+      "required": ["remaining"],
+      "additionalProperties": true,
+      "properties": {
+        "remaining": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of entity-ghost entities still pending for the planner force."
+        },
+        "stuck": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["entity", "position", "reason"],
+            "properties": {
+              "entity": { "type": "string" },
+              "position": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                }
+              },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "fluid_machines": {
+      "type": "array",
+      "description": "Every planner-owned machine with at least one input fluid box.",
+      "items": {
+        "type": "object",
+        "required": ["entity", "position", "status", "input_boxes"],
+        "properties": {
+          "entity": { "type": "string" },
+          "position": {
+            "type": "object",
+            "required": ["x", "y"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            }
+          },
+          "status": { "type": "string" },
+          "input_boxes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "amount"],
+              "properties": {
+                "index": { "type": "integer", "minimum": 1 },
+                "amount": { "type": "number", "minimum": 0 },
+                "fluid": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Extra invariant violations discovered while measuring, beyond what electronics_execution.py itself checks."
+    }
+  }
+}

@@ -9,7 +9,7 @@ from typing import Iterable, Sequence
 
 from core.execution_authorizer import authorize_execution
 from planners.infrastructure_geometry import boxes_overlap
-from planners.plan_validation import ENTITY_FOOTPRINTS, actions
+from planners.plan_validation import ENTITY_FOOTPRINTS, actions, occupied_tile_indices
 from planners.infrastructure import (
     POLE_SPECS,
     local_power_anchors,
@@ -19,6 +19,7 @@ from planners.infrastructure import (
     strip_local_power,
     validate_power_connectivity,
 )
+from planners.roboport_coverage import POWER_SITE_OFFSETS, SUBSTATION_SIZE, footprint_tiles
 
 CANONICAL_POWER_SOURCE = (-160.0, -160.0)
 CANONICAL_ROBOPORT_HUB = (-128.0, -128.0)
@@ -101,18 +102,27 @@ def _anchor(anchor: object) -> dict:
     return {"x": float(anchor), "y": -3.0}
 
 
-def roboport_power_sites(positions: Sequence[tuple]) -> list[dict]:
-    """Give every roboport a non-overlapping substation within supply range."""
+def roboport_power_sites(
+    positions: Sequence[tuple], obstacles: set[tuple[int, int]] | None = None,
+) -> list[dict]:
+    """Give every roboport a non-overlapping substation within supply range.
+
+    `obstacles` are tile indices already claimed by emitted geometry (production
+    rows, belt and pipe routes). Without it a substation can be dropped straight
+    onto a route the caller solved earlier; with it the offset search simply
+    skips those slots.
+    """
     sites = []
     substations: list[tuple[int, int]] = []
-    offsets = ((-7, 0), (7, 0), (0, -7), (0, 7), (-7, -7), (7, -7), (-7, 7), (7, 7))
+    claimed = obstacles or set()
     for index, position in enumerate(positions):
         point = (round(position[0]), round(position[1]))
-        candidates = [(point[0] + dx, point[1] + dy) for dx, dy in offsets]
+        candidates = [(point[0] + dx, point[1] + dy) for dx, dy in POWER_SITE_OFFSETS]
         substation = next((
             candidate for candidate in candidates
             if not any(boxes_overlap(candidate, 2, other, 4) for other in positions)
             and not any(boxes_overlap(candidate, 2, other, 2) for other in substations)
+            and not (footprint_tiles(candidate, SUBSTATION_SIZE) & claimed)
         ), None)
         if substation is None:
             raise ValueError(f"Cannot place a non-overlapping power site for roboport {point}")
@@ -137,7 +147,7 @@ def _combined_plan(plans: Iterable[tuple[str, dict]]) -> dict:
 
 def _resolve_spine_pole_overlaps(
     power: dict, obstacle_plans: Sequence[tuple[str, dict]],
-) -> None:
+) -> None:  # obstacle_plans: everything already emitted that a pole must dodge
     """Relocate colliding spine poles within routing slack; never disconnect by deletion."""
     obstacles = [
         (
@@ -188,8 +198,17 @@ def compose_managed_sandbox(
     materials: dict,
     *,
     bots_per_roboport: int = 30,
+    extra_roboports: Sequence[tuple] = (),
+    obstacle_plans: Sequence[tuple[str, dict]] = (),
 ) -> dict:
-    """Strip local sources and extend the canonical sandbox backbone."""
+    """Strip local sources and extend the canonical sandbox backbone.
+
+    `extra_roboports` are positions derived from the FINISHED block geometry
+    (planners.roboport_coverage) rather than from `anchors`; `obstacle_plans` are
+    the plans that geometry lives in, so the substations and spine poles this
+    backbone adds for them never land on a solved route. Both default to empty,
+    which reproduces the anchor-only backbone exactly.
+    """
     normalized = [_anchor(anchor) for anchor in anchors]
     if not normalized:
         raise ValueError("managed sandbox composition needs at least one anchor")
@@ -210,7 +229,8 @@ def compose_managed_sandbox(
         }
         for index, anchor in enumerate(normalized)
     ]
-    robots = plan_roboport_network(robot_sites)
+    robots = plan_roboport_network(robot_sites, extra_positions=extra_roboports)
+    obstacle_tiles = occupied_tile_indices(list(obstacle_plans))
 
     stripped = []
     power_sites = []
@@ -223,11 +243,12 @@ def compose_managed_sandbox(
             })
         stripped.append((plan_name, strip_local_power(plan)))
 
-    power_sites.extend(roboport_power_sites(roboport_positions(robots)))
-
+    power_sites.extend(roboport_power_sites(roboport_positions(robots), obstacle_tiles))
 
     power = plan_power_network(power_sites, source=CANONICAL_POWER_SOURCE)
-    _resolve_spine_pole_overlaps(power, stripped + [("unified_roboports", robots)])
+    _resolve_spine_pole_overlaps(
+        power, stripped + [("unified_roboports", robots)] + list(obstacle_plans),
+    )
     infrastructure = [("unified_power", power), ("unified_roboports", robots)]
     validate_power_connectivity(_combined_plan(infrastructure + stripped))
 

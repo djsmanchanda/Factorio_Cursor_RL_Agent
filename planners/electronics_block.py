@@ -29,7 +29,8 @@ from planners.resource_layouts import (
     resource_fluid_segment,
 )
 from planners.electronics_world import ElectronicsWorldSpec
-from planners.infrastructure import strip_local_power
+from planners.infrastructure import roboport_positions, strip_local_power
+from planners.roboport_coverage import plan_coverage_roboports, roboport_ghost_targets
 from planners.sandbox_infrastructure import compose_managed_sandbox
 
 BELT = "express-transport-belt"
@@ -364,6 +365,31 @@ def _block_anchors(include_processing: bool) -> list[dict]:
             {"name": "pu", "x": 210, "y": 210, "extent": ((180, 190), (235, 235))},
         ]
     return anchors
+
+
+def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped):
+    """Re-compose the backbone so it covers the routes, not just the anchors.
+
+    The anchor-tree roboports have to exist before item and fluid routes can be
+    solved (the routes dodge their tiles), but those routes then wander outside
+    the tree's construction radii and their ghosts would never be built. So the
+    tree is planned once, the routes are solved against it, and the backbone is
+    then re-composed with the extra roboports the FINISHED geometry demands --
+    each chained to the network and kept off every emitted tile, which is what
+    makes the second pass collision-free rather than another guess.
+    """
+    existing = roboport_positions(dict(preview["infrastructure"])["unified_roboports"])
+    extra = plan_coverage_roboports(
+        existing, roboport_ghost_targets(stripped), occupied_tile_indices(stripped),
+    )
+    if not extra:
+        return preview
+    return compose_managed_sandbox(
+        infrastructure_stages, anchors, {}, bots_per_roboport=50,
+        extra_roboports=extra, obstacle_plans=stripped,
+    )
+
+
 def build_electronics_block(*, include_processing: bool, world: ElectronicsWorldSpec) -> dict:
     stages = _solid_stages(include_processing, world) + _fluid_stages(include_processing, world)
     stages.append(_advanced_circuit_stage(include_processing))
@@ -389,10 +415,14 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
     if any(action["action_type"] == "remove_entity" for _, plan in production for action in actions(plan)):
         raise ValueError("Immutable electronics block cannot contain removal actions")
 
+    stripped = [(name, strip_local_power(plan)) for name, plan in production]
+    composed = _cover_emitted_geometry(
+        preview, infrastructure_stages, anchors, stripped,
+    )
     composition = {
-        "infrastructure": preview["infrastructure"],
-        "plans": [(name, strip_local_power(plan)) for name, plan in production],
-        "scaffolding": preview["scaffolding"],
+        "infrastructure": composed["infrastructure"],
+        "plans": stripped,
+        "scaffolding": composed["scaffolding"],
     }
     complete = composition["infrastructure"] + composition["plans"]
     validate_no_collisions(complete)

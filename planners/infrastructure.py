@@ -315,6 +315,7 @@ def plan_roboport_network(
     sites: List[dict],
     spacing: int = ROBOPORT_SPACING,
     waypoints: List[Sequence[Point]] | None = None,
+    extra_positions: Sequence[Point] | None = None,
 ) -> dict:
     """One chained roboport network covering every site.
 
@@ -327,6 +328,11 @@ def plan_roboport_network(
     roboport every `spacing` tiles. `waypoints` overrides that with explicit
     polylines when the caller has reserved corridors and does not want the tree
     guessing a path across a machine row.
+
+    `extra_positions` appends roboports the caller derived from geometry the
+    anchor tree cannot know about -- see planners.roboport_coverage, which walks
+    ports out to route tiles that landed outside the tree's construction radii.
+    They are appended after the tree, so the tree's own layout never shifts.
 
     Roboports are place_entity, not ghosts: nothing can build the first one.
     """
@@ -356,6 +362,8 @@ def plan_roboport_network(
             for start, end in zip(corners, corners[1:]):
                 for point in step_points(start, end, spacing):
                     placer.add(point)
+    for point in extra_positions or ():
+        placer.add(point)
 
     plan = {"phases": [{"name": "roboport_network", "actions": [
         {"action_type": "place_entity", "entity": ROBOPORT_ENTITY, "position": {"x": x, "y": y}}

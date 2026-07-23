@@ -30,24 +30,60 @@ def test_advanced_circuit_cli_requires_schema_loaded_world_spec() -> None:
     assert missing.returncode == 2
     assert "--world-spec" in missing.stderr
 
-    planned = _run("tools/build_advanced_circuits.py", "--world-spec", str(_WORLD))
+    # Bare --world-spec with neither --plan-only nor live credentials is a
+    # live-mode attempt, and the CLI fails closed rather than silently
+    # defaulting to a plan: it demands an explicit --script-output and
+    # --rcon-password (or --plan-only) before it will do anything at all.
+    bare = _run("tools/build_advanced_circuits.py", "--world-spec", str(_WORLD))
+    assert bare.returncode == 2
+    assert "--script-output" in bare.stderr
+    assert "--rcon-password" in bare.stderr
+
+    planned = _run(
+        "tools/build_advanced_circuits.py", "--world-spec", str(_WORLD), "--plan-only",
+    )
     assert planned.returncode == 0
-    assert "live execution: disabled" in planned.stdout
+    assert "mode: plan-only" in planned.stdout
 
 
-def test_processing_cli_requires_world_spec_or_explicit_legacy_opt_in() -> None:
+def test_processing_cli_requires_world_spec_and_explicit_live_credentials() -> None:
     missing = _run("tools/build_processing_units.py", "--plan-only")
     assert missing.returncode == 2
-    assert "--legacy-fluid-only" in missing.stderr
+    assert "--world-spec" in missing.stderr
 
     planned = _run(
         "tools/build_processing_units.py", "--plan-only", "--world-spec", str(_WORLD),
     )
     assert planned.returncode == 0
-    assert "live execution: disabled" in planned.stdout
+    assert "mode: plan-only" in planned.stdout
 
-    legacy = _run("tools/build_processing_units.py", "--plan-only", "--legacy-fluid-only")
-    assert legacy.returncode == 0
+    # M6 removed the scripted legacy fluid-only bypass outright: there is no
+    # opt-in flag left to gate, so the CLI must refuse to even recognize it
+    # rather than silently accepting or reinterpreting it.
+    legacy = _run(
+        "tools/build_processing_units.py", "--plan-only", "--world-spec", str(_WORLD),
+        "--legacy-fluid-only",
+    )
+    assert legacy.returncode == 2
+    assert "--legacy-fluid-only" in legacy.stderr
+    assert "unrecognized arguments" in legacy.stderr
+
+    # Live mode (no --plan-only) fails closed without explicit credentials.
+    bare_live = _run(
+        "tools/build_processing_units.py", "--world-spec", str(_WORLD),
+    )
+    assert bare_live.returncode == 2
+    assert "--script-output" in bare_live.stderr
+    assert "--rcon-password" in bare_live.stderr
+
+    # --existing-topology only accepts the three explicit reconciliation modes.
+    bad_topology = _run(
+        "tools/build_processing_units.py", "--plan-only", "--world-spec", str(_WORLD),
+        "--existing-topology", "bogus",
+    )
+    assert bad_topology.returncode == 2
+    assert "invalid choice: 'bogus'" in bad_topology.stderr
+    assert "refuse, reconcile, reset" in bad_topology.stderr
 
 def test_legacy_mining_builders_require_explicit_existing_resource_acknowledgement() -> None:
     line = _run(

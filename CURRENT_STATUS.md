@@ -206,3 +206,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added live recipe contracts, exact DAG expansion, surveyed electronics program compilation, immutable phases, restart-safe state, and fail-closed executable action selection.
 - Why: Goals must compile from observed resources into authorized deterministic plans without structural RL, production cheats, or unsupported runtime actions.
 - Next: Live validation requires explicit approval and a running planner sandbox.
+
+## [2026-07-23] M6 preflight defects - row power pitch and geometry-derived roboport coverage
+- Files: planners/resource_layouts.py, planners/roboport_coverage.py (new), planners/infrastructure.py, planners/sandbox_infrastructure.py, planners/electronics_block.py, tests/test_electronics_bundle_preflight.py
+- What: Mining/fluid rows now emit medium poles at a supply-radius pitch instead of one anchor pole, and the roboport backbone is re-composed after routing with extra chained roboports covering every emitted place_ghost tile.
+- Why: preflight() over the real electronics bundle found a coal drill outside any pole supply area and 284 route ghosts outside every construction radius - both would have wasted a live build cycle.
+- Verified: preflight(build_electronics_block(include_processing=True, world=<fixture>)) is ok=True with zero skipped checks; 371 passed / 8 failed, every failure in tools/build_processing_units.py and tools/build_advanced_circuits.py (owned by another in-flight agent).

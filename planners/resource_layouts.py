@@ -3,22 +3,54 @@
 
 from __future__ import annotations
 
-from planners.plan_validation import validate_build_plan
+from planners.infrastructure import POLE_SPECS
+from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from planners.recipe_data import BELT_TIERS
 
 # Pumpjack and offshore-pump connection geometry is intentionally not inferred.
 # Callers supply exact entity and output pipe coordinates until live verification lands.
 
+ROW_POLE = "medium-electric-pole"
 
-def _power_scaffold(anchor: tuple[float, float]) -> list[dict]:
+
+def _row_pole_positions(
+    anchor: tuple[float, float], entity: str, last_x: float,
+) -> list[tuple[float, float]]:
+    """Medium poles across the row at a pitch derived from the pole's own supply
+    radius, so EVERY machine in the row sits inside a supply square.
+
+    A single pole at the anchor only reaches `supply` tiles, which silently left
+    the far end of a wide mining row unpowered (a three-drill coal row already
+    overshoots it). The pitch is `2 * supply`, at which neighbouring supply
+    squares meet, and stays inside the pole's `wire` reach so the row is still
+    one connected chain. strip_local_power() drops the row's EEI and substation
+    but keeps these poles, so they are what actually feeds the row in a factory.
+    """
+    supply = POLE_SPECS[ROW_POLE]["supply"]
+    pitch = min(POLE_SPECS[ROW_POLE]["wire"], 2 * supply)
+    # A `size`x`size` body centred at cx is inside the supply square while
+    # |pole_x - cx| < supply + size/2.
+    reach = supply + ENTITY_FOOTPRINTS.get(entity, 1) / 2
+    positions = [tuple(anchor)]
+    while positions[-1][0] + reach <= last_x:
+        positions.append((positions[-1][0] + pitch, anchor[1]))
+    return positions
+
+
+def _power_scaffold(
+    anchor: tuple[float, float], entity: str = "electric-mining-drill", last_x: float | None = None,
+) -> list[dict]:
     x, y = anchor
+    poles = _row_pole_positions(anchor, entity, last_x if last_x is not None else x)
     return [
         {"action_type": "place_entity", "entity": "electric-energy-interface",
          "position": {"x": x - 8, "y": y}},
         {"action_type": "place_entity", "entity": "substation",
          "position": {"x": x - 4, "y": y}},
-        {"action_type": "place_ghost", "entity": "medium-electric-pole",
-         "position": {"x": x, "y": y}},
+    ] + [
+        {"action_type": "place_ghost", "entity": ROW_POLE,
+         "position": {"x": pole_x, "y": pole_y}}
+        for pole_x, pole_y in poles
     ]
 
 
@@ -49,7 +81,10 @@ def generate_coal_mine(
         for x, y in drill_positions
     ]
     plan = {"phases": [
-        {"name": "coal_power", "actions": _power_scaffold((first_x - 2, output_y - 4))},
+        {"name": "coal_power", "actions": _power_scaffold(
+            (first_x - 2, output_y - 4), "electric-mining-drill",
+            max(x for x, _ in drill_positions),
+        )},
         {"name": "coal_mining", "actions": drills + belts},
     ]}
     validate_build_plan(plan)
@@ -80,7 +115,10 @@ def _fluid_resource_plan(
     ]
     anchor = tuple(sites[0]["position"])
     plan = {"phases": [
-        {"name": f"{kind}_power", "actions": _power_scaffold((anchor[0] - 3, anchor[1] + 3))},
+        {"name": f"{kind}_power", "actions": _power_scaffold(
+            (anchor[0] - 3, anchor[1] + 3), entity,
+            max(site["position"][0] for site in sites),
+        )},
         {"name": f"{kind}_source", "actions": entities + pipes},
     ]}
     validate_build_plan(plan)
