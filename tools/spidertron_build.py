@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 import time
 from pathlib import Path
@@ -28,90 +27,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.rcon_client import RconClient, RconError
-
-Point = tuple[float, float]
-
-
-# ---------------------------------------------------------------------------
-# Pure geometry (unit-tested in tests/test_spidertron_tour.py)
-# ---------------------------------------------------------------------------
-
-def _axis_coords(lo: float, hi: float, step: float) -> list[float]:
-    """Evenly spaced coordinates covering [lo, hi] with spacing <= step. A span that
-    already fits within one step collapses to its midpoint, so a small area is served
-    from a single stop instead of being needlessly toured (every extra teleport
-    interrupts in-flight construction bots)."""
-    span = hi - lo
-    if span <= step:
-        return [(lo + hi) / 2.0]
-    intervals = math.ceil(span / step)
-    return [lo + i * span / intervals for i in range(intervals + 1)]
-
-
-def lawnmower_waypoints(
-    min_x: float, min_y: float, max_x: float, max_y: float, step: float
-) -> list[Point]:
-    """Deterministic serpentine tour covering a box; spacing <= step on both axes so
-    every tile is within step of a waypoint and consecutive hops stay <= step."""
-    if step <= 0:
-        raise ValueError("step must be positive")
-    if max_x < min_x or max_y < min_y:
-        raise ValueError("bounding box max must be >= min on both axes")
-    xs = _axis_coords(min_x, max_x, step)
-    ys = _axis_coords(min_y, max_y, step)
-    waypoints: list[Point] = []
-    for row, y in enumerate(ys):
-        row_xs = xs if row % 2 == 0 else list(reversed(xs))
-        for x in row_xs:
-            waypoints.append((float(x), float(y)))
-    return waypoints
-
-
-def concentric_rings(
-    positions: Sequence[Point], center: Point, ring_width: float
-) -> list[list[Point]]:
-    """Partition positions into concentric rings by Chebyshev (square) distance from
-    the center, innermost first. Chebyshev distance makes each ring a square shell,
-    so a ring of width ~ the roboport construction reach lands entirely within the
-    coverage already established by the ring inside it. Positions within each ring are
-    sorted deterministically. Empty rings are dropped, but relative ordering (index by
-    distance) is preserved so the build always expands outward."""
-    if ring_width <= 0:
-        raise ValueError("ring_width must be positive")
-    cx, cy = center
-    buckets: dict[int, list[Point]] = {}
-    for x, y in positions:
-        chebyshev = max(abs(x - cx), abs(y - cy))
-        index = int(chebyshev // ring_width)
-        buckets.setdefault(index, []).append((float(x), float(y)))
-    rings: list[list[Point]] = []
-    for index in sorted(buckets):
-        rings.append(sorted(buckets[index]))
-    return rings
-
-
-def square_grid(count: int, spacing: float, center: Point) -> list[Point]:
-    """A deterministic square grid of ~count points centered on `center`, used by the
-    self-test to synthesize a build field larger than one construction radius."""
-    if count <= 0:
-        raise ValueError("count must be positive")
-    side = math.ceil(math.sqrt(count))
-    cx, cy = center
-    half = (side - 1) / 2.0
-    points: list[Point] = []
-    for row in range(side):
-        for col in range(side):
-            if len(points) >= count:
-                break
-            points.append((cx + (col - half) * spacing, cy + (row - half) * spacing))
-    return points
-
-
-def ring_bbox(ring: Sequence[Point]) -> tuple[float, float, float, float]:
-    xs = [p[0] for p in ring]
-    ys = [p[1] for p in ring]
-    return (min(xs), min(ys), max(xs), max(ys))
-
+from tools.spidertron_geometry import (
+    Point,
+    concentric_rings,
+    lawnmower_waypoints,
+    ring_bbox,
+    square_grid,
+)
 
 # ---------------------------------------------------------------------------
 # RCON helpers

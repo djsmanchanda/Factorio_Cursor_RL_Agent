@@ -141,6 +141,47 @@ local function configure_created_entity(entity, action)
   return nil
 end
 
+-- Factorio's create_entity auto-wires nearby poles unreliably once dozens of
+-- poles already exist on the surface (verified live: two poles 5 tiles apart
+-- always auto-connect, but the same distance silently fails to connect once
+-- ~60 poles already exist nearby) -- so every place_entity/place_ghost pole
+-- placement must be followed by an explicit wiring pass rather than trusting
+-- the implicit auto-connect. Reach values come straight from the prototype
+-- (get_max_wire_distance), matching planners/infrastructure.py's POLE_SPECS.
+local function ensure_pole_wiring(surface, force)
+  local poles = surface.find_entities_filtered({ type = "electric-pole", force = force })
+  local reach_cache = {}
+  local function reach(entity)
+    local cached = reach_cache[entity.name]
+    if cached then return cached end
+    local value = prototypes.entity[entity.name].get_max_wire_distance()
+    reach_cache[entity.name] = value
+    return value
+  end
+  local connected = 0
+  for i = 1, #poles do
+    local a = poles[i]
+    if a.valid then
+      for j = i + 1, #poles do
+        local b = poles[j]
+        if b.valid and a.electric_network_id ~= b.electric_network_id then
+          local dx = a.position.x - b.position.x
+          local dy = a.position.y - b.position.y
+          local distance = math.sqrt(dx * dx + dy * dy)
+          if distance <= math.min(reach(a), reach(b)) then
+            local wire_a = a.get_wire_connector(defines.wire_connector_id.pole_copper, true)
+            local wire_b = b.get_wire_connector(defines.wire_connector_id.pole_copper, true)
+            if wire_a.connect_to(wire_b, false, defines.wire_origin.script) then
+              connected = connected + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  return connected
+end
+
 local function execute_build_plan(authorization, build_plan)
   local approved = {}
   for _, action in ipairs(authorization.approved_actions or {}) do
@@ -310,6 +351,7 @@ local function execute_build_plan(authorization, build_plan)
     end
   end
 
+  counts.wires_connected = ensure_pole_wiring(surface, force)
   counts.attempted_placements = counts.attempted_ghosts + counts.attempted_entities
   counts.succeeded_placements = counts.placed_ghosts + counts.placed_entities
   counts.already_present_placements = counts.already_present_ghosts

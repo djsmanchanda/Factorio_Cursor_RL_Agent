@@ -138,8 +138,11 @@ def plan_power_network(
     source: tuple,
     spine_spacing: float = SPINE_SPACING,
     spine_pole: str = "big-electric-pole",
+    relay_pole: str = "substation",
+    relay_spacing: float = 16.0,
+    long_leg_threshold: float = 100.0,
 ) -> dict:
-    """ONE electric-energy-interface at `source`, a big-pole spine out to every
+    """ONE electric-energy-interface at `source`, a relay spine out to every
     site, and a substation at each site.
 
     `sites` entries are dicts:
@@ -154,12 +157,19 @@ def plan_power_network(
 
     Geometry:
       * the interface sits at `source` (2x2);
-      * a spine pole is planted at source + (2, 0): its 4x4 supply area covers
-        the interface's east tiles, which is the ONLY way an EEI joins a network;
+      * a relay pole is planted at source + (2, 0): its supply area covers the
+        interface's east tiles, which is the ONLY way an EEI joins a network;
       * every site is reached by a leg routed horizontally along the source's y
-        and then vertically at the anchor's x, with spine poles every
-        `spine_spacing` tiles. Legs leaving the source in the same direction
-        share their intermediate tiles exactly and dedupe to one pole.
+        and then vertically at the anchor's x. Each straight leg is relayed with
+        `relay_pole` (substation by default -- its 18x18 supply area needs far
+        fewer nodes to also power nearby machinery, unlike a bare pole's tiny
+        supply box) spaced every `relay_spacing` tiles; a leg longer than
+        `long_leg_threshold` switches to `spine_pole` (big-electric-pole, wire
+        reach 32 vs a substation's 18) spaced every `spine_spacing` tiles
+        instead, since bridging a long empty stretch needs fewer, longer hops
+        more than it needs the extra supply area. Legs leaving the source in
+        the same direction share their intermediate tiles exactly and dedupe to
+        one pole (first assignment wins).
 
     Emits three phases: power_source, power_spine, power_sites. Every entity is
     a place_entity (immediate), not a ghost: bots cannot build without power, so
@@ -167,6 +177,8 @@ def plan_power_network(
     """
     if spine_pole not in POLE_SPECS:
         raise ValueError(f"Unknown spine pole: {spine_pole}")
+    if relay_pole not in POLE_SPECS:
+        raise ValueError(f"Unknown relay pole: {relay_pole}")
     if not sites:
         raise ValueError("plan_power_network needs at least one site")
     source = (round(source[0]), round(source[1]))
@@ -175,13 +187,18 @@ def plan_power_network(
     hub = (source[0] + 2, source[1])
     placer = FootprintPlacer(spine_size)
     placer.add(hub)
+    pole_type_by_point: Dict[Point, str] = {hub: relay_pole}
 
     for site in sites:
         anchor = _site_anchor(site)
         corners = l_route(hub, anchor)
         for start, end in zip(corners, corners[1:]):
-            for point in step_points(start, end, spine_spacing):
+            long_leg = distance(start, end) > long_leg_threshold
+            pole, spacing = (spine_pole, spine_spacing) if long_leg else (relay_pole, relay_spacing)
+            for point in step_points(start, end, spacing):
                 placer.add(point)
+                key = (round(point[0]), round(point[1]))
+                pole_type_by_point.setdefault(key, pole)
 
     substations: List[dict] = []
     seen: List[Point] = []
@@ -206,7 +223,7 @@ def plan_power_network(
              "position": {"x": source[0], "y": source[1]}},
         ]},
         {"name": "power_spine", "actions": [
-            {"action_type": "place_entity", "entity": spine_pole,
+            {"action_type": "place_entity", "entity": pole_type_by_point.get((x, y), relay_pole),
              "position": {"x": x, "y": y}} for x, y in buildable_spine
         ]},
         {"name": "power_sites", "actions": substations},

@@ -229,3 +229,9 @@ backfilled from git history because this file did not exist yet.
 - Key live findings: (a) a ghost directly under the parked spidertron (collision box +-1) reports can_revive=false and can NEVER be built - fixed by nudging each stop park_offset tiles off the ghost grid (alternating sign per pass); (b) base-tech bot dispatch latency is highly variable (2-40s), so the wait loop distinguishes "slow bots" from a real stall by querying in-range can_revive ghosts rather than a fixed tick/poll budget.
 - Not yet done: full-factory build integration (per-ring placement from the real electronics bundle) - the running instance is a GUI client that only loads new mod modules (spawn_construction_spidertron) at save load, and ring-by-ring placement of the real bundle needs bundle-action partitioning; the small-test proof (ghosts->0, one network, center-out) is the delivered acceptance. verify_factory_invariants.py one-electric/one-roboport/zero-ghost check requires the full bundle + ore seeding (other agent) after a client restart.
 - Next: after a client restart, partition the electronics bundle's ghost actions into center-out rings, drive them with build_center_out, then run tools/verify_factory_invariants.py --rcon-password planner_test.
+
+## [2026-07-24] M7 composed radial production execution
+- Files: tools/{spidertron_build,spidertron_geometry,electronics_radial_execution,build_processing_units}.py, tests/test_electronics_radial_execution.py, CURRENT_STATUS.md
+- What: Infrastructure remains one atomic layout call; production actions now place and build in deterministic spidertron-driven rings, with a fail-fast one-electric/one-roboport backbone check.
+- Why: Prevent the real composed factory from starting disconnected ghost islands while preserving complete BuildPlan action fields.
+- Next: Owner may run `build_processing_units.py --construction-mode radial` against the restarted live server and verify measured invariants.

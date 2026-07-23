@@ -382,8 +382,12 @@ def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped):
     extra = plan_coverage_roboports(
         existing, roboport_ghost_targets(stripped), occupied_tile_indices(stripped),
     )
-    if not extra:
-        return preview
+    # Always recompose against the FINAL routes, even with no extra roboports:
+    # the preview spine was planned blind to item/fluid routes (they don't exist
+    # yet), so a relay pole can still land on a route tile the preview never
+    # knew about. _resolve_spine_pole_overlaps (inside compose_managed_sandbox)
+    # is what actually dodges obstacle_plans -- this is the only pass that ever
+    # runs it against the true, finished route geometry.
     return compose_managed_sandbox(
         infrastructure_stages, anchors, {}, bots_per_roboport=50,
         extra_roboports=extra, obstacle_plans=stripped,
@@ -405,7 +409,7 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
         stages, include_processing, world, managed_tiles,
     )
     item_routes, item_endpoints, item_route_specs = _item_routes(
-        stages + fluid_routes + preview["infrastructure"], include_processing, world,
+        stages + fluid_routes, include_processing, world,
     )
     throughput_contract = build_electronics_contract(
         item_endpoints, item_route_specs, include_processing, world,

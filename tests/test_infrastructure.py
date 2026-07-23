@@ -92,7 +92,10 @@ def test_power_validator_rejects_a_disconnected_site() -> None:
         source=(0, 0),
     )
     broken = copy.deepcopy(plan)
-    substation = next(a for a in _actions(broken) if a["entity"] == "substation")
+    substation = next(
+        a for a in _actions(broken)
+        if a["entity"] == "substation" and (a["position"]["x"], a["position"]["y"]) == (20, 0)
+    )
     substation["position"] = {"x": 200, "y": 200}
 
     with pytest.raises(ValueError, match="unreachable from the power source"):

@@ -16,6 +16,8 @@ from orchestrator.game_bridge import BridgeError, GameBridge
 from planners.electronics_block import build_electronics_block
 from planners.electronics_world import load_electronics_world_spec
 from tools.electronics_execution import ElectronicsExecutionError, execute_electronics_bundle
+from tools.electronics_radial_execution import execute_electronics_bundle_radial
+from tools.rcon_client import RconClient, RconError
 
 
 def main() -> int:
@@ -30,6 +32,14 @@ def main() -> int:
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--settle-ticks", type=int, default=5400)
     parser.add_argument("--settle-timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--construction-mode", choices=["atomic", "radial"], default="atomic")
+    parser.add_argument(
+        "--ring-width", type=float,
+        help="Radial shell width in tiles (default: measured spidertron construction radius)",
+    )
+    parser.add_argument("--spidertron-roboports", type=int, default=4)
+    parser.add_argument("--spidertron-batteries", type=int, default=2)
+    parser.add_argument("--spidertron-bots", type=int, default=50)
     parser.add_argument(
         "--existing-topology", choices=["refuse", "reconcile", "reset"], default="refuse"
     )
@@ -60,23 +70,42 @@ def main() -> int:
     except BridgeError as error:
         print(f"BRIDGE FAILED: {error}", file=sys.stderr)
         return 1
+    rcon_client = None
     try:
-        result = execute_electronics_bundle(
-            bridge,
-            bundle,
-            world=world,
-            existing_topology=args.existing_topology,
-            settle_ticks=args.settle_ticks,
-            settle_timeout_seconds=args.settle_timeout_seconds,
-        )
+        if args.construction_mode == "radial":
+            rcon_client = RconClient(args.rcon_host, args.rcon_port, args.rcon_password)
+            result = execute_electronics_bundle_radial(
+                bridge,
+                rcon_client,
+                bundle,
+                world=world,
+                existing_topology=args.existing_topology,
+                settle_ticks=args.settle_ticks,
+                settle_timeout_seconds=args.settle_timeout_seconds,
+                ring_width=args.ring_width,
+                roboports=args.spidertron_roboports,
+                batteries=args.spidertron_batteries,
+                bots=args.spidertron_bots,
+            )
+        else:
+            result = execute_electronics_bundle(
+                bridge,
+                bundle,
+                world=world,
+                existing_topology=args.existing_topology,
+                settle_ticks=args.settle_ticks,
+                settle_timeout_seconds=args.settle_timeout_seconds,
+            )
         print(json.dumps(result["live"], sort_keys=True))
         return 0
-    except (BridgeError, ElectronicsExecutionError, OSError, ValueError) as error:
+    except (BridgeError, ElectronicsExecutionError, RconError, OSError, ValueError) as error:
         print(f"EXECUTION FAILED: {error}", file=sys.stderr)
         if isinstance(error, ElectronicsExecutionError) and error.report is not None:
             print(json.dumps(error.report, sort_keys=True), file=sys.stderr)
         return 1
     finally:
+        if rcon_client is not None:
+            rcon_client.close()
         bridge.close()
 
 
