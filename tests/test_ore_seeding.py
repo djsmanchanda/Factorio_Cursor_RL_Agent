@@ -79,7 +79,8 @@ def test_payload_matches_every_declared_ore_patch(world):
     not guessed coordinates -- with the same item and bounds."""
     payload = ore_seeding_payload(world)
     seeded_by_id = {patch["id"]: patch for patch in payload["ore_patches"]}
-    assert set(seeded_by_id) == {patch["id"] for patch in world.ore_patches}
+    pumpjack_ids = {f"pumpjack_{index}" for index in range(len(world.pumpjack_sites))}
+    assert set(seeded_by_id) == {patch["id"] for patch in world.ore_patches} | pumpjack_ids
     for patch in world.ore_patches:
         seeded = seeded_by_id[patch["id"]]
         assert seeded["item"] == patch["item"]
@@ -87,6 +88,11 @@ def test_payload_matches_every_declared_ore_patch(world):
             patch["x1"], patch["y1"], patch["x2"], patch["y2"],
         )
         assert seeded["amount"] > 0
+    for index, site in enumerate(world.pumpjack_sites):
+        seeded = seeded_by_id[f"pumpjack_{index}"]
+        assert seeded["item"] == site["resource"]
+        assert seeded["x1"] < site["position"][0] < seeded["x2"]
+        assert seeded["y1"] < site["position"][1] < seeded["y2"]
 
 
 def test_drill_footprints_covered_true_for_fixture(world):
@@ -132,7 +138,7 @@ def test_seed_ore_uses_fake_bridge_and_reports_per_resource(world):
     assert bridge.seed_calls[0] == ore_seeding_payload(world)
     assert report["ok"] is True
     assert report["seeded_ore_tiles"] > 0
-    assert set(report["seeded_by_resource"]) == {"iron-ore", "copper-ore", "coal"}
+    assert set(report["seeded_by_resource"]) == {"iron-ore", "copper-ore", "coal", "crude-oil"}
     assert any("ore seeding" in message for message in messages)
 
 

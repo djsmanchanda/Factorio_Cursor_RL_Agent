@@ -65,26 +65,45 @@ def scaffolding_with_materials(scaffolding: Mapping, materials: Mapping[str, int
     return payload
 
 
+PUMPJACK_FOOTPRINT = 3  # matches planners/plan_validation.py::ENTITY_FOOTPRINTS["pumpjack"]
+
+
 def ore_seeding_payload(world: ElectronicsWorldSpec, *, amount: int = 100000) -> dict:
     """Derive the mod's ore_patches seeding payload straight from the surveyed
     WorldSpec, so seeded ore lands exactly on the surveyed rectangles the
-    mining rows were placed against -- never guessed coordinates."""
+    mining rows were placed against -- never guessed coordinates.
+
+    Pumpjacks are included too: crude-oil is a resource patch just like ore,
+    and a pumpjack sitting on bare ground reports no_minable_resources and
+    produces nothing, starving every fluid stage downstream of it."""
     if not world.ore_patches:
         raise ValueError("WorldSpec declares no ore patches to seed")
-    return {
-        "ore_patches": [
-            {
-                "id": patch["id"],
-                "item": patch["item"],
-                "x1": patch["x1"],
-                "y1": patch["y1"],
-                "x2": patch["x2"],
-                "y2": patch["y2"],
-                "amount": amount,
-            }
-            for patch in world.ore_patches
-        ]
-    }
+    half = PUMPJACK_FOOTPRINT / 2.0 + 1  # one tile of margin around the footprint
+    patches = [
+        {
+            "id": patch["id"],
+            "item": patch["item"],
+            "x1": patch["x1"],
+            "y1": patch["y1"],
+            "x2": patch["x2"],
+            "y2": patch["y2"],
+            "amount": amount,
+        }
+        for patch in world.ore_patches
+    ]
+    patches.extend(
+        {
+            "id": f"pumpjack_{index}",
+            "item": site["resource"],
+            "x1": site["position"][0] - half,
+            "y1": site["position"][1] - half,
+            "x2": site["position"][0] + half,
+            "y2": site["position"][1] + half,
+            "amount": amount,
+        }
+        for index, site in enumerate(world.pumpjack_sites)
+    )
+    return {"ore_patches": patches}
 
 
 def drill_footprints_covered(world: ElectronicsWorldSpec) -> bool:
