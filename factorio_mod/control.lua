@@ -14,6 +14,7 @@ require("scaffolding")
 require("layout_executor")
 require("research")
 require("live_execution")
+require("spidertron_builder")
 
 script.on_event(defines.events.on_robot_built_entity, function(event)
   -- Factorio 2.0: event field renamed from created_entity to entity.

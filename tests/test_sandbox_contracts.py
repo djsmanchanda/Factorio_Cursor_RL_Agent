@@ -297,7 +297,7 @@ def test_lua_modules_are_bounded_headered_and_register_each_command_once() -> No
         "snapshot", "export_recipe_catalog", "apply_ghost_plan", "export_ghost_observation", "execute_ghost_plan",
         "execute_construction", "execute_upgrade_plan", "execute_deconstruction_plan",
         "inspect_sandbox_topology", "reconcile_sandbox_topology",
-        "ensure_sandbox_scaffolding", "build_layout_plan", "set_research", "research_status",
+        "ensure_sandbox_scaffolding", "seed_ore_patches", "build_layout_plan", "set_research", "research_status",
             "create_planner_world",
     }
     registered = re.findall(r'commands\.add_command\("([^"]+)"', _lua_source())

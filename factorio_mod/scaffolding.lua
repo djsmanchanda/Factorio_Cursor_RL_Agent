@@ -131,6 +131,69 @@ local function ensure_scaffolding(payload)
     seeded_ore_tiles = seeded
   }
 end
+local function seed_ore_patches(payload)
+  local surface = get_or_create_sandbox_surface()
+  local patches = payload.ore_patches
+  if type(patches) ~= "table" or #patches == 0 then
+    error("Ore seeding payload must include a non-empty ore_patches array")
+  end
+
+  local seeded = 0
+  local by_resource = {}
+  for _, patch in ipairs(patches) do
+    local item = patch.item
+    local x1 = tonumber(patch.x1)
+    local y1 = tonumber(patch.y1)
+    local x2 = tonumber(patch.x2)
+    local y2 = tonumber(patch.y2)
+    if type(item) ~= "string" or x1 == nil or y1 == nil or x2 == nil or y2 == nil then
+      error("Ore patch entries need item, x1, y1, x2, y2")
+    end
+    local amount = tonumber(patch.amount) or 100000
+    for x = math.floor(x1), math.floor(x2) do
+      for y = math.floor(y1), math.floor(y2) do
+        local existing = surface.find_entities_filtered({
+          name = item,
+          area = { { x, y }, { x + 1, y + 1 } },
+          force = "neutral",
+          limit = 1
+        })
+        if #existing == 0 then
+          surface.create_entity({ name = item, position = { x + 0.5, y + 0.5 }, amount = amount })
+          seeded = seeded + 1
+          by_resource[item] = (by_resource[item] or 0) + 1
+        end
+      end
+    end
+  end
+
+  return { seeded_ore_tiles = seeded, seeded_by_resource = by_resource }
+end
+
+commands.add_command("seed_ore_patches", "Idempotently seed resource-entity tiles for surveyed WorldSpec ore patches on planner-sandbox, exactly under the mining rows that reference them.", function(command)
+  local ok, payload = pcall(function()
+    return helpers.json_to_table(command.parameter or "")
+  end)
+  if not ok or type(payload) ~= "table" then
+    game.print("Ore seeding error: invalid JSON payload")
+    return
+  end
+
+  local run_ok, result = pcall(function()
+    return seed_ore_patches(payload)
+  end)
+
+  local report = { tick = game.tick, ok = run_ok }
+  if run_ok then
+    report.seeded_ore_tiles = result.seeded_ore_tiles
+    report.seeded_by_resource = result.seeded_by_resource
+  else
+    report.error = tostring(result)
+  end
+  local json = helpers.table_to_json(report)
+  helpers.write_file("factorio_mod/ore_seed_reports/ore_seed_" .. game.tick .. ".json", json, false)
+end)
+
 commands.add_command("ensure_sandbox_scaffolding", "Idempotently provision power, roboports, bots, and materials on planner-sandbox.", function(command)
   local ok, payload = pcall(function()
     return helpers.json_to_table(command.parameter or "")

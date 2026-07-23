@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Sequence
 from jsonschema import Draft7Validator
 
 from orchestrator.game_bridge import GameBridge, load_json
+from planners.electronics_world import ElectronicsWorldSpec
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.sandbox_infrastructure import build_layout_authorization, topology_is_compatible
 
@@ -62,6 +63,71 @@ def scaffolding_with_materials(scaffolding: Mapping, materials: Mapping[str, int
         str(item): int(count) for item, count in sorted(materials.items()) if int(count) > 0
     }
     return payload
+
+
+def ore_seeding_payload(world: ElectronicsWorldSpec, *, amount: int = 100000) -> dict:
+    """Derive the mod's ore_patches seeding payload straight from the surveyed
+    WorldSpec, so seeded ore lands exactly on the surveyed rectangles the
+    mining rows were placed against -- never guessed coordinates."""
+    if not world.ore_patches:
+        raise ValueError("WorldSpec declares no ore patches to seed")
+    return {
+        "ore_patches": [
+            {
+                "id": patch["id"],
+                "item": patch["item"],
+                "x1": patch["x1"],
+                "y1": patch["y1"],
+                "x2": patch["x2"],
+                "y2": patch["y2"],
+                "amount": amount,
+            }
+            for patch in world.ore_patches
+        ]
+    }
+
+
+def drill_footprints_covered(world: ElectronicsWorldSpec) -> bool:
+    """True iff every surveyed mining-drill position lies inside some patch
+    rectangle the seeding payload will seed (i.e. no drill is left barren)."""
+    patches = {patch["id"]: patch for patch in world.ore_patches}
+
+    def _inside(position: tuple[float, float], patch_id: str) -> bool:
+        patch = patches.get(patch_id)
+        if patch is None:
+            return False
+        x, y = position
+        return patch["x1"] <= x <= patch["x2"] and patch["y1"] <= y <= patch["y2"]
+
+    for line in world.ore_lines:
+        if not all(_inside(position, line["patch_id"]) for position in line["drill_positions"]):
+            return False
+    return all(_inside(position, world.coal_patch_id) for position in world.coal_drill_positions)
+
+
+def _seed_ore(
+    bridge: GameBridge,
+    world: ElectronicsWorldSpec,
+    emit: Callable[[str], None],
+) -> dict:
+    """Seed every surveyed ore patch. Must run after any reset and before
+    construction: drills placed on bare ground mine nothing."""
+    if not drill_footprints_covered(world):
+        raise ElectronicsExecutionError(
+            "WorldSpec has a surveyed mining drill outside every declared ore patch; "
+            "refusing to seed a payload that would leave a drill on bare ground"
+        )
+    report = _load_report(bridge.seed_ore_patches(ore_seeding_payload(world)))
+    if not report.get("ok"):
+        raise ElectronicsExecutionError(
+            f"Ore seeding failed: {report.get('error', 'unknown error')}", report=report
+        )
+    emit(
+        "ore seeding: "
+        f"seeded_tiles={report.get('seeded_ore_tiles', 0)}, "
+        f"by_resource={report.get('seeded_by_resource', {})}"
+    )
+    return report
 
 
 def prepare_existing_topology(bridge: GameBridge, mode: str) -> dict:
@@ -279,6 +345,8 @@ def _mutated(*reports: Mapping) -> bool:
             return True
         if report.get("bots_inserted", 0) or any(report.get("inserted", {}).values()):
             return True
+        if report.get("seeded_ore_tiles", 0):
+            return True
     return False
 
 
@@ -313,18 +381,21 @@ def execute_electronics_bundle(
     bridge: GameBridge,
     bundle: Mapping,
     *,
+    world: ElectronicsWorldSpec,
     existing_topology: str,
     settle_ticks: int,
     settle_timeout_seconds: float,
     emit: Callable[[str], None] = print,
 ) -> dict:
-    """Execute infrastructure first, build production, measure, replay, and save."""
+    """Seed ore, execute infrastructure first, build production, measure, replay, and save."""
     infrastructure = list(bundle["infrastructure"])
     production = list(bundle["plans"])
     materials = production_materials(production)
     reports: list[dict] = []
     try:
         prepare_existing_topology(bridge, existing_topology)
+        ore_report = _seed_ore(bridge, world, emit)
+        reports.append(ore_report)
         infrastructure_report = _build_group(bridge, "infrastructure", infrastructure, emit)
         reports.append(infrastructure_report)
         scaffold_report = _scaffold(bridge, bundle["scaffolding"], materials, emit)

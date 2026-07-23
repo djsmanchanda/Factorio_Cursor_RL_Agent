@@ -29,6 +29,23 @@ local function get_or_create_planner_force()
   if human_force then
     force.set_friend(human_force, true)
     human_force.set_friend(force, true)
+    -- Sync research from the human force so the sandbox's bots, machines and
+    -- inserters run at the SAME speed as the rest of the game. A fresh force
+    -- has zero research: bots ~10x slower, machines slower, inserters base
+    -- capacity - which the user observed as the sandbox being "out of sync".
+    for name, tech in pairs(human_force.technologies) do
+      if tech.researched and force.technologies[name] and not force.technologies[name].researched then
+        force.technologies[name].researched = true
+      end
+    end
+    -- Infinite-research effects (e.g. worker robot speed) stack past the finite
+    -- techs; copy the resulting force modifiers directly to fully match.
+    for _, modifier in pairs({
+      "worker_robots_speed_modifier", "worker_robots_battery_modifier",
+      "worker_robots_storage_bonus",
+    }) do
+      pcall(function() force[modifier] = human_force[modifier] end)
+    end
   end
 
   local bootstrap = force.technologies["automation-science-pack"]

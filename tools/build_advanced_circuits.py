@@ -67,6 +67,7 @@ def main() -> int:
         result = execute_electronics_bundle(
             bridge,
             bundle,
+            world=world,
             existing_topology=args.existing_topology,
             settle_ticks=args.settle_ticks,
             settle_timeout_seconds=args.settle_timeout_seconds,
