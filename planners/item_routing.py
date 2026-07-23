@@ -9,6 +9,7 @@ from planners.plan_validation import validate_build_plan
 from planners.recipe_data import BELT_TIERS
 
 _DIRECTIONS = {(1, 0): "east", (-1, 0): "west", (0, 1): "south", (0, -1): "north"}
+_DIRECTION_STEPS = {direction: step for step, direction in _DIRECTIONS.items()}
 UNDERGROUND_MAX_ENDPOINT_DISTANCE = {
     "transport-belt": 5,
     "fast-transport-belt": 7,
@@ -103,6 +104,50 @@ def _tunnel_geometry(
     return tunnels, endpoints
 
 
+def _validate_tunnel_connections(
+    route: ItemRoute,
+    points: list[tuple[int, int]],
+    endpoints: dict[tuple[int, int], tuple[str, str]],
+) -> None:
+    """Reject tunnel endpoints whose adjacent surface belt cannot connect.
+
+    An underground output cannot feed a corner belt on its first tile. The
+    first surface belt must keep the tunnel's direction; only the following
+    tile may turn. Endpoint adjacency is checked on both sides of the tunnel.
+    """
+    for point, (direction, role) in endpoints.items():
+        index = points.index(point)
+        step = _DIRECTION_STEPS[direction]
+        neighbour_index = index - 1 if role == "input" else index + 1
+        if neighbour_index < 0 or neighbour_index >= len(points):
+            continue
+        expected = (
+            point[0] - step[0] if role == "input" else point[0] + step[0],
+            point[1] - step[1] if role == "input" else point[1] + step[1],
+        )
+        if points[neighbour_index] != expected:
+            relation = (
+                "receive from a belt directly behind"
+                if role == "input"
+                else "feed a belt directly ahead"
+            )
+            raise ValueError(
+                f"Item route {route.name} tunnel {role} must {relation} "
+                f"before turning at {point}"
+            )
+
+        if role == "output" and index + 2 < len(points):
+            following_step = (
+                points[index + 2][0] - points[index + 1][0],
+                points[index + 2][1] - points[index + 1][1],
+            )
+            if following_step != step:
+                raise ValueError(
+                    f"Item route {route.name} tunnel output at {point} must feed a "
+                    "same-direction belt before turning"
+                )
+
+
 def route_declared_items(
     endpoints: list[ItemEndpoint],
     routes: list[ItemRoute],
@@ -133,6 +178,7 @@ def route_declared_items(
             segment = _segment(start, end)
             points.extend(segment if not points else segment[1:])
         tunnels, tunnel_ends = _tunnel_geometry(route, points, belt_type)
+        _validate_tunnel_connections(route, points, tunnel_ends)
         physical_points = set(points) - tunnels
         collisions = sorted(physical_points & (occupied | claimed))
         if collisions:

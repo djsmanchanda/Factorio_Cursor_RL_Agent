@@ -60,6 +60,13 @@ def test_processing_chain_consumes_sulfur_and_uses_reserved_interface(processing
     assert not any(a["action_type"] == "remove_entity" for a in emitted)
     assert sum(a.get("entity") == "electric-energy-interface" for a in emitted) == 1
 
+def test_processing_underground_outputs_keep_a_straight_connector(processing):
+    for _, plan in processing["plans"]:
+        routed = list(actions(plan))
+        for index, action in enumerate(routed[:-2]):
+            if action.get("underground_type") == "output":
+                assert routed[index + 1]["direction"] == action["direction"]
+
 
 def test_both_blocks_fit_the_surveyed_bounded_surface(advanced, processing):
     expected = {"x1": -250, "y1": -250, "x2": 250, "y2": 250}

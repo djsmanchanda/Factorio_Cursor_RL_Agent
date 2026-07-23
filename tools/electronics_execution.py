@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -65,7 +66,53 @@ def scaffolding_with_materials(scaffolding: Mapping, materials: Mapping[str, int
     return payload
 
 
+WATER_LAKE_HALF_WIDTH = 6
+WATER_LAKE_DEPTH = 13
 PUMPJACK_FOOTPRINT = 3  # matches planners/plan_validation.py::ENTITY_FOOTPRINTS["pumpjack"]
+
+
+def _water_lake_bounds(
+    position: tuple[float, float], direction: str,
+) -> tuple[int, int, int, int]:
+    """Return the canonical 14x13 lake behind an offshore pump.
+
+    The dimensions and north-facing placement match planners/world_generation.py.
+    Offshore pumps draw opposite their output direction.
+    """
+    x, y = map(math.floor, position)
+    cross_min = -WATER_LAKE_HALF_WIDTH
+    cross_max = WATER_LAKE_HALF_WIDTH + 1
+    depth = WATER_LAKE_DEPTH - 1
+    if direction == "north":
+        return x + cross_min, y + 1, x + cross_max, y + WATER_LAKE_DEPTH
+    if direction == "south":
+        return x + cross_min, y - depth, x + cross_max, y
+    if direction == "east":
+        return x - depth, y + cross_min, x, y + cross_max
+    if direction == "west":
+        return x + 1, y + cross_min, x + WATER_LAKE_DEPTH, y + cross_max
+    raise ValueError(f"Unknown offshore-pump direction: {direction}")
+
+
+def water_seeding_payload(world: ElectronicsWorldSpec) -> dict:
+    """Derive bounded Nauvis-style water lakes from surveyed pump sites."""
+    if not world.offshore_pump_sites:
+        raise ValueError("WorldSpec declares no offshore-pump sites to seed")
+    lakes = []
+    for index, site in enumerate(world.offshore_pump_sites):
+        if site["resource"] != "water":
+            raise ValueError("Offshore-pump site resource must be water")
+        direction = site.get("direction", "north")
+        x1, y1, x2, y2 = _water_lake_bounds(site["position"], direction)
+        lakes.append({
+            "id": f"offshore_pump_{index}",
+            "tile": "water",
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+        })
+    return {"water_lakes": lakes}
 
 
 def ore_seeding_payload(world: ElectronicsWorldSpec, *, amount: int = 100000) -> dict:
@@ -122,6 +169,21 @@ def drill_footprints_covered(world: ElectronicsWorldSpec) -> bool:
         if not all(_inside(position, line["patch_id"]) for position in line["drill_positions"]):
             return False
     return all(_inside(position, world.coal_patch_id) for position in world.coal_drill_positions)
+
+
+def _seed_water(
+    bridge: GameBridge,
+    world: ElectronicsWorldSpec,
+    emit: Callable[[str], None],
+) -> dict:
+    """Seed water terrain after topology reset and before pump construction."""
+    report = _load_report(bridge.seed_water_lakes(water_seeding_payload(world)))
+    if not report.get("ok"):
+        raise ElectronicsExecutionError(
+            f"Water seeding failed: {report.get('error', 'unknown error')}", report=report
+        )
+    emit(f"water seeding: seeded_tiles={report.get('seeded_water_tiles', 0)}")
+    return report
 
 
 def _seed_ore(
@@ -364,7 +426,7 @@ def _mutated(*reports: Mapping) -> bool:
             return True
         if report.get("bots_inserted", 0) or any(report.get("inserted", {}).values()):
             return True
-        if report.get("seeded_ore_tiles", 0):
+        if report.get("seeded_ore_tiles", 0) or report.get("seeded_water_tiles", 0):
             return True
     return False
 
@@ -406,13 +468,15 @@ def execute_electronics_bundle(
     settle_timeout_seconds: float,
     emit: Callable[[str], None] = print,
 ) -> dict:
-    """Seed ore, execute infrastructure first, build production, measure, replay, and save."""
+    """Seed resources, execute infrastructure, build production, measure, replay, and save."""
     infrastructure = list(bundle["infrastructure"])
     production = list(bundle["plans"])
     materials = production_materials(production)
     reports: list[dict] = []
     try:
         prepare_existing_topology(bridge, existing_topology)
+        water_report = _seed_water(bridge, world, emit)
+        reports.append(water_report)
         ore_report = _seed_ore(bridge, world, emit)
         reports.append(ore_report)
         infrastructure_report = _build_group(bridge, "infrastructure", infrastructure, emit)

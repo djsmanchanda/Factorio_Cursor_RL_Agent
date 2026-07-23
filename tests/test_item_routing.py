@@ -93,3 +93,43 @@ def test_separate_tunnel_runs_cannot_share_an_endpoint() -> None:
 
     with pytest.raises(ValueError, match="cannot share an endpoint"):
         route_declared_items(endpoints, [route])
+
+
+def test_tunnel_output_rejects_a_perpendicular_next_belt() -> None:
+    route = ItemRoute(
+        "broken_exit_turn", "copper-cable", "cable_out", "cable_aux",
+        waypoints=((19, 5),), tunnel_crossings=tuple((x, 5) for x in range(11, 19)),
+    )
+    endpoints = [
+        ItemEndpoint("cable_out", "copper-cable", "producer", (10, 5), "east"),
+        ItemEndpoint("cable_aux", "copper-cable", "consumer", (19, 10), "south"),
+    ]
+
+    with pytest.raises(ValueError, match="tunnel output .* before turning"):
+        route_declared_items(endpoints, [route])
+
+
+def test_tunnel_output_connects_before_a_dogleg_turn() -> None:
+    route = ItemRoute(
+        "connected_exit_turn", "copper-cable", "cable_out", "cable_aux",
+        waypoints=((21, 5), (21, 6), (19, 6)),
+        tunnel_crossings=tuple((x, 5) for x in range(11, 19)),
+    )
+    endpoints = [
+        ItemEndpoint("cable_out", "copper-cable", "producer", (10, 5), "east"),
+        ItemEndpoint("cable_aux", "copper-cable", "consumer", (19, 10), "south"),
+    ]
+
+    routed = list(actions(route_declared_items(endpoints, [route])[0][1]))
+    output_index = next(
+        index
+        for index, action in enumerate(routed)
+        if action.get("underground_type") == "output"
+    )
+
+    assert routed[output_index]["position"] == {"x": 19.5, "y": 5.5}
+    assert routed[output_index]["direction"] == "east"
+    assert routed[output_index + 1]["position"] == {"x": 20.5, "y": 5.5}
+    assert routed[output_index + 1]["direction"] == "east"
+    assert routed[output_index + 2]["position"] == {"x": 21.5, "y": 5.5}
+    assert routed[output_index + 2]["direction"] == "south"

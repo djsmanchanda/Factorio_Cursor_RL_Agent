@@ -18,6 +18,7 @@ from tools.electronics_execution import (
     _mutated,
     _scaffold,
     _seed_ore,
+    _seed_water,
     prepare_existing_topology,
     production_materials,
     validate_layout_report,
@@ -169,6 +170,8 @@ def execute_electronics_bundle_radial(
     ring_reports: list[dict] = []
     try:
         prepare_existing_topology(bridge, existing_topology)
+        water_report = _seed_water(bridge, world, emit)
+        reports.append(water_report)
         ore_report = _seed_ore(bridge, world, emit)
         reports.append(ore_report)
         infrastructure_report = _build_group(bridge, "infrastructure", infrastructure, emit)

@@ -67,6 +67,15 @@ and the matching `CREATE_PLANNER_WORLD` or `RESET_PLANNER_WORLD` token. It only
 targets `planner-sandbox`; reset is never implicit. Autoplace is disabled and
 all resources and water are placed from the spec. The starter-kit contract
 contains construction equipment only; production ingredients remain empty.
+
+## Live resource and water seeding
+
+`/seed_ore_patches <json>` idempotently creates the surveyed solid-resource and
+crude-oil entities. `/seed_water_lakes <json>` independently lays bounded
+Nauvis-style `water` tiles behind surveyed offshore pumps. Live electronics
+execution invokes both commands after any topology reset and before construction;
+water is terrain and is deliberately not represented as a resource entity.
+
 ## Resource survey
 
 `/snapshot planner-sandbox` includes the persisted 500x500 bounds and seed,

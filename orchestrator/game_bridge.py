@@ -16,6 +16,7 @@ EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "execution_reports"
 CONSTRUCTION_REPORT_SUBDIR = Path("factorio_mod") / "construction_reports"
 SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 ORE_SEED_REPORT_SUBDIR = Path("factorio_mod") / "ore_seed_reports"
+WATER_SEED_REPORT_SUBDIR = Path("factorio_mod") / "water_seed_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
 LIVE_EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "live_execution_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
@@ -134,6 +135,10 @@ class GameBridge:
     def seed_ore_patches(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(f"/seed_ore_patches {body}", ORE_SEED_REPORT_SUBDIR, timeout)
+
+    def seed_water_lakes(self, payload: dict, timeout: float = 120.0) -> Path:
+        body = json.dumps(payload, separators=(",", ":"))
+        return self._run_and_collect(f"/seed_water_lakes {body}", WATER_SEED_REPORT_SUBDIR, timeout)
 
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))

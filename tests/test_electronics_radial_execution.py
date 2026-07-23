@@ -111,6 +111,9 @@ def _patch_execution_dependencies(monkeypatch, events: list[str], *, fail_ring: 
 
     monkeypatch.setattr(radial, "prepare_existing_topology", lambda *_: events.append("prepare"))
     monkeypatch.setattr(
+        radial, "_seed_water", lambda *_: events.append("water") or {"seeded_water_tiles": 1},
+    )
+    monkeypatch.setattr(
         radial, "_seed_ore", lambda *_: events.append("seed") or {"seeded_ore_tiles": 1},
     )
     monkeypatch.setattr(radial, "production_materials", lambda _: {"small-electric-pole": 10})
@@ -173,7 +176,7 @@ def test_radial_execution_orders_atomic_infrastructure_then_ascending_rings(monk
 
     assert result["live"] == {"ok": True}
     assert events == [
-        "prepare", "seed", "build:infrastructure/infra", "network", "spawn", "radius",
+        "prepare", "water", "seed", "build:infrastructure/infra", "network", "spawn", "radius",
         "build:ring_0", "tour:0:1", "build:ring_1", "tour:1:1", "build:ring_2", "tour:2:1",
         "scaffold", "settle", "verify", "cleanup", "save",
     ]
