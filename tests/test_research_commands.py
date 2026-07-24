@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.game_bridge import GameBridge, RESEARCH_REPORT_SUBDIR
+from orchestrator.game_bridge import GameBridge, RECIPE_CATALOG_SUBDIR, RESEARCH_REPORT_SUBDIR
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,3 +68,12 @@ def test_increase_command_fails_before_opening_a_game_connection() -> None:
         main(["increase", "automation-science-pack", "1"])
 
     assert error.value.code == 2
+
+def test_recipe_catalog_sends_existing_player_force() -> None:
+    bridge, calls = _recording_bridge()
+
+    bridge.export_recipe_catalog(force="player")
+
+    assert calls == [
+        ("/export_recipe_catalog player", RECIPE_CATALOG_SUBDIR, 120.0)
+    ]

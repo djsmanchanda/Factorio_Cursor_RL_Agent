@@ -290,3 +290,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added explicit existing-force research status/queue commands and a CLI for produce/research goals; rate-increase goals fail closed pending a measured capacity policy.
 - Why: Real-base targets must never mutate the sandbox planner force or claim research completion from a queued request.
 - Next: Redeploy the mod, export the player recipe catalog, then integrate verified science recipes and real fluid connectors.
+
+## [2026-07-24] Real-base player recipe export
+- Files: orchestrator/game_bridge.py, tests/test_research_commands.py
+- What: GameBridge can now export the enabled recipe catalog for an explicit existing force such as player.
+- Why: Science recipes must be captured from the actual Factorio 2.0 force before they enter the autonomous catalog.
+- Next: After mod redeploy/restart, export player catalog and use the observed contracts to add science and fluid recipe stages.

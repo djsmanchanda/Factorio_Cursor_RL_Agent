@@ -121,8 +121,16 @@ class GameBridge:
         return self._run_and_collect(
             f"/reconcile_sandbox_topology {payload}", TOPOLOGY_REPORT_SUBDIR, timeout
         )
-    def export_recipe_catalog(self, timeout: float = 120.0) -> Path:
-        return self._run_and_collect("/export_recipe_catalog", RECIPE_CATALOG_SUBDIR, timeout)
+    def export_recipe_catalog(
+        self, timeout: float = 120.0, *, force: str | None = None,
+    ) -> Path:
+        """Export enabled recipes for the legacy planner or one existing force."""
+        command = "/export_recipe_catalog"
+        if force is not None:
+            if not force:
+                raise ValueError("force must be non-empty when supplied")
+            command += " " + force
+        return self._run_and_collect(command, RECIPE_CATALOG_SUBDIR, timeout)
 
     def execute_upgrade_plan(self, authorization: dict, upgrade_plan: dict, timeout: float = 120.0) -> Path:
         payload = json.dumps({"authorization": authorization, "upgrade_plan": upgrade_plan}, separators=(",", ":"))
