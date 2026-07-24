@@ -247,10 +247,8 @@ def compose_managed_sandbox(
     occupied_obstacles = terrain_obstacles | occupied_tile_indices(
         stripped + [("unified_roboports", robots)] + list(obstacle_plans),
     )
-    # Site substations must remain stable across phased builds; later routes were
-    # already planned around the preview backbone, so only immutable terrain may
-    # shift their local placement.
-    power_sites.extend(roboport_power_sites(roboport_positions(robots), terrain_obstacles))
+    # The final backbone must not land on completed production routes.
+    power_sites.extend(roboport_power_sites(roboport_positions(robots), occupied_obstacles))
 
     power = plan_power_network(
         power_sites, source=CANONICAL_POWER_SOURCE, blocked_tiles=occupied_obstacles,

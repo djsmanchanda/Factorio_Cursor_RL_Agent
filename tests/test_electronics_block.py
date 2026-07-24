@@ -11,7 +11,7 @@ import pytest
 from planners.electronics_block import DEPENDENCIES_2A, DEPENDENCIES_2B, build_electronics_block
 from planners.electronics_world import ElectronicsWorldSpec, load_electronics_world_spec
 from planners.infrastructure import validate_power_connectivity
-from planners.plan_validation import actions, validate_no_collisions, validate_placement_subset
+from planners.plan_validation import actions, occupied_tile_indices, validate_no_collisions, validate_placement_subset
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 
@@ -132,3 +132,25 @@ def test_relocated_power_spine_stays_connected_and_nonoverlapping(processing):
 
     validate_power_connectivity(combined)
     validate_no_collisions(complete)
+
+
+def test_fluid_links_respect_the_preplanned_item_route_reservations(processing):
+    item_plans = [
+        (name, plan)
+        for name, plan in processing["plans"]
+        if plan["phases"][0]["name"].startswith("item_route_")
+    ]
+    fluid_plans = [
+        (name, plan)
+        for name, plan in processing["plans"]
+        if name.startswith("link_")
+    ]
+
+    item_tiles = occupied_tile_indices(item_plans)
+    fluid_tiles = occupied_tile_indices(fluid_plans)
+    assert not item_tiles & fluid_tiles
+
+    # ec_to_pu is a fixed production belt.  It must be present before links
+    # are planned, rather than being treated as an after-the-fact collision.
+    assert (200, 196) in item_tiles
+    assert (200, 196) not in fluid_tiles

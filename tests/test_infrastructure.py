@@ -112,13 +112,12 @@ def test_power_spine_keeps_120_tile_legs_on_substations_by_default() -> None:
     )
 
     assert not any(action["entity"] == "big-electric-pole" for action in _actions(plan))
-def test_power_route_detours_when_both_direct_elbows_are_blocked() -> None:
+def test_power_route_uses_shortest_clear_detour_when_direct_elbows_are_blocked() -> None:
     blocked = {(x, y) for x in (6, 7) for y in (-99, -98, -96, -95)}
 
     route = choose_clear_l_route((-9, -98), (28, -95), 16, 2, blocked)
 
-    assert len(route) == 4
-    assert route[1][1] not in {-98, -95}
+    assert route == [(-9, -98), (-1, -98), (-1, -95), (28, -95)]
 
 def test_power_validator_rejects_a_disconnected_site() -> None:
     plan = plan_power_network(

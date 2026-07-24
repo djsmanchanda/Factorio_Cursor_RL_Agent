@@ -9,11 +9,13 @@ from planners.electronics_contracts import (
 )
 from planners.fluid_layouts import (
     fluid_network_segments,
-    generate_fluid_chain_link,
     generate_fluid_machine_row,
     header_attachment,
 )
-from planners.fluid_routing import fluid_chain_link_segments
+from planners.fluid_routing import (
+    generate_shortest_fluid_chain_link,
+    shortest_fluid_chain_segments,
+)
 from planners.item_routing import ItemEndpoint, ItemRoute, route_declared_items
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.plan_validation import (
@@ -254,7 +256,8 @@ def _item_routes(
 
 def _fluid_routes(
     stages: list[tuple[str, dict]], include_processing: bool,
-    world: ElectronicsWorldSpec, managed_tiles: set[tuple[int, int]],
+    world: ElectronicsWorldSpec, hard_tiles: set[tuple[int, int]],
+    tunnelable_tiles: set[tuple[int, int]],
 ):
     stage_segments = []
 
@@ -268,8 +271,13 @@ def _fluid_routes(
     crude_output = tuple(world.pumpjack_sites[0]["output"])
     crude_from = (crude_output[0] - 1, crude_output[1])
     crude_to = header_attachment("basic-oil-processing", "crude-oil", 2, 40, -30)["attach"]
-    crude_plan = generate_fluid_chain_link(crude_from, [crude_to], "crude-oil", 15, stage_segments, obstacle_tiles=managed_tiles)
-    crude_segments = fluid_chain_link_segments(crude_from, [crude_to], "crude-oil", 15, stage_segments, obstacle_tiles=managed_tiles)
+    crude_plan = generate_shortest_fluid_chain_link(
+        crude_from, [crude_to], "crude-oil", stage_segments, hard_tiles=hard_tiles,
+        tunnelable_tiles=tunnelable_tiles, existing_tiles=(crude_to,),
+    )
+    crude_segments = shortest_fluid_chain_segments(
+        crude_from, [crude_to], "crude-oil", stage_segments, hard_tiles=hard_tiles, tunnelable_tiles=tunnelable_tiles,
+    )
 
     petroleum_to = [header_attachment("plastic-bar", "petroleum-gas", 2, 90, 20)["attach"]]
     if include_processing:
@@ -281,11 +289,12 @@ def _fluid_routes(
         "basic-oil-processing", "petroleum-gas", 2, 40, -30
     )["attach"]
     petroleum_foreign = stage_segments + crude_segments
-    petroleum_plan = generate_fluid_chain_link(
-        petroleum_from, petroleum_to, "petroleum-gas", 0, petroleum_foreign, obstacle_tiles=managed_tiles
+    petroleum_plan = generate_shortest_fluid_chain_link(
+        petroleum_from, petroleum_to, "petroleum-gas", petroleum_foreign, hard_tiles=hard_tiles,
+        tunnelable_tiles=tunnelable_tiles, existing_tiles=(petroleum_from, *petroleum_to),
     )
-    petroleum_segments = fluid_chain_link_segments(
-        petroleum_from, petroleum_to, "petroleum-gas", 0, petroleum_foreign, obstacle_tiles=managed_tiles
+    petroleum_segments = shortest_fluid_chain_segments(
+        petroleum_from, petroleum_to, "petroleum-gas", petroleum_foreign, hard_tiles=hard_tiles, tunnelable_tiles=tunnelable_tiles,
     )
     plans = [("link_crude_oil", crude_plan), ("link_petroleum_gas", petroleum_plan)]
     all_segments = stage_segments + crude_segments + petroleum_segments
@@ -298,11 +307,12 @@ def _fluid_routes(
             header_attachment("sulfur", "water", 2, 90, 108)["attach"],
             header_attachment("sulfuric-acid", "water", 2, 150, 171)["attach"],
         ]
-        water_plan = generate_fluid_chain_link(
-            water_from, water_to, "water", -60, all_segments, obstacle_tiles=managed_tiles
+        water_plan = generate_shortest_fluid_chain_link(
+            water_from, water_to, "water", all_segments, hard_tiles=hard_tiles,
+            tunnelable_tiles=tunnelable_tiles, existing_tiles=tuple(water_to),
         )
-        water_segments = fluid_chain_link_segments(
-            water_from, water_to, "water", -60, all_segments, obstacle_tiles=managed_tiles
+        water_segments = shortest_fluid_chain_segments(
+            water_from, water_to, "water", all_segments, hard_tiles=hard_tiles, tunnelable_tiles=tunnelable_tiles,
         )
         acid_from = header_attachment(
             "sulfuric-acid", "sulfuric-acid", FLUID_STAGE_COUNTS["sulfuric_acid"], 150, 171
@@ -311,11 +321,12 @@ def _fluid_routes(
             "processing-unit", "sulfuric-acid", FLUID_STAGE_COUNTS["sulfuric_acid"], 220, 220
         )["attach"]]
         acid_foreign = all_segments + water_segments
-        acid_plan = generate_fluid_chain_link(
-            acid_from, acid_to, "sulfuric-acid", 0, acid_foreign, obstacle_tiles=managed_tiles
+        acid_plan = generate_shortest_fluid_chain_link(
+            acid_from, acid_to, "sulfuric-acid", acid_foreign, hard_tiles=hard_tiles,
+            tunnelable_tiles=tunnelable_tiles, existing_tiles=(acid_from, *acid_to),
         )
-        acid_segments = fluid_chain_link_segments(
-            acid_from, acid_to, "sulfuric-acid", 0, acid_foreign, obstacle_tiles=managed_tiles
+        acid_segments = shortest_fluid_chain_segments(
+            acid_from, acid_to, "sulfuric-acid", acid_foreign, hard_tiles=hard_tiles, tunnelable_tiles=tunnelable_tiles,
         )
         plans += [("link_water", water_plan), ("link_sulfuric_acid", acid_plan)]
         all_segments += water_segments + acid_segments
@@ -410,12 +421,38 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
     preview = compose_managed_sandbox(
         infrastructure_stages, anchors, {}, bots_per_roboport=50, obstacle_tiles=water_tiles,
     )
-    managed_tiles = occupied_tile_indices(preview["infrastructure"]) | water_tiles
-    fluid_routes, fluid_segments = _fluid_routes(
-        stages, include_processing, world, managed_tiles,
-    )
+    # Item routes are declared, fixed geometry.  Solve and reserve them before
+    # cross-stage fluids so links cannot claim a surface tile that a belt needs.
+    # This keeps item-route output stable while allowing the fluid router to
+    # choose its legal crossings from the complete known obstacle set.
     item_routes, item_endpoints, item_route_specs = _item_routes(
-        stages + fluid_routes, include_processing, world, water_tiles,
+        stages, include_processing, world, water_tiles,
+    )
+    stage_structures = [
+        (name, {"phases": [
+            {**phase, "actions": [action for action in phase["actions"]
+             if "belt" not in action.get("entity", "") and action.get("entity") not in {"pipe", "pipe-to-ground"}]}
+            for phase in strip_local_power(plan)["phases"]
+        ]})
+        for name, plan in stages
+    ]
+    hard_tiles = occupied_tile_indices(preview["infrastructure"] + stage_structures) | water_tiles
+    stage_belts = [
+        (name, {"phases": [{**phase, "actions": [
+            action for action in phase["actions"] if "belt" in action.get("entity", "")
+        ]} for phase in strip_local_power(plan)["phases"]]})
+        for name, plan in stages
+    ]
+    stage_pipes = [
+        (name, {"phases": [{**phase, "actions": [
+            action for action in phase["actions"]
+            if action.get("entity") in {"pipe", "pipe-to-ground"}
+        ]} for phase in strip_local_power(plan)["phases"]]})
+        for name, plan in stages
+    ]
+    item_tiles = occupied_tile_indices(item_routes + stage_belts + stage_pipes)
+    fluid_routes, fluid_segments = _fluid_routes(
+        stages, include_processing, world, hard_tiles, item_tiles,
     )
     throughput_contract = build_electronics_contract(
         item_endpoints, item_route_specs, include_processing, world,

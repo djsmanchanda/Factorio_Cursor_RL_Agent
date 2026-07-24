@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from heapq import heappop, heappush
 from pathlib import Path
 from typing import List
 
@@ -13,6 +14,8 @@ from core.fluid_systems import validate_network_purity, validate_underground_spa
 from planners.local_layout_planner import _reject_fuel_entities
 
 LINK_TUNNEL_CLEARANCE = 2
+ROUTE_CLEARANCE = 1
+ROUTE_SEARCH_MARGIN = 24
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -180,4 +183,174 @@ def generate_fluid_chain_link(
             from_point, to_points, fluid, trunk_x, foreign, obstacle_tiles
         ) + foreign
     )
+    return plan
+
+def _route_tile(point: tuple) -> tuple[int, int]:
+    """Normalize one public grid coordinate without accepting fractional tiles."""
+    x, y = point
+    if int(x) != x or int(y) != y:
+        raise ValueError(f"Fluid routes require integer tile coordinates, got {point!r}")
+    return int(x), int(y)
+
+
+def _route_clearance_tiles(
+    occupied: set[tuple[int, int]], clearance: int,
+) -> set[tuple[int, int]]:
+    """Reserve a fixed square margin around known hard or tunnelable tiles."""
+    if clearance < 0:
+        raise ValueError("clearance must be non-negative")
+    return {
+        (x + dx, y + dy)
+        for x, y in occupied
+        for dx in range(-clearance, clearance + 1)
+        for dy in range(-clearance, clearance + 1)
+    }
+
+
+def _bounded_shortest_path(
+    starts: set[tuple[int, int]],
+    goal: tuple[int, int],
+    blocked: set[tuple[int, int]],
+    bounds: tuple[int, int, int, int],
+) -> list[tuple[int, int]]:
+    """Deterministic bounded A* path from any existing network tile to ``goal``."""
+    min_x, max_x, min_y, max_y = bounds
+    frontier: list[tuple[int, int, int, int]] = []
+    previous: dict[tuple[int, int], tuple[int, int] | None] = {}
+    costs: dict[tuple[int, int], int] = {}
+    for start in sorted(starts):
+        costs[start] = 0
+        previous[start] = None
+        heuristic = abs(start[0] - goal[0]) + abs(start[1] - goal[1])
+        heappush(frontier, (heuristic, 0, *start))
+    while frontier:
+        _, cost, x, y = heappop(frontier)
+        current = (x, y)
+        if cost != costs.get(current):
+            continue
+        if current == goal:
+            path = [current]
+            while previous[path[-1]] is not None:
+                path.append(previous[path[-1]])
+            return list(reversed(path))
+        for dx, dy in ((0, -1), (-1, 0), (1, 0), (0, 1)):
+            nxt = x + dx, y + dy
+            if not (min_x <= nxt[0] <= max_x and min_y <= nxt[1] <= max_y):
+                continue
+            if nxt in blocked:
+                continue
+            next_cost = cost + 1
+            if next_cost >= costs.get(nxt, float("inf")):
+                continue
+            costs[nxt] = next_cost
+            previous[nxt] = current
+            heuristic = abs(nxt[0] - goal[0]) + abs(nxt[1] - goal[1])
+            heappush(frontier, (next_cost + heuristic, next_cost, *nxt))
+    raise ValueError(f"No clear fluid route to {goal} inside bounded search area")
+
+
+def shortest_fluid_chain_tiles(
+    from_point: tuple,
+    to_points: List[tuple],
+    hard_tiles=(),
+    tunnelable_tiles=(),
+    clearance: int = ROUTE_CLEARANCE,
+    search_margin: int = ROUTE_SEARCH_MARGIN,
+) -> list[tuple[int, int]]:
+    """Return a deterministic, compact pipe tree with a fixed expansion margin.
+
+    ``hard_tiles`` are entities or terrain that a pipe may never occupy.
+    ``tunnelable_tiles`` are occupied routes that may support an underground
+    crossing in a later emission phase.  This conservative first phase avoids
+    both classes on the surface, rather than silently placing a crossing whose
+    endpoints have not been generated.  Every target joins the existing tree
+    with bounded A*, so the result is computed from inputs, not a fixed trunk.
+    """
+    source = _route_tile(from_point)
+    targets = sorted({_route_tile(point) for point in to_points})
+    if not targets:
+        raise ValueError("A chain link needs at least one consumer attachment")
+    if search_margin < 0:
+        raise ValueError("search_margin must be non-negative")
+    hard = {_route_tile(point) for point in hard_tiles}
+    tunnelable = {_route_tile(point) for point in tunnelable_tiles}
+    # A fixed belt may sit on an infrastructure footprint in the abstract
+    # planner model. Hard terrain/entities take precedence there.
+    tunnelable -= hard
+    network = {source}
+    # Structures and terrain reserve expansion clearance. Belts reserve their
+    # actual tiles only: widening every belt into a wall can close a valid
+    # factory corridor before an underground crossing policy is available.
+    blocked = (_route_clearance_tiles(hard, clearance) | tunnelable) - {source, *targets}
+    points = [source, *targets]
+    bounds = (
+        min(x for x, _ in points) - search_margin,
+        max(x for x, _ in points) + search_margin,
+        min(y for _, y in points) - search_margin,
+        max(y for _, y in points) + search_margin,
+    )
+    remaining = set(targets)
+    while remaining:
+        candidates = [
+            (_bounded_shortest_path(network, target, blocked - network, bounds), target)
+            for target in remaining
+        ]
+        path, target = min(candidates, key=lambda candidate: (len(candidate[0]), candidate[1]))
+        network.update(path)
+        remaining.remove(target)
+    return sorted(network)
+
+
+def shortest_fluid_chain_segments(
+    from_point: tuple,
+    to_points: List[tuple],
+    fluid: str,
+    foreign: List[dict] = (),
+    hard_tiles=(),
+    tunnelable_tiles=(),
+    clearance: int = ROUTE_CLEARANCE,
+    search_margin: int = ROUTE_SEARCH_MARGIN,
+) -> List[dict]:
+    """Return one purity segment generated by ``shortest_fluid_chain_tiles``."""
+    foreign = list(foreign)
+    return [{
+        "fluid": fluid,
+        "separated_by_pump": False,
+        "tiles": shortest_fluid_chain_tiles(
+            from_point,
+            to_points,
+            set(hard_tiles) | _obstacles(foreign, fluid),
+            tunnelable_tiles,
+            clearance,
+            search_margin,
+        ),
+    }]
+
+
+def generate_shortest_fluid_chain_link(
+    from_point: tuple,
+    to_points: List[tuple],
+    fluid: str,
+    foreign: List[dict] = (),
+    hard_tiles=(),
+    tunnelable_tiles=(),
+    clearance: int = ROUTE_CLEARANCE,
+    search_margin: int = ROUTE_SEARCH_MARGIN,
+    existing_tiles=(),
+) -> dict:
+    """Return a schema-validated plan for the automatic fluid-chain router."""
+    foreign = list(foreign)
+    segments = shortest_fluid_chain_segments(
+        from_point, to_points, fluid, foreign, hard_tiles, tunnelable_tiles,
+        clearance, search_margin,
+    )
+    existing = {_route_tile(point) for point in existing_tiles}
+    actions = [
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": x + 0.5, "y": y + 0.5}}
+        for x, y in segments[0]["tiles"] if (x, y) not in existing
+    ]
+    plan = {"phases": [{"name": f"fluid_link_{fluid}", "actions": actions}]}
+    _validate(plan)
+    validate_network_purity(segments + foreign)
     return plan

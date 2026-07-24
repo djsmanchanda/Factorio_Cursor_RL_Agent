@@ -39,7 +39,7 @@ def choose_clear_l_route(
     start: Point, end: Point, spacing: float, footprint_size: float,
     blocked_tiles: set[tuple[int, int]] | None,
 ) -> List[Point]:
-    """Choose the deterministic rectilinear route with fewer blocked pole tiles."""
+    """Choose the shortest deterministic rectilinear route with minimal collisions."""
     horizontal_first = l_route(start, end)
     if not blocked_tiles or start[0] == end[0] or start[1] == end[1]:
         return horizontal_first
@@ -58,7 +58,11 @@ def choose_clear_l_route(
             for point in step_points(leg_start, leg_end, spacing)
         )
 
-    return min(candidates, key=collisions)
+    def route_key(route: List[Point]) -> tuple:
+        length = sum(distance(left, right) for left, right in zip(route, route[1:]))
+        return (collisions(route), length, len(route), tuple(route))
+
+    return min(candidates, key=route_key)
 
 
 def footprint_tile_indices(centre: Point, size: float) -> set[tuple[int, int]]:

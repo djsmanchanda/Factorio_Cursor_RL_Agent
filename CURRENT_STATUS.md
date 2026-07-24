@@ -260,3 +260,9 @@ backfilled from git history because this file did not exist yet.
 - What: Initial electronics construction now uses fast Nauvis-native belts/inserters, with an explicit authorized plan generator for later express/stack upgrades; west-facing pumpjack placement now follows its live-verified output port.
 - Why: Avoid off-planet logistics costs during initial build and prevent the crude source from being placed disconnected from its pipe.
 - Next: Obtain the south-facing offshore pump's pipe-connection direction and first adjacent land-side pipe tile before changing its survey/placement; coordinated item-and-fluid corridor allocation is needed before shortening the sulfuric-acid detour.
+## [2026-07-24] M7 planner follow-up - automatic compact fluid corridors
+- Files: planners/{fluid_routing,electronics_block,infrastructure_geometry,sandbox_infrastructure}.py, tests/{test_fluid_routing,test_electronics_block,test_infrastructure}.py
+- What: Replaced fixed fluid-route trunk coordinates with deterministic bounded A* shared pipe trees that reserve completed items/pipes and keep a one-tile clearance from structures/water; power elbow selection now prefers the shortest clear route.
+- Why: Every future source/target arrangement must optimize from its actual obstacle set instead of relying on a hand-picked coordinate.
+- Verified: full composed processing bundle preflight passes; `python -m pytest tests -q` -> 431 passed, 1 skipped.
+- Next: live-build the new plan; still obtain the south-facing offshore-pump pipe-connection direction and first land-side pipe tile before changing its source placement.
