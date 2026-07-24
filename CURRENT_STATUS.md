@@ -284,3 +284,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added player-force recipe-catalog export, direct electric mining into real chests for raw dependency items, and bounded purity-safe pipe bridges.
 - Why: Chemical/production-science planning needs live recipe truth plus non-cheat raw-item and fluid interfaces.
 - Next: Export the player catalog after mod redeploy; integrate verified recipes and source connector observations into the autonomous builder.
+
+## [2026-07-24] Real-base goals and research
+- Files: factorio_mod/research.lua, orchestrator/game_bridge.py, tools/autonomous_run.py, tests/test_research_commands.py
+- What: Added explicit existing-force research status/queue commands and a CLI for produce/research goals; rate-increase goals fail closed pending a measured capacity policy.
+- Why: Real-base targets must never mutate the sandbox planner force or claim research completion from a queued request.
+- Next: Redeploy the mod, export the player recipe catalog, then integrate verified science recipes and real fluid connectors.

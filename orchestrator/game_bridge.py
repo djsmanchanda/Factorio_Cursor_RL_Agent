@@ -156,12 +156,32 @@ class GameBridge:
             raise BridgeError(f"Server save failed: {response.strip()}")
         return response
 
-    def set_research(self, technology: str, timeout: float = 60.0) -> Path:
-        payload = json.dumps({"technology": technology}, separators=(",", ":"))
-        return self._run_and_collect(f"/set_research {payload}", RESEARCH_REPORT_SUBDIR, timeout)
+    def set_research(
+        self, technology: str, timeout: float = 60.0, *, force: str | None = None,
+    ) -> Path:
+        """Queue one technology on ``force``.
 
-    def research_status(self, timeout: float = 60.0) -> Path:
-        return self._run_and_collect("/research_status", RESEARCH_REPORT_SUBDIR, timeout)
+        Omitting ``force`` preserves the legacy planner-force command. Real
+        base callers must supply their existing force explicitly.
+        """
+        payload = {"technology": technology}
+        if force is not None:
+            payload["force"] = force
+        body = json.dumps(payload, separators=(",", ":"))
+        return self._run_and_collect(f"/set_research {body}", RESEARCH_REPORT_SUBDIR, timeout)
+
+    def research_status(
+        self, timeout: float = 60.0, *, force: str | None = None,
+        technology: str | None = None,
+    ) -> Path:
+        """Export research state, optionally including one technology's state."""
+        payload = {key: value for key, value in {
+            "force": force, "technology": technology,
+        }.items() if value is not None}
+        command = "/research_status"
+        if payload:
+            command += " " + json.dumps(payload, separators=(",", ":"))
+        return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
 
 
 def load_json(path: Path) -> dict:
