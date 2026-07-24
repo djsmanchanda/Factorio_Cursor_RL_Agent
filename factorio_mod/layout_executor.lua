@@ -196,8 +196,10 @@ local function execute_build_plan(authorization, build_plan)
     place_entity = "place_core_infrastructure",
     remove_entity = "remove_entities"
   }
-  local surface = get_or_create_sandbox_surface()
-  local force = get_or_create_planner_force()
+  -- Optional: target an existing surface/force (e.g. "nauvis"/"player") instead
+  -- of the isolated sandbox, for building directly onto a real base.
+  local surface = get_or_create_sandbox_surface(build_plan.surface)
+  local force = get_or_create_planner_force(build_plan.force)
   local counts = {
     attempted_ghosts = 0,
     placed_ghosts = 0,

@@ -10,16 +10,31 @@ local function ensure_storage()
   return storage
 end
 
-local function get_or_create_sandbox_surface()
-  local surface = game.surfaces["planner-sandbox"]
+local function get_or_create_sandbox_surface(surface_name)
+  local name = surface_name or "planner-sandbox"
+  local surface = game.surfaces[name]
   if surface then
     return surface
   end
-
+  if surface_name then
+    error(name .. " surface does not exist")
+  end
   error("planner-sandbox does not exist; run the confirmed WorldSpec command first")
 end
 
-local function get_or_create_planner_force()
+-- `force_name` opts into operating directly on an EXISTING force (e.g. "player")
+-- instead of the isolated "planner" force: no creation, no tech/speed sync, no
+-- friendship setup -- the caller's own force already has whatever research and
+-- modifiers it has, and that is exactly what should be used.
+local function get_or_create_planner_force(force_name)
+  if force_name then
+    local force = game.forces[force_name]
+    if not force then
+      error(force_name .. " force does not exist")
+    end
+    return force
+  end
+
   local force = game.forces.planner
   if not force then
     force = game.create_force("planner")

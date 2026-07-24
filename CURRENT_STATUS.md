@@ -266,3 +266,9 @@ backfilled from git history because this file did not exist yet.
 - Why: Every future source/target arrangement must optimize from its actual obstacle set instead of relying on a hand-picked coordinate.
 - Verified: full composed processing bundle preflight passes; `python -m pytest tests -q` -> 431 passed, 1 skipped.
 - Next: live-build the new plan; still obtain the south-facing offshore-pump pipe-connection direction and first land-side pipe tile before changing its source placement.
+
+## [2026-07-24] Real-base autonomy foundation
+- Files: orchestrator/{live_base,autonomous_builder}.py, planners/belt_bridge.py, factorio_mod/{sandbox_shared,layout_executor}.lua
+- What: Added survey, recursive stage construction, belt bridges, and bounded power/roboport/obstruction recovery for an existing Nauvis player force.
+- Why: Start deterministic autonomous expansion from real mined resources without modifying the synthetic planner-sandbox pipeline.
+- Next: Validate drill footprints against real ore tiles before building further mining stages.
