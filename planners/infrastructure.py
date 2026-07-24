@@ -55,6 +55,7 @@ from jsonschema import Draft7Validator
 from planners.infrastructure_geometry import (
     FootprintPlacer,
     boxes_overlap,
+    choose_clear_l_route,
     chebyshev_distance,
     distance,
     l_route,
@@ -140,7 +141,8 @@ def plan_power_network(
     spine_pole: str = "big-electric-pole",
     relay_pole: str = "substation",
     relay_spacing: float = 16.0,
-    long_leg_threshold: float = 100.0,
+    long_leg_threshold: float = 150.0,
+    blocked_tiles: set[tuple[int, int]] | None = None,
 ) -> dict:
     """ONE electric-energy-interface at `source`, a relay spine out to every
     site, and a substation at each site.
@@ -159,17 +161,13 @@ def plan_power_network(
       * the interface sits at `source` (2x2);
       * a relay pole is planted at source + (2, 0): its supply area covers the
         interface's east tiles, which is the ONLY way an EEI joins a network;
-      * every site is reached by a leg routed horizontally along the source's y
-        and then vertically at the anchor's x. Each straight leg is relayed with
-        `relay_pole` (substation by default -- its 18x18 supply area needs far
-        fewer nodes to also power nearby machinery, unlike a bare pole's tiny
-        supply box) spaced every `relay_spacing` tiles; a leg longer than
-        `long_leg_threshold` switches to `spine_pole` (big-electric-pole, wire
-        reach 32 vs a substation's 18) spaced every `spine_spacing` tiles
-        instead, since bridging a long empty stretch needs fewer, longer hops
-        more than it needs the extra supply area. Legs leaving the source in
-        the same direction share their intermediate tiles exactly and dedupe to
-        one pole (first assignment wins).
+      * the hub and site anchors form a deterministic minimum spanning tree, so
+        each site attaches to its nearest already-connected neighbour instead
+        of every route radiating independently from the hub;
+      * each tree edge is routed rectilinearly through the clearer of its two
+        elbows when `blocked_tiles` are supplied. Its legs use `relay_pole` at
+        longer than `long_leg_threshold` (150 tiles by default) switches to
+        `spine_pole` at `spine_spacing`. Shared points dedupe deterministically.
 
     Emits three phases: power_source, power_spine, power_sites. Every entity is
     a place_entity (immediate), not a ghost: bots cannot build without power, so
@@ -189,9 +187,13 @@ def plan_power_network(
     placer.add(hub)
     pole_type_by_point: Dict[Point, str] = {hub: relay_pole}
 
-    for site in sites:
-        anchor = _site_anchor(site)
-        corners = l_route(hub, anchor)
+    anchors = [_site_anchor(site) for site in sites]
+    nodes = [hub, *anchors]
+    for start_index, end_index in minimum_spanning_tree_edges(nodes):
+        start, end = nodes[start_index], nodes[end_index]
+        corners = choose_clear_l_route(
+            start, end, relay_spacing, spine_size, blocked_tiles,
+        )
         for start, end in zip(corners, corners[1:]):
             long_leg = distance(start, end) > long_leg_threshold
             pole, spacing = (spine_pole, spine_spacing) if long_leg else (relay_pole, relay_spacing)

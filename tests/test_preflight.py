@@ -143,6 +143,33 @@ def test_roboport_split_network_is_caught():
     assert "separate logistic network" in failure["detail"]
 
 
+# --- 8. seeded-water terrain --------------------------------------------------
+
+def test_water_lake_overlap_is_caught() -> None:
+    bundle = {
+        "infrastructure": [_entity("medium-electric-pole", 17.5, 86.5, name="wet_pole")],
+        "plans": [],
+        "water_lake_tiles": [(17, 86)],
+    }
+
+    result = preflight(bundle)
+
+    assert not result["ok"]
+    assert any(failure["check"] == "water_lake_overlap" for failure in result["failures"])
+
+
+def test_declared_shoreline_offshore_pump_is_allowed_at_water_edge() -> None:
+    bundle = {
+        "infrastructure": [_entity("offshore-pump", 20.5, 84.5, name="shore_pump")],
+        "plans": [],
+        "water_lake_tiles": [(20, 84)],
+        "water_shoreline_pump_positions": [(20.5, 84.5)],
+    }
+
+    result = preflight(bundle)
+
+    assert not any(failure["check"] == "water_lake_overlap" for failure in result["failures"])
+
 # --- 8. electric-only ------------------------------------------------------------
 
 def test_electric_only_rejects_burner_entities():

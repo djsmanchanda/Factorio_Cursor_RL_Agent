@@ -39,6 +39,7 @@ def _row_pole_positions(
 
 def _power_scaffold(
     anchor: tuple[float, float], entity: str = "electric-mining-drill", last_x: float | None = None,
+    include_row_poles: bool = True,
 ) -> list[dict]:
     x, y = anchor
     poles = _row_pole_positions(anchor, entity, last_x if last_x is not None else x)
@@ -47,11 +48,11 @@ def _power_scaffold(
          "position": {"x": x - 8, "y": y}},
         {"action_type": "place_entity", "entity": "substation",
          "position": {"x": x - 4, "y": y}},
-    ] + [
+    ] + ([
         {"action_type": "place_ghost", "entity": ROW_POLE,
          "position": {"x": pole_x, "y": pole_y}}
         for pole_x, pole_y in poles
-    ]
+    ] if include_row_poles else [])
 
 
 def generate_coal_mine(
@@ -114,10 +115,15 @@ def _fluid_resource_plan(
         for x, y in pipe_tiles
     ]
     anchor = tuple(sites[0]["position"])
+    # A north-facing offshore pump is supplied from the land side, never from
+    # the lake terrain it draws from. The retained row pole and managed
+    # replacement substation therefore move north of the shoreline.
+    power_anchor = (anchor[0] - 3, anchor[1] - 3) if entity == "offshore-pump" else (anchor[0] - 3, anchor[1] + 3)
     plan = {"phases": [
         {"name": f"{kind}_power", "actions": _power_scaffold(
-            (anchor[0] - 3, anchor[1] + 3), entity,
+            power_anchor, entity,
             max(site["position"][0] for site in sites),
+            include_row_poles=entity != "offshore-pump",
         )},
         {"name": f"{kind}_source", "actions": entities + pipes},
     ]}

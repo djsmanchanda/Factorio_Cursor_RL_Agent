@@ -250,3 +250,8 @@ backfilled from git history because this file did not exist yet.
 - Why: Offshore pumps had no terrain water, and live belt turns immediately after underground exits split transport lines.
 - Verified: 29 focused tests passed; py_compile passed; full-suite collection remains blocked by the existing permission-denied runs/pytest-tmp-radial-20260724 directory.
 - Next: Redeploy the mod and restart the headless server before the next live radial build; then verify water/pump operation and fluid machines.
+## [2026-07-24] M7 planner follow-up - water obstacles and local power spine
+- Files: planners/{water_lakes,electronics_block,preflight,infrastructure,infrastructure_geometry,sandbox_infrastructure,fluid_routing,resource_layouts}.py, tools/electronics_execution.py, tests/{test_preflight,test_resource_layouts,test_infrastructure,test_fluid_layouts}.py
+- What: Seeded lake tiles now constrain routing, infrastructure and preflight; the power spine is a terrain-aware MST; nearby blocked fluid crossings share one valid underground run.
+- Why: Prevent unbuildable land ghosts on water and replace hub-spoke wiring without rewriting an earlier phase's infrastructure.
+- Next: Live-probe offshore-pump and pumpjack connector offsets before changing their source-to-pipe placement.

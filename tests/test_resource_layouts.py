@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from planners.plan_validation import actions, assert_no_production_infinity, validate_no_collisions
+from planners.plan_validation import occupied_tile_indices
 from planners.resource_layouts import (
     generate_coal_mine,
     generate_offshore_pump_source,
@@ -38,3 +39,12 @@ def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> No
     assert any(action["entity"] == "pumpjack" for action in actions(crude))
     assert any(action["entity"] == "offshore-pump" for action in actions(water))
     assert_no_production_infinity([("crude", crude), ("water", water)])
+
+
+def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
+    plan = generate_offshore_pump_source(
+        [{"position": (20.5, 83.5), "output": (20, 80), "direction": "north"}],
+        [(20, 80)],
+    )
+    assert not any(action["entity"] == "medium-electric-pole" for action in actions(plan))
+    assert (17, 86) not in occupied_tile_indices([("water", plan)])

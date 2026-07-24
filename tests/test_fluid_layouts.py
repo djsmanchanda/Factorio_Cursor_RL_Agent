@@ -405,11 +405,13 @@ def test_chain_link_refuses_a_crossing_it_cannot_tunnel_under():
         generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
 
 
-def test_chain_link_refuses_two_crossings_too_close_to_separate():
+def test_chain_link_tunnels_under_a_nearby_crossing_run_once():
     foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
                 "tiles": [(14, 5), (16, 5)]}]
-    with pytest.raises(ValueError, match="too close to tunnel under separately"):
-        generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+    plan = generate_fluid_chain_link((20, 5), [(20, 40)], "water", 10, foreign)
+    tiles = _link_tiles(plan)
+    assert tiles[(12, 5)]["entity"] == "pipe-to-ground"
+    assert tiles[(18, 5)]["entity"] == "pipe-to-ground"
 
 
 def test_chain_link_refuses_a_trunk_east_of_its_attachments():

@@ -330,6 +330,35 @@ def _check_roboport_coverage(placements):
     return failures, None
 
 
+# --- 8. water-lake terrain: no land entity may occupy a seeded water tile ---
+
+def _action_tile_indices(action: dict) -> set[tuple[int, int]]:
+    size = _footprint(action["entity"])
+    x, y = _pos(action)
+    left, top = int(x - size / 2), int(y - size / 2)
+    return {(tile_x, tile_y) for tile_x in range(left, left + size)
+            for tile_y in range(top, top + size)}
+
+
+def _check_water_lake_overlap(placements, bundle: Any):
+    if not isinstance(bundle, dict) or "water_lake_tiles" not in bundle:
+        return [], "bundle declares no seeded water-lake tiles"
+    water_tiles = {tuple(tile) for tile in bundle["water_lake_tiles"]}
+    shoreline_pumps = {tuple(position) for position in bundle.get("water_shoreline_pump_positions", ())}
+    failures = []
+    for name, action in placements:
+        position = _pos(action)
+        if action["entity"] == "offshore-pump" and position in shoreline_pumps:
+            continue
+        overlap = _action_tile_indices(action) & water_tiles
+        if overlap:
+            failures.append({
+                "check": "water_lake_overlap",
+                "detail": f"{name}:{action['entity']} at {position} occupies seeded water tile(s) {sorted(overlap)[:4]}",
+                "positions": [position],
+            })
+    return failures, None
+
 # --- 8. electric-only: no burner/boiler/steam-engine entities ---------------
 
 def _check_electric_only(placements):
@@ -349,6 +378,7 @@ _CHECKS = (
     ("underground_span", lambda named, placements, bundle: _check_underground_span(placements)),
     ("inserter_sanity", lambda named, placements, bundle: _check_inserter_sanity(named, placements)),
     ("roboport_coverage", lambda named, placements, bundle: _check_roboport_coverage(placements)),
+    ("water_lake_overlap", lambda named, placements, bundle: _check_water_lake_overlap(placements, bundle)),
     ("electric_only", lambda named, placements, bundle: _check_electric_only(placements)),
 )
 

@@ -35,6 +35,36 @@ def l_route(start: Point, end: Point) -> List[Point]:
     return corners
 
 
+def choose_clear_l_route(
+    start: Point, end: Point, spacing: float, footprint_size: float,
+    blocked_tiles: set[tuple[int, int]] | None,
+) -> List[Point]:
+    """Choose the deterministic rectilinear route with fewer blocked pole tiles."""
+    horizontal_first = l_route(start, end)
+    if not blocked_tiles or start[0] == end[0] or start[1] == end[1]:
+        return horizontal_first
+    vertical_first = [start, (start[0], end[1]), end]
+    candidates = [horizontal_first, vertical_first]
+    for offset in (-16, -8, 8, 16):
+        candidates.extend((
+            [start, (start[0], start[1] + offset), (end[0], start[1] + offset), end],
+            [start, (start[0] + offset, start[1]), (start[0] + offset, end[1]), end],
+        ))
+
+    def collisions(route: List[Point]) -> int:
+        return sum(
+            bool(footprint_tile_indices(point, footprint_size) & blocked_tiles)
+            for leg_start, leg_end in zip(route, route[1:])
+            for point in step_points(leg_start, leg_end, spacing)
+        )
+
+    return min(candidates, key=collisions)
+
+
+def footprint_tile_indices(centre: Point, size: float) -> set[tuple[int, int]]:
+    """Return the tile cells occupied by a square entity footprint."""
+    left, top = int(centre[0] - size / 2), int(centre[1] - size / 2)
+    return {(x, y) for x in range(left, left + int(size)) for y in range(top, top + int(size))}
 def step_points(start: Point, end: Point, spacing: float) -> List[Point]:
     """Return rounded points from exclusive start to inclusive end."""
     span = distance(start, end)

@@ -23,6 +23,7 @@ from planners.infrastructure import (
     validate_power_connectivity,
     validate_roboport_network,
 )
+from planners.infrastructure_geometry import choose_clear_l_route
 from planners.plan_validation import validate_no_collisions
 from planners.sandbox_infrastructure import CANONICAL_POWER_SOURCE, CANONICAL_ROBOPORT_HUB
 from tools.electronics_execution import scaffolding_with_materials
@@ -85,6 +86,39 @@ def test_power_plan_has_one_source_and_every_pole_reaches_it() -> None:
     ]
     validate_power_connectivity(power)
 
+
+def test_power_spine_uses_an_mst_instead_of_hub_spokes() -> None:
+    plan = plan_power_network(
+        [
+            {"name": "north", "substation": (5, 80), "pole_anchor": (0, 80)},
+            {"name": "north_east", "substation": (25, 100), "pole_anchor": (20, 100)},
+        ],
+        source=(0, 0),
+    )
+    spine = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in _actions(plan)
+        if action["entity"] in {"substation", "big-electric-pole"}
+    }
+
+    assert (20, 80) in spine
+    assert (20, 0) not in spine
+
+
+def test_power_spine_keeps_120_tile_legs_on_substations_by_default() -> None:
+    plan = plan_power_network(
+        [{"name": "near", "substation": (125, 0), "pole_anchor": (120, 0)}],
+        source=(0, 0),
+    )
+
+    assert not any(action["entity"] == "big-electric-pole" for action in _actions(plan))
+def test_power_route_detours_when_both_direct_elbows_are_blocked() -> None:
+    blocked = {(x, y) for x in (6, 7) for y in (-99, -98, -96, -95)}
+
+    route = choose_clear_l_route((-9, -98), (28, -95), 16, 2, blocked)
+
+    assert len(route) == 4
+    assert route[1][1] not in {-98, -95}
 
 def test_power_validator_rejects_a_disconnected_site() -> None:
     plan = plan_power_network(

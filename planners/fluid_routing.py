@@ -79,23 +79,28 @@ def _link_route(from_point: tuple, to_points: List[tuple], trunk_x: int,
     for row, a, b in legs:
         lo, hi = min(a, b), max(a, b)
         crossed = [x for x in range(lo, hi + 1) if (x, row) in obstacles]
-        for index, col in enumerate(crossed):
-            if col - clear <= lo or col + clear >= hi:
+        crossing_runs = []
+        for col in crossed:
+            if not crossing_runs or col - crossing_runs[-1][-1] > 2 * clear:
+                crossing_runs.append([col])
+            else:
+                crossing_runs[-1].append(col)
+        for run in crossing_runs:
+            first, last = run[0], run[-1]
+            if first - clear <= lo or last + clear >= hi:
                 raise ValueError(
-                    f"No room to tunnel under {(col, row)}: leg spans {lo}..{hi} and a "
+                    f"No room to tunnel under {(first, row)}..{(last, row)}: leg spans {lo}..{hi} and a "
                     f"crossing needs {clear} clear tiles plus a pipe on each side"
                 )
-            if index and col - crossed[index - 1] <= 2 * clear:
-                raise ValueError(
-                    f"Crossings {(crossed[index - 1], row)} and {(col, row)} are "
-                    "too close to tunnel under separately"
-                )
-            validate_underground_span((col - clear, row), (col + clear, row))
+            validate_underground_span((first - clear, row), (last + clear, row))
             # A pipe-to-ground's `direction` is where its NORMAL end points, so
             # the two ends of a west-east tunnel face away from each other.
-            undergrounds.append(((col - clear, row), "west"))
-            undergrounds.append(((col + clear, row), "east"))
-        buried = {x for col in crossed for x in range(col - clear + 1, col + clear)}
+            undergrounds.append(((first - clear, row), "west"))
+            undergrounds.append(((last + clear, row), "east"))
+        buried = {
+            x for run in crossing_runs
+            for x in range(run[0] - clear + 1, run[-1] + clear)
+        }
         pipes.update((x, row) for x in range(lo, hi + 1) if x not in buried)
     pipes -= {tile for tile, _ in undergrounds}
     # validate_network_purity only compares ADJACENT tiles, so it cannot see two

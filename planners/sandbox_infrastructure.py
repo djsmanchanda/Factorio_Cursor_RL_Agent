@@ -147,7 +147,8 @@ def _combined_plan(plans: Iterable[tuple[str, dict]]) -> dict:
 
 def _resolve_spine_pole_overlaps(
     power: dict, obstacle_plans: Sequence[tuple[str, dict]],
-) -> None:  # obstacle_plans: everything already emitted that a pole must dodge
+    obstacle_tiles: set[tuple[int, int]] | None = None,
+) -> None:  # obstacle_plans and tiles: everything a pole must dodge
     """Relocate colliding spine poles within routing slack; never disconnect by deletion."""
     obstacles = [
         (
@@ -157,7 +158,7 @@ def _resolve_spine_pole_overlaps(
         for _, plan in obstacle_plans
         for action in actions(plan)
         if action.get("action_type") in {"place_entity", "place_ghost"}
-    ]
+    ] + [((x + 0.5, y + 0.5), 1) for x, y in obstacle_tiles or ()]
     fixed_power = [
         (
             (action["position"]["x"], action["position"]["y"]),
@@ -200,14 +201,14 @@ def compose_managed_sandbox(
     bots_per_roboport: int = 30,
     extra_roboports: Sequence[tuple] = (),
     obstacle_plans: Sequence[tuple[str, dict]] = (),
+    obstacle_tiles: set[tuple[int, int]] | None = None,
 ) -> dict:
     """Strip local sources and extend the canonical sandbox backbone.
 
     `extra_roboports` are positions derived from the FINISHED block geometry
     (planners.roboport_coverage) rather than from `anchors`; `obstacle_plans` are
-    the plans that geometry lives in, so the substations and spine poles this
-    backbone adds for them never land on a solved route. Both default to empty,
-    which reproduces the anchor-only backbone exactly.
+    the plans that geometry lives in. `obstacle_tiles` adds immutable terrain
+    cells (such as seeded lakes); both keep substations and spine poles clear.
     """
     normalized = [_anchor(anchor) for anchor in anchors]
     if not normalized:
@@ -230,7 +231,7 @@ def compose_managed_sandbox(
         for index, anchor in enumerate(normalized)
     ]
     robots = plan_roboport_network(robot_sites, extra_positions=extra_roboports)
-    obstacle_tiles = occupied_tile_indices(list(obstacle_plans))
+    terrain_obstacles = obstacle_tiles or set()
 
     stripped = []
     power_sites = []
@@ -243,11 +244,20 @@ def compose_managed_sandbox(
             })
         stripped.append((plan_name, strip_local_power(plan)))
 
-    power_sites.extend(roboport_power_sites(roboport_positions(robots), obstacle_tiles))
+    occupied_obstacles = terrain_obstacles | occupied_tile_indices(
+        stripped + [("unified_roboports", robots)] + list(obstacle_plans),
+    )
+    # Site substations must remain stable across phased builds; later routes were
+    # already planned around the preview backbone, so only immutable terrain may
+    # shift their local placement.
+    power_sites.extend(roboport_power_sites(roboport_positions(robots), terrain_obstacles))
 
-    power = plan_power_network(power_sites, source=CANONICAL_POWER_SOURCE)
+    power = plan_power_network(
+        power_sites, source=CANONICAL_POWER_SOURCE, blocked_tiles=occupied_obstacles,
+    )
     _resolve_spine_pole_overlaps(
         power, stripped + [("unified_roboports", robots)] + list(obstacle_plans),
+        terrain_obstacles,
     )
     infrastructure = [("unified_power", power), ("unified_roboports", robots)]
     validate_power_connectivity(_combined_plan(infrastructure + stripped))

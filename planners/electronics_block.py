@@ -32,6 +32,7 @@ from planners.electronics_world import ElectronicsWorldSpec
 from planners.infrastructure import roboport_positions, strip_local_power
 from planners.roboport_coverage import plan_coverage_roboports, roboport_ghost_targets
 from planners.sandbox_infrastructure import compose_managed_sandbox
+from planners.water_lakes import water_lake_tile_indices
 
 BELT = "express-transport-belt"
 INSERTER = "stack-inserter"
@@ -155,6 +156,7 @@ def _mining_output(world: ElectronicsWorldSpec, stage: str, resource: str, count
 
 def _item_routes(
     stages: list[tuple[str, dict]], include_processing: bool, world: ElectronicsWorldSpec,
+    obstacle_tiles: set[tuple[int, int]] | None = None,
 ) -> list[tuple[str, dict]]:
     iron_out = _mining_output(world, "iron_plate", "iron-ore", SOLID_STAGE_COUNTS["iron_plate"])
     copper_ec_out = _mining_output(world, "copper_plate_ec", "copper-ore", SOLID_STAGE_COUNTS["copper_plate_ec"])
@@ -245,7 +247,7 @@ def _item_routes(
         for name, plan in stages
     ]
     plans = route_declared_items(
-        endpoints, routes, occupied_tiles=occupied_tile_indices(stripped), belt_type=BELT,
+        endpoints, routes, occupied_tiles=occupied_tile_indices(stripped) | (obstacle_tiles or set()), belt_type=BELT,
     )
     return plans, endpoints, routes
 
@@ -368,7 +370,7 @@ def _block_anchors(include_processing: bool) -> list[dict]:
     return anchors
 
 
-def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped):
+def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped, water_tiles):
     """Re-compose the backbone so it covers the routes, not just the anchors.
 
     The anchor-tree roboports have to exist before item and fluid routes can be
@@ -381,7 +383,7 @@ def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped):
     """
     existing = roboport_positions(dict(preview["infrastructure"])["unified_roboports"])
     extra = plan_coverage_roboports(
-        existing, roboport_ghost_targets(stripped), occupied_tile_indices(stripped),
+        existing, roboport_ghost_targets(stripped), occupied_tile_indices(stripped) | water_tiles,
     )
     # Always recompose against the FINAL routes, even with no extra roboports:
     # the preview spine was planned blind to item/fluid routes (they don't exist
@@ -389,9 +391,11 @@ def _cover_emitted_geometry(preview, infrastructure_stages, anchors, stripped):
     # knew about. _resolve_spine_pole_overlaps (inside compose_managed_sandbox)
     # is what actually dodges obstacle_plans -- this is the only pass that ever
     # runs it against the true, finished route geometry.
+    planned_geometry = [(name, strip_local_power(plan)) for name, plan in infrastructure_stages]
     return compose_managed_sandbox(
         infrastructure_stages, anchors, {}, bots_per_roboport=50,
-        extra_roboports=extra, obstacle_plans=stripped,
+        extra_roboports=extra, obstacle_plans=stripped + planned_geometry,
+        obstacle_tiles=water_tiles,
     )
 
 
@@ -402,15 +406,16 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
     infrastructure_stages = _solid_stages(True, world) + _fluid_stages(True, world)
     infrastructure_stages.append(_advanced_circuit_stage(True))
     anchors = _block_anchors(True)
+    water_tiles = water_lake_tile_indices(world.offshore_pump_sites)
     preview = compose_managed_sandbox(
-        infrastructure_stages, anchors, {}, bots_per_roboport=50,
+        infrastructure_stages, anchors, {}, bots_per_roboport=50, obstacle_tiles=water_tiles,
     )
-    managed_tiles = occupied_tile_indices(preview["infrastructure"])
+    managed_tiles = occupied_tile_indices(preview["infrastructure"]) | water_tiles
     fluid_routes, fluid_segments = _fluid_routes(
         stages, include_processing, world, managed_tiles,
     )
     item_routes, item_endpoints, item_route_specs = _item_routes(
-        stages + fluid_routes, include_processing, world,
+        stages + fluid_routes, include_processing, world, water_tiles,
     )
     throughput_contract = build_electronics_contract(
         item_endpoints, item_route_specs, include_processing, world,
@@ -422,8 +427,16 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
 
     stripped = [(name, strip_local_power(plan)) for name, plan in production]
     composed = _cover_emitted_geometry(
-        preview, infrastructure_stages, anchors, stripped,
+        preview, infrastructure_stages, anchors, stripped, water_tiles,
     )
+    if not include_processing:
+        # Phase 2A must never deploy infrastructure that Phase 2B rewrites.
+        # Reserve the ultimate backbone now; only production remains phased.
+        ultimate = build_electronics_block(include_processing=True, world=world)
+        composed = {
+            "infrastructure": ultimate["infrastructure"],
+            "scaffolding": ultimate["scaffolding"],
+        }
     composition = {
         "infrastructure": composed["infrastructure"],
         "plans": stripped,
@@ -436,6 +449,8 @@ def build_electronics_block(*, include_processing: bool, world: ElectronicsWorld
         "production": production,
         "dependencies": sorted(DEPENDENCIES_2B if include_processing else DEPENDENCIES_2A),
         "fluid_segments": fluid_segments,
+        "water_lake_tiles": sorted(water_tiles),
+        "water_shoreline_pump_positions": [tuple(site["position"]) for site in world.offshore_pump_sites],
         "block_footprint": {"x1": -250, "y1": -250, "x2": 250, "y2": 250},
         "interfaces_reserved": True,
         "throughput_contract": throughput_contract,

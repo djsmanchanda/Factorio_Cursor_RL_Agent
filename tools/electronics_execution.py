@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import copy
 import json
-import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -17,6 +16,7 @@ from orchestrator.game_bridge import GameBridge, load_json
 from planners.electronics_world import ElectronicsWorldSpec
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.sandbox_infrastructure import build_layout_authorization, topology_is_compatible
+from planners.water_lakes import water_lake_bounds
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_REPORT_SCHEMA = REPO_ROOT / "schemas" / "live_execution_report.schema.json"
@@ -65,34 +65,7 @@ def scaffolding_with_materials(scaffolding: Mapping, materials: Mapping[str, int
     }
     return payload
 
-
-WATER_LAKE_HALF_WIDTH = 6
-WATER_LAKE_DEPTH = 13
 PUMPJACK_FOOTPRINT = 3  # matches planners/plan_validation.py::ENTITY_FOOTPRINTS["pumpjack"]
-
-
-def _water_lake_bounds(
-    position: tuple[float, float], direction: str,
-) -> tuple[int, int, int, int]:
-    """Return the canonical 14x13 lake behind an offshore pump.
-
-    The dimensions and north-facing placement match planners/world_generation.py.
-    Offshore pumps draw opposite their output direction.
-    """
-    x, y = map(math.floor, position)
-    cross_min = -WATER_LAKE_HALF_WIDTH
-    cross_max = WATER_LAKE_HALF_WIDTH + 1
-    depth = WATER_LAKE_DEPTH - 1
-    if direction == "north":
-        return x + cross_min, y + 1, x + cross_max, y + WATER_LAKE_DEPTH
-    if direction == "south":
-        return x + cross_min, y - depth, x + cross_max, y
-    if direction == "east":
-        return x - depth, y + cross_min, x, y + cross_max
-    if direction == "west":
-        return x + 1, y + cross_min, x + WATER_LAKE_DEPTH, y + cross_max
-    raise ValueError(f"Unknown offshore-pump direction: {direction}")
-
 
 def water_seeding_payload(world: ElectronicsWorldSpec) -> dict:
     """Derive bounded Nauvis-style water lakes from surveyed pump sites."""
@@ -103,7 +76,7 @@ def water_seeding_payload(world: ElectronicsWorldSpec) -> dict:
         if site["resource"] != "water":
             raise ValueError("Offshore-pump site resource must be water")
         direction = site.get("direction", "north")
-        x1, y1, x2, y2 = _water_lake_bounds(site["position"], direction)
+        x1, y1, x2, y2 = water_lake_bounds(site["position"], direction)
         lakes.append({
             "id": f"offshore_pump_{index}",
             "tile": "water",
