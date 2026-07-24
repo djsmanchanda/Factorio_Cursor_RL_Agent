@@ -1,5 +1,5 @@
 -- Path: factorio_mod/recipe_catalog.lua
--- Purpose: Export the planner force's enabled deterministic recipe contracts in stable order.
+-- Purpose: Export enabled deterministic recipe contracts for a requested existing force in stable order.
 
 local shared = require("sandbox_shared")
 
@@ -36,8 +36,16 @@ local function sorted_parts(parts)
   return result, reasons
 end
 
-commands.add_command("export_recipe_catalog", "Export enabled planner-force recipes.", function(command)
-  local force = shared.get_or_create_planner_force()
+local function export_force(command)
+  local name = string.match(command.parameter or "", "^%s*(.-)%s*$")
+  if name == "" then return shared.get_or_create_planner_force() end
+  local force = game.forces[name]
+  if not force then error("force does not exist: " .. name) end
+  return force
+end
+
+commands.add_command("export_recipe_catalog", "Export enabled recipes; optional existing force name.", function(command)
+  local force = export_force(command)
   local recipes = {}
   local names = {}
   for name, recipe in pairs(force.recipes) do

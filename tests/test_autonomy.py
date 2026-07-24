@@ -64,6 +64,8 @@ def test_lua_catalog_and_no_ore_seeding_contract():
     lua = (ROOT / "factorio_mod/recipe_catalog.lua").read_text()
     daemon = (ROOT / "orchestrator/expansion_daemon.py").read_text()
     assert "table.sort(names)" in lua and "probabilistic product" in lua
+    assert "command.parameter" in lua and "game.forces[name]" in lua
+    assert "force does not exist" in lua
     assert "ore_patches=" not in daemon
     assert "CityPlanner rail handoff" in daemon
 

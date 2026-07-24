@@ -278,3 +278,9 @@ backfilled from git history because this file did not exist yet.
 - What: Mining-stage placement now validates every live 3x3 drill footprint against the requested ore, shifts deterministically within the surveyed patch, and reduces to one drill only when necessary.
 - Why: Prevent irregular ore-patch edges from producing dead drills with no_minable_resources.
 - Next: Live-run a copper or iron stage after redeploying only if the committed Lua foundation has not already been deployed.
+
+## [2026-07-24] Real-base dependency primitives
+- Files: factorio_mod/recipe_catalog.lua, planners/{resource_layouts,pipe_bridge}.py, tests/test_{autonomy,resource_layouts,pipe_bridge}.py
+- What: Added player-force recipe-catalog export, direct electric mining into real chests for raw dependency items, and bounded purity-safe pipe bridges.
+- Why: Chemical/production-science planning needs live recipe truth plus non-cheat raw-item and fluid interfaces.
+- Next: Export the player catalog after mod redeploy; integrate verified recipes and source connector observations into the autonomous builder.

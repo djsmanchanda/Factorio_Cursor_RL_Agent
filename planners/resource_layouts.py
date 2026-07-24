@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from math import floor
+from math import floor, isclose
 
 from planners.infrastructure import POLE_SPECS
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
@@ -55,16 +55,18 @@ def _row_pole_positions(
 
 def _power_scaffold(
     anchor: tuple[float, float], entity: str = "electric-mining-drill", last_x: float | None = None,
-    include_row_poles: bool = True,
+    include_row_poles: bool = True, include_energy_interface: bool = True,
 ) -> list[dict]:
     x, y = anchor
     poles = _row_pole_positions(anchor, entity, last_x if last_x is not None else x)
-    return [
+    scaffold = ([
         {"action_type": "place_entity", "entity": "electric-energy-interface",
          "position": {"x": x - 8, "y": y}},
+    ] if include_energy_interface else []) + [
         {"action_type": "place_entity", "entity": "substation",
          "position": {"x": x - 4, "y": y}},
-    ] + ([
+    ]
+    return scaffold + ([
         {"action_type": "place_ghost", "entity": ROW_POLE,
          "position": {"x": pole_x, "y": pole_y}}
         for pole_x, pole_y in poles
@@ -103,6 +105,67 @@ def generate_coal_mine(
             max(x for x, _ in drill_positions),
         )},
         {"name": "coal_mining", "actions": drills + belts},
+    ]}
+    validate_build_plan(plan)
+    return plan
+
+
+def generate_direct_mining_to_chest(
+    drill_positions: list[tuple[float, float]],
+    output_chest: tuple[float, float],
+    belt_type: str = "fast-transport-belt",
+    inserter_type: str = "fast-inserter",
+) -> dict:
+    """Mine a surveyed solid resource directly into one real steel chest.
+
+    Drills are deliberately south-facing and share their output row. This is
+    the smallest real-base raw-resource primitive: it uses no infinity source
+    and no energy-interface, so the caller must connect its retained local
+    poles to the actual electric grid.
+    """
+    if not drill_positions:
+        raise ValueError("Direct mine needs supplied drill coordinates")
+    if belt_type not in BELT_TIERS:
+        raise ValueError(f"Unknown belt tier: {belt_type}")
+    if inserter_type not in {"fast-inserter", "bulk-inserter", "stack-inserter"}:
+        raise ValueError(f"Unknown inserter tier: {inserter_type}")
+
+    drills = sorted(drill_positions)
+    first_x, drill_y = drills[0]
+    if any(not isclose(y, drill_y) for _, y in drills):
+        raise ValueError("Direct mine drills must share one output row")
+    belt_y = drill_y + 2
+    chest_x, chest_y = output_chest
+    if not isclose(chest_y, belt_y):
+        raise ValueError("Output chest must sit on the drills' south output row")
+    belt_end_x = chest_x - 2
+    if belt_end_x < max(x for x, _ in drills):
+        raise ValueError("Output chest needs a belt endpoint east of every drill")
+    belt_length = belt_end_x - first_x
+    if not isclose(belt_length, round(belt_length)):
+        raise ValueError("Output chest must be tile-aligned with the drill belt")
+
+    belts = [
+        {"action_type": "place_ghost", "entity": belt_type,
+         "position": {"x": first_x + step, "y": belt_y}, "direction": "east"}
+        for step in range(round(belt_length) + 1)
+    ]
+    mine_actions = [
+        {"action_type": "place_ghost", "entity": "electric-mining-drill",
+         "position": {"x": x, "y": y}, "direction": "south"}
+        for x, y in drills
+    ] + belts + [
+        {"action_type": "place_ghost", "entity": inserter_type,
+         "position": {"x": chest_x - 1, "y": chest_y}, "direction": "west"},
+        {"action_type": "place_ghost", "entity": "steel-chest",
+         "position": {"x": chest_x, "y": chest_y}},
+    ]
+    plan = {"phases": [
+        {"name": "direct_mine_power", "actions": _power_scaffold(
+            (first_x - 2, belt_y - 4), "electric-mining-drill", max(x for x, _ in drills),
+            include_energy_interface=False,
+        )},
+        {"name": "direct_mine_output", "actions": mine_actions},
     ]}
     validate_build_plan(plan)
     return plan

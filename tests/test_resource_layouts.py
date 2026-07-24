@@ -8,6 +8,7 @@ import pytest
 from planners.plan_validation import actions, assert_no_production_infinity, validate_no_collisions
 from planners.plan_validation import occupied_tile_indices
 from planners.resource_layouts import (
+    generate_direct_mining_to_chest,
     generate_coal_mine,
     generate_offshore_pump_source,
     generate_pumpjack_source,
@@ -26,6 +27,54 @@ def test_coal_mine_drops_to_declared_output_row_deterministically() -> None:
     ]
     assert_no_production_infinity([("coal", plan)])
     validate_no_collisions([("coal", plan)])
+
+
+def test_direct_mining_to_chest_is_real_electric_output_primitive() -> None:
+    plan = generate_direct_mining_to_chest(
+        [(1.5, 10.5), (4.5, 10.5)], (8.5, 12.5),
+    )
+
+    assert plan == generate_direct_mining_to_chest(
+        [(4.5, 10.5), (1.5, 10.5)], (8.5, 12.5),
+    )
+    actions_by_entity = {
+        entity: [action for action in actions(plan) if action["entity"] == entity]
+        for entity in {action["entity"] for action in actions(plan)}
+    }
+    assert [action["position"] for action in actions_by_entity["electric-mining-drill"]] == [
+        {"x": 1.5, "y": 10.5}, {"x": 4.5, "y": 10.5},
+    ]
+    assert [action["position"] for action in actions_by_entity["fast-transport-belt"]] == [
+        {"x": 1.5, "y": 12.5}, {"x": 2.5, "y": 12.5},
+        {"x": 3.5, "y": 12.5}, {"x": 4.5, "y": 12.5},
+        {"x": 5.5, "y": 12.5}, {"x": 6.5, "y": 12.5},
+    ]
+    assert actions_by_entity["fast-inserter"] == [{
+        "action_type": "place_ghost", "entity": "fast-inserter",
+        "position": {"x": 7.5, "y": 12.5}, "direction": "west",
+    }]
+    assert actions_by_entity["steel-chest"] == [{
+        "action_type": "place_ghost", "entity": "steel-chest",
+        "position": {"x": 8.5, "y": 12.5},
+    }]
+    assert "electric-energy-interface" not in actions_by_entity
+    assert_no_production_infinity([("raw", plan)])
+    validate_no_collisions([("raw", plan)])
+
+
+@pytest.mark.parametrize(
+    ("drills", "chest", "message"),
+    [
+        ([], (8.5, 12.5), "needs supplied"),
+        ([(1.5, 10.5)], (8.5, 13.5), "south output row"),
+        ([(1.5, 10.5), (4.5, 10.5)], (5.5, 12.5), "east of every drill"),
+    ],
+)
+def test_direct_mining_to_chest_rejects_invalid_geometry(
+    drills: list[tuple[float, float]], chest: tuple[float, float], message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        generate_direct_mining_to_chest(drills, chest)
 
 
 def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> None:
