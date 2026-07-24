@@ -125,7 +125,11 @@
               "properties": {
                 "index": { "type": "integer", "minimum": 1 },
                 "amount": { "type": "number", "minimum": 0 },
-                "fluid": { "type": ["string", "null"] }
+                "fluid": { "type": ["string", "null"] },
+                "connected": {
+                  "type": "boolean",
+                  "description": "True iff fluidbox.get_connections(index) found a physically attached pipe -- false means this box can never fill regardless of settle time."
+                }
               }
             }
           }

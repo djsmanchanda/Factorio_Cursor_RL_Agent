@@ -137,6 +137,10 @@ local function measure_ghosts(surface, force, violations)
 end
 
 -- Every input/input-output fluid box on a fluid-carrying entity, keyed by fluidbox index.
+-- `connected` distinguishes "no pipe physically attached here" (a placement/geometry bug,
+-- will NEVER fill no matter how long you wait) from "attached but empty/still filling"
+-- (a timing issue) -- this is the single question every fluid-shortage live debug session
+-- this project has ever had eventually had to answer by hand over RCON.
 local function input_boxes(entity)
   local boxes = {}
   local fluidbox = entity.fluidbox
@@ -146,10 +150,12 @@ local function input_boxes(entity)
     local direction = proto_ok and proto and proto.production_type or nil
     if direction == "input" or direction == "input-output" then
       local contents = fluidbox[index]
+      local conn_ok, connections = pcall(function() return fluidbox.get_connections(index) end)
       table.insert(boxes, {
         index = index,
         amount = contents and contents.amount or 0,
-        fluid = contents and contents.name or nil
+        fluid = contents and contents.name or nil,
+        connected = conn_ok and #connections > 0
       })
     end
   end

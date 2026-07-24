@@ -333,10 +333,21 @@ def validate_live_report(report: Mapping) -> dict:
     for machine in normalized["fluid_machines"]:
         for fluid_box in machine["input_boxes"]:
             if fluid_box["amount"] <= 0:
-                violations.append(
-                    f"empty input box {fluid_box['index']} on {machine['entity']} "
-                    f"at {machine['position']}"
-                )
+                # `connected` (from live_execution.lua's fluidbox.get_connections check)
+                # tells apart a real geometry bug (no pipe ever attached, will NEVER fill)
+                # from a timing issue (attached, just not full yet) -- surface that
+                # distinction here instead of forcing another round of manual RCON probing.
+                if fluid_box.get("connected") is False:
+                    violations.append(
+                        f"DISCONNECTED input box {fluid_box['index']} on {machine['entity']} "
+                        f"at {machine['position']} (no pipe attached -- placement/geometry bug, "
+                        "will never fill)"
+                    )
+                else:
+                    violations.append(
+                        f"empty input box {fluid_box['index']} on {machine['entity']} "
+                        f"at {machine['position']} (connected -- likely just needs more settle time)"
+                    )
         if machine["entity"] == "oil-refinery" and machine["status"] != "working":
             violations.append(
                 f"refinery at {machine['position']} status={machine['status']} (expected working)"
