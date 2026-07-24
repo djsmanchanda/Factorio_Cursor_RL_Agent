@@ -13,7 +13,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["assembler_tier_upgrade", "module_upgrade"]
+            "enum": ["assembler_tier_upgrade", "entity_tier_upgrade", "module_upgrade"]
           },
           "position": {
             "type": "object",

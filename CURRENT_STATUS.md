@@ -255,3 +255,8 @@ backfilled from git history because this file did not exist yet.
 - What: Seeded lake tiles now constrain routing, infrastructure and preflight; the power spine is a terrain-aware MST; nearby blocked fluid crossings share one valid underground run.
 - Why: Prevent unbuildable land ghosts on water and replace hub-spoke wiring without rewriting an earlier phase's infrastructure.
 - Next: Live-probe offshore-pump and pumpjack connector offsets before changing their source-to-pipe placement.
+## [2026-07-24] M7 planner follow-up - native logistics and verified crude source
+- Files: planners/{electronics_block,electronics_contracts,electronics_upgrades,resource_layouts,plan_validation,preflight}.py, factorio_mod/upgrades.lua, schemas/upgrade_plan.schema.json, tools/generate_electronics_upgrade_plan.py, tests/{test_electronics_upgrades,test_resource_layouts,fixtures/electronics_world_spec.json}
+- What: Initial electronics construction now uses fast Nauvis-native belts/inserters, with an explicit authorized plan generator for later express/stack upgrades; west-facing pumpjack placement now follows its live-verified output port.
+- Why: Avoid off-planet logistics costs during initial build and prevent the crude source from being placed disconnected from its pipe.
+- Next: Obtain the south-facing offshore pump's pipe-connection direction and first adjacent land-side pipe tile before changing its survey/placement; coordinated item-and-fluid corridor allocation is needed before shortening the sulfuric-acid detour.

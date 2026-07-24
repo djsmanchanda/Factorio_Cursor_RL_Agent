@@ -15,7 +15,10 @@ from planners.infrastructure import (
     ROBOPORT_CONSTRUCTION_RADIUS, ROBOPORT_ENTITY, ROBOPORT_LINK_DISTANCE,
 )
 from planners.infrastructure_geometry import boxes_overlap, chebyshev_distance, distance
-from planners.plan_validation import ENTITY_FOOTPRINTS, actions as _plan_actions, occupied_tile_indices
+from planners.plan_validation import (
+    ENTITY_FOOTPRINTS, actions as _plan_actions, is_verified_pumpjack_attachment,
+    occupied_tile_indices,
+)
 from planners.recipe_data import FORBIDDEN_FUEL_ENTITIES
 
 Point = Tuple[float, float]
@@ -98,7 +101,7 @@ def _check_footprint_overlap(placements):
         pos_a, size_a = _pos(action_a), _footprint(action_a["entity"])
         for name_b, action_b in placements[i + 1:]:
             pos_b, size_b = _pos(action_b), _footprint(action_b["entity"])
-            if boxes_overlap(pos_a, size_a, pos_b, size_b):
+            if boxes_overlap(pos_a, size_a, pos_b, size_b) and not is_verified_pumpjack_attachment(action_a, action_b):
                 failures.append({"check": "footprint_overlap",
                                   "detail": f"{name_a}:{action_a['entity']} at {pos_a} overlaps "
                                             f"{name_b}:{action_b['entity']} at {pos_b}",

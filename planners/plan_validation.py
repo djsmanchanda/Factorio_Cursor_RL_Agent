@@ -50,6 +50,17 @@ def validate_build_plan(plan: dict) -> None:
     _reject_fuel_entities(plan)
 
 
+def is_verified_pumpjack_attachment(left: dict, right: dict) -> bool:
+    """Allow only the live-probed west pumpjack output port to host a pipe."""
+    pumpjack, pipe = (left, right) if left["entity"] == "pumpjack" else (right, left)
+    if pumpjack["entity"] != "pumpjack" or pipe["entity"] != "pipe":
+        return False
+    if pumpjack.get("direction") != "west":
+        return False
+    position = pumpjack["position"]
+    connector = {"x": position["x"] - 1, "y": position["y"] + 1}
+    return pipe["position"] == connector
+
 def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
     placements = [
         (name, action)
@@ -63,7 +74,7 @@ def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
         for right_name, right in placements[index + 1:]:
             right_position = (right["position"]["x"], right["position"]["y"])
             right_size = ENTITY_FOOTPRINTS.get(right["entity"], 1)
-            if boxes_overlap(left_position, left_size, right_position, right_size):
+            if boxes_overlap(left_position, left_size, right_position, right_size) and not is_verified_pumpjack_attachment(left, right):
                 raise ValueError(
                     f"Plan collision: {left_name} {left['entity']} at {left_position} overlaps "
                     f"{right_name} {right['entity']} at {right_position}"

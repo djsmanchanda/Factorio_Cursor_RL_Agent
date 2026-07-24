@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 from planners.fluid_layouts import header_attachment
-from planners.recipe_data import FEED_HEADROOM, LINE_RECIPES, MACHINE_SPEEDS
+from planners.recipe_data import BELT_TIERS, FEED_HEADROOM, LINE_RECIPES, MACHINE_SPEEDS
 
 CONTRACT_VERSION = "1.0.0"
 ADVANCED_CIRCUIT_RATE = 0.6
 PROCESSING_UNIT_RATE = 0.1
-BELT_CAPACITY_PER_SECOND = 45.0
+BELT_CAPACITY_PER_SECOND = float(BELT_TIERS["fast-transport-belt"])
 FLUID_STAGE_COUNTS = {
     "refinery": 2, "plastic": 2, "sulfur": 2,
     "sulfuric_acid": 2, "processing_unit": 2,

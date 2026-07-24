@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from planners.plan_validation import actions, assert_no_production_infinity, validate_no_collisions
 from planners.plan_validation import occupied_tile_indices
 from planners.resource_layouts import (
@@ -28,8 +30,8 @@ def test_coal_mine_drops_to_declared_output_row_deterministically() -> None:
 
 def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> None:
     crude = generate_pumpjack_source(
-        [{"position": (20.5, 20.5), "output": (20, 17), "direction": "north"}],
-        [(20, 17), (19, 17)],
+        [{"position": (18.5, 20.5), "output": (17, 21), "direction": "west"}],
+        [(17, 21), (16, 21)],
     )
     water = generate_offshore_pump_source(
         [{"position": (5.5, 30.5), "output": (6, 30), "direction": "east"}],
@@ -39,6 +41,24 @@ def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> No
     assert any(action["entity"] == "pumpjack" for action in actions(crude))
     assert any(action["entity"] == "offshore-pump" for action in actions(water))
     assert_no_production_infinity([("crude", crude), ("water", water)])
+
+
+def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
+    site = {"position": (18.5, -43.5), "output": (17, -43), "direction": "west"}
+    plan = generate_pumpjack_source([site], [(17, -43)])
+
+    pumpjack = next(action for action in actions(plan) if action["entity"] == "pumpjack")
+    pipe = next(action for action in actions(plan) if action["entity"] == "pipe")
+    assert pumpjack == {
+        "action_type": "place_ghost", "entity": "pumpjack",
+        "position": {"x": 18.5, "y": -43.5}, "direction": "west",
+    }
+    assert pipe["position"] == {"x": 17.5, "y": -42.5}
+    validate_no_collisions([("crude", plan)])
+
+    site["output"] = (20, -47)
+    with pytest.raises(ValueError, match="live-verified connector tile"):
+        generate_pumpjack_source([site], [(20, -47)])
 
 
 def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:

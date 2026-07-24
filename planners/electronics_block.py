@@ -34,8 +34,8 @@ from planners.roboport_coverage import plan_coverage_roboports, roboport_ghost_t
 from planners.sandbox_infrastructure import compose_managed_sandbox
 from planners.water_lakes import water_lake_tile_indices
 
-BELT = "express-transport-belt"
-INSERTER = "stack-inserter"
+BELT = "fast-transport-belt"
+INSERTER = "fast-inserter"
 
 
 DEPENDENCIES_2A = {

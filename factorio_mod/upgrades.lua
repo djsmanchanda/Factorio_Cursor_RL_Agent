@@ -97,7 +97,10 @@ local function execute_upgrades(authorization, upgrade_plan)
       goto continue
     end
 
-    if entry.action == "assembler_tier_upgrade" then
+    if entry.action == "assembler_tier_upgrade" or entry.action == "entity_tier_upgrade" then
+      if not entry.from_name or not entry.to_name then
+        error("Entity tier upgrade requires from_name and to_name")
+      end
       if target.name == entry.to_name then
         table.insert(results, { action = entry.action, status = "skipped", reason = "already_upgraded" })
       else

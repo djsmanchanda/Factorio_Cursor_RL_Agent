@@ -3,14 +3,30 @@
 
 from __future__ import annotations
 
+from math import floor
+
 from planners.infrastructure import POLE_SPECS
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from planners.recipe_data import BELT_TIERS
 
-# Pumpjack and offshore-pump connection geometry is intentionally not inferred.
-# Callers supply exact entity and output pipe coordinates until live verification lands.
+# Only the live-probed west-facing pumpjack connector is encoded here. Offshore
+# pump geometry stays survey-supplied until its land-side pipe tile is captured.
 
 ROW_POLE = "medium-electric-pole"
+
+
+def verified_pumpjack_output_tile(site: dict) -> tuple[int, int] | None:
+    """Return the only verified pumpjack output tile, or None for unknown directions.
+
+    A working west-facing pumpjack at (18.5, -43.5) exposed its output at
+    (17.5, -42.5). Pipe actions use tile centres, so that connector is tile
+    (17, -43). Translating that one observed orientation is safe; other
+    directions remain deliberately unmodelled rather than guessed.
+    """
+    if site.get("direction", "north") != "west":
+        return None
+    x, y = site["position"]
+    return floor(x - 1), floor(y + 1)
 
 
 def _row_pole_positions(
@@ -103,6 +119,14 @@ def _fluid_resource_plan(
     outputs = {tuple(site["output"]) for site in sites}
     if not outputs <= set(map(tuple, pipe_tiles)):
         raise ValueError(f"{kind} pipe tiles must include every supplied output coordinate")
+    if entity == "pumpjack":
+        for site in sites:
+            verified_output = verified_pumpjack_output_tile(site)
+            if verified_output is not None and tuple(site["output"]) != verified_output:
+                raise ValueError(
+                    "West-facing pumpjack output must match its live-verified connector tile "
+                    f"{verified_output}, got {tuple(site['output'])}"
+                )
     entities = [
         {"action_type": "place_ghost", "entity": entity,
          "position": {"x": site["position"][0], "y": site["position"][1]},
@@ -123,7 +147,7 @@ def _fluid_resource_plan(
         {"name": f"{kind}_power", "actions": _power_scaffold(
             power_anchor, entity,
             max(site["position"][0] for site in sites),
-            include_row_poles=entity != "offshore-pump",
+            include_row_poles=entity not in {"offshore-pump", "pumpjack"},
         )},
         {"name": f"{kind}_source", "actions": entities + pipes},
     ]}
