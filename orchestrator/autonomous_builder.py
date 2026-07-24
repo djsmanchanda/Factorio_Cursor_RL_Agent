@@ -232,6 +232,42 @@ def extend_roboport_coverage(
     return True
 
 
+def _mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
+    """Centres emitted by LocalLayoutPlanner.generate_mining_feed()."""
+    ox, oy = origin
+    return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
+
+
+def _candidate_mining_origins(
+    preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
+) -> list[Point]:
+    """Integer line origins whose drill footprints can overlap the patch bbox."""
+    min_x = math.floor(patch_min[0]) - (3 * machine_count) + 1
+    max_x = math.floor(patch_max[0])
+    min_y = math.floor(patch_min[1]) + 1
+    max_y = math.floor(patch_max[1]) + 3
+    origins = [(float(x), float(y)) for x in range(min_x, max_x + 1) for y in range(min_y, max_y + 1)]
+    return sorted(origins, key=lambda point: (math.dist(point, preferred), point[1], point[0]))
+
+
+def _choose_mining_origin(
+    preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
+    area_is_clear: Callable[[Point, Point], bool], footprint_has_resource: Callable[[list[Point]], bool],
+) -> tuple[Point, int] | None:
+    """Find the nearest clear layout whose every drill can mine the target ore.
+
+    Reducing to one drill is an explicit capacity reduction only when the real
+    patch cannot support the default pair; it is safer than placing a dead drill.
+    """
+    for count in range(machine_count, 0, -1):
+        for origin in _candidate_mining_origins(preferred, patch_min, patch_max, count):
+            ox, oy = origin
+            if not area_is_clear((ox, oy - 5), (ox + (count * 3) + 12, oy + 7)):
+                continue
+            if footprint_has_resource(_mining_drill_positions(origin, count)):
+                return origin, count
+    return None
+
 def build_mining_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     reference_point: Point, emit: Callable[[str], None],
@@ -243,16 +279,23 @@ def build_mining_stage(
     if found is None:
         raise StuckError(f"No {ore} found within survey radius of {reference_point} -- "
                           "cannot mine what isn't on the map")
-    nearest_tile, _patch_min, _patch_max = found
-    machine_count = _DEFAULT_MACHINE_COUNT
-    width = machine_count * 3
-    origin = live_base.find_clear_area(
-        client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5), width + 12, 12,
+    nearest_tile, patch_min, patch_max = found
+    preferred_box = live_base.find_clear_area(
+        client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
+        (_DEFAULT_MACHINE_COUNT * 3) + 12, 12,
     )
-    if origin is None:
-        raise StuckError(f"No clear space found near the {ore} patch at {nearest_tile} "
-                          f"for a {machine_count}-machine mining line")
-    ox, oy = round(origin[0]), round(origin[1] + 5)
+    if preferred_box is None:
+        raise StuckError(f"No clear staging area found near the {ore} patch at {nearest_tile}")
+    preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
+    selected = _choose_mining_origin(
+        preferred, patch_min, patch_max, _DEFAULT_MACHINE_COUNT,
+        lambda lower, upper: live_base.area_clear(client, surface, lower, upper),
+        lambda centres: live_base.drill_footprints_have_resource(client, surface, ore, centres),
+    )
+    if selected is None:
+        raise StuckError(f"No clear position near the {ore} patch at {nearest_tile} puts every drill on {ore}")
+    (ox, oy), machine_count = selected
+    ox, oy = int(ox), int(oy)
     emit(f"mining stage for {recipe}: ore at {nearest_tile}, building at ({ox},{oy})")
 
     planner = LocalLayoutPlanner()

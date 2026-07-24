@@ -86,6 +86,26 @@ def nearest_resource(
     return (x, y), (minx, miny), (maxx, maxy)
 
 
+def drill_footprints_have_resource(
+    client: RconClient, surface: str, resource: str, centres: list[Point],
+) -> bool:
+    """True only when every 3x3 electric-drill footprint overlaps `resource`.
+
+    Resource entities do not block construction, so a clear staging box alone
+    cannot prove a drill can mine. This probes the live target resource for
+    each planned drill before a BuildPlan is submitted.
+    """
+    if not centres:
+        raise ValueError("at least one drill centre is required")
+    checks = ";".join(
+        "local n=#s.find_entities_filtered{name='" + resource + "',type='resource',area={{" +
+        str(x - 1.5) + "," + str(y - 1.5) + "},{" + str(x + 1.5) + "," + str(y + 1.5) + "}}};" +
+        "out[#out+1]=(n>0 and '1' or '0')"
+        for x, y in centres
+    )
+    lua = "local s=game.surfaces['" + surface + "'];local out={};" + checks + ";rcon.print(table.concat(out,''))"
+    return _sc(client, lua) == "1" * len(centres)
+
 def area_clear(client: RconClient, surface: str, min_point: Point, max_point: Point) -> bool:
     """True iff no BUILDABLE-conflicting entities (any force, excluding ore/
     resource patches -- a mining stage needs to stand ON ore, not avoid it;

@@ -272,3 +272,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added survey, recursive stage construction, belt bridges, and bounded power/roboport/obstruction recovery for an existing Nauvis player force.
 - Why: Start deterministic autonomous expansion from real mined resources without modifying the synthetic planner-sandbox pipeline.
 - Next: Validate drill footprints against real ore tiles before building further mining stages.
+
+## [2026-07-24] Real-base drill footprint validation
+- Files: orchestrator/{autonomous_builder,live_base}.py, tests/test_autonomous_builder.py
+- What: Mining-stage placement now validates every live 3x3 drill footprint against the requested ore, shifts deterministically within the surveyed patch, and reduces to one drill only when necessary.
+- Why: Prevent irregular ore-patch edges from producing dead drills with no_minable_resources.
+- Next: Live-run a copper or iron stage after redeploying only if the committed Lua foundation has not already been deployed.
