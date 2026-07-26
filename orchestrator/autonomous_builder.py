@@ -34,6 +34,11 @@ _ROBOPORT_LINK_DISTANCE = 46.0
 # How far outside the source->destination box to survey obstacles, so a route
 # has room to detour around something sitting right on the straight path.
 _BRIDGE_SURVEY_MARGIN = 24.0
+# Blockage remediation: bounded rounds of (wait -> diagnose -> fix -> recheck).
+# One round is long enough for bots to make visible progress, and the round
+# count bounds how long a genuinely unfixable stage can spin.
+_BLOCKAGE_INTERVAL = 30.0
+_BLOCKAGE_ROUNDS = 6
 # How many of an ingredient a stage's requester chest asks for. Two full
 # assembler input stacks' worth: enough to ride out bot round-trip latency
 # without hoarding a scarce item in one chest.
@@ -385,35 +390,81 @@ def extend_roboport_coverage(
     return True
 
 
+def _diagnose_blockage(
+    client: RconClient, surface: str, force: str, origin: Point,
+    substation_position: Point, machine_positions: list[Point],
+) -> tuple[str, str] | None:
+    """Why is this stage not finishing? Returns (issue, remedy) or None.
+
+    Ordered by what actually blocks construction first: bots cannot build
+    outside coverage, a roboport with no power provides no coverage, and a
+    machine with no power never runs even once built.
+    """
+    nearest = live_base.nearest_roboport(client, surface, force, origin)
+    if nearest is None:
+        return ("no roboport on this surface", "none")
+    if math.dist(nearest, origin) > _ROBOPORT_CONSTRUCTION_RADIUS:
+        return (
+            f"site is {math.dist(nearest, origin):.0f} tiles from the nearest roboport "
+            f"(construction radius {_ROBOPORT_CONSTRUCTION_RADIUS:.0f})",
+            "coverage",
+        )
+    if live_base.entity_status_name(client, surface, nearest) == "no_power":
+        return (f"covering roboport at {nearest} has no power", "roboport_power")
+    statuses = live_base.entity_statuses(client, surface, machine_positions)
+    unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
+    if unpowered:
+        return (f"{len(unpowered)} machine(s) unpowered", "stage_power")
+    return None
+
+
 def bring_stage_up(
     client: RconClient, bridge: GameBridge, surface: str, force: str, name: str,
     origin: Point, area: tuple[Point, Point], substation_position: Point,
     machine_positions: list[Point], emit: Callable[[str], None],
+    *, rounds: int = _BLOCKAGE_ROUNDS, interval: float = _BLOCKAGE_INTERVAL,
 ) -> None:
-    """Get a freshly-placed stage physically alive: ghosts built, in roboport
-    range, and on the main power grid.
+    """Work a stage until it is physically alive, like an open ticket.
 
-    Runs BEFORE any inter-stage transport. Power and coverage repair used to
-    happen only after the transport step, so a transport failure left the stage
-    orphaned and unpowered -- observed live, where an aborted belt bridge left
-    a whole copper-cable stage on its own isolated electric network. A stage
-    that cannot be fed is still worth having up; one with no power is not.
+    Each round: give the bots a bounded window, and if the build has not
+    finished, diagnose WHY and apply the matching remedy, then re-check. The
+    previous design waited out one long timeout, attempted a single fix and
+    gave up -- so an issue needing two fixes (extend coverage, THEN power the
+    roboport that extended it) could never resolve itself.
     """
-    # Coverage is knowable up front from geometry -- check it before waiting on
-    # bots at all, instead of discovering it from a stalled build.
+    # Coverage is knowable from geometry alone, so fix it before waiting on bots.
     extend_roboport_coverage(client, bridge, surface, force, origin, emit)
-    remaining = _wait_for_ghosts(client, surface, force, area)
-    if remaining and extend_roboport_coverage(client, bridge, surface, force, origin, emit):
-        remaining = _wait_for_ghosts(client, surface, force, area)
-    if remaining:
-        raise StuckError(f"{name} still has {remaining} unbuilt ghosts after settling")
-    statuses = live_base.entity_statuses(client, surface, machine_positions)
-    unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
-    if unpowered and extend_power(client, bridge, surface, force, substation_position, emit):
-        recheck = live_base.entity_statuses(client, surface, machine_positions)
-        still = [p for p in machine_positions if recheck.get(tuple(p)) == "no_power"]
-        if still:
-            raise StuckError(f"{name} is still unpowered after bridging: {still}")
+    for attempt in range(1, rounds + 1):
+        remaining = _wait_for_ghosts(
+            client, surface, force, area, timeout_seconds=interval,
+        )
+        issue = _diagnose_blockage(
+            client, surface, force, origin, substation_position, machine_positions,
+        )
+        if remaining == 0 and issue is None:
+            if attempt > 1:
+                emit(f"  [{name}] RESOLVED after {attempt} round(s)")
+            return
+        if issue is None:
+            emit(f"  [{name} #{attempt}/{rounds}] {remaining} ghost(s) left, no blockage "
+                 "found -- bots still working")
+            continue
+        description, remedy = issue
+        emit(f"  [{name} #{attempt}/{rounds}] OPEN: {description} -> remedy: {remedy}")
+        if remedy == "coverage":
+            extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+        elif remedy == "roboport_power":
+            nearest = live_base.nearest_roboport(client, surface, force, origin)
+            if nearest is not None:
+                extend_power(client, bridge, surface, force, nearest, emit)
+        elif remedy == "stage_power":
+            extend_power(client, bridge, surface, force, substation_position, emit)
+        else:
+            raise StuckError(f"{name}: {description} -- no automatic remedy")
+    raise StuckError(
+        f"{name} still blocked after {rounds} rounds "
+        f"({rounds * interval:.0f}s of remediation attempts)"
+    )
 
 
 def _mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
