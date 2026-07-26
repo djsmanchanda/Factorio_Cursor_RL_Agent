@@ -29,6 +29,23 @@ UNDERGROUND_REACH = {
 }
 
 
+# Tiles per second an item travels on each belt tier. Queried live against
+# Factorio 2.0.77 (prototypes.entity[name].belt_speed * 60). Used to work out
+# how long the FIRST item takes to cross a bridge, which is dead time before a
+# fed stage can possibly run.
+BELT_SPEEDS = {
+    "transport-belt": 1.875,
+    "fast-transport-belt": 3.75,
+    "express-transport-belt": 5.625,
+    "turbo-transport-belt": 7.5,
+}
+
+
+def transit_seconds(belt_type: str, tiles: float) -> float:
+    """How long the first item needs to traverse `tiles` of `belt_type`."""
+    return tiles / BELT_SPEEDS[belt_type]
+
+
 def _tile(point: Point) -> tuple[int, int]:
     return (math.floor(point[0]), math.floor(point[1]))
 

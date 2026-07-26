@@ -12,6 +12,7 @@ from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from planners.belt_bridge import (
     DIRECTION_VECTORS, UNDERGROUND_REACH, bridge_chest_to_chest, opposite,
+    transit_seconds,
 )
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import step_points
@@ -39,6 +40,9 @@ _BRIDGE_SURVEY_MARGIN = 24.0
 # count bounds how long a genuinely unfixable stage can spin.
 _BLOCKAGE_INTERVAL = 30.0
 _BLOCKAGE_ROUNDS = 6
+# Multiplier on computed belt transit time before judging a fed stage
+# unhealthy: the first item has to cross, then the inserter has to load it.
+_TRANSIT_SAFETY = 1.5
 # How many of an ingredient a stage's requester chest asks for. Two full
 # assembler input stacks' worth: enough to ride out bot round-trip latency
 # without hoarding a scarce item in one chest.
@@ -612,6 +616,7 @@ def build_conversion_stage(
     bring_stage_up(client, bridge, surface, force, f"conversion stage for {recipe}",
                     (ox, oy), stage_area, substation_position, machine_positions, emit)
 
+    feed_delay = 0.0
     unresolved = sorted(set(feed_positions) - set(ingredient_sources))
     if unresolved:
         raise StuckError(
@@ -657,13 +662,26 @@ def build_conversion_stage(
             "surface": surface, "force": force,
         }
         _submit(client, bridge, surface, bridge_plan, f"bridge_{ingredient}_to_{recipe}", emit)
+        belt_tiles = sum(
+            1 for action in bridge_actions if "transport-belt" in action["entity"]
+        )
+        feed_delay = max(feed_delay, transit_seconds(belt_type, belt_tiles))
+        emit(f"    {ingredient}: {belt_tiles} belt tiles, first item arrives in "
+             f"~{transit_seconds(belt_type, belt_tiles):.0f}s")
 
     xs = [ox, ox + length, *(p[0] for p in ingredient_sources.values())]
     transport_area = ((min(xs) - 5, oy - 15), (max(xs) + 5, oy + 15))
     remaining = _wait_for_ghosts(client, surface, force, transport_area)
     if remaining:
         raise StuckError(f"{recipe} transport still has {remaining} unbuilt ghosts after settling")
-    stuck = _diagnose_machines(client, surface, machine_positions, emit)
+    # A stage cannot possibly run before its first ingredient physically
+    # arrives. Judging it healthy-or-not sooner than that reports a false
+    # failure on a bridge that is working -- observed live, where a ~60 tile
+    # yellow belt needed ~32s and the check gave up at 20s.
+    stuck = _diagnose_machines(
+        client, surface, machine_positions, emit,
+        grace_seconds=_STUCK_GRACE_SECONDS + feed_delay * _TRANSIT_SAFETY,
+    )
     if stuck:
         # Bridges are the most likely remaining culprit for "built but not
         # fed": confirm each feed chest is actually receiving the ingredient
