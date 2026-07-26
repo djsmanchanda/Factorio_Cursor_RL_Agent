@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Callable
 
+from core.science_recipe_graph import validate_current_builder_target
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from planners.infrastructure import POLE_SPECS
@@ -85,6 +86,16 @@ _BOT_THROUGHPUT_LIMIT = 3.0
 
 class StuckError(RuntimeError):
     """The builder cannot proceed and needs a human decision -- never guessed silently."""
+
+
+def validate_builder_target(
+    target: str, surface: str, recipes: Mapping[str, Mapping],
+) -> None:
+    """Convert symbolic target rejection into the builder's fail-closed error."""
+    try:
+        validate_current_builder_target(target, surface, recipes)
+    except ValueError as error:
+        raise StuckError(str(error)) from error
 
 
 def _ghost_materials(plan: dict) -> dict[str, int]:

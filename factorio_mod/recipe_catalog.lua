@@ -1,5 +1,5 @@
 -- Path: factorio_mod/recipe_catalog.lua
--- Purpose: Export enabled deterministic recipe contracts for a requested existing force in stable order.
+-- Purpose: Export all recipe knowledge plus force unlock state and environmental acquisition leaves in stable order.
 
 local shared = require("sandbox_shared")
 
@@ -44,7 +44,7 @@ local function export_force(command)
   return force
 end
 
-commands.add_command("export_recipe_catalog", "Export enabled recipes; optional existing force name.", function(command)
+commands.add_command("export_recipe_catalog", "Export all recipes with unlock state; optional existing force name.", function(command)
   local force = export_force(command)
   local recipes = {}
   local names = {}
@@ -53,7 +53,7 @@ commands.add_command("export_recipe_catalog", "Export enabled recipes; optional 
     -- (parameter-0..9) and recipe-unknown are enabled but craft nothing, so
     -- they can never contribute to a production chain and only break the
     -- catalog's non-empty products contract.
-    if recipe.enabled and #recipe.products > 0 then table.insert(names, name) end
+    if #recipe.products > 0 then table.insert(names, name) end
   end
   table.sort(names)
   for _, name in ipairs(names) do
@@ -65,7 +65,7 @@ commands.add_command("export_recipe_catalog", "Export enabled recipes; optional 
     for _, reason in ipairs(product_reasons) do table.insert(reasons, reason) end
     local ticks = math.max(1, math.floor((recipe.energy or 0.5) * 60 + 0.5))
     local entry = {
-      name = name, enabled = true, category = recipe.category or "crafting",
+      name = name, enabled = recipe.enabled, category = recipe.category or "crafting",
       energy_ticks = ticks, ingredients = ingredients, products = products,
       supported = #reasons == 0,
     }
@@ -73,12 +73,22 @@ commands.add_command("export_recipe_catalog", "Export enabled recipes; optional 
     table.insert(recipes, entry)
   end
   local raw_set = { water = true, wood = true }
-  for _, prototype in pairs(prototypes.entity) do
-    if prototype.type == "resource" and prototype.mineable_properties then
-      for _, product in pairs(prototype.mineable_properties.products or {}) do
-        raw_set[product.name] = true
-      end
+  local environmental_source_types = {
+    resource = true, tree = true, plant = true, fish = true,
+  }
+  local function add_mineable_products(prototype)
+    if not prototype.mineable_properties then return end
+    for _, product in pairs(prototype.mineable_properties.products or {}) do
+      raw_set[product.name] = true
     end
+  end
+  for _, prototype in pairs(prototypes.entity) do
+    if environmental_source_types[prototype.type] then
+      add_mineable_products(prototype)
+    end
+  end
+  for _, prototype in pairs(prototypes.asteroid_chunk) do
+    add_mineable_products(prototype)
   end
   local raw_resources = {}
   for name, _ in pairs(raw_set) do table.insert(raw_resources, name) end

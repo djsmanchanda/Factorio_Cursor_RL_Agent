@@ -13,6 +13,28 @@ Planning is deterministic: the same snapshot, goal, and configuration produce
 the same result. Planning readiness must be explicit; no plan is emitted when a
 required capability or prerequisite is unavailable.
 
+## Recipe knowledge and execution scope
+
+`/export_recipe_catalog` exports every known force recipe in stable order and
+preserves each recipe's `enabled` state. `core.science_recipe_graph` uses that
+catalog to retain structural dependency knowledge for all twelve Space Age
+science packs, including locked, coproduct, probabilistic, and alternative
+routes. Structural knowledge does not imply a deterministic throughput promise.
+
+Executable exact-rate graphs remain stricter: disabled, unsupported,
+probabilistic, unbalanced coproduct, and unresolved ambiguous paths fail closed.
+A same-named recipe is the deterministic primary unless an explicit recipe
+preference selects another producer; structural graphs retain all non-recovery
+alternatives.
+
+The current real-base builder is Nauvis-only. All six Nauvis sciences are in
+planning scope, but only targets whose complete stage chain exists in
+`planners.recipe_data.LINE_RECIPES` are executable (currently automation and
+logistic science). Chemical, production, utility, and military science remain
+structurally known but fail readiness until their missing stages are implemented.
+Space, planet-specific, and promethium science remain knowledge-only until the
+relevant PlanetPlanner or interplanetary capability exists.
+
 ## Progress and phasing
 
 `ProgressState` is a read-only summary derived from snapshots, metrics, and

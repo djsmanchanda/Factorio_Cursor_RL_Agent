@@ -325,3 +325,9 @@ backfilled from git history because this file did not exist yet.
 - Files: docs/{architecture,planner_and_execution,data_contracts_and_determinism}.md, docs/archive/{handoffs,superseded-design}/, AGENTS.md, FULL_DOCUMENTATION.md, planner/tool references
 - What: Archived handoffs 24-29 and superseded the overlapping architecture/agent/planner/execution/state documents with three compact canonical references; regenerated the combined documentation.
 - Why: Reduce documentation bloat while preserving historical evidence and keeping invariants, schemas, and live operational guidance discoverable.
+
+## [2026-07-27] All-science structural recipe knowledge
+- Files: core/{recipe_dag,science_recipe_graph}.py, factorio_mod/{recipe_catalog.lua,README.md}, orchestrator/{autonomous_builder,stage_services}.py, tests/test_{autonomy,science_recipe_graph}.py, docs/{planner_and_execution,31_factorio_mod_interaction_and_troubleshooting}.md
+- What: Added grounded structural chains for all 12 Space Age science packs, retained valid producer alternatives, exported locked recipes and environmental/asteroid inputs, and enforced pre-connection Nauvis scope and builder-readiness gates.
+- Why: Let the planner understand space and planetary dependencies without pretending probabilistic or off-world chains are currently executable.
+- Next: Redeploy/restart only with explicit approval, then export the player catalog to verify disabled recipes and environmental acquisition leaves against the live Factorio runtime.

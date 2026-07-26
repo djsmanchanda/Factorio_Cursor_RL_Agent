@@ -22,6 +22,11 @@ def _validate(payload: Mapping, schema_name: str) -> None:
         raise ValueError("; ".join(f"{'/'.join(map(str, e.path)) or '<root>'}: {e.message}" for e in errors))
 
 
+def validate_recipe_catalog(catalog: Mapping) -> None:
+    """Validate the live recipe boundary before any graph consumes it."""
+    _validate(catalog, "recipe_catalog.schema.json")
+
+
 def _decimal(value: object) -> Decimal:
     return Decimal(str(value))
 
@@ -29,7 +34,7 @@ def _decimal(value: object) -> Decimal:
 def compile_recipe_dag(goal: Mapping, catalog: Mapping) -> dict:
     """Compile exact rates. Unsupported, cyclic, missing, and ambiguous recipes fail closed."""
     _validate(goal, "goal.schema.json")
-    _validate(catalog, "recipe_catalog.schema.json")
+    validate_recipe_catalog(catalog)
     raw_leaves = set(catalog["raw_resources"])
     producers: dict[str, list[dict]] = defaultdict(list)
     for recipe in catalog["recipes"]:
@@ -49,12 +54,18 @@ def compile_recipe_dag(goal: Mapping, catalog: Mapping) -> dict:
         candidates = sorted(producers.get(item, []), key=lambda recipe: recipe["name"])
         if not candidates:
             raise ValueError(f"Missing enabled deterministic recipe for {item}")
-        selected = candidates[0]
+        exact = [recipe for recipe in candidates if recipe["name"] == item]
         preference = preferences.get(item)
-        if len(candidates) > 1:
+        if preference is not None:
             selected = next((r for r in candidates if r["name"] == preference), None)
             if selected is None:
-                raise ValueError(f"Ambiguous recipes for {item}: {', '.join(r['name'] for r in candidates)}")
+                raise ValueError(f"Preferred recipe {preference!r} does not produce {item}")
+        elif len(exact) == 1:
+            selected = exact[0]
+        elif len(candidates) > 1:
+            raise ValueError(f"Ambiguous recipes for {item}: {', '.join(r['name'] for r in candidates)}")
+        else:
+            selected = candidates[0]
         if len(selected["products"]) != 1:
             raise ValueError(f"Shared coproduct recipe {selected['name']} is unsupported for exact expansion")
         name = selected["name"]

@@ -30,6 +30,15 @@ discovered mods on next launch.
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
 
+## Recipe knowledge export
+
+Run `/export_recipe_catalog player` to export every recipe known to the existing
+`player` force. Each entry retains its current `enabled` state, so locked recipes
+remain available for structural planning without becoming executable. The export
+also records acquisition leaves from resource, plant, tree, and fish entities plus
+the dedicated asteroid-chunk prototype collection. It is read-only and writes under
+`script-output/factorio_mod/recipe_catalogs/`.
+
 ## GhostPlan sandbox rendering
 
 This is a sandbox-only visualization tool. It renders ghosts in a dedicated

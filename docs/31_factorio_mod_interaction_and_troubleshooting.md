@@ -190,7 +190,7 @@ on a live server without explicit approval and valid payloads.
 | Command | Purpose | Output directory |
 | --- | --- | --- |
 | `/snapshot [surface]` | Export deterministic surface state | `factorio_mod/snapshots/` |
-| `/export_recipe_catalog [force]` | Export recipes/raw resources | `factorio_mod/recipe_catalogs/` |
+| `/export_recipe_catalog [force]` | Export all recipes, unlock state, and environmental inputs | `factorio_mod/recipe_catalogs/` |
 | `/research_status [JSON]` | Export force/research state | `factorio_mod/research_reports/` |
 | `/export_ghost_observation` | Export sandbox ghosts | `factorio_mod/ghost_observations/` |
 | `/inspect_sandbox_topology` | Inspect sandbox topology | `factorio_mod/topology_reports/` |

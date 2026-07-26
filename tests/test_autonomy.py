@@ -31,10 +31,32 @@ def test_missing_and_ambiguous_recipes_fail_closed():
     with pytest.raises(ValueError, match="Missing enabled"):
         compile_recipe_dag(goal("unknown-widget", 1), CATALOG)
     ambiguous = json.loads(json.dumps(CATALOG))
-    duplicate = dict(ambiguous["recipes"][0]); duplicate["name"] = "advanced-circuit-alt"
+    duplicate = dict(next(
+        recipe for recipe in ambiguous["recipes"] if recipe["name"] == "basic-oil-processing"
+    ))
+    duplicate["name"] = "alternate-oil-processing"
     ambiguous["recipes"].append(duplicate)
     with pytest.raises(ValueError, match="Ambiguous"):
         compile_recipe_dag(goal("advanced-circuit", 1), ambiguous)
+
+
+def test_explicit_recipe_preference_overrides_same_named_default():
+    catalog = json.loads(json.dumps(CATALOG))
+    alternate = dict(next(
+        recipe for recipe in catalog["recipes"] if recipe["name"] == "iron-plate"
+    ))
+    alternate["name"] = "iron-plate-alternate"
+    catalog["recipes"].append(alternate)
+    preferred_goal = goal("processing-unit", 0.075)
+    preferred_goal["preferences"] = {
+        "recipes": {"iron-plate": "iron-plate-alternate"}
+    }
+
+    graph = compile_recipe_dag(preferred_goal, catalog)
+
+    assert "iron-plate-alternate" in graph["topological_order"]
+    assert "iron-plate" not in graph["topological_order"]
+
 
 def test_program_determinism_and_concrete_gate():
     first = compile_autonomy_program(goal(), CATALOG, world_spec=WORLD)

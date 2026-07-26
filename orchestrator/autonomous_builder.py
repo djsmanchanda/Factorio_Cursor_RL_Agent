@@ -8,10 +8,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
+from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
 from orchestrator.stage_services import (
-    StuckError,
+    StuckError, validate_builder_target,
     _BLOCKAGE_INTERVAL,
     _BLOCKAGE_ROUNDS,
     _BOT_THROUGHPUT_LIMIT,
@@ -52,11 +53,9 @@ _DEFAULT_MACHINE_COUNT = 2
 
 
 def _mineable(recipe: str) -> bool:
-    """True iff this recipe's sole ingredient is a raw resource (mined/pumped),
-    not another LINE_RECIPES product -- i.e. it needs generate_mining_feed,
-    not a chest-fed conversion stage."""
+    """Whether this recipe is a supported direct resource-extraction stage."""
     ingredients = LINE_RECIPES[recipe]["ingredients"]
-    return len(ingredients) == 1 and ingredients[0] not in LINE_RECIPES
+    return len(ingredients) == 1 and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
 
 
 def _diagnose_blockage(
@@ -484,6 +483,7 @@ def run(
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
     genuinely stuck (raises StuckError rather than guessing)."""
+    validate_builder_target(goal_item, surface, LINE_RECIPES)
     client = RconClient(rcon_host, rcon_port, rcon_password)
     bridge = GameBridge(script_output=Path(script_output), host=rcon_host, port=rcon_port,
                          password=rcon_password)
