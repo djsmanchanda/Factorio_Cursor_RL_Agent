@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
@@ -32,6 +33,37 @@ _STUCK_GRACE_SECONDS = 20.0
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
 _ROBOPORT_LINK_DISTANCE = 46.0
+# Live-verified on 2.0.77 (prototypes.entity['roboport'].logistic_radius): a
+# roboport serves LOGISTIC chests only within 25 tiles -- under half its
+# construction reach. Coverage checked against construction radius alone
+# therefore passes while the chests it just built sit in no network at all: a
+# passive provider supplies nothing, a requester never fills, and the only
+# symptom is a downstream stage stuck at item_ingredient_shortage.
+_ROBOPORT_LOGISTIC_RADIUS = 25.0
+# (radius, service area is a square) per coverage purpose. The logistic supply
+# area is genuinely square -- live-probed with
+# `roboport.logistic_cell.is_in_logistic_range`: for the roboport at (3,-1),
+# (28,-1) is in range and (28.5,-1) is not, while the far corner (27.9,23.9)
+# is still in. So Chebyshev distance is the exact test. Construction coverage
+# keeps the Euclidean measure it was live-verified with; Euclidean >=
+# Chebyshev, so it can only ever add a roboport that was not strictly needed,
+# never skip one that was.
+_ROBOPORT_SERVICE_AREAS = {
+    "construction": (_ROBOPORT_CONSTRUCTION_RADIUS, False),
+    "logistic": (_ROBOPORT_LOGISTIC_RADIUS, True),
+}
+# Slack subtracted from a chain's final hop so tile rounding can never land it
+# a fraction outside the service radius it was placed to satisfy.
+_COVERAGE_MARGIN = 2.0
+# Every chest type that is inert unless it is inside a logistic supply area.
+_LOGISTIC_CHEST_ENTITIES = frozenset({
+    "active-provider-chest", "buffer-chest", "passive-provider-chest",
+    "requester-chest", "storage-chest",
+})
+# How far from a stage's machines its own collection chest can be. A stage's
+# chest sits at the end of its machine row; a container farther away than a
+# whole stage footprint belongs to something else and is not ours to cover.
+_STAGE_CHEST_REACH = 30.0
 # How far outside the source->destination box to survey obstacles, so a route
 # has room to detour around something sitting right on the straight path.
 _BRIDGE_SURVEY_MARGIN = 24.0
@@ -350,37 +382,74 @@ def extend_power(
     return True
 
 
+def service_distance(roboport: Point, target: Point, *, square: bool) -> float:
+    """Distance measured in the metric that matches the service area's SHAPE.
+
+    A roboport's areas are squares centred on it, so Chebyshev is the exact
+    test; Euclidean is a strictly conservative approximation of it. See
+    _ROBOPORT_SERVICE_AREAS for which purpose uses which and why.
+    """
+    if square:
+        return max(abs(roboport[0] - target[0]), abs(roboport[1] - target[1]))
+    return math.dist(roboport, target)
+
+
+def roboport_chain(source: Point, target: Point, radius: float) -> list[Point]:
+    """Roboport positions from `source` (an existing roboport) that end with
+    `target` inside `radius`, each hop within link distance of the previous.
+
+    The chain deliberately stops `radius` short of `target` instead of walking
+    onto it: a logistic chest IS the target, and the coverage that must reach
+    it is served just as well from the near edge of the supply area. Distances
+    along the chain are Euclidean, which is >= the Chebyshev distance the
+    square service area actually uses -- so a chain that satisfies this
+    satisfies the real area too.
+    """
+    total = math.dist(source, target)
+    if total == 0 or total <= radius:
+        return []
+    reach = total - radius + _COVERAGE_MARGIN
+    step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
+    unit = ((target[0] - source[0]) / total, (target[1] - source[1]) / total)
+    return [
+        (float(round(source[0] + unit[0] * travel)), float(round(source[1] + unit[1] * travel)))
+        for travel in (min(step * hop, reach) for hop in range(1, math.ceil(reach / step) + 1))
+    ]
+
+
 def extend_roboport_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    target_position: Point, emit: Callable[[str], None],
+    target_position: Point, emit: Callable[[str], None], *,
+    purpose: str = "construction",
 ) -> bool:
-    """If `target_position` is beyond every existing roboport's construction
-    radius, chain new roboports out to it (each within link distance of the
-    previous one, ending within construction radius of the target). Returns
+    """If `target_position` is beyond every existing roboport's service area
+    for `purpose` ("construction" for ghosts, "logistic" for chests), chain new
+    roboports out to it (each within link distance of the previous one). Returns
     True if roboports were added (caller should re-check ghost completion),
     False if coverage was already fine."""
+    radius, square = _ROBOPORT_SERVICE_AREAS[purpose]
     nearest = live_base.nearest_roboport(client, surface, force, target_position)
     if nearest is None:
         return False
-    if math.dist(nearest, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
+    gap = service_distance(nearest, target_position, square=square)
+    if gap <= radius:
         return False
-    emit(f"  roboport coverage gap: nearest roboport {nearest} is "
-         f"{math.dist(nearest, target_position):.0f} tiles from {target_position} "
-         f"(construction radius is {_ROBOPORT_CONSTRUCTION_RADIUS:.0f}) -- chaining roboports out")
-    step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
-    hops = step_points(nearest, target_position, step)
-    placed: list[Point] = []
-    for hop in hops:
-        placed.append(hop)
-        if math.dist(hop, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
-            break
+    emit(f"  roboport {purpose} coverage gap: nearest roboport {nearest} is "
+         f"{gap:.0f} tiles from {target_position} "
+         f"({purpose} radius is {radius:.0f}) -- chaining roboports out")
+    placed = roboport_chain(nearest, target_position, radius)
+    if not placed:
+        raise StuckError(
+            f"{target_position} is outside {purpose} coverage of the roboport at "
+            f"{nearest} but no chain position could be derived; investigate directly"
+        )
     actions = [
         {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
         for x, y in placed
     ]
     plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
     _submit(client, bridge, surface, plan, "roboport_bridge", emit)
-    # A roboport with no power provides NO construction coverage, so chaining
+    # A roboport with no power provides NO coverage of either kind, so chaining
     # one out without connecting it just moves the stall. Observed live: a
     # bridged roboport sat at no_power and its ghosts never built.
     for position in placed:
@@ -389,20 +458,62 @@ def extend_roboport_coverage(
             if not extend_power(client, bridge, surface, force, position, emit):
                 raise StuckError(
                     f"roboport at {position} cannot be powered; it would provide no "
-                    "construction coverage"
+                    f"{purpose} coverage"
                 )
     return True
+
+
+def _logistic_chest_positions(plan: dict) -> list[Point]:
+    """Every coloured logistic chest a plan places -- its requester feed chests
+    and its passive-provider output chest.
+
+    These are known at plan time, so their coverage can be guaranteed before
+    the stage is ever expected to work rather than diagnosed after it silently
+    fails to.
+    """
+    return [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") in _LOGISTIC_CHEST_ENTITIES
+    ]
+
+
+def ensure_logistic_coverage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    chest_positions: Sequence[Point], emit: Callable[[str], None],
+) -> bool:
+    """Put every one of `chest_positions` inside a roboport's LOGISTIC supply
+    area, chaining roboports out where it isn't. Returns True if anything was
+    added.
+
+    Construction coverage is not enough and never was: it reaches 55 tiles
+    while the supply area reaches 25, so a chest can be built perfectly and
+    still belong to no network. Each chest is handled in turn against a
+    re-queried nearest roboport, so a port placed for one chest is credited to
+    the next instead of being duplicated.
+    """
+    added = False
+    for position in sorted({tuple(p) for p in chest_positions}):
+        added |= extend_roboport_coverage(
+            client, bridge, surface, force, position, emit, purpose="logistic",
+        )
+    return added
 
 
 def _diagnose_blockage(
     client: RconClient, surface: str, force: str, origin: Point,
     substation_position: Point, machine_positions: list[Point],
+    logistic_chest_positions: Sequence[Point] = (),
 ) -> tuple[str, str] | None:
     """Why is this stage not finishing? Returns (issue, remedy) or None.
 
     Ordered by what actually blocks construction first: bots cannot build
-    outside coverage, a roboport with no power provides no coverage, and a
-    machine with no power never runs even once built.
+    outside coverage, and a roboport with no power provides no coverage at all.
+    Logistic coverage is checked next because its remedy places AND powers a
+    roboport, which can incidentally close a power gap near the stage -- the
+    reverse is never true, so diagnosing it before machine power lets one round
+    fix both. Machine power is last; it is also the only check here that has to
+    poll every machine's live status.
     """
     nearest = live_base.nearest_roboport(client, surface, force, origin)
     if nearest is None:
@@ -415,6 +526,20 @@ def _diagnose_blockage(
         )
     if live_base.entity_status_name(client, surface, nearest) == "no_power":
         return (f"covering roboport at {nearest} has no power", "roboport_power")
+    if logistic_chest_positions:
+        # Only chests that are actually BUILT are judged here; ones still
+        # waiting on a bot are absent from the reply and are the ghost count's
+        # business, not a coverage fault.
+        served = live_base.logistic_network_ids(client, surface, logistic_chest_positions)
+        orphaned = [p for p, network in served.items() if network is None]
+        if orphaned:
+            return (
+                f"{len(orphaned)} logistic chest(s) belong to no logistic network "
+                f"(first at {tuple(orphaned[0])}); a chest outside every roboport's "
+                f"{_ROBOPORT_LOGISTIC_RADIUS:.0f}-tile supply area can neither supply "
+                "nor be supplied",
+                "logistic_coverage",
+            )
     statuses = live_base.entity_statuses(client, surface, machine_positions)
     unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
     if unpowered:
@@ -427,6 +552,7 @@ def bring_stage_up(
     origin: Point, area: tuple[Point, Point], substation_position: Point,
     machine_positions: list[Point], emit: Callable[[str], None],
     *, rounds: int = _BLOCKAGE_ROUNDS, interval: float = _BLOCKAGE_INTERVAL,
+    logistic_chest_positions: Sequence[Point] = (),
 ) -> None:
     """Work a stage until it is physically alive, like an open ticket.
 
@@ -436,14 +562,19 @@ def bring_stage_up(
     gave up -- so an issue needing two fixes (extend coverage, THEN power the
     roboport that extended it) could never resolve itself.
     """
-    # Coverage is knowable from geometry alone, so fix it before waiting on bots.
+    # Both coverages are knowable from geometry alone, so fix them before
+    # waiting on bots -- and logistic coverage BEFORE the chests are even built,
+    # so they join a network the moment they exist rather than after a stage has
+    # visibly starved.
     extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+    ensure_logistic_coverage(client, bridge, surface, force, logistic_chest_positions, emit)
     for attempt in range(1, rounds + 1):
         remaining = _wait_for_ghosts(
             client, surface, force, area, timeout_seconds=interval,
         )
         issue = _diagnose_blockage(
             client, surface, force, origin, substation_position, machine_positions,
+            logistic_chest_positions,
         )
         if remaining == 0 and issue is None:
             if attempt > 1:
@@ -457,6 +588,10 @@ def bring_stage_up(
         emit(f"  [{name} #{attempt}/{rounds}] OPEN: {description} -> remedy: {remedy}")
         if remedy == "coverage":
             extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+        elif remedy == "logistic_coverage":
+            ensure_logistic_coverage(
+                client, bridge, surface, force, logistic_chest_positions, emit,
+            )
         elif remedy == "roboport_power":
             nearest = live_base.nearest_roboport(client, surface, force, origin)
             if nearest is not None:
@@ -562,7 +697,8 @@ def build_mining_stage(
     length = machine_count * 3
     area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
     bring_stage_up(client, bridge, surface, force, f"mining stage for {recipe}",
-                    (ox, oy), area, substation_position, machine_positions, emit)
+                    (ox, oy), area, substation_position, machine_positions, emit,
+                    logistic_chest_positions=_logistic_chest_positions(plan))
     stuck = _diagnose_machines(client, surface, machine_positions, emit)
     if stuck:
         raise StuckError(f"mining stage for {recipe} built but not healthy: {stuck}")
@@ -613,8 +749,19 @@ def build_conversion_stage(
 
     length = machine_count * 3
     stage_area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
+    # The UPSTREAM provider chest of every bot-served ingredient needs supply-area
+    # coverage just as much as this stage's own requesters do: a provider outside
+    # every network hands out nothing, and the only symptom downstream is
+    # item_ingredient_shortage on a stage that looks correctly built. Live case:
+    # the iron-gear-wheel output chest at (-9.5,30.5) had no network at all.
+    logistic_chests = _logistic_chest_positions(plan) + [
+        ingredient_sources[ingredient]
+        for ingredient, mode in sorted(modes.items())
+        if mode == "logistic" and ingredient in ingredient_sources
+    ]
     bring_stage_up(client, bridge, surface, force, f"conversion stage for {recipe}",
-                    (ox, oy), stage_area, substation_position, machine_positions, emit)
+                    (ox, oy), stage_area, substation_position, machine_positions, emit,
+                    logistic_chest_positions=logistic_chests)
 
     feed_delay = 0.0
     unresolved = sorted(set(feed_positions) - set(ingredient_sources))
@@ -695,6 +842,24 @@ def build_conversion_stage(
     return (ox + length + 1.5, oy + 6.5)
 
 
+def _existing_stage_chests(
+    client: RconClient, surface: str, force: str, last_machine: Point,
+) -> list[Point]:
+    """The logistic chest of an ALREADY-BUILT stage, when it has one nearby.
+
+    A stage found by survey has no BuildPlan to read chest positions out of,
+    and it is exactly the case where a stranded provider chest has been sitting
+    unnoticed for a whole run. One nearest-container probe is enough: a stage's
+    own collection chest sits at the end of its machine row.
+    """
+    chest = live_base.nearest_container(
+        client, surface, force, last_machine, names=tuple(sorted(_LOGISTIC_CHEST_ENTITIES)),
+    )
+    if chest is None or math.dist(chest, last_machine) > _STAGE_CHEST_REACH:
+        return []
+    return [chest]
+
+
 def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None],
@@ -730,6 +895,9 @@ def ensure_produced(
             existing.machine_positions[0], area,
             substation[0] if substation else existing.machine_positions[0],
             list(existing.machine_positions), emit,
+            logistic_chest_positions=_existing_stage_chests(
+                client, surface, force, existing.machine_positions[-1],
+            ),
         )
         return None
 

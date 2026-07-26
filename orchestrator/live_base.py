@@ -396,6 +396,52 @@ def entity_statuses(
     return statuses
 
 
+def logistic_network_ids(
+    client: RconClient, surface: str, positions: Sequence[Point],
+) -> dict[Point, int | None]:
+    """Which logistic network serves each position, in ONE round trip.
+
+    A coloured logistic chest (passive/active provider, requester, buffer,
+    storage) only takes part in the logistic system while it stands inside a
+    roboport's LOGISTIC supply area -- a radius of 25, less than half the
+    construction radius of 55 that let bots build it there in the first place.
+    Outside it `entity.logistic_network` is nil, so a provider supplies nothing
+    and a requester is never filled, with no error anywhere. Live-verified on
+    the running base: two passive-provider chests ~28 tiles from the nearest
+    roboport built fine and then reported no network at all, starving every
+    stage downstream of them.
+
+    A position with NOTHING built on it yet is left OUT of the result rather
+    than mapped to None. The distinction matters: an unbuilt chest is still a
+    ghost the bots are working on, while a built one reporting no network is a
+    real, permanent fault. Collapsing them would make every stage look broken
+    for as long as it was under construction.
+
+    Reading `.logistic_network` is safe on any entity (verified live against a
+    substation, drill, belt and steel chest -- all return nil, none error).
+    """
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "local n=e and e.logistic_network;"
+        "out[#out+1]=i..'='..(e and (n and tostring(n.network_id) or '-') or 'x') end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    served: dict[Point, int | None] = {}
+    for pair in _sc(client, lua).split(","):
+        if not pair:
+            continue
+        index, _, network = pair.partition("=")
+        if network == "x":
+            continue
+        served[tuple(positions[int(index) - 1])] = None if network == "-" else int(network)
+    return served
+
+
 def chest_contents(client: RconClient, surface: str, position: Point) -> dict[str, int]:
     lua = (
         "local s=game.surfaces['" + surface + "'];"
