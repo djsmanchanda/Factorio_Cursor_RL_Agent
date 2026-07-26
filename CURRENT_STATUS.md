@@ -304,3 +304,14 @@ backfilled from git history because this file did not exist yet.
 - Verified: 453 passed, 1 skipped — identical to the pre-cleanup run.
 - Deliberately KEPT (documented as live capabilities in README.md, not orphans): rl_advisor.py, rl_feedback_builder.py, ghost_observer.py, construction_reporter.py, execution_reporter.py, inspect_progress.py, dashboard_server.py. Also kept both larger clusters by explicit decision: the synthetic-sandbox pipeline (~3.9k LOC, still the only proven end-to-end factory AND a live dependency of planners/pipe_bridge.py via fluid_routing) and the three superseded autonomy daemons + city_planner/supervisor (~5.0k LOC, unreachable but left in place).
 - Next: if the daemons/city_planner cluster is confirmed obsolete, it is the single largest remaining simplification (~5.0k LOC, no inbound edges).
+
+## [2026-07-27] Real-base stage-service split recovery
+- Files: orchestrator/{autonomous_builder,stage_services,stage_transport}.py, tests/test_logistic_coverage.py
+- What: Finished the interrupted behavior-preserving split, restored every moved constant/import, and moved test interception to the owning service module.
+- Why: Keep the live builder within the 500-LOC limit without regressing the committed logistic-supply-radius fix.
+
+## [2026-07-27] Intrinsic land-value zoning and late shadow migration
+- Files: planners/{land_value,zoning,zoning_geometry}.py, tests/test_{land_value,zoning,zoning_allocation,zoning_scoring,zoning_geometry}.py
+- What: Added deterministic central land value, outer bulk mining/smelting preference, independent mine/smelter allocations, an all-science 100/s-for-36000-ticks relocation gate, and surface/grid-bound release permits backed by completed shadow-migration evidence.
+- Why: Preserve ore for mining early, reserve central land for science/research/spaceport, and prevent premature or destructive reuse of working inner industry.
+- Next: Persist ore-patch identity/initial amount and add approved rail/station templates before connecting this CityPlanner policy to live construction; the current belt/bot builder remains one grandfathered local block.
