@@ -28,6 +28,7 @@ class LineState:
     machine_count: int
     working_count: int
     output_position: Point | None
+    machine_positions: tuple[Point, ...] = ()
 
 
 def find_line(client: RconClient, surface: str, force: str, recipe: str, machine: str) -> LineState | None:
@@ -41,21 +42,28 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local n=0;local w=0;local ex,ey;"
+        "local n=0;local w=0;local pos={};"
         "for _,e in pairs(s.find_entities_filtered{name='" + machine + "',force=f}) do "
         "local ok,r=pcall(function() return e.get_recipe() end);"
         "if ok and r and r.name=='" + recipe + "' then n=n+1;"
         "if e.status==defines.entity_status.working then w=w+1 end;"
-        "ex=e.position.x;ey=e.position.y end end;"
-        "rcon.print(n..' '..w..' '..tostring(ex)..' '..tostring(ey))"
+        "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
+        "rcon.print(n..' '..w..' '..table.concat(pos,','))"
     )
-    parts = _sc(client, lua).split()
+    parts = _sc(client, lua).split(" ", 2)
     count = int(parts[0])
     if count == 0:
         return None
     working = int(parts[1])
-    position = (float(parts[2]), float(parts[3])) if parts[2] != "nil" else None
-    return LineState(recipe=recipe, machine_count=count, working_count=working, output_position=position)
+    machines = tuple(
+        (float(pair.split(":")[0]), float(pair.split(":")[1]))
+        for pair in (parts[2] if len(parts) > 2 else "").split(",") if pair
+    )
+    return LineState(
+        recipe=recipe, machine_count=count, working_count=working,
+        output_position=machines[-1] if machines else None,
+        machine_positions=machines,
+    )
 
 
 def nearest_resource(
@@ -326,6 +334,31 @@ def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) 
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e.position end end;"
         "if not best then rcon.print('NONE') return end;"
         "rcon.print(best.x..' '..best.y)"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    x, y = raw.split()
+    return (float(x), float(y))
+
+
+def nearest_container(
+    client: RconClient, surface: str, force: str, near: Point,
+    names: Sequence[str] = ("passive-provider-chest", "steel-chest"),
+) -> Point | None:
+    """Nearest output chest to a line's machines.
+
+    A pre-existing line is only usable as an ingredient source if its
+    collection chest can be found; find_line reports machines, not chests.
+    """
+    literal = ",".join("'" + n + "'" for n in names)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";local best;local bd=1e18;"
+        "for _,e in pairs(s.find_entities_filtered{name={" + literal + "},force=f}) do "
+        "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
+        "if d<bd then bd=d;best=e.position end end;"
+        "if not best then rcon.print('NONE') return end;rcon.print(best.x..' '..best.y)"
     )
     raw = _sc(client, lua)
     if raw == "NONE":

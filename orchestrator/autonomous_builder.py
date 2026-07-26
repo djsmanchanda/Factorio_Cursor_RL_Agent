@@ -690,7 +690,30 @@ def ensure_produced(
     spec = LINE_RECIPES[item]
     existing = live_base.find_line(client, surface, force, item, spec["machine"])
     if existing and existing.working_count > 0:
-        return existing.output_position
+        chest = live_base.nearest_container(
+            client, surface, force, existing.machine_positions[-1]
+        )
+        return chest or existing.output_position
+    if existing:
+        # A stage that exists but is not running is a REPAIR job, not a reason
+        # to build a second one. Duplicating instead of repairing is what left
+        # three half-built copper stages littering one ore patch across runs,
+        # eventually leaving no clear ground to place a fourth.
+        emit(f"{item}: found {existing.machine_count} existing machine(s), "
+             f"{existing.working_count} working -- repairing rather than duplicating")
+        xs = [p[0] for p in existing.machine_positions]
+        ys = [p[1] for p in existing.machine_positions]
+        area = ((min(xs) - 15, min(ys) - 15), (max(xs) + 15, max(ys) + 15))
+        substation = live_base.nearest_pole_on_other_network(
+            client, surface, force, existing.machine_positions[0], -1,
+        )
+        bring_stage_up(
+            client, bridge, surface, force, f"existing {item} stage",
+            existing.machine_positions[0], area,
+            substation[0] if substation else existing.machine_positions[0],
+            list(existing.machine_positions), emit,
+        )
+        return None
 
     if not _mineable(item):
         sources: dict[str, Point] = {}
