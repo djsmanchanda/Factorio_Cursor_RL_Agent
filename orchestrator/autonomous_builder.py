@@ -10,7 +10,7 @@ from typing import Callable
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
-from planners.belt_bridge import bridge_chest_to_chest
+from planners.belt_bridge import bridge_chest_to_chest, opposite
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import step_points
 from planners.local_layout_planner import LocalLayoutPlanner
@@ -33,10 +33,6 @@ _ROBOPORT_LINK_DISTANCE = 46.0
 
 class StuckError(RuntimeError):
     """The builder cannot proceed and needs a human decision -- never guessed silently."""
-
-
-def _opposite(direction: str) -> str:
-    return {"north": "south", "south": "north", "east": "west", "west": "east"}[direction]
 
 
 def _toward(source: Point, dest: Point) -> str:
@@ -378,7 +374,7 @@ def build_conversion_stage(
         direction = _toward(source_position, feed_position)
         bridge_actions = bridge_chest_to_chest(
             source_position, feed_position,
-            exit_direction=direction, entry_direction=_opposite(direction),
+            exit_direction=direction, entry_direction=opposite(direction),
             belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
         )
         bridge_plan = {

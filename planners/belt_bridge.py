@@ -16,6 +16,16 @@ _VECTOR_TO_FACING = {vector: name for name, vector in _FACING_TO_VECTOR.items()}
 _OPPOSITE = {"north": "south", "south": "north", "east": "west", "west": "east"}
 
 
+def opposite(direction: str) -> str:
+    """The facing 180 degrees from `direction`. Public because callers that
+    place a bridge also have to reason about its two ends (see
+    orchestrator.autonomous_builder), and one canonical map beats two."""
+    try:
+        return _OPPOSITE[direction]
+    except KeyError:
+        raise ValueError(f"Unknown direction: {direction!r}") from None
+
+
 def _scaled(vector: tuple[float, float], scale: float) -> Point:
     return (vector[0] * scale, vector[1] * scale)
 

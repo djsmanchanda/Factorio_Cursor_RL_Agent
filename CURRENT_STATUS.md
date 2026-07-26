@@ -296,3 +296,11 @@ backfilled from git history because this file did not exist yet.
 - What: GameBridge can now export the enabled recipe catalog for an explicit existing force such as player.
 - Why: Science recipes must be captured from the actual Factorio 2.0 force before they enter the autonomous catalog.
 - Next: After mod redeploy/restart, export player catalog and use the observed contracts to add science and fluid recipe stages.
+
+## [2026-07-26] Dead-code audit and direction-helper dedupe
+- Files: removed core/{construction_progress_updater,deconstruction_executor,progress_reconciler,upgrade_executor}.py and tools/inspect_{snapshot,metrics,intents,plan_skeleton,planning_bundle,phase_result}.py; trimmed tools/README.md; planners/belt_bridge.py, orchestrator/autonomous_builder.py
+- What: Deleted 892 LOC that no entrypoint, module, or test reaches, and collapsed the duplicated direction-opposite map into one public `belt_bridge.opposite()`.
+- Why: An AST import-graph audit showed the repo is ~17.5k LOC of Python but the live real-base system is only ~4.4k of it; these ten modules had zero inbound edges and zero test coverage, so they were cost without benefit.
+- Verified: 453 passed, 1 skipped — identical to the pre-cleanup run.
+- Deliberately KEPT (documented as live capabilities in README.md, not orphans): rl_advisor.py, rl_feedback_builder.py, ghost_observer.py, construction_reporter.py, execution_reporter.py, inspect_progress.py, dashboard_server.py. Also kept both larger clusters by explicit decision: the synthetic-sandbox pipeline (~3.9k LOC, still the only proven end-to-end factory AND a live dependency of planners/pipe_bridge.py via fluid_routing) and the three superseded autonomy daemons + city_planner/supervisor (~5.0k LOC, unreachable but left in place).
+- Next: if the daemons/city_planner cluster is confirmed obsolete, it is the single largest remaining simplification (~5.0k LOC, no inbound edges).
