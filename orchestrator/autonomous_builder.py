@@ -26,7 +26,7 @@ _DEFAULT_MACHINE_COUNT = 2
 _DEFAULT_BELT = "fast-transport-belt"
 _DEFAULT_INSERTER = "fast-inserter"
 _HEALTHY_STATUSES = {"working"}
-_STUCK_GRACE_SECONDS = 30.0
+_STUCK_GRACE_SECONDS = 20.0
 # Live-verified this session: roboport construction radius 55, link (chain)
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
@@ -252,7 +252,16 @@ def _submit(
 
 
 def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[Point, Point],
-                      *, timeout_seconds: float = 180.0, poll_seconds: float = 3.0) -> int:
+                      *, timeout_seconds: float = 180.0, poll_seconds: float = 1.0,
+                      stall_seconds: float = 8.0) -> int:
+    """Ghosts remaining, returning as soon as progress STOPS rather than when a
+    long timeout expires.
+
+    Bots build continuously while they can; once the count stops falling, more
+    waiting changes nothing and the real answer is a diagnosis (no coverage, no
+    power, no material). Burning the full timeout first is what made the
+    builder feel like it took minutes to notice an obvious problem.
+    """
     min_point, max_point = area
     lua = (
         "local s=game.surfaces['" + surface + "'];"
@@ -261,17 +270,21 @@ def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[P
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}})"
     )
     deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        remaining = int(client.command("/sc " + lua).strip())
-        if remaining == 0:
-            return 0
+    remaining = int(client.command("/sc " + lua).strip())
+    last_change = time.monotonic()
+    while remaining and time.monotonic() < deadline:
         time.sleep(poll_seconds)
+        current = int(client.command("/sc " + lua).strip())
+        if current != remaining:
+            remaining, last_change = current, time.monotonic()
+        elif time.monotonic() - last_change >= stall_seconds:
+            return remaining
     return remaining
 
 
 def _diagnose_machines(
     client: RconClient, surface: str, positions: list[Point], emit: Callable[[str], None],
-    *, grace_seconds: float = _STUCK_GRACE_SECONDS, poll_seconds: float = 5.0,
+    *, grace_seconds: float = _STUCK_GRACE_SECONDS, poll_seconds: float = 2.0,
 ) -> list[tuple[Point, str]]:
     """Poll each machine's real status until every one reaches a healthy state
     or `grace_seconds` elapses (bots dispatch slowly; a machine that just went
@@ -280,11 +293,12 @@ def _diagnose_machines(
     deadline = time.monotonic() + grace_seconds
     stuck: list[tuple[Point, str]] = []
     while True:
-        stuck = []
-        for position in positions:
-            status = live_base.entity_status_name(client, surface, position)
-            if status not in _HEALTHY_STATUSES:
-                stuck.append((position, status or "missing"))
+        statuses = live_base.entity_statuses(client, surface, positions)
+        stuck = [
+            (position, statuses.get(tuple(position), "missing"))
+            for position in positions
+            if statuses.get(tuple(position)) not in _HEALTHY_STATUSES
+        ]
         if not stuck or time.monotonic() >= deadline:
             break
         time.sleep(poll_seconds)
@@ -357,6 +371,17 @@ def extend_roboport_coverage(
     ]
     plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
     _submit(client, bridge, surface, plan, "roboport_bridge", emit)
+    # A roboport with no power provides NO construction coverage, so chaining
+    # one out without connecting it just moves the stall. Observed live: a
+    # bridged roboport sat at no_power and its ghosts never built.
+    for position in placed:
+        if live_base.entity_status_name(client, surface, position) == "no_power":
+            emit(f"  bridged roboport at {position} has no power -- connecting it")
+            if not extend_power(client, bridge, surface, force, position, emit):
+                raise StuckError(
+                    f"roboport at {position} cannot be powered; it would provide no "
+                    "construction coverage"
+                )
     return True
 
 
@@ -374,20 +399,19 @@ def bring_stage_up(
     a whole copper-cable stage on its own isolated electric network. A stage
     that cannot be fed is still worth having up; one with no power is not.
     """
+    # Coverage is knowable up front from geometry -- check it before waiting on
+    # bots at all, instead of discovering it from a stalled build.
+    extend_roboport_coverage(client, bridge, surface, force, origin, emit)
     remaining = _wait_for_ghosts(client, surface, force, area)
     if remaining and extend_roboport_coverage(client, bridge, surface, force, origin, emit):
         remaining = _wait_for_ghosts(client, surface, force, area)
     if remaining:
         raise StuckError(f"{name} still has {remaining} unbuilt ghosts after settling")
-    unpowered = [
-        position for position in machine_positions
-        if live_base.entity_status_name(client, surface, position) == "no_power"
-    ]
+    statuses = live_base.entity_statuses(client, surface, machine_positions)
+    unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
     if unpowered and extend_power(client, bridge, surface, force, substation_position, emit):
-        still = [
-            position for position in machine_positions
-            if live_base.entity_status_name(client, surface, position) == "no_power"
-        ]
+        recheck = live_base.entity_statuses(client, surface, machine_positions)
+        still = [p for p in machine_positions if recheck.get(tuple(p)) == "no_power"]
         if still:
             raise StuckError(f"{name} is still unpowered after bridging: {still}")
 

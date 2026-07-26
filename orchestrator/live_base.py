@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from tools.rcon_client import RconClient
@@ -130,7 +131,14 @@ def find_clear_area(
     max_radius: float = 200.0, step: float = 10.0,
 ) -> Point | None:
     """Nearest clear box (as its min-corner) big enough for `width` x `height`,
-    searching outward from `near` in a deterministic expanding ring."""
+    searching outward from `near` in a deterministic expanding ring.
+
+    Entity occupancy for the WHOLE search region is fetched in a single query
+    and candidates are then scored locally: probing the server once per
+    candidate cost ~50ms each and up to 40 candidates per stage. Only the first
+    candidate that clears that local check pays for a terrain (water) probe,
+    since that one is per-tile and expensive server-side.
+    """
     candidates: list[tuple[float, Point]] = []
     radius = 0.0
     while radius <= max_radius:
@@ -138,14 +146,25 @@ def find_clear_area(
             for dy in _ring_offsets(radius):
                 if radius > 0 and max(abs(dx), abs(dy)) != radius:
                     continue
-                candidate = (near[0] + dx, near[1] + dy)
-                candidates.append((math.hypot(dx, dy), candidate))
+                candidates.append((math.hypot(dx, dy), (near[0] + dx, near[1] + dy)))
         radius += step
         if len(candidates) > 40:
             break
-    for _, candidate in sorted(candidates, key=lambda item: item[0]):
-        max_point = (candidate[0] + width, candidate[1] + height)
-        if area_clear(client, surface, candidate, max_point):
+    if not candidates:
+        return None
+    ordered = [candidate for _distance, candidate in sorted(candidates, key=lambda item: item[0])]
+    region_min = (min(c[0] for c in ordered), min(c[1] for c in ordered))
+    region_max = (max(c[0] for c in ordered) + width, max(c[1] for c in ordered) + height)
+    occupied = occupied_tiles(client, surface, region_min, region_max)
+    for candidate in ordered:
+        box = {
+            (x, y)
+            for x in range(math.floor(candidate[0]), math.ceil(candidate[0] + width))
+            for y in range(math.floor(candidate[1]), math.ceil(candidate[1] + height))
+        }
+        if box & occupied:
+            continue
+        if area_clear(client, surface, candidate, (candidate[0] + width, candidate[1] + height)):
             return candidate
     return None
 
@@ -313,6 +332,35 @@ def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) 
         return None
     x, y = raw.split()
     return (float(x), float(y))
+
+
+def entity_statuses(
+    client: RconClient, surface: str, positions: Sequence[Point],
+) -> dict[Point, str]:
+    """Decoded `.status` for many entities in ONE round trip.
+
+    Diagnosis polls every machine in a stage repeatedly; one query per machine
+    per poll was ~50ms each and scaled with stage size for no reason.
+    """
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local names={};for k,v in pairs(defines.entity_status) do names[v]=k end;"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "out[#out+1]=i..'='..(e and (names[e.status] or 'unknown') or 'missing') end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    statuses: dict[Point, str] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        index, _, status = pair.partition("=")
+        statuses[tuple(positions[int(index) - 1])] = status
+    return statuses
 
 
 def chest_contents(client: RconClient, surface: str, position: Point) -> dict[str, int]:
