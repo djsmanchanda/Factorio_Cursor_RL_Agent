@@ -1,6 +1,6 @@
 # Path: tools/verify_factory_invariants.py
 # Purpose: Independent, measurement-based acceptance harness for milestone M6 -
-#          measures the six live-server invariants from docs/24_next_milestone_brief.md
+#          measures the six live-server invariants from the planning/execution contract
 #          directly over RCON. Never infers; reports "unknown" for anything it cannot measure.
 
 from __future__ import annotations

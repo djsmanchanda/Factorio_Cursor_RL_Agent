@@ -9,6 +9,12 @@ An autonomous planning + execution system for Factorio that can:
 This is **not** an end-to-end RL bot.
 It is a factory compiler with an execution agent.
 
+## Live Mod Operations
+
+- Start with the [Factorio mod interaction and troubleshooting runbook](docs/31_factorio_mod_interaction_and_troubleshooting.md) for RCON, `GameBridge`, autonomous-run boundaries, command inventory, and failures.
+- Repository-local Codex guidance is inventoried in [`.agents/skills/README.md`](.agents/skills/README.md).
+- Live mutation, mod deployment, saves/resets, and server lifecycle actions require explicit user authorization.
+
 Core philosophy:
 > Planning is symbolic. Execution is learned.
 

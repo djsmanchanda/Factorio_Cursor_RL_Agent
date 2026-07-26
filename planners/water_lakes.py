@@ -15,7 +15,7 @@ def water_lake_bounds(
 ) -> tuple[int, int, int, int]:
     """Return the canonical bounded lake behind one offshore-pump site.
 
-    NOTE (live-verified this session via RCON, see docs/29 follow-up): the
+    NOTE (live-verified via RCON; see the archived M7 handoff): the
     Factorio entity's real `direction` field is the OPPOSITE of what these
     branch names say -- a pump created with direction=north actually links
     its pipe connector on the SOUTH tile (i.e. the lake it draws from is
@@ -30,7 +30,7 @@ def water_lake_bounds(
     lake and the offshore pump's own power scaffold + connector pipe stub --
     that needs dedicated corridor-allocation work before the swap can land
     safely. Do not "fix" this in isolation again without also resolving that
-    collision (see docs/29_codex_brief_tiers_pumps_routing.md).
+    collision.
     """
     x, y = map(math.floor, position)
     cross_min = -WATER_LAKE_HALF_WIDTH

@@ -110,7 +110,7 @@ Keep entries very small. This file is the first thing any agent reads when resum
 
 Before implementing any feature: identify the applicable docs, read them fully, align with their constraints.
 
-Canonical set: `README.md`, `docs/00`–`docs/20` (description, architecture, agent hierarchy, planner, layout primitives, Lua integration, execution/RL, instruction language, data/state, determinism/save-load, checklist, experiments, future work, city planning, rail standard, block schema, city migration, space/multiplanet, supply chain supervision, external knowledge, system invariants).
+Canonical set: `README.md`, `docs/architecture.md`, `docs/planner_and_execution.md`, `docs/data_contracts_and_determinism.md`, `docs/07_instruction_language.md`, `docs/10_checklist_todo.md`, `docs/11_experiments.md`, `docs/12_future_work.md`, `docs/13_city_planning.md`, `docs/14_rail_blueprint_standard.md`, `docs/15_block_schema.md`, `docs/16_city_migration.md`, `docs/17_space_and_multiplanet_planning.md`, `docs/18_supply_chain_supervision.md`, `docs/19_external_knowledge_and_layout_search.md`, `docs/20_system_invariants.md`, `docs/21_external_game_knowledge.md`, `docs/22_rl_decision_layer.md`, `docs/23_fluid_systems.md`, `docs/30_codex_brief_realbase_autonomy.md`, and `docs/31_factorio_mod_interaction_and_troubleshooting.md`. Historical handoffs and superseded designs live under `docs/archive/` and are not canonical.
 
 On doc conflict: call it out explicitly, choose the safer path, default to invariants.
 

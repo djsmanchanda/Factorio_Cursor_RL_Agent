@@ -1,11 +1,13 @@
 <!-- Path: factorio_mod/README.md -->
 <!-- Purpose: Document the Factorio mod files and snapshot export usage. -->
 
-# Factorio Mod (Snapshot Exporter)
+# Factorio Mod
+
+For the complete 19-command inventory, RCON/GameBridge usage, output directories, real-base rules, and troubleshooting, use the [authoritative interaction runbook](../docs/31_factorio_mod_interaction_and_troubleshooting.md).
 
 ## Files
 - `info.json` (exception): Factorio requires strict JSON, so it cannot include comments.
-- `control.lua`: Implements the `/snapshot` command and writes deterministic JSON snapshots.
+- `control.lua`: Loads the modules that register the mod's console-command surface.
 
 ## Assumptions / Constraints
 - Targets **Factorio 2.0** (`factorio_version: 2.0`); uses the 2.0 API (`storage`, `helpers.*`, `event.entity`).
@@ -25,6 +27,8 @@ discovered mods on next launch.
    - `/snapshot`
 4. The JSON file will be written to:
    - `script-output/factorio_mod/snapshots/snapshot_<tick>.json`
+
+For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
 
 ## GhostPlan sandbox rendering
 

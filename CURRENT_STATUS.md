@@ -315,3 +315,13 @@ backfilled from git history because this file did not exist yet.
 - What: Added deterministic central land value, outer bulk mining/smelting preference, independent mine/smelter allocations, an all-science 100/s-for-36000-ticks relocation gate, and surface/grid-bound release permits backed by completed shadow-migration evidence.
 - Why: Preserve ore for mining early, reserve central land for science/research/spaceport, and prevent premature or destructive reuse of working inner industry.
 - Next: Persist ore-patch identity/initial amount and add approved rail/station templates before connecting this CityPlanner policy to live construction; the current belt/bot builder remains one grandfathered local block.
+
+## [2026-07-27] Factorio mod interaction runbook and local skills
+- Files: docs/31_factorio_mod_interaction_and_troubleshooting.md, .agents/skills/, README.md, tools/README.md, factorio_mod/README.md
+- What: Documented all 19 RCON-exposed mod commands, GameBridge/script-output workflows, safe diagnostics, server launch boundaries, failure routing, and two repo-local operational skills.
+- Why: Make live server interaction and troubleshooting repeatable, evidence-driven, and read-only by default.
+
+## [2026-07-27] Documentation consolidation
+- Files: docs/{architecture,planner_and_execution,data_contracts_and_determinism}.md, docs/archive/{handoffs,superseded-design}/, AGENTS.md, FULL_DOCUMENTATION.md, planner/tool references
+- What: Archived handoffs 24-29 and superseded the overlapping architecture/agent/planner/execution/state documents with three compact canonical references; regenerated the combined documentation.
+- Why: Reduce documentation bloat while preserving historical evidence and keeping invariants, schemas, and live operational guidance discoverable.

@@ -1,7 +1,7 @@
 # Path: tools/spidertron_build.py
 # Purpose: Build a ghost field CENTER-OUT, one concentric ring at a time, so the
 #          construction network grows outward from a single hub and never starts in
-#          disconnected parts (docs/25_execution_rework_brief.md + the ring redirect:
+#          disconnected parts (the center-out construction contract + the ring redirect:
 #          "start with one roboport in the center ... gradually increase the build
 #          radius. If it starts construction in multiple parts, it gets out of sync").
 #

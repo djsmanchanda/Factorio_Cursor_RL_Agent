@@ -1,7 +1,7 @@
 -- Path: factorio_mod/spidertron_builder.lua
 -- Purpose: Spawn a self-powered construction spidertron on planner-sandbox so a
 --          mobile roboport can build ghosts anywhere without a fixed, bootstrapping
---          roboport network (see docs/25_execution_rework_brief.md section 2).
+--          roboport network.
 
 local shared = require("sandbox_shared")
 local get_or_create_sandbox_surface = shared.get_or_create_sandbox_surface

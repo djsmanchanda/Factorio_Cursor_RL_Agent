@@ -1,7 +1,7 @@
 # Path: planners/preflight.py
 # Purpose: ONE offline preflight running every known live-failure check over a
 # composed BuildPlan bundle before it reaches the game (M6 brief,
-# docs/24_next_milestone_brief.md). Composes existing validators wherever they
+# the planning/execution contract). Composes existing validators wherever they
 # exist (planners.infrastructure, planners.plan_validation, core.fluid_systems)
 # instead of re-deriving their rules -- see preflight()'s docstring.
 
