@@ -10,7 +10,7 @@ from typing import Callable
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
-from planners.belt_bridge import bridge_chest_to_chest, opposite
+from planners.belt_bridge import DIRECTION_VECTORS, bridge_chest_to_chest, opposite
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import step_points
 from planners.local_layout_planner import LocalLayoutPlanner
@@ -29,6 +29,9 @@ _STUCK_GRACE_SECONDS = 30.0
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
 _ROBOPORT_LINK_DISTANCE = 46.0
+# How far outside the source->destination box to survey obstacles, so a route
+# has room to detour around something sitting right on the straight path.
+_BRIDGE_SURVEY_MARGIN = 24.0
 
 
 class StuckError(RuntimeError):
@@ -40,6 +43,30 @@ def _toward(source: Point, dest: Point) -> str:
     if abs(dx) >= abs(dy):
         return "east" if dx > 0 else "west"
     return "south" if dy > 0 else "north"
+
+
+def _clear_side(chest: Point, preferred: str, blocked: set[tuple[int, int]]) -> str:
+    """Pick the side of `chest` a bridge can actually attach to.
+
+    bridge_chest_to_chest puts an inserter one tile out and the belt's first
+    tile two tiles out, so a side is usable only when BOTH are free. Facing the
+    destination is merely the preference: a production stage sits on one side
+    of its own output chest, so the direct side is frequently its own machine
+    row -- observed live, where every attempt drove the belt back through the
+    furnaces it had just built. Falls back to the preferred side when nothing
+    is clear, so the caller still gets a plan and a real placement error
+    rather than a silent no-op.
+    """
+    ordered = [preferred, *(d for d in DIRECTION_VECTORS if d != preferred)]
+    for direction in ordered:
+        vx, vy = DIRECTION_VECTORS[direction]
+        tiles = {
+            (math.floor(chest[0] + vx * step), math.floor(chest[1] + vy * step))
+            for step in (1, 2)
+        }
+        if not (tiles & blocked):
+            return direction
+    return preferred
 
 
 def _mineable(recipe: str) -> bool:
@@ -372,10 +399,29 @@ def build_conversion_stage(
     for ingredient, feed_position in feed_positions.items():
         source_position = ingredient_sources[ingredient]
         direction = _toward(source_position, feed_position)
+        # Survey what is really in the corridor first. Without this the route
+        # is a naive L that happily runs through the upstream stage's own
+        # furnaces and any belt already crossing the base -- observed live.
+        # The two endpoints are excluded so the bridge can still attach to the
+        # chests it is supposed to connect.
+        blocked = live_base.occupied_tiles(
+            client, surface,
+            (min(source_position[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
+             min(source_position[1], feed_position[1]) - _BRIDGE_SURVEY_MARGIN),
+            (max(source_position[0], feed_position[0]) + _BRIDGE_SURVEY_MARGIN,
+             max(source_position[1], feed_position[1]) + _BRIDGE_SURVEY_MARGIN),
+        )
+        blocked -= {
+            (math.floor(source_position[0]), math.floor(source_position[1])),
+            (math.floor(feed_position[0]), math.floor(feed_position[1])),
+        }
+        exit_direction = _clear_side(source_position, direction, blocked)
+        entry_direction = _clear_side(feed_position, opposite(direction), blocked)
         bridge_actions = bridge_chest_to_chest(
             source_position, feed_position,
-            exit_direction=direction, entry_direction=opposite(direction),
+            exit_direction=exit_direction, entry_direction=entry_direction,
             belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+            blocked_tiles=blocked,
         )
         bridge_plan = {
             "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": bridge_actions}],

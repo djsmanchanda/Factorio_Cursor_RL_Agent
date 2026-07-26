@@ -9,9 +9,10 @@ from planners.infrastructure_geometry import choose_clear_l_route
 
 Point = tuple[float, float]
 
-_FACING_TO_VECTOR = {
+DIRECTION_VECTORS = {
     "north": (0.0, -1.0), "south": (0.0, 1.0), "east": (1.0, 0.0), "west": (-1.0, 0.0),
 }
+_FACING_TO_VECTOR = DIRECTION_VECTORS
 _VECTOR_TO_FACING = {vector: name for name, vector in _FACING_TO_VECTOR.items()}
 _OPPOSITE = {"north": "south", "south": "north", "east": "west", "west": "east"}
 

@@ -238,6 +238,38 @@ def nearest_pole_on_other_network(
     return (float(x), float(y)), name
 
 
+def occupied_tiles(
+    client: RconClient, surface: str, min_point: Point, max_point: Point,
+) -> set[tuple[int, int]]:
+    """Every tile index inside the box that a route may not occupy: any built
+    entity or ghost of ANY force, plus water. Resource tiles are excluded --
+    belts and pipes run over ore perfectly well, and treating a patch as solid
+    would wall off whole corridors.
+
+    This is what turns a naive L-route into one that goes around real
+    infrastructure instead of demanding it be bulldozed.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for _,e in pairs(s.find_entities_filtered{area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}}) do "
+        "if e.type~='resource' and e.type~='character' then "
+        "local b=e.bounding_box;"
+        "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
+        "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
+        "out[#out+1]=x..','..y end end end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    tiles: set[tuple[int, int]] = set()
+    for pair in raw.split(";"):
+        if not pair:
+            continue
+        x, _, y = pair.partition(",")
+        tiles.add((int(x), int(y)))
+    return tiles
+
+
 def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) -> Point | None:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
