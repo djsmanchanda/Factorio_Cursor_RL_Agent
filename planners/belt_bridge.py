@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Sequence
 
 from planners.infrastructure_geometry import choose_clear_l_route
@@ -15,6 +16,21 @@ DIRECTION_VECTORS = {
 _FACING_TO_VECTOR = DIRECTION_VECTORS
 _VECTOR_TO_FACING = {vector: name for name, vector in _FACING_TO_VECTOR.items()}
 _OPPOSITE = {"north": "south", "south": "north", "east": "west", "west": "east"}
+
+# Max distance between an underground belt's entry and exit, per tier. Queried
+# live against Factorio 2.0.77:
+#   /sc prototypes.entity[name].max_underground_distance
+# A span of N covers N-1 obstructed tiles, so yellow (5) tunnels under 4.
+UNDERGROUND_REACH = {
+    "transport-belt": 5,
+    "fast-transport-belt": 7,
+    "express-transport-belt": 9,
+    "turbo-transport-belt": 11,
+}
+
+
+def _tile(point: Point) -> tuple[int, int]:
+    return (math.floor(point[0]), math.floor(point[1]))
 
 
 def opposite(direction: str) -> str:
@@ -100,22 +116,89 @@ def bridge_chest_to_chest(
     ]
 
     route = choose_clear_l_route(belt_start, belt_end, belt_spacing, 1.0, blocked_tiles)
+    actions.extend(_belt_run(route, belt_type, blocked_tiles or set()))
+    return actions
+
+
+def _route_points(route: Sequence[Point]) -> list[tuple[Point, str, int]]:
+    """(tile, direction, leg index) along the route, corners appearing once.
+
+    A shared corner tile carries the direction of the leg it EXITS on, matching
+    how a real player-built belt corner is a single tile, not two.
+    """
+    points: list[tuple[Point, str, int]] = []
     for leg_index, (leg_start, leg_end) in enumerate(zip(route, route[1:])):
         direction = _leg_direction(leg_start, leg_end)
-        length = int(round(abs(leg_end[0] - leg_start[0]) + abs(leg_end[1] - leg_start[1])))
         vector = _FACING_TO_VECTOR[direction]
-        # Exclusive of the leg's start (already emitted by the previous leg, or
-        # is belt_start itself) so a shared corner tile is placed exactly once,
-        # carrying the direction of the leg it exits on -- matching how a real
-        # player-built belt corner is a single tile, not two.
-        first_step = 1 if leg_index > 0 else 0
-        for step in range(first_step, length + 1):
-            point = _add(leg_start, _scaled(vector, step))
+        length = int(round(abs(leg_end[0] - leg_start[0]) + abs(leg_end[1] - leg_start[1])))
+        for step in range(1 if leg_index > 0 else 0, length + 1):
+            points.append((_add(leg_start, _scaled(vector, step)), direction, leg_index))
+    return points
+
+
+def _belt_run(
+    route: Sequence[Point], belt_type: str, blocked: set[tuple[int, int]],
+) -> list[dict]:
+    """Surface belt over free ground, tunnelling under anything in the way.
+
+    `choose_clear_l_route` returns the route with the FEWEST collisions, not a
+    guaranteed-clear one, so a long cross-base run will still meet obstacles.
+    Rather than demand they be removed, each unbroken run of blocked tiles
+    becomes an underground-belt pair: entry on the last free tile before it,
+    exit on the first free tile after. The pair's span must fit the tier's
+    reach (live-verified UNDERGROUND_REACH), and a tunnel cannot turn, so a
+    blocked corner or a run too long to span is reported instead of silently
+    emitting a belt that cannot be built.
+    """
+    underground = belt_type.replace("transport-belt", "underground-belt")
+    reach = UNDERGROUND_REACH[belt_type]
+    points = _route_points(route)
+    actions: list[dict] = []
+    index = 0
+    while index < len(points):
+        point, direction, leg = points[index]
+        if _tile(point) not in blocked:
             actions.append({
                 "action_type": "place_ghost", "entity": belt_type,
                 "position": {"x": point[0], "y": point[1]}, "direction": direction,
             })
+            index += 1
+            continue
 
+        span_end = index
+        while span_end < len(points) and _tile(points[span_end][0]) in blocked:
+            span_end += 1
+        if index == 0 or span_end >= len(points):
+            raise ValueError(
+                f"Belt route is blocked at its {'start' if index == 0 else 'end'} "
+                f"({point}); a tunnel needs a free tile on both sides"
+            )
+        entry_point, entry_direction, entry_leg = points[index - 1]
+        exit_point, _, exit_leg = points[span_end]
+        if not (entry_leg == leg == exit_leg):
+            raise ValueError(
+                f"Blocked tiles at {point} sit on a corner of the belt route; an "
+                "underground belt cannot turn"
+            )
+        distance = int(round(abs(exit_point[0] - entry_point[0]) + abs(exit_point[1] - entry_point[1])))
+        if distance > reach:
+            raise ValueError(
+                f"Belt route needs a {distance}-tile tunnel at {entry_point}, beyond "
+                f"{underground}'s {reach}-tile reach; route around or use a higher tier"
+            )
+        # Replace the surface belt already emitted for the entry tile.
+        actions.pop()
+        actions.append({
+            "action_type": "place_ghost", "entity": underground,
+            "position": {"x": entry_point[0], "y": entry_point[1]},
+            "direction": entry_direction, "underground_type": "input",
+        })
+        actions.append({
+            "action_type": "place_ghost", "entity": underground,
+            "position": {"x": exit_point[0], "y": exit_point[1]},
+            "direction": entry_direction, "underground_type": "output",
+        })
+        index = span_end + 1
     return actions
 
 
