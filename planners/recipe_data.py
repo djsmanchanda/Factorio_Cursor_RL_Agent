@@ -25,6 +25,28 @@ LINE_RECIPES: Dict[str, dict] = {
         "machine": "assembling-machine-2", "ingredients": ["copper-plate", "iron-gear-wheel"],
         "amounts": [1, 1], "product_amount": 1, "craft_time": 5.0,
     },
+    # Logistic-science chain. Every field below is transcribed from the live
+    # player-force export (tests/fixtures/player_recipe_catalog.json) rather
+    # than from memory -- Factorio 2.0 Space Age recipes differ from 1.1, and
+    # tests/test_recipe_catalog_contract.py re-checks them against that export.
+    # transport-belt's category is "pressing" and electronic-circuit's is
+    # "electronics"; assembling-machine-2 supports both (verified live).
+    "transport-belt": {
+        "machine": "assembling-machine-2", "ingredients": ["iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
+    },
+    "inserter": {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1, 1], "product_amount": 1, "craft_time": 0.5,
+        # Three solid ingredients: the middle one rides the auxiliary corridor,
+        # which generate_line_layout only supports at index 1.
+        "auxiliary_ingredient_index": 1,
+    },
+    "logistic-science-pack": {
+        "machine": "assembling-machine-2", "ingredients": ["inserter", "transport-belt"],
+        "amounts": [1, 1], "product_amount": 1, "craft_time": 6.0,
+    },
     "advanced-circuit": {
         "machine": "assembling-machine-2",
         "ingredients": ["plastic-bar", "copper-cable", "electronic-circuit"],
