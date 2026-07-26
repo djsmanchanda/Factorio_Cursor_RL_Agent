@@ -10,11 +10,13 @@ from typing import Callable
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
-from planners.belt_bridge import DIRECTION_VECTORS, bridge_chest_to_chest, opposite
+from planners.belt_bridge import (
+    DIRECTION_VECTORS, UNDERGROUND_REACH, bridge_chest_to_chest, opposite,
+)
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import step_points
 from planners.local_layout_planner import LocalLayoutPlanner
-from planners.recipe_data import LINE_RECIPES
+from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
@@ -32,6 +34,19 @@ _ROBOPORT_LINK_DISTANCE = 46.0
 # How far outside the source->destination box to survey obstacles, so a route
 # has room to detour around something sitting right on the straight path.
 _BRIDGE_SURVEY_MARGIN = 24.0
+# How many of an ingredient a stage's requester chest asks for. Two full
+# assembler input stacks' worth: enough to ride out bot round-trip latency
+# without hoarding a scarce item in one chest.
+_LOGISTIC_REQUEST = 100
+# Ingredient demand (items/s) above which a link must be a belt rather than
+# logistic bots. Bots deliver roughly cargo-size per round trip, so their
+# throughput falls off with distance and is capped by the bot population; a
+# belt is constant-throughput at any length (yellow alone is 15 items/s).
+# Below this a requester chest is far cheaper -- one chest instead of a ~50
+# belt corridor -- which matters while belts are a scarce consumable. This is
+# a deliberate policy threshold, not a measured constant; raise it if bots are
+# plentiful, lower it once belt production is established.
+_BOT_THROUGHPUT_LIMIT = 3.0
 
 
 class StuckError(RuntimeError):
@@ -69,6 +84,42 @@ def _clear_side(chest: Point, preferred: str, blocked: set[tuple[int, int]]) -> 
     return preferred
 
 
+def _ingredient_demand(recipe: str, ingredient: str, machine_count: int) -> float:
+    """Items/second of `ingredient` a `machine_count`-machine stage consumes."""
+    spec = LINE_RECIPES[recipe]
+    crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+    amount = spec["amounts"][spec["ingredients"].index(ingredient)]
+    return amount * crafts_per_second
+
+
+def _transport_mode(recipe: str, ingredient: str, machine_count: int) -> str:
+    """"logistic" (requester chest, bots deliver) or "belt" (physical corridor).
+
+    Small demand does not justify a belt run across the base; large demand
+    cannot be served by bots at all. Chosen per ingredient, because one stage
+    can easily need a trickle of one input and a torrent of another.
+    """
+    demand = _ingredient_demand(recipe, ingredient, machine_count)
+    return "belt" if demand > _BOT_THROUGHPUT_LIMIT else "logistic"
+
+
+def choose_belt_tier(stock: dict[str, int], needed: int) -> str:
+    """Cheapest belt tier the base actually holds enough of.
+
+    _DEFAULT_BELT is only a preference. Picking a tier that is out of stock
+    places ghosts nothing can build, so availability decides; ties break toward
+    the slowest adequate tier, leaving faster belts for links that need them.
+    """
+    for tier in ("transport-belt", "fast-transport-belt", "express-transport-belt",
+                  "turbo-transport-belt"):
+        if stock.get(tier, 0) >= needed:
+            return tier
+    raise StuckError(
+        f"No belt tier has {needed} in stock (have: "
+        + ", ".join(f"{t}={stock.get(t, 0)}" for t in UNDERGROUND_REACH) + ")"
+    )
+
+
 def _mineable(recipe: str) -> bool:
     """True iff this recipe's sole ingredient is a raw resource (mined/pumped),
     not another LINE_RECIPES product -- i.e. it needs generate_mining_feed,
@@ -77,17 +128,84 @@ def _mineable(recipe: str) -> bool:
     return len(ingredients) == 1 and ingredients[0] not in LINE_RECIPES
 
 
-def _swap_infinity_chests(plan: dict) -> dict[str, Point]:
-    """Replace every infinity-chest feeder with a real steel-chest in place,
-    returning {ingredient_name: chest_position} for the caller to bridge."""
+def _swap_infinity_chests(
+    plan: dict, modes: dict[str, str], *, request_count: int = _LOGISTIC_REQUEST,
+) -> dict[str, Point]:
+    """Turn every infinity-chest feeder into a real REQUESTER chest asking for
+    its ingredient, so logistic bots deliver it.
+
+    The sandbox pipeline used infinity chests (an infinite cheat source); on a
+    real base the alternative is a physical belt from the upstream stage. A
+    stage-to-stage belt costs ~50 belts and has to route around everything
+    already built, while a requester costs one chest and no corridor at all --
+    which matters because belts are a consumable the base has to produce.
+    Returns {ingredient: chest_position}.
+    """
     positions: dict[str, Point] = {}
     for phase in plan["phases"]:
         for action in phase["actions"]:
             if action.get("entity") == "infinity-chest":
                 ingredient = action.pop("infinity_filter")
-                action["entity"] = "steel-chest"
+                if modes.get(ingredient, "logistic") == "logistic":
+                    action["entity"] = "requester-chest"
+                    action["logistic_request"] = {"name": ingredient, "count": request_count}
+                else:
+                    # Belt-fed: a plain chest the incoming belt unloads into.
+                    action["entity"] = "steel-chest"
                 positions[ingredient] = (action["position"]["x"], action["position"]["y"])
     return positions
+
+
+def _publish_output_chest(plan: dict) -> None:
+    """Make a stage's collection chest a passive provider, so its product is
+    visible to the logistic network and can be requested by downstream stages
+    (and by construction bots for building material)."""
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("entity") == "steel-chest":
+                action["entity"] = "passive-provider-chest"
+
+
+def _ghost_materials(plan: dict) -> dict[str, int]:
+    """Items construction bots must consume to revive this plan's ghosts.
+    place_entity actions are created directly and cost nothing."""
+    required: dict[str, int] = {}
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("action_type") == "place_ghost":
+                required[action["entity"]] = required.get(action["entity"], 0) + 1
+    return required
+
+
+def assert_affordable(
+    client: RconClient, surface: str, force: str, plan: dict, name: str,
+    emit: Callable[[str], None],
+) -> None:
+    """Refuse to place ghosts the base cannot pay for.
+
+    Without this the plan places fine and then stalls invisibly: the ghosts
+    exist, the bots have nothing to build them with, and the only symptom is a
+    stage that never comes up. Naming the exact shortfall turns that into an
+    actionable message -- and, once the builder can produce its own belts, into
+    a decision about what to make next.
+    """
+    required = _ghost_materials(plan)
+    if not required:
+        return
+    stock = live_base.available_items(client, surface, force)
+    short = {
+        item: count - stock.get(item, 0)
+        for item, count in required.items()
+        if stock.get(item, 0) < count
+    }
+    if short:
+        detail = ", ".join(f"{item}: need {required[item]}, short {missing}"
+                            for item, missing in sorted(short.items()))
+        raise StuckError(
+            f"{name} needs material the base does not have -- {detail}. "
+            "Produce it (or free some up) before this stage can be built."
+        )
+    emit(f"  {name}: material check ok ({sum(required.values())} ghost items in stock)")
 
 
 def _submit(
@@ -99,6 +217,7 @@ def _submit(
     retry. A collision with anything else means this exact placement is
     genuinely occupied -- raise so the caller picks a different spot instead
     of bulldozing real infrastructure."""
+    assert_affordable(client, surface, plan.get("force", "player"), plan, name, emit)
     authorization = build_layout_authorization([(name, plan)])
     for attempt in range(max_retries + 1):
         report = load_json(bridge.build_layout(authorization, plan))
@@ -328,6 +447,7 @@ def build_mining_stage(
         feed_style="chest", terminal_collector=True,
     )
     plan = strip_local_power(plan, remove_substations=False)
+    _publish_output_chest(plan)
     machine = LINE_RECIPES[recipe]["machine"]
     machine_positions = [
         (action["position"]["x"], action["position"]["y"])
@@ -381,7 +501,12 @@ def build_conversion_stage(
         feed_style="chest", terminal_collector=True,
     )
     plan = strip_local_power(plan, remove_substations=False)
-    feed_positions = _swap_infinity_chests(plan)
+    _publish_output_chest(plan)
+    modes = {
+        ingredient: _transport_mode(recipe, ingredient, machine_count)
+        for ingredient in LINE_RECIPES[recipe]["ingredients"]
+    }
+    feed_positions = _swap_infinity_chests(plan, modes)
     machine = LINE_RECIPES[recipe]["machine"]
     machine_positions = [
         (action["position"]["x"], action["position"]["y"])
@@ -396,14 +521,24 @@ def build_conversion_stage(
     plan["surface"], plan["force"] = surface, force
     _submit(client, bridge, surface, plan, f"conversion_{recipe}", emit)
 
-    for ingredient, feed_position in feed_positions.items():
+    unresolved = sorted(set(feed_positions) - set(ingredient_sources))
+    if unresolved:
+        raise StuckError(
+            f"{recipe} feeds on {unresolved}, which have no producing stage to supply them"
+        )
+    for ingredient in sorted(feed_positions):
+        feed_position = feed_positions[ingredient]
         source_position = ingredient_sources[ingredient]
-        direction = _toward(source_position, feed_position)
-        # Survey what is really in the corridor first. Without this the route
-        # is a naive L that happily runs through the upstream stage's own
-        # furnaces and any belt already crossing the base -- observed live.
-        # The two endpoints are excluded so the bridge can still attach to the
-        # chests it is supposed to connect.
+        if modes[ingredient] == "logistic":
+            # Bots carry it: the upstream chest is a passive provider and this
+            # one is a requester, so no corridor is built at all.
+            emit(f"  {recipe}: {ingredient} by logistic bots "
+                 f"({_ingredient_demand(recipe, ingredient, machine_count):.2f}/s, "
+                 f"provider at {source_position})")
+            continue
+        emit(f"  {recipe}: {ingredient} needs a belt "
+             f"({_ingredient_demand(recipe, ingredient, machine_count):.2f}/s exceeds "
+             f"the {_BOT_THROUGHPUT_LIMIT}/s bot limit)")
         blocked = live_base.occupied_tiles(
             client, surface,
             (min(source_position[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
@@ -415,12 +550,15 @@ def build_conversion_stage(
             (math.floor(source_position[0]), math.floor(source_position[1])),
             (math.floor(feed_position[0]), math.floor(feed_position[1])),
         }
-        exit_direction = _clear_side(source_position, direction, blocked)
-        entry_direction = _clear_side(feed_position, opposite(direction), blocked)
+        direction = _toward(source_position, feed_position)
+        span = int(abs(source_position[0] - feed_position[0])
+                   + abs(source_position[1] - feed_position[1])) + 4
+        belt_type = choose_belt_tier(live_base.available_items(client, surface, force), span)
         bridge_actions = bridge_chest_to_chest(
             source_position, feed_position,
-            exit_direction=exit_direction, entry_direction=entry_direction,
-            belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+            exit_direction=_clear_side(source_position, direction, blocked),
+            entry_direction=_clear_side(feed_position, opposite(direction), blocked),
+            belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
             blocked_tiles=blocked,
         )
         bridge_plan = {

@@ -110,6 +110,22 @@ local function configuration_error(entity, action, direction)
       end
     end
   end
+  if action.logistic_request then
+    -- Idempotency: an already-configured requester must report the SAME
+    -- request, otherwise a rerun would silently accept a chest asking for the
+    -- wrong item.
+    local ok, slot = pcall(function()
+      local sections = entity.get_logistic_sections()
+      local section = sections.sections[1]
+      return section and section.get_slot(1) or nil
+    end)
+    if not ok then return "logistic_request_read_failed" end
+    local name = slot and slot.value and (slot.value.name or slot.value)
+    if name ~= action.logistic_request.name then
+      return "logistic_request_mismatch:expected=" .. action.logistic_request.name
+        .. ",actual=" .. tostring(name)
+    end
+  end
   return nil
 end
 
@@ -137,6 +153,21 @@ local function configure_created_entity(entity, action)
       end)
     end
     if not ok then return "infinity_filter_set_failed" end
+  end
+  if action.logistic_request then
+    -- Factorio 2.0 logistic sections API, verified live on 2.0.77:
+    --   chest.get_logistic_sections() -> add_section() / sections[1]
+    --   section.set_slot(index, {value = <item>, min = <count>})
+    -- This is what lets a stage be fed by bots instead of a long belt run.
+    local ok = pcall(function()
+      local sections = entity.get_logistic_sections()
+      local section = sections.sections[1] or sections.add_section()
+      section.set_slot(1, {
+        value = action.logistic_request.name,
+        min = action.logistic_request.count,
+      })
+    end)
+    if not ok then return "logistic_request_set_failed" end
   end
   return nil
 end

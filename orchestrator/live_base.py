@@ -270,6 +270,34 @@ def occupied_tiles(
     return tiles
 
 
+def available_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
+    """Everything the force is holding in containers on this surface.
+
+    This is the real build budget: construction bots can only revive a ghost
+    from material that exists somewhere they can reach. Planning against an
+    item the base does not have produces ghosts that sit forever -- observed
+    live when fast-transport-belt ran to zero mid-build.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];local t={};"
+        "for _,c in pairs(s.find_entities_filtered{force=f,type={'container','logistic-container'}}) do "
+        "local inv=c.get_inventory(defines.inventory.chest);"
+        "if inv then for _,it in pairs(inv.get_contents()) do "
+        "t[it.name]=(t[it.name] or 0)+it.count end end end;"
+        "local o={};for n,c in pairs(t) do o[#o+1]=n..'='..c end;rcon.print(table.concat(o,','))"
+    )
+    raw = _sc(client, lua)
+    if not raw:
+        return {}
+    counts: dict[str, int] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        name, _, count = pair.partition("=")
+        counts[name] = int(count)
+    return counts
+
+
 def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) -> Point | None:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"

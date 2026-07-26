@@ -73,6 +73,16 @@
                 "recipe": {
                   "type": "string"
                 },
+                "logistic_request": {
+                  "type": "object",
+                  "description": "Logistic request set on a requester/buffer chest, so bots deliver an ingredient instead of a belt carrying it.",
+                  "required": ["name", "count"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": { "type": "string" },
+                    "count": { "type": "integer", "minimum": 1 }
+                  }
+                },
                 "infinity_filter": {
                   "type": "string"
                 },
