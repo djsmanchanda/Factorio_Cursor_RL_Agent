@@ -327,6 +327,71 @@ def extend_power(
     return True
 
 
+def extend_roboport_coverage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    target_position: Point, emit: Callable[[str], None],
+) -> bool:
+    """If `target_position` is beyond every existing roboport's construction
+    radius, chain new roboports out to it (each within link distance of the
+    previous one, ending within construction radius of the target). Returns
+    True if roboports were added (caller should re-check ghost completion),
+    False if coverage was already fine."""
+    nearest = live_base.nearest_roboport(client, surface, force, target_position)
+    if nearest is None:
+        return False
+    if math.dist(nearest, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
+        return False
+    emit(f"  roboport coverage gap: nearest roboport {nearest} is "
+         f"{math.dist(nearest, target_position):.0f} tiles from {target_position} "
+         f"(construction radius is {_ROBOPORT_CONSTRUCTION_RADIUS:.0f}) -- chaining roboports out")
+    step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
+    hops = step_points(nearest, target_position, step)
+    placed: list[Point] = []
+    for hop in hops:
+        placed.append(hop)
+        if math.dist(hop, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
+            break
+    actions = [
+        {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
+        for x, y in placed
+    ]
+    plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
+    _submit(client, bridge, surface, plan, "roboport_bridge", emit)
+    return True
+
+
+def bring_stage_up(
+    client: RconClient, bridge: GameBridge, surface: str, force: str, name: str,
+    origin: Point, area: tuple[Point, Point], substation_position: Point,
+    machine_positions: list[Point], emit: Callable[[str], None],
+) -> None:
+    """Get a freshly-placed stage physically alive: ghosts built, in roboport
+    range, and on the main power grid.
+
+    Runs BEFORE any inter-stage transport. Power and coverage repair used to
+    happen only after the transport step, so a transport failure left the stage
+    orphaned and unpowered -- observed live, where an aborted belt bridge left
+    a whole copper-cable stage on its own isolated electric network. A stage
+    that cannot be fed is still worth having up; one with no power is not.
+    """
+    remaining = _wait_for_ghosts(client, surface, force, area)
+    if remaining and extend_roboport_coverage(client, bridge, surface, force, origin, emit):
+        remaining = _wait_for_ghosts(client, surface, force, area)
+    if remaining:
+        raise StuckError(f"{name} still has {remaining} unbuilt ghosts after settling")
+    unpowered = [
+        position for position in machine_positions
+        if live_base.entity_status_name(client, surface, position) == "no_power"
+    ]
+    if unpowered and extend_power(client, bridge, surface, force, substation_position, emit):
+        still = [
+            position for position in machine_positions
+            if live_base.entity_status_name(client, surface, position) == "no_power"
+        ]
+        if still:
+            raise StuckError(f"{name} is still unpowered after bridging: {still}")
+
+
 def _mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
     """Centres emitted by LocalLayoutPlanner.generate_mining_feed()."""
     ox, oy = origin
