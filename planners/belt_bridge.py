@@ -123,16 +123,22 @@ def bridge_chest_to_chest(
 def _route_points(route: Sequence[Point]) -> list[tuple[Point, str, int]]:
     """(tile, direction, leg index) along the route, corners appearing once.
 
-    A shared corner tile carries the direction of the leg it EXITS on, matching
-    how a real player-built belt corner is a single tile, not two.
+    A belt tile faces the direction items LEAVE it in, so the corner tile must
+    carry the OUTGOING leg's direction: a tile facing east at the end of an
+    eastward leg runs items off the end instead of turning them south. Each leg
+    therefore emits start-inclusive, end-exclusive -- the corner belongs to the
+    leg that departs from it -- and the route's final tile is appended with the
+    last leg's direction.
     """
     points: list[tuple[Point, str, int]] = []
     for leg_index, (leg_start, leg_end) in enumerate(zip(route, route[1:])):
         direction = _leg_direction(leg_start, leg_end)
         vector = _FACING_TO_VECTOR[direction]
         length = int(round(abs(leg_end[0] - leg_start[0]) + abs(leg_end[1] - leg_start[1])))
-        for step in range(1 if leg_index > 0 else 0, length + 1):
+        for step in range(length):
             points.append((_add(leg_start, _scaled(vector, step)), direction, leg_index))
+    last_start, last_end = route[-2], route[-1]
+    points.append((tuple(last_end), _leg_direction(last_start, last_end), len(route) - 2))
     return points
 
 

@@ -97,6 +97,34 @@ def test_emitted_actions_validate_against_the_build_plan_schema() -> None:
     assert not list(Draft7Validator(SCHEMA).iter_errors(plan))
 
 
+def test_a_corner_faces_the_direction_items_leave_it_in() -> None:
+    """Found live: the corner tile carried the INCOMING leg's direction, so a
+    belt arriving eastbound stayed eastbound at the turn and ran items off the
+    end instead of sending them down the next leg."""
+    from planners.belt_bridge import _route_points
+
+    points = _route_points([(0.5, 0.5), (3.5, 0.5), (3.5, 2.5)])
+    facings = {tile: direction for tile, direction, _leg in points}
+    assert facings[(3.5, 0.5)] == "south", "corner must face the outgoing leg"
+    assert facings[(2.5, 0.5)] == "east", "the tile before the corner still runs east"
+    assert facings[(3.5, 2.5)] == "south"
+    # every tile appears exactly once -- a doubled corner would be two belts
+    assert len(points) == len({tile for tile, _d, _l in points})
+
+
+def test_every_belt_tile_feeds_into_the_next_one() -> None:
+    """End-to-end orientation check: following each belt's facing must land on
+    the next belt in the run, which is what makes items actually flow."""
+    from planners.belt_bridge import DIRECTION_VECTORS, _route_points
+
+    points = _route_points([(0.5, 0.5), (6.5, 0.5), (6.5, 4.5), (9.5, 4.5)])
+    for (tile, direction, _leg), (next_tile, _nd, _nl) in zip(points, points[1:]):
+        vx, vy = DIRECTION_VECTORS[direction]
+        assert (round(tile[0] + vx, 1), round(tile[1] + vy, 1)) == next_tile, (
+            f"belt at {tile} facing {direction} does not feed {next_tile}"
+        )
+
+
 def test_opposite_rejects_an_unknown_facing() -> None:
     assert opposite("north") == "south"
     with pytest.raises(ValueError):

@@ -327,53 +327,6 @@ def extend_power(
     return True
 
 
-def _repair_and_rediagnose(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    substation_position: Point, machine_positions: list[Point], stuck: list[tuple[Point, str]],
-    emit: Callable[[str], None],
-) -> list[tuple[Point, str]]:
-    """If the stuck reason is a real, fixable gap this builder knows how to
-    close (no_power so far), fix it and re-check; otherwise return `stuck`
-    as-is so the caller reports it plainly."""
-    if any(reason == "no_power" for _position, reason in stuck):
-        if extend_power(client, bridge, surface, force, substation_position, emit):
-            return _diagnose_machines(client, surface, machine_positions, emit)
-    return stuck
-
-
-def extend_roboport_coverage(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    target_position: Point, emit: Callable[[str], None],
-) -> bool:
-    """If `target_position` is beyond every existing roboport's construction
-    radius, chain new roboports out to it (each within link distance of the
-    previous one, ending within construction radius of the target). Returns
-    True if roboports were added (caller should re-check ghost completion),
-    False if coverage was already fine."""
-    nearest = live_base.nearest_roboport(client, surface, force, target_position)
-    if nearest is None:
-        return False
-    if math.dist(nearest, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
-        return False
-    emit(f"  roboport coverage gap: nearest roboport {nearest} is "
-         f"{math.dist(nearest, target_position):.0f} tiles from {target_position} "
-         f"(construction radius is {_ROBOPORT_CONSTRUCTION_RADIUS:.0f}) -- chaining roboports out")
-    step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
-    hops = step_points(nearest, target_position, step)
-    placed: list[Point] = []
-    for hop in hops:
-        placed.append(hop)
-        if math.dist(hop, target_position) <= _ROBOPORT_CONSTRUCTION_RADIUS:
-            break
-    actions = [
-        {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
-        for x, y in placed
-    ]
-    plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
-    _submit(client, bridge, surface, plan, "roboport_bridge", emit)
-    return True
-
-
 def _mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
     """Centres emitted by LocalLayoutPlanner.generate_mining_feed()."""
     ox, oy = origin
@@ -464,16 +417,9 @@ def build_mining_stage(
 
     length = machine_count * 3
     area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
-    remaining = _wait_for_ghosts(client, surface, force, area)
-    if remaining and extend_roboport_coverage(client, bridge, surface, force, (ox, oy), emit):
-        remaining = _wait_for_ghosts(client, surface, force, area)
-    if remaining:
-        raise StuckError(f"mining stage for {recipe} still has {remaining} unbuilt ghosts after settling")
+    bring_stage_up(client, bridge, surface, force, f"mining stage for {recipe}",
+                    (ox, oy), area, substation_position, machine_positions, emit)
     stuck = _diagnose_machines(client, surface, machine_positions, emit)
-    if stuck:
-        stuck = _repair_and_rediagnose(
-            client, bridge, surface, force, substation_position, machine_positions, stuck, emit,
-        )
     if stuck:
         raise StuckError(f"mining stage for {recipe} built but not healthy: {stuck}")
     return (ox + length + 1.5, oy + 6.5)
@@ -521,6 +467,11 @@ def build_conversion_stage(
     plan["surface"], plan["force"] = surface, force
     _submit(client, bridge, surface, plan, f"conversion_{recipe}", emit)
 
+    length = machine_count * 3
+    stage_area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
+    bring_stage_up(client, bridge, surface, force, f"conversion stage for {recipe}",
+                    (ox, oy), stage_area, substation_position, machine_positions, emit)
+
     unresolved = sorted(set(feed_positions) - set(ingredient_sources))
     if unresolved:
         raise StuckError(
@@ -567,19 +518,12 @@ def build_conversion_stage(
         }
         _submit(client, bridge, surface, bridge_plan, f"bridge_{ingredient}_to_{recipe}", emit)
 
-    length = machine_count * 3
     xs = [ox, ox + length, *(p[0] for p in ingredient_sources.values())]
-    area = ((min(xs) - 5, oy - 15), (max(xs) + 5, oy + 15))
-    remaining = _wait_for_ghosts(client, surface, force, area)
-    if remaining and extend_roboport_coverage(client, bridge, surface, force, (ox, oy), emit):
-        remaining = _wait_for_ghosts(client, surface, force, area)
+    transport_area = ((min(xs) - 5, oy - 15), (max(xs) + 5, oy + 15))
+    remaining = _wait_for_ghosts(client, surface, force, transport_area)
     if remaining:
-        raise StuckError(f"conversion stage for {recipe} still has {remaining} unbuilt ghosts after settling")
+        raise StuckError(f"{recipe} transport still has {remaining} unbuilt ghosts after settling")
     stuck = _diagnose_machines(client, surface, machine_positions, emit)
-    if stuck:
-        stuck = _repair_and_rediagnose(
-            client, bridge, surface, force, substation_position, machine_positions, stuck, emit,
-        )
     if stuck:
         # Bridges are the most likely remaining culprit for "built but not
         # fed": confirm each feed chest is actually receiving the ingredient
