@@ -203,7 +203,13 @@ def test_lua_contract_uses_planner_force_exact_idempotency_and_honest_counters()
     control = _lua_source()
 
     assert 'game.forces["player"]' not in control
-    assert "local function get_or_create_planner_force()" in control
+    # The helper gained an OPTIONAL force_name so the real-base builder can
+    # target an existing force (e.g. "player"); the sandbox contract this test
+    # guards is that calling it with NO argument still resolves to the isolated
+    # planner force, creating it when absent.
+    assert "local function get_or_create_planner_force(force_name)" in control
+    assert "local force = game.forces.planner" in control
+    assert 'force = game.create_force("planner")' in control
     assert "local function find_exact_entity(surface, force, name, position)" in control
     assert "force = force" in control
     assert "Managed infrastructure requires planner roboport at exact anchor" in control

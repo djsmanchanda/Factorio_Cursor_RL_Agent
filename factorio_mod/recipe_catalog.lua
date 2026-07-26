@@ -49,7 +49,11 @@ commands.add_command("export_recipe_catalog", "Export enabled recipes; optional 
   local recipes = {}
   local names = {}
   for name, recipe in pairs(force.recipes) do
-    if recipe.enabled then table.insert(names, name) end
+    -- Skip product-less entries: Factorio's blueprint-parameter placeholders
+    -- (parameter-0..9) and recipe-unknown are enabled but craft nothing, so
+    -- they can never contribute to a production chain and only break the
+    -- catalog's non-empty products contract.
+    if recipe.enabled and #recipe.products > 0 then table.insert(names, name) end
   end
   table.sort(names)
   for _, name in ipairs(names) do
@@ -81,6 +85,13 @@ commands.add_command("export_recipe_catalog", "Export enabled recipes; optional 
   table.sort(raw_resources)
   local payload = { version = "1.0.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes }
   local path = "factorio_mod/recipe_catalogs/recipe_catalog_" .. game.tick .. ".json"
-  helpers.write_file(path, helpers.table_to_json(payload), false)
+  local json = helpers.table_to_json(payload)
+  -- An EMPTY Lua table serialises to `{}` (object), not `[]` (array), so any
+  -- ingredient-less or product-less recipe (biter-egg, the parameter-N
+  -- placeholders) breaks schema validation. Same fix as layout_executor.lua
+  -- and live_execution.lua already apply to their own list fields.
+  json = json:gsub('"ingredients":{}', '"ingredients":[]')
+  json = json:gsub('"products":{}', '"products":[]')
+  helpers.write_file(path, json, false)
   rcon.print("recipe_catalog=" .. path)
 end)
