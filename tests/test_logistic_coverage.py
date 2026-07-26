@@ -8,12 +8,12 @@ import math
 import pytest
 
 from orchestrator import live_base
-from orchestrator.autonomous_builder import (
+from orchestrator.autonomous_builder import _diagnose_blockage
+from orchestrator.stage_services import (
     _LOGISTIC_CHEST_ENTITIES,
     _ROBOPORT_CONSTRUCTION_RADIUS,
     _ROBOPORT_LINK_DISTANCE,
     _ROBOPORT_LOGISTIC_RADIUS,
-    _diagnose_blockage,
     _logistic_chest_positions,
     ensure_logistic_coverage,
     extend_roboport_coverage,
@@ -162,7 +162,7 @@ def test_logistic_network_query_is_skipped_entirely_for_no_positions() -> None:
 def test_extend_roboport_coverage_ignores_the_gap_when_asked_about_construction(monkeypatch) -> None:
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(
-        "orchestrator.autonomous_builder._submit",
+        "orchestrator.stage_services._submit",
         lambda *a, **k: pytest.fail("construction coverage should be satisfied at 40 tiles"),
     )
     assert extend_roboport_coverage(
@@ -175,7 +175,7 @@ def test_ensure_logistic_coverage_places_a_roboport_for_a_stranded_chest(monkeyp
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "working")
     monkeypatch.setattr(
-        "orchestrator.autonomous_builder._submit",
+        "orchestrator.stage_services._submit",
         lambda _c, _b, _s, plan, *a, **k: submitted.append(plan) or {"ok": True},
     )
     assert ensure_logistic_coverage(
@@ -194,7 +194,7 @@ def test_ensure_logistic_coverage_places_a_roboport_for_a_stranded_chest(monkeyp
 def test_ensure_logistic_coverage_is_a_no_op_for_chests_already_served(monkeypatch) -> None:
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(
-        "orchestrator.autonomous_builder._submit",
+        "orchestrator.stage_services._submit",
         lambda *a, **k: pytest.fail("no roboport is needed inside the supply area"),
     )
     assert ensure_logistic_coverage(
