@@ -11,6 +11,14 @@ from typing import Callable
 from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
+from orchestrator.extraction_transport import planned_footprint_tiles, preflight_ingredient_transport
+from orchestrator.stage_extraction import (
+    LOCAL_MODE_MAX_LINK_TILES,
+    candidate_mining_origins as _candidate_mining_origins,
+    choose_mining_origin as _choose_mining_origin,
+    mining_drill_positions as _mining_drill_positions,
+    plan_local_extraction,
+)
 from orchestrator.stage_services import (
     StuckError, validate_builder_target,
     _BLOCKAGE_INTERVAL,
@@ -164,118 +172,86 @@ def bring_stage_up(
     )
 
 
-def _mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
-    """Centres emitted by LocalLayoutPlanner.generate_mining_feed()."""
-    ox, oy = origin
-    return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
-
-
-def _candidate_mining_origins(
-    preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
-) -> list[Point]:
-    """Integer line origins whose drill footprints can overlap the patch bbox."""
-    min_x = math.floor(patch_min[0]) - (3 * machine_count) + 1
-    max_x = math.floor(patch_max[0])
-    min_y = math.floor(patch_min[1]) + 1
-    max_y = math.floor(patch_max[1]) + 3
-    origins = [(float(x), float(y)) for x in range(min_x, max_x + 1) for y in range(min_y, max_y + 1)]
-    return sorted(origins, key=lambda point: (math.dist(point, preferred), point[1], point[0]))
-
-
-def _choose_mining_origin(
-    preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
-    area_is_clear: Callable[[Point, Point], bool], footprint_has_resource: Callable[[list[Point]], bool],
-) -> tuple[Point, int] | None:
-    """Find the nearest clear layout whose every drill can mine the target ore.
-
-    Reducing to one drill is an explicit capacity reduction only when the real
-    patch cannot support the default pair; it is safer than placing a dead drill.
-    """
-    for count in range(machine_count, 0, -1):
-        for origin in _candidate_mining_origins(preferred, patch_min, patch_max, count):
-            ox, oy = origin
-            if not area_is_clear((ox, oy - 5), (ox + (count * 3) + 12, oy + 7)):
-                continue
-            if footprint_has_resource(_mining_drill_positions(origin, count)):
-                return origin, count
-    return None
-
 def build_mining_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     reference_point: Point, emit: Callable[[str], None],
 ) -> Point:
-    """Mine + smelt/pump `recipe` (e.g. iron-plate, copper-plate) from real,
-    surveyed resource near `reference_point`. Returns the real output chest position."""
-    ore = LINE_RECIPES[recipe]["ingredients"][0]
-    found = live_base.nearest_resource(client, surface, ore, reference_point)
-    if found is None:
-        raise StuckError(f"No {ore} found within survey radius of {reference_point} -- "
-                          "cannot mine what isn't on the map")
-    nearest_tile, patch_min, patch_max = found
-    preferred_box = live_base.find_clear_area(
-        client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
-        (_DEFAULT_MACHINE_COUNT * 3) + 12, 12,
+    """Build ore-only extraction, then an independent off-ore smelting stage."""
+    try:
+        extraction = plan_local_extraction(
+            client, surface, force, recipe, reference_point, _DEFAULT_MACHINE_COUNT,
+            belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+        )
+    except ValueError as error:
+        raise StuckError(str(error)) from error
+    emit(
+        f"{extraction.drill_count} drill(s) feed {extraction.furnace_count} "
+        f"separate {recipe} furnace(s); mining productivity "
+        f"is +{extraction.mining_productivity_bonus:.0%}"
     )
-    if preferred_box is None:
-        raise StuckError(f"No clear staging area found near the {ore} patch at {nearest_tile}")
-    preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
-    selected = _choose_mining_origin(
-        preferred, patch_min, patch_max, _DEFAULT_MACHINE_COUNT,
-        lambda lower, upper: live_base.area_clear(client, surface, lower, upper),
-        lambda centres: live_base.drill_footprints_have_resource(client, surface, ore, centres),
-    )
-    if selected is None:
-        raise StuckError(f"No clear position near the {ore} patch at {nearest_tile} puts every drill on {ore}")
-    (ox, oy), machine_count = selected
-    ox, oy = int(ox), int(oy)
-    emit(f"mining stage for {recipe}: ore at {nearest_tile}, building at ({ox},{oy})")
 
-    planner = LocalLayoutPlanner()
-    plan = planner.generate_line_layout(
-        recipe, machine_count, ox, oy, mining_feed=True,
-        belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
-        feed_style="chest", terminal_collector=True,
-    )
-    plan = strip_local_power(plan, remove_substations=False)
-    _publish_output_chest(plan)
-    machine = LINE_RECIPES[recipe]["machine"]
-    machine_positions = [
-        (action["position"]["x"], action["position"]["y"])
-        for phase in plan["phases"] for action in phase["actions"]
-        if action["entity"] == machine
-    ]
-    substation_position = next(
-        (action["position"]["x"], action["position"]["y"])
-        for phase in plan["phases"] for action in phase["actions"]
-        if action["entity"] == "substation"
-    )
-    plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, f"mining_{recipe}", emit)
+    if extraction.build_plan is not None:
+        if extraction.mine_origin is None:
+            raise StuckError("new extraction plan has no mine origin")
+        ox, oy = extraction.mine_origin
+        plan = strip_local_power(extraction.build_plan, remove_substations=False)
+        _publish_output_chest(plan)
+        machine_positions = [
+            (action["position"]["x"], action["position"]["y"])
+            for phase in plan["phases"] for action in phase["actions"]
+            if action["entity"] == "electric-mining-drill"
+        ]
+        substation_position = next(
+            (action["position"]["x"], action["position"]["y"])
+            for phase in plan["phases"] for action in phase["actions"]
+            if action["entity"] == "substation"
+        )
+        plan["surface"], plan["force"] = surface, force
+        _submit(client, bridge, surface, plan, f"mining_{extraction.ore}", emit)
+        area = ((ox - 15, oy - 15), (extraction.ore_output[0] + 15, oy + 15))
+        bring_stage_up(
+            client, bridge, surface, force, f"mining stage for {extraction.ore}",
+            (ox, oy), area, substation_position, machine_positions, emit,
+            logistic_chest_positions=_logistic_chest_positions(plan),
+        )
+        stuck = _diagnose_machines(client, surface, machine_positions, emit)
+        if stuck:
+            raise StuckError(
+                f"mining stage for {extraction.ore} built but not healthy: {stuck}"
+            )
+    else:
+        emit(f"reusing existing {extraction.ore} mine at {extraction.ore_output}")
 
-    length = machine_count * 3
-    area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
-    bring_stage_up(client, bridge, surface, force, f"mining stage for {recipe}",
-                    (ox, oy), area, substation_position, machine_positions, emit,
-                    logistic_chest_positions=_logistic_chest_positions(plan))
-    stuck = _diagnose_machines(client, surface, machine_positions, emit)
-    if stuck:
-        raise StuckError(f"mining stage for {recipe} built but not healthy: {stuck}")
-    return (ox + length + 1.5, oy + 6.5)
-
+    return build_conversion_stage(
+        client, bridge, surface, force, recipe,
+        {extraction.ore: extraction.ore_output}, reference_point, emit,
+        placement_origin=extraction.smelter_origin,
+        machine_count=extraction.furnace_count,
+        max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+    )
 
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
+    *, placement_origin: Point | None = None,
+    machine_count: int = _DEFAULT_MACHINE_COUNT,
+    max_belt_route_tiles: int | None = None,
 ) -> Point:
     """Assemble `recipe` from its (already-producing) ingredients. Bridges each
     ingredient's real upstream output chest to this stage's real feed chest
     with a belt+inserter pair, using whichever side faces the source."""
-    machine_count = _DEFAULT_MACHINE_COUNT
     width = machine_count * 3
-    origin = live_base.find_clear_area(client, surface, reference_point, width + 12, 20)
-    if origin is None:
-        raise StuckError(f"No clear space found near {reference_point} for the {recipe} stage")
-    ox, oy = round(origin[0]), round(origin[1] + 5)
+    if placement_origin is None:
+        area = live_base.find_clear_area(
+            client, surface, reference_point, width + 12, 20
+        )
+        if area is None:
+            raise StuckError(
+                f"No clear space found near {reference_point} for the {recipe} stage"
+            )
+        ox, oy = round(area[0]), round(area[1] + 5)
+    else:
+        ox, oy = round(placement_origin[0]), round(placement_origin[1])
     emit(f"conversion stage for {recipe}: building at ({ox},{oy})")
 
     planner = LocalLayoutPlanner()
@@ -291,6 +267,27 @@ def build_conversion_stage(
         for ingredient in LINE_RECIPES[recipe]["ingredients"]
     }
     feed_positions = _swap_infinity_chests(plan, modes)
+    unresolved = sorted(set(feed_positions) - set(ingredient_sources))
+    if unresolved:
+        raise StuckError(
+            f"{recipe} feeds on {unresolved}, which have no producing stage to supply them"
+        )
+    preflighted: dict[str, tuple[list[dict], str]] = {}
+    if max_belt_route_tiles is not None:
+        planned_blocked = planned_footprint_tiles(plan)
+        for ingredient, feed_position in sorted(feed_positions.items()):
+            route = preflight_ingredient_transport(
+                client, surface, force, recipe, ingredient,
+                ingredient_sources[ingredient], feed_position, machine_count,
+                max_belt_route_tiles=max_belt_route_tiles,
+                additional_blocked=planned_blocked,
+            )
+            if route is not None:
+                preflighted[ingredient] = route
+                plan["phases"].append({
+                    "name": f"bridge_{ingredient}_to_{recipe}",
+                    "actions": route[0],
+                })
     machine = LINE_RECIPES[recipe]["machine"]
     machine_positions = [
         (action["position"]["x"], action["position"]["y"])
@@ -322,14 +319,16 @@ def build_conversion_stage(
                     logistic_chest_positions=logistic_chests)
 
     feed_delay = 0.0
-    unresolved = sorted(set(feed_positions) - set(ingredient_sources))
-    if unresolved:
-        raise StuckError(
-            f"{recipe} feeds on {unresolved}, which have no producing stage to supply them"
-        )
     for ingredient in sorted(feed_positions):
         feed_position = feed_positions[ingredient]
         source_position = ingredient_sources[ingredient]
+        if ingredient in preflighted:
+            route_actions, belt_type = preflighted[ingredient]
+            belt_tiles = sum(
+                1 for action in route_actions if "transport-belt" in action["entity"]
+            )
+            feed_delay = max(feed_delay, transit_seconds(belt_type, belt_tiles))
+            continue
         if modes[ingredient] == "logistic":
             # Bots carry it: the upstream chest is a passive provider and this
             # one is a requester, so no corridor is built at all.
@@ -360,7 +359,7 @@ def build_conversion_stage(
             exit_direction=_clear_side(source_position, direction, blocked),
             entry_direction=_clear_side(feed_position, opposite(direction), blocked),
             belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
-            blocked_tiles=blocked,
+            blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
         )
         bridge_plan = {
             "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": bridge_actions}],

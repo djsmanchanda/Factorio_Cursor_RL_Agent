@@ -88,6 +88,7 @@ def bridge_chest_to_chest(
     inserter_type: str = "fast-inserter",
     blocked_tiles: set[tuple[int, int]] | None = None,
     belt_spacing: float = 1.0,
+    max_route_tiles: int | None = None,
 ) -> list[dict]:
     """Real entities moving one item from `source_position` chest to `dest_position` chest.
 
@@ -133,6 +134,13 @@ def bridge_chest_to_chest(
     ]
 
     route = choose_clear_l_route(belt_start, belt_end, belt_spacing, 1.0, blocked_tiles)
+    route_tiles = len(_route_points(route))
+    if max_route_tiles is not None and route_tiles > max_route_tiles:
+        raise ValueError(
+            f"Generated belt route needs {route_tiles} tiles, beyond the "
+            f"{max_route_tiles}-tile local-mode limit; CityPlanner rail handoff "
+            "is required"
+        )
     actions.extend(_belt_run(route, belt_type, blocked_tiles or set()))
     return actions
 

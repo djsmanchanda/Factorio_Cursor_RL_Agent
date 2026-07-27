@@ -60,6 +60,16 @@ Local layouts may use belts and bots. Inter-block transport is rail-only once
 city rules apply. Deployed blocks are immutable; scaling adds blocks or
 replicates them rather than editing them in place.
 
+The current real-base extraction layout operates in local mode: drills plus a
+short ore egress remain on the resource patch, while the electric-furnace line
+gets an independent footprint whose full entity bounds and five-tile apron are
+live-checked as resource-free. Furnace count includes the force's measured
+mining-productivity bonus. Mine-to-smelter links are capped at 300 generated
+route tiles and preflighted before the smelter is submitted; a farther legal
+site fails closed for a future CityPlanner rail handoff rather than leaving a
+disconnected block. Built, ghosted, and partially constructed extraction
+stages are reconciled on retry. This is not City Mode.
+
 ## Observer, supervisor, and executor
 
 1. Observer exports state and computes deterministic metrics.

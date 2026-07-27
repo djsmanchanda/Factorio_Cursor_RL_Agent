@@ -292,6 +292,10 @@ Bad credentials and closed ports currently produce uncaught tracebacks from
 
 Repository Lua is not automatically loaded by a running server. Command registration and
 Lua changes require the intended mod deployment and a server restart/save reload.
+Python planner and orchestrator changes are different: redeploying the mod does
+not reload `tools/autonomous_run.py` or its imported modules. Stop the old
+autonomous process and start a new invocation from the intended repository
+revision before evaluating changed layout geometry.
 
 Do not copy/redeploy a mod, replace a mod folder, run `/server-save`, `/quit`, reset or
 reconcile state, or restart/launch a server without explicit user authorization. When

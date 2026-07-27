@@ -43,10 +43,13 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=0;local w=0;local pos={};"
-        "for _,e in pairs(s.find_entities_filtered{name='" + machine + "',force=f}) do "
+        "local machines=s.find_entities_filtered{name='" + machine + "',force=f};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
+        "if g.ghost_name=='" + machine + "' then table.insert(machines,g) end end;"
+        "for _,e in pairs(machines) do "
         "local ok,r=pcall(function() return e.get_recipe() end);"
         "if ok and r and r.name=='" + recipe + "' then n=n+1;"
-        "if e.status==defines.entity_status.working then w=w+1 end;"
+        "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
         "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
         "rcon.print(n..' '..w..' '..table.concat(pos,','))"
     )
@@ -115,37 +118,52 @@ def drill_footprints_have_resource(
     lua = "local s=game.surfaces['" + surface + "'];local out={};" + checks + ";rcon.print(table.concat(out,''))"
     return _sc(client, lua) == "1" * len(centres)
 
-def area_clear(client: RconClient, surface: str, min_point: Point, max_point: Point) -> bool:
-    """True iff no BUILDABLE-conflicting entities (any force, excluding ore/
-    resource patches -- a mining stage needs to stand ON ore, not avoid it;
-    Factorio itself only blocks placement on water, not on resource tiles)
-    and no water tiles occupy the box."""
+def area_clear(
+    client: RconClient, surface: str, min_point: Point, max_point: Point, *,
+    avoid_resources: bool = False, resource_clearance: float = 0.0,
+) -> bool:
+    """Whether a box is buildable, optionally with an ore-free apron."""
+    if resource_clearance < 0:
+        raise ValueError("resource_clearance cannot be negative")
+    resource_min = (
+        min_point[0] - resource_clearance, min_point[1] - resource_clearance,
+    )
+    resource_max = (
+        max_point[0] + resource_clearance, max_point[1] + resource_clearance,
+    )
+    resource_scan = (
+        "local resources=#s.find_entities_filtered{type='resource',area={{" +
+        str(resource_min[0]) + "," + str(resource_min[1]) + "},{" +
+        str(resource_max[0]) + "," + str(resource_max[1]) + "}}};"
+        if avoid_resources else "local resources=0;"
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];"
-        "local n=0;for _,e in pairs(s.find_entities_filtered{area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
-        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}}) do if e.type~='resource' then n=n+1 end end;"
+        "local n=0;for _,e in pairs(s.find_entities_filtered{area={{" +
+        str(min_point[0]) + "," + str(min_point[1]) + "},{" +
+        str(max_point[0]) + "," + str(max_point[1]) +
+        "}}}) do if e.type~='resource' then n=n+1 end end;" + resource_scan +
         "local bad_tiles=0;"
         "for x=" + str(math.floor(min_point[0])) + "," + str(math.ceil(max_point[0])) + " do "
         "for y=" + str(math.floor(min_point[1])) + "," + str(math.ceil(max_point[1])) + " do "
         "local t=s.get_tile(x,y);if not t.valid or t.name:find('water') then bad_tiles=bad_tiles+1 end end end;"
-        "rcon.print(n..' '..bad_tiles)"
+        "rcon.print(n..' '..bad_tiles..' '..resources)"
     )
-    entity_count, bad_tiles = (int(part) for part in _sc(client, lua).split())
-    return entity_count == 0 and bad_tiles == 0
+    counts = (int(part) for part in _sc(client, lua).split())
+    return all(count == 0 for count in counts)
 
 
 def find_clear_area(
     client: RconClient, surface: str, near: Point, width: float, height: float, *,
     max_radius: float = 200.0, step: float = 10.0,
+    avoid_resources: bool = False,
+    resource_clearance: float = 0.0,
 ) -> Point | None:
-    """Nearest clear box (as its min-corner) big enough for `width` x `height`,
-    searching outward from `near` in a deterministic expanding ring.
+    """Find the nearest deterministic clear box satisfying land reservations.
 
-    Entity occupancy for the WHOLE search region is fetched in a single query
-    and candidates are then scored locally: probing the server once per
-    candidate cost ~50ms each and up to 40 candidates per stage. Only the first
-    candidate that clears that local check pays for a terrain (water) probe,
-    since that one is per-tile and expensive server-side.
+    Entity occupancy for the whole search region is fetched once. Candidates
+    inside explicit forbidden rectangles are skipped, and production callers
+    may make resource entities blocking with ``avoid_resources``.
     """
     candidates: list[tuple[float, Point]] = []
     radius = 0.0
@@ -165,6 +183,7 @@ def find_clear_area(
     region_max = (max(c[0] for c in ordered) + width, max(c[1] for c in ordered) + height)
     occupied = occupied_tiles(client, surface, region_min, region_max)
     for candidate in ordered:
+        candidate_max = (candidate[0] + width, candidate[1] + height)
         box = {
             (x, y)
             for x in range(math.floor(candidate[0]), math.ceil(candidate[0] + width))
@@ -172,7 +191,11 @@ def find_clear_area(
         }
         if box & occupied:
             continue
-        if area_clear(client, surface, candidate, (candidate[0] + width, candidate[1] + height)):
+        if area_clear(
+            client, surface, candidate, candidate_max,
+            avoid_resources=avoid_resources,
+            resource_clearance=resource_clearance,
+        ):
             return candidate
     return None
 

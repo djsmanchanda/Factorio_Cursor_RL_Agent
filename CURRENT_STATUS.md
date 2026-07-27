@@ -331,3 +331,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added grounded structural chains for all 12 Space Age science packs, retained valid producer alternatives, exported locked recipes and environmental/asteroid inputs, and enforced pre-connection Nauvis scope and builder-readiness gates.
 - Why: Let the planner understand space and planetary dependencies without pretending probabilistic or off-world chains are currently executable.
 - Next: Redeploy/restart only with explicit approval, then export the player catalog to verify disabled recipes and environmental acquisition leaves against the live Factorio runtime.
+
+## [2026-07-27] Separate real-base extraction and smelting
+- Files: orchestrator/{autonomous_builder,extraction_state,extraction_transport,live_base,stage_extraction}.py, planners/belt_bridge.py, tests/{test_belt_bridge,test_extraction_separation}.py, docs/{planner_and_execution,31_factorio_mod_interaction_and_troubleshooting}.md
+- What: Replaced coupled mining lines with retry-reconciled ore-only extraction and independently sized, off-ore smelting; preflighted local transport before structural submission.
+- Why: Preserve ore land and expansion room, respect different drill/furnace rates, and prevent retries or over-limit routes from duplicating infrastructure.
+- Next: Restart the Python autonomous runner before testing; existing coupled stages remain grandfathered until an authorized shadow migration.

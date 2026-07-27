@@ -129,3 +129,17 @@ def test_opposite_rejects_an_unknown_facing() -> None:
     assert opposite("north") == "south"
     with pytest.raises(ValueError):
         opposite("sideways")
+
+
+def test_generated_detour_cannot_cross_the_local_mode_route_limit(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "planners.belt_bridge.choose_clear_l_route",
+        lambda *_args: [
+            (2.5, 0.5), (2.5, 20.5), (294.5, 20.5), (294.5, 0.5),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="CityPlanner rail handoff"):
+        _bridge(dest_position=(296.5, 0.5), max_route_tiles=300)
