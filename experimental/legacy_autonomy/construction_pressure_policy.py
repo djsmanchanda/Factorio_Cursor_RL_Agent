@@ -1,4 +1,4 @@
-# Path: core/construction_pressure_policy.py
+# Path: experimental/legacy_autonomy/construction_pressure_policy.py
 # Purpose: Deterministically derive construction pressure from ProgressState backlog.
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def compute_construction_pressure_signal(
     )
 
     if schema_path is None:
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         schema_path = repo_root / "schemas" / "construction_pressure.schema.json"
     _validate_schema(signal.to_dict(), schema_path, "ConstructionPressureSignal")
     return signal

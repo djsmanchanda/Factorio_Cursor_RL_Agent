@@ -1,4 +1,4 @@
-# Path: orchestrator/loop_daemon.py
+# Path: experimental/legacy_autonomy/loop_daemon.py
 # Purpose: Recurring sandbox expansion loop: observe -> project -> construct -> reconcile -> phase advance, until the build intent is satisfied.
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

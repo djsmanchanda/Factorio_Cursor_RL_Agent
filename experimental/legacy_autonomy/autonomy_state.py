@@ -1,4 +1,4 @@
-# Path: core/autonomy_state.py
+# Path: experimental/legacy_autonomy/autonomy_state.py
 # Purpose: Persist and reconcile deterministic autonomy phase progress atomically across restarts.
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Mapping
 from jsonschema import Draft7Validator
 
-_ROOT = Path(__file__).resolve().parents[1]
+_ROOT = Path(__file__).resolve().parents[2]
 _ALLOWED = {"pending": {"running"}, "running": {"verified", "failed"}, "failed": {"running"}, "verified": set()}
 
 def _validate(state: Mapping) -> None:

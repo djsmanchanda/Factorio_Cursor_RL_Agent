@@ -1,4 +1,4 @@
-# Path: core/zone_saturation_policy.py
+# Path: experimental/legacy_autonomy/zone_saturation_policy.py
 # Purpose: Deterministically map zone fill telemetry to expansion damping.
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def compute_zone_saturation_signal(
     if type(zone_fill_entries) is not list or len(zone_fill_entries) == 0:
         raise ValueError("zone_fill entries must be a non-empty array")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     if zone_fill_schema_path is None:
         zone_fill_schema_path = repo_root / "schemas" / "zone_fill.schema.json"
     if signal_schema_path is None:

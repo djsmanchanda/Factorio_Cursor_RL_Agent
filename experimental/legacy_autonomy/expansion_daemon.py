@@ -1,4 +1,4 @@
-# Path: orchestrator/expansion_daemon.py
+# Path: experimental/legacy_autonomy/expansion_daemon.py
 # Purpose: Autonomous expansion loop - measure the chain, diagnose bottlenecks, choose a catalog action, execute it, and log the transition for RL training.
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 

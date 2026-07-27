@@ -1,4 +1,4 @@
-# Path: core/material_supply_policy.py
+# Path: experimental/legacy_autonomy/material_supply_policy.py
 # Purpose: Deterministically derive material supply pressure for advisory confidence shaping.
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ def compute_material_supply_signal(
     )
 
     if schema_path is None:
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         schema_path = repo_root / "schemas" / "material_supply.schema.json"
     _validate_schema(signal.to_dict(), schema_path, "MaterialSupplySignal")
     return signal

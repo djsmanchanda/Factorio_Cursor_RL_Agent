@@ -1,4 +1,4 @@
-# Path: core/capacity_allocator.py
+# Path: experimental/legacy_autonomy/capacity_allocator.py
 # Purpose: Deterministically allocate conservative phase capacity to an expansion target.
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def allocate_phase_capacity(
     )
 
     if schema_path is None:
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         schema_path = repo_root / "schemas" / "capacity_allocation.schema.json"
     _validate_schema(allocation.to_dict(), schema_path, "CapacityAllocation")
     return allocation

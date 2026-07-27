@@ -1,4 +1,4 @@
-# Path: rl_advisor.py
+# Path: experimental/legacy_autonomy/rl_advisor.py
 # Purpose: Produce deterministic, non-authoritative RL action proposals from read-only observations.
 
 from __future__ import annotations
@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Optional
 
 from jsonschema import Draft7Validator
-from core.bot_capacity_policy import compute_bot_capacity_signal
-from core.capacity_allocator import CapacityAllocation, allocate_phase_capacity
-from core.construction_pressure_policy import compute_construction_pressure_signal
-from core.material_supply_policy import compute_material_supply_signal
-from core.target_selector import ExpansionTarget, select_expansion_target
-from core.zone_saturation_policy import compute_zone_saturation_signal
+from experimental.legacy_autonomy.bot_capacity_policy import compute_bot_capacity_signal
+from experimental.legacy_autonomy.capacity_allocator import CapacityAllocation, allocate_phase_capacity
+from experimental.legacy_autonomy.construction_pressure_policy import compute_construction_pressure_signal
+from experimental.legacy_autonomy.material_supply_policy import compute_material_supply_signal
+from experimental.legacy_autonomy.target_selector import ExpansionTarget, select_expansion_target
+from experimental.legacy_autonomy.zone_saturation_policy import compute_zone_saturation_signal
 
 
 @dataclass(frozen=True)
@@ -88,7 +88,7 @@ def propose_rl_action(
     observation_schema_path: Path | None = None,
     proposal_schema_path: Path | None = None,
 ) -> RLActionProposal:
-    repo_root = Path(__file__).resolve().parent
+    repo_root = Path(__file__).resolve().parents[2]
     if observation_schema_path is None:
         observation_schema_path = repo_root / "rl_observation.schema.json"
     if proposal_schema_path is None:
@@ -317,7 +317,7 @@ def main() -> int:
     import sys
 
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python rl_advisor.py <rl_observation.json> [seed]")
+        print("Usage: python -m experimental.legacy_autonomy.rl_advisor <rl_observation.json> [seed]")
         return 1
 
     observation_path = Path(sys.argv[1]).resolve()

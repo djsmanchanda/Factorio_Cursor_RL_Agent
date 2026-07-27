@@ -1,4 +1,4 @@
-# Path: core/bot_capacity_policy.py
+# Path: experimental/legacy_autonomy/bot_capacity_policy.py
 # Purpose: Deterministically derive bot capacity pressure from metrics summary.
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def compute_bot_capacity_signal(
     )
 
     if schema_path is None:
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         schema_path = repo_root / "schemas" / "bot_capacity.schema.json"
     _validate_schema(signal.to_dict(), schema_path, "BotCapacitySignal")
     return signal

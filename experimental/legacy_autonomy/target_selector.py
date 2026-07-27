@@ -1,4 +1,4 @@
-# Path: core/target_selector.py
+# Path: experimental/legacy_autonomy/target_selector.py
 # Purpose: Deterministically select a read-only expansion target from pressure telemetry.
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ def select_expansion_target(
     )
 
     if schema_path is None:
-        repo_root = Path(__file__).resolve().parents[1]
+        repo_root = Path(__file__).resolve().parents[2]
         schema_path = repo_root / "schemas" / "expansion_target.schema.json"
     _validate_schema(target.to_dict(), schema_path, "ExpansionTarget")
     return target

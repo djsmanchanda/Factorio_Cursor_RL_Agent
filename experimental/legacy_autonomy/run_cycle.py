@@ -1,4 +1,4 @@
-# Path: orchestrator/run_cycle.py
+# Path: experimental/legacy_autonomy/run_cycle.py
 # Purpose: Run one deterministic observe -> supervise -> plan (-> authorized ghost execution) cycle against a live game.
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
