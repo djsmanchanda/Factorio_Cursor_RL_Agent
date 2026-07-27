@@ -38,6 +38,19 @@ def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
     return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
 
 
+
+def existing_mine_service_geometry(
+    output: Point, drill_count: int,
+) -> tuple[Point, tuple[Point, Point], Point, list[Point]]:
+    """Reconstruct immutable direct-mine power/service geometry on retry."""
+    drills = [(output[0] - 4 - 3 * index, output[1] - 2)
+              for index in range(drill_count)]
+    first_x = min(position[0] for position in drills)
+    origin = (first_x - 1.5, output[1] - 0.5)
+    area = ((first_x - 15, output[1] - 15),
+            (output[0] + 15, output[1] + 15))
+    return origin, area, (first_x - 6, output[1] - 4), drills
+
 def candidate_mining_origins(
     preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
 ) -> list[Point]:

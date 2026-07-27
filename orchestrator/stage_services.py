@@ -12,7 +12,7 @@ from core.science_recipe_graph import validate_current_builder_target
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from planners.infrastructure import POLE_SPECS
-from planners.infrastructure_geometry import step_points
+from planners.infrastructure_geometry import distance, l_route, step_points
 from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
@@ -239,6 +239,40 @@ def _diagnose_machines(
     return stuck
 
 
+def _power_bridge_hops(
+    start: Point, end: Point, spacing: float, blocked: set[tuple[int, int]],
+) -> list[Point]:
+    """Shortest deterministic pole chain whose pole footprints avoid blockers."""
+    horizontal = l_route(start, end)
+    vertical = [start, (start[0], end[1]), end]
+    routes = [horizontal, vertical]
+    for offset in (-128, -64, -32, -16, 16, 32, 64, 128):
+        routes.extend((
+            [start, (start[0], start[1] + offset),
+             (end[0], start[1] + offset), end],
+            [start, (start[0] + offset, start[1]),
+             (start[0] + offset, end[1]), end],
+        ))
+
+    candidates = []
+    for route in routes:
+        route = [point for index, point in enumerate(route)
+                 if index == 0 or point != route[index - 1]]
+        hops: list[Point] = []
+        for leg_start, leg_end in zip(route, route[1:]):
+            hops.extend(step_points(leg_start, leg_end, spacing))
+        if hops and hops[-1] == end:
+            hops.pop()
+        hops = list(dict.fromkeys(hops))
+        collisions = sum((math.floor(x), math.floor(y)) in blocked for x, y in hops)
+        length = sum(distance(a, b) for a, b in zip(route, route[1:]))
+        candidates.append((collisions, length, tuple(route), hops))
+    collisions, _length, _route, hops = min(candidates, key=lambda item: item[:3])
+    if collisions:
+        raise ValueError("no resource-free, unobstructed power route is available")
+    return hops
+
+
 def extend_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near_position: Point, emit: Callable[[str], None],
@@ -257,10 +291,27 @@ def extend_power(
     target_position, target_name = target
     emit(f"  power gap found: network {own_network} at {near_position} is isolated from "
          f"{target_name} at {target_position} -- bridging with a pole chain")
-    # Conservative spacing (< medium-electric-pole's own 9-tile reach) so
-    # every hop connects regardless of what pole type sits at either end.
-    spacing = min(POLE_SPECS["medium-electric-pole"]["wire"] - 1, 8.0)
-    hops = step_points(target_position, near_position, spacing)[:-1]  # drop the dest, already a real pole
+    # The first hop is limited by the shorter endpoint reach (small poles
+    # reach only 7.5 tiles); later medium-pole hops inherit that safe spacing.
+    target_wire = POLE_SPECS.get(target_name, POLE_SPECS["medium-electric-pole"])["wire"]
+    spacing = min(POLE_SPECS["medium-electric-pole"]["wire"], target_wire) - 1
+    margin = 132.0
+    blocked = live_base.occupied_tiles(
+        client, surface,
+        (min(target_position[0], near_position[0]) - margin,
+         min(target_position[1], near_position[1]) - margin),
+        (max(target_position[0], near_position[0]) + margin,
+         max(target_position[1], near_position[1]) + margin),
+        include_resources=True,
+    )
+    blocked -= {
+        (math.floor(target_position[0]), math.floor(target_position[1])),
+        (math.floor(near_position[0]), math.floor(near_position[1])),
+    }
+    try:
+        hops = _power_bridge_hops(target_position, near_position, spacing, blocked)
+    except ValueError as error:
+        raise StuckError(f"power gap cannot be routed safely: {error}") from error
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")

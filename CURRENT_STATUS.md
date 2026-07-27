@@ -337,3 +337,9 @@ backfilled from git history because this file did not exist yet.
 - What: Replaced coupled mining lines with retry-reconciled ore-only extraction and independently sized, off-ore smelting; preflighted local transport before structural submission.
 - Why: Preserve ore land and expansion room, respect different drill/furnace rates, and prevent retries or over-limit routes from duplicating infrastructure.
 - Next: Restart the Python autonomous runner before testing; existing coupled stages remain grandfathered until an authorized shadow migration.
+
+## [2026-07-27] Ore-aware power remediation
+- Files: orchestrator/{live_base,stage_services}.py, tests/test_infrastructure.py
+- What: Routed emergency medium-pole chains around resource and occupied tiles while respecting the shorter endpoint pole reach.
+- Why: Separated extraction could place a stage across an ore patch from the grid, and the straight bridge repeatedly failed to energize it.
+- Next: Restart only the Python autonomous runner before an authorized retry; no mod redeploy is required.

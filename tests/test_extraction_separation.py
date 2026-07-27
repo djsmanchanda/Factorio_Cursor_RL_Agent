@@ -440,6 +440,7 @@ def test_pending_smelter_is_repaired_instead_of_duplicate_mining(monkeypatch) ->
     ) is None
 
 def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
+    serviced = []
     planned = LocalExtractionPlan(
         ore="iron-ore", mine_origin=None, drill_count=2, furnace_count=2,
         mining_productivity_bonus=0.0, smelter_origin=(85.0, 82.0),
@@ -455,8 +456,16 @@ def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
     monkeypatch.setattr(
         autonomous_builder, "build_conversion_stage", lambda *_a, **_k: (1.0, 2.0),
     )
+    monkeypatch.setattr(
+        autonomous_builder, "bring_stage_up",
+        lambda *_a, **_k: serviced.append((_a[4], _a[7], tuple(_a[8]))),
+    )
 
     assert autonomous_builder.build_mining_stage(
         object(), object(), "nauvis", "player", "iron-plate",
         (0.0, 0.0), lambda _message: None,
     ) == (1.0, 2.0)
+    assert serviced == [(
+        "existing mine for iron-ore", (5.5, 16.5),
+        ((14.5, 18.5), (11.5, 18.5)),
+    )]

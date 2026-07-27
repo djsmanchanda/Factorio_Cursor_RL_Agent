@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from orchestrator.stage_services import _power_bridge_hops
 from planners.electronics_block import _block_anchors, build_electronics_block
 from planners.electronics_world import load_electronics_world_spec
 from planners.infrastructure import (
@@ -325,3 +326,17 @@ def test_fluid_routing_is_split_and_layout_module_respects_file_limit() -> None:
     assert routing.exists()
     assert "def generate_fluid_chain_link" in routing.read_text(encoding="utf-8")
     assert len(layouts.read_text(encoding="utf-8").splitlines()) <= 500
+
+
+def test_power_bridge_detours_around_reserved_ore() -> None:
+    ore_tiles = {(x, 0) for x in range(1, 20)}
+
+    hops = _power_bridge_hops((0.0, 0.0), (24.0, 0.0), 6.5, ore_tiles)
+
+    assert hops
+    assert not {(int(x // 1), int(y // 1)) for x, y in hops} & ore_tiles
+    chain = [(0.0, 0.0), *hops, (24.0, 0.0)]
+    assert all(
+        ((right[0] - left[0]) ** 2 + (right[1] - left[1]) ** 2) ** 0.5 <= 7.5
+        for left, right in zip(chain, chain[1:])
+    )

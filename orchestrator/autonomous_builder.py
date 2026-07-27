@@ -13,7 +13,7 @@ from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
 from orchestrator.extraction_transport import planned_footprint_tiles, preflight_ingredient_transport
 from orchestrator.stage_extraction import (
-    LOCAL_MODE_MAX_LINK_TILES,
+    LOCAL_MODE_MAX_LINK_TILES, existing_mine_service_geometry,
     candidate_mining_origins as _candidate_mining_origins,
     choose_mining_origin as _choose_mining_origin,
     mining_drill_positions as _mining_drill_positions,
@@ -221,7 +221,9 @@ def build_mining_stage(
             )
     else:
         emit(f"reusing existing {extraction.ore} mine at {extraction.ore_output}")
-
+        origin, area, substation_position, machines = existing_mine_service_geometry(extraction.ore_output, extraction.drill_count)
+        bring_stage_up(client, bridge, surface, force, f"existing mine for {extraction.ore}", origin,
+                       area, substation_position, machines, emit, logistic_chest_positions=[extraction.ore_output])
     return build_conversion_stage(
         client, bridge, surface, force, recipe,
         {extraction.ore: extraction.ore_output}, reference_point, emit,
@@ -229,7 +231,6 @@ def build_mining_stage(
         machine_count=extraction.furnace_count,
         max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
     )
-
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],

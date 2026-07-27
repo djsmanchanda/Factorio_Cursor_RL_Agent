@@ -290,20 +290,22 @@ def nearest_pole_on_other_network(
 
 def occupied_tiles(
     client: RconClient, surface: str, min_point: Point, max_point: Point,
+    *, include_resources: bool = False,
 ) -> set[tuple[int, int]]:
-    """Every tile index inside the box that a route may not occupy: any built
-    entity or ghost of ANY force, plus water. Resource tiles are excluded --
-    belts and pipes run over ore perfectly well, and treating a patch as solid
-    would wall off whole corridors.
+    """Every tile index inside the box that a route may not occupy.
+
+    Resources stay traversable for belts/pipes by default. Power remediation
+    opts in because pole footprints must not consume reserved mining land.
 
     This is what turns a naive L-route into one that goes around real
     infrastructure instead of demanding it be bulldozed.
     """
+    resource_check = "" if include_resources else "e.type~='resource' and "
     lua = (
         "local s=game.surfaces['" + surface + "'];local out={};"
         "for _,e in pairs(s.find_entities_filtered{area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}}) do "
-        "if e.type~='resource' and e.type~='character' then "
+        "if " + resource_check + "e.type~='character' then "
         "local b=e.bounding_box;"
         "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
         "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
