@@ -53,6 +53,22 @@ def _row_pole_positions(
     return positions
 
 
+def even_size_center(x: float, y: float) -> dict:
+    """Snap a 2x2 entity's centre onto the tile grid the game will accept.
+
+    An even-sized body (substation, electric-energy-interface) centres on a tile
+    BOUNDARY, so its centre must be integral; odd-sized bodies centre on tile
+    middles and are the reason row geometry here is built on .5 coordinates.
+    Emitting a .5 centre for a 2x2 does not fail -- the game silently relocates
+    it by up to 0.707 tiles on creation, and every later lookup by the planned
+    position then misses the entity that was actually built. Observed live: a
+    mine substation planned at (50.5, 23.5) was created at (51, 24), so the
+    unpowered-machine remedy could not find its own substation and did nothing
+    for six rounds.
+    """
+    return {"x": float(round(x)), "y": float(round(y))}
+
+
 def _power_scaffold(
     anchor: tuple[float, float], entity: str = "electric-mining-drill", last_x: float | None = None,
     include_row_poles: bool = True, include_energy_interface: bool = True,
@@ -61,10 +77,10 @@ def _power_scaffold(
     poles = _row_pole_positions(anchor, entity, last_x if last_x is not None else x)
     scaffold = ([
         {"action_type": "place_entity", "entity": "electric-energy-interface",
-         "position": {"x": x - 8, "y": y}},
+         "position": even_size_center(x - 8, y)},
     ] if include_energy_interface else []) + [
         {"action_type": "place_entity", "entity": "substation",
-         "position": {"x": x - 4, "y": y}},
+         "position": even_size_center(x - 4, y)},
     ]
     return scaffold + ([
         {"action_type": "place_ghost", "entity": ROW_POLE,
@@ -115,8 +131,12 @@ def generate_direct_mining_to_chest(
     output_chest: tuple[float, float],
     belt_type: str = "fast-transport-belt",
     inserter_type: str = "fast-inserter",
+    *,
+    output_side: str = "east",
+    reserved_pair_columns: int = 0,
+    prebuilt_pair_columns: int = 0,
 ) -> dict:
-    """Mine a surveyed solid resource directly into one real steel chest.
+    """Mine onto a continuous belt with a side-tapped real steel chest.
 
     Drills are deliberately south-facing and share their output row. This is
     the smallest real-base raw-resource primitive: it uses no infinity source
@@ -127,8 +147,14 @@ def generate_direct_mining_to_chest(
         raise ValueError("Direct mine needs supplied drill coordinates")
     if belt_type not in BELT_TIERS:
         raise ValueError(f"Unknown belt tier: {belt_type}")
-    if inserter_type not in {"fast-inserter", "bulk-inserter", "stack-inserter"}:
+    if inserter_type not in {"inserter", "fast-inserter", "bulk-inserter", "stack-inserter"}:
         raise ValueError(f"Unknown inserter tier: {inserter_type}")
+    if output_side not in {"east", "west"}:
+        raise ValueError(f"Unknown mine output side: {output_side}")
+    if reserved_pair_columns < 0 or prebuilt_pair_columns < 0:
+        raise ValueError("reserved and prebuilt pair columns cannot be negative")
+    if prebuilt_pair_columns > reserved_pair_columns:
+        raise ValueError("prebuilt_pair_columns cannot exceed the reserved corridor")
 
     drills = sorted(drill_positions)
     first_x, drill_y = drills[0]
@@ -138,16 +164,28 @@ def generate_direct_mining_to_chest(
     chest_x, chest_y = output_chest
     if not isclose(chest_y, belt_y):
         raise ValueError("Output chest must sit on the drills' south output row")
-    belt_end_x = chest_x - 2
-    if belt_end_x < max(x for x, _ in drills):
-        raise ValueError("Output chest needs a belt endpoint east of every drill")
-    belt_length = belt_end_x - first_x
+    last_x = max(x for x, _ in drills)
+    if output_side == "east":
+        belt_start_x = first_x
+        belt_end_x = chest_x
+        if belt_end_x < last_x:
+            raise ValueError("Output tap needs a belt endpoint east of every drill")
+        terminal_inserter_x, belt_direction = chest_x - 1, "east"
+    else:
+        belt_start_x = chest_x
+        # Only the affordable part of the reserved corridor is paved now.
+        belt_end_x = last_x + 2 + 3 * prebuilt_pair_columns
+        if belt_start_x > first_x:
+            raise ValueError("Output tap needs a belt endpoint west of every drill")
+        terminal_inserter_x, belt_direction = chest_x + 1, "west"
+    belt_length = belt_end_x - belt_start_x
     if not isclose(belt_length, round(belt_length)):
         raise ValueError("Output chest must be tile-aligned with the drill belt")
 
     belts = [
         {"action_type": "place_ghost", "entity": belt_type,
-         "position": {"x": first_x + step, "y": belt_y}, "direction": "east"}
+         "position": {"x": belt_start_x + step, "y": belt_y},
+         "direction": belt_direction}
         for step in range(round(belt_length) + 1)
     ]
     mine_actions = [
@@ -156,20 +194,141 @@ def generate_direct_mining_to_chest(
         for x, y in drills
     ] + belts + [
         {"action_type": "place_ghost", "entity": inserter_type,
-         "position": {"x": chest_x - 1, "y": chest_y}, "direction": "west"},
+         "position": {"x": chest_x, "y": chest_y - 1},
+         "direction": "south"},
         {"action_type": "place_ghost", "entity": "steel-chest",
-         "position": {"x": chest_x, "y": chest_y}},
+         "position": {"x": chest_x, "y": chest_y - 2}},
     ]
+    # The row poles are positioned for the DRILL row and their supply area stops
+    # short of the output row four tiles south, leaving the inserter that loads
+    # the chest unpowered. The drills then read as healthy while the belt backs
+    # up and the provider chest never fills -- and because an inserter is not a
+    # "machine", nothing in the stage health check noticed. One pole beside the
+    # inserter covers the output row; it stays inside the last row pole's wire
+    # reach so the whole mine remains one connected chain.
+    anchor = (first_x - 2, belt_y - 4)
+    row_poles = _row_pole_positions(
+        anchor, "electric-mining-drill", max(x for x, _ in drills),
+    )
+    output_pole = (terminal_inserter_x, chest_y + 2)
+    reach = min(
+        ((output_pole[0] - pole_x) ** 2 + (output_pole[1] - pole_y) ** 2) ** 0.5
+        for pole_x, pole_y in row_poles
+    )
+    if reach > POLE_SPECS[ROW_POLE]["wire"]:
+        raise ValueError(
+            f"Output-row pole at {output_pole} is {reach:.2f} tiles from the nearest "
+            f"row pole, past {ROW_POLE}'s {POLE_SPECS[ROW_POLE]['wire']}-tile wire reach"
+        )
     plan = {"phases": [
         {"name": "direct_mine_power", "actions": _power_scaffold(
-            (first_x - 2, belt_y - 4), "electric-mining-drill", max(x for x, _ in drills),
+            anchor, "electric-mining-drill", max(x for x, _ in drills),
             include_energy_interface=False,
-        )},
+        ) + [
+            {"action_type": "place_ghost", "entity": ROW_POLE,
+             "position": {"x": output_pole[0], "y": output_pole[1]}},
+        ]},
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
     validate_build_plan(plan)
     return plan
 
+
+def generate_direct_mine_row_expansion(
+    drill_positions: list[tuple[float, float]],
+    shared_belt_y: float,
+) -> dict:
+    """Add a north-facing drill row that drops onto an existing belt."""
+    if not drill_positions:
+        raise ValueError("Mine expansion needs drill positions")
+    drills = sorted(drill_positions)
+    if any(not isclose(y - 2, shared_belt_y) for _, y in drills):
+        raise ValueError("North-facing expansion drills must output onto shared_belt_y")
+    first_x = min(x for x, _ in drills)
+    last_x = max(x for x, _ in drills)
+    anchor = (first_x - 2, drills[0][1] + 4)
+    plan = {"phases": [
+        {"name": "direct_mine_expansion_power", "actions": _power_scaffold(
+            anchor, "electric-mining-drill", last_x,
+            include_energy_interface=False,
+        )},
+        {"name": "direct_mine_expansion", "actions": [
+            {"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": x, "y": y}, "direction": "north"}
+            for x, y in drills
+        ]},
+    ]}
+    validate_build_plan(plan)
+    return plan
+
+def generate_shared_belt_column_expansion(
+    drill_x: float,
+    shared_belt_y: float,
+    belt_type: str = "fast-transport-belt",
+    *,
+    include_belt: bool = True,
+    belt_direction: str = "east",
+) -> dict:
+    """Add one north/south drill pair, optionally extending its shared belt."""
+    if belt_type not in BELT_TIERS:
+        raise ValueError(f"Unknown belt tier: {belt_type}")
+    if belt_direction not in {"east", "west"}:
+        raise ValueError(f"Unknown belt direction: {belt_direction}")
+    belt_actions = [
+        {"action_type": "place_ghost", "entity": belt_type,
+         "position": {"x": drill_x + step, "y": shared_belt_y},
+         "direction": belt_direction}
+        for step in range(3)
+    ] if include_belt else []
+    plan = {"phases": [
+        {"name": "shared_belt_column_power", "actions": [
+            {"action_type": "place_ghost", "entity": ROW_POLE,
+             "position": {"x": drill_x, "y": shared_belt_y - 4}},
+            {"action_type": "place_ghost", "entity": ROW_POLE,
+             "position": {"x": drill_x, "y": shared_belt_y + 4}},
+        ]},
+        {"name": "shared_belt_column", "actions": [
+            {"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": drill_x, "y": shared_belt_y - 2}, "direction": "south"},
+            {"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": drill_x, "y": shared_belt_y + 2}, "direction": "north"},
+            *belt_actions,
+        ]},
+    ]}
+    validate_build_plan(plan)
+    return plan
+
+def generate_shared_belt_batch_expansion(
+    drill_xs: list[float], shared_belt_y: float, *,
+    belt_direction: str = "west",
+) -> dict:
+    """Populate reserved drill columns and only their required belt tiles."""
+    if not drill_xs:
+        raise ValueError("Batch mine expansion needs at least one drill column")
+    if belt_direction not in {"east", "west"}:
+        raise ValueError(f"Unknown belt direction: {belt_direction}")
+    columns = sorted(set(drill_xs))
+    step = 1 if belt_direction == "west" else -1
+    plan = {"phases": [
+        {"name": "shared_belt_batch_power", "actions": [
+            {"action_type": "place_ghost", "entity": ROW_POLE,
+             "position": {"x": x, "y": shared_belt_y + dy}}
+            for x in columns for dy in (-4, 4)
+        ]},
+        {"name": "shared_belt_batch", "actions": [
+            {"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": x, "y": shared_belt_y + dy},
+             "direction": direction}
+            for x in columns for dy, direction in ((-2, "south"), (2, "north"))
+        ] + [
+            {"action_type": "place_ghost", "entity": "fast-transport-belt",
+             "position": {"x": x + step * offset, "y": shared_belt_y},
+             "direction": belt_direction}
+            for x in columns for offset in range(3)
+        ]},
+    ]}
+    validate_build_plan(plan)
+    return plan
 
 def _fluid_resource_plan(
     kind: str,

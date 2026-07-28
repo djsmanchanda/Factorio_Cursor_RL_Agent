@@ -7,10 +7,15 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from orchestrator import extraction_state, live_base
+from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
-from planners.resource_layouts import generate_direct_mining_to_chest
+from planners.resource_layouts import (
+    generate_direct_mine_row_expansion,
+    generate_shared_belt_batch_expansion,
+    generate_shared_belt_column_expansion,
+    generate_direct_mining_to_chest,
+)
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.zoning_geometry import MINING_APRON_TILES, Rect
 from tools.rcon_client import RconClient
@@ -18,6 +23,8 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
 LOCAL_MODE_MAX_LINK_TILES = 300.0
+RESERVED_ADDITIONAL_DRILLS = 20
+RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 
 
 @dataclass(frozen=True)
@@ -30,6 +37,13 @@ class LocalExtractionPlan:
     smelter_origin: Point
     ore_output: Point
     build_plan: dict | None
+    expansion_positions: tuple[Point, ...] = ()
+    row_drill_count: int = 0
+    expansion_step: int = -1
+    system_drill_count_before: int = 0
+    system_drill_target: int = 0
+    shared_belt_y: float | None = None
+    smelter_flow_direction: str = "east"
 
 
 def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
@@ -37,19 +51,56 @@ def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
     ox, oy = origin
     return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
 
+def paired_mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
+    """Three-above/belt/three-below geometry for a complete mine unit."""
+    upper = mining_drill_positions(origin, machine_count)
+    belt_y = origin[1] + 0.5
+    return upper + [(x, belt_y + 2) for x, _ in upper]
 
 
 def existing_mine_service_geometry(
-    output: Point, drill_count: int,
+    output: Point, drill_count: int, expansion_step: int = -1, *,
+    shared_belt_y: float | None = None,
 ) -> tuple[Point, tuple[Point, Point], Point, list[Point]]:
     """Reconstruct immutable direct-mine power/service geometry on retry."""
-    drills = [(output[0] - 4 - 3 * index, output[1] - 2)
-              for index in range(drill_count)]
-    first_x = min(position[0] for position in drills)
-    origin = (first_x - 1.5, output[1] - 0.5)
-    area = ((first_x - 15, output[1] - 15),
-            (output[0] + 15, output[1] + 15))
-    return origin, area, (first_x - 6, output[1] - 4), drills
+    belt_y = output[1] if shared_belt_y is None else shared_belt_y
+    upper = [(output[0] + expansion_step * (4 + 3 * index), belt_y - 2)
+             for index in range(drill_count)]
+    drills = upper + [(x, belt_y + 2) for x, _ in upper]
+    first_x = min(position[0] for position in upper)
+    last_x = max(position[0] for position in upper)
+    origin = (first_x - 1.5, belt_y - 0.5)
+    area = ((min(first_x, output[0]) - 15, belt_y - 15),
+            (max(last_x, output[0]) + 15, belt_y + 15))
+    return origin, area, (first_x - 6, belt_y - 4), drills
+
+def adjacent_mining_positions(
+    output: Point, drill_count: int, expansion_step: int = -1,
+) -> list[Point]:
+    """Mirror the primary south-facing row below its shared output belt."""
+    return sorted([
+        (output[0] + expansion_step * (4 + 3 * index), output[1] + 2)
+        for index in range(drill_count)
+    ])
+
+
+def adjacent_mine_row_state(
+    client: RconClient, surface: str, output: Point, drill_count: int,
+    expansion_step: int = -1,
+) -> str:
+    """Return missing, complete, or partial for the deterministic second row."""
+    entities = [
+        live_base.entity_at(client, surface, position)
+        for position in adjacent_mining_positions(output, drill_count, expansion_step)
+    ]
+    drills = [entity is not None and entity["name"] == "electric-mining-drill"
+              for entity in entities]
+    if all(drills):
+        return "complete"
+    if any(entity is not None for entity in entities):
+        return "partial"
+    return "missing"
+
 
 def candidate_mining_origins(
     preferred: Point, patch_min: Point, patch_max: Point, machine_count: int,
@@ -76,21 +127,47 @@ def choose_mining_origin(
     machine_count: int,
     area_is_clear: Callable[[Point, Point], bool],
     footprint_has_resource: Callable[[list[Point]], bool],
+    reserved_pair_columns: int = 0,
 ) -> tuple[Point, int] | None:
-    """Choose a clear row whose every drill can mine, reducing capacity safely."""
-    for count in range(machine_count, 0, -1):
-        for origin in candidate_mining_origins(
-            preferred, patch_min, patch_max, count
+    """Choose a complete paired row; never shrink below requested capacity."""
+    for origin in candidate_mining_origins(
+        preferred, patch_min, patch_max, machine_count
+    ):
+        ox, oy = origin
+        total_columns = machine_count + reserved_pair_columns
+        if not area_is_clear(
+            (ox - 6, oy - 5), (ox + total_columns * 3 + 4, oy + 7)
         ):
-            ox, oy = origin
-            if not area_is_clear(
-                (ox, oy - 5), (ox + (count * 3) + 12, oy + 7)
-            ):
-                continue
-            if footprint_has_resource(mining_drill_positions(origin, count)):
-                return origin, count
+            continue
+        if footprint_has_resource(
+            paired_mining_drill_positions(origin, total_columns)
+        ):
+            return origin, machine_count
     return None
 
+def _supported_pair_reserve(
+    origin: Point,
+    row_drill_count: int,
+    maximum: int,
+    area_is_clear: Callable[[Point, Point], bool],
+    footprint_has_resource: Callable[[list[Point]], bool],
+) -> int:
+    """Largest contiguous future corridor supported by this exact patch slice."""
+    ox, oy = origin
+    low, high, best = 0, maximum, 0
+    while low <= high:
+        candidate = (low + high) // 2
+        total_columns = row_drill_count + candidate
+        fits = area_is_clear(
+            (ox - 6, oy - 5), (ox + total_columns * 3 + 4, oy + 7),
+        ) and footprint_has_resource(
+            paired_mining_drill_positions(origin, total_columns)
+        )
+        if fits:
+            best, low = candidate, candidate + 1
+        else:
+            high = candidate - 1
+    return best
 
 def direct_mine_plan(
     origin: Point,
@@ -98,18 +175,77 @@ def direct_mine_plan(
     *,
     belt_type: str,
     inserter_type: str,
+    reserved_pair_columns: int = RESERVED_PAIR_COLUMNS,
+    prebuilt_pair_columns: int = 0,
 ) -> tuple[dict, Point]:
-    """Return an ore-only drill/egress plan and its collection chest."""
+    """Return a paired mine start with its measured future corridor reserved."""
     ox, oy = origin
-    drills = mining_drill_positions(origin, machine_count)
-    output = (ox + machine_count * 3 + 2.5, oy + 0.5)
-    return (
-        generate_direct_mining_to_chest(
-            drills, output, belt_type=belt_type, inserter_type=inserter_type
-        ),
-        output,
+    upper = mining_drill_positions(origin, machine_count)
+    belt_anchor = (ox - 2.5, oy + 0.5)
+    # The provider is a low-priority sample from the through belt. A fast
+    # inserter starves downstream consumers until the chest fills.
+    inserter_type = "inserter"
+    plan = generate_direct_mining_to_chest(
+        upper, belt_anchor, belt_type=belt_type, inserter_type=inserter_type,
+        output_side="west", reserved_pair_columns=reserved_pair_columns,
+        prebuilt_pair_columns=prebuilt_pair_columns,
     )
+    lower = [(x, belt_anchor[1] + 2) for x, _ in upper]
+    mirrored = generate_direct_mine_row_expansion(lower, belt_anchor[1])
+    plan["phases"].extend(mirrored["phases"])
+    return plan, (belt_anchor[0], belt_anchor[1] - 2)
 
+
+def _new_direct_mine(
+    client: RconClient, surface: str, ore: str, nearest_tile: Point,
+    patch_min: Point, patch_max: Point, machine_count: int,
+    belt_type: str, inserter_type: str, belt_stock: int,
+) -> tuple[Point, int, dict, Point]:
+    """Choose the next clear independent row on the same resource patch."""
+    patch_columns = max(0, math.floor((patch_max[0] - patch_min[0]) / 3) + 1)
+    row_drill_count = min(machine_count, patch_columns)
+    if row_drill_count < 1:
+        raise ValueError(f"The {ore} patch cannot fit a mining-drill pair")
+    maximum_reserve = min(
+        RESERVED_PAIR_COLUMNS, patch_columns - row_drill_count,
+    )
+    preferred_box = live_base.find_clear_area(
+        client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
+        row_drill_count * 3 + 10, 12,
+    )
+    if preferred_box is None:
+        raise ValueError(f"No clear staging area found near the {ore} patch at {nearest_tile}")
+    preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
+    area_is_clear = lambda lower, upper: live_base.area_clear(
+        client, surface, lower, upper
+    )
+    footprint_has_resource = lambda centres: live_base.drill_footprints_have_resource(
+        client, surface, ore, centres
+    )
+    selected = choose_mining_origin(
+        preferred, patch_min, patch_max, row_drill_count,
+        area_is_clear, footprint_has_resource, 0,
+    )
+    if selected is None:
+        raise ValueError(
+            f"No clear position near the {ore} patch at {nearest_tile} "
+            "puts every drill on ore"
+        )
+    selected_origin, row_drill_count = selected
+    origin = (int(selected_origin[0]), int(selected_origin[1]))
+    reserved_columns = _supported_pair_reserve(
+        origin, row_drill_count, maximum_reserve,
+        area_is_clear, footprint_has_resource,
+    )
+    prebuilt_columns = extraction_capacity.affordable_prebuilt_columns(
+        belt_stock, reserved_columns,
+    )
+    plan, output = direct_mine_plan(
+        origin, row_drill_count, belt_type=belt_type, inserter_type=inserter_type,
+        reserved_pair_columns=reserved_columns,
+        prebuilt_pair_columns=prebuilt_columns,
+    )
+    return origin, row_drill_count * 2, plan, output
 
 def smelter_count_for_drills(
     recipe: str, drill_count: int, mining_productivity_bonus: float,
@@ -179,14 +315,16 @@ def smelter_search_anchors(
     )
 
 
-def _smelter_geometry(
+def _smelter_layout_geometry(
     recipe: str, machine_count: int, belt_type: str, inserter_type: str,
-) -> tuple[Rect, Point]:
-    """Exact retained entity bounds and feed-chest offset at line origin zero."""
+    flow_direction: str = "east",
+) -> tuple[Rect, Point, Point]:
+    """Exact retained bounds plus input and output interface offsets."""
     plan = LocalLayoutPlanner().generate_line_layout(
         recipe, machine_count, 0, 0,
         belt_type=belt_type, inserter_type=inserter_type,
         feed_style="chest", terminal_collector=True,
+        flow_direction=flow_direction,
     )
     retained = [
         action for action in actions(plan)
@@ -200,14 +338,29 @@ def _smelter_geometry(
     feed = next(
         action for action in retained if action["entity"] == "infinity-chest"
     )["position"]
+    output = next(
+        action for action in retained
+        if action["entity"] == "steel-chest" and action["position"]["y"] == 6.5
+    )["position"]
     return (
         Rect(
             min(box[0] for box in extents), min(box[1] for box in extents),
             max(box[2] for box in extents), max(box[3] for box in extents),
         ),
         (feed["x"], feed["y"]),
+        (output["x"], output["y"]),
     )
 
+
+def _smelter_geometry(
+    recipe: str, machine_count: int, belt_type: str, inserter_type: str,
+    flow_direction: str = "east",
+) -> tuple[Rect, Point]:
+    """Compatibility view used by existing footprint callers and tests."""
+    bounds, feed, _output = _smelter_layout_geometry(
+        recipe, machine_count, belt_type, inserter_type, flow_direction,
+    )
+    return bounds, feed
 
 def _align_area_anchor(anchor: Point, bounds: Rect) -> Point:
     """Align a bounds corner so translating it yields an integer line origin."""
@@ -227,91 +380,174 @@ def plan_local_extraction(
     *,
     belt_type: str,
     inserter_type: str,
+    reuse_existing: bool = True,
+    belt_stock: int = 0,
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
-    existing = extraction_state.find_resource_mine(
+    mines = extraction_state.find_resource_mines(
         client, surface, force, ore, reference_point
     )
-    if existing is not None and existing.pending:
-        raise ValueError(
-            f"Matching {ore} extraction ghosts are still pending at "
-            f"{existing.output}; refusing to submit a duplicate mine"
-        )
-    if existing is not None and extraction_state.pending_plate_smelter(
-        client, surface, force, ore, existing.output
+    observed = mines[0] if mines else None
+    if observed is not None and extraction_state.pending_plate_smelter(
+        client, surface, force, ore, observed.output
     ):
         raise ValueError(
-            f"A pending off-ore smelter already exists near {existing.output}; "
+            f"A pending off-ore smelter already exists near {observed.output}; "
             "refusing to submit a duplicate line"
         )
-    survey_near = existing.output if existing is not None else reference_point
-    found = live_base.nearest_resource(client, surface, ore, survey_near)
+    system_before = extraction_state.resource_drill_count(
+        client, surface, force, ore
+    )
+    phase_target = extraction_capacity.next_drill_phase(system_before)
+    if not reuse_existing and phase_target is None:
+        raise ValueError(
+            f"{ore} extraction is already at the final "
+            f"{extraction_capacity.EXTRACTION_DRILL_PHASES[-1]}-drill phase"
+        )
+    existing = observed if reuse_existing else None
+    active = extraction_capacity.expandable_mine(mines) if not reuse_existing else None
+    survey_mine = active or observed
+    survey_near = survey_mine.output if survey_mine is not None else reference_point
+    found = resource_patches.patch_for_extraction(client, surface, ore, survey_near, active=survey_mine is not None)
     if found is None:
         raise ValueError(
             f"No {ore} found within survey radius of {survey_near} -- "
             "cannot mine what isn't on the map"
         )
-    nearest_tile, patch_min, patch_max = found
+    nearest_tile, patch_min, patch_max = found.nearest, found.minimum, found.maximum
     productivity = extraction_state.mining_productivity_bonus(client, force)
     mine_origin: Point | None = None
     build_plan: dict | None = None
+    expansion_positions: tuple[Point, ...] = ()
+    row_drill_count = 0
+    expansion_step = -1
     if existing is not None:
-        drill_count, ore_output = existing.drill_count, existing.output
+        expansion_step = existing.expansion_step
+        row_drill_count = existing.drill_count
+        row_state = adjacent_mine_row_state(
+            client, surface, (existing.output[0], existing.shared_belt_y),
+            row_drill_count, expansion_step
+        )
+        if row_state == "partial" and not existing.pending:
+            raise ValueError(
+                f"Adjacent {ore} mining row is partially built; refusing to miscount capacity"
+            )
+        drill_count = row_drill_count * (
+            2 if existing.pending or row_state == "complete" else 1
+        )
+        ore_output = existing.output
+    elif mines:
+        requested = phase_target - system_before
+        requested += requested % 2
+        positions = (
+            extraction_capacity.phase_batch_positions(active, requested)
+            if active is not None else ()
+        )
+        if positions:
+            for x, y in positions:
+                if not live_base.area_clear(
+                    client, surface, (x - 1.5, y - 1.5), (x + 1.5, y + 1.5)
+                ):
+                    raise ValueError(f"Reserved {ore} expansion drill site {(x, y)} is blocked")
+            if not live_base.drill_footprints_have_resource(
+                client, surface, ore, list(positions)
+            ):
+                raise ValueError(
+                    f"The next {ore} phase does not keep every reserved drill on ore"
+                )
+            drill_xs = sorted({x for x, _y in positions})
+            mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
+            build_plan = generate_shared_belt_batch_expansion(
+                drill_xs, active.shared_belt_y,
+                belt_direction="west" if active.expansion_step > 0 else "east",
+            )
+            drill_count = len(positions)
+            ore_output = active.output
+            row_drill_count = len(drill_xs)
+            expansion_step = active.expansion_step
+            expansion_positions = positions
+        else:
+            pair_count = max(3, math.ceil(requested / 2))
+            mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
+                client, surface, ore, nearest_tile, patch_min, patch_max,
+                pair_count, belt_type, inserter_type, belt_stock,
+            )
+            row_drill_count = drill_count // 2
+            expansion_step = 1
     else:
-        preferred_box = live_base.find_clear_area(
-            client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
-            machine_count * 3 + 12, 12,
+        mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
+            client, surface, ore, nearest_tile, patch_min, patch_max,
+            machine_count, belt_type, inserter_type, belt_stock,
         )
-        if preferred_box is None:
-            raise ValueError(
-                f"No clear staging area found near the {ore} patch at {nearest_tile}"
-            )
-        preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
-        selected = choose_mining_origin(
-            preferred, patch_min, patch_max, machine_count,
-            lambda lower, upper: live_base.area_clear(
-                client, surface, lower, upper
-            ),
-            lambda centres: live_base.drill_footprints_have_resource(
-                client, surface, ore, centres
-            ),
-        )
-        if selected is None:
-            raise ValueError(
-                f"No clear position near the {ore} patch at {nearest_tile} "
-                "puts every drill on ore"
-            )
-        selected_origin, drill_count = selected
-        mine_origin = (int(selected_origin[0]), int(selected_origin[1]))
-        build_plan, ore_output = direct_mine_plan(
-            mine_origin, drill_count,
-            belt_type=belt_type, inserter_type=inserter_type,
-        )
-
+        row_drill_count = drill_count // 2
+        expansion_step = 1
     furnace_count = smelter_count_for_drills(recipe, drill_count, productivity)
-    bounds, feed_offset = _smelter_geometry(
-        recipe, furnace_count, belt_type, inserter_type
+    geometries = {
+        direction: _smelter_layout_geometry(
+            recipe, furnace_count, belt_type, inserter_type, direction,
+        )
+        for direction in ("east", "west")
+    }
+    east_bounds = geometries["east"][0]
+    footprint = (
+        east_bounds.max_x - east_bounds.min_x,
+        east_bounds.max_y - east_bounds.min_y,
     )
-    footprint = (bounds.max_x - bounds.min_x, bounds.max_y - bounds.min_y)
     smelter_origin = None
+    smelter_flow_direction = "east"
+    candidates: list[tuple[bool, bool, float, float, str, Point]] = []
     for anchor in smelter_search_anchors(
         patch_min, patch_max, footprint, reference_point
     ):
-        anchor = _align_area_anchor(anchor, bounds)
-        area_min = live_base.find_clear_area(
-            client, surface, anchor, *footprint,
-            max_radius=60.0, avoid_resources=True,
-            resource_clearance=MINING_APRON_TILES,
-        )
-        if area_min is None:
-            continue
-        candidate = (area_min[0] - bounds.min_x, area_min[1] - bounds.min_y)
-        feed = (candidate[0] + feed_offset[0], candidate[1] + feed_offset[1])
-        link_tiles = abs(feed[0] - ore_output[0]) + abs(feed[1] - ore_output[1])
-        if link_tiles <= LOCAL_MODE_MAX_LINK_TILES:
-            smelter_origin = candidate
-            break
+        for direction in ("east", "west"):
+            bounds, feed_offset, output_offset = geometries[direction]
+            oriented_anchor = _align_area_anchor(anchor, bounds)
+            area_min = live_base.find_clear_area(
+                client, surface, oriented_anchor,
+                bounds.max_x - bounds.min_x, bounds.max_y - bounds.min_y,
+                max_radius=60.0, avoid_resources=True,
+                resource_clearance=MINING_APRON_TILES,
+            )
+            if area_min is None:
+                continue
+            candidate = (
+                area_min[0] - bounds.min_x, area_min[1] - bounds.min_y,
+            )
+            feed = (
+                candidate[0] + feed_offset[0], candidate[1] + feed_offset[1],
+            )
+            output = (
+                candidate[0] + output_offset[0],
+                candidate[1] + output_offset[1],
+            )
+            input_tiles = abs(feed[0] - ore_output[0]) + abs(feed[1] - ore_output[1])
+            output_tiles = (
+                abs(output[0] - reference_point[0])
+                + abs(output[1] - reference_point[1])
+            )
+            mine_to_output = (
+                abs(output[0] - ore_output[0])
+                + abs(output[1] - ore_output[1])
+            )
+            target_to_feed = (
+                abs(feed[0] - reference_point[0])
+                + abs(feed[1] - reference_point[1])
+            )
+            if input_tiles <= LOCAL_MODE_MAX_LINK_TILES:
+                candidates.append((
+                    input_tiles > mine_to_output,
+                    output_tiles > target_to_feed,
+                    input_tiles + output_tiles,
+                    input_tiles,
+                    direction,
+                    candidate,
+                ))
+    if candidates:
+        (
+            _input_wrong_way, _output_wrong_way, _total, _input,
+            smelter_flow_direction, smelter_origin,
+        ) = min(candidates)
     if smelter_origin is None:
         raise ValueError(
             f"No off-ore {recipe} site is available within the "
@@ -327,4 +563,16 @@ def plan_local_extraction(
         smelter_origin=smelter_origin,
         ore_output=ore_output,
         build_plan=build_plan,
+        expansion_positions=expansion_positions,
+        row_drill_count=row_drill_count,
+        expansion_step=expansion_step,
+        system_drill_count_before=system_before,
+        smelter_flow_direction=smelter_flow_direction,
+        shared_belt_y=(
+            (existing or active).shared_belt_y if (existing or active) is not None
+            else ore_output[1] + 2
+        ),
+        system_drill_target=(
+            phase_target if not reuse_existing or not mines else system_before
+        ),
     )

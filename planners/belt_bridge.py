@@ -78,6 +78,158 @@ def _leg_direction(start: Point, end: Point) -> str:
     return _VECTOR_TO_FACING[axis]
 
 
+def _aligned_final_route(
+    source_belt: Point, belt_end: Point, entry_direction: str,
+    blocked_tiles: set[tuple[int, int]] | None,
+    exit_direction: str | None = None,
+) -> list[Point]:
+    """Route to a belt endpoint through a straight, aligned final leg.
+
+    Underground belts must be paired on one axis with one facing.  Asking the
+    L-route chooser to end at a corner lets the last tunnel inherit a turn or
+    line up with a nearby unrelated endpoint.  One extra clear approach tile
+    makes the final leg deterministic for both belt-to-belt and belt-to-chest
+    bridges.
+    """
+    entry_vector = _FACING_TO_VECTOR[entry_direction]
+    approach = _add(belt_end, entry_vector)
+    if exit_direction is None:
+        route = choose_clear_l_route(
+            source_belt, approach, 1.0, 1.0, blocked_tiles,
+        )
+    else:
+        if exit_direction not in _FACING_TO_VECTOR:
+            raise ValueError(f"Unknown belt exit direction: {exit_direction!r}")
+        exit_vector = _FACING_TO_VECTOR[exit_direction]
+        forced = _add(source_belt, _scaled(exit_vector, 2))
+        # Keep the existing source and side-tap tiles facing with the mine.
+        # The following tile owns the turn toward the destination.
+        turn = (
+            (forced[0], approach[1])
+            if exit_direction in {"east", "west"}
+            else (approach[0], forced[1])
+        )
+        route = []
+        for point in (source_belt, forced, turn, approach):
+            if not route or point != route[-1]:
+                route.append(point)
+    if route[-1] != belt_end:
+        route.append(belt_end)
+    return route
+
+
+def bridge_belt_to_chest(
+    source_belt: Point,
+    dest_position: Point,
+    *,
+    entry_direction: str,
+    belt_type: str = "fast-transport-belt",
+    inserter_type: str = "fast-inserter",
+    blocked_tiles: set[tuple[int, int]] | None = None,
+    max_route_tiles: int | None = None,
+) -> list[dict]:
+    """Continue an existing output belt into a destination chest.
+
+    Unlike chest-to-chest transport, this has no source inserter: production
+    stays on the belt while a side chest samples it for logistic consumers.
+    """
+    if entry_direction not in _FACING_TO_VECTOR:
+        raise ValueError(f"Unknown direction: {entry_direction!r}")
+    entry_vector = _FACING_TO_VECTOR[entry_direction]
+    dest_inserter = _add(dest_position, _scaled(entry_vector, 1))
+    belt_end = _add(dest_position, _scaled(entry_vector, 2))
+    route = _aligned_final_route(
+        source_belt, belt_end, entry_direction, blocked_tiles,
+    )
+    route_tiles = len(_route_points(route))
+    if max_route_tiles is not None and route_tiles > max_route_tiles:
+        raise ValueError(
+            f"Generated belt route needs {route_tiles} tiles, beyond the "
+            f"{max_route_tiles}-tile local-mode limit; CityPlanner rail handoff "
+            "is required"
+        )
+    actions = [{
+        "action_type": "place_entity", "entity": inserter_type,
+        "position": {"x": dest_inserter[0], "y": dest_inserter[1]},
+        "direction": entry_direction,
+    }]
+    actions.extend(_belt_run(route, belt_type, blocked_tiles or set()))
+    return actions
+
+def bridge_belt_to_belt(
+    source_belt: Point,
+    dest_belt: Point,
+    *,
+    entry_direction: str,
+    belt_type: str = "fast-transport-belt",
+    blocked_tiles: set[tuple[int, int]] | None = None,
+    max_route_tiles: int | None = None,
+    exit_direction: str | None = None,
+) -> list[dict]:
+    """Continue one belt into the free tile beside another belt."""
+    entry_vector = _FACING_TO_VECTOR[entry_direction]
+    belt_end = _add(dest_belt, entry_vector)
+    route = _aligned_final_route(
+        source_belt, belt_end, entry_direction, blocked_tiles,
+        exit_direction=exit_direction,
+    )
+    route_tiles = len(_route_points(route))
+    if max_route_tiles is not None and route_tiles > max_route_tiles:
+        raise ValueError(
+            f"Generated belt route needs {route_tiles} tiles, beyond the "
+            f"{max_route_tiles}-tile local-mode limit"
+        )
+    blocked = blocked_tiles or set()
+    actions = _belt_run(route, belt_type, blocked)
+    actions.extend(_turn_buffer_actions(route, blocked, actions))
+    return actions
+
+
+def _turn_buffer_actions(
+    route: Sequence[Point],
+    blocked_tiles: set[tuple[int, int]],
+    belt_actions: Sequence[dict],
+) -> list[dict]:
+    """Add a side reserve only where both inserters touch surface belts."""
+    points: list[Point] = []
+    for point in route:
+        if not points or point != points[-1]:
+            points.append(point)
+    route_tiles = {_tile(position) for position, _, _ in _route_points(points)}
+    for previous, corner, following in zip(points, points[1:], points[2:]):
+        incoming = _leg_direction(previous, corner)
+        outgoing = _leg_direction(corner, following)
+        if incoming == outgoing:
+            continue
+        incoming_vector = _FACING_TO_VECTOR[incoming]
+        outgoing_vector = _FACING_TO_VECTOR[outgoing]
+        chest = _add(_add(corner, _scaled(incoming_vector, -2)), _scaled(outgoing_vector, 2))
+        input_inserter = _add(_add(corner, _scaled(incoming_vector, -2)), outgoing_vector)
+        output_inserter = _add(_add(corner, _scaled(incoming_vector, -1)), _scaled(outgoing_vector, 2))
+        reserve_tiles = {_tile(chest), _tile(input_inserter), _tile(output_inserter)}
+        if reserve_tiles & (blocked_tiles | route_tiles):
+            continue
+        surface_belts = {
+            _tile((action["position"]["x"], action["position"]["y"]))
+            for action in belt_actions if action.get("entity") in UNDERGROUND_REACH
+        }
+        input_pickup = _add(corner, _scaled(incoming_vector, -2))
+        output_drop = _add(corner, _scaled(outgoing_vector, 2))
+        if {_tile(input_pickup), _tile(output_drop)} - surface_belts:
+            continue
+        return [
+            {"action_type": "place_entity", "entity": "steel-chest",
+             "position": {"x": chest[0], "y": chest[1]}},
+            {"action_type": "place_entity", "entity": "inserter",
+             "position": {"x": input_inserter[0], "y": input_inserter[1]},
+             "direction": opposite(outgoing)},
+            {"action_type": "place_entity", "entity": "inserter",
+             "position": {"x": output_inserter[0], "y": output_inserter[1]},
+             "direction": opposite(incoming)},
+        ]
+    return []
+
+
 def bridge_chest_to_chest(
     source_position: Point,
     dest_position: Point,

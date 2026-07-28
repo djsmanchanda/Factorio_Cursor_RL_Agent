@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.autonomy_program import compile_autonomy_program
-from core.autonomy_state import initial_state, reconcile, transition
+from experimental.legacy_autonomy.autonomy_state import initial_state, reconcile, transition
 from core.recipe_dag import compile_recipe_dag
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,16 +82,6 @@ def test_restart_state_transitions_and_reconcile():
     with pytest.raises(ValueError, match="Earlier phases"):
         transition(resumed, program["phases"][2]["id"], "running", tick=23)
 
-def test_lua_catalog_and_no_ore_seeding_contract():
-    lua = (ROOT / "factorio_mod/recipe_catalog.lua").read_text()
-    daemon = (ROOT / "orchestrator/expansion_daemon.py").read_text()
-    assert "table.sort(names)" in lua and "probabilistic product" in lua
-    assert "command.parameter" in lua and "game.forces[name]" in lua
-    assert "force does not exist" in lua
-    assert "ore_patches=" not in daemon
-    assert "CityPlanner rail handoff" in daemon
-
-
 def test_cycle_coproduct_rate_and_recipe_contract_fail_closed():
     cycle = {"version": "1.0.0", "force": "planner", "tick": 0, "raw_resources": [], "recipes": [
         {"name": "make-a", "enabled": True, "category": "crafting", "energy_ticks": 60, "ingredients": [{"name": "b", "type": "item", "amount": 1}], "products": [{"name": "a", "type": "item", "amount": 1}], "supported": True},
@@ -114,21 +104,13 @@ def test_reconcile_requires_exact_phase_identity_and_verified_prefix():
         reconcile(program, state, set(), snapshot_tick=1)
 
 def test_daemon_filters_unsupported_actions_before_policy_selection():
-    from orchestrator.expansion_daemon import _is_executable_action
+    from experimental.legacy_autonomy.expansion_daemon import _is_executable_action
     chain = {"lines": [{"name": "mine", "mining_feed": True}, {"name": "line"}, {"name": "science", "consumers": ["lab_row"]}]}
     assert not _is_executable_action({"action": "open_new_mine", "target_line": "mine"}, chain)
     assert not _is_executable_action({"action": "upgrade_belt_tier", "target_line": "line"}, chain)
     assert _is_executable_action({"action": "extend_line_x", "target_line": "line"}, chain)
     assert _is_executable_action({"action": "add_collectors", "target_line": "science"}, chain)
-    cli = (ROOT / "tools/compile_autonomy_goal.py").read_text()
-    assert "compiled_from_snapshot_tick" not in cli
 
-
-def test_worldspec_provenance_and_upgrade_idempotency_are_fail_closed():
-    with pytest.raises(ValueError, match="block_bounds"):
-        compile_autonomy_program(goal(), CATALOG, world_spec=WORLD, snapshot={"surface": "planner-sandbox", "tick": 0})
-    lua = (ROOT / "factorio_mod/upgrades.lua").read_text()
-    assert lua.index("local upgraded") < lua.index("local target")
 
 
 def test_declared_raw_resource_wins_over_enabled_recipe_producer():

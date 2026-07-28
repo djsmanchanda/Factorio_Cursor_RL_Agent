@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Tuple
 
-from core.fluid_systems import _orthogonally_adjacent, validate_network_purity, validate_underground_span
+from core.fluid_systems import mixing_conflicts, validate_network_purity, validate_underground_span
 from planners.infrastructure import (
     POLE_SPECS, POWER_SOURCE_ENTITY, POWER_SOURCE_SIZE,
     ROBOPORT_CONSTRUCTION_RADIUS, ROBOPORT_ENTITY, ROBOPORT_LINK_DISTANCE,
@@ -27,6 +28,7 @@ _PLACEMENTS = {"place_entity", "place_ghost"}
 # ENTITY_FOOTPRINTS already carries every footprint this brief calls for
 # except 'lab' (3x3, live-verified same as chemical-plant/electric-furnace).
 FOOTPRINTS: Dict[str, int] = {**ENTITY_FOOTPRINTS, "lab": 3}
+_SPATIAL_CELL_SIZE = max(FOOTPRINTS.values())
 
 # Inserter pickup/drop reach in tiles: normal tiers reach 1, long-handed reaches 2.
 INSERTER_REACH: Dict[str, int] = {
@@ -95,19 +97,43 @@ def _check_duplicate_tiles(placements):
 def _check_footprint_overlap(placements):
     if not placements:
         return [], "no placements in bundle"
-    failures = []
-    for i in range(len(placements)):
-        name_a, action_a = placements[i]
-        pos_a, size_a = _pos(action_a), _footprint(action_a["entity"])
-        for name_b, action_b in placements[i + 1:]:
-            pos_b, size_b = _pos(action_b), _footprint(action_b["entity"])
-            if boxes_overlap(pos_a, size_a, pos_b, size_b) and not is_verified_pumpjack_attachment(action_a, action_b):
-                failures.append({"check": "footprint_overlap",
-                                  "detail": f"{name_a}:{action_a['entity']} at {pos_a} overlaps "
-                                            f"{name_b}:{action_b['entity']} at {pos_b}",
-                                  "positions": [pos_a, pos_b]})
-    return failures, None
+    indexed = [
+        (name, action, _pos(action), _footprint(action["entity"]))
+        for name, action in placements
+    ]
+    cells: Dict[Tuple[int, int], List[int]] = {}
+    overlaps = []
+    for right_index, (_, right, right_pos, right_size) in enumerate(indexed):
+        half = right_size / 2.0
+        cell_range_x = range(
+            math.floor((right_pos[0] - half) / _SPATIAL_CELL_SIZE),
+            math.floor((right_pos[0] + half) / _SPATIAL_CELL_SIZE) + 1,
+        )
+        cell_range_y = range(
+            math.floor((right_pos[1] - half) / _SPATIAL_CELL_SIZE),
+            math.floor((right_pos[1] + half) / _SPATIAL_CELL_SIZE) + 1,
+        )
+        covered_cells = [(x, y) for x in cell_range_x for y in cell_range_y]
+        candidates = {index for cell in covered_cells for index in cells.get(cell, ())}
+        for left_index in candidates:
+            _, left, left_pos, left_size = indexed[left_index]
+            if (
+                boxes_overlap(left_pos, left_size, right_pos, right_size)
+                and not is_verified_pumpjack_attachment(left, right)
+            ):
+                overlaps.append((left_index, right_index))
+        for cell in covered_cells:
+            cells.setdefault(cell, []).append(right_index)
 
+    failures = []
+    for left_index, right_index in sorted(overlaps):
+        name_a, action_a, pos_a, _ = indexed[left_index]
+        name_b, action_b, pos_b, _ = indexed[right_index]
+        failures.append({"check": "footprint_overlap",
+                         "detail": f"{name_a}:{action_a['entity']} at {pos_a} overlaps "
+                                   f"{name_b}:{action_b['entity']} at {pos_b}",
+                         "positions": [pos_a, pos_b]})
+    return failures, None
 
 # --- 3. power reach: pole graph rooted at the single EEI --------------------
 
@@ -179,26 +205,20 @@ def _check_power(placements):
 
 def _fluid_mixing_failures(segments: list) -> list:
     """Same adjacency rule as validate_network_purity, collecting every
-    offending pair instead of raising on the first."""
-    failures = []
-    for i in range(len(segments)):
-        seg_a = segments[i]
-        fluid_a = seg_a.get("fluid")
-        for j in range(i + 1, len(segments)):
-            seg_b = segments[j]
-            fluid_b = seg_b.get("fluid")
-            if fluid_a is None or fluid_b is None or fluid_a == fluid_b:
-                continue
-            if seg_a.get("separated_by_pump") or seg_b.get("separated_by_pump"):
-                continue
-            for tile_a in seg_a["tiles"]:
-                for tile_b in seg_b["tiles"]:
-                    if _orthogonally_adjacent(tile_a, tile_b):
-                        failures.append({"check": "fluid_mixing",
-                                          "detail": f"tile {tile_a} ('{fluid_a}') is adjacent to tile {tile_b} "
-                                                    f"('{fluid_b}') without a separating pump",
-                                          "positions": [tile_a, tile_b]})
-    return failures
+    offending pair instead of raising on the first.
+
+    Shares mixing_conflicts' position index rather than re-deriving adjacency:
+    this runs only once a plan has ALREADY failed purity, and an all-pairs scan
+    made diagnosing a large broken plan look like a hang exactly when the
+    operator most needs the answer.
+    """
+    return [
+        {"check": "fluid_mixing",
+         "detail": f"tile {tile_a} ('{segments[index_a].get('fluid')}') is adjacent to "
+                   f"tile {tile_b} ('{segments[index_b].get('fluid')}') without a separating pump",
+         "positions": [tile_a, tile_b]}
+        for index_a, tile_a, index_b, tile_b in mixing_conflicts(segments)
+    ]
 
 
 def _check_fluid_mixing(bundle):

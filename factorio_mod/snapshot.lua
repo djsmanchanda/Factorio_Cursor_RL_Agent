@@ -108,14 +108,22 @@ local function build_world_observation(surface)
   end)
 
   local water_tiles = {}
-  for y = bounds.y_min, bounds.y_max_exclusive - 1 do
-    for x = bounds.x_min, bounds.x_max_exclusive - 1 do
-      local name = surface.get_tile(x, y).name
-      if name == "water" or name == "deepwater" then
-        water_tiles[#water_tiles + 1] = { x = x, y = y }
-      end
-    end
+  for _, tile in pairs(surface.find_tiles_filtered({
+      area = {
+        { bounds.x_min, bounds.y_min },
+        { bounds.x_max_exclusive, bounds.y_max_exclusive }
+      },
+      name = { "water", "deepwater" }
+  })) do
+    water_tiles[#water_tiles + 1] = {
+      x = tile.position.x,
+      y = tile.position.y
+    }
   end
+  table.sort(water_tiles, function(a, b)
+    if a.y ~= b.y then return a.y < b.y end
+    return a.x < b.x
+  end)
   return {
     version = "1.0.0",
     seed = saved.seed,

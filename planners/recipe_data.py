@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Mapping
 LINE_RECIPES: Dict[str, dict] = {
     "iron-gear-wheel": {
         "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
@@ -47,6 +47,36 @@ LINE_RECIPES: Dict[str, dict] = {
         "machine": "assembling-machine-2", "ingredients": ["inserter", "transport-belt"],
         "amounts": [1, 1], "product_amount": 1, "craft_time": 6.0,
     },
+    "steel-plate": {
+        "machine": "electric-furnace", "ingredients": ["iron-plate"],
+        "amounts": [5], "product_amount": 1, "craft_time": 16.0, "set_recipe": False,
+    },
+    "pipe": {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 0.5,
+    },
+    "engine-unit": {
+        "machine": "assembling-machine-2",
+        "ingredients": ["iron-gear-wheel", "pipe", "steel-plate"],
+        "amounts": [1, 2, 1], "product_amount": 1, "craft_time": 10.0,
+        "auxiliary_ingredient_index": 1,
+    },
+    "plastic-bar": {
+        "machine": "chemical-plant", "ingredients": ["coal"], "amounts": [1],
+        "fluid_ingredients": {"petroleum-gas": 20},
+        "product_amount": 2, "craft_time": 1.0,
+    },
+    "sulfur": {
+        "machine": "chemical-plant", "ingredients": [], "amounts": [],
+        "fluid_ingredients": {"petroleum-gas": 30, "water": 30},
+        "product_amount": 2, "craft_time": 1.0,
+    },
+    "chemical-science-pack": {
+        "machine": "assembling-machine-2",
+        "ingredients": ["advanced-circuit", "engine-unit", "sulfur"],
+        "amounts": [3, 2, 1], "product_amount": 2, "craft_time": 24.0,
+        "auxiliary_ingredient_index": 1,
+    },
     "advanced-circuit": {
         "machine": "assembling-machine-2",
         "ingredients": ["plastic-bar", "copper-cable", "electronic-circuit"],
@@ -69,13 +99,74 @@ LINE_RECIPES: Dict[str, dict] = {
     },
 }
 
-MACHINE_SPEEDS = {"assembling-machine-2": 0.75, "electric-furnace": 2.0}
+_GENERIC_ASSEMBLER_CATEGORIES = {
+    "advanced-crafting", "basic-crafting", "crafting", "electronics", "pressing",
+}
+_COMPACT_MALL_RECIPES = {"chemical-plant", "oil-refinery", "pumpjack"}
+
+
+def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
+    """Install live, deterministic solid recipes the current line can execute."""
+    learned: list[str] = []
+    for recipe in catalog.get("recipes", []):
+        name = recipe.get("name")
+        ingredients = recipe.get("ingredients", [])
+        products = recipe.get("products", [])
+        if (
+            not isinstance(name, str)
+            or name in LINE_RECIPES
+            or not recipe.get("enabled")
+            or not recipe.get("supported")
+            or recipe.get("category") not in _GENERIC_ASSEMBLER_CATEGORIES
+            or not (
+                1 <= len(ingredients) <= 3
+                or (name in _COMPACT_MALL_RECIPES and len(ingredients) <= 5)
+            )
+            or any(part.get("type") != "item" for part in ingredients)
+            or len(products) != 1
+            or products[0].get("type") != "item"
+            or products[0].get("name") != name
+        ):
+            continue
+        spec = {
+            "machine": "assembling-machine-2",
+            "ingredients": [part["name"] for part in ingredients],
+            "amounts": [part["amount"] for part in ingredients],
+            "product_amount": products[0]["amount"],
+            "craft_time": recipe["energy_ticks"] / 60,
+        }
+        if len(ingredients) == 3:
+            spec["auxiliary_ingredient_index"] = 1
+        elif len(ingredients) > 3:
+            spec["mall_only"] = True
+        LINE_RECIPES[name] = spec
+        learned.append(name)
+    return tuple(sorted(learned))
+MACHINE_SPEEDS = {
+    # Tiers 1 and 3 are here so a mall cell upgraded to a faster machine
+    # recomputes its own input rate instead of failing an unknown lookup.
+    "assembling-machine-1": 0.5, "assembling-machine-2": 0.75,
+    "assembling-machine-3": 1.25, "electric-furnace": 2.0,
+    "chemical-plant": 1.0, "oil-refinery": 1.0,
+}
 
 # Feeder inserter chest->belt throughput estimates (items/s, research-boosted;
 # docs/21). Inserter swings are rotation-bound: 180 degrees to load, 180 to
 # unload, so one feeder cannot supply a hungry line - feed points scale with
 # per-ingredient demand: feeders = ceil(demand / rate).
-FEEDER_RATES = {"fast-inserter": 4.0, "bulk-inserter": 8.0, "stack-inserter": 12.0}
+# The basic inserter's figure is derived, not measured: Factorio's base
+# chest->belt rates put a plain inserter at ~0.36x a fast one, applied here to
+# this table's research-boosted fast-inserter value. Deliberately conservative
+# -- understating it makes the selector upgrade sooner, which costs materials
+# rather than throughput. Worth measuring live alongside the others in docs/21.
+FEEDER_RATES = {
+    "inserter": 1.4, "fast-inserter": 4.0, "bulk-inserter": 8.0, "stack-inserter": 12.0,
+}
+
+# Cheapest first. stack-inserter is deliberately absent: docs/21 records it as
+# Gleba-only production, so it is never auto-selected on Nauvis even when the
+# demand would justify it -- a caller wanting one must ask by name.
+_AUTO_INSERTER_TIERS = ("inserter", "fast-inserter", "bulk-inserter")
 
 # Capacity headroom (user standard, 2026-07-18): provision feed capacity with
 # a 20-25% buffer over raw demand so supply never runs at the ragged edge.
@@ -89,7 +180,48 @@ LINE_PITCH_Y = 16
 # and stack inserters have off-planet sourcing constraints in real supply
 # chains; on the sandbox they arrive via scaffolding.
 BELT_TIERS = {"transport-belt": 15, "fast-transport-belt": 30, "express-transport-belt": 45, "turbo-transport-belt": 60}
-INSERTER_TIERS = {"fast-inserter", "bulk-inserter", "stack-inserter"}
+INSERTER_TIERS = {"inserter", "fast-inserter", "bulk-inserter", "stack-inserter"}
+
+
+def machine_ingredient_rates(recipe: str, machine_count: int = 1) -> list[float]:
+    """Items per second of each ingredient a line of `machine_count` consumes."""
+    spec = LINE_RECIPES[recipe]
+    crafts = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+    return [amount * crafts for amount in spec["amounts"]]
+
+
+def machine_handled_rates(recipe: str, machine_count: int = 1) -> list[float]:
+    """Every item flow one machine's inserters carry: each ingredient IN, and
+    the product OUT.
+
+    The output side is not always the quieter one -- copper-cable consumes 1.5
+    plates/s but emits 3 cables/s -- and a line layout uses the same tier on
+    both faces, so sizing on ingredients alone would under-provision the
+    collector. A fluid-only recipe has no ingredient inserters at all and is
+    sized purely by what it emits.
+    """
+    spec = LINE_RECIPES[recipe]
+    crafts = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+    return machine_ingredient_rates(recipe, machine_count) + [
+        spec.get("product_amount", 1) * crafts
+    ]
+
+
+def inserter_for_demand(items_per_second: float) -> str:
+    """Cheapest inserter tier that carries `items_per_second` on its own.
+
+    An electric furnace smelting a plate every 1.6s moves well under one item
+    per second, so the fast-inserter baseline docs/21 records was buying nothing
+    there: it costs materials and, on a real base, an extra production chain.
+    Feed points are sized separately by count (see _feeders_needed), so a
+    cheaper tier here widens the feed array rather than starving the line.
+    """
+    if items_per_second < 0:
+        raise ValueError("Inserter demand cannot be negative")
+    for tier in _AUTO_INSERTER_TIERS:
+        if FEEDER_RATES[tier] >= items_per_second:
+            return tier
+    return _AUTO_INSERTER_TIERS[-1]
 
 # Sideload feeder geometry (feed_style="sideload"). Instead of chest+inserter
 # pairs placed directly on the input belt, each ingredient rides a dedicated

@@ -85,13 +85,3 @@ def test_seed_water_uses_bridge_and_reports_mutation() -> None:
     assert report["seeded_water_tiles"] == 182
     assert _mutated(report) is True
     assert any("water seeding" in message for message in messages)
-
-
-def test_lua_water_command_is_idempotent_and_bounded() -> None:
-    source = (Path(__file__).parents[1] / "factorio_mod" / "water_seeding.lua").read_text(
-        encoding="utf-8"
-    )
-
-    assert 'existing ~= "water" and existing ~= "deepwater"' in source
-    assert "surface.set_tiles(tiles, true)" in source
-    assert "MAX_LAKE_TILES = 4096" in source

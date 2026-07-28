@@ -444,7 +444,7 @@ def test_chain_link_plans_validate_against_the_schema():
 
 # --- the real processing-unit chain ------------------------------------------
 
-def test_processing_unit_chain_links_are_pure_against_every_stage():
+def test_processing_unit_chain_links_are_pure_against_every_stage(processing_bundle):
     # The fixed STAGES/LINKS table that used to live in
     # tools/build_processing_units.py was absorbed into
     # planners/electronics_block.py's _fluid_routes(), which is exercised here
@@ -452,13 +452,7 @@ def test_processing_unit_chain_links_are_pure_against_every_stage():
     # the bundle already raises on any mixing hazard or double-claimed tile
     # (validate_network_purity runs inside _fluid_routes), so a bundle coming
     # back at all is itself proof the chain links are pure.
-    from planners.electronics_block import build_electronics_block
-    from planners.electronics_world import load_electronics_world_spec
-
-    world = load_electronics_world_spec(
-        Path(__file__).resolve().parent / "fixtures" / "electronics_world_spec.json"
-    )
-    bundle = build_electronics_block(include_processing=True, world=world)
+    bundle = processing_bundle
 
     expected_fluids = {"crude-oil", "petroleum-gas", "water", "sulfuric-acid"}
     link_names = [name for name, _ in bundle["plans"] if name.startswith("link_")]

@@ -54,7 +54,7 @@ SCIENCE_PACK_BY_NAME = MappingProxyType(
     {spec.name: spec for spec in SCIENCE_PACK_SPECS}
 )
 ALL_SCIENCE_PACKS = tuple(spec.name for spec in SCIENCE_PACK_SPECS)
-NAUVIS_DIRECT_RESOURCE_INPUTS = frozenset({"copper-ore", "iron-ore"})
+NAUVIS_DIRECT_RESOURCE_INPUTS = frozenset({"coal", "copper-ore", "iron-ore"})
 
 NAUVIS_SCIENCE_PACKS = tuple(
     spec.name for spec in SCIENCE_PACK_SPECS if spec.nauvis_in_scope
@@ -101,6 +101,9 @@ def validate_current_builder_target(
     visiting: list[str] = []
 
     def visit(item: str) -> None:
+        if item in NAUVIS_DIRECT_RESOURCE_INPUTS:
+            visited.add(item)
+            return
         if item in visited:
             return
         if item in visiting:

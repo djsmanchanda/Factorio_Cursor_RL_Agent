@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from planners.electronics_block import DEPENDENCIES_2A, DEPENDENCIES_2B, build_electronics_block
-from planners.electronics_world import ElectronicsWorldSpec, load_electronics_world_spec
+from planners.electronics_world import ElectronicsWorldSpec
 from planners.infrastructure import validate_power_connectivity
 from planners.plan_validation import actions, occupied_tile_indices, validate_no_collisions, validate_placement_subset
 
@@ -17,18 +17,18 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 
 
 @pytest.fixture(scope="module")
-def world():
-    return load_electronics_world_spec(_FIXTURE)
+def world(electronics_world):
+    return electronics_world
 
 
 @pytest.fixture(scope="module")
-def advanced(world):
-    return build_electronics_block(include_processing=False, world=world)
+def advanced(electronics_world):
+    return build_electronics_block(include_processing=False, world=electronics_world)
 
 
 @pytest.fixture(scope="module")
-def processing(world):
-    return build_electronics_block(include_processing=True, world=world)
+def processing(processing_bundle):
+    return processing_bundle
 
 
 def _all_actions(bundle):

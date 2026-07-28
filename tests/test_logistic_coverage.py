@@ -9,6 +9,7 @@ import pytest
 
 from orchestrator import live_base
 from orchestrator.autonomous_builder import _diagnose_blockage
+from orchestrator.roboport_placement import clear_chain_positions
 from orchestrator.stage_services import (
     _LOGISTIC_CHEST_ENTITIES,
     _ROBOPORT_CONSTRUCTION_RADIUS,
@@ -106,6 +107,37 @@ def test_chain_never_places_a_roboport_on_top_of_the_chest() -> None:
     assert (40.0, 0.0) not in chain
 
 
+def test_chain_relocates_a_roboport_off_a_stage_footprint(monkeypatch) -> None:
+    ideal = (17.0, 0.0)
+    monkeypatch.setattr(
+        live_base, "area_clear",
+        lambda _c, _s, lo, hi: ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2) != ideal,
+    )
+    placed = clear_chain_positions(
+        None, "nauvis", (0.0, 0.0), (40.0, 0.0), [ideal],
+        service_radius=25.0, service_square=True, link_distance=46.0,
+    )
+    assert placed[0] != ideal
+    assert math.dist((0.0, 0.0), placed[0]) <= 46.0
+    assert service_distance(placed[0], (40.0, 0.0), square=True) <= 25.0
+
+
+def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
+    powered = []
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
+    monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
+    monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "low_power")
+    monkeypatch.setattr("orchestrator.stage_services._submit", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        "orchestrator.stage_services.extend_power",
+        lambda _c, _b, _s, _f, position, _emit: powered.append(position) or True,
+    )
+    assert extend_roboport_coverage(
+        None, None, "nauvis", "player", (30.0, 0.0), lambda _m: None,
+        purpose="logistic",
+    )
+    assert powered
+
 # --- plan-time chest discovery -------------------------------------------
 
 def test_logistic_chest_positions_finds_feeds_and_output_but_not_plain_chests() -> None:
@@ -174,6 +206,7 @@ def test_ensure_logistic_coverage_places_a_roboport_for_a_stranded_chest(monkeyp
     submitted: list[dict] = []
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "working")
+    monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
     monkeypatch.setattr(
         "orchestrator.stage_services._submit",
         lambda _c, _b, _s, plan, *a, **k: submitted.append(plan) or {"ok": True},
@@ -207,6 +240,7 @@ def test_ensure_logistic_coverage_is_a_no_op_for_chests_already_served(monkeypat
 def _patch_healthy_site(monkeypatch) -> None:
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "working")
+    monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
     monkeypatch.setattr(live_base, "entity_statuses", lambda _c, _s, ps: {tuple(p): "working" for p in ps})
 
 

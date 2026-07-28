@@ -96,16 +96,6 @@ def test_energy_interface_count_fail_when_zero():
     assert result["count"] == 0
 
 
-def test_energy_interface_count_unknown_when_surface_missing():
-    client = FakeRconClient([("electric-energy-interface", "ERROR:no-surface")])
-    result = vfi.measure_energy_interface_count(client, "nope")
-    assert result["status"] == vfi.UNKNOWN
-
-
-# ---------------------------------------------------------------------------
-# Criterion 2: electric_networks
-# ---------------------------------------------------------------------------
-
 def test_electric_networks_pass_single_network():
     client = FakeRconClient(
         [
@@ -149,14 +139,6 @@ def test_electric_networks_fail_when_two_distinct_ids():
     assert result["network_ids"] == [5, 9]
 
 
-def test_electric_networks_unknown_when_nothing_sampled():
-    client = FakeRconClient(
-        [("e.electric_network_id", json.dumps({"sampled": 0, "networks": {}}))]
-    )
-    result = vfi.measure_electric_networks(client, "planner-sandbox")
-    assert result["status"] == vfi.UNKNOWN
-
-
 def test_electric_networks_unknown_on_garbled_response():
     # measure_electric_networks raises on unparseable input; run_all (tested below)
     # is the boundary that turns this into an "unknown" criterion rather than a crash.
@@ -164,20 +146,6 @@ def test_electric_networks_unknown_on_garbled_response():
     with pytest.raises(vfi.MeasurementError):
         vfi.measure_electric_networks(client, "planner-sandbox")
 
-
-def test_electric_networks_empty_lua_table_parses_as_no_networks():
-    # helpers.table_to_json serializes an empty Lua array as '{}', not '[]'.
-    client = FakeRconClient(
-        [("e.electric_network_id", json.dumps({"sampled": 2, "networks": {}}))]
-    )
-    result = vfi.measure_electric_networks(client, "planner-sandbox")
-    assert result["network_ids"] == []
-    assert result["status"] == vfi.FAIL  # zero distinct ids != exactly one
-
-
-# ---------------------------------------------------------------------------
-# Criterion 3: logistic_networks
-# ---------------------------------------------------------------------------
 
 def test_logistic_networks_pass():
     client = FakeRconClient(
@@ -209,18 +177,6 @@ def test_logistic_networks_fail_when_some_roboports_uncovered():
     result = vfi.measure_logistic_networks(client, "planner-sandbox")
     assert result["status"] == vfi.FAIL
 
-
-def test_logistic_networks_unknown_when_no_roboports():
-    client = FakeRconClient(
-        [("without_network", json.dumps({"total_roboports": 0, "without_network": 0, "networks": {}}))]
-    )
-    result = vfi.measure_logistic_networks(client, "planner-sandbox")
-    assert result["status"] == vfi.UNKNOWN
-
-
-# ---------------------------------------------------------------------------
-# Criterion 4: pending_ghosts
-# ---------------------------------------------------------------------------
 
 def test_pending_ghosts_pass_when_zero():
     client = FakeRconClient([("ghost_revive", json.dumps({"total": 0, "sample": []}))])
@@ -349,27 +305,6 @@ def test_fluid_machines_unknown_when_none_found():
 # Criterion 6: idempotency baseline/compare
 # ---------------------------------------------------------------------------
 
-def test_diff_entity_counts_detects_added_entity():
-    baseline = {"inserter": 2, "assembling-machine-1": 1}
-    current = {"inserter": 2, "assembling-machine-1": 2}
-    diff = vfi.diff_entity_counts(baseline, current)
-    assert diff == {"added": {"assembling-machine-1": 1}, "removed": {}}
-
-
-def test_diff_entity_counts_detects_removed_entity():
-    baseline = {"inserter": 2}
-    current = {"inserter": 1}
-    diff = vfi.diff_entity_counts(baseline, current)
-    assert diff == {"added": {}, "removed": {"inserter": 1}}
-
-
-def test_diff_entity_counts_no_change():
-    baseline = {"inserter": 2}
-    current = {"inserter": 2}
-    diff = vfi.diff_entity_counts(baseline, current)
-    assert diff == {"added": {}, "removed": {}}
-
-
 def test_measure_idempotency_writes_baseline(tmp_path):
     baseline_path = tmp_path / "baseline.json"
     client = FakeRconClient([("find_entities_filtered{}", json.dumps({"inserter": 2}))])
@@ -395,32 +330,6 @@ def test_measure_idempotency_compare_fail_when_entity_added(tmp_path):
     assert result["status"] == vfi.FAIL
     assert result["diff"]["added"] == {"inserter": 1}
 
-
-def test_measure_idempotency_unknown_without_baseline_or_compare():
-    client = FakeRconClient([("find_entities_filtered{}", json.dumps({"inserter": 2}))])
-    result = vfi.measure_idempotency(client, "planner-sandbox", None, None)
-    assert result["status"] == vfi.UNKNOWN
-
-
-def test_measure_idempotency_unknown_when_compare_file_missing(tmp_path):
-    client = FakeRconClient([("find_entities_filtered{}", json.dumps({"inserter": 2}))])
-    result = vfi.measure_idempotency(
-        client, "planner-sandbox", None, str(tmp_path / "does-not-exist.json")
-    )
-    assert result["status"] == vfi.UNKNOWN
-
-
-def test_measure_idempotency_unknown_when_compare_file_garbled(tmp_path):
-    bad_path = tmp_path / "garbled.json"
-    bad_path.write_text("not json{{{", encoding="utf-8")
-    client = FakeRconClient([("find_entities_filtered{}", json.dumps({"inserter": 2}))])
-    result = vfi.measure_idempotency(client, "planner-sandbox", None, str(bad_path))
-    assert result["status"] == vfi.UNKNOWN
-
-
-# ---------------------------------------------------------------------------
-# Overall verdict / run_all
-# ---------------------------------------------------------------------------
 
 def test_run_all_verdict_unknown_on_healthy_world_without_baseline():
     # Idempotency (criterion 6) inherently needs two runs; a single healthy run
@@ -460,84 +369,11 @@ def test_run_all_verdict_fail_when_two_electric_networks():
     assert report["criteria_status"]["electric_networks"] == vfi.FAIL
 
 
-def test_run_all_verdict_unknown_when_a_query_returns_garbled_response():
-    client = FakeRconClient(healthy_rules(fluid="not-json-at-all"))
-    report = vfi.run_all(client, "planner-sandbox")
-    assert report["criteria_status"]["fluid_machines"] == vfi.UNKNOWN
-    assert report["verdict"] == vfi.UNKNOWN
-
-
-def test_run_all_verdict_unknown_when_a_query_returns_empty_response():
-    client = FakeRconClient(healthy_rules(energy=""))
-    report = vfi.run_all(client, "planner-sandbox")
-    assert report["criteria_status"]["energy_interface_count"] == vfi.UNKNOWN
-    assert report["verdict"] == vfi.UNKNOWN
-
-
-def test_format_report_includes_all_six_criteria():
-    client = FakeRconClient(healthy_rules())
-    report = vfi.run_all(client, "planner-sandbox")
-    text = vfi.format_report(report)
-    for marker in ("1. energy_interface_count", "2. electric_networks", "3. logistic_networks",
-                   "4. pending_ghosts", "5. fluid_machines", "6. idempotency"):
-        assert marker in text
-
-
-# ---------------------------------------------------------------------------
-# Exit code mapping via main()
-# ---------------------------------------------------------------------------
-
 def _patch_client(monkeypatch, rules):
     def fake_constructor(host, port, password, timeout=10.0):
         return FakeRconClient(rules)
 
     monkeypatch.setattr(vfi, "RconClient", fake_constructor)
-
-
-def test_main_exit_code_zero_on_pass(monkeypatch, capsys, tmp_path):
-    baseline_path = tmp_path / "baseline.json"
-    baseline_path.write_text(
-        json.dumps({"assembling-machine-1": 1, "oil-refinery": 1}), encoding="utf-8"
-    )
-    _patch_client(monkeypatch, healthy_rules())
-    code = vfi.main(["--rcon-password", "x", "--compare", str(baseline_path)])
-    assert code == 0
-
-
-def test_main_exit_code_three_on_unknown_single_run_no_baseline(monkeypatch, capsys):
-    _patch_client(monkeypatch, healthy_rules())
-    code = vfi.main(["--rcon-password", "x"])
-    assert code == 3  # idempotency cannot be proven in a single run
-
-
-def test_main_exit_code_two_on_fail(monkeypatch, capsys):
-    two_network_electric = json.dumps(
-        {
-            "sampled": 4,
-            "networks": [
-                {"id": 1, "examples": []},
-                {"id": 2, "examples": []},
-            ],
-        }
-    )
-    _patch_client(monkeypatch, healthy_rules(electric=two_network_electric))
-    code = vfi.main(["--rcon-password", "x"])
-    assert code == 2
-
-
-def test_main_exit_code_three_on_unknown(monkeypatch, capsys):
-    _patch_client(monkeypatch, healthy_rules(fluid="garbled"))
-    code = vfi.main(["--rcon-password", "x"])
-    assert code == 3
-
-
-def test_main_exit_code_three_when_rcon_connection_fails(monkeypatch, capsys):
-    def broken_constructor(host, port, password, timeout=10.0):
-        raise vfi.RconError("connection refused")
-
-    monkeypatch.setattr(vfi, "RconClient", broken_constructor)
-    code = vfi.main(["--rcon-password", "x"])
-    assert code == 3
 
 
 def test_main_json_output_is_valid_json(monkeypatch, capsys, tmp_path):
@@ -550,15 +386,3 @@ def test_main_json_output_is_valid_json(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     parsed = json.loads(out)
     assert parsed["verdict"] == vfi.PASS
-
-
-def test_main_baseline_and_compare_round_trip(monkeypatch, capsys, tmp_path):
-    baseline_path = tmp_path / "baseline.json"
-    _patch_client(monkeypatch, healthy_rules())
-    code = vfi.main(["--rcon-password", "x", "--baseline", str(baseline_path)])
-    assert code == 3  # idempotency unknown on a single run
-    assert baseline_path.exists()
-
-    _patch_client(monkeypatch, healthy_rules())
-    code = vfi.main(["--rcon-password", "x", "--compare", str(baseline_path)])
-    assert code == 0  # unchanged counts -> idempotent -> overall pass

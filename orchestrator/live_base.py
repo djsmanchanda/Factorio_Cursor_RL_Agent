@@ -7,6 +7,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from orchestrator import resource_patches
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -20,6 +21,11 @@ _SAFE_TO_CLEAR_TYPES = {"tree", "simple-entity"}
 
 def _sc(client: RconClient, lua: str) -> str:
     return client.command("/sc " + lua).strip()
+
+
+def game_tick(client: RconClient) -> int:
+    """Current simulation time for deterministic scheduling and task aging."""
+    return int(_sc(client, "rcon.print(game.tick)"))
 
 
 @dataclass(frozen=True)
@@ -98,6 +104,7 @@ def nearest_resource(
     return (x, y), (minx, miny), (maxx, maxy)
 
 
+
 def drill_footprints_have_resource(
     client: RconClient, surface: str, resource: str, centres: list[Point],
 ) -> bool:
@@ -117,6 +124,7 @@ def drill_footprints_have_resource(
     )
     lua = "local s=game.surfaces['" + surface + "'];local out={};" + checks + ";rcon.print(table.concat(out,''))"
     return _sc(client, lua) == "1" * len(centres)
+
 
 def area_clear(
     client: RconClient, surface: str, min_point: Point, max_point: Point, *,
@@ -161,9 +169,19 @@ def find_clear_area(
 ) -> Point | None:
     """Find the nearest deterministic clear box satisfying land reservations.
 
-    Entity occupancy for the whole search region is fetched once. Candidates
-    inside explicit forbidden rectangles are skipped, and production callers
-    may make resource entities blocking with ``avoid_resources``.
+    Every terrain question is answered from two region-wide queries made once
+    up front -- occupancy (entities, water, and clutter) and, when reserving
+    mining land, where resources are at all -- so candidate evaluation is pure
+    set arithmetic. Probing each candidate over its own RCON round-trip instead
+    made siting cost one blocking game round-trip per rejected position, and
+    every one of those answers was already contained in the region scan.
+
+    ``box_has_reserved_patch`` is the one probe that still runs per candidate,
+    because whether a patch is worth reserving depends on the whole patch's
+    remaining amount rather than on anything visible in the box. It is asked
+    only of candidates that actually overlap a resource tile; an ore-free box
+    cannot touch a patch, and siting with ``avoid_resources`` is looking for
+    ore-free land, so in practice it is asked rarely or never.
     """
     candidates: list[tuple[float, Point]] = []
     radius = 0.0
@@ -181,23 +199,55 @@ def find_clear_area(
     ordered = [candidate for _distance, candidate in sorted(candidates, key=lambda item: item[0])]
     region_min = (min(c[0] for c in ordered), min(c[1] for c in ordered))
     region_max = (max(c[0] for c in ordered) + width, max(c[1] for c in ordered) + height)
-    occupied = occupied_tiles(client, surface, region_min, region_max)
+    occupied = occupied_tiles(
+        client, surface, region_min, region_max, include_clutter=True,
+    )
+    # One tile wider than any apron a candidate can ask about, so the per-box
+    # margin below can never look outside what this scan actually covered.
+    reserved_region = (
+        resource_patches.resource_tiles(
+            client, surface,
+            (region_min[0] - resource_clearance - 1, region_min[1] - resource_clearance - 1),
+            (region_max[0] + resource_clearance + 1, region_max[1] + resource_clearance + 1),
+        )
+        if avoid_resources else set()
+    )
     for candidate in ordered:
         candidate_max = (candidate[0] + width, candidate[1] + height)
-        box = {
-            (x, y)
-            for x in range(math.floor(candidate[0]), math.ceil(candidate[0] + width))
-            for y in range(math.floor(candidate[1]), math.ceil(candidate[1] + height))
-        }
+        box = _box_tiles(candidate, candidate_max)
         if box & occupied:
             continue
-        if area_clear(
-            client, surface, candidate, candidate_max,
-            avoid_resources=avoid_resources,
-            resource_clearance=resource_clearance,
-        ):
-            return candidate
+        if avoid_resources:
+            reserved_box = (
+                candidate[0] - resource_clearance, candidate[1] - resource_clearance,
+            )
+            reserved_box_max = (
+                candidate_max[0] + resource_clearance, candidate_max[1] + resource_clearance,
+            )
+            if _box_tiles(reserved_box, reserved_box_max, margin=1) & reserved_region:
+                if resource_patches.box_has_reserved_patch(
+                    client, surface, reserved_box, reserved_box_max,
+                ):
+                    continue
+        return candidate
     return None
+
+
+def _box_tiles(
+    min_point: Point, max_point: Point, *, margin: int = 0,
+) -> set[tuple[int, int]]:
+    """Tile indices a box covers, matching occupied_tiles' floor-based indexing.
+
+    ``margin`` widens the result by whole tiles. Callers using this to decide
+    whether an exact check is WORTH MAKING pass margin=1: a resource entity
+    centred just outside a box still overlaps it, and floor-indexed tiles would
+    otherwise miss that. Over-including only costs the exact check it guards.
+    """
+    return {
+        (x, y)
+        for x in range(math.floor(min_point[0]) - margin, math.ceil(max_point[0]) + margin)
+        for y in range(math.floor(min_point[1]) - margin, math.ceil(max_point[1]) + margin)
+    }
 
 
 def _ring_offsets(radius: float) -> list[float]:
@@ -219,6 +269,25 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
         return None
     name, entity_type, force = raw.split(" ", 2)
     return {"name": name, "type": entity_type, "force": force}
+
+
+
+def logistic_request_total(
+    client: RconClient, surface: str, force: str, item: str,
+) -> int:
+    """Total requested count for one item across requester and buffer chests."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local total=0;for _,e in pairs(s.find_entities_filtered{"
+        "name={'requester-chest','buffer-chest'},force=f}) do "
+        "local ok,sections=pcall(function() return e.get_logistic_sections() end);"
+        "if ok and sections then for _,section in pairs(sections.sections) do "
+        "for i=1,section.filters_count do local slot=section.get_slot(i);"
+        "if slot and slot.value then local name=slot.value.name or slot.value;"
+        "if name=='" + item + "' then total=total+(tonumber(slot.min) or 0) end end end end end end;"
+        "rcon.print(math.ceil(total))"
+    )
+    return int(_sc(client, lua))
 
 
 def is_safe_to_clear(entity: dict) -> bool:
@@ -251,13 +320,26 @@ def entity_status_name(client: RconClient, surface: str, position: Point) -> str
     return None if raw == "NONE" else raw
 
 
+# A find_entities_filtered position+radius query matches an entity's CENTRE, not
+# its footprint, so a lookup by planned position misses a pole the game centred
+# elsewhere. A 2x2 substation planned on a .5 coordinate lands 0.707 tiles away;
+# poles are >=2 tiles apart in every layout here, so 1.5 resolves the snap
+# without ever reaching a neighbouring pole -- and the nearest match is taken
+# rather than an arbitrary one.
+_POLE_LOOKUP_RADIUS = 1.5
+
+
 def pole_network_id(client: RconClient, surface: str, position: Point) -> int | None:
     lua = (
         "local s=game.surfaces['" + surface + "'];"
-        "local e=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
-        "type='electric-pole',radius=0.5,limit=1}[1];"
-        "if not e then rcon.print('NONE') return end;"
-        "local ok,id=pcall(function() return e.electric_network_id end);"
+        "local px,py=" + str(position[0]) + "," + str(position[1]) + ";"
+        "local best,bd=nil,1e18;"
+        "for _,e in pairs(s.find_entities_filtered{position={px,py},"
+        "type='electric-pole',radius=" + str(_POLE_LOOKUP_RADIUS) + "}) do "
+        "local d=(e.position.x-px)^2+(e.position.y-py)^2;"
+        "if d<bd then bd=d;best=e end end;"
+        "if not best then rcon.print('NONE') return end;"
+        "local ok,id=pcall(function() return best.electric_network_id end);"
         "rcon.print(ok and tostring(id) or 'NONE')"
     )
     raw = _sc(client, lua)
@@ -288,24 +370,98 @@ def nearest_pole_on_other_network(
     return (float(x), float(y)), name
 
 
+# Entity types that actually FEED an electric network. An accumulator is
+# deliberately absent: it only stores what a source already produced, so a
+# network holding nothing else generates nothing.
+_GENERATOR_TYPES = (
+    "'electric-energy-interface','generator','solar-panel',"
+    "'burner-generator','fusion-generator'"
+)
+
+
+def nearest_powered_pole(
+    client: RconClient, surface: str, force: str, near: Point,
+    exclude_network_id: int | None = None,
+) -> tuple[Point, str] | None:
+    """Nearest pole belonging to a network that has real generation on it.
+
+    Bridging to merely a DIFFERENT network is not enough and silently wastes a
+    remediation round: the nearest other network is often a stage's own local
+    substation island, which has no source on it either, so the consumer stays
+    unpowered after a bridge that looked successful.
+    """
+    exclusion = (
+        "" if exclude_network_id is None
+        else "if id==" + str(exclude_network_id) + " then goto continue end;"
+    )
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local powered={};"
+        "for _,e in pairs(s.find_entities_filtered{type={" + _GENERATOR_TYPES + "}}) do "
+        "local ok,id=pcall(function() return e.electric_network_id end);"
+        "if ok and id then powered[id]=true end end;"
+        "local best,bd,bname=nil,1e18,nil;"
+        "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
+        "local ok,id=pcall(function() return e.electric_network_id end);"
+        "if ok and id and powered[id] then "
+        + exclusion +
+        "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
+        "if d<bd then bd=d;best=e.position;bname=e.name end end;"
+        "::continue:: end;"
+        "if not best then rcon.print('NONE') return end;"
+        "rcon.print(best.x..' '..best.y..' '..bname)"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    x, y, name = raw.split(" ", 2)
+    return (float(x), float(y)), name
+
+
 def occupied_tiles(
     client: RconClient, surface: str, min_point: Point, max_point: Point,
-    *, include_resources: bool = False,
+    *, ignore_names: Sequence[str] = (), include_resources: bool = False,
+    include_clutter: bool = False,
 ) -> set[tuple[int, int]]:
     """Every tile index inside the box that a route may not occupy.
 
-    Resources stay traversable for belts/pipes by default. Power remediation
-    opts in because pole footprints must not consume reserved mining land.
+    Resources stay traversable for belts/pipes by default; callers may opt in
+    when a placement policy reserves mining land.
+
+    Trees and rocks are likewise traversable by default -- a route may cross
+    them because construction clears them (see _SAFE_TO_CLEAR_TYPES). A caller
+    SITING a new area rather than routing through one wants them counted, since
+    an area is chosen once and clutter there is work; `include_clutter` says so.
 
     This is what turns a naive L-route into one that goes around real
     infrastructure instead of demanding it be bulldozed.
+
+    TERRAIN counts as occupancy too. A route is unbuildable on water whether or
+    not anything stands there, and a ghost on water is worse than a rejected
+    route: bots accept it, never build it, and the stage reports "bots still
+    working" until its rounds run out. Observed live: one fast-transport-belt
+    ghost at (-38.5, 44.5) on a water tile stalled a whole science stage.
+    Water is therefore blocked unconditionally -- unlike ore, nothing can be
+    built on it and no caller ever wants to route through it.
     """
+    ignored = "{" + ",".join("['" + name + "']=true" for name in ignore_names) + "}"
     resource_check = "" if include_resources else "e.type~='resource' and "
+    clutter_check = (
+        "" if include_clutter else
+        "not (e.force and e.force.name=='neutral' and "
+        "(e.type=='tree' or e.type=='simple-entity')) and "
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];local out={};"
-        "for _,e in pairs(s.find_entities_filtered{area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
-        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}}) do "
-        "if " + resource_check + "e.type~='character' then "
+        "local ignored=" + ignored + ";"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,t in pairs(s.find_tiles_filtered{area=area,collision_mask='water_tile'}) do "
+        "out[#out+1]=t.position.x..','..t.position.y end;"
+        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        "if " + resource_check + "e.type~='character' and "
+        + clutter_check + "not ignored[e.name] then "
         "local b=e.bounding_box;"
         "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
         "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
@@ -349,6 +505,31 @@ def available_items(client: RconClient, surface: str, force: str) -> dict[str, i
         counts[name] = int(count)
     return counts
 
+
+def roboports_needing_power(
+    client: RconClient, surface: str, force: str,
+) -> list[tuple[Point, str]]:
+    """Built roboports that cannot yet provide reliable construction/logistics."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local names={};for k,v in pairs(defines.entity_status) do names[v]=k end;"
+        "local powered={};for _,g in pairs(s.find_entities_filtered{type={"
+        "'electric-energy-interface','generator','solar-panel','burner-generator',"
+        "'fusion-generator'}}) do local ok,id=pcall(function() return g.electric_network_id end);"
+        "if ok and id then powered[id]=true end end;"
+        "local out={};for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "local status=names[e.status];local ok,id=pcall(function() return e.electric_network_id end);"
+        "if status=='no_power' or (status=='low_power' and not (ok and id and powered[id])) then "
+        "out[#out+1]=e.position.x..','..e.position.y..','..status end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    result = []
+    for record in raw.split(";"):
+        if record:
+            x, y, status = record.split(",")
+            result.append(((float(x), float(y)), status))
+    return result
 
 def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) -> Point | None:
     lua = (
@@ -421,6 +602,132 @@ def entity_statuses(
     return statuses
 
 
+def progress_counters(
+    client: RconClient, surface: str, positions: Sequence[Point],
+) -> dict[Point, float]:
+    """A per-machine number that MOVES while the machine is doing its job.
+
+    Status alone cannot separate "correctly built and waiting for its first
+    item" from "starved because the feed is broken" -- both read
+    no_ingredients. Progress can: a machine that has produced anything, or is
+    part-way through a craft, is demonstrably fed. Preferring an observation to
+    a timer is also what keeps the health check independent of belt tier, route
+    length and craft time, none of which a fixed grace window can track.
+
+    `products_finished` (crafting machines) is monotonic; `mining_progress` and
+    `crafting_progress` are cyclic, so callers must treat any CHANGE as
+    progress rather than only an increase. Entities exposing none of these are
+    omitted and stay judged on status alone.
+    """
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "if e then "
+        "local v=nil;"
+        "local ok,n=pcall(function() return e.products_finished end);"
+        "if ok and n then v=n*1000 end;"
+        "local ok2,m=pcall(function() return e.mining_progress end);"
+        "if ok2 and m then v=(v or 0)+m end;"
+        "local ok3,c=pcall(function() return e.crafting_progress end);"
+        "if ok3 and c then v=(v or 0)+c end;"
+        "if v then out[#out+1]=i..'='..string.format('%.4f',v) end "
+        "end end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    counters: dict[Point, float] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        index, _, value = pair.partition("=")
+        counters[tuple(positions[int(index) - 1])] = float(value)
+    return counters
+
+
+def machine_health(
+    client: RconClient, surface: str, positions: Sequence[Point],
+) -> tuple[dict[Point, str], dict[Point, float]]:
+    """Read machine status and progress for a whole stage in one RCON call."""
+    if not positions:
+        return {}, {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local names={};for k,v in pairs(defines.entity_status) do names[v]=k end;"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "local status=e and (names[e.status] or 'unknown') or 'missing';local v='';"
+        "if e then local n=nil;local ok,x=pcall(function() return e.products_finished end);"
+        "if ok and x then n=x*1000 end;"
+        "local ok2,y=pcall(function() return e.mining_progress end);"
+        "if ok2 and y then n=(n or 0)+y end;"
+        "local ok3,z=pcall(function() return e.crafting_progress end);"
+        "if ok3 and z then n=(n or 0)+z end;"
+        "if n then v=string.format('%.4f',n) end end;"
+        "out[#out+1]=i..'='..status..'@'..v end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    statuses: dict[Point, str] = {}
+    counters: dict[Point, float] = {}
+    for pair in _sc(client, lua).split(","):
+        if not pair:
+            continue
+        index, _, payload = pair.partition("=")
+        status, _, value = payload.partition("@")
+        position = tuple(positions[int(index) - 1])
+        statuses[position] = status
+        if value:
+            counters[position] = float(value)
+    return statuses, counters
+
+def logistic_robot_speed(client: RconClient, force: str) -> float:
+    """Tiles per second a logistic robot actually flies, research included.
+
+    Prototype speed is per TICK and worker-robot-speed research multiplies it,
+    so a base 0.05 becomes 14.1 tiles/s at a +3.7 modifier. Reading both live is
+    the only way a delivery estimate stays right as research lands.
+    """
+    lua = (
+        "local p=prototypes.entity['logistic-robot'];"
+        "local f=game.forces['" + force + "'];"
+        "rcon.print(p.speed*60*(1+f.worker_robots_speed_modifier))"
+    )
+    return float(_sc(client, lua))
+
+
+def unpowered_entities(
+    client: RconClient, surface: str, area: tuple[Point, Point],
+) -> list[Point]:
+    """Every entity inside `area` that reads no_power, nearest-first by name.
+
+    A stage's health cannot be judged from its machines alone. An inserter that
+    moves the product is not a "machine", so a mining row whose pole supply area
+    reaches the drills but stops one tile short of the output row reports every
+    drill as fine while the output inserter sits dead and the belt backs up.
+    """
+    (min_x, min_y), (max_x, max_y) = area
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for _,e in pairs(s.find_entities_filtered{area={{" + str(min_x) + "," + str(min_y) + "},"
+        "{" + str(max_x) + "," + str(max_y) + "}}}) do "
+        "if e.status==defines.entity_status.no_power then "
+        "out[#out+1]=string.format('%s %.1f %.1f',e.name,e.position.x,e.position.y) end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    found: list[Point] = []
+    for record in raw.split(";"):
+        if not record:
+            continue
+        _name, x, y = record.rsplit(" ", 2)
+        found.append((float(x), float(y)))
+    return found
+
+
 def logistic_network_ids(
     client: RconClient, surface: str, positions: Sequence[Point],
 ) -> dict[Point, int | None]:
@@ -473,6 +780,8 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
         "local c=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
         "radius=0.5,limit=1}[1];"
         "if not c then rcon.print('NONE') return end;"
+        "if c.type~='container' and c.type~='logistic-container' then "
+        "rcon.print('NONE') return end;"
         "local inv=c.get_inventory(defines.inventory.chest);local out={};"
         "for _,it in pairs(inv.get_contents()) do out[#out+1]=it.name..'='..it.count end;"
         "rcon.print(table.concat(out,','))"

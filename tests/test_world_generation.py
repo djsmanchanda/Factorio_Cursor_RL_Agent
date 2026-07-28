@@ -4,8 +4,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import json
-from pathlib import Path
+
 
 import pytest
 
@@ -15,7 +14,6 @@ from planners.plan_validation import actions, assert_no_production_infinity
 from planners.world_generation import PlannerWorldSpec, default_world_payload, validate_world_payload
 
 
-_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _overlap(left: dict, right: dict) -> bool:
@@ -127,26 +125,6 @@ def test_world_contract_rejects_autoplace_overlap_and_production_starter_items()
         validate_world_payload(production)
 
 
-def test_lua_world_creation_is_confirmation_gated_and_persistent() -> None:
-    lua = (_ROOT / "factorio_mod" / "world_generation.lua").read_text(encoding="utf-8")
-    shared = (_ROOT / "factorio_mod" / "sandbox_shared.lua").read_text(encoding="utf-8")
-    control = (_ROOT / "factorio_mod" / "control.lua").read_text(encoding="utf-8")
-
-    assert 'require("world_generation")' in control
-    assert 'payload.confirm ~= true' in lua
-    assert 'CREATE_TOKEN = "CREATE_PLANNER_WORLD"' in lua
-    assert 'RESET_TOKEN = "RESET_PLANNER_WORLD"' in lua
-    assert 'game.create_surface(SURFACE_NAME, map_gen_settings(spec))' in lua
-    assert 'game.delete_surface(existing)' in lua
-    assert 'storage.planner_world = {' in lua
-    assert 'default_enable_all_autoplace_controls = false' in lua
-    assert 'treat_missing_as_default = false' in lua
-    assert 'name = "crude-oil"' in lua
-    assert 'surface.set_tiles(tiles, true)' in lua
-    assert "infinity-chest" not in lua and "infinity-pipe" not in lua
-    assert "run the confirmed WorldSpec command first" in shared
-
-
 def test_world_rejects_cross_contract_drift_before_execution() -> None:
     canonical = deepcopy(default_world_payload())
     canonical["starter_kit"]["power_source"]["position"] = [-159, -160]
@@ -168,34 +146,3 @@ def test_world_rejects_cross_contract_drift_before_execution() -> None:
     lake["water_lake"]["offshore_edge_candidates"][0]["position"] = [20.5, -2.5]
     with pytest.raises(ValueError, match="overlaps a resource patch"):
         validate_world_payload(lake)
-
-
-def test_lua_validates_every_contract_before_mutation_and_guards_reset_ownership() -> None:
-    lua = (_ROOT / "factorio_mod" / "world_generation.lua").read_text(encoding="utf-8")
-
-    assert "local function is_integer(value)" in lua
-    assert "local function validate_resources(spec)" in lua
-    assert "local function validate_crude(spec)" in lua
-    assert "local function validate_lake(spec, resource_patches)" in lua
-    assert "local function validate_starter_kit(starter)" in lua
-    assert "local function validate_electronics_world(world, patches, crude_spots, lake)" in lua
-    assert "local function owns_existing_surface(surface)" in lua
-    assert "reset refused: existing planner-sandbox is not owned" in lua
-    assert "saved.owner == OWNER and saved.surface == SURFACE_NAME" in lua
-    assert "Starter kit item is not construction-only" in lua
-    assert "electronics pumpjack has no generated crude-oil spot" in lua
-    assert lua.index("local spec = validate_spec(payload.world_spec)") < lua.index("game.delete_surface(existing)")
-    assert lua.index("local spec = validate_spec(payload.world_spec)") < lua.index("return create_world(spec)")
-
-def test_new_files_obey_headers_and_line_limit() -> None:
-    files = [
-        _ROOT / "planners" / "world_generation.py",
-        _ROOT / "factorio_mod" / "world_generation.lua",
-        _ROOT / "tools" / "build_world_spec.py",
-        Path(__file__),
-    ]
-    for path in files:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        assert "Path:" in lines[0]
-        assert "Purpose:" in lines[1]
-        assert len(lines) <= 500

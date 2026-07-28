@@ -201,36 +201,3 @@ def test_full_m3_survey_m2_bundle_is_collision_checked() -> None:
 
     assert result["version"] == "1.0.0"
     assert len(result["ore_lines"]) == 6
-
-
-def test_lua_exports_only_persisted_bounded_world_observations() -> None:
-    lua = (_ROOT / "factorio_mod" / "snapshot.lua").read_text(encoding="utf-8")
-
-    assert "local function build_world_observation(surface)" in lua
-    assert "saved.surface ~= surface.name or not saved.bounds" in lua
-    assert "surface.find_entities_filtered({" in lua
-    assert 'type = "resource"' in lua
-    assert "for y = bounds.y_min, bounds.y_max_exclusive - 1 do" in lua
-    assert 'name == "water" or name == "deepwater"' in lua
-    assert "world_observation = build_world_observation(surface)" in lua
-
-
-def test_plan_only_cli_accepts_snapshot_or_raw_observation_contracts() -> None:
-    source = (_ROOT / "tools" / "survey_electronics_world.py").read_text(encoding="utf-8")
-
-    assert '"world_observation" in payload' in source
-    assert "allocate_electronics_world(" in source
-    assert "--block-bounds" in source and "--single-macro-block" in source
-    assert "--output" in source
-
-
-def test_milestone_four_files_have_headers_and_stay_small() -> None:
-    files = [
-        _ROOT / "planners" / "resource_survey.py",
-        _ROOT / "tools" / "survey_electronics_world.py",
-        Path(__file__),
-    ]
-    for path in files:
-        lines = path.read_text(encoding="utf-8").splitlines()
-        assert "Path:" in lines[0] and "Purpose:" in lines[1]
-        assert len(lines) <= 500

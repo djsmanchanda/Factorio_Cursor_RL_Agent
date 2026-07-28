@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
-
+RESERVED_PAIR_COLUMNS = 10
 
 def _sc(client: RconClient, lua: str) -> str:
     return client.command("/sc " + lua).strip()
@@ -20,6 +20,13 @@ class ResourceMine:
     output: Point
     drill_count: int
     pending: bool = False
+    expansion_step: int = -1
+    row_capacity: int = 0
+    belt_y: float | None = None
+
+    @property
+    def shared_belt_y(self) -> float:
+        return self.output[1] if self.belt_y is None else self.belt_y
 
 
 @dataclass(frozen=True)
@@ -51,7 +58,21 @@ def mining_productivity_bonus(
 def pending_plate_smelter(
     client: RconClient, surface: str, force: str, ore: str, near: Point,
 ) -> bool:
-    """Whether an incomplete deterministic furnace row requests this ore."""
+    """Whether an UNBUILT deterministic furnace row requests this ore.
+
+    Completeness is judged purely on whether the row is still ghosts. A furnace
+    is deliberately NOT judged on its recipe: unlike an assembling machine it has
+    no settable recipe and auto-selects one from the first ore inserted, so
+    `get_recipe()` is nil for every furnace that has not been fed yet.
+
+    Treating that nil as "still pending" deadlocked the runner outright. A fully
+    built, powered furnace row that had never received ore was reported pending
+    forever, plan_local_extraction refused to continue, and the run aborted
+    before reaching the remediation that would have fixed the starved feed --
+    so the condition causing the refusal could never clear. Observed live: three
+    built copper-plate furnaces, zero ghosts remaining, every run exiting
+    immediately on "refusing to submit a duplicate line".
+    """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local area={{" + str(near[0] - 320) + "," + str(near[1] - 320) + "},{"
@@ -72,11 +93,9 @@ def pending_plate_smelter(
         "if ok and name=='" + ore + "' then return true end end return false end;"
         "for _,e in pairs(machines) do local x,y=e.position.x,e.position.y;"
         "if not has_machine(x-3,y) then local n=1;local pending=e.type=='entity-ghost';"
-        "local ok,r=pcall(function() return e.get_recipe() end);if not ok or not r then pending=true end;"
         "while has_machine(x+3*n,y) do for _,m in pairs(machines) do if "
         "math.abs(m.position.x-(x+3*n))<0.1 and math.abs(m.position.y-y)<0.1 then "
-        "local rok,rr=pcall(function() return m.get_recipe() end);"
-        "if m.type=='entity-ghost' or not rok or not rr then pending=true end end end;n=n+1 end;"
+        "if m.type=='entity-ghost' then pending=true end end end;n=n+1 end;"
         "if pending and requests(x-3,y-5) and output_at(x+3*n,y+3) then "
         "rcon.print('1');return end end end;rcon.print('0')"
     )
@@ -91,10 +110,10 @@ def _parse_entities(raw: str) -> list[ExtractionEntity]:
     return entities
 
 
-def _classify_direct_mine(
+def _classify_direct_mines(
     entities: list[ExtractionEntity], near: Point,
-) -> ResourceMine | None:
-    """Classify complete and interrupted direct-mine geometry deterministically."""
+) -> list[ResourceMine]:
+    """Classify legacy terminal chests and continuous-belt side taps."""
     by_kind: dict[str, dict[Point, bool]] = {}
     for entity in entities:
         states = by_kind.setdefault(entity.kind, {})
@@ -105,37 +124,52 @@ def _classify_direct_mine(
     inserters = by_kind.get("inserter", {})
     candidates: list[tuple[float, ResourceMine]] = []
     for chest, chest_built in by_kind.get("chest", {}).items():
-        inserter = (chest[0] - 1, chest[1])
-        endpoint = (chest[0] - 2, chest[1])
-        if inserter not in inserters or endpoint not in belts:
-            continue
-        row = sorted(
-            (position, built) for position, built in drills.items()
-            if abs(chest[1] - (position[1] + 2)) < 0.1
-            and 4 <= chest[0] - position[0] <= 20
-            and abs(((chest[0] - position[0]) - 4) % 3) < 0.1
-        )
-        if not row:
-            continue
-        expected_count = round((chest[0] - row[0][0][0] - 1) / 3)
-        expected = {
-            (chest[0] - 4 - 3 * index, chest[1] - 2)
-            for index in range(expected_count)
-        }
-        row_states = dict(row)
-        first_x = min(position[0] for position in expected)
-        belt_xs = [first_x + step for step in range(round(chest[0] - 2 - first_x) + 1)]
-        complete = (
-            chest_built
-            and inserters[inserter]
-            and expected == set(row_states)
-            and all(row_states.get(position, False) for position in expected)
-            and all(belts.get((x, chest[1]), False) for x in belt_xs)
-        )
-        mine = ResourceMine(chest, expected_count, pending=not complete)
-        candidates.append(((chest[0] - near[0]) ** 2 + (chest[1] - near[1]) ** 2, mine))
+        for expansion_step in (-1, 1):
+            layouts = [
+                (chest[1], (chest[0] + expansion_step, chest[1]),
+                 (chest[0] + 2 * expansion_step, chest[1]), False),
+                (chest[1] + 2, (chest[0], chest[1] + 1),
+                 (chest[0], chest[1] + 2), True),
+            ]
+            for belt_y, inserter, endpoint, side_tap in layouts:
+                if inserter not in inserters or endpoint not in belts:
+                    continue
+                row: dict[Point, bool] = {}
+                for index in range(34):
+                    position = (
+                        chest[0] + expansion_step * (4 + 3 * index), belt_y - 2,
+                    )
+                    if position not in drills:
+                        break
+                    row[position] = drills[position]
+                if not row:
+                    continue
+                expected_count = len(row)
+                farthest_x = chest[0] + expansion_step * (4 + 3 * (expected_count - 1))
+                lo, hi = sorted((endpoint[0], farthest_x))
+                belt_positions = {
+                    (lo + offset, belt_y)
+                    for offset in range(round(hi - lo) + 1)
+                }
+                complete = (
+                    chest_built
+                    and inserters[inserter]
+                    and all(row.values())
+                    and all(belts.get(position, False) for position in belt_positions)
+                )
+                row_capacity = (
+                    expected_count + RESERVED_PAIR_COLUMNS
+                    if expansion_step > 0 else 0
+                )
+                mine = ResourceMine(
+                    chest, expected_count, pending=not complete,
+                    expansion_step=expansion_step, row_capacity=row_capacity,
+                    belt_y=belt_y if side_tap else None,
+                )
+                distance = (chest[0] - near[0]) ** 2 + (chest[1] - near[1]) ** 2
+                candidates.append((distance, mine))
     if candidates:
-        return min(candidates, key=lambda candidate: candidate[0])[1]
+        return [mine for _distance, mine in sorted(candidates, key=lambda item: item[0])]
 
     pending_drills = list(drills)
     if pending_drills:
@@ -143,18 +177,24 @@ def _classify_direct_mine(
             pending_drills,
             key=lambda p: (p[0] - near[0]) ** 2 + (p[1] - near[1]) ** 2,
         )
-        return ResourceMine((drill[0] + 4, drill[1] + 2), 1, pending=True)
-    return None
+        return [ResourceMine((drill[0] + 4, drill[1] + 2), 1, pending=True)]
+    return []
+
+def _classify_direct_mine(
+    entities: list[ExtractionEntity], near: Point,
+) -> ResourceMine | None:
+    mines = _classify_direct_mines(entities, near)
+    return mines[0] if mines else None
 
 
-def find_resource_mine(
+def _resource_mine_entities(
     client: RconClient,
     surface: str,
     force: str,
     resource: str,
     near: Point,
-) -> ResourceMine | None:
-    """Find this planner's complete or partially submitted extraction row."""
+) -> list[ExtractionEntity]:
+    """Read entity records needed to reconcile every managed resource mine."""
     lua = (
         "local s=game.surfaces['" + surface + "'];"
         "local f=game.forces['" + force + "'];local out={};"
@@ -176,21 +216,60 @@ def find_resource_mine(
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
         "if g.ghost_name=='passive-provider-chest' or g.ghost_name=='steel-chest' "
         "then table.insert(chests,g) end end;"
-        "for _,c in pairs(chests) do local cp=c.position;local ins={};"
-        "for _,e in pairs(s.find_entities_filtered{type='inserter',force=f,"
-        "position={cp.x-1,cp.y},radius=0.2}) do table.insert(ins,e) end;"
-        "for _,g in pairs(ghosts('inserter',{cp.x-1,cp.y})) do table.insert(ins,g) end;"
-        "local endbelt=s.find_entities_filtered{type='transport-belt',force=f,"
-        "position={cp.x-2,cp.y},radius=0.2};"
-        "for _,g in pairs(ghosts('transport-belt',{cp.x-2,cp.y})) do "
-        "table.insert(endbelt,g) end;if #ins>0 and #endbelt>0 then "
+        "local function record(c,ins,endbelt,belt_y) if #ins>0 and #endbelt>0 then "
         "add('chest',c,c.type~='entity-ghost');"
         "for _,e in pairs(ins) do add('inserter',e,e.type~='entity-ghost') end;"
-        "for x=cp.x-20,cp.x-2,1 do for _,e in pairs("
+        "for x=c.position.x-160,c.position.x+160,1 do for _,e in pairs("
         "s.find_entities_filtered{type='transport-belt',force=f,"
-        "position={x,cp.y},radius=0.2}) do add('belt',e,true) end;"
-        "for _,g in pairs(ghosts('transport-belt',{x,cp.y})) do "
+        "position={x,belt_y},radius=0.2}) do add('belt',e,true) end;"
+        "for _,g in pairs(ghosts('transport-belt',{x,belt_y})) do "
         "add('belt',g,false) end end end end;"
+        "for _,c in pairs(chests) do local cp=c.position;local ins={};local endbelt={};"
+        "for _,side in pairs({-1,1}) do for _,e in pairs("
+        "s.find_entities_filtered{type='inserter',force=f,"
+        "position={cp.x+side,cp.y},radius=0.2}) do table.insert(ins,e) end;"
+        "for _,g in pairs(ghosts('inserter',{cp.x+side,cp.y})) do table.insert(ins,g) end;"
+        "for _,e in pairs(s.find_entities_filtered{type='transport-belt',force=f,"
+        "position={cp.x+2*side,cp.y},radius=0.2}) do table.insert(endbelt,e) end;"
+        "for _,g in pairs(ghosts('transport-belt',{cp.x+2*side,cp.y})) do "
+        "table.insert(endbelt,g) end end;record(c,ins,endbelt,cp.y);"
+        "local tapins=s.find_entities_filtered{type='inserter',force=f,"
+        "position={cp.x,cp.y+1},radius=0.2};"
+        "for _,g in pairs(ghosts('inserter',{cp.x,cp.y+1})) do table.insert(tapins,g) end;"
+        "local tapbelt=s.find_entities_filtered{type='transport-belt',force=f,"
+        "position={cp.x,cp.y+2},radius=0.2};"
+        "for _,g in pairs(ghosts('transport-belt',{cp.x,cp.y+2})) do "
+        "table.insert(tapbelt,g) end;record(c,tapins,tapbelt,cp.y+2) end;"
         "rcon.print(table.concat(out,';'))"
     )
-    return _classify_direct_mine(_parse_entities(_sc(client, lua)), near)
+    return _parse_entities(_sc(client, lua))
+
+
+def find_resource_mines(
+    client: RconClient, surface: str, force: str, resource: str, near: Point,
+) -> list[ResourceMine]:
+    """Find every planner-managed mine for one resource, nearest-first."""
+    return _classify_direct_mines(
+        _resource_mine_entities(client, surface, force, resource, near), near,
+    )
+
+
+def find_resource_mine(
+    client: RconClient, surface: str, force: str, resource: str, near: Point,
+) -> ResourceMine | None:
+    """Compatibility wrapper returning only the nearest managed mine."""
+    mines = find_resource_mines(client, surface, force, resource, near)
+    return mines[0] if mines else None
+
+
+def resource_drill_count(
+    client: RconClient, surface: str, force: str, resource: str,
+) -> int:
+    """Count all built drills currently targeting this resource."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local n=0;for _,d in pairs(s.find_entities_filtered{"
+        "name='electric-mining-drill',force=f}) do local t=d.mining_target;"
+        "if t and t.name=='" + resource + "' then n=n+1 end end;rcon.print(n)"
+    )
+    return int(_sc(client, lua))

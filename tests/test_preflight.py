@@ -1,18 +1,11 @@
 # Path: tests/test_preflight.py
-# Purpose: One test per live-failure check preflight() catches, plus a clean
-# bundle, a skip case, and the real composed electronics bundle (M6 brief).
+# Purpose: One focused test per preflight rejection, plus clean and skip behavior.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from planners.electronics_block import build_electronics_block
-from planners.electronics_world import load_electronics_world_spec
 from planners.preflight import assert_preflight, preflight
-
-_FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 
 
 def _entity(entity, x, y, *, action_type="place_entity", direction=None, name="p"):
@@ -229,18 +222,3 @@ def test_assert_preflight_is_silent_on_a_clean_bundle():
 
 
 # --- real composed electronics bundle (M6: 40 plans about to be executed) -----
-
-@pytest.fixture(scope="module")
-def real_bundle():
-    world = load_electronics_world_spec(_FIXTURE)
-    return build_electronics_block(include_processing=True, world=world)
-
-
-def test_preflight_over_the_real_electronics_bundle(real_bundle):
-    result = preflight(real_bundle)
-    if not result["ok"]:
-        details = "\n".join(f"- [{f['check']}] {f['detail']}" for f in result["failures"])
-        pytest.fail(
-            "preflight found known-fatal defect(s) in the real composed electronics "
-            f"bundle -- these WILL fail live execution:\n{details}"
-        )

@@ -93,7 +93,6 @@ def test_line_recipe_machine_can_craft_its_category(name: str) -> None:
 # This is a recorded gap, not a passing case -- delete an entry from this set the
 # moment its chain really does resolve.
 FLUID_BLOCKED_CHAINS = {
-    "advanced-circuit",   # needs plastic-bar <- petroleum-gas
     "processing-unit",    # needs advanced-circuit, plus sulfuric-acid directly
 }
 

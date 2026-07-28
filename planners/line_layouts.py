@@ -40,6 +40,7 @@ class LineLayoutMixin:
         feed_style: str = "chest",
         chained_ingredients: "set | list | None" = None,
         terminal_collector: bool = True,
+        flow_direction: str = "east",
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -90,6 +91,8 @@ class LineLayoutMixin:
             raise ValueError(f"No line recipe knowledge for: {recipe}")
         if machine_count <= 0:
             raise ValueError("machine_count must be positive")
+        if flow_direction not in {"east", "west"}:
+            raise ValueError("Line flow direction must be east or west")
 
         if belt_type not in BELT_TIERS:
             raise ValueError(f"Unknown belt tier: {belt_type}")
@@ -297,6 +300,17 @@ class LineLayoutMixin:
         ]
         if mining_feed:
             phases.append(self.generate_mining_feed(machine_count, origin_x, origin_y)["phases"][0])
+        if flow_direction == "west":
+            mirror_axis_twice = 2 * ox + length
+            for phase in phases:
+                for action in phase["actions"]:
+                    action["position"]["x"] = (
+                        mirror_axis_twice - action["position"]["x"]
+                    )
+                    if action.get("direction") == "east":
+                        action["direction"] = "west"
+                    elif action.get("direction") == "west":
+                        action["direction"] = "east"
         plan = {"phases": phases}
 
         repo_root = Path(__file__).resolve().parents[1]
@@ -372,7 +386,7 @@ class LineLayoutMixin:
                                       only_indices: "set | None" = None) -> None:
         """Sideload gives each ingredient ONE lane; demand must fit it.
 
-        Hard failure below raw demand (physically cannot keep up — measured
+        Hard failure below raw demand (physically cannot keep up â€” measured
         live: express lane 22.5/s vs 27/s cable demand ran at 8.27/s of a
         9.6/s cap). The error names the cheapest tier meeting demand with
         FEED_HEADROOM so callers can upgrade or switch feed style.

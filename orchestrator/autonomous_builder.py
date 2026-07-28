@@ -4,35 +4,46 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
 from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
-from orchestrator.game_bridge import GameBridge
-from orchestrator.extraction_transport import planned_footprint_tiles, preflight_ingredient_transport
+from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.mine_retirement import retire_depleted_mines
+from orchestrator.mine_output_tap import legacy_output_tap_plan
+from orchestrator.mall_builder import build_compact_mall_stage
+from orchestrator.parts_mall import (
+    MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
+)
+from orchestrator.intermediate_scaling import (
+    live_intermediate_demand, promoted_line_belt_type, promoted_line_machine_count,
+)
+from orchestrator.priority_list import PriorityList
+from orchestrator.extraction_transport import (
+    planned_footprint_tiles, preflight_ingredient_transport,
+)
+from orchestrator.stage_chemical import ensure_coal_mine, ensure_oil_cell
 from orchestrator.stage_extraction import (
     LOCAL_MODE_MAX_LINK_TILES, existing_mine_service_geometry,
-    candidate_mining_origins as _candidate_mining_origins,
-    choose_mining_origin as _choose_mining_origin,
-    mining_drill_positions as _mining_drill_positions,
+    candidate_mining_origins as _candidate_mining_origins,  # noqa: F401 - compatibility export
+    choose_mining_origin as _choose_mining_origin,  # noqa: F401 - compatibility export
+    mining_drill_positions as _mining_drill_positions,  # noqa: F401 - compatibility export
     plan_local_extraction,
 )
+from orchestrator.stage_recovery import repair_existing_ingredient_transport
 from orchestrator.stage_services import (
-    StuckError, validate_builder_target,
+    StuckError,
     _BLOCKAGE_INTERVAL,
     _BLOCKAGE_ROUNDS,
-    _BOT_THROUGHPUT_LIMIT,
-    _BRIDGE_SURVEY_MARGIN,
     _DEFAULT_BELT,
     _DEFAULT_INSERTER,
     _LOGISTIC_CHEST_ENTITIES,
     _ROBOPORT_CONSTRUCTION_RADIUS,
     _ROBOPORT_LOGISTIC_RADIUS,
     _STAGE_CHEST_REACH,
-    _STUCK_GRACE_SECONDS,
-    _TRANSIT_SAFETY,
     _diagnose_machines,
     _logistic_chest_positions,
     _submit,
@@ -40,20 +51,34 @@ from orchestrator.stage_services import (
     ensure_logistic_coverage,
     extend_power,
     extend_roboport_coverage,
+    validate_builder_target,
 )
 from orchestrator.stage_transport import (
-    _clear_side,
-    _ingredient_demand,
     _publish_output_chest,
+    _direct_single_belt_feed,
     _swap_infinity_chests,
-    _toward,
     _transport_mode,
-    choose_belt_tier,
+    ensure_ingredient_transport,
+    transport_grace_seconds,
 )
-from planners.belt_bridge import bridge_chest_to_chest, opposite, transit_seconds
+from planners.bootstrap_smelting import (
+    generate_logistic_smelter,
+    logistic_smelter_origin,
+    retire_logistic_smelter_plan,
+)
 from planners.infrastructure import strip_local_power
 from planners.local_layout_planner import LocalLayoutPlanner
-from planners.recipe_data import LINE_RECIPES
+from planners.mall_layout import (
+    generate_compact_mall_request_update, generate_mall_provider_limit_update,
+    generate_promoted_mall_retirement_plan,
+)
+from planners.recipe_data import (
+    FEED_HEADROOM,
+    LINE_RECIPES,
+    inserter_for_demand,
+    install_catalog_line_recipes,
+    machine_handled_rates,
+)
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -63,13 +88,92 @@ _DEFAULT_MACHINE_COUNT = 2
 def _mineable(recipe: str) -> bool:
     """Whether this recipe is a supported direct resource-extraction stage."""
     ingredients = LINE_RECIPES[recipe]["ingredients"]
-    return len(ingredients) == 1 and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
+    return (
+        len(ingredients) == 1
+        and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
+    )
 
+
+def _side_sample_plate_output(
+    plan: dict, origin: Point, machine_count: int,
+    belt_type: str = _DEFAULT_BELT, flow_direction: str = "east",
+    tap_inserter_type: str = "inserter",
+) -> Point:
+    """Keep one powered side tap while the output belt stays continuous."""
+    if flow_direction not in {"east", "west"}:
+        raise ValueError("Plate output flow must be east or west")
+    ox, oy = origin
+    terminal_chests = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "steel-chest"
+        and action["position"]["y"] == oy + 6.5
+    ]
+    if len(terminal_chests) != 1:
+        raise StuckError("plate layout has no unique terminal collector")
+    terminal_chest = terminal_chests[0]
+    chest_x = terminal_chest["position"]["x"]
+    step = 1 if flow_direction == "east" else -1
+    inserter_x = chest_x - step
+    terminal_inserter = next((
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity", "").endswith("inserter")
+        and action["position"] == {"x": inserter_x, "y": oy + 6.5}
+    ), None)
+    if terminal_inserter is None:
+        raise StuckError("plate layout terminal collector has no inserter")
+
+    # Generic high-throughput lines add drain chests below the output belt.
+    # Plates keep one low-priority sample only; the continuous belt is primary.
+    for phase in plan["phases"]:
+        phase["actions"] = [
+            action for action in phase["actions"]
+            if action is terminal_chest or action is terminal_inserter or not (
+                action.get("entity") == "steel-chest"
+                and action["position"]["y"] == oy + 8.5
+            ) and not (
+                action.get("entity", "").endswith("inserter")
+                and action["position"]["y"] == oy + 7.5
+            )
+        ]
+
+    provider = (chest_x, oy + 8.5)
+    terminal_chest["position"] = {"x": provider[0], "y": provider[1]}
+    terminal_inserter.update({
+        "entity": tap_inserter_type,
+        "position": {"x": provider[0], "y": provider[1] - 1},
+        "direction": "north",
+    })
+    collector_phase = next(
+        phase for phase in plan["phases"] if terminal_chest in phase["actions"]
+    )
+    collector_phase["actions"].extend([
+        {
+            "action_type": "place_ghost", "entity": belt_type,
+            "position": {"x": inserter_x, "y": oy + 6.5},
+            "direction": flow_direction,
+        },
+        {
+            "action_type": "place_ghost", "entity": belt_type,
+            "position": {"x": chest_x, "y": oy + 6.5},
+            "direction": flow_direction,
+        },
+        {
+            "action_type": "place_ghost", "entity": belt_type,
+            "position": {"x": chest_x + step, "y": oy + 6.5},
+            "direction": flow_direction,
+        },
+        {
+            "action_type": "place_ghost", "entity": "medium-electric-pole",
+            "position": {"x": provider[0], "y": provider[1] + 2},
+        },
+    ])
+    return provider
 
 def _diagnose_blockage(
     client: RconClient, surface: str, force: str, origin: Point,
     substation_position: Point, machine_positions: list[Point],
     logistic_chest_positions: Sequence[Point] = (),
+    area: tuple[Point, Point] | None = None,
 ) -> tuple[str, str] | None:
     """Why is this stage not finishing? Returns (issue, remedy) or None.
 
@@ -110,6 +214,20 @@ def _diagnose_blockage(
     unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
     if unpowered:
         return (f"{len(unpowered)} machine(s) unpowered", "stage_power")
+    # Machines are not the whole stage. The inserter that moves the product is
+    # what makes a mining row actually deliver, and it sits on the output row --
+    # outside the supply area of poles positioned for the machine row. Checking
+    # machines alone declared such a stage healthy while its belt backed up and
+    # its provider chest stayed empty forever.
+    if area is not None:
+        stranded = live_base.unpowered_entities(client, surface, area)
+        if stranded:
+            return (
+                f"{len(stranded)} support entity(ies) unpowered "
+                f"(first at {stranded[0]}); the stage's machines have power but "
+                "something that moves its product does not",
+                "entity_power",
+            )
     return None
 
 
@@ -134,13 +252,14 @@ def bring_stage_up(
     # visibly starved.
     extend_roboport_coverage(client, bridge, surface, force, origin, emit)
     ensure_logistic_coverage(client, bridge, surface, force, logistic_chest_positions, emit)
+    description, remedy, acted_ever = "no blockage recorded", "none", False
     for attempt in range(1, rounds + 1):
         remaining = _wait_for_ghosts(
             client, surface, force, area, timeout_seconds=interval,
         )
         issue = _diagnose_blockage(
             client, surface, force, origin, substation_position, machine_positions,
-            logistic_chest_positions,
+            logistic_chest_positions, area,
         )
         if remaining == 0 and issue is None:
             if attempt > 1:
@@ -153,41 +272,126 @@ def bring_stage_up(
         description, remedy = issue
         emit(f"  [{name} #{attempt}/{rounds}] OPEN: {description} -> remedy: {remedy}")
         if remedy == "coverage":
-            extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+            acted = extend_roboport_coverage(
+                client, bridge, surface, force, origin, emit,
+            )
         elif remedy == "logistic_coverage":
-            ensure_logistic_coverage(
+            # Unlike a power gap, this one CAN clear without the remedy doing
+            # anything: a roboport that was just connected still has to charge
+            # its buffer before it serves a logistic area, and until it does the
+            # chests inside its range read as belonging to no network. So a
+            # no-op here is reported and waited out rather than treated as
+            # fatal -- but it is no longer silent, and a run where every single
+            # round was a no-op now says so instead of timing out anonymously.
+            acted = ensure_logistic_coverage(
                 client, bridge, surface, force, logistic_chest_positions, emit,
             )
+            if not acted:
+                emit("    coverage is already geometrically sufficient -- waiting for the "
+                     "covering roboport to finish powering up")
         elif remedy == "roboport_power":
             nearest = live_base.nearest_roboport(client, surface, force, origin)
-            if nearest is not None:
-                extend_power(client, bridge, surface, force, nearest, emit)
+            if nearest is not None and not extend_power(
+                client, bridge, surface, force, nearest, emit,
+            ):
+                raise StuckError(
+                    f"{name}: {description}, but no power bridge can be built from the "
+                    f"roboport at {nearest} -- either no pole stands there or the whole "
+                    "surface is already one network, so retrying cannot change anything"
+                )
+            acted = nearest is not None
         elif remedy == "stage_power":
-            extend_power(client, bridge, surface, force, substation_position, emit)
+            # A remedy that changes nothing must not be retried. extend_power
+            # returns False without emitting when there is no pole at the
+            # recorded position or no second network to bridge to; the previous
+            # code discarded that, so the loop re-ran an identical no-op for
+            # every remaining round and reported only a bare timeout.
+            if not extend_power(
+                client, bridge, surface, force, substation_position, emit,
+            ):
+                raise StuckError(
+                    f"{name}: {description}, but no power bridge can be built from "
+                    f"{substation_position} -- either no pole stands there (check the "
+                    "planned vs. built substation position) or the whole surface is "
+                    "already one network, so retrying cannot change anything"
+                )
+            acted = True
+        elif remedy == "entity_power":
+            stranded = live_base.unpowered_entities(client, surface, area)
+            if not stranded:
+                acted = False
+            else:
+                # Each stranded entity is wired individually: they are stranded
+                # precisely because no single pole position covers them all.
+                acted = False
+                for position in stranded:
+                    acted |= extend_power(
+                        client, bridge, surface, force, position, emit,
+                    )
+                if not acted:
+                    raise StuckError(
+                        f"{name}: {description}, but none of {stranded} can be reached "
+                        "by a pole chain from any generating network"
+                    )
         else:
             raise StuckError(f"{name}: {description} -- no automatic remedy")
+        acted_ever |= bool(acted)
+    if not acted_ever:
+        raise StuckError(
+            f"{name}: {description}, and not one of the {rounds} remediation rounds "
+            f"built anything -- the remedy '{remedy}' cannot address this fault, so the "
+            f"{rounds * interval:.0f}s were spent re-running a no-op"
+        )
     raise StuckError(
         f"{name} still blocked after {rounds} rounds "
-        f"({rounds * interval:.0f}s of remediation attempts)"
+        f"({rounds * interval:.0f}s of remediation attempts); last issue: {description}"
     )
 
 
 def build_mining_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
-    reference_point: Point, emit: Callable[[str], None],
+    reference_point: Point, emit: Callable[[str], None], *, expand: bool = False,
 ) -> Point:
     """Build ore-only extraction, then an independent off-ore smelting stage."""
+    ore = LINE_RECIPES[recipe]["ingredients"][0]
+    try:
+        retire_depleted_mines(
+            client, bridge, surface, force, ore, reference_point, emit,
+        )
+    except RuntimeError as error:
+        raise StuckError(str(error)) from error
     try:
         extraction = plan_local_extraction(
-            client, surface, force, recipe, reference_point, _DEFAULT_MACHINE_COUNT,
+            client, surface, force, recipe, reference_point, 3,
             belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+            reuse_existing=not expand,
+            belt_stock=live_base.available_items(
+                client, surface, force,
+            ).get(_DEFAULT_BELT, 0),
         )
     except ValueError as error:
         raise StuckError(str(error)) from error
+    if expand and extraction.build_plan is not None:
+        emit(
+            f"MINING SYSTEM PHASE: {extraction.system_drill_count_before} -> "
+            f"{extraction.system_drill_target} total {extraction.ore} drills; "
+            f"building {extraction.drill_count} drill(s) in this batch"
+        )
+        phase_names = {phase["name"] for phase in extraction.build_plan["phases"]}
+        if "shared_belt_batch" in phase_names:
+            emit("MINING CAPACITY: filling the current reserved corridor in one batch")
+        elif "direct_mine_output" in phase_names:
+            emit("MINING CAPACITY: opening the next mine at the current system phase")
     emit(
         f"{extraction.drill_count} drill(s) feed {extraction.furnace_count} "
         f"separate {recipe} furnace(s); mining productivity "
         f"is +{extraction.mining_productivity_bonus:.0%}"
+    )
+    ore_output = extraction.ore_output
+    emit(
+        f"{recipe} refinery flow is {extraction.smelter_flow_direction}bound: "
+        f"input faces mine output {ore_output}; output favors downstream "
+        f"reference {reference_point}"
     )
 
     if extraction.build_plan is not None:
@@ -201,73 +405,227 @@ def build_mining_stage(
             for phase in plan["phases"] for action in phase["actions"]
             if action["entity"] == "electric-mining-drill"
         ]
-        substation_position = next(
+        power_positions = [
             (action["position"]["x"], action["position"]["y"])
             for phase in plan["phases"] for action in phase["actions"]
-            if action["entity"] == "substation"
-        )
+            if action["entity"] in {"substation", "medium-electric-pole"}
+        ]
+        if not power_positions:
+            raise StuckError(f"mining plan for {extraction.ore} has no power anchor")
+        substation_position = power_positions[0]
         plan["surface"], plan["force"] = surface, force
         _submit(client, bridge, surface, plan, f"mining_{extraction.ore}", emit)
-        area = ((ox - 15, oy - 15), (extraction.ore_output[0] + 15, oy + 15))
+        stage_xs = [x for x, _y in machine_positions] + [extraction.ore_output[0]]
+        stage_ys = [y for _x, y in machine_positions] + [extraction.ore_output[1]]
+        area = (
+            (min(stage_xs) - 15, min(stage_ys) - 15),
+            (max(stage_xs) + 15, max(stage_ys) + 15),
+        )
         bring_stage_up(
             client, bridge, surface, force, f"mining stage for {extraction.ore}",
             (ox, oy), area, substation_position, machine_positions, emit,
             logistic_chest_positions=_logistic_chest_positions(plan),
         )
-        stuck = _diagnose_machines(client, surface, machine_positions, emit)
+        stuck = _diagnose_machines(
+            client, surface, machine_positions, emit, bridge=bridge, force=force,
+        )
         if stuck:
             raise StuckError(
                 f"mining stage for {extraction.ore} built but not healthy: {stuck}"
             )
+    elif extraction.expansion_positions:
+        machines = list(extraction.expansion_positions)
+        first_x = min(x for x, _ in machines)
+        row_y = machines[0][1]
+        origin = (first_x - 1.5, row_y + 1.5)
+        area = ((first_x - 15, row_y - 15), (extraction.ore_output[0] + 15, row_y + 15))
+        substation_position = (first_x - 6, row_y)
+        emit(f"reusing completed adjacent {extraction.ore} expansion row")
+        bring_stage_up(
+            client, bridge, surface, force, f"expanded mine for {extraction.ore}",
+            origin, area, substation_position, machines, emit,
+        )
     else:
-        emit(f"reusing existing {extraction.ore} mine at {extraction.ore_output}")
-        origin, area, substation_position, machines = existing_mine_service_geometry(extraction.ore_output, extraction.drill_count)
-        bring_stage_up(client, bridge, surface, force, f"existing mine for {extraction.ore}", origin,
-                       area, substation_position, machines, emit, logistic_chest_positions=[extraction.ore_output])
-    return build_conversion_stage(
-        client, bridge, surface, force, recipe,
-        {extraction.ore: extraction.ore_output}, reference_point, emit,
+        if extraction.shared_belt_y == extraction.ore_output[1]:
+            emit(
+                f"upgrading legacy {extraction.ore} terminal chest at "
+                f"{extraction.ore_output} to a side tap"
+            )
+            tap_plan, ore_output = legacy_output_tap_plan(
+                extraction.ore_output, extraction.expansion_step,
+                belt_type=_DEFAULT_BELT, inserter_type="inserter",
+            )
+            tap_plan["surface"], tap_plan["force"] = surface, force
+            _submit(
+                client, bridge, surface, tap_plan,
+                f"mine_output_tap_{extraction.ore}", emit,
+            )
+        emit(f"reusing existing {extraction.ore} mine at {ore_output}")
+        origin, area, substation_position, machines = existing_mine_service_geometry(
+            extraction.ore_output, extraction.row_drill_count or extraction.drill_count,
+            extraction.expansion_step, shared_belt_y=extraction.shared_belt_y,
+        )
+        bring_stage_up(
+            client, bridge, surface, force, f"existing mine for {extraction.ore}",
+            origin, area, substation_position, machines, emit,
+            logistic_chest_positions=[ore_output],
+        )
+    conversion_args = dict(
         placement_origin=extraction.smelter_origin,
         machine_count=extraction.furnace_count,
         max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+        flow_direction=extraction.smelter_flow_direction,
     )
+    try:
+        return build_conversion_stage(
+            client, bridge, surface, force, recipe,
+            {extraction.ore: ore_output}, reference_point, emit,
+            **conversion_args,
+        )
+    except MaterialShortage as shortage:
+        if _DEFAULT_BELT not in shortage.required:
+            raise
+        emit(
+            f"  BOOTSTRAP: {recipe} cannot wait for {_DEFAULT_BELT}; "
+            "building a beltless logistic smelter"
+        )
+        return build_logistic_smelter(
+            client, bridge, surface, force, recipe, extraction.ore,
+            extraction.smelter_origin, ore_output, emit,
+        )
+
+
+def build_logistic_smelter(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, ore: str, origin: Point, ore_output: Point,
+    emit: Callable[[str], None],
+) -> Point:
+    """Build the first plate line without depending on belt production."""
+    ox, oy = round(origin[0]), round(origin[1])
+    plan = generate_logistic_smelter(recipe, ore, (ox, oy))
+    plan["surface"], plan["force"] = surface, force
+    machines = [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action["entity"] == "electric-furnace"
+    ]
+    providers = [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action["entity"] == "passive-provider-chest"
+    ]
+    substation = (ox - 4.0, oy + 3.5)
+    _submit(client, bridge, surface, plan, f"logistic_{recipe}_bootstrap", emit)
+    area = ((ox - 10, oy - 10), (ox + 10, oy + 12))
+    bring_stage_up(
+        client, bridge, surface, force, f"logistic bootstrap for {recipe}",
+        (ox, oy), area, substation, machines, emit,
+        logistic_chest_positions=[ore_output, *providers],
+    )
+    stuck = _diagnose_machines(
+        client, surface, machines, emit, bridge=bridge, force=force,
+    )
+    if stuck:
+        raise StuckError(f"logistic bootstrap for {recipe} built but not healthy: {stuck}")
+    return providers[-1]
+
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
     *, placement_origin: Point | None = None,
     machine_count: int = _DEFAULT_MACHINE_COUNT,
     max_belt_route_tiles: int | None = None,
+    belt_type: str = _DEFAULT_BELT,
+    inserter_type: str | None = None,
+    allow_logistic_inputs: bool = False,
+    flow_direction: str = "east",
+    side_tap_output: bool = False,
 ) -> Point:
     """Assemble `recipe` from its (already-producing) ingredients. Bridges each
     ingredient's real upstream output chest to this stage's real feed chest
     with a belt+inserter pair, using whichever side faces the source."""
     width = machine_count * 3
+    if inserter_type is None:
+        # Size the tier to the busiest flow ONE inserter beside ONE machine
+        # carries. A smelter row is slow -- an electric furnace moves well under
+        # an item per second -- so the fast-inserter baseline bought nothing
+        # there and cost a whole production chain on a real base.
+        peak_rate = max(machine_handled_rates(recipe))
+        inserter_type = inserter_for_demand(peak_rate * FEED_HEADROOM)
+        emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {inserter_type}")
+    planner = LocalLayoutPlanner()
     if placement_origin is None:
+        # Reserve the footprint the layout ACTUALLY occupies, not a box starting
+        # at its origin. A line puts its feed chests and input-belt extension at
+        # negative offsets, so ~7 tiles of every stage sit WEST of the origin --
+        # land that was never checked, because the clear-area search treated the
+        # origin as the box's left edge. Observed live: a science stage placed at
+        # (-37,44) reached to x=-44.5 and put a belt ghost in a lake, where bots
+        # accept it and can never build it.
+        probe = planner.generate_line_layout(
+            recipe, machine_count, 0, 0,
+            belt_type=belt_type, inserter_type=inserter_type,
+            feed_style="chest", terminal_collector=True,
+            flow_direction=flow_direction,
+        )
+        spots = [
+            (action["position"]["x"], action["position"]["y"])
+            for phase in probe["phases"] for action in phase["actions"]
+        ]
+        west = math.ceil(-min(x for x, _ in spots)) + 1
+        east = math.ceil(max(x for x, _ in spots)) + 1
+        north = math.ceil(-min(y for _, y in spots)) + 1
+        south = math.ceil(max(y for _, y in spots)) + 1
         area = live_base.find_clear_area(
-            client, surface, reference_point, width + 12, 20
+            client, surface, reference_point, west + east, north + south,
+            avoid_resources=True, resource_clearance=5,
         )
         if area is None:
             raise StuckError(
                 f"No clear space found near {reference_point} for the {recipe} stage"
             )
-        ox, oy = round(area[0]), round(area[1] + 5)
+        ox, oy = round(area[0]) + west, round(area[1]) + north
     else:
         ox, oy = round(placement_origin[0]), round(placement_origin[1])
     emit(f"conversion stage for {recipe}: building at ({ox},{oy})")
-
-    planner = LocalLayoutPlanner()
     plan = planner.generate_line_layout(
         recipe, machine_count, ox, oy,
-        belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+        belt_type=belt_type, inserter_type=inserter_type,
         feed_style="chest", terminal_collector=True,
+        flow_direction=flow_direction,
     )
     plan = strip_local_power(plan, remove_substations=False)
+    output_position = (
+        _side_sample_plate_output(
+            plan, (ox, oy), machine_count, belt_type, flow_direction,
+            tap_inserter_type=inserter_type,
+        )
+        if recipe in {"iron-plate", "copper-plate"} or side_tap_output
+        else next(
+            (action["position"]["x"], action["position"]["y"])
+            for phase in plan["phases"] for action in phase["actions"]
+            if action.get("entity") == "steel-chest"
+        )
+    )
     _publish_output_chest(plan)
     modes = {
-        ingredient: _transport_mode(recipe, ingredient, machine_count)
+        ingredient: ("logistic" if allow_logistic_inputs else "belt")
         for ingredient in LINE_RECIPES[recipe]["ingredients"]
     }
-    feed_positions = _swap_infinity_chests(plan, modes)
+    direct_belt_input = (
+        recipe in {"iron-plate", "copper-plate"}
+        and len(modes) == 1
+        and next(iter(modes.values())) == "belt"
+    )
+    if direct_belt_input:
+        ingredient = next(iter(modes))
+        feed_positions = {
+            ingredient: _direct_single_belt_feed(
+                plan, ingredient, flow_direction,
+            )
+        }
+    else:
+        feed_positions = _swap_infinity_chests(plan, modes)
     unresolved = sorted(set(feed_positions) - set(ingredient_sources))
     if unresolved:
         raise StuckError(
@@ -282,6 +640,9 @@ def build_conversion_stage(
                 ingredient_sources[ingredient], feed_position, machine_count,
                 max_belt_route_tiles=max_belt_route_tiles,
                 additional_blocked=planned_blocked,
+                mode=modes[ingredient],
+                destination_is_belt=direct_belt_input,
+                destination_belt_direction=flow_direction,
             )
             if route is not None:
                 preflighted[ingredient] = route
@@ -305,6 +666,22 @@ def build_conversion_stage(
 
     length = machine_count * 3
     stage_area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
+    # Buffer chests themselves are passive; the inserters that load/unload
+    # them are not. Check planned support inserters immediately after submit
+    # so a buffer cannot silently starve a stage while its machines are powered.
+    support_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity", "").endswith("inserter")
+    }
+    for position in sorted(support_positions):
+        if live_base.entity_status_name(client, surface, position) == "no_power":
+            emit(f"  support inserter at {position} has no power -- connecting it")
+            if not extend_power(client, bridge, surface, force, position, emit):
+                raise StuckError(
+                    f"support inserter at {position} is unpowered and cannot be "
+                    "reached by a pole chain from any generating network"
+                )
     # The UPSTREAM provider chest of every bot-served ingredient needs supply-area
     # coverage just as much as this stage's own requesters do: a provider outside
     # every network hands out nothing, and the only symptom downstream is
@@ -328,76 +705,44 @@ def build_conversion_stage(
             belt_tiles = sum(
                 1 for action in route_actions if "transport-belt" in action["entity"]
             )
-            feed_delay = max(feed_delay, transit_seconds(belt_type, belt_tiles))
+            feed_delay = max(
+                feed_delay, transport_grace_seconds(belt_type, belt_tiles)
+            )
             continue
-        if modes[ingredient] == "logistic":
-            # Bots carry it: the upstream chest is a passive provider and this
-            # one is a requester, so no corridor is built at all.
-            emit(f"  {recipe}: {ingredient} by logistic bots "
-                 f"({_ingredient_demand(recipe, ingredient, machine_count):.2f}/s, "
-                 f"provider at {source_position})")
-            continue
-        emit(f"  {recipe}: {ingredient} needs a belt "
-             f"({_ingredient_demand(recipe, ingredient, machine_count):.2f}/s exceeds "
-             f"the {_BOT_THROUGHPUT_LIMIT}/s bot limit)")
-        blocked = live_base.occupied_tiles(
-            client, surface,
-            (min(source_position[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
-             min(source_position[1], feed_position[1]) - _BRIDGE_SURVEY_MARGIN),
-            (max(source_position[0], feed_position[0]) + _BRIDGE_SURVEY_MARGIN,
-             max(source_position[1], feed_position[1]) + _BRIDGE_SURVEY_MARGIN),
+        feed_delay = max(
+            feed_delay,
+            ensure_ingredient_transport(
+                client, bridge, surface, force, recipe, ingredient,
+                source_position, feed_position, machine_count, emit,
+                max_belt_route_tiles=max_belt_route_tiles,
+                mode=modes[ingredient],
+            ),
         )
-        blocked -= {
-            (math.floor(source_position[0]), math.floor(source_position[1])),
-            (math.floor(feed_position[0]), math.floor(feed_position[1])),
-        }
-        direction = _toward(source_position, feed_position)
-        span = int(abs(source_position[0] - feed_position[0])
-                   + abs(source_position[1] - feed_position[1])) + 4
-        belt_type = choose_belt_tier(live_base.available_items(client, surface, force), span)
-        bridge_actions = bridge_chest_to_chest(
-            source_position, feed_position,
-            exit_direction=_clear_side(source_position, direction, blocked),
-            entry_direction=_clear_side(feed_position, opposite(direction), blocked),
-            belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
-            blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
-        )
-        bridge_plan = {
-            "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": bridge_actions}],
-            "surface": surface, "force": force,
-        }
-        _submit(client, bridge, surface, bridge_plan, f"bridge_{ingredient}_to_{recipe}", emit)
-        belt_tiles = sum(
-            1 for action in bridge_actions if "transport-belt" in action["entity"]
-        )
-        feed_delay = max(feed_delay, transit_seconds(belt_type, belt_tiles))
-        emit(f"    {ingredient}: {belt_tiles} belt tiles, first item arrives in "
-             f"~{transit_seconds(belt_type, belt_tiles):.0f}s")
-
-    xs = [ox, ox + length, *(p[0] for p in ingredient_sources.values())]
-    transport_area = ((min(xs) - 5, oy - 15), (max(xs) + 5, oy + 15))
-    remaining = _wait_for_ghosts(client, surface, force, transport_area)
-    if remaining:
-        raise StuckError(f"{recipe} transport still has {remaining} unbuilt ghosts after settling")
     # A stage cannot possibly run before its first ingredient physically
     # arrives. Judging it healthy-or-not sooner than that reports a false
     # failure on a bridge that is working -- observed live, where a ~60 tile
     # yellow belt needed ~32s and the check gave up at 20s.
     stuck = _diagnose_machines(
         client, surface, machine_positions, emit,
-        grace_seconds=_STUCK_GRACE_SECONDS + feed_delay * _TRANSIT_SAFETY,
+        grace_seconds=feed_delay, bridge=bridge, force=force,
     )
     if stuck:
         # Bridges are the most likely remaining culprit for "built but not
-        # fed": confirm each feed chest is actually receiving the ingredient
-        # before blaming something deeper.
+        # fed: direct refinery feeds are belts, not chests, so do not run the
+        # chest inventory probe against them.
         for ingredient, feed_position in feed_positions.items():
+            if direct_belt_input:
+                emit(
+                    f"  DIAGNOSIS: {feed_position} input belt for {ingredient} "
+                    "received nothing -- the mine-to-refinery belt is disconnected"
+                )
+                continue
             contents = live_base.chest_contents(client, surface, feed_position)
             if contents.get(ingredient, 0) == 0:
                 emit(f"  DIAGNOSIS: {feed_position} feed chest for {ingredient} is empty -- "
                      "the bridge from its source isn't delivering (check the bridge inserters/belt)")
         raise StuckError(f"conversion stage for {recipe} built but not healthy: {stuck}")
-    return (ox + length + 1.5, oy + 6.5)
+    return output_position
 
 
 def _existing_stage_chests(
@@ -418,24 +763,153 @@ def _existing_stage_chests(
     return [chest]
 
 
+def _paired_mall_provider(
+    client: RconClient, surface: str, machine_positions: Sequence[Point],
+) -> Point | None:
+    """Find the provider assigned to one machine in a paired mall cell."""
+    for machine_x, machine_y in machine_positions:
+        for requester_dx, provider_dy in ((3, -1), (-3, 1)):
+            requester = (machine_x + requester_dx, machine_y)
+            requester_entity = live_base.entity_at(client, surface, requester)
+            if not requester_entity or requester_entity["name"] != "requester-chest":
+                continue
+            provider = (requester[0], machine_y + provider_dy)
+            provider_entity = live_base.entity_at(client, surface, provider)
+            if provider_entity and provider_entity["name"] == "passive-provider-chest":
+                return provider
+    return None
+
+
 def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
-    reference_point: Point, emit: Callable[[str], None],
+    reference_point: Point, emit: Callable[[str], None], *,
+    upgrade_bootstrap: bool = True, stock_target: int = 1,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
+    if item == "coal":
+        return ensure_coal_mine(
+            client, bridge, surface, force, reference_point, bring_stage_up, emit,
+        )
+    if item in {"plastic-bar", "sulfur"}:
+        outputs = ensure_oil_cell(
+            client, bridge, surface, force, reference_point,
+            lambda ingredient: ensure_produced(
+                client, bridge, surface, force, ingredient, reference_point, emit,
+                upgrade_bootstrap=upgrade_bootstrap,
+            ),
+            bring_stage_up, emit,
+        )
+        return outputs[item] if outputs else None
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
     spec = LINE_RECIPES[item]
-    existing = live_base.find_line(client, surface, force, item, spec["machine"])
-    if existing and existing.working_count > 0:
-        chest = live_base.nearest_container(
-            client, surface, force, existing.machine_positions[-1]
+    mall_stock_target = stock_target
+    if not upgrade_bootstrap:
+        mall_stock_target += live_base.logistic_request_total(
+            client, surface, force, item,
         )
+    existing = live_base.find_line(client, surface, force, item, spec["machine"])
+    demand = live_intermediate_demand(client, surface, force, item)
+    promoted_count = promoted_line_machine_count(
+        item, demand, existing.machine_count if existing else 0,
+    )
+    promote_to_line = promoted_count is not None and (
+        existing is None or existing.machine_count < 6
+    )
+    if promote_to_line:
+        emit(
+            f"  INTERMEDIATE PROMOTION: {item} demand is {demand:.2f}/s; "
+            f"building a shared {promoted_count}-machine line instead of another mall cell"
+        )
+    mall_provider: Point | None = None
+    if existing and not upgrade_bootstrap and len(existing.machine_positions) == 1:
+        machine_position = existing.machine_positions[0]
+        requester_position = (machine_position[0] - 3, machine_position[1])
+        requester = live_base.entity_at(client, surface, requester_position)
+        paired_companion = live_base.entity_at(
+            client, surface, (machine_position[0] - 6, machine_position[1]),
+        )
+        if (
+            requester and requester["name"] == "requester-chest"
+            and paired_companion is None
+        ):
+            request_plan = generate_compact_mall_request_update(
+                item, spec["ingredients"], spec["amounts"], machine_position,
+                stock_target=mall_stock_target,
+                product_amount=spec.get("product_amount", 1),
+            )
+            request_plan["surface"], request_plan["force"] = surface, force
+            _submit(
+                client, bridge, surface, request_plan,
+                f"compact_mall_requests_{item}", emit,
+            )
+
+    if existing and not upgrade_bootstrap:
+        mall_provider = _paired_mall_provider(
+            client, surface, existing.machine_positions,
+        )
+        if mall_provider is not None:
+            emit(
+                f"  MALL BUFFER: {item} provider at {mall_provider} "
+                f"tracks combined demand {mall_stock_target}"
+            )
+            limit_plan = generate_mall_provider_limit_update(
+                item, mall_provider, mall_stock_target,
+            )
+            limit_plan["surface"], limit_plan["force"] = surface, force
+            _submit(
+                client, bridge, surface, limit_plan,
+                f"mall_provider_limit_{item}", emit,
+            )
+
+    if existing and existing.working_count > 0 and not promote_to_line:
+        origin = logistic_smelter_origin(existing.machine_positions)
+        requester = (
+            live_base.entity_at(client, surface, (origin[0] + 1.5, origin[1] + 3.5))
+            if origin is not None else None
+        )
+        if (
+            upgrade_bootstrap and item in {"iron-plate", "copper-plate"}
+            and requester and requester["name"] == "requester-chest"
+        ):
+            extraction = plan_local_extraction(
+                client, surface, force, item, reference_point, 3,
+                belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+                reuse_existing=True,
+                belt_stock=live_base.available_items(
+                    client, surface, force,
+                ).get(_DEFAULT_BELT, 0),
+            )
+            emit(f"  BOOTSTRAP UPGRADE: replacing requester-fed {item} with belt transport")
+            build_conversion_stage(
+                client, bridge, surface, force, item,
+                {extraction.ore: extraction.ore_output}, reference_point, emit,
+                machine_count=extraction.furnace_count,
+                max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+            )
+            retirement = retire_logistic_smelter_plan(item, extraction.ore, origin)
+            retirement["surface"], retirement["force"] = surface, force
+            _submit(client, bridge, surface, retirement, f"retire_logistic_{item}", emit)
+            return None
+        chest = live_base.nearest_container(
+            client, surface, force, existing.machine_positions[-1],
+            names=("passive-provider-chest",),
+        )
+        if mall_provider is not None:
+            chest = mall_provider
+        if chest is not None:
+            output_area = ((chest[0] - 3, chest[1] - 3), (chest[0] + 3, chest[1] + 3))
+            for position in live_base.unpowered_entities(client, surface, output_area):
+                emit(f"  existing {item} output entity at {position} is unpowered -- connecting it")
+                if not extend_power(client, bridge, surface, force, position, emit):
+                    raise StuckError(
+                        f"existing {item} output entity at {position} cannot be powered"
+                    )
         return chest or existing.output_position
-    if existing:
+    if existing and not promote_to_line:
         # A stage that exists but is not running is a REPAIR job, not a reason
         # to build a second one. Duplicating instead of repairing is what left
         # three half-built copper stages littering one ore patch across runs,
@@ -456,18 +930,97 @@ def ensure_produced(
                 client, surface, force, existing.machine_positions[-1],
             ),
         )
+        statuses = live_base.entity_statuses(client, surface, existing.machine_positions)
+        if statuses and all(
+            status == "item_ingredient_shortage" for status in statuses.values()
+        ) and not _mineable(item):
+            if not upgrade_bootstrap:
+                chest = live_base.nearest_container(
+                    client, surface, force, existing.machine_positions[-1],
+                    names=("passive-provider-chest",),
+                )
+                emit(
+                    f"  MALL WAIT: existing {item} line is supply-starved; "
+                    "keeping its current transport while bootstrap production catches up"
+                )
+                return chest or existing.output_position
+            repaired = repair_existing_ingredient_transport(
+                client, bridge, surface, force, item, existing.machine_positions,
+                lambda ingredient: ensure_produced(
+                    client, bridge, surface, force, ingredient, reference_point, emit,
+                    upgrade_bootstrap=upgrade_bootstrap,
+                ),
+                emit,
+            )
+            if repaired:
+                return None
         return None
 
     if not _mineable(item):
         sources: dict[str, Point] = {}
-        for ingredient in spec["ingredients"]:
+        # A readiness mall is allowed to consume a complete stocked input
+        # buffer. Requiring a live upstream line first creates a deadlock for
+        # bootstrap items such as inserters: their iron plates/gears/circuits
+        # are already available, but the iron-plate line itself needs the same
+        # inserters as construction ghosts.
+        stocked = (
+            live_base.available_items(client, surface, force)
+            if not upgrade_bootstrap else {}
+        )
+        crafts_needed = math.ceil(
+            mall_stock_target / max(1, spec.get("product_amount", 1)),
+        )
+        for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
+            required = math.ceil(amount * crafts_needed)
+            if not upgrade_bootstrap and stocked.get(ingredient, 0) >= required:
+                emit(
+                    f"  MALL BOOTSTRAP: using stocked {ingredient} "
+                    f"({stocked[ingredient]}/{required}) for {item}"
+                )
+                continue
             if ingredient not in LINE_RECIPES:
                 raise StuckError(f"{item} needs {ingredient!r}, which has no recipe and isn't mineable")
-            position = ensure_produced(client, bridge, surface, force, ingredient, reference_point, emit)
+            position = ensure_produced(
+                client, bridge, surface, force, ingredient, reference_point, emit,
+                upgrade_bootstrap=upgrade_bootstrap,
+            )
             if position is None:
                 return None  # built something upstream this round; re-survey next loop
             sources[ingredient] = position
-        build_conversion_stage(client, bridge, surface, force, item, sources, reference_point, emit)
+        if promote_to_line:
+            if mall_provider is not None and existing and len(existing.machine_positions) == 1:
+                retirement = generate_promoted_mall_retirement_plan(
+                    item, spec["machine"], existing.machine_positions[0], mall_provider,
+                )
+                retirement["surface"], retirement["force"] = surface, force
+                emit(
+                    f"  MALL RETIRE: removing the old {item} cell and clearing its "
+                    "request group before the dedicated line takes over"
+                )
+                _submit(
+                    client, bridge, surface, retirement,
+                    f"retire_promoted_mall_{item}", emit,
+                )
+            build_conversion_stage(
+                client, bridge, surface, force, item, sources, reference_point, emit,
+                machine_count=promoted_count,
+                belt_type=promoted_line_belt_type(
+                    item, promoted_count, live_base.available_items(client, surface, force),
+                ),
+                inserter_type="fast-inserter",
+                allow_logistic_inputs=False,
+                side_tap_output=True,
+            )
+        elif not upgrade_bootstrap:
+            build_compact_mall_stage(
+                client, bridge, surface, force, item, sources, reference_point,
+                bring_stage_up, emit, stock_target=mall_stock_target,
+            )
+        else:
+            build_conversion_stage(
+                client, bridge, surface, force, item, sources, reference_point, emit,
+                allow_logistic_inputs=not upgrade_bootstrap,
+            )
         return None
 
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
@@ -479,21 +1032,129 @@ def run(
     rcon_host: str = "127.0.0.1", rcon_port: int = 27017, rcon_password: str = "",
     script_output: Path | str = "", reference_point: Point = (0.0, 0.0),
     max_iterations: int = 20, emit: Callable[[str], None] = print,
+    mission_items: tuple[str, ...] = (),
 ) -> dict:
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
     genuinely stuck (raises StuckError rather than guessing)."""
     validate_builder_target(goal_item, surface, LINE_RECIPES)
     client = RconClient(rcon_host, rcon_port, rcon_password)
-    bridge = GameBridge(script_output=Path(script_output), host=rcon_host, port=rcon_port,
-                         password=rcon_password)
+    bridge = GameBridge(
+        script_output=Path(script_output), host=rcon_host, port=rcon_port,
+        password=rcon_password, command_timeout=30.0,
+    )
     try:
-        for iteration in range(max_iterations):
+        catalog = load_json(bridge.export_recipe_catalog(force=force))
+        learned = install_catalog_line_recipes(catalog)
+        emit(
+            f"RECIPE CATALOG: loaded {len(catalog.get('recipes', []))} force recipes; "
+            f"{len(learned)} additional solid recipes are executable"
+        )
+        validate_builder_target(goal_item, surface, LINE_RECIPES)
+        mall_targets = mission_mall_targets(
+            mission_items or (goal_item,), LINE_RECIPES,
+        )
+        emit(
+            "CONSTRUCTION READINESS: phase 0 targets -- "
+            + ", ".join(f"{item}={target}" for item, target in mall_targets.items())
+        )
+        priority_path = Path(script_output).parent / "logs" / "autonomous-priorities.json"
+        priorities = PriorityList(priority_path, live_base.game_tick(client))
+        iteration = 0
+        while iteration < max_iterations:
+            stock = live_base.available_items(client, surface, force)
+            tick = live_base.game_tick(client)
+            priorities.sync(mall_targets, stock, tick)
+            for stocked_item, stocked_target in list(mall_targets.items()):
+                if stock.get(stocked_item, 0) >= stocked_target:
+                    priorities.complete(stocked_item, tick)
+                    mall_targets.pop(stocked_item)
+            task = priorities.next(mall_targets, tick)
+            if task is not None:
+                item, target = task.item, task.target
+                emit(priorities.describe(task, tick))
+                if item not in LINE_RECIPES:
+                    raise StuckError(
+                        f"Parts mall needs {target} {item}, but no executable recipe "
+                        "knowledge exists for that construction item"
+                    )
+                emit(f"--- parts mall: ensuring {item} production for stock target {target} ---")
+                try:
+                    output = ensure_produced(
+                        client, bridge, surface, force, item, reference_point, emit,
+                        upgrade_bootstrap=False, stock_target=target,
+                    )
+                except MaterialShortage as shortage:
+                    add_demands(mall_targets, shortage)
+                    continue
+                if output is not None:
+                    def expand_upstream() -> bool:
+                        upstream = next(
+                            (ingredient for ingredient in LINE_RECIPES[item]["ingredients"]
+                             if ingredient in LINE_RECIPES and _mineable(ingredient)),
+                            None,
+                        )
+                        if upstream is None:
+                            reason = f"{item} has no supported extraction input to expand"
+                            priorities.defer(item, live_base.game_tick(client), reason)
+                            emit(f"  PRIORITY DEFERRED: {reason}")
+                            return False
+                        emit(f"  MALL EXPAND: considering another {upstream} extraction phase")
+                        try:
+                            build_mining_stage(
+                                client, bridge, surface, force, upstream,
+                                reference_point, emit, expand=True,
+                            )
+                        except StuckError as error:
+                            current_tick = live_base.game_tick(client)
+                            priorities.defer(item, current_tick, str(error))
+                            emit(
+                                f"  PRIORITY DEFERRED: {item}; {error}; "
+                                "reserved corridor remains bookmarked, nothing was submitted"
+                            )
+                            return False
+                        return True
+
+                    try:
+                        ready = wait_for_stock(
+                            client, surface, force, item, target, emit,
+                            on_stalled=expand_upstream,
+                        )
+                    except MaterialShortage as shortage:
+                        add_demands(mall_targets, shortage)
+                        continue
+                    if not ready:
+                        continue
+                    priorities.complete(item, live_base.game_tick(client))
+                    mall_targets.pop(item, None)
+                continue
+            if mall_targets:
+                wait_ticks = priorities.wait_ticks(mall_targets, tick)
+                emit(
+                    "PRIORITY WAIT: all unfinished construction tasks are deferred; "
+                    f"next review in {wait_ticks or 60} ticks"
+                )
+                time.sleep(5)
+                continue
             emit(f"--- iteration {iteration}: checking {goal_item} ---")
-            position = ensure_produced(client, bridge, surface, force, goal_item, reference_point, emit)
+            try:
+                position = ensure_produced(
+                    client, bridge, surface, force, goal_item, reference_point, emit,
+                )
+            except MaterialShortage as shortage:
+                add_demands(mall_targets, shortage)
+                emit(
+                    f"  MALL DEMAND: {shortage.stage} requested "
+                    + ", ".join(
+                        f"{item}={target}"
+                        for item, target in sorted(shortage.required.items())
+                    )
+                )
+                continue
+            iteration += 1
             if position is not None:
                 emit(f"GOAL MET: {goal_item} is producing at {position}")
-                return {"ok": True, "iterations": iteration + 1, "output_position": position}
+                return {"ok": True, "iterations": iteration, "output_position": position}
         raise StuckError(f"Did not reach a working {goal_item} line within {max_iterations} iterations")
     finally:
         client.close()

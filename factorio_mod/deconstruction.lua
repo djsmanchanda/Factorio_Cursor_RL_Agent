@@ -44,7 +44,7 @@ local function validate_deconstruction_payload(payload)
   return { authorization = authorization, deconstruction_plan = plan }, nil
 end
 
-local function execute_deconstruction(authorization, plan)
+local function execute_deconstruction(authorization, plan, surface, force)
   local approved = {}
   for _, action in ipairs(authorization.approved_actions) do
     approved[action] = true
@@ -62,10 +62,6 @@ local function execute_deconstruction(authorization, plan)
       block_filter[block] = true
     end
   end
-
-  local surface = get_or_create_sandbox_surface()
-  local force = get_or_create_planner_force()
-  require_construction_network(surface, force)
 
   local results = {}
   local processed = 0
@@ -151,7 +147,7 @@ local function execute_deconstruction(authorization, plan)
   return results
 end
 
-commands.add_command("execute_deconstruction_plan", "Execute authorized deconstruction via bots in planner-sandbox.", function(command)
+commands.add_command("execute_deconstruction_plan", "Execute authorized deterministic deconstruction via construction bots.", function(command)
   local payload, err = parse_deconstruction_payload(command.parameter)
   if err then
     if command.player_index then
@@ -178,11 +174,23 @@ commands.add_command("execute_deconstruction_plan", "Execute authorized deconstr
     return
   end
 
-  local results = execute_deconstruction(validated.authorization, validated.deconstruction_plan)
+  local surface = payload.surface and game.surfaces[payload.surface] or nil
+  local force = payload.force and game.forces[payload.force] or nil
+  if payload.surface and not surface then
+    error("Unknown deconstruction surface: " .. tostring(payload.surface))
+  end
+  if payload.force and not force then
+    error("Unknown deconstruction force: " .. tostring(payload.force))
+  end
+  surface = surface or get_or_create_sandbox_surface()
+  force = force or get_or_create_planner_force()
+  local results = execute_deconstruction(
+    validated.authorization, validated.deconstruction_plan, surface, force
+  )
 
   local report = {
     tick = game.tick,
-    surface = get_or_create_sandbox_surface().name,
+    surface = surface.name,
     actions = results
   }
 

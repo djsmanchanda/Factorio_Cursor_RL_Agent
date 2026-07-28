@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft7Validator
 
-from planners.belt_bridge import UNDERGROUND_REACH, bridge_chest_to_chest, opposite
+from planners.belt_bridge import (
+    UNDERGROUND_REACH,
+    bridge_belt_to_belt,
+    bridge_chest_to_chest,
+    opposite,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = json.loads((ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8"))
@@ -125,6 +130,22 @@ def test_every_belt_tile_feeds_into_the_next_one() -> None:
         )
 
 
+def test_mine_side_tap_stays_westbound_before_the_bridge_turns_south() -> None:
+    actions = bridge_belt_to_belt(
+        (78.5, -39.5), (77.5, -18.5),
+        entry_direction="north", exit_direction="west",
+        belt_type="transport-belt", blocked_tiles=set(),
+    )
+    facings = {
+        (action["position"]["x"], action["position"]["y"]): action["direction"]
+        for action in actions
+        if action.get("entity") == "transport-belt"
+    }
+    assert facings[(78.5, -39.5)] == "west"
+    assert facings[(77.5, -39.5)] == "west"
+    assert facings[(76.5, -39.5)] == "south"
+
+
 def test_opposite_rejects_an_unknown_facing() -> None:
     assert opposite("north") == "south"
     with pytest.raises(ValueError):
@@ -143,3 +164,43 @@ def test_generated_detour_cannot_cross_the_local_mode_route_limit(
 
     with pytest.raises(ValueError, match="CityPlanner rail handoff"):
         _bridge(dest_position=(296.5, 0.5), max_route_tiles=300)
+
+
+def test_belt_turn_gets_an_offline_reserve_chest() -> None:
+    actions = bridge_belt_to_belt(
+        (20.5, 0.5),
+        (0.5, 20.5),
+        entry_direction="north",
+        belt_type="fast-transport-belt",
+        blocked_tiles=set(),
+    )
+
+    assert {
+        "action_type": "place_entity", "entity": "steel-chest",
+        "position": {"x": 2.5, "y": 2.5},
+    } in actions
+    assert {
+        "action_type": "place_entity", "entity": "inserter",
+        "position": {"x": 2.5, "y": 1.5}, "direction": "north",
+    } in actions
+    assert {
+        "action_type": "place_entity", "entity": "inserter",
+        "position": {"x": 1.5, "y": 2.5}, "direction": "east",
+    } in actions
+    surface_belts = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in actions if action.get("entity") == "fast-transport-belt"
+    }
+    assert (2.5, 0.5) in surface_belts  # buffer input pickup
+    assert (0.5, 2.5) in surface_belts  # buffer output drop
+
+def test_turn_buffer_is_skipped_when_its_output_would_hit_a_tunnel() -> None:
+    actions = bridge_belt_to_belt(
+        (20.5, 0.5),
+        (0.5, 20.5),
+        entry_direction="north",
+        belt_type="fast-transport-belt",
+        blocked_tiles={(0, 2)},
+    )
+
+    assert not any(action["entity"] == "steel-chest" for action in actions)

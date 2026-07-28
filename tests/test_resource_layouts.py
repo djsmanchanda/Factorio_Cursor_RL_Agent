@@ -48,14 +48,15 @@ def test_direct_mining_to_chest_is_real_electric_output_primitive() -> None:
         {"x": 1.5, "y": 12.5}, {"x": 2.5, "y": 12.5},
         {"x": 3.5, "y": 12.5}, {"x": 4.5, "y": 12.5},
         {"x": 5.5, "y": 12.5}, {"x": 6.5, "y": 12.5},
+        {"x": 7.5, "y": 12.5}, {"x": 8.5, "y": 12.5},
     ]
     assert actions_by_entity["fast-inserter"] == [{
         "action_type": "place_ghost", "entity": "fast-inserter",
-        "position": {"x": 7.5, "y": 12.5}, "direction": "west",
+        "position": {"x": 8.5, "y": 11.5}, "direction": "south",
     }]
     assert actions_by_entity["steel-chest"] == [{
         "action_type": "place_ghost", "entity": "steel-chest",
-        "position": {"x": 8.5, "y": 12.5},
+        "position": {"x": 8.5, "y": 10.5},
     }]
     assert "electric-energy-interface" not in actions_by_entity
     assert_no_production_infinity([("raw", plan)])
@@ -67,7 +68,7 @@ def test_direct_mining_to_chest_is_real_electric_output_primitive() -> None:
     [
         ([], (8.5, 12.5), "needs supplied"),
         ([(1.5, 10.5)], (8.5, 13.5), "south output row"),
-        ([(1.5, 10.5), (4.5, 10.5)], (5.5, 12.5), "east of every drill"),
+        ([(1.5, 10.5), (4.5, 10.5)], (3.5, 12.5), "east of every drill"),
     ],
 )
 def test_direct_mining_to_chest_rejects_invalid_geometry(

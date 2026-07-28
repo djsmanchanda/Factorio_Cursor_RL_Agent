@@ -165,6 +165,57 @@ def _orthogonally_adjacent(a: tuple, b: tuple) -> bool:
     return (ax == bx and abs(ay - by) == 1) or (ay == by and abs(ax - bx) == 1)
 
 
+_NEIGHBOUR_OFFSETS = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+
+def _tile_owners(segments: list[dict]) -> dict[tuple, list[tuple[int, tuple]]]:
+    """Position -> [(segment index, the tile object as the segment stored it)].
+
+    Tiles are keyed by value so a lookup can jump straight to whatever occupies
+    a neighbouring position, but the original object is carried alongside so
+    error messages render exactly as the segment wrote it (a list stays a list).
+    """
+    owners: dict[tuple, list[tuple[int, tuple]]] = {}
+    for index, segment in enumerate(segments):
+        for tile in segment["tiles"]:
+            owners.setdefault((tile[0], tile[1]), []).append((index, tile))
+    return owners
+
+
+def mixing_conflicts(segments: list[dict]):
+    """Yield (index_a, tile_a, index_b, tile_b) for every unsanctioned adjacency.
+
+    Comparing every tile against every other tile is quadratic in both segment
+    count and segment size -- ~235k comparisons on the current electronics
+    bundle, paid on every preflight because proving purity requires exhausting
+    the search. Adjacency only ever involves the four neighbouring positions, so
+    indexing tiles by position turns the scan linear in total tile count.
+
+    Each unordered segment pair is reported once, anchored on the
+    lower-indexed segment, so `index_a < index_b` always holds.
+    """
+    owners = _tile_owners(segments)
+    for index_a, segment_a in enumerate(segments):
+        fluid_a = segment_a.get("fluid")
+        if fluid_a is None or segment_a.get("separated_by_pump"):
+            continue
+        for tile_a in segment_a["tiles"]:
+            for offset_x, offset_y in _NEIGHBOUR_OFFSETS:
+                neighbours = owners.get((tile_a[0] + offset_x, tile_a[1] + offset_y))
+                if not neighbours:
+                    continue
+                for index_b, tile_b in neighbours:
+                    if index_b <= index_a:
+                        continue
+                    segment_b = segments[index_b]
+                    fluid_b = segment_b.get("fluid")
+                    if fluid_b is None or fluid_b == fluid_a:
+                        continue
+                    if segment_b.get("separated_by_pump"):
+                        continue
+                    yield index_a, tile_a, index_b, tile_b
+
+
 def validate_network_purity(segments: list[dict]) -> None:
     """Raise ValueError naming the offending tiles when two tiles of
     DIFFERENT, non-None fluid from different segments are orthogonally
@@ -172,23 +223,11 @@ def validate_network_purity(segments: list[dict]) -> None:
     {"fluid": str|None, "tiles": [(x, y)...], "separated_by_pump": bool}.
     This is the anti-mixing guard: a fluid network can hold exactly one
     fluid type, the fluid analogue of the quality jam rule."""
-    for i in range(len(segments)):
-        seg_a = segments[i]
-        fluid_a = seg_a.get("fluid")
-        for j in range(i + 1, len(segments)):
-            seg_b = segments[j]
-            fluid_b = seg_b.get("fluid")
-            if fluid_a is None or fluid_b is None or fluid_a == fluid_b:
-                continue
-            if seg_a.get("separated_by_pump") or seg_b.get("separated_by_pump"):
-                continue
-            for tile_a in seg_a["tiles"]:
-                for tile_b in seg_b["tiles"]:
-                    if _orthogonally_adjacent(tile_a, tile_b):
-                        raise ValueError(
-                            f"Fluid mixing: tile {tile_a} ('{fluid_a}') is adjacent to "
-                            f"tile {tile_b} ('{fluid_b}') without a separating pump"
-                        )
+    for index_a, tile_a, index_b, tile_b in mixing_conflicts(segments):
+        raise ValueError(
+            f"Fluid mixing: tile {tile_a} ('{segments[index_a]['fluid']}') is adjacent to "
+            f"tile {tile_b} ('{segments[index_b]['fluid']}') without a separating pump"
+        )
 
 
 def validate_pipeline_span(tiles: list[tuple], pumps: list[tuple] | None = None) -> None:

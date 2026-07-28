@@ -9,7 +9,7 @@ from pathlib import Path
 from jsonschema import Draft7Validator
 
 from planners.electronics_block import BELT, INSERTER
-from planners.electronics_upgrades import INITIAL_TO_PREMIUM, build_premium_upgrade_plan
+from planners.electronics_upgrades import build_premium_upgrade_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,9 +41,3 @@ def test_premium_upgrade_plan_is_sorted_deduplicated_and_schema_valid():
     }
     schema = json.loads((ROOT / "schemas" / "upgrade_plan.schema.json").read_text(encoding="utf-8"))
     assert not list(Draft7Validator(schema).iter_errors(plan))
-
-
-def test_upgrade_executor_supports_generic_entity_tier_upgrades():
-    lua = (ROOT / "factorio_mod" / "upgrades.lua").read_text(encoding="utf-8")
-    assert 'entry.action == "entity_tier_upgrade"' in lua
-    assert INITIAL_TO_PREMIUM["fast-inserter"] == "stack-inserter"

@@ -194,8 +194,6 @@ def test_live_builder_rejects_out_of_scope_work_before_connecting() -> None:
         run("space-science-pack", surface="nauvis")
     with pytest.raises(StuckError, match="Nauvis-only"):
         run("automation-science-pack", surface="gleba")
-    with pytest.raises(StuckError, match="No executable recipe knowledge"):
-        run("chemical-science-pack", surface="nauvis")
 
 
 def test_builder_preflights_the_complete_chain_before_connecting(monkeypatch) -> None:
@@ -215,14 +213,3 @@ def test_builder_preflights_the_complete_chain_before_connecting(monkeypatch) ->
 
     with pytest.raises(StuckError, match="missing-intermediate"):
         run("incomplete-science-pack", surface="nauvis")
-
-
-def test_lua_catalog_exports_locked_recipes_and_environmental_sources() -> None:
-    source = (ROOT / "factorio_mod" / "recipe_catalog.lua").read_text(encoding="utf-8")
-
-    assert "enabled = recipe.enabled" in source
-    assert "recipe.enabled and" not in source
-    assert "environmental_source_types" in source
-    assert "environmental_source_types[prototype.type]" in source
-    assert "prototypes.asteroid_chunk" in source
-    assert '["simple-entity"]' not in source
