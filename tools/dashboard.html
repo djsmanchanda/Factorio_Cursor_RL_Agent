@@ -1,320 +1,111 @@
 <!-- Path: tools/dashboard.html -->
-<!-- Purpose: Live viewer for the loop daemon: agent thinking, build progress, and sandbox map. -->
+<!-- Purpose: Local live log and operations console for the real-base Factorio runner. -->
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Factorio Planner — Agent View</title>
-<style>
-  :root {
-    --bg: #14161a; --panel: #1d2127; --edge: #2e343d; --text: #d8dde5; --dim: #8a93a1;
-    --amber: #e8a33d; --green: #5fb864; --blue: #5a9bd4; --red: #d46a5a; --ghost: #7d8fb3;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; padding: 16px; }
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin-bottom: 10px; }
-  .sub { color: var(--dim); font-size: 12px; margin-bottom: 16px; }
-  .grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; }
-  .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 14px; }
-  .full { grid-column: 1 / -1; }
-  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-  .stat { background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 10px 16px; min-width: 120px; }
-  .stat .v { font-size: 22px; font-weight: 600; }
-  .stat .l { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
-  .bar { height: 8px; background: var(--edge); border-radius: 4px; overflow: hidden; margin-top: 6px; }
-  .bar i { display: block; height: 100%; background: var(--green); transition: width .6s; }
-  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  th { text-align: left; color: var(--dim); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid var(--edge); }
-  td { padding: 4px 8px; border-bottom: 1px solid #23272e; }
-  tr.now td { background: #232a33; }
-  .think p { margin: 6px 0; }
-  .think b { color: var(--amber); font-weight: 600; }
-  .tag { display: inline-block; background: #262c35; border: 1px solid var(--edge); border-radius: 4px; padding: 1px 7px; margin: 2px 3px 2px 0; font-size: 12px; }
-  .tag.act { border-color: var(--green); color: var(--green); }
-  .tag.deny { border-color: var(--red); color: var(--red); }
-  #map { width: 100%; background: #171a1f; border-radius: 8px; border: 1px solid var(--edge); }
-  .legend { display: flex; gap: 14px; margin-top: 8px; font-size: 12px; color: var(--dim); flex-wrap: wrap; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-  .empty { color: var(--dim); padding: 30px; text-align: center; }
-  #log { max-height: 260px; overflow-y: auto; }
-  .subhead { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--dim); margin: 18px 0 8px; }
-  .subhead:first-of-type { margin-top: 0; }
-  .explain { font-size: 13.5px; color: var(--text); margin: 8px 0 16px; padding: 8px 10px;
-             background: #232a33; border-left: 3px solid var(--amber); border-radius: 4px; }
-  .rationale { color: var(--dim); font-size: 11.5px; }
-  .verdict-green { border-color: var(--green); color: var(--green); }
-  .verdict-amber { border-color: var(--amber); color: var(--amber); }
-  .verdict-blue { border-color: var(--blue); color: var(--blue); }
-  .verdict-red { border-color: var(--red); color: var(--red); }
-  .verdict-dim { border-color: var(--edge); color: var(--dim); }
-  tr.chosen td { background: #22301f; }
-  tr.chosen td:first-child { color: var(--green); font-weight: 600; }
-  #decisions-timeline { max-height: 260px; overflow-y: auto; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="action-token" content="__ACTION_TOKEN__">
+  <title>Factorio Operations Console</title>
+  <link rel="stylesheet" href="/dashboard.css">
 </head>
 <body>
-<h1>Factorio Planner — Agent View</h1>
-<div class="sub" id="meta">connecting…</div>
-
-<div class="stats" id="stats"></div>
-
-<div class="grid">
-  <div class="panel full">
-    <h2>Sandbox — what is being created, and where</h2>
-    <svg id="map" viewBox="0 0 1000 420" preserveAspectRatio="xMidYMid meet"></svg>
-    <div class="legend">
-      <span><i class="dot" style="background:var(--green)"></i>built</span>
-      <span><i class="dot" style="background:none;border:1px dashed var(--ghost)"></i>pending ghost</span>
-      <span><i class="dot" style="background:none;border:1px solid #3a414c"></i>planned slot</span>
-      <span><i class="dot" style="background:var(--blue)"></i>logistics / power</span>
+  <header>
+    <div>
+      <p class="eyebrow">LOCAL · NAUVIS · PLAYER FORCE</p>
+      <h1>Factorio Operations Console</h1>
+      <p class="subtitle">Watch the autonomous builder think, build, wait, and fail in real time.</p>
     </div>
-  </div>
-
-  <div class="panel">
-    <h2>Agent thinking — latest decision</h2>
-    <div class="think" id="think"><div class="empty">waiting for first iteration…</div></div>
-  </div>
-
-  <div class="panel">
-    <h2>Production ledger</h2>
-    <div id="ledger"><div class="empty">no data yet</div></div>
-  </div>
-
-  <div class="panel full">
-    <h2>Iteration log</h2>
-    <div id="log"><div class="empty">no iterations yet</div></div>
-  </div>
-
-  <div class="panel full">
-    <h2>Agent decisions</h2>
-    <div class="sub" id="decisions-meta">connecting…</div>
-    <div id="decisions-body"><div class="empty">waiting for the expansion daemon's first step…</div></div>
-  </div>
-
-  <div class="panel full">
-    <h2>Decisions timeline</h2>
-    <div id="decisions-timeline"><div class="empty">no steps yet</div></div>
-  </div>
-</div>
-
-<script>
-const BLOCK_COLORS = { circuits: "#e8a33d", smelting: "#d46a5a", science: "#5a9bd4" };
-const FOOT = { "assembling-machine-1": 3, "stone-furnace": 2, "lab": 3 };
-const COLS = 8;
-
-function el(tag, attrs, text) {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const key in attrs) node.setAttribute(key, attrs[key]);
-  if (text) node.textContent = text;
-  return node;
-}
-
-function renderMap(think, intent_counts) {
-  const svg = document.getElementById("map");
-  svg.innerHTML = "";
-  if (!think || !think.zones) { return; }
-
-  // World-to-screen: sandbox area roughly x -10..140, y -12..40
-  const sx = x => (x + 12) * 6.5, sy = y => (y + 14) * 6.5;
-
-  for (const [block, zone] of Object.entries(think.zones)) {
-    const total = intent_counts[block] || 0;
-    const built = think.built_by_prototype ? (think.built_by_prototype[protoFor(block)] || 0) : 0;
-    const pending = (think.pending_ghosts_by_block || {})[block] || 0;
-    const proto = protoFor(block);
-    const size = (FOOT[proto] || 3) * 6.5;
-
-    for (let i = 0; i < total; i++) {
-      const cx = zone.origin_x + (i % COLS) * zone.stride_x;
-      const cy = zone.origin_y + Math.floor(i / COLS) * zone.stride_y;
-      let fill = "none", stroke = "#3a414c", dash = "";
-      if (i < built) { fill = BLOCK_COLORS[block] || "#5fb864"; stroke = fill; }
-      else if (i < built + pending) { stroke = "#7d8fb3"; dash = "3,3"; }
-      const r = el("rect", { x: sx(cx), y: sy(cy), width: size, height: size, rx: 2,
-        fill: fill === "none" ? "transparent" : fill, "fill-opacity": fill === "none" ? 0 : 0.85,
-        stroke: stroke, "stroke-dasharray": dash });
-      svg.appendChild(r);
-    }
-    svg.appendChild(el("text", { x: sx(zone.origin_x), y: sy(zone.origin_y) - 10,
-      fill: BLOCK_COLORS[block] || "#d8dde5", "font-size": "13", "font-weight": "600" }, block));
-  }
-
-  for (const e of (think.map_entities || [])) {
-    if (FOOT[e.name]) continue; // placeholders drawn as grid cells above
-    svg.appendChild(el("rect", { x: sx(e.x) - 4, y: sy(e.y) - 4, width: 9, height: 9, rx: 2, fill: "#5a9bd4" }));
-  }
-}
-
-function protoFor(block) {
-  return { circuits: "assembling-machine-1", smelting: "stone-furnace", science: "lab" }[block] || "assembling-machine-1";
-}
-
-function renderThink(status) {
-  const think = status.thinking;
-  const target = document.getElementById("think");
-  if (!think) { target.innerHTML = '<div class="empty">iteration recorded no trace</div>'; return; }
-  const ps = think.progress_state, cp = think.capacity_phasing;
-  const plans = Object.entries(think.ghosts_planned_by_block || {}).map(([b, n]) => `<span class="tag act">${b}: +${n} ghosts</span>`).join("") || '<span class="tag">no new projection</span>';
-  const mats = Object.entries(think.materials_requested || {}).map(([m, n]) => `<span class="tag">${m} × ${n}</span>`).join("") || '<span class="tag">stocked</span>';
-  const proposal = think.execution_proposal;
-  const allowed = proposal ? proposal.allowed_actions.map(a => `<span class="tag act">${a}</span>`).join("") : "";
-  const denied = proposal ? (proposal.blocked_actions || []).map(a => `<span class="tag deny">${a.action}</span>`).join("") : "";
-  target.innerHTML = `
-    <p>Capacity: <b>${ps.current_capacity}</b> built, <b>${ps.committed_capacity}</b> committed of <b>${ps.ultimate_capacity}</b> target.
-       Active phase: <b>${ps.active_phase_capacity}</b>.</p>
-    <p>Phasing verdict: <b>${cp.reason}</b> (previous ${cp.previous_active_capacity} → desired ${cp.desired_active_capacity}).</p>
-    <p>Fill delta: <b>${think.fill_delta}</b> → ${plans}</p>
-    <p>Materials requested: ${mats}</p>
-    ${proposal ? `<p>Execution gate: ${allowed} ${denied}</p>` : ""}
-    ${think.authorization ? `<p>Authorized by <b>${think.authorization.authorization_source}</b> at ${think.authorization.authorization_timestamp.replace("T", " ").slice(0, 19)}</p>` : ""}
-  `;
-}
-
-function renderLedger(status) {
-  const think = status.thinking || {};
-  const built = think.built_by_prototype || {};
-  const pending = think.pending_ghosts_by_block || {};
-  const zones = think.zones || {};
-  let rows = "";
-  for (const block of Object.keys(zones)) {
-    const proto = protoFor(block);
-    rows += `<tr><td>${block}</td><td>${proto}</td><td>${built[proto] || 0}</td><td>${pending[block] || 0}</td></tr>`;
-  }
-  document.getElementById("ledger").innerHTML = rows
-    ? `<table><tr><th>block</th><th>prototype</th><th>built</th><th>ghosts pending</th></tr>${rows}</table>`
-    : '<div class="empty">no data yet</div>';
-}
-
-function render(state) {
-  document.getElementById("meta").textContent = state.loop
-    ? `run ${state.loop} — ${state.iterations.length} iterations — refreshed ${new Date().toLocaleTimeString()}`
-    : (state.message || "no runs yet");
-  if (!state.latest) return;
-  const s = state.latest;
-
-  const pct = s.ultimate ? Math.round(100 * s.current / s.ultimate) : 0;
-  document.getElementById("stats").innerHTML = `
-    <div class="stat"><div class="v">${s.current} / ${s.ultimate}</div><div class="l">structures built</div><div class="bar"><i style="width:${pct}%"></i></div></div>
-    <div class="stat"><div class="v">${s.pending_ghosts}</div><div class="l">ghosts pending</div></div>
-    <div class="stat"><div class="v">${s.active_phase}</div><div class="l">active phase</div></div>
-    <div class="stat"><div class="v">${s.iteration}</div><div class="l">iteration</div></div>
-    <div class="stat"><div class="v">${s.done ? "DONE" : "RUNNING"}</div><div class="l">status</div></div>`;
-
-  const intentCounts = (s.thinking || {}).intent_counts || {};
-  renderMap(s.thinking, intentCounts);
-  renderThink(s);
-  renderLedger(s);
-
-  const rows = state.iterations.slice().reverse().map((it, idx) => `
-    <tr class="${idx === 0 ? "now" : ""}"><td>${it.iteration}</td><td>${it.tick}</td>
-    <td>${it.current}/${it.ultimate}</td><td>${it.pending_ghosts}</td><td>${it.active_phase}</td>
-    <td>${(it.actions || []).join(", ") || "observe + hold"}</td></tr>`).join("");
-  document.getElementById("log").innerHTML =
-    `<table><tr><th>#</th><th>tick</th><th>built</th><th>pending</th><th>phase</th><th>actions</th></tr>${rows}</table>`;
-}
-
-// --- Agent decisions (runs/expansion_*/step_*.json via /api/expansion) ---
-
-const VERDICT_CLASS = {
-  machine_limited: "amber", healthy_ramping: "green",
-  feed_limited: "blue", drain_limited: "blue",
-  input_starved: "red", power_limited: "red", resource_depleted: "red",
-  unknown: "dim",
-};
-
-function verdictClass(verdict) {
-  return VERDICT_CLASS[verdict] || "dim";
-}
-
-function fmtNum(value, digits) {
-  return (value === null || value === undefined || Number.isNaN(Number(value))) ? "—" : Number(value).toFixed(digits);
-}
-
-function renderDecisions(expState) {
-  document.getElementById("decisions-meta").textContent = expState.run
-    ? `run ${expState.run} — ${expState.steps.length} steps — refreshed ${new Date().toLocaleTimeString()}`
-    : (expState.message || "no expansion runs yet");
-
-  const body = document.getElementById("decisions-body");
-  const timeline = document.getElementById("decisions-timeline");
-  const step = expState.latest;
-  if (!step) {
-    body.innerHTML = '<div class="empty">waiting for the expansion daemon\'s first step…</div>';
-    timeline.innerHTML = '<div class="empty">no steps yet</div>';
-    return;
-  }
-
-  const diagnosis = step.diagnosis || {};
-  const diagRows = Object.entries(diagnosis).map(([line, d]) => `
-    <tr><td>${line}</td>
-        <td><span class="tag verdict-${verdictClass(d.verdict)}">${d.verdict || "unknown"}</span></td>
-        <td>${d.confidence || ""}</td>
-        <td>${d.recommended_action || ""}</td>
-        <td class="rationale">${d.rationale || ""}</td></tr>`).join("");
-
-  const chosen = step.chosen || null;
-  const chosenKey = chosen ? JSON.stringify(chosen) : null;
-  const catalog = step.catalog || [];
-  const catalogRows = catalog.map(a => {
-    const isChosen = chosenKey !== null && JSON.stringify(a) === chosenKey;
-    return `<tr class="${isChosen ? "chosen" : ""}">
-      <td>${isChosen ? "▶ " : ""}${a.action || "?"}</td>
-      <td>${a.line || a.target || ""}</td>
-      <td>${fmtNum(a.predicted_delta, 3)}</td></tr>`;
-  }).join("");
-
-  const result = step.result || {};
-  const resultTag = result.ok === true ? '<span class="tag act">ok</span>'
-    : result.ok === false ? '<span class="tag deny">failed</span>' : "";
-
-  body.innerHTML = `
-    <div class="stats">
-      <div class="stat"><div class="v">${fmtNum(step.research_rate, 3)}</div><div class="l">research rate</div></div>
-      <div class="stat"><div class="v">${step.step ?? "—"}</div><div class="l">step</div></div>
-      <div class="stat"><div class="v">${step.tick ?? "—"}</div><div class="l">tick</div></div>
+    <div class="status-cluster">
+      <span id="game-status" class="status">Game</span>
+      <span id="rcon-status" class="status">RCON</span>
+      <span id="runner-status" class="status">Runner</span>
     </div>
-    <p class="explain">${step.explain || "(no explanation recorded)"}</p>
-    <div class="subhead">Per-line diagnosis</div>
-    <table><tr><th>line</th><th>verdict</th><th>confidence</th><th>recommended action</th><th>rationale</th></tr>
-      ${diagRows || '<tr><td colspan="5" class="empty">no diagnosis recorded</td></tr>'}</table>
-    <div class="subhead">Candidate catalog</div>
-    <table><tr><th>action</th><th>line</th><th>predicted &Delta;</th></tr>
-      ${catalogRows || '<tr><td colspan="3" class="empty">no candidates recorded</td></tr>'}</table>
-    <p style="margin-top:10px">Outcome: ${resultTag} ${(result.detail || "").toString()}</p>
-  `;
+  </header>
 
-  const rows = expState.steps.slice().reverse().map((st, idx) => {
-    const verdicts = Object.values(st.diagnosis || {}).map(d => d.verdict);
-    const summary = verdicts.length ? [...new Set(verdicts)].join(", ") : "—";
-    const chosenAction = st.chosen ? `${st.chosen.action || "?"}${st.chosen.line ? " → " + st.chosen.line : ""}` : "none";
-    return `<tr class="${idx === 0 ? "now" : ""}"><td>${st.step}</td><td>${summary}</td>
-      <td>${chosenAction}</td><td>${fmtNum(st.research_rate, 3)}</td></tr>`;
-  }).join("");
-  timeline.innerHTML = `<table><tr><th>step</th><th>verdicts</th><th>chosen action</th><th>research rate</th></tr>${rows}</table>`;
-}
+  <main>
+    <section class="panel controls">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">CONTROL ROOM</p>
+          <h2>Frequent actions</h2>
+        </div>
+        <p id="operation-state" class="operation-state">Ready</p>
+      </div>
+      <div class="action-grid">
+        <button data-action="restart_runner">
+          <strong>Restart Python runner</strong>
+          <span>Run mining-productivity-4 with the fixed Nauvis settings.</span>
+        </button>
+        <button data-action="deploy_mod">
+          <strong>Redeploy mod</strong>
+          <span>Update both normal and dedicated-server mod copies.</span>
+        </button>
+        <button data-action="restart_server" class="warn">
+          <strong>Restart server</strong>
+          <span>Stop the runner, quit through RCON, then request elevated launch.</span>
+        </button>
+        <button data-action="full_refresh" class="warn">
+          <strong>Full refresh</strong>
+          <span>Stop, redeploy, restart server, then restart the runner.</span>
+        </button>
+        <button data-action="restore_save" class="danger">
+          <strong>RESTORE</strong>
+          <span>Backup the current save, restore mod_playground.zip, then start server.</span>
+        </button>
+        <button data-action="stop_runner" class="quiet">
+          <strong>Stop Python runner</strong>
+          <span>Stop only autonomous_run.py; leave Factorio running.</span>
+        </button>
+      </div>
+      <p id="action-message" class="action-message">No dashboard action has run yet.</p>
+    </section>
 
-async function pollExpansion() {
-  try {
-    const response = await fetch("/api/expansion");
-    renderDecisions(await response.json());
-  } catch (err) {
-    document.getElementById("decisions-meta").textContent = "dashboard server unreachable — retrying…";
-  }
-}
+    <section class="panel priority-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">MISSION QUEUE</p>
+          <h2>Construction priorities</h2>
+        </div>
+        <p id="priority-count" class="operation-state">Waiting</p>
+      </div>
+      <div class="priority-table-wrap">
+        <table>
+          <thead>
+            <tr><th>Task</th><th>Rating</th><th>Progress</th><th>Age</th><th>State</th></tr>
+          </thead>
+          <tbody id="priority-body">
+            <tr><td colspan="5" class="empty-priority">Waiting for priority data…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
-async function poll() {
-  try {
-    const response = await fetch("/api/state");
-    render(await response.json());
-  } catch (err) {
-    document.getElementById("meta").textContent = "dashboard server unreachable — retrying…";
-  }
-}
-poll();
-pollExpansion();
-setInterval(poll, 3000);
-setInterval(pollExpansion, 3000);
-</script>
+    <section class="panel console-panel">
+      <div class="panel-heading console-heading">
+        <div>
+          <p class="eyebrow">LIVE OUTPUT</p>
+          <h2 id="console-title">Autonomous runner</h2>
+        </div>
+        <div class="console-tools">
+          <label><input id="follow-log" type="checkbox" checked> Follow</label>
+          <button id="clear-view" class="small">Clear view</button>
+          <button id="copy-log" class="small">Copy</button>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Log selection">
+        <button class="tab active" data-log="runner">Runner</button>
+        <button class="tab" data-log="control">Dashboard actions</button>
+        <button class="tab" data-log="server">Factorio server</button>
+        <button class="tab" data-log="errors">Server errors</button>
+      </nav>
+      <pre id="log-output" aria-live="polite">Waiting for log output…</pre>
+    </section>
+  </main>
+
+  <footer>
+    Bound to <code>127.0.0.1:9137</code>. Buttons run fixed local commands only; there is no command input.
+  </footer>
+  <script src="/dashboard.js"></script>
 </body>
 </html>

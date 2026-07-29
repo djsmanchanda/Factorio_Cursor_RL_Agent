@@ -1,119 +1,179 @@
 # Path: tools/dashboard_server.py
-# Purpose: Local web dashboard for the loop daemon: serves the viewer page and a JSON API over runs/loop_* status files and runs/expansion_* decision-step files.
+# Purpose: Serve the loopback-only Factorio operations dashboard, live logs, and fixed control actions.
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DASHBOARD_HTML = REPO_ROOT / "tools" / "dashboard.html"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-# Default HTTP port. Avoids 8765, which commonly collides with desktop apps.
+from tools.dashboard_runtime import DashboardConfig, OperationError, OperationManager
+
+TOOLS_DIR = REPO_ROOT / "tools"
 DEFAULT_PORT = 9137
+STATIC_FILES = {
+    "/dashboard.css": (TOOLS_DIR / "dashboard.css", "text/css; charset=utf-8"),
+    "/dashboard.js": (TOOLS_DIR / "dashboard.js", "text/javascript; charset=utf-8"),
+}
 
 
-def _latest_loop_dir(runs_dir: Path) -> Path | None:
-    candidates = sorted(runs_dir.glob("loop_*"), key=lambda p: p.name)
+def _latest_dir(runs_dir: Path, prefix: str) -> Path | None:
+    candidates = sorted(runs_dir.glob(f"{prefix}_*"), key=lambda path: path.name)
     return candidates[-1] if candidates else None
 
 
-def build_state(runs_dir: Path) -> dict:
-    loop_dir = _latest_loop_dir(runs_dir)
-    if loop_dir is None:
-        return {"loop": None, "iterations": [], "message": "No loop runs found yet."}
-
-    iterations = []
-    for status_path in sorted(loop_dir.glob("iter_*/status.json")):
+def _json_files(directory: Path | None, pattern: str) -> list[dict]:
+    if directory is None:
+        return []
+    results = []
+    for path in sorted(directory.glob(pattern)):
         try:
-            with status_path.open("r", encoding="utf-8") as handle:
-                iterations.append(json.load(handle))
+            results.append(json.loads(path.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
             continue
+    return results
 
+
+def build_state(runs_dir: Path) -> dict:
+    loop_dir = _latest_dir(runs_dir, "loop")
+    iterations = _json_files(loop_dir, "iter_*/status.json")
     return {
-        "loop": loop_dir.name,
+        "loop": loop_dir.name if loop_dir else None,
         "iterations": iterations,
         "latest": iterations[-1] if iterations else None,
     }
 
 
-def _latest_expansion_dir(runs_dir: Path) -> Path | None:
-    candidates = sorted(runs_dir.glob("expansion_*"), key=lambda p: p.name)
-    return candidates[-1] if candidates else None
-
-
 def build_expansion_state(runs_dir: Path) -> dict:
-    """Newest runs/expansion_*/step_*.json trail: the RL/greedy decision
-    layer's per-step trace (research rate, per-line diagnosis, candidate
-    action catalog, chosen action, explanation, execution result). Written by
-    the expansion daemon (out of scope here); this only reads it back."""
-    expansion_dir = _latest_expansion_dir(runs_dir)
-    if expansion_dir is None:
-        return {"run": None, "steps": [], "latest": None, "message": "No expansion runs found yet."}
-
-    steps = []
-    for step_path in sorted(expansion_dir.glob("step_*.json")):
-        try:
-            with step_path.open("r", encoding="utf-8") as handle:
-                steps.append(json.load(handle))
-        except (json.JSONDecodeError, OSError):
-            continue
-
+    expansion_dir = _latest_dir(runs_dir, "expansion")
+    steps = _json_files(expansion_dir, "step_*.json")
     return {
-        "run": expansion_dir.name,
+        "run": expansion_dir.name if expansion_dir else None,
         "steps": steps,
         "latest": steps[-1] if steps else None,
     }
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    runs_dir: Path = REPO_ROOT / "runs"
+    runs_dir = REPO_ROOT / "runs"
+    manager: OperationManager
+    action_token: str
 
     def _send(self, code: int, content_type: str, body: bytes) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802 (http.server API)
-        if self.path in {"/", "/index.html"}:
-            self._send(200, "text/html; charset=utf-8", DASHBOARD_HTML.read_bytes())
-        elif self.path == "/api/state":
-            body = json.dumps(build_state(self.runs_dir)).encode("utf-8")
-            self._send(200, "application/json", body)
-        elif self.path == "/api/expansion":
-            body = json.dumps(build_expansion_state(self.runs_dir)).encode("utf-8")
-            self._send(200, "application/json", body)
-        else:
-            self._send(404, "text/plain", b"not found")
+    def _json(self, code: int, payload: dict) -> None:
+        self._send(code, "application/json; charset=utf-8", json.dumps(payload).encode("utf-8"))
 
-    def log_message(self, format: str, *args) -> None:  # silence request spam
+    def do_GET(self) -> None:  # noqa: N802
+        request = urlsplit(self.path)
+        if request.path in {"/", "/index.html"}:
+            page = (TOOLS_DIR / "dashboard.html").read_text(encoding="utf-8")
+            page = page.replace("__ACTION_TOKEN__", self.action_token)
+            self._send(200, "text/html; charset=utf-8", page.encode("utf-8"))
+            return
+        static = STATIC_FILES.get(request.path)
+        if static:
+            path, content_type = static
+            self._send(200, content_type, path.read_bytes())
+            return
+        if request.path == "/api/status":
+            self._json(200, self.manager.status())
+            return
+        if request.path == "/api/priorities":
+            try:
+                self._json(200, self.manager.priorities())
+            except OperationError as exc:
+                self._json(500, {"error": str(exc)})
+            return
+        if request.path == "/api/logs":
+            query = parse_qs(request.query)
+            name = query.get("name", ["runner"])[0]
+            try:
+                offset = int(query.get("offset", ["0"])[0])
+                self._json(200, self.manager.read_log(name, offset))
+            except (ValueError, OperationError) as exc:
+                self._json(400, {"error": str(exc)})
+            return
+        if request.path == "/api/state":
+            self._json(200, build_state(self.runs_dir))
+            return
+        if request.path == "/api/expansion":
+            self._json(200, build_expansion_state(self.runs_dir))
+            return
+        self._send(404, "text/plain; charset=utf-8", b"not found")
+
+    def do_POST(self) -> None:  # noqa: N802
+        if self.headers.get("X-Action-Token") != self.action_token:
+            self._json(403, {"error": "Invalid dashboard action token."})
+            return
+        request = urlsplit(self.path)
+        prefix = "/api/actions/"
+        if not request.path.startswith(prefix):
+            self._json(404, {"error": "Unknown endpoint."})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > 4096:
+                raise OperationError("Request body is too large.")
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(payload, dict):
+                raise OperationError("Request body must be an object.")
+            action = request.path[len(prefix):]
+            self.manager.start(action, str(payload.get("confirmation", "")))
+            self._json(202, {"accepted": True, "action": action})
+        except (json.JSONDecodeError, OperationError) as exc:
+            self._json(409, {"error": str(exc)})
+
+    def log_message(self, format: str, *args) -> None:
         pass
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Serve the loop daemon dashboard.")
-    # 8765 collides with common desktop apps; 9137 is the project default.
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    roaming = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    parser = argparse.ArgumentParser(description="Serve the local Factorio operations dashboard.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--runs-dir", default=str(REPO_ROOT / "runs"))
+    parser.add_argument("--runs-dir", type=Path, default=REPO_ROOT / "runs")
+    parser.add_argument("--server-data", type=Path, default=local_app_data / "Factorio-server")
+    parser.add_argument("--source-save", type=Path, default=roaming / "Factorio" / "saves" / "mod_playground.zip")
+    parser.add_argument("--rcon-password", default="planner_test")
+    parser.add_argument("--technology", default="mining-productivity-4")
     args = parser.parse_args()
 
-    DashboardHandler.runs_dir = Path(args.runs_dir)
+    config = DashboardConfig(
+        server_data=args.server_data,
+        source_save=args.source_save,
+        rcon_password=args.rcon_password,
+        technology=args.technology,
+    )
+    DashboardHandler.runs_dir = args.runs_dir
+    DashboardHandler.manager = OperationManager(config)
+    DashboardHandler.action_token = secrets.token_urlsafe(24)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), DashboardHandler)
     except OSError as exc:
         print(f"Cannot bind port {args.port}: {exc}\nPass --port to pick another.", file=sys.stderr)
         return 1
-    print(f"Dashboard at http://127.0.0.1:{args.port}/ (runs dir: {DashboardHandler.runs_dir})")
+    print(f"Factorio operations dashboard: http://127.0.0.1:{args.port}/", flush=True)
     server.serve_forever()
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
