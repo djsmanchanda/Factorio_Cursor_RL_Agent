@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional
 
 from tools.rcon_client import RconClient
 
@@ -22,6 +22,14 @@ LIVE_EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "live_execution_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
+
+# The mod writes one tick-stamped JSON per command and never removes any, while
+# every collection globs and stats the whole subdirectory -- once up front and
+# again on each poll. Unbounded history therefore makes each command slower than
+# the last, forever, across every run sharing one script-output. Only the file a
+# command just produced is ever read back, so older reports are pure history:
+# keep a generous window for post-mortems and drop the rest.
+REPORT_RETENTION = 200
 
 
 class BridgeError(RuntimeError):
@@ -40,13 +48,17 @@ class GameBridge:
         password: str = "",
         poll_interval: float = 0.5,
         command_timeout: float = 300.0,
+        retain_reports: int = REPORT_RETENTION,
     ):
         self.script_output = Path(script_output)
         if not self.script_output.is_dir():
             raise BridgeError(f"script-output directory not found: {self.script_output}")
+        if retain_reports < 1:
+            raise ValueError("retain_reports must keep at least the file just collected")
         # Long socket timeout: a megabase /snapshot can block the server for a minute+.
         self._rcon = RconClient(host, port, password, timeout=command_timeout)
         self._poll_interval = poll_interval
+        self._retain_reports = retain_reports
 
     def close(self) -> None:
         self._rcon.close()
@@ -54,20 +66,37 @@ class GameBridge:
     def command(self, text: str) -> str:
         return self._rcon.command(text)
 
-    def _existing_files(self, subdir: Path) -> Set[str]:
+    def _existing_files(self, subdir: Path) -> dict[str, tuple[int, int]]:
         directory = self.script_output / subdir
         if not directory.is_dir():
-            return set()
-        return {item.name for item in directory.glob("*.json")}
+            return {}
+        snapshot: dict[str, tuple[int, int]] = {}
+        for item in directory.glob("*.json"):
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            snapshot[item.name] = (stat.st_mtime_ns, stat.st_size)
+        return snapshot
 
-    def _wait_for_new_file(self, subdir: Path, known: Set[str], timeout: float) -> Path:
+    def _wait_for_new_file(
+        self, subdir: Path, known: dict[str, tuple[int, int]], timeout: float,
+    ) -> Path:
         directory = self.script_output / subdir
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if directory.is_dir():
-                fresh = sorted(set(item.name for item in directory.glob("*.json")) - known)
+                fresh: list[tuple[int, str, Path]] = []
+                for item in directory.glob("*.json"):
+                    try:
+                        stat = item.stat()
+                    except OSError:
+                        continue
+                    signature = (stat.st_mtime_ns, stat.st_size)
+                    if known.get(item.name) != signature:
+                        fresh.append((stat.st_mtime_ns, item.name, item))
                 if fresh:
-                    candidate = directory / fresh[-1]
+                    candidate = max(fresh)[2]
                     # The game may still be flushing; accept only parseable JSON.
                     try:
                         with candidate.open("r", encoding="utf-8") as handle:
@@ -77,9 +106,42 @@ class GameBridge:
                         pass
             time.sleep(self._poll_interval)
         raise BridgeError(
-            f"Timed out after {timeout:.0f}s waiting for a new file in {directory}. "
+            f"Timed out after {timeout:.0f}s waiting for a new or updated file in {directory}. "
             "Is the mod loaded and the server unpaused (auto_pause off with zero players)?"
         )
+
+    def _prune_reports(self, subdir: Path, keep: Path) -> int:
+        """Trim one report subdirectory to the newest ``retain_reports`` files.
+
+        ``keep`` -- the report this command just collected -- is retained
+        unconditionally, so a caller can always read what it was handed even if
+        the retention window is smaller than the burst that produced it.
+        Ordering is (mtime, name) so a filesystem with coarse timestamp
+        resolution still evicts deterministically. Deletion failures are
+        ignored: losing a pruning race must never fail a live build.
+        """
+        directory = self.script_output / subdir
+        if not directory.is_dir():
+            return 0
+        candidates: list[tuple[int, str, Path]] = []
+        for item in directory.glob("*.json"):
+            try:
+                candidates.append((item.stat().st_mtime_ns, item.name, item))
+            except OSError:
+                continue
+        if len(candidates) <= self._retain_reports:
+            return 0
+        candidates.sort(reverse=True)
+        removed = 0
+        for _mtime, _name, item in candidates[self._retain_reports:]:
+            if item == keep:
+                continue
+            try:
+                item.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def _run_and_collect(self, command_text: str, subdir: Path, timeout: float) -> Path:
         known = self._existing_files(subdir)
@@ -88,7 +150,9 @@ class GameBridge:
             lowered = response.lower()
             if "error" in lowered or "blocked" in lowered:
                 raise BridgeError(f"Command {command_text!r} failed: {response.strip()}")
-        return self._wait_for_new_file(subdir, known, timeout)
+        collected = self._wait_for_new_file(subdir, known, timeout)
+        self._prune_reports(subdir, collected)
+        return collected
 
     def request_snapshot(self, timeout: float = 300.0, surface: Optional[str] = None) -> Path:
         command = f"/snapshot {surface}" if surface else "/snapshot"
@@ -135,6 +199,18 @@ class GameBridge:
     def execute_upgrade_plan(self, authorization: dict, upgrade_plan: dict, timeout: float = 120.0) -> Path:
         payload = json.dumps({"authorization": authorization, "upgrade_plan": upgrade_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/execute_upgrade_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
+
+    def execute_deconstruction(
+        self, authorization: dict, deconstruction_plan: dict, *,
+        surface: str, force: str, timeout: float = 120.0,
+    ) -> Path:
+        payload = json.dumps({
+            "authorization": authorization, "deconstruction_plan": deconstruction_plan,
+            "surface": surface, "force": force,
+        }, separators=(",", ":"))
+        return self._run_and_collect(
+            f"/execute_deconstruction_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout,
+        )
 
     def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))

@@ -1,0 +1,61 @@
+# Path: .github/workflows/ci.yml
+# Purpose: Gate every change on the Python test suite and Lua syntax validation, so a
+#          defect is caught here instead of mid-build against a real Factorio server.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+  lua:
+    name: lua syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The mod is never exercised by pytest -- nothing outside a running game
+      # loads it -- so a syntax error stays invisible until a live run fails to
+      # start. luac -p parses without executing, which is the one check that can
+      # run here. It does NOT resolve globals: a call to a deleted Lua helper
+      # still only surfaces in game.
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+
+      - name: Check factorio_mod/*.lua parses
+        run: |
+          status=0
+          for file in factorio_mod/*.lua; do
+            if luac5.4 -p "$file"; then
+              echo "ok   $file"
+            else
+              echo "FAIL $file"
+              status=1
+            fi
+          done
+          exit $status
