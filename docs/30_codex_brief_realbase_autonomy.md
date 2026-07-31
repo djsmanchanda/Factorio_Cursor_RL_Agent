@@ -24,7 +24,7 @@ on it's own from here on out."*
 This is NOT the synthetic-sandbox pipeline. Do NOT reuse or extend:
 - `planners/electronics_block.py`, `tools/build_processing_units.py`, `planners/resource_survey.py`
   (all hard-locked to the synthetic `planner-sandbox` surface + fixed WorldSpec).
-- `orchestrator/expansion_daemon.py` / `run_cycle.py` / `loop_daemon.py` (three older,
+- `experimental/legacy_autonomy/expansion_daemon.py` / `run_cycle.py` / `loop_daemon.py` (three older,
   non-integrated autonomy-loop prototypes, all sandbox-bound; the user's intent supersedes them —
   they implement only 2 of 9 catalog actions and assume a pre-registered line registry).
 

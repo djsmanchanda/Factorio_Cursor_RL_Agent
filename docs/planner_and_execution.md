@@ -29,9 +29,10 @@ alternatives.
 
 The current real-base builder is Nauvis-only. All six Nauvis sciences are in
 planning scope, but only targets whose complete stage chain exists in
-`planners.recipe_data.LINE_RECIPES` are executable (currently automation and
-logistic science). Chemical, production, utility, and military science remain
-structurally known but fail readiness until their missing stages are implemented.
+`planners.recipe_data.LINE_RECIPES` are executable (currently automation, logistic, and chemical science).
+Chemical science uses a compact real-base oil cell with water-safe pipe routing. Production,
+utility, and military science remain structurally known but fail readiness until
+their missing stages are implemented.
 Space, planet-specific, and promethium science remain knowledge-only until the
 relevant PlanetPlanner or interplanetary capability exists.
 
@@ -64,11 +65,27 @@ The current real-base extraction layout operates in local mode: drills plus a
 short ore egress remain on the resource patch, while the electric-furnace line
 gets an independent footprint whose full entity bounds and five-tile apron are
 live-checked as resource-free. Furnace count includes the force's measured
-mining-productivity bonus. Mine-to-smelter links are capped at 300 generated
-route tiles and preflighted before the smelter is submitted; a farther legal
+mining-productivity bonus. Each refinery evaluates eastbound and westbound flow:
+the input interface first faces its mine, while the output interface favors the
+declared downstream reference; plate output uses one powered side collector on
+a continuous belt. Mine-to-smelter links are capped at 300 generated route
+tiles and preflighted before the smelter is submitted; a farther legal
 site fails closed for a future CityPlanner rail handoff rather than leaving a
 disconnected block. Built, ghosted, and partially constructed extraction
-stages are reconciled on retry. This is not City Mode.
+stages are reconciled on retry. Extraction capacity is phased across the
+entire resource system at 6, 20, 50, and 100 total drills. Each
+intervention builds the largest next-phase batch that fits the current
+reserved corridor. A new mine inherits the remaining system target instead
+of restarting at six; if a patch is smaller, later corridors retain the unmet
+target. This is not City Mode.
+
+Compact parts-mall providers use item-group inventory bars: production items
+retain at least four stacks, logistics items five, and intermediate products
+ten. A larger stock target expands the same provider using the item's live
+stack size; it does not allocate an unrestricted chest. Blueprint stock targets
+and live requester demand are combined. Whenever that demand would occupy more
+than half the allowed inventory, capacity grows in two-stack steps until at
+least half remains as shock reserve.
 
 ## Observer, supervisor, and executor
 

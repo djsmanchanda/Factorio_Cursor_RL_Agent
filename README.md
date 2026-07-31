@@ -15,6 +15,24 @@ It is a factory compiler with an execution agent.
 - Repository-local Codex guidance is inventoried in [`.agents/skills/README.md`](.agents/skills/README.md).
 - Live mutation, mod deployment, saves/resets, and server lifecycle actions require explicit user authorization.
 
+### Local Operations Dashboard
+
+Run `scripts\launch_dashboard.ps1`, or run `python -u tools\dashboard_server.py` and open `http://127.0.0.1:9137/`.
+
+The loopback-only page follows autonomous-run, Factorio stdout/stderr, and dashboard action logs. Its fixed buttons can redeploy the mod, restart the Python runner, restart the server, perform the full refresh sequence, or restore the starting save. Save restore requires a typed confirmation and preserves a timestamped backup under the dedicated server saves directory.
+## Active Runtime
+
+The current Nauvis path is `tools/autonomous_run.py` ->
+`orchestrator/autonomous_builder.py` -> `orchestrator/stage_*.py` ->
+`planners/*.py`. It does not import the quarantined RL/sandbox daemons.
+
+## Experimental Legacy Pipeline
+
+The superseded sandbox autonomy loops and deterministic RL advisor are preserved
+under [`experimental/legacy_autonomy/`](experimental/legacy_autonomy/README.md).
+They are unsupported, are not invoked by the dashboard or active runner, and
+must be called explicitly with `python -m experimental.legacy_autonomy.<module>`.
+
 Core philosophy:
 > Planning is symbolic. Execution is learned.
 
@@ -56,8 +74,8 @@ Supervision:
 	- `python -c "from core.execution_readiness import propose_execution; import json; print(propose_execution(json.load(open('progress_state.json')), json.load(open('capacity_phasing.json')), json.load(open('build_intent.json')), 'OK').to_dict())"`
 - Execution authorization:
 	- `python -c "from core.execution_authorizer import authorize_execution; import json; proposal=json.load(open('execution_proposal.json')); print(authorize_execution(proposal, proposal['allowed_actions'], 'test').to_dict())"`
-- RL advisor (non-authoritative):
-	- `python rl_advisor.py <rl_observation.json> [seed]`
+- Quarantined RL advisor (experimental, non-authoritative):
+	- `python -m experimental.legacy_autonomy.rl_advisor <rl_observation.json> [seed]`
 	- The RL advisor is advisory only and cannot execute actions.
 	- Every RL proposal sets `requires_authorization = true` and must flow through readiness, authorization, and then execution.
 	- Safety boundaries: read-only inputs, no state mutation, no Lua calls, and no bypass of human/bot authorization.
@@ -72,8 +90,8 @@ Supervision:
 	- Construction pressure shaping computes deterministic backlog pressure from ProgressState and dampens `project_more_ghosts` confidence when committed work outpaces current progress.
 	- Bot capacity shaping reads `metrics_summary.bot_utilization_ratio` and applies deterministic expansion damping as robot utilization rises.
 	- Material supply awareness adds deterministic heuristic damping from backlog, throughput stress, and dominant production gaps; this remains advisory-only and does not perform recipe solving.
-	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `core.target_selector.select_expansion_target`, and `core.capacity_allocator.allocate_phase_capacity`).
-	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
+	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `experimental.legacy_autonomy.target_selector.select_expansion_target`, and `experimental.legacy_autonomy.capacity_allocator.allocate_phase_capacity`).
+	- Future training hook points: replace the deterministic scoring policy in `experimental/legacy_autonomy/rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):
 	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`
 	- Builds deterministic, schema-validated RL feedback telemetry from read-only artifacts.

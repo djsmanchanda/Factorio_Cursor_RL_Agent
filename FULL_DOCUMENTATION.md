@@ -1,4 +1,6 @@
 --- FILE: README.md ---
+> Historical aggregate snapshot. Paths and status statements in this generated
+> file may be stale; use `README.md` and the canonical documents under `docs/`.
 
 # Factorio Autonomous Planning Agent
 
@@ -59,7 +61,7 @@ Supervision:
 - Execution authorization:
 	- `python -c "from core.execution_authorizer import authorize_execution; import json; proposal=json.load(open('execution_proposal.json')); print(authorize_execution(proposal, proposal['allowed_actions'], 'test').to_dict())"`
 - RL advisor (non-authoritative):
-	- `python rl_advisor.py <rl_observation.json> [seed]`
+	- `python -m experimental.legacy_autonomy.rl_advisor <rl_observation.json> [seed]`
 	- The RL advisor is advisory only and cannot execute actions.
 	- Every RL proposal sets `requires_authorization = true` and must flow through readiness, authorization, and then execution.
 	- Safety boundaries: read-only inputs, no state mutation, no Lua calls, and no bypass of human/bot authorization.
@@ -74,8 +76,8 @@ Supervision:
 	- Construction pressure shaping computes deterministic backlog pressure from ProgressState and dampens `project_more_ghosts` confidence when committed work outpaces current progress.
 	- Bot capacity shaping reads `metrics_summary.bot_utilization_ratio` and applies deterministic expansion damping as robot utilization rises.
 	- Material supply awareness adds deterministic heuristic damping from backlog, throughput stress, and dominant production gaps; this remains advisory-only and does not perform recipe solving.
-	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `core.target_selector.select_expansion_target`, and `core.capacity_allocator.allocate_phase_capacity`).
-	- Future training hook points: replace the deterministic scoring policy in `rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
+	- These enrichment values are deterministic and derived from existing metrics/progress (see `core.metrics.derive_rl_observation_health`, `core.metrics.derive_spatial_pressure`, `core.metrics.derive_throughput_stress`, `core.metrics.derive_block_pressure_attribution`, `core.metrics.derive_production_gap_estimate`, `experimental.legacy_autonomy.target_selector.select_expansion_target`, and `experimental.legacy_autonomy.capacity_allocator.allocate_phase_capacity`).
+	- Future training hook points: replace the deterministic scoring policy in `experimental/legacy_autonomy/rl_advisor.py` with a trained policy/value model while preserving schema validation and authorization gating.
 - RL feedback builder (pre-training instrumentation):
 	- `python rl_feedback_builder.py <progress_state.json> <metrics_summary.json> [construction_report.json] [execution_report.json]`
 	- Builds deterministic, schema-validated RL feedback telemetry from read-only artifacts.
@@ -162,12 +164,12 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 ## Phase 2 – Execution (RL Optimization)
 - [ ] Headless Factorio setup
 - [ ] Instruction language (FIL) parsing (`goal.schema.json`)
-- [ ] RL executor (Targeted at build efficiency) — advisory-only `rl_advisor.py` exists; no learned policy
+- [ ] RL executor (Targeted at build efficiency) — legacy advisor is quarantined at `experimental/legacy_autonomy/rl_advisor.py`; no learned policy is active
 - [x] Reward function definition (Invariants-checked) — `rl_feedback_builder.py` (telemetry only, nothing consumes it yet)
 
 ## Phase 2.5 – Metrics & Policies
 - [x] FactoryGraph-derived metrics (`core/factory_graph.py`, `core/metrics.py`)
-- [x] Bot saturation detection (`core/bot_capacity_policy.py`, supervisor policy evaluator)
+- [x] Bot saturation detection (`experimental/legacy_autonomy/bot_capacity_policy.py`, quarantined prototype)
 - [x] Power structure analysis (power stress ratio in metrics/observation)
 - [x] Resource structure analysis (material supply, production gap, pressure attribution)
 - [x] Policy threshold definitions (`policies/bot_thresholds.json`)
@@ -185,7 +187,7 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] Verified live snapshot from Factorio 2.0.77 validates against `snapshot.schema.json` (headless server + RCON, 2026-07-18)
 - [x] RCON transport, Python→game commands (`tools/rcon_client.py`)
 - [x] script-output watcher (game→Python file ingestion) (`orchestrator/game_bridge.py`)
-- [x] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution (`orchestrator/run_cycle.py`, one-shot cycle; recurring loop still TODO)
+- [x] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution (`experimental/legacy_autonomy/run_cycle.py`, quarantined legacy cycle)
 - [x] Fix capacity model: committed = current + pending ghosts; fill-delta semantics in ghost projection and execution readiness; snapshot-derived current capacity (verified live: cycle 1 projects 50 ghosts from pure observation, cycle 2 holds at delta 0)
 - [x] First automated test suite: `tests/test_capacity_model.py` (9 tests; run `python -m pytest tests/`)
 - [ ] Broaden test coverage beyond the capacity model (planners, executors, bridge)
@@ -1920,7 +1922,7 @@ on it's own from here on out."*
 This is NOT the synthetic-sandbox pipeline. Do NOT reuse or extend:
 - `planners/electronics_block.py`, `tools/build_processing_units.py`, `planners/resource_survey.py`
   (all hard-locked to the synthetic `planner-sandbox` surface + fixed WorldSpec).
-- `orchestrator/expansion_daemon.py` / `run_cycle.py` / `loop_daemon.py` (three older,
+- `experimental/legacy_autonomy/expansion_daemon.py` / `run_cycle.py` / `loop_daemon.py` (three older,
   non-integrated autonomy-loop prototypes, all sandbox-bound; the user's intent supersedes them —
   they implement only 2 of 9 catalog actions and assume a pre-registered line registry).
 

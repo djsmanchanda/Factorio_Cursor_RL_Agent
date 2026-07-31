@@ -18,12 +18,12 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 ## Phase 2 – Execution (RL Optimization)
 - [ ] Headless Factorio setup
 - [ ] Instruction language (FIL) parsing (`goal.schema.json`)
-- [ ] RL executor (Targeted at build efficiency) — advisory-only `rl_advisor.py` exists; no learned policy
+- [ ] RL executor (targeted at build efficiency) — legacy advisor quarantined at `experimental/legacy_autonomy/rl_advisor.py`; no learned policy is wired into the active runtime
 - [x] Reward function definition (Invariants-checked) — `rl_feedback_builder.py` (telemetry only, nothing consumes it yet)
 
 ## Phase 2.5 – Metrics & Policies
 - [x] FactoryGraph-derived metrics (`core/factory_graph.py`, `core/metrics.py`)
-- [x] Bot saturation detection (`core/bot_capacity_policy.py`, supervisor policy evaluator)
+- [x] Bot saturation prototype preserved at `experimental/legacy_autonomy/bot_capacity_policy.py`; not active runtime policy
 - [x] Power structure analysis (power stress ratio in metrics/observation)
 - [x] Resource structure analysis (material supply, production gap, pressure attribution)
 - [x] Policy threshold definitions (`policies/bot_thresholds.json`)
@@ -41,7 +41,7 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [x] Verified live snapshot from Factorio 2.0.77 validates against `snapshot.schema.json` (headless server + RCON, 2026-07-18)
 - [x] RCON transport, Python→game commands (`tools/rcon_client.py`)
 - [x] script-output watcher (game→Python file ingestion) (`orchestrator/game_bridge.py`)
-- [x] Top-level orchestrator loop: snapshot → metrics → supervisor → planner → authorization → execution (`orchestrator/run_cycle.py`, one-shot cycle; recurring loop still TODO)
+- [x] Legacy sandbox orchestrator loop preserved at `experimental/legacy_autonomy/run_cycle.py`; active Nauvis execution enters through `tools/autonomous_run.py`
 - [x] Fix capacity model: committed = current + pending ghosts; fill-delta semantics in ghost projection and execution readiness; snapshot-derived current capacity (verified live: cycle 1 projects 50 ghosts from pure observation, cycle 2 holds at delta 0)
 - [x] First automated test suite: `tests/test_capacity_model.py` (9 tests; run `python -m pytest tests/`)
 - [ ] Broaden test coverage beyond the capacity model (planners, executors, bridge)

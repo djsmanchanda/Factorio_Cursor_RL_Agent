@@ -29,9 +29,21 @@ Per docs/19: reference data only — validated before use, never authoritative o
 - Belts (items/s): transport-belt 15, fast-transport-belt 30,
   express-transport-belt 45, turbo-transport-belt 60 (**Vulcanus-only
   production** — must be imported off-planet).
-- Inserters: fast-inserter baseline; bulk-inserter high hand capacity
+- Inserters: plain inserter, fast-inserter, bulk-inserter high hand capacity
   (upgradable +11); stack-inserter (**Gleba-only production**) stacks items
   4-high on belts, effectively quadrupling belt throughput.
+- Tier is **chosen from the rate one inserter carries**, not fixed
+  (superseded the fast-inserter baseline, 2026-08-01). `inserter_for_demand`
+  in `planners/recipe_data.py` picks the cheapest tier covering the busiest
+  flow at a machine -- ingredients in AND product out, since a line layout
+  puts the same tier on both faces. An electric furnace moves 0.625 item/s,
+  so a fast inserter there was ~5x oversized and cost a production chain it
+  never used; a plain inserter carries it with margin. Busy lines still
+  escalate (electronic-circuit draws 4.5 copper-cable/s -> bulk-inserter).
+- stack-inserter is never auto-selected: Gleba-only production means demand
+  alone must not conjure one onto Nauvis. A caller asks for it by name.
+- Feeder COUNT is sized separately (`_feeders_needed`), so a cheaper tier
+  widens the feed array rather than throttling the line.
 - Planet-sourcing constraints are supply-chain facts for PlanetPlanner-era
   planning; on the test sandbox all tiers are available via scaffolding.
 

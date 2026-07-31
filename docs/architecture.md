@@ -18,6 +18,10 @@ goal -> instruction/goal schema -> observer -> metrics -> supervisor
 The observer and metrics layers are read-only. The supervisor generates intents
 and chooses among planner-produced actions. Planners decide structure.
 Executors perform approved actions and may optimize timing only.
+The active Nauvis implementation enters through `tools/autonomous_run.py` and
+`orchestrator/autonomous_builder.py`. The older sandbox daemons and advisory RL
+prototype are quarantined under `experimental/legacy_autonomy/`; active runtime
+modules must not import that package.
 
 ## Layers
 

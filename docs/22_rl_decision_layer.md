@@ -2,6 +2,13 @@
 # Purpose: Architecture of the RL decision layer: what RL decides, over what action space, with what rewards. User-defined 2026-07-18.
 
 # RL Decision Layer
+## Current implementation status
+
+This document defines a future execution-policy boundary, not the active
+runtime. The disconnected first-generation advisor and sandbox daemons are
+quarantined under `experimental/legacy_autonomy/`. The active Nauvis builder
+remains deterministic and does not import that package. Revival requires an
+explicit architecture review and must preserve the invariants below.
 
 ## Division of labor (invariant-compatible)
 
