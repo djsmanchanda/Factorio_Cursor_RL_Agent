@@ -661,8 +661,16 @@ def build_conversion_stage(
         )
     )
     _publish_output_chest(plan)
+    # Belt or bots is a THROUGHPUT question, and _transport_mode already answers
+    # it per ingredient. Hardcoding "belt" here overrode that: a science stage
+    # drawing 0.30 copper-plate/s -- a tenth of what bots carry -- demanded a
+    # 128-tile belt corridor, could not afford any belt tier, and killed the run.
+    # allow_logistic_inputs still forces bots for callers that must avoid belts.
     modes = {
-        ingredient: ("logistic" if allow_logistic_inputs else "belt")
+        ingredient: (
+            "logistic" if allow_logistic_inputs
+            else _transport_mode(recipe, ingredient, machine_count)
+        )
         for ingredient in LINE_RECIPES[recipe]["ingredients"]
     }
     direct_belt_input = (

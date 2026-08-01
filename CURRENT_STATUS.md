@@ -785,3 +785,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added `inserter_tiers_covering` and `_stage_inserter_type`; a conversion stage now substitutes UP to an adequate tier the base is already stocking when the cheapest adequate tier is short, and only falls back to the cheapest when nothing adequate is stocked.
 - Why: Regression from the rate-driven tier change -- the iron-plate smelter demanded 14 plain inserters, inserters need iron plate, and iron plate needs that smelter, so the runner livelocked on `MALL DEMAND: conversion_iron-plate requested inserter=14` roughly every 12s indefinitely.
 - Next: The mall loop still has no bound (`iteration` never increments on the MaterialShortage path) and deferral does not remember what failed, so any other circular material demand will spin the same way.
+
+## [2026-08-01] Belt-vs-bots follows measured demand
+- Files: `orchestrator/autonomous_builder.py`, `orchestrator/stage_transport.py`, `tests/test_transport_mode_selection.py`, `CURRENT_STATUS.md`
+- What: `build_conversion_stage` now derives each ingredient's transport mode from `_transport_mode` instead of hardcoding "belt", and the belt-route log line states the real reason rather than always claiming the bot limit was exceeded.
+- Why: A 2-machine science stage draws 0.30 copper-plate/s -- a tenth of the 3.0/s bot limit -- but was handed a 128-tile belt corridor it could not afford, ending the run with "no belt tier can be afforded"; the log compounded it by asserting "0.30/s exceeds the 3.0/s bot limit".
+- Next: `expand_upstream` only scales MINEABLE inputs, so a stage bottlenecked on an intermediate (fast-transport-belt short of iron-gear-wheel) defers forever instead of adding gear capacity.

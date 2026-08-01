@@ -419,8 +419,17 @@ def ensure_ingredient_transport(
     ) is not None:
         emit(f"  {recipe}: {ingredient} continues from its production belt; "
              "a regular inserter side-taps it without interrupting the main belt")
-    emit(f"  {recipe}: {ingredient} needs a belt "
-         f"({demand:.2f}/s exceeds the {_BOT_THROUGHPUT_LIMIT}/s bot limit)")
+    # State the ACTUAL reason. This used to assert the demand exceeded the bot
+    # limit on every belt route, including ones a caller forced -- so the log
+    # read "0.30/s exceeds the 3.0/s bot limit", which is plainly false and hid
+    # why a trickle was getting a belt corridor.
+    reason = (
+        f"{demand:.2f}/s exceeds the {_BOT_THROUGHPUT_LIMIT}/s bot limit"
+        if demand > _BOT_THROUGHPUT_LIMIT
+        else f"belt transport was requested for this link; {demand:.2f}/s would "
+             f"fit inside the {_BOT_THROUGHPUT_LIMIT}/s bot limit"
+    )
+    emit(f"  {recipe}: {ingredient} needs a belt ({reason})")
     actions, belt_type, _ = _plan_belt_transport(
         client, surface, force, ingredient, source_position, feed_position,
         reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
