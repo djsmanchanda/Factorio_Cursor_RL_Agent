@@ -31,10 +31,41 @@ def _line_phase(minimum_machines: int) -> int:
         (phase for phase in PROMOTED_LINE_PHASES if phase >= minimum_machines),
         PROMOTED_LINE_PHASES[-1],
     )
-PROMOTABLE_INTERMEDIATES = frozenset({
-    "iron-gear-wheel", "copper-cable", "iron-stick", "electronic-circuit",
-    "advanced-circuit", "processing-unit", "engine-unit", "pipe",
+
+
+# Recipes on these machines are already owned by another stage: furnace output
+# is sized by the mining phase feeding it, and chemical plants and refineries
+# are placed by the fluid stage that routes their pipes. Promoting one here
+# would build a second, unfed copy of something that stage already manages.
+STAGE_OWNED_MACHINES = frozenset({
+    "electric-furnace", "chemical-plant", "oil-refinery",
 })
+
+
+def is_promotable(item: str) -> bool:
+    """Whether a shared belt-fed line is the right shape for this recipe.
+
+    Derived from what the line can physically supply rather than from a list of
+    remembered names, so a recipe added to LINE_RECIPES scales without also
+    having to be remembered here. Two things disqualify one:
+
+    - Its machine belongs to another stage (see STAGE_OWNED_MACHINES).
+    - It needs a fluid. A promoted line is belt-fed and inserter-served and has
+      no pipe run, so the machines would sit empty waiting on an input that
+      never arrives.
+
+    The old hand-written list got both edges wrong in the same direction. It
+    named processing-unit, which takes sulfuric acid and so could never have run
+    on a belt-fed line, while omitting transport-belt and inserter -- the two
+    items the mall is most often asked to mass-produce.
+    """
+    spec = LINE_RECIPES.get(item)
+    if spec is None:
+        return False
+    if spec.get("fluid_ingredients"):
+        return False
+    machine = spec["machine"]
+    return machine in MACHINE_SPEEDS and machine not in STAGE_OWNED_MACHINES
 
 
 def live_intermediate_demand(
@@ -70,13 +101,11 @@ def promoted_line_machine_count(
     A machine running flat out is already the evidence: it cannot go faster, so
     the only way to raise output is more machines.
     """
-    if item not in PROMOTABLE_INTERMEDIATES:
+    if not is_promotable(item):
         return None
     if not saturated and demand_per_second <= MALL_INTERMEDIATE_RATE_LIMIT:
         return None
-    spec = LINE_RECIPES.get(item)
-    if spec is None or spec["machine"] not in MACHINE_SPEEDS:
-        return None
+    spec = LINE_RECIPES[item]
     per_machine = (
         spec.get("product_amount", 1)
         * MACHINE_SPEEDS[spec["machine"]]

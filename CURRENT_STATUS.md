@@ -882,3 +882,20 @@ paved three tiles per column and columns sit three apart, so a skipped column
 severs the belt and every drill past it feeds nothing.
 
 **Next:** `PROMOTABLE_INTERMEDIATES` is still a hand-maintained allowlist.
+
+## Promotion eligibility is derived, not listed
+
+**Files:** `orchestrator/intermediate_scaling.py`, `tests/test_promotable.py`
+
+**What:** `PROMOTABLE_INTERMEDIATES` is replaced by `is_promotable(item)`, which
+asks whether a belt-fed line can actually supply the recipe: no fluid input, and
+a machine not already owned by the mining or fluid stage.
+
+**Why:** The hand-written list had to be remembered every time a recipe was
+added, and it was already wrong in both directions. It named `processing-unit`,
+which takes sulfuric acid and could never have run on a belt-fed line, and it
+omitted `transport-belt` and `inserter` -- the two items the mall is most often
+asked to mass-produce, and the exact symptom reported as "it should have started
+regular transport belt production and it didn't".
+
+**Next:** `FEEDER_RATES` are still derived estimates rather than measured.
