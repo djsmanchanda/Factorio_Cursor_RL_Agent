@@ -827,3 +827,9 @@ backfilled from git history because this file did not exist yet.
 - What: `ensure_produced` gained `allow_promotion` (default True); the production-prep pass passes False, so a baseline recipe fills its mall cells to the requested count instead of being promoted.
 - Why: Prep asked for copper-cable to 2 machines; on the second pass the single cell read as saturated, promotion outranked prep and built a 6-machine dedicated line, which then demanded 9.00/s of copper plate belted across the base and died on a 25-tile tunnel requirement.
 - Next: That belt failure is still latent for genuinely promoted lines -- `no belt route is available ... beyond turbo-underground-belt's 11-tile reach` means a promoted line sited far from its plate source cannot be fed at all.
+
+## [2026-08-01] Run loop bounds livelocks; promoted lines sit by their source
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_run_loop_bounds.py`, `CURRENT_STATUS.md`
+- What: The run loop now aborts after `_MAX_UNCHANGED_PASSES` consecutive passes that chose the same task at the same completion with the same outstanding work, and a promoted line is sited beside the input it consumes fastest instead of beside the mall.
+- Why: `max_iterations` never bounded anything because `iteration` only advances on goal work, so every mall/prep `continue` skipped it and a stuck run spun for hours; and a 6-machine copper-cable line placed at the mall needed 9.00/s of plate belted ~90 tiles from the mine, dying on a 25-tile tunnel requirement.
+- Next: Belt routing still fails outright on an obstruction instead of routing around it.

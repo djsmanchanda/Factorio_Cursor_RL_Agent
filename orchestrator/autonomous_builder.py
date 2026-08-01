@@ -82,11 +82,19 @@ from planners.recipe_data import (
     install_catalog_line_recipes,
     inserter_tiers_covering,
     machine_handled_rates,
+    machine_ingredient_rates,
 )
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 _DEFAULT_MACHINE_COUNT = 2
+
+# A livelock re-selects the same task and gets the same result forever.
+# max_iterations never bounded it: `iteration` only advances on goal work,
+# so every mall/prep `continue` skipped it and a stuck run spun for hours.
+# This counts consecutive passes that chose the same task at the same
+# completion -- real progress moves one of them.
+_MAX_UNCHANGED_PASSES = 12
 
 
 def _mineable(recipe: str) -> bool:
@@ -154,6 +162,22 @@ def expansion_target(item: str, stock: Mapping[str, int]) -> str | None:
             ),
         )
     return None
+
+
+def _heaviest_source(
+    item: str, sources: Mapping[str, Point], machine_count: int,
+) -> Point | None:
+    """Where the line should sit: beside whichever input it consumes fastest.
+
+    A belt run is proportional to distance, and the heaviest input is the one
+    whose belt would cost the most and be most likely to fail routing. Falls
+    back to None when no source is known, leaving the caller's own reference.
+    """
+    if not sources:
+        return None
+    spec = LINE_RECIPES[item]
+    rates = dict(zip(spec["ingredients"], machine_ingredient_rates(item, machine_count)))
+    return sources[max(sources, key=lambda ingredient: rates.get(ingredient, 0.0))]
 
 
 def _side_sample_plate_output(
@@ -1143,8 +1167,21 @@ def ensure_produced(
                     client, bridge, surface, retirement,
                     f"retire_promoted_mall_{item}", emit,
                 )
+            # Site the line beside the input it eats most of, not beside the
+            # mall. A 6-machine copper-cable line placed at the mall needed
+            # 9.00/s of plate belted ~90 tiles from the mine and died on
+            # "Belt route needs a 25-tile tunnel". Building next to the source
+            # keeps that run short instead of routing it across the base.
+            line_reference = (
+                _heaviest_source(item, sources, promoted_count) or reference_point
+            )
+            if line_reference != reference_point:
+                emit(
+                    f"  LINE SITING: placing the {item} line near its heaviest "
+                    f"input at {line_reference} rather than the mall"
+                )
             build_conversion_stage(
-                client, bridge, surface, force, item, sources, reference_point, emit,
+                client, bridge, surface, force, item, sources, line_reference, emit,
                 machine_count=promoted_count,
                 belt_type=promoted_line_belt_type(
                     item, promoted_count, live_base.available_items(client, surface, force),
@@ -1215,6 +1252,8 @@ def run(
         priority_path = Path(script_output).parent / "logs" / "autonomous-priorities.json"
         priorities = PriorityList(priority_path, live_base.game_tick(client))
         prepped: set[str] = set()
+        last_signature: tuple | None = None
+        unchanged_passes = 0
         iteration = 0
         while iteration < max_iterations:
             stock = live_base.available_items(client, surface, force)
@@ -1225,6 +1264,25 @@ def run(
                     priorities.complete(stocked_item, tick)
                     mall_targets.pop(stocked_item)
             task = priorities.next(mall_targets, tick)
+            signature = (
+                task.item if task else None,
+                task.progress_percent if task else None,
+                tuple(sorted(mall_targets)),
+                tuple(sorted(prepped)),
+            )
+            if signature == last_signature:
+                unchanged_passes += 1
+                if unchanged_passes >= _MAX_UNCHANGED_PASSES:
+                    raise StuckError(
+                        f"No progress in {unchanged_passes} passes: "
+                        f"{signature[0] or goal_item} has been at "
+                        f"{signature[1]}% with the same outstanding work each time. "
+                        "Something it needs cannot be built, and retrying is not "
+                        "finding it -- see the repeated reason above."
+                    )
+            else:
+                unchanged_passes = 0
+                last_signature = signature
             if task is not None:
                 item, target = task.item, task.target
                 emit(priorities.describe(task, tick))
