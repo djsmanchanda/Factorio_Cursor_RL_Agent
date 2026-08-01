@@ -75,19 +75,43 @@ def test_obstacles_are_tunnelled_under_not_built_over() -> None:
     assert tunnel[0]["direction"] == tunnel[1]["direction"] == "east"
 
 
-def test_a_run_longer_than_the_tier_reach_is_reported_not_emitted() -> None:
+def _walled(gap_free_from: int, gap_free_to: int) -> set[tuple[int, int]]:
+    """A wall across the whole search band, so going around is impossible and
+    tunnelling is the only way through."""
+    return {
+        (x, y)
+        for x in range(gap_free_from, gap_free_to)
+        for y in range(-60, 61)
+    }
+
+
+def test_a_run_longer_than_the_tier_reach_is_reported_when_no_way_round() -> None:
+    """Reach still bounds a tunnel -- it is only no longer fatal when the belt
+    can step aside instead."""
     with pytest.raises(ValueError, match="beyond .*underground-belt's 7-tile reach"):
-        _bridge(blocked_tiles={(x, 0) for x in range(4, 13)})
+        _bridge(blocked_tiles=_walled(4, 13))
 
 
-def test_a_higher_tier_spans_what_a_lower_tier_cannot() -> None:
-    """Reach is per tier, so the same obstacle run is only a hard failure
-    relative to the belt being used."""
-    blocked = {(x, 0) for x in range(4, 12)}
+def test_a_higher_tier_spans_a_wall_a_lower_tier_cannot() -> None:
+    """Reach is per tier, so the same obstacle is only impassable relative to
+    the belt being used."""
+    blocked = _walled(4, 12)
     with pytest.raises(ValueError):
         _bridge(belt_type="fast-transport-belt", blocked_tiles=blocked)
     actions = _bridge(belt_type="turbo-transport-belt", blocked_tiles=blocked)
     assert _tiles(actions, "underground-belt")
+
+
+def test_an_obstacle_that_can_be_walked_around_is_no_longer_fatal() -> None:
+    """The run-killer for days: an obstacle run too long to tunnel ended the
+    run outright instead of routing around it."""
+    obstacle = {(x, 0) for x in range(4, 13)}
+
+    actions = _bridge(blocked_tiles=obstacle)
+
+    belted = _tiles(actions, "transport-belt") | _tiles(actions, "underground-belt")
+    assert belted, "a route was found"
+    assert not (belted & obstacle), "and it does not sit on the obstacle"
 
 
 def test_a_blocked_endpoint_is_reported_because_a_tunnel_needs_both_sides() -> None:

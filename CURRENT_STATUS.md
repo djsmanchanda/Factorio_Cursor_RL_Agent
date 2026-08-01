@@ -833,3 +833,9 @@ backfilled from git history because this file did not exist yet.
 - What: The run loop now aborts after `_MAX_UNCHANGED_PASSES` consecutive passes that chose the same task at the same completion with the same outstanding work, and a promoted line is sited beside the input it consumes fastest instead of beside the mall.
 - Why: `max_iterations` never bounded anything because `iteration` only advances on goal work, so every mall/prep `continue` skipped it and a stuck run spun for hours; and a 6-machine copper-cable line placed at the mall needed 9.00/s of plate belted ~90 tiles from the mine, dying on a 25-tile tunnel requirement.
 - Next: Belt routing still fails outright on an obstruction instead of routing around it.
+
+## [2026-08-01] Belt routes step around what they cannot tunnel under
+- Files: `planners/belt_bridge.py`, `tests/test_belt_detour.py`, `tests/test_belt_bridge.py`, `CURRENT_STATUS.md`
+- What: Added `search_clear_route`, a deterministic rectilinear A* over free tiles with a turn cost, and `_route_or_detour`; all three bridge builders now fall back to a searched route when the chosen one cannot be belted, and only report failure when no route exists at all.
+- Why: `choose_clear_l_route` only scores a fixed set of L and Z shapes, so a cross-base run through built-up ground kept returning a route whose obstacles could not be tunnelled -- "blocked tiles sit on a corner", or a 25-tile span past turbo's 11-tile reach -- and the run died rather than stepping aside; this was the recurring run-killer across days of logs.
+- Next: Tier reach still bounds a tunnel, so a genuine wall across the search band is still reported; the search margin is 48 tiles either side of the endpoints.

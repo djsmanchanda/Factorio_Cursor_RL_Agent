@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import heapq
 import math
 from typing import Sequence
 
@@ -118,6 +119,118 @@ def _aligned_final_route(
     return route
 
 
+# Going AROUND beats demanding the way be cleared. choose_clear_l_route only
+# scores a fixed set of L and Z shapes, so a cross-base run through a built-up
+# area kept returning a route whose obstacles could not be tunnelled -- "blocked
+# tiles sit on a corner", or a span past the tier's reach -- and the run died
+# rather than stepping aside. A turn costs more than a tile so routes stay
+# belt-shaped instead of becoming staircases.
+_ROUTE_TURN_COST = 6
+_ROUTE_SEARCH_MARGIN = 48.0
+_ROUTE_SEARCH_LIMIT = 400_000
+
+
+def search_clear_route(
+    start: Point, end: Point, blocked: set[tuple[int, int]],
+    *, final_direction: str | None = None,
+) -> list[Point] | None:
+    """A rectilinear route from `start` to `end` over free tiles, or None.
+
+    Deterministic A*: ties break on the ordered direction list, so the same
+    inputs always give the same belt. Returns corner points in the shape
+    _route_points expects -- the caller's existing machinery is unchanged.
+    """
+    start_tile, end_tile = _tile(start), _tile(end)
+    if start_tile in blocked or end_tile in blocked:
+        return None
+    low_x = min(start[0], end[0]) - _ROUTE_SEARCH_MARGIN
+    high_x = max(start[0], end[0]) + _ROUTE_SEARCH_MARGIN
+    low_y = min(start[1], end[1]) - _ROUTE_SEARCH_MARGIN
+    high_y = max(start[1], end[1]) + _ROUTE_SEARCH_MARGIN
+    order = ("east", "west", "south", "north")
+
+    def heuristic(point: Point) -> float:
+        return abs(point[0] - end[0]) + abs(point[1] - end[1])
+
+    origin = (start, None)
+    best: dict[tuple[Point, str | None], float] = {origin: 0.0}
+    came: dict[tuple[Point, str | None], tuple[Point, str | None]] = {}
+    queue: list[tuple[float, int, Point, str | None]] = [(heuristic(start), 0, start, None)]
+    counter = 0
+    expanded = 0
+    while queue:
+        _priority, _tiebreak, point, heading = heapq.heappop(queue)
+        state = (point, heading)
+        if point == end and (final_direction is None or heading == final_direction):
+            return _corners(_unwind(came, state))
+        expanded += 1
+        if expanded > _ROUTE_SEARCH_LIMIT:
+            return None
+        for direction in order:
+            vector = _FACING_TO_VECTOR[direction]
+            nxt = (point[0] + vector[0], point[1] + vector[1])
+            if not (low_x <= nxt[0] <= high_x and low_y <= nxt[1] <= high_y):
+                continue
+            if _tile(nxt) in blocked:
+                continue
+            cost = (
+                best[state] + 1.0
+                + (_ROUTE_TURN_COST if heading is not None and direction != heading else 0.0)
+            )
+            successor = (nxt, direction)
+            if cost >= best.get(successor, math.inf):
+                continue
+            best[successor] = cost
+            came[successor] = state
+            counter += 1
+            heapq.heappush(queue, (cost + heuristic(nxt), counter, nxt, direction))
+    return None
+
+
+def _unwind(
+    came: dict[tuple[Point, str | None], tuple[Point, str | None]],
+    state: tuple[Point, str | None],
+) -> list[Point]:
+    path = [state[0]]
+    while state in came:
+        state = came[state]
+        path.append(state[0])
+    path.reverse()
+    return path
+
+
+def _corners(path: Sequence[Point]) -> list[Point]:
+    """Collapse a tile-by-tile path to the corner points a route is made of."""
+    if len(path) < 2:
+        return list(path)
+    corners = [path[0]]
+    for previous, point, following in zip(path, path[1:], path[2:]):
+        before = (point[0] - previous[0], point[1] - previous[1])
+        after = (following[0] - point[0], following[1] - point[1])
+        if before != after:
+            corners.append(point)
+    corners.append(path[-1])
+    return corners
+
+
+def _route_or_detour(
+    route: Sequence[Point], belt_type: str, blocked: set[tuple[int, int]],
+    *, final_direction: str | None = None,
+) -> tuple[list[dict], list[Point]]:
+    """Belt the chosen route, or search a clear one when it cannot be belted."""
+    try:
+        return _belt_run(route, belt_type, blocked), list(route)
+    except ValueError as blocked_route:
+        detour = search_clear_route(
+            route[0], route[-1], blocked, final_direction=final_direction,
+        )
+        if detour is None:
+            raise ValueError(
+                f"no belt route is available for this bridge: {blocked_route}"
+            ) from blocked_route
+        return _belt_run(detour, belt_type, blocked), detour
+
+
 def bridge_belt_to_chest(
     source_belt: Point,
     dest_position: Point,
@@ -153,7 +266,12 @@ def bridge_belt_to_chest(
         "position": {"x": dest_inserter[0], "y": dest_inserter[1]},
         "direction": entry_direction,
     }]
-    actions.extend(_belt_run(route, belt_type, blocked_tiles or set()))
+    actions.extend(
+        _route_or_detour(
+            route, belt_type, blocked_tiles or set(),
+            final_direction=entry_direction,
+        )[0]
+    )
     return actions
 
 def bridge_belt_to_belt(
@@ -180,8 +298,10 @@ def bridge_belt_to_belt(
             f"{max_route_tiles}-tile local-mode limit"
         )
     blocked = blocked_tiles or set()
-    actions = _belt_run(route, belt_type, blocked)
-    actions.extend(_turn_buffer_actions(route, blocked, actions))
+    actions, built = _route_or_detour(
+        route, belt_type, blocked, final_direction=entry_direction,
+    )
+    actions.extend(_turn_buffer_actions(built, blocked, actions))
     return actions
 
 
@@ -293,7 +413,12 @@ def bridge_chest_to_chest(
             f"{max_route_tiles}-tile local-mode limit; CityPlanner rail handoff "
             "is required"
         )
-    actions.extend(_belt_run(route, belt_type, blocked_tiles or set()))
+    actions.extend(
+        _route_or_detour(
+            route, belt_type, blocked_tiles or set(),
+            final_direction=entry_direction,
+        )[0]
+    )
     return actions
 
 
