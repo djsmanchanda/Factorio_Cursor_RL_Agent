@@ -948,3 +948,31 @@ was caught.
 tests `importorskip` it so a bare checkout still runs green.
 
 **Next:** LOC debt -- `autonomous_builder.py` is still ~1400 lines.
+
+## Dead-code sweep: one orphan removed, three false positives corrected
+
+**Files:** `schemas/build_plan.schema.json`,
+`tests/test_executor_settings_coverage.py`
+
+**What:** Removed the `blueprint` action field from the build-plan schema, and
+added a guard that every field the schema declares is one the executor either
+applies at creation or reapplies as a setting.
+
+**Why:** Nothing emitted `blueprint` and nothing consumed it, so a plan could
+declare one and have it silently dropped -- the same silent-skip failure
+SETTING_FIELDS guards against, one level up in the contract. Verified by
+reinstating the field and watching the new test fail.
+
+**Correction to the record.** Three modules previously flagged as residual dead
+code are not, and are deliberately kept:
+- `rl_feedback_builder.py` -- a documented CLI entry point in README.md and
+  FULL_DOCUMENTATION.md. Not imported because it is a script.
+- `core/quality_modules.py` -- data tables and pure validators, encoded from
+  docs/21 and tested; awaiting a consumer, not orphaned by accident.
+- `planners/pipe_bridge.py` -- imported only by its own test. Note that the
+  earlier entry at line 305 has the dependency backwards: pipe_bridge imports
+  `fluid_routing`, not the reverse, so it is an orphan rather than a live
+  dependency. Kept anyway as the fluid analogue of the belt bridge the
+  extraction stages use.
+
+**Next:** LOC debt is the remaining charter breach.

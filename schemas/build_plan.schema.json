@@ -158,9 +158,6 @@
                 "infinity_filter": {
                   "type": "string"
                 },
-                "blueprint": {
-                  "type": "string"
-                },
                 "fill_percentage": {
                   "type": "number",
                   "minimum": 0,
