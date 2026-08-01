@@ -11,6 +11,10 @@ from typing import Callable
 
 from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
+from orchestrator.baseline_production import (
+    BASELINE_MACHINES, baseline_build_order, baseline_drill_phase,
+    baseline_plate_draw,
+)
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
@@ -903,6 +907,7 @@ def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], *,
     upgrade_bootstrap: bool = True, stock_target: int = 1,
+    minimum_machines: int = 1,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -996,7 +1001,11 @@ def ensure_produced(
                 f"mall_provider_limit_{item}", emit,
             )
 
-    if existing and existing.working_count > 0 and not promote_to_line:
+    # An UNDER-SIZED line falls through to the build path: production prep
+    # asks for a standing number of machines, and a line that exists with
+    # fewer than that is not finished being built.
+    at_size = existing is None or existing.machine_count >= minimum_machines
+    if existing and at_size and existing.working_count > 0 and not promote_to_line:
         origin = logistic_smelter_origin(existing.machine_positions)
         requester = (
             live_base.entity_at(client, surface, (origin[0] + 1.5, origin[1] + 3.5))
@@ -1040,7 +1049,7 @@ def ensure_produced(
                         f"existing {item} output entity at {position} cannot be powered"
                     )
         return chest or existing.output_position
-    if existing and not promote_to_line:
+    if existing and at_size and not promote_to_line:
         # A stage that exists but is not running is a REPAIR job, not a reason
         # to build a second one. Duplicating instead of repairing is what left
         # three half-built copper stages littering one ore patch across runs,
@@ -1186,8 +1195,21 @@ def run(
             "CONSTRUCTION READINESS: phase 0 targets -- "
             + ", ".join(f"{item}={target}" for item, target in mall_targets.items())
         )
+        emit(
+            "PRODUCTION PREP: standing lines -- "
+            + ", ".join(
+                f"{recipe}x{BASELINE_MACHINES[recipe]}"
+                for recipe in baseline_build_order()
+            )
+            + "; plate draw "
+            + ", ".join(
+                f"{plate} {rate:.2f}/s (drill phase {baseline_drill_phase(plate)})"
+                for plate, rate in sorted(baseline_plate_draw().items())
+            )
+        )
         priority_path = Path(script_output).parent / "logs" / "autonomous-priorities.json"
         priorities = PriorityList(priority_path, live_base.game_tick(client))
+        prepped: set[str] = set()
         iteration = 0
         while iteration < max_iterations:
             stock = live_base.available_items(client, surface, force)
@@ -1263,6 +1285,34 @@ def run(
                     f"next review in {wait_ticks or 60} ticks"
                 )
                 time.sleep(5)
+                continue
+            pending = [r for r in baseline_build_order() if r not in prepped]
+            if pending:
+                recipe = pending[0]
+                wanted = BASELINE_MACHINES[recipe]
+                line = live_base.find_line(
+                    client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+                )
+                if line is not None and line.machine_count >= wanted:
+                    prepped.add(recipe)
+                    emit(f"  PREP READY: {recipe} has {line.machine_count}/{wanted} machine(s)")
+                    continue
+                have = line.machine_count if line else 0
+                emit(
+                    f"--- production prep: {recipe} to {wanted} machine(s) "
+                    f"(have {have}) ---"
+                )
+                try:
+                    produced = ensure_produced(
+                        client, bridge, surface, force, recipe, reference_point, emit,
+                        upgrade_bootstrap=False, stock_target=wanted,
+                        minimum_machines=wanted,
+                    )
+                except MaterialShortage as shortage:
+                    add_demands(mall_targets, shortage)
+                    continue
+                if produced is None:
+                    continue  # built one stage; re-survey and carry on
                 continue
             emit(f"--- iteration {iteration}: checking {goal_item} ---")
             try:

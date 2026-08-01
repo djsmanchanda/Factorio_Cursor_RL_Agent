@@ -815,3 +815,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added `may_consume_stocked_inputs`; the bootstrap-from-stock shortcut is now taken only for a plain mall cell, never when promoting an intermediate to a shared line.
 - Why: The shortcut `continue`s without recording a source position, which is right for a requester-fed mall cell but not for a belt-fed line; promoting gears while 13 iron plates sat in a chest left `build_conversion_stage` with nothing to route from and ended the run on "iron-gear-wheel feeds on ['iron-plate'], which have no producing stage to supply them".
 - Next: Promotion retires the mall cell before the shared line completes, and the next pass rebuilds that cell -- observed twice in one run at (35, 31); worth confirming it converges rather than churning.
+
+## [2026-08-01] Production prep before goal-driven building
+- Files: `orchestrator/baseline_production.py`, `orchestrator/autonomous_builder.py`, `tests/test_baseline_production.py`, `CURRENT_STATUS.md`
+- What: Added a standing prep set (copper-cable x2, iron-gear-wheel x2, steel-plate x2, electronic-circuit x1) built in dependency order before the goal loop, with `baseline_plate_draw`/`baseline_drill_phase` sizing the extraction it implies (iron 8.75/s -> phase 20, copper 3.00/s -> phase 6); `ensure_produced` gained `minimum_machines` so an under-sized line falls through to the build path instead of the repair guard.
+- Why: Starting a goal from nothing made every run rediscover the same missing basics and thrash between half-built stages; prepping the basics first lets demand-driven scaling grow from a running start.
+- Next: Prep declares the iron drill phase but does not yet drive extraction to it -- the phase number is reported, and the existing expansion ladder still has to climb 6 -> 20 on demand.
