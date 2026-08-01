@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 
-from planners.recipe_data import MACHINE_SPEEDS
+from planners.recipe_data import FEED_HEADROOM, MACHINE_SPEEDS, inserter_for_demand
 
 MALL_MINIMUM_STACKS = {
     "production": 4,
@@ -108,14 +108,28 @@ def recipe_logistic_section(
     }
 
 
-def compact_input_inserter(requests: list[dict]) -> str:
-    """Upgrade the sole requester inserter only for a large requested batch."""
-    total = sum(request["count"] for request in requests)
-    if total >= 500:
-        return "bulk-inserter"
-    if total >= 100:
-        return "fast-inserter"
-    return "inserter"
+def compact_input_inserter(machine: str, ingredients: list[str],
+                           amounts: list[float], craft_time: float) -> str:
+    """The tier that can actually feed one mall machine, from its intake rate.
+
+    Sizing this from the requested BATCH was throughput-blind: an
+    electronic-circuit cell draws 6.0 items/s and was handed a 1.4/s inserter,
+    running at roughly a quarter speed however full its requester was. Eight of
+    thirteen mall recipes were undersized that way.
+
+    It also corrupted the promotion signal: a machine throttled by its inserter
+    still reports as working, so the cell read as saturated and promotion built
+    six more machines, every one equally throttled.
+    """
+    crafts = machine_crafts_per_second(machine, craft_time)
+    return inserter_for_demand(sum(amounts) * crafts * FEED_HEADROOM)
+
+
+def compact_output_inserter(machine: str, product_amount: float,
+                            craft_time: float) -> str:
+    """The tier that can clear one mall machine's output."""
+    crafts = machine_crafts_per_second(machine, craft_time)
+    return inserter_for_demand(product_amount * crafts * FEED_HEADROOM)
 
 
 def generate_compact_mall_request_update(
@@ -191,50 +205,6 @@ def generate_promoted_mall_retirement_plan(
         "name": f"retire_promoted_mall_{recipe}", "actions": actions,
     }]}
 
-def generate_compact_mall_layout(
-    recipe: str,
-    machine: str,
-    ingredients: list[str],
-    amounts: list[float],
-    origin: tuple[int, int],
-    *,
-    stock_target: int = 1,
-    product_amount: float = 1,
-    set_recipe: bool = True,
-) -> dict:
-    """One assembler, one multi-item requester, and one provider, with no belts."""
-    if not 1 <= len(ingredients) <= 5:
-        raise ValueError("Compact mall cells support one to five solid ingredients")
-    ox, oy = origin
-    requests = compact_requests(ingredients, amounts, stock_target, product_amount)
-    machine_action = {
-        "action_type": "place_ghost", "entity": machine,
-        "position": {"x": ox + 1.5, "y": oy + 1.5},
-    }
-    if set_recipe:
-        machine_action["recipe"] = recipe
-    actions = [
-        {"action_type": "place_entity", "entity": "substation",
-         "position": {"x": ox + 7.0, "y": oy + 4.0}},
-        machine_action,
-        # Inserter direction is its pickup side. The requester is west of the
-        # machine, so face west to pick up there and drop into the machine.
-        {"action_type": "place_entity", "entity": compact_input_inserter(requests),
-         "position": {"x": ox - 0.5, "y": oy + 1.5}, "direction": "west"},
-        {"action_type": "place_entity", "entity": "requester-chest",
-         "position": {"x": ox - 1.5, "y": oy + 1.5},
-         "logistic_group": f"mall:{recipe}", "logistic_requests": requests},
-        # The provider is east of the machine; face west to pick up from the
-        # machine and drop into the chest.
-        {"action_type": "place_entity", "entity": "fast-inserter",
-         "position": {"x": ox + 3.5, "y": oy + 1.5}, "direction": "west"},
-        {"action_type": "place_entity", "entity": "passive-provider-chest",
-         "position": {"x": ox + 4.5, "y": oy + 1.5},
-         "inventory_limit": _inventory_limit(recipe, stock_target)},
-    ]
-    return {"phases": [{"name": f"compact_mall_{recipe}", "actions": actions}]}
-
-
 def generate_paired_mall_layout(
     recipe: str,
     machine: str,
@@ -287,10 +257,12 @@ def generate_paired_mall_layout(
         {"action_type": "place_entity", "entity": "requester-chest",
          "position": {"x": ox + 4.5, "y": oy + 1.5},
          "logistic_sections": [section]},
-        {"action_type": "place_entity", "entity": compact_input_inserter(requests),
+        {"action_type": "place_entity",
+         "entity": compact_input_inserter(machine, ingredients, amounts, craft_time),
          "position": {"x": input_x, "y": oy + 1.5},
          "direction": input_direction},
-        {"action_type": "place_entity", "entity": "fast-inserter",
+        {"action_type": "place_entity",
+         "entity": compact_output_inserter(machine, product_amount, craft_time),
          "position": {"x": output_x, "y": provider_y},
          "direction": output_direction},
         {"action_type": "place_entity", "entity": "passive-provider-chest",

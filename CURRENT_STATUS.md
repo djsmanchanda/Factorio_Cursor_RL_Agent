@@ -839,3 +839,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added `search_clear_route`, a deterministic rectilinear A* over free tiles with a turn cost, and `_route_or_detour`; all three bridge builders now fall back to a searched route when the chosen one cannot be belted, and only report failure when no route exists at all.
 - Why: `choose_clear_l_route` only scores a fixed set of L and Z shapes, so a cross-base run through built-up ground kept returning a route whose obstacles could not be tunnelled -- "blocked tiles sit on a corner", or a 25-tile span past turbo's 11-tile reach -- and the run died rather than stepping aside; this was the recurring run-killer across days of logs.
 - Next: Tier reach still bounds a tunnel, so a genuine wall across the search band is still reported; the search margin is 48 tiles either side of the endpoints.
+
+## [2026-08-02] Mall inserters sized from machine rate
+- Files: `planners/mall_layout.py`, `tests/test_mall_inserter_sizing.py`, `CURRENT_STATUS.md`
+- What: `compact_input_inserter` now takes the machine and recipe and sizes from intake rate via `inserter_for_demand`; added `compact_output_inserter` for the output face, which was a hardcoded fast-inserter; deleted the unreferenced `generate_compact_mall_layout`.
+- Why: Sizing from the requested batch left 8 of 13 mall recipes undersized -- an electronic-circuit cell draws 6.0 items/s and got a 1.4/s inserter, running at a quarter speed however full its requester was -- and a machine throttled by its inserter still reports as working, so the cell read as saturated and promotion built six more equally throttled machines.
+- Next: `FEEDER_RATES` remain estimates; the plain inserter's 1.4/s is derived from base-rate ratios rather than measured live.
