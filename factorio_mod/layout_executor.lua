@@ -80,87 +80,18 @@ local function inventory_limit_details(entity, limit)
 end
 
 -- One chest may feed several machines, so its requests are kept as one NAMED
--- SECTION per machine set rather than merged into a single slot list: the game
--- sums the sections itself, the label says which machines each set belongs to,
--- and re-running a build rewrites only that machine's own section instead of
--- accumulating onto whatever the chest already held.
-local function find_section_by_group(sections, group)
-  for _, section in pairs(sections.sections) do
-    if section.valid and section.group == group then
-      return section
-    end
-  end
-  return nil
-end
-
--- A chest placed by create_entity starts with one blank unnamed section. Claim
--- that before adding another, so a single-machine cell ends up with exactly one
--- section rather than an empty one trailing every labelled group.
-local function claim_section_for_group(sections, group)
-  for _, section in pairs(sections.sections) do
-    if section.valid and section.group == "" and section.filters_count == 0 then
-      section.group = group
-      return section
-    end
-  end
-  local section = sections.add_section()
-  section.group = group
-  return section
-end
-
-local function verify_section_slots(section, requests)
-  for index, request in ipairs(requests) do
-    local slot = section.get_slot(index)
-    local name = slot and slot.value and (slot.value.name or slot.value)
-    local count = slot and tonumber(slot.min) or nil
-    if name ~= request.name or count ~= tonumber(request.count) then
-      error("slot=" .. index .. ",expected=" .. request.name .. ":" .. request.count
-        .. ",actual=" .. tostring(name) .. ":" .. tostring(count))
-    end
-  end
-end
-
-local function write_section_slots(section, requests)
-  for index, request in ipairs(requests) do
-    section.set_slot(index, { value = request.name, min = request.count })
-  end
-  for index = #requests + 1, section.filters_count do
-    section.clear_slot(index)
-  end
-end
-
-local function clear_logistic_groups(entity, groups)
-  local sections = entity.get_logistic_sections()
-  if not sections then error("no_logistic_sections") end
-  for _, group in ipairs(groups) do
-    local section = find_section_by_group(sections, group)
-    if section then write_section_slots(section, {}) end
-  end
-end
-
--- Which fields mean "this action still has settings to apply to an entity that
--- ALREADY exists". Listed once, because an omission here is silent: the entity
--- is reported already_present, no failure is recorded, and the setting simply
--- never lands -- indistinguishable from the planner never asking for it. Adding
--- a configurable action field means adding it here.
-local SETTING_FIELDS = {
-  "logistic_request", "logistic_requests", "logistic_sections", "clear_logistic_groups", "inventory_limit",
-  "infinity_filter",
-}
-
-local function has_settings(action)
-  for _, field in ipairs(SETTING_FIELDS) do
-    if action[field] ~= nil then return true end
-  end
-  return false
-end
-
--- A ghost was configured when it was created, so only a real entity needs its
--- recipe reapplied; settings above are reapplied to either.
-local function needs_reconfiguration(action, entity)
-  if has_settings(action) then return true end
-  return action.recipe ~= nil and entity.type ~= "entity-ghost"
-end
+-- SECTION per machine set rather than merged into a single slot list. That
+-- bookkeeping lives in logistic_sections.lua, where it can be tested without a
+-- running game -- a chest holding no requests is indistinguishable from one
+-- that was never asked for any, so the failure mode is silent.
+local logistic_sections = require("logistic_sections")
+local find_section_by_group = logistic_sections.find_section_by_group
+local claim_section_for_group = logistic_sections.claim_section_for_group
+local verify_section_slots = logistic_sections.verify_section_slots
+local write_section_slots = logistic_sections.write_section_slots
+local clear_logistic_groups = logistic_sections.clear_logistic_groups
+local has_settings = logistic_sections.has_settings
+local needs_reconfiguration = logistic_sections.needs_reconfiguration
 
 local function configuration_error(entity, action, direction)
   if direction ~= nil and entity.direction ~= direction then

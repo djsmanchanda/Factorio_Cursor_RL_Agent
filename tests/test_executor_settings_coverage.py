@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 _EXECUTOR = (REPO_ROOT / "factorio_mod" / "layout_executor.lua").read_text(encoding="utf-8")
+_SECTIONS = (REPO_ROOT / "factorio_mod" / "logistic_sections.lua").read_text(encoding="utf-8")
 _SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8")
 )
@@ -29,8 +30,8 @@ _NOT_STANDALONE_SETTINGS = {
 
 
 def _setting_fields() -> set[str]:
-    block = re.search(r"local SETTING_FIELDS = \{(.*?)\}", _EXECUTOR, re.S)
-    assert block, "SETTING_FIELDS table not found in layout_executor.lua"
+    block = re.search(r"M\.SETTING_FIELDS = \{(.*?)\}", _SECTIONS, re.S)
+    assert block, "SETTING_FIELDS table not found in logistic_sections.lua"
     return set(re.findall(r'"([^"]+)"', block.group(1)))
 
 

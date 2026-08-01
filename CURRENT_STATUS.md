@@ -923,3 +923,28 @@ the error direction cost materials instead of throughput.
 **Next:** This cannot be closed by choosing a better constant. docs/21 now
 carries the live measurement procedure; running it replaces the guess and the
 tier comes out of the frozenset.
+
+## The mod's requester bookkeeping now runs under test
+
+**Files:** `factorio_mod/logistic_sections.lua` (new),
+`factorio_mod/layout_executor.lua`, `tests/test_logistic_sections_lua.py`,
+`tests/test_executor_settings_coverage.py`, `.github/workflows/ci.yml`
+
+**What:** The pure logistic-section functions moved out of the executor into
+their own module, and 25 tests drive them in a real Lua interpreter (lupa)
+against a stubbed `LuaLogisticSections`. `layout_executor.lua` drops 650 -> 582
+lines. CI installs lupa in the pytest job; the syntax job still parses the rest.
+
+**Why:** 650 lines of Lua were covered only by `luac -p`, which parses without
+executing and does not resolve globals. This is the code whose failure mode is
+silent -- a chest holding no requests looks exactly like a chest nobody asked
+for any -- and it is where the live requester bug lived. Verified by
+reintroducing four separate bugs (dropped trailing-slot clear, unclaimed blank
+section, missing SETTING_FIELDS entry, ghosts reconfigured for recipe); each
+was caught.
+
+**Note:** `lupa` is a verification-only dependency, deliberately kept out of
+`requirements.txt` like `luaparser` -- the game ships its own interpreter. The
+tests `importorskip` it so a bare checkout still runs green.
+
+**Next:** LOC debt -- `autonomous_builder.py` is still ~1400 lines.

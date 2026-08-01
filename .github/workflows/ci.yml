@@ -30,6 +30,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Verification-only, deliberately out of requirements.txt: the game ships
+      # its own interpreter, so nothing at runtime needs one. lupa embeds Lua so
+      # the mod's pure logic can be driven by pytest instead of only parsed.
+      # Without it those tests skip and the Lua regressions go unnoticed.
+      - name: Install Lua test interpreter
+        run: pip install lupa
+
       - name: Run test suite
         run: python -m pytest -q
 
@@ -39,11 +46,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The mod is never exercised by pytest -- nothing outside a running game
-      # loads it -- so a syntax error stays invisible until a live run fails to
-      # start. luac -p parses without executing, which is the one check that can
-      # run here. It does NOT resolve globals: a call to a deleted Lua helper
-      # still only surfaces in game.
+      # Anything in the mod that touches the game API can only be parsed here;
+      # a syntax error would otherwise stay invisible until a live run failed to
+      # start. luac -p parses without executing and does NOT resolve globals, so
+      # a call to a deleted Lua helper still only surfaces in game. The parts
+      # that are pure table logic are pulled out into their own modules and run
+      # for real under lupa in the pytest job above.
       - name: Install Lua
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
 
