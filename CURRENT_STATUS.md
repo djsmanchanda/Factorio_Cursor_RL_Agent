@@ -821,3 +821,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added a standing prep set (copper-cable x2, iron-gear-wheel x2, steel-plate x2, electronic-circuit x1) built in dependency order before the goal loop, with `baseline_plate_draw`/`baseline_drill_phase` sizing the extraction it implies (iron 8.75/s -> phase 20, copper 3.00/s -> phase 6); `ensure_produced` gained `minimum_machines` so an under-sized line falls through to the build path instead of the repair guard.
 - Why: Starting a goal from nothing made every run rediscover the same missing basics and thrash between half-built stages; prepping the basics first lets demand-driven scaling grow from a running start.
 - Next: Prep declares the iron drill phase but does not yet drive extraction to it -- the phase number is reported, and the existing expansion ladder still has to climb 6 -> 20 on demand.
+
+## [2026-08-01] Prep finishes its mall cells before promotion may fire
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_prep_precedence.py`, `CURRENT_STATUS.md`
+- What: `ensure_produced` gained `allow_promotion` (default True); the production-prep pass passes False, so a baseline recipe fills its mall cells to the requested count instead of being promoted.
+- Why: Prep asked for copper-cable to 2 machines; on the second pass the single cell read as saturated, promotion outranked prep and built a 6-machine dedicated line, which then demanded 9.00/s of copper plate belted across the base and died on a 25-tile tunnel requirement.
+- Next: That belt failure is still latent for genuinely promoted lines -- `no belt route is available ... beyond turbo-underground-belt's 11-tile reach` means a promoted line sited far from its plate source cannot be fed at all.

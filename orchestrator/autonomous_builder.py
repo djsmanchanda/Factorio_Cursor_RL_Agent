@@ -907,7 +907,7 @@ def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], *,
     upgrade_bootstrap: bool = True, stock_target: int = 1,
-    minimum_machines: int = 1,
+    minimum_machines: int = 1, allow_promotion: bool = True,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -948,7 +948,12 @@ def ensure_produced(
     promoted_count = promoted_line_machine_count(
         item, demand, existing.machine_count if existing else 0, saturated=saturated,
     )
-    promote_to_line = promoted_count is not None and (
+    # Production prep asks for a standing number of MALL cells and must be
+    # allowed to finish. Promotion outranking it turned "copper-cable to 2
+    # machines" into a 6-machine dedicated line on the second pass, which then
+    # demanded 9.00/s of plate belted across the base. A dedicated line is for
+    # when the planner later judges the mall cells saturated in real service.
+    promote_to_line = allow_promotion and promoted_count is not None and (
         existing is None or existing.machine_count < promoted_count
     )
     if promote_to_line:
@@ -1306,7 +1311,7 @@ def run(
                     produced = ensure_produced(
                         client, bridge, surface, force, recipe, reference_point, emit,
                         upgrade_bootstrap=False, stock_target=wanted,
-                        minimum_machines=wanted,
+                        minimum_machines=wanted, allow_promotion=False,
                     )
                 except MaterialShortage as shortage:
                     add_demands(mall_targets, shortage)
