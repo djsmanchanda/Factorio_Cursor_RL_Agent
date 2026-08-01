@@ -73,7 +73,8 @@ class _FakeRcon:
 
 
 def test_live_resource_probe_checks_each_exact_drill_footprint() -> None:
-    client = _FakeRcon("11")
+    # Reply is "<target count>,<foreign ore>" per centre, joined by ";".
+    client = _FakeRcon("4,;4,")
     assert live_base.drill_footprints_have_resource(
         client, "nauvis", "iron-ore", [(11.5, 18.5), (14.5, 18.5)],
     )
@@ -85,7 +86,7 @@ def test_live_resource_probe_checks_each_exact_drill_footprint() -> None:
 
 def test_live_resource_probe_rejects_one_empty_drill_footprint() -> None:
     assert not live_base.drill_footprints_have_resource(
-        _FakeRcon("10"), "nauvis", "copper-ore", [(11.5, 18.5), (14.5, 18.5)],
+        _FakeRcon("4,;0,"), "nauvis", "copper-ore", [(11.5, 18.5), (14.5, 18.5)],
     )
 
 

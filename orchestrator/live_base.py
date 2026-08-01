@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from orchestrator import resource_patches
+from planners.recipe_data import DRILL_MINING_AREAS, drill_mining_reach
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -105,25 +106,69 @@ def nearest_resource(
 
 
 
-def drill_footprints_have_resource(
+def drill_siting_conflicts(
     client: RconClient, surface: str, resource: str, centres: list[Point],
-) -> bool:
-    """True only when every 3x3 electric-drill footprint overlaps `resource`.
+    *, drill: str = "electric-mining-drill",
+) -> list[tuple[Point, str]]:
+    """Every planned centre that cannot cleanly mine `resource`, and why.
 
-    Resource entities do not block construction, so a clear staging box alone
-    cannot prove a drill can mine. This probes the live target resource for
-    each planned drill before a BuildPlan is submitted.
+    Two separate faults, both fatal to a mine:
+
+    * nothing to mine -- resource entities do not block construction, so a clear
+      staging box alone cannot prove a drill has ore under it.
+    * MIXED ore -- a drill reaches beyond its own footprint (5x5 for the
+      electric drill, 13x13 for the big one). Sited near where two patches
+      touch, a drill standing entirely on iron still reaches the copper next to
+      it, mines both, and jams its output with a second item that nothing
+      downstream accepts.
+
+    One query for every centre; an empty list means the whole row is safe.
     """
     if not centres:
         raise ValueError("at least one drill centre is required")
+    reach = drill_mining_reach(drill)
     checks = ";".join(
-        "local n=#s.find_entities_filtered{name='" + resource + "',type='resource',area={{" +
-        str(x - 1.5) + "," + str(y - 1.5) + "},{" + str(x + 1.5) + "," + str(y + 1.5) + "}}};" +
-        "out[#out+1]=(n>0 and '1' or '0')"
+        "local t=#s.find_entities_filtered{name='" + resource + "',type='resource',"
+        "area={{" + str(x - 1.5) + "," + str(y - 1.5) + "},{"
+        + str(x + 1.5) + "," + str(y + 1.5) + "}}};"
+        "local f='';for _,e in pairs(s.find_entities_filtered{type='resource',"
+        "area={{" + str(x - reach) + "," + str(y - reach) + "},{"
+        + str(x + reach) + "," + str(y + reach) + "}}}) do "
+        "if e.name~='" + resource + "' then f=e.name end end;"
+        "out[#out+1]=t..','..f"
         for x, y in centres
     )
-    lua = "local s=game.surfaces['" + surface + "'];local out={};" + checks + ";rcon.print(table.concat(out,''))"
-    return _sc(client, lua) == "1" * len(centres)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};" + checks
+        + ";rcon.print(table.concat(out,';'))"
+    )
+    replies = _sc(client, lua).split(";")
+    conflicts: list[tuple[Point, str]] = []
+    for centre, reply in zip(centres, replies):
+        target, _, foreign = reply.partition(",")
+        if int(target or 0) <= 0:
+            conflicts.append((centre, f"no {resource} under the drill"))
+        elif foreign:
+            conflicts.append((centre, (
+                f"its {DRILL_MINING_AREAS[drill]}x{DRILL_MINING_AREAS[drill]} mining "
+                f"area also reaches {foreign}, which would jam the output"
+            )))
+    return conflicts
+
+
+def drill_footprints_have_resource(
+    client: RconClient, surface: str, resource: str, centres: list[Point],
+    *, drill: str = "electric-mining-drill",
+) -> bool:
+    """True only when every drill mines `resource` AND nothing else.
+
+    Kept as the boolean gate every siting search already calls, so the
+    mixed-ore rule cannot be forgotten by a future caller: see
+    drill_siting_conflicts for the faults it rejects.
+    """
+    return not drill_siting_conflicts(
+        client, surface, resource, centres, drill=drill,
+    )
 
 
 def area_clear(

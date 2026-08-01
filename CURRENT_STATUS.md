@@ -803,3 +803,9 @@ backfilled from git history because this file did not exist yet.
 - What: A promotable intermediate whose machines are all working now promotes to a shared line on that evidence alone, and line size snaps to `EXTRACTION_DRILL_PHASES` (6, 20, 50, 100) -- reused, not copied -- stepping past the current size each time it saturates again.
 - Why: `live_intermediate_demand` only sums consumers that are WORKING, and the consumers a starved intermediate blocks are exactly the ones not working, so a flat-out gear cell measured 0.00/s demand, never cleared the 3.0/s promotion threshold, and starved every downstream line indefinitely.
 - Next: Promotion is still gated by `PROMOTABLE_INTERMEDIATES`, a hardcoded allowlist; an intermediate outside it saturates with no move available.
+
+## [2026-08-01] Drill siting clears the mining area of foreign ore
+- Files: `planners/recipe_data.py`, `orchestrator/live_base.py`, `orchestrator/stage_extraction.py`, `tests/test_drill_siting.py`, `tests/test_autonomous_builder.py`, `CURRENT_STATUS.md`
+- What: Added `DRILL_MINING_AREAS` (electric 5x5, big 13x13) and `drill_siting_conflicts`, which rejects a centre with no target ore under it OR any foreign ore inside its mining area; `drill_footprints_have_resource` now wraps it so every existing siting search inherits the rule.
+- Why: The probe only checked the 3x3 footprint for the target, but an electric drill mines 5x5 -- one tile past its footprint on every side -- so a drill sited entirely on iron near a patch border also mined the adjacent copper and jammed its output with an item nothing downstream accepts.
+- Next: `DRILL_MINING_AREAS` covers the two electric drills; anything else raises rather than guessing a reach.

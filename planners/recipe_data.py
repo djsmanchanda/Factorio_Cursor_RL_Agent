@@ -142,6 +142,27 @@ def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
         LINE_RECIPES[name] = spec
         learned.append(name)
     return tuple(sorted(learned))
+# A drill REACHES further than it stands on. The electric drill occupies 3x3 but
+# mines a 5x5 area; the big drill occupies 5x5 but mines 13x13. Where two ore
+# types touch, a drill sited entirely on one of them can still reach the other,
+# mine both, and jam its output with a second item -- so siting must clear the
+# MINING AREA of foreign ore, not just the footprint.
+DRILL_MINING_AREAS = {
+    "electric-mining-drill": 5,
+    "big-mining-drill": 13,
+}
+
+
+def drill_mining_reach(drill: str) -> float:
+    """Half-width of `drill`'s mining area, in tiles from its centre."""
+    if drill not in DRILL_MINING_AREAS:
+        raise ValueError(
+            f"No mining area known for {drill!r}; add it to DRILL_MINING_AREAS "
+            "so its siting can be checked for foreign ore"
+        )
+    return DRILL_MINING_AREAS[drill] / 2.0
+
+
 MACHINE_SPEEDS = {
     # Tiers 1 and 3 are here so a mall cell upgraded to a faster machine
     # recomputes its own input rate instead of failing an unknown lookup.

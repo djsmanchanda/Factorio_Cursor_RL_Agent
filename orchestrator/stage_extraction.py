@@ -450,11 +450,15 @@ def plan_local_extraction(
                     client, surface, (x - 1.5, y - 1.5), (x + 1.5, y + 1.5)
                 ):
                     raise ValueError(f"Reserved {ore} expansion drill site {(x, y)} is blocked")
-            if not live_base.drill_footprints_have_resource(
+            conflicts = live_base.drill_siting_conflicts(
                 client, surface, ore, list(positions)
-            ):
+            )
+            if conflicts:
+                detail = "; ".join(
+                    f"{centre} {reason}" for centre, reason in conflicts[:3]
+                )
                 raise ValueError(
-                    f"The next {ore} phase does not keep every reserved drill on ore"
+                    f"The next {ore} phase cannot mine cleanly: {detail}"
                 )
             drill_xs = sorted({x for x, _y in positions})
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
