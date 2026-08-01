@@ -207,6 +207,22 @@ def machine_handled_rates(recipe: str, machine_count: int = 1) -> list[float]:
     ]
 
 
+def inserter_tiers_covering(items_per_second: float) -> tuple[str, ...]:
+    """Every auto-selectable tier that carries `items_per_second`, cheapest first.
+
+    More than one tier is usually adequate, and which of them a caller can
+    actually BUILD depends on what the base is holding. Returning the whole
+    adequate set lets a caller downgrade its preference to an affordable tier
+    instead of demanding a part it cannot make yet.
+    """
+    if items_per_second < 0:
+        raise ValueError("Inserter demand cannot be negative")
+    covering = tuple(
+        tier for tier in _AUTO_INSERTER_TIERS if FEEDER_RATES[tier] >= items_per_second
+    )
+    return covering or _AUTO_INSERTER_TIERS[-1:]
+
+
 def inserter_for_demand(items_per_second: float) -> str:
     """Cheapest inserter tier that carries `items_per_second` on its own.
 
@@ -216,12 +232,7 @@ def inserter_for_demand(items_per_second: float) -> str:
     Feed points are sized separately by count (see _feeders_needed), so a
     cheaper tier here widens the feed array rather than starving the line.
     """
-    if items_per_second < 0:
-        raise ValueError("Inserter demand cannot be negative")
-    for tier in _AUTO_INSERTER_TIERS:
-        if FEEDER_RATES[tier] >= items_per_second:
-            return tier
-    return _AUTO_INSERTER_TIERS[-1]
+    return inserter_tiers_covering(items_per_second)[0]
 
 # Sideload feeder geometry (feed_style="sideload"). Instead of chest+inserter
 # pairs placed directly on the input belt, each ingredient rides a dedicated

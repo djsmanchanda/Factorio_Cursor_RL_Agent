@@ -779,3 +779,9 @@ backfilled from git history because this file did not exist yet.
 - Files: `orchestrator/autonomous_builder.py`, `CURRENT_STATUS.md`
 - What: Readiness mall tasks may consume sufficient stocked ingredients directly instead of recursively requiring an upstream line first.
 - Why: Inserter bootstrap was looping through an iron-plate build even though plates, gears, and circuits were already stocked; that upstream construction needed the same inserters.
+
+## [2026-08-01] Conversion stage picks an inserter tier it can build
+- Files: `orchestrator/autonomous_builder.py`, `planners/recipe_data.py`, `tests/test_inserter_affordability.py`, `tests/test_extraction_separation.py`, `CURRENT_STATUS.md`
+- What: Added `inserter_tiers_covering` and `_stage_inserter_type`; a conversion stage now substitutes UP to an adequate tier the base is already stocking when the cheapest adequate tier is short, and only falls back to the cheapest when nothing adequate is stocked.
+- Why: Regression from the rate-driven tier change -- the iron-plate smelter demanded 14 plain inserters, inserters need iron plate, and iron plate needs that smelter, so the runner livelocked on `MALL DEMAND: conversion_iron-plate requested inserter=14` roughly every 12s indefinitely.
+- Next: The mall loop still has no bound (`iteration` never increments on the MaterialShortage path) and deferral does not remember what failed, so any other circular material demand will spin the same way.

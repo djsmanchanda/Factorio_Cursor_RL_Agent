@@ -501,6 +501,9 @@ def test_over_limit_route_rejects_before_smelter_submission(monkeypatch) -> None
     monkeypatch.setattr(
         autonomous_builder, "_submit", lambda *_args: submitted.append(_args[3]),
     )
+    # The stage reads the base's stock to pick an inserter tier it can actually
+    # build; this test drives it with a bare object for a client.
+    monkeypatch.setattr(live_base, "available_items", lambda *_a, **_k: {})
 
     with pytest.raises(ValueError, match="CityPlanner rail handoff"):
         autonomous_builder.build_conversion_stage(

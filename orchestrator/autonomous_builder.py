@@ -75,8 +75,8 @@ from planners.mall_layout import (
 from planners.recipe_data import (
     FEED_HEADROOM,
     LINE_RECIPES,
-    inserter_for_demand,
     install_catalog_line_recipes,
+    inserter_tiers_covering,
     machine_handled_rates,
 )
 from tools.rcon_client import RconClient
@@ -529,6 +529,62 @@ def build_logistic_smelter(
         raise StuckError(f"logistic bootstrap for {recipe} built but not healthy: {stuck}")
     return providers[-1]
 
+
+def _stage_inserter_type(
+    client: RconClient, surface: str, force: str, recipe: str, machine_count: int,
+    belt_type: str, flow_direction: str, emit: Callable[[str], None],
+) -> str:
+    """The cheapest inserter tier that both CARRIES this line and can be BUILT.
+
+    Rate alone is not enough. Several tiers are usually adequate, and demanding
+    the cheapest one deadlocks whenever the base cannot make it yet: a smelter
+    row needs inserters, inserters need iron plate, and iron plate needs the
+    smelter row. Observed live -- the runner asked for 14 plain inserters,
+    held 9, and spun on that cycle indefinitely.
+
+    So among the tiers that carry the load, prefer one the base is already
+    holding enough of. Substituting UP is always safe (more throughput than
+    required, only more expensive), and an oversized inserter that exists beats
+    a right-sized one that cannot be produced -- stability over optimality.
+    """
+    peak_rate = max(machine_handled_rates(recipe))
+    covering = inserter_tiers_covering(peak_rate * FEED_HEADROOM)
+    preferred = covering[0]
+    needed = _line_inserter_count(recipe, machine_count, belt_type, preferred, flow_direction)
+    stock = live_base.available_items(client, surface, force)
+    if stock.get(preferred, 0) >= needed:
+        emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {preferred}")
+        return preferred
+    for tier in covering[1:]:
+        if stock.get(tier, 0) >= needed:
+            emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- {preferred} "
+                 f"fits but only {stock.get(preferred, 0)}/{needed} are in stock; "
+                 f"using {tier} instead ({stock[tier]} available)")
+            return tier
+    # Nothing adequate is in stock: keep the right-sized choice so the parts
+    # mall is asked for the cheapest part rather than an oversized one.
+    emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {preferred} "
+         f"(only {stock.get(preferred, 0)}/{needed} in stock; no adequate tier is stocked)")
+    return preferred
+
+
+def _line_inserter_count(
+    recipe: str, machine_count: int, belt_type: str, inserter_type: str,
+    flow_direction: str,
+) -> int:
+    """How many of `inserter_type` this line's layout actually places."""
+    plan = LocalLayoutPlanner().generate_line_layout(
+        recipe, machine_count, 0, 0, belt_type=belt_type,
+        inserter_type=inserter_type, feed_style="chest",
+        terminal_collector=True, flow_direction=flow_direction,
+    )
+    return sum(
+        1
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == inserter_type
+    )
+
+
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
@@ -546,13 +602,10 @@ def build_conversion_stage(
     with a belt+inserter pair, using whichever side faces the source."""
     width = machine_count * 3
     if inserter_type is None:
-        # Size the tier to the busiest flow ONE inserter beside ONE machine
-        # carries. A smelter row is slow -- an electric furnace moves well under
-        # an item per second -- so the fast-inserter baseline bought nothing
-        # there and cost a whole production chain on a real base.
-        peak_rate = max(machine_handled_rates(recipe))
-        inserter_type = inserter_for_demand(peak_rate * FEED_HEADROOM)
-        emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {inserter_type}")
+        inserter_type = _stage_inserter_type(
+            client, surface, force, recipe, machine_count, belt_type,
+            flow_direction, emit,
+        )
     planner = LocalLayoutPlanner()
     if placement_origin is None:
         # Reserve the footprint the layout ACTUALLY occupies, not a box starting
