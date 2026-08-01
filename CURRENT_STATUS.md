@@ -791,3 +791,9 @@ backfilled from git history because this file did not exist yet.
 - What: `build_conversion_stage` now derives each ingredient's transport mode from `_transport_mode` instead of hardcoding "belt", and the belt-route log line states the real reason rather than always claiming the bot limit was exceeded.
 - Why: A 2-machine science stage draws 0.30 copper-plate/s -- a tenth of the 3.0/s bot limit -- but was handed a 128-tile belt corridor it could not afford, ending the run with "no belt tier can be afforded"; the log compounded it by asserting "0.30/s exceeds the 3.0/s bot limit".
 - Next: `expand_upstream` only scales MINEABLE inputs, so a stage bottlenecked on an intermediate (fast-transport-belt short of iron-gear-wheel) defers forever instead of adding gear capacity.
+
+## [2026-08-01] Expansion follows the bottleneck down the chain
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_expansion_target.py`, `CURRENT_STATUS.md`
+- What: Added `expansion_target`, which walks the recipe DAG from a stalled item to the deepest extraction stage, following whichever input the base is shortest of per craft and guarding against recipe cycles; `expand_upstream` now uses it and names the traced bottleneck.
+- Why: Expansion only checked DIRECT ingredients for a mineable one, so fast-transport-belt (transport-belt + iron-gear-wheel, neither mineable) deferred forever at 11/25 while its real constraint, iron ore, sat two levels down.
+- Next: Only extraction is scaled. When a stage's own line is saturated rather than starved the runner still has no move, because `ensure_produced` refuses to duplicate an existing machine.

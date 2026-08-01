@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Callable
 
@@ -92,6 +92,43 @@ def _mineable(recipe: str) -> bool:
         len(ingredients) == 1
         and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
     )
+
+
+def expansion_target(item: str, stock: Mapping[str, int]) -> str | None:
+    """The deepest extraction stage that limits `item`, or None if none does.
+
+    Bottlenecks are recursive. A is short because B is short because C is
+    short, all the way down to ore, so raising A means raising whatever is
+    actually starved beneath it. Checking only DIRECT ingredients for a
+    mineable one gives up far too early: fast-transport-belt needs
+    transport-belt and iron-gear-wheel, neither of which is mineable, so it
+    deferred forever while its real constraint -- iron ore -- sat two levels
+    down.
+
+    At each level it follows the input the base is SHORTEST of, measured
+    against what one craft consumes, so the walk tracks the live constraint
+    rather than an arbitrary branch. `seen` guards against recipe cycles.
+    """
+    seen: set[str] = set()
+    current = item
+    while current in LINE_RECIPES and current not in seen:
+        seen.add(current)
+        if _mineable(current):
+            return current
+        spec = LINE_RECIPES[current]
+        candidates = [
+            ingredient for ingredient in spec["ingredients"]
+            if ingredient in LINE_RECIPES and ingredient not in seen
+        ]
+        if not candidates:
+            return None
+        current = min(
+            candidates,
+            key=lambda ingredient: stock.get(ingredient, 0) / max(
+                1, spec["amounts"][spec["ingredients"].index(ingredient)]
+            ),
+        )
+    return None
 
 
 def _side_sample_plate_output(
@@ -1150,16 +1187,16 @@ def run(
                     continue
                 if output is not None:
                     def expand_upstream() -> bool:
-                        upstream = next(
-                            (ingredient for ingredient in LINE_RECIPES[item]["ingredients"]
-                             if ingredient in LINE_RECIPES and _mineable(ingredient)),
-                            None,
+                        upstream = expansion_target(
+                            item, live_base.available_items(client, surface, force),
                         )
                         if upstream is None:
                             reason = f"{item} has no supported extraction input to expand"
                             priorities.defer(item, live_base.game_tick(client), reason)
                             emit(f"  PRIORITY DEFERRED: {reason}")
                             return False
+                        if upstream != item:
+                            emit(f"  MALL BOTTLENECK: {item} traces down to {upstream}")
                         emit(f"  MALL EXPAND: considering another {upstream} extraction phase")
                         try:
                             build_mining_stage(
