@@ -864,3 +864,21 @@ very cell just removed -- observed twice in fifteen seconds at cell (35,31).
 
 **Next:** Deferral has no memory: a blocked drill site is retried identically
 on every later pass.
+
+## A blocked mining corridor shortens the batch instead of failing forever
+
+**Files:** `orchestrator/stage_extraction.py`, `tests/test_batch_prefix.py`
+
+**What:** `buildable_batch_prefix` walks a reserved corridor outward from the
+mine and returns the leading run of columns that are clear and free of foreign
+ore. `plan_local_extraction` builds that prefix. An empty prefix falls through
+to `_new_direct_mine`, siting a fresh row elsewhere.
+
+**Why:** Reserved positions are a deterministic function of the active mine, so
+a corridor that had grown into trees or a neighbouring patch raised the same
+`Reserved ... drill site is blocked` on every pass, for the life of the save.
+The prefix -- not the clean subset -- is the buildable part: the shared belt is
+paved three tiles per column and columns sit three apart, so a skipped column
+severs the belt and every drill past it feeds nothing.
+
+**Next:** `PROMOTABLE_INTERMEDIATES` is still a hand-maintained allowlist.

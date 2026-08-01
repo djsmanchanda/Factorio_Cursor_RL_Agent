@@ -247,6 +247,48 @@ def _new_direct_mine(
     )
     return origin, row_drill_count * 2, plan, output
 
+
+def buildable_batch_prefix(
+    client: RconClient, surface: str, ore: str, positions: tuple[Point, ...],
+) -> tuple[Point, ...]:
+    """The leading run of reserved columns that can actually be built today.
+
+    A reserved corridor is checked outward from the mine, and the answer stops
+    at the first column that is blocked or would put a drill's mining area over
+    a foreign ore. The prefix is what matters rather than the clean subset: the
+    shared belt is paved three tiles per column and columns sit three apart, so
+    a skipped column is a severed belt, and every drill past it feeds nothing.
+
+    Returning a short prefix -- possibly empty -- instead of raising is what
+    lets a corridor that has grown into a tree line or a neighbouring patch stop
+    being retried identically forever. An empty answer tells the caller this
+    corridor is finished and the phase needs a new row somewhere else.
+    """
+    columns: list[tuple[Point, Point]] = [
+        (positions[index], positions[index + 1])
+        for index in range(0, len(positions) - 1, 2)
+    ]
+    if not columns:
+        return ()
+    conflicted = {
+        centre for centre, _reason in live_base.drill_siting_conflicts(
+            client, surface, ore, list(positions),
+        )
+    }
+    buildable: list[Point] = []
+    for pair in columns:
+        if any(
+            site in conflicted or not live_base.area_clear(
+                client, surface,
+                (site[0] - 1.5, site[1] - 1.5), (site[0] + 1.5, site[1] + 1.5),
+            )
+            for site in pair
+        ):
+            break
+        buildable.extend(pair)
+    return tuple(buildable)
+
+
 def smelter_count_for_drills(
     recipe: str, drill_count: int, mining_productivity_bonus: float,
 ) -> int:
@@ -444,22 +486,8 @@ def plan_local_extraction(
             extraction_capacity.phase_batch_positions(active, requested)
             if active is not None else ()
         )
+        positions = buildable_batch_prefix(client, surface, ore, positions)
         if positions:
-            for x, y in positions:
-                if not live_base.area_clear(
-                    client, surface, (x - 1.5, y - 1.5), (x + 1.5, y + 1.5)
-                ):
-                    raise ValueError(f"Reserved {ore} expansion drill site {(x, y)} is blocked")
-            conflicts = live_base.drill_siting_conflicts(
-                client, surface, ore, list(positions)
-            )
-            if conflicts:
-                detail = "; ".join(
-                    f"{centre} {reason}" for centre, reason in conflicts[:3]
-                )
-                raise ValueError(
-                    f"The next {ore} phase cannot mine cleanly: {detail}"
-                )
             drill_xs = sorted({x for x, _y in positions})
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
             build_plan = generate_shared_belt_batch_expansion(
