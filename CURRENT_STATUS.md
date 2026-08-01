@@ -976,3 +976,36 @@ code are not, and are deliberately kept:
   extraction stages use.
 
 **Next:** LOC debt is the remaining charter breach.
+
+## Split the judgement calls and the diagnosis out of the builder
+
+**Files:** `orchestrator/build_decisions.py` (new),
+`orchestrator/build_diagnostics.py` (new),
+`orchestrator/autonomous_builder.py`, `tests/test_inserter_affordability.py`
+
+**What:** `autonomous_builder.py` drops 1444 -> 1185 lines.
+`build_decisions.py` holds what a pass decides -- what limits a product
+(`expansion_target`), where a line should sit (`_heaviest_source`), whether
+stocked inputs may be consumed, and which inserter tier is both adequate and
+affordable. `build_diagnostics.py` holds `_diagnose_blockage` and
+`_side_sample_plate_output`, which read a stalled stage without changing it.
+
+**Why:** Charter limit is 500 LOC; this was the largest breach. These two groups
+also had no monkeypatch entanglement, so the move could not silently change
+which function a test was exercising.
+
+**Still over the limit and NOT split:** `autonomous_builder.py` (1185),
+`live_base.py` (851), `stage_services.py` (716), `stage_extraction.py` (609),
+`verify_factory_invariants.py` (600), `stage_transport.py` (556),
+`core/metrics.py` (555), `belt_bridge.py` (521), `layout_executor.lua` (581).
+
+The remaining split of `autonomous_builder.py` -- the four stage builders into
+one module, `run()` into another -- is blocked on a real hazard, not on effort:
+tests monkeypatch `autonomous_builder.bring_stage_up` and
+`autonomous_builder.build_conversion_stage`, and callers of those live in the
+same module. Move the callee and the patch silently stops applying, so the test
+exercises the real function and still passes. Those patch sites must be
+retargeted in the same change, and each retarget verified by confirming the test
+fails when the patch is removed.
+
+**Next:** the goal's closing audit and verification.

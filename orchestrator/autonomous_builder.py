@@ -5,12 +5,19 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Callable
 
-from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
+from orchestrator.build_decisions import (
+    _heaviest_source,
+    _mineable,
+    _stage_inserter_type,
+    expansion_target,
+    may_consume_stocked_inputs,
+)
+from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, baseline_build_order,
     baseline_drill_phase, baseline_plate_draw, baseline_smelter_count,
@@ -45,8 +52,6 @@ from orchestrator.stage_services import (
     _DEFAULT_BELT,
     _DEFAULT_INSERTER,
     _LOGISTIC_CHEST_ENTITIES,
-    _ROBOPORT_CONSTRUCTION_RADIUS,
-    _ROBOPORT_LOGISTIC_RADIUS,
     _STAGE_CHEST_REACH,
     _diagnose_machines,
     _logistic_chest_positions,
@@ -77,12 +82,8 @@ from planners.mall_layout import (
     generate_promoted_mall_retirement_plan,
 )
 from planners.recipe_data import (
-    FEED_HEADROOM,
     LINE_RECIPES,
     install_catalog_line_recipes,
-    inserter_tiers_covering,
-    machine_handled_rates,
-    machine_ingredient_rates,
 )
 from tools.rcon_client import RconClient
 
@@ -97,224 +98,15 @@ _DEFAULT_MACHINE_COUNT = 2
 _MAX_UNCHANGED_PASSES = 12
 
 
-def _mineable(recipe: str) -> bool:
-    """Whether this recipe is a supported direct resource-extraction stage."""
-    ingredients = LINE_RECIPES[recipe]["ingredients"]
-    return (
-        len(ingredients) == 1
-        and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
-    )
 
 
-def may_consume_stocked_inputs(
-    *, upgrade_bootstrap: bool, promote_to_line: bool,
-) -> bool:
-    """Whether this build may satisfy an ingredient from a stocked buffer
-    instead of resolving a producing stage for it.
-
-    A readiness MALL CELL may: it is requester-fed, so bots really do supply it
-    from whatever is in a chest. Demanding a live upstream line first would
-    deadlock bootstrap items such as inserters, whose plates and gears are
-    already stocked while the iron-plate line itself needs those very inserters
-    as construction ghosts.
-
-    A PROMOTED LINE may not: it is belt-fed from a producing stage, so it needs
-    a real source POSITION, which a stocked buffer cannot give. Taking the
-    shortcut left build_conversion_stage with nothing to route from and ended a
-    run on "iron-gear-wheel feeds on ['iron-plate'], which have no producing
-    stage to supply them" -- while 13 iron plates sat in a chest.
-    """
-    return not upgrade_bootstrap and not promote_to_line
 
 
-def expansion_target(item: str, stock: Mapping[str, int]) -> str | None:
-    """The deepest extraction stage that limits `item`, or None if none does.
-
-    Bottlenecks are recursive. A is short because B is short because C is
-    short, all the way down to ore, so raising A means raising whatever is
-    actually starved beneath it. Checking only DIRECT ingredients for a
-    mineable one gives up far too early: fast-transport-belt needs
-    transport-belt and iron-gear-wheel, neither of which is mineable, so it
-    deferred forever while its real constraint -- iron ore -- sat two levels
-    down.
-
-    At each level it follows the input the base is SHORTEST of, measured
-    against what one craft consumes, so the walk tracks the live constraint
-    rather than an arbitrary branch. `seen` guards against recipe cycles.
-    """
-    seen: set[str] = set()
-    current = item
-    while current in LINE_RECIPES and current not in seen:
-        seen.add(current)
-        if _mineable(current):
-            return current
-        spec = LINE_RECIPES[current]
-        candidates = [
-            ingredient for ingredient in spec["ingredients"]
-            if ingredient in LINE_RECIPES and ingredient not in seen
-        ]
-        if not candidates:
-            return None
-        current = min(
-            candidates,
-            key=lambda ingredient: stock.get(ingredient, 0) / max(
-                1, spec["amounts"][spec["ingredients"].index(ingredient)]
-            ),
-        )
-    return None
 
 
-def _heaviest_source(
-    item: str, sources: Mapping[str, Point], machine_count: int,
-) -> Point | None:
-    """Where the line should sit: beside whichever input it consumes fastest.
-
-    A belt run is proportional to distance, and the heaviest input is the one
-    whose belt would cost the most and be most likely to fail routing. Falls
-    back to None when no source is known, leaving the caller's own reference.
-    """
-    if not sources:
-        return None
-    spec = LINE_RECIPES[item]
-    rates = dict(zip(spec["ingredients"], machine_ingredient_rates(item, machine_count)))
-    return sources[max(sources, key=lambda ingredient: rates.get(ingredient, 0.0))]
 
 
-def _side_sample_plate_output(
-    plan: dict, origin: Point, machine_count: int,
-    belt_type: str = _DEFAULT_BELT, flow_direction: str = "east",
-    tap_inserter_type: str = "inserter",
-) -> Point:
-    """Keep one powered side tap while the output belt stays continuous."""
-    if flow_direction not in {"east", "west"}:
-        raise ValueError("Plate output flow must be east or west")
-    ox, oy = origin
-    terminal_chests = [
-        action for phase in plan["phases"] for action in phase["actions"]
-        if action.get("entity") == "steel-chest"
-        and action["position"]["y"] == oy + 6.5
-    ]
-    if len(terminal_chests) != 1:
-        raise StuckError("plate layout has no unique terminal collector")
-    terminal_chest = terminal_chests[0]
-    chest_x = terminal_chest["position"]["x"]
-    step = 1 if flow_direction == "east" else -1
-    inserter_x = chest_x - step
-    terminal_inserter = next((
-        action for phase in plan["phases"] for action in phase["actions"]
-        if action.get("entity", "").endswith("inserter")
-        and action["position"] == {"x": inserter_x, "y": oy + 6.5}
-    ), None)
-    if terminal_inserter is None:
-        raise StuckError("plate layout terminal collector has no inserter")
 
-    # Generic high-throughput lines add drain chests below the output belt.
-    # Plates keep one low-priority sample only; the continuous belt is primary.
-    for phase in plan["phases"]:
-        phase["actions"] = [
-            action for action in phase["actions"]
-            if action is terminal_chest or action is terminal_inserter or not (
-                action.get("entity") == "steel-chest"
-                and action["position"]["y"] == oy + 8.5
-            ) and not (
-                action.get("entity", "").endswith("inserter")
-                and action["position"]["y"] == oy + 7.5
-            )
-        ]
-
-    provider = (chest_x, oy + 8.5)
-    terminal_chest["position"] = {"x": provider[0], "y": provider[1]}
-    terminal_inserter.update({
-        "entity": tap_inserter_type,
-        "position": {"x": provider[0], "y": provider[1] - 1},
-        "direction": "north",
-    })
-    collector_phase = next(
-        phase for phase in plan["phases"] if terminal_chest in phase["actions"]
-    )
-    collector_phase["actions"].extend([
-        {
-            "action_type": "place_ghost", "entity": belt_type,
-            "position": {"x": inserter_x, "y": oy + 6.5},
-            "direction": flow_direction,
-        },
-        {
-            "action_type": "place_ghost", "entity": belt_type,
-            "position": {"x": chest_x, "y": oy + 6.5},
-            "direction": flow_direction,
-        },
-        {
-            "action_type": "place_ghost", "entity": belt_type,
-            "position": {"x": chest_x + step, "y": oy + 6.5},
-            "direction": flow_direction,
-        },
-        {
-            "action_type": "place_ghost", "entity": "medium-electric-pole",
-            "position": {"x": provider[0], "y": provider[1] + 2},
-        },
-    ])
-    return provider
-
-def _diagnose_blockage(
-    client: RconClient, surface: str, force: str, origin: Point,
-    substation_position: Point, machine_positions: list[Point],
-    logistic_chest_positions: Sequence[Point] = (),
-    area: tuple[Point, Point] | None = None,
-) -> tuple[str, str] | None:
-    """Why is this stage not finishing? Returns (issue, remedy) or None.
-
-    Ordered by what actually blocks construction first: bots cannot build
-    outside coverage, and a roboport with no power provides no coverage at all.
-    Logistic coverage is checked next because its remedy places AND powers a
-    roboport, which can incidentally close a power gap near the stage -- the
-    reverse is never true, so diagnosing it before machine power lets one round
-    fix both. Machine power is last; it is also the only check here that has to
-    poll every machine's live status.
-    """
-    nearest = live_base.nearest_roboport(client, surface, force, origin)
-    if nearest is None:
-        return ("no roboport on this surface", "none")
-    if math.dist(nearest, origin) > _ROBOPORT_CONSTRUCTION_RADIUS:
-        return (
-            f"site is {math.dist(nearest, origin):.0f} tiles from the nearest roboport "
-            f"(construction radius {_ROBOPORT_CONSTRUCTION_RADIUS:.0f})",
-            "coverage",
-        )
-    if live_base.entity_status_name(client, surface, nearest) == "no_power":
-        return (f"covering roboport at {nearest} has no power", "roboport_power")
-    if logistic_chest_positions:
-        # Only chests that are actually BUILT are judged here; ones still
-        # waiting on a bot are absent from the reply and are the ghost count's
-        # business, not a coverage fault.
-        served = live_base.logistic_network_ids(client, surface, logistic_chest_positions)
-        orphaned = [p for p, network in served.items() if network is None]
-        if orphaned:
-            return (
-                f"{len(orphaned)} logistic chest(s) belong to no logistic network "
-                f"(first at {tuple(orphaned[0])}); a chest outside every roboport's "
-                f"{_ROBOPORT_LOGISTIC_RADIUS:.0f}-tile supply area can neither supply "
-                "nor be supplied",
-                "logistic_coverage",
-            )
-    statuses = live_base.entity_statuses(client, surface, machine_positions)
-    unpowered = [p for p in machine_positions if statuses.get(tuple(p)) == "no_power"]
-    if unpowered:
-        return (f"{len(unpowered)} machine(s) unpowered", "stage_power")
-    # Machines are not the whole stage. The inserter that moves the product is
-    # what makes a mining row actually deliver, and it sits on the output row --
-    # outside the supply area of poles positioned for the machine row. Checking
-    # machines alone declared such a stage healthy while its belt backed up and
-    # its provider chest stayed empty forever.
-    if area is not None:
-        stranded = live_base.unpowered_entities(client, surface, area)
-        if stranded:
-            return (
-                f"{len(stranded)} support entity(ies) unpowered "
-                f"(first at {stranded[0]}); the stage's machines have power but "
-                "something that moves its product does not",
-                "entity_power",
-            )
-    return None
 
 
 def bring_stage_up(
@@ -616,59 +408,8 @@ def build_logistic_smelter(
     return providers[-1]
 
 
-def _stage_inserter_type(
-    client: RconClient, surface: str, force: str, recipe: str, machine_count: int,
-    belt_type: str, flow_direction: str, emit: Callable[[str], None],
-) -> str:
-    """The cheapest inserter tier that both CARRIES this line and can be BUILT.
-
-    Rate alone is not enough. Several tiers are usually adequate, and demanding
-    the cheapest one deadlocks whenever the base cannot make it yet: a smelter
-    row needs inserters, inserters need iron plate, and iron plate needs the
-    smelter row. Observed live -- the runner asked for 14 plain inserters,
-    held 9, and spun on that cycle indefinitely.
-
-    So among the tiers that carry the load, prefer one the base is already
-    holding enough of. Substituting UP is always safe (more throughput than
-    required, only more expensive), and an oversized inserter that exists beats
-    a right-sized one that cannot be produced -- stability over optimality.
-    """
-    peak_rate = max(machine_handled_rates(recipe))
-    covering = inserter_tiers_covering(peak_rate * FEED_HEADROOM)
-    preferred = covering[0]
-    needed = _line_inserter_count(recipe, machine_count, belt_type, preferred, flow_direction)
-    stock = live_base.available_items(client, surface, force)
-    if stock.get(preferred, 0) >= needed:
-        emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {preferred}")
-        return preferred
-    for tier in covering[1:]:
-        if stock.get(tier, 0) >= needed:
-            emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- {preferred} "
-                 f"fits but only {stock.get(preferred, 0)}/{needed} are in stock; "
-                 f"using {tier} instead ({stock[tier]} available)")
-            return tier
-    # Nothing adequate is in stock: keep the right-sized choice so the parts
-    # mall is asked for the cheapest part rather than an oversized one.
-    emit(f"  {recipe} moves {peak_rate:.2f} item/s per machine -- using {preferred} "
-         f"(only {stock.get(preferred, 0)}/{needed} in stock; no adequate tier is stocked)")
-    return preferred
 
 
-def _line_inserter_count(
-    recipe: str, machine_count: int, belt_type: str, inserter_type: str,
-    flow_direction: str,
-) -> int:
-    """How many of `inserter_type` this line's layout actually places."""
-    plan = LocalLayoutPlanner().generate_line_layout(
-        recipe, machine_count, 0, 0, belt_type=belt_type,
-        inserter_type=inserter_type, feed_style="chest",
-        terminal_collector=True, flow_direction=flow_direction,
-    )
-    return sum(
-        1
-        for phase in plan["phases"] for action in phase["actions"]
-        if action.get("entity") == inserter_type
-    )
 
 
 def build_conversion_stage(

@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from orchestrator import autonomous_builder, live_base  # noqa: E402
+from orchestrator import build_decisions, live_base  # noqa: E402
 from planners.recipe_data import (  # noqa: E402
     feeder_rate,
     FEED_HEADROOM,
@@ -29,7 +29,7 @@ def stocked(monkeypatch):
             live_base, "available_items", lambda *_args, **_kwargs: stock
         )
         said: list[str] = []
-        tier = autonomous_builder._stage_inserter_type(
+        tier = build_decisions._stage_inserter_type(
             None, "nauvis", "player", "iron-plate", 7,
             "transport-belt", "west", said.append,
         )
@@ -40,7 +40,7 @@ def stocked(monkeypatch):
 def test_substitutes_up_when_the_right_sized_tier_is_short(stocked) -> None:
     """The live deadlock: the smelter row needs plain inserters, inserters need
     iron plate, and iron plate needs the smelter row."""
-    needed = autonomous_builder._line_inserter_count(
+    needed = build_decisions._line_inserter_count(
         "iron-plate", 7, "transport-belt", "inserter", "west",
     )
     tier, message = stocked({"inserter": needed - 1, "fast-inserter": 60})
@@ -50,7 +50,7 @@ def test_substitutes_up_when_the_right_sized_tier_is_short(stocked) -> None:
 
 
 def test_keeps_the_cheapest_tier_when_it_is_stocked(stocked) -> None:
-    needed = autonomous_builder._line_inserter_count(
+    needed = build_decisions._line_inserter_count(
         "iron-plate", 7, "transport-belt", "inserter", "west",
     )
     tier, _ = stocked({"inserter": needed, "fast-inserter": 60})
@@ -91,10 +91,10 @@ def test_covering_never_returns_empty_even_past_every_tier() -> None:
 
 
 def test_line_inserter_count_scales_with_the_row() -> None:
-    small = autonomous_builder._line_inserter_count(
+    small = build_decisions._line_inserter_count(
         "iron-plate", 2, "transport-belt", "inserter", "west",
     )
-    large = autonomous_builder._line_inserter_count(
+    large = build_decisions._line_inserter_count(
         "iron-plate", 7, "transport-belt", "inserter", "west",
     )
 
