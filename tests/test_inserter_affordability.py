@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder, live_base  # noqa: E402
 from planners.recipe_data import (  # noqa: E402
-    FEEDER_RATES,
+    feeder_rate,
     FEED_HEADROOM,
     inserter_tiers_covering,
     machine_handled_rates,
@@ -72,7 +72,7 @@ def test_never_substitutes_down_to_an_inadequate_tier(stocked) -> None:
     peak = max(machine_handled_rates("electronic-circuit")) * FEED_HEADROOM
     tier, _ = stocked({"inserter": 9999, "fast-inserter": 9999, "bulk-inserter": 9999})
 
-    assert FEEDER_RATES[tier] >= max(machine_handled_rates("iron-plate")) * FEED_HEADROOM
+    assert feeder_rate(tier) >= max(machine_handled_rates("iron-plate")) * FEED_HEADROOM
     assert "inserter" not in inserter_tiers_covering(peak), "e-circuit needs more than a plain inserter"
 
 
@@ -81,8 +81,8 @@ def test_covering_tiers_are_cheapest_first_and_all_adequate() -> None:
     covering = inserter_tiers_covering(demand)
 
     assert covering[0] == "inserter"
-    assert all(FEEDER_RATES[tier] >= demand for tier in covering)
-    assert list(covering) == sorted(covering, key=lambda tier: FEEDER_RATES[tier])
+    assert all(feeder_rate(tier) >= demand for tier in covering)
+    assert list(covering) == sorted(covering, key=lambda tier: feeder_rate(tier))
 
 
 def test_covering_never_returns_empty_even_past_every_tier() -> None:

@@ -11,6 +11,7 @@ from jsonschema import Draft7Validator
 
 from planners.recipe_data import (
     BELT_TIERS,
+    feeder_rate,
     CHAINED_BELT_WEST,
     CHAINED_SUBSTATION_X,
     CHAIN_SOUTH_APPROACH_COL,
@@ -135,7 +136,7 @@ class LineLayoutMixin:
         # Per-ingredient demand (items/s) sets how many feed points each
         # ingredient needs; the input belt extends west to host them.
         crafts_per_second = machine_count * MACHINE_SPEEDS[machine] / spec["craft_time"]
-        feeder_rate = FEEDER_RATES[inserter_type]
+        feed_rate = feeder_rate(inserter_type)
         feeders_needed = self._feeders_needed(recipe, machine_count, inserter_type)
         feed_slots = max(feeders_needed) if not mining_feed else 0
         belt_west = self._belt_west(recipe, machine_count, feed_style, inserter_type, mining_feed)
@@ -214,7 +215,7 @@ class LineLayoutMixin:
             ])
         # Collectors scale with output demand just like feeders; extras drain
         # from the south side of the output belt into their own chests.
-        extra_collectors = max(0, -(-int(crafts_per_second * spec["product_amount"] * FEED_HEADROOM * 100) // int(feeder_rate * 100)) - 1)
+        extra_collectors = max(0, -(-int(crafts_per_second * spec["product_amount"] * FEED_HEADROOM * 100) // int(feed_rate * 100)) - 1)
         if three_input and extra_collectors:
             raise ValueError("Advanced-circuit auxiliary corridor reserves the south collector rows")
         for i in range(extra_collectors if terminal_collector else 0):
@@ -376,9 +377,9 @@ class LineLayoutMixin:
         """
         spec = LINE_RECIPES[recipe]
         crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
-        feeder_rate = FEEDER_RATES[inserter_type]
+        feed_rate = feeder_rate(inserter_type)
         return [
-            max(1, -(-int(amount * crafts_per_second * FEED_HEADROOM * 100) // int(feeder_rate * 100)))
+            max(1, -(-int(amount * crafts_per_second * FEED_HEADROOM * 100) // int(feed_rate * 100)))
             for amount in spec["amounts"]
         ]
 

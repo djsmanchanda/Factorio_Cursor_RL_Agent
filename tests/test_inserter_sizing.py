@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from planners.recipe_data import (  # noqa: E402
     FEED_HEADROOM,
-    FEEDER_RATES,
+    feeder_rate,
     INSERTER_TIERS,
     LINE_RECIPES,
     inserter_for_demand,
@@ -46,18 +46,26 @@ def test_two_product_recipes_are_measured_on_their_output(recipe: str) -> None:
     """A line layout puts the same tier on both faces, so the busier face has to
     be the one measured. These emit two products per craft."""
     assert max(machine_handled_rates(recipe)) == 2 * max(machine_ingredient_rates(recipe))
-    assert FEEDER_RATES[_chosen(recipe)] >= max(machine_handled_rates(recipe)) * FEED_HEADROOM
+    assert feeder_rate(_chosen(recipe)) >= max(machine_handled_rates(recipe)) * FEED_HEADROOM
 
 
 def test_output_rate_can_decide_the_tier_on_its_own() -> None:
-    """plastic-bar consumes 1 coal/s -- inside a plain inserter -- but emits 2
-    bars/s, which is not. Sizing on ingredients alone would have starved its
-    collector."""
+    """sulfur draws no items at all and emits two a second, so ingredient-only
+    sizing had nothing to work from and would have starved its collector."""
     ingredients_only = inserter_for_demand(
-        max(machine_ingredient_rates("plastic-bar")) * FEED_HEADROOM
+        max(machine_ingredient_rates("sulfur"), default=0.0) * FEED_HEADROOM
     )
     assert ingredients_only == "inserter"
-    assert _chosen("plastic-bar") == "fast-inserter"
+    assert _chosen("sulfur") == "fast-inserter"
+
+
+def test_no_recipe_is_sized_below_what_it_actually_moves() -> None:
+    """The property the sulfur and copper-cable cases are instances of. Stated
+    outright so it keeps holding when a rate change stops separating them."""
+    top = feeder_rate("bulk-inserter")
+    for recipe in LINE_RECIPES:
+        demand = max(machine_handled_rates(recipe), default=0.0) * FEED_HEADROOM
+        assert feeder_rate(_chosen(recipe)) >= min(demand, top)
 
 
 def test_a_fluid_only_recipe_is_sized_by_what_it_emits() -> None:
@@ -82,13 +90,13 @@ def test_stack_inserters_are_never_selected_automatically() -> None:
 
 def test_selection_is_the_cheapest_tier_that_covers_demand() -> None:
     for tier in ("inserter", "fast-inserter", "bulk-inserter"):
-        rate = FEEDER_RATES[tier]
+        rate = feeder_rate(tier)
         assert inserter_for_demand(rate) == tier, "a tier must cover its own rated load"
     # Just past a tier's rating escalates -- except at the top, which saturates
     # rather than reaching for a Gleba-only stack inserter.
-    assert inserter_for_demand(FEEDER_RATES["inserter"] + 0.01) == "fast-inserter"
-    assert inserter_for_demand(FEEDER_RATES["fast-inserter"] + 0.01) == "bulk-inserter"
-    assert inserter_for_demand(FEEDER_RATES["bulk-inserter"] + 0.01) == "bulk-inserter"
+    assert inserter_for_demand(feeder_rate("inserter") + 0.01) == "fast-inserter"
+    assert inserter_for_demand(feeder_rate("fast-inserter") + 0.01) == "bulk-inserter"
+    assert inserter_for_demand(feeder_rate("bulk-inserter") + 0.01) == "bulk-inserter"
 
 
 def test_demand_must_not_be_negative() -> None:

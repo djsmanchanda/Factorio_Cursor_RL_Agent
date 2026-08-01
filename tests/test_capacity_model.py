@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from core.capacity_phasing_policy import evaluate_capacity_phasing
 from core.phase_advance_evaluator import propose_phase_advance
 from core.progress_state import build_progress_state, _derive_committed_capacity
 from planners.city_planner.ghost_projection_phase import _derive_delta_capacity, generate_ghost_plan
+from planners.recipe_data import FEED_HEADROOM, feeder_rate
 
 BUILD_INTENT = {
     "intents": [
@@ -218,22 +220,25 @@ def test_feeder_count_scales_with_ingredient_demand():
     actions = [a for p in plan["phases"] for a in p["actions"]]
     cable_chests = [a for a in actions if a.get("infinity_filter") == "copper-cable"]
     plate_chests = [a for a in actions if a.get("infinity_filter") == "iron-plate"]
-    # 6 machines x 1.5 crafts/s x 3 cables = 27/s -> 3 stack feeders; plates 9/s -> 1.
-    assert len(cable_chests) == 3
-    assert len(plate_chests) == 1
+    # 6 machines x 1.5 crafts/s x 3 cables = 27/s of cable, 9/s of plate. Both
+    # counts are derived from the rate one feeder is SIZED at, not from the
+    # tier's ceiling, so a rate correction moves the expectation with the code.
+    rate = feeder_rate("stack-inserter")
+    assert len(cable_chests) == math.ceil(27 * FEED_HEADROOM / rate)
+    assert len(plate_chests) == math.ceil(9 * FEED_HEADROOM / rate)
 
 
 def test_collectors_scale_with_output_demand():
     from planners.local_layout_planner import LocalLayoutPlanner
 
     planner = LocalLayoutPlanner()
-    # 12 gear machines = 18 gears/s; stack collectors drain ~12/s -> 2 collectors.
+    # 12 gear machines = 18 gears/s, drained at the collector's sized rate.
     plan = planner.generate_line_layout(
         "iron-gear-wheel", 12, 0, 0, belt_type="express-transport-belt", inserter_type="stack-inserter"
     )
     actions = [a for p in plan["phases"] for a in p["actions"]]
     chests = [a for a in actions if a["entity"] == "steel-chest"]
-    assert len(chests) == 2
+    assert len(chests) == math.ceil(18 * FEED_HEADROOM / feeder_rate("stack-inserter"))
 
 
 def test_mining_fed_smelting_line_layout():

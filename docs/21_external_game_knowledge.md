@@ -58,6 +58,32 @@ Per docs/19: reference data only — validated before use, never authoritative o
 - Planner consequence: feed points scale with per-ingredient demand
   (feeders = ceil(demand / feeder_rate); LINE_RECIPES amounts × craft rate).
 
+### Known gap: feeder rates are ceilings, and belt tier is unmodelled
+`FEEDER_RATES` holds best-case chest->belt throughput -- fully researched hand
+capacity, unloading onto a belt fast enough not to hold the swing. Only
+fast-inserter has a live datapoint behind it. The plain inserter's figure is
+arithmetic (~0.36x a fast one, applied to the researched fast value) and the two
+high-capacity tiers are prototype claims, so all three are listed in
+`UNMEASURED_FEEDER_RATES` and discounted by `UNMEASURED_RATE_DERATING` before
+anything is sized from them. Callers use `feeder_rate()`, never the table.
+
+The derating is a safety margin, NOT a measurement. Erring low buys a
+cheaper-than-needed tier or one extra feed point; erring high builds a line that
+runs throttled while every machine still reports as working -- which reads
+downstream as saturation and gets five more equally throttled machines built
+beside it.
+
+The bigger unmodelled factor is the destination belt: the measured 12.8x jump
+above came from upgrading belt AND inserter together, so a fast inserter onto a
+plain transport-belt carries well under this table's 4.0/s.
+
+To close it, measure per tier on a live base rather than guessing better:
+1. Build one machine fed from an infinity chest through one inserter of the
+   tier, unloading onto a saturated belt of the tier being paired with it.
+2. Read `get_item_production_statistics` over a fixed tick window; divide.
+3. Repeat per (inserter tier, belt tier) pair.
+4. Record the number here, and remove that tier from `UNMEASURED_FEEDER_RATES`.
+
 ## Advanced feeding patterns (user-provided, 2026-07-18 — next to implement)
 - **Dedicated belt per ingredient**: fill the entire input belt (both lanes)
   with the high-demand ingredient; run a second parallel belt for the other

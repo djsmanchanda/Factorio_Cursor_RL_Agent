@@ -20,6 +20,7 @@ from planners.recipe_data import (
     CHAIN_SOUTH_APPROACH_COL,
     CHAIN_SOUTH_JUNCTION_COL,
     FEEDER_RATES,
+    feeder_rate,
     FEED_HEADROOM,
     FEED_STYLES,
     FORBIDDEN_FUEL_ENTITIES,

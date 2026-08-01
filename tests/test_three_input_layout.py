@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import math
+
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.plan_validation import actions
+from planners.recipe_data import FEED_HEADROOM, feeder_rate
 
 
 def test_advanced_circuit_row_has_two_main_inputs_and_auxiliary_cable_belt() -> None:
@@ -45,4 +48,5 @@ def test_product_amount_scales_output_collector_capacity() -> None:
         "copper-cable", 6, inserter_type="stack-inserter"
     )
     steel_chests = [action for action in actions(plan) if action["entity"] == "steel-chest"]
-    assert len(steel_chests) == 2
+    # 6 machines x 1.5 crafts/s x 2 cable per craft = 18/s to clear.
+    assert len(steel_chests) == math.ceil(18 * FEED_HEADROOM / feeder_rate("stack-inserter"))

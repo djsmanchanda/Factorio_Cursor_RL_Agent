@@ -899,3 +899,27 @@ asked to mass-produce, and the exact symptom reported as "it should have started
 regular transport belt production and it didn't".
 
 **Next:** `FEEDER_RATES` are still derived estimates rather than measured.
+
+## Feeder throughput is a ceiling, and is now treated as one
+
+**Files:** `planners/recipe_data.py`, `planners/line_layouts.py`,
+`planners/fluid_layouts.py`, `planners/local_layout_planner.py`,
+`docs/21_external_game_knowledge.md`, `tests/test_feeder_rate_honesty.py`,
+plus the sizing tests that asserted against the raw table.
+
+**What:** `FEEDER_RATES` is documented as a best-case ceiling.
+`UNMEASURED_FEEDER_RATES` names the three tiers never observed on this base
+(inserter, bulk-inserter, stack-inserter) and `feeder_rate()` discounts them by
+`UNMEASURED_RATE_DERATING` before anything is sized from them. Every production
+call site goes through the accessor; a test fails the build if any reads the
+table directly.
+
+**Why:** Sizing off a ceiling understates how many feed points a line needs, and
+an underfed machine still reports as working -- the exact path by which a
+throttled cell read as saturated and had five more equally throttled machines
+built beside it. The derating is a safety margin, NOT a measurement: it makes
+the error direction cost materials instead of throughput.
+
+**Next:** This cannot be closed by choosing a better constant. docs/21 now
+carries the live measurement procedure; running it replaces the guess and the
+tier comes out of the frozenset.

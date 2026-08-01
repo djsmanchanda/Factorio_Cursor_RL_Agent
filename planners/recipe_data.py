@@ -171,18 +171,48 @@ MACHINE_SPEEDS = {
     "chemical-plant": 1.0, "oil-refinery": 1.0,
 }
 
-# Feeder inserter chest->belt throughput estimates (items/s, research-boosted;
-# docs/21). Inserter swings are rotation-bound: 180 degrees to load, 180 to
-# unload, so one feeder cannot supply a hungry line - feed points scale with
-# per-ingredient demand: feeders = ceil(demand / rate).
-# The basic inserter's figure is derived, not measured: Factorio's base
-# chest->belt rates put a plain inserter at ~0.36x a fast one, applied here to
-# this table's research-boosted fast-inserter value. Deliberately conservative
-# -- understating it makes the selector upgrade sooner, which costs materials
-# rather than throughput. Worth measuring live alongside the others in docs/21.
+# Feeder inserter chest->belt throughput CEILINGS (items/s), not typical rates.
+# Inserter swings are rotation-bound -- 180 degrees to load, 180 to unload -- so
+# one feeder cannot supply a hungry line; feed points scale with per-ingredient
+# demand as feeders = ceil(demand / rate).
+#
+# These are best case: fully researched hand capacity, unloading onto a belt
+# fast enough not to hold the swing. docs/21 records that a slower belt worsens
+# unload time, and that dependence is NOT modelled here -- a fast-inserter
+# feeding a plain transport-belt measured well under this table's 4.0/s. Sizing
+# off a ceiling understates how many feeders a line needs, and an underfed
+# machine still reports as working, which is how a throttled cell once read as
+# saturated and had five more equally throttled machines built beside it.
+# UNMEASURED_FEEDER_RATES carries the derating that guards against that; see
+# `feeder_rate`, which is what callers should use.
 FEEDER_RATES = {
     "inserter": 1.4, "fast-inserter": 4.0, "bulk-inserter": 8.0, "stack-inserter": 12.0,
 }
+
+# Tiers whose ceiling above was never observed on this base. The plain inserter
+# is arithmetic -- Factorio's base chest->belt rates put it at ~0.36x a fast one,
+# applied to the researched fast-inserter figure -- and the two high-capacity
+# tiers are prototype claims. Only fast-inserter has a live datapoint behind it.
+UNMEASURED_FEEDER_RATES = frozenset({"inserter", "bulk-inserter", "stack-inserter"})
+
+# What an unmeasured ceiling is discounted by before anything is sized from it.
+# Erring low buys a cheaper-than-needed tier or one extra feed point; erring
+# high buys a line that runs throttled and reports itself healthy. Removing this
+# requires measuring the tiers on a live base, not a better guess -- the
+# procedure is in docs/21.
+UNMEASURED_RATE_DERATING = 0.75
+
+
+def feeder_rate(inserter: str) -> float:
+    """Throughput to size a feed array from: derated unless it was measured."""
+    ceiling = FEEDER_RATES.get(inserter)
+    if ceiling is None:
+        raise ValueError(
+            f"No feeder throughput known for {inserter!r}; add it to FEEDER_RATES"
+        )
+    if inserter in UNMEASURED_FEEDER_RATES:
+        return ceiling * UNMEASURED_RATE_DERATING
+    return ceiling
 
 # Cheapest first. stack-inserter is deliberately absent: docs/21 records it as
 # Gleba-only production, so it is never auto-selected on Nauvis even when the
@@ -239,7 +269,7 @@ def inserter_tiers_covering(items_per_second: float) -> tuple[str, ...]:
     if items_per_second < 0:
         raise ValueError("Inserter demand cannot be negative")
     covering = tuple(
-        tier for tier in _AUTO_INSERTER_TIERS if FEEDER_RATES[tier] >= items_per_second
+        tier for tier in _AUTO_INSERTER_TIERS if feeder_rate(tier) >= items_per_second
     )
     return covering or _AUTO_INSERTER_TIERS[-1:]
 

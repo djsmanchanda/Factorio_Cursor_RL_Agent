@@ -20,6 +20,7 @@ from core.fluid_systems import (
 from planners.local_layout_planner import (
     BELT_TIERS,
     FEEDER_RATES,
+    feeder_rate,
     FEED_HEADROOM,
     INSERTER_TIERS,
     MACHINE_SPEEDS,
@@ -226,7 +227,7 @@ def _item_feeders(recipe: str, machine_count: int, inserter_type: str) -> List[i
     LocalLayoutPlanner._feeders_needed, so both layers size feeds identically."""
     spec = FLUID_RECIPES[recipe]
     crafts = machine_count * FLUID_MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
-    rate = FEEDER_RATES[inserter_type]
+    rate = feeder_rate(inserter_type)
     return [max(1, -(-int(a * crafts * FEED_HEADROOM * 100) // int(rate * 100)))
             for a in spec["item_amounts"]]
 

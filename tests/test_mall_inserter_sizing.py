@@ -18,7 +18,7 @@ from planners.mall_layout import (  # noqa: E402
     generate_paired_mall_layout,
 )
 from planners.recipe_data import (  # noqa: E402
-    FEEDER_RATES,
+    feeder_rate,
     LINE_RECIPES,
     MACHINE_SPEEDS,
 )
@@ -47,8 +47,8 @@ def test_no_mall_cell_is_throttled_by_its_own_inserters(recipe: str) -> None:
         spec["machine"], spec.get("product_amount", 1), spec["craft_time"],
     )
 
-    assert FEEDER_RATES[chosen_in] >= intake, f"{recipe} input starves at {intake:.2f}/s"
-    assert FEEDER_RATES[chosen_out] >= output, f"{recipe} output backs up at {output:.2f}/s"
+    assert feeder_rate(chosen_in) >= intake, f"{recipe} input starves at {intake:.2f}/s"
+    assert feeder_rate(chosen_out) >= output, f"{recipe} output backs up at {output:.2f}/s"
 
 
 def test_the_busiest_recipe_gets_the_biggest_tier() -> None:
