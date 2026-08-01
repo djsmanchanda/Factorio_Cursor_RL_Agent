@@ -911,15 +911,27 @@ def ensure_produced(
         )
     existing = live_base.find_line(client, surface, force, item, spec["machine"])
     demand = live_intermediate_demand(client, surface, force, item)
+    # Every machine busy means this cell cannot go faster, whatever measured
+    # demand says -- and measured demand is unreliable here precisely because
+    # the consumers this item starves are the ones that would report it.
+    saturated = bool(
+        existing
+        and existing.machine_count > 0
+        and existing.working_count >= existing.machine_count
+    )
     promoted_count = promoted_line_machine_count(
-        item, demand, existing.machine_count if existing else 0,
+        item, demand, existing.machine_count if existing else 0, saturated=saturated,
     )
     promote_to_line = promoted_count is not None and (
-        existing is None or existing.machine_count < 6
+        existing is None or existing.machine_count < promoted_count
     )
     if promote_to_line:
+        why = (
+            f"all {existing.machine_count} machine(s) running flat out"
+            if saturated and existing else f"demand is {demand:.2f}/s"
+        )
         emit(
-            f"  INTERMEDIATE PROMOTION: {item} demand is {demand:.2f}/s; "
+            f"  INTERMEDIATE PROMOTION: {item} -- {why}; "
             f"building a shared {promoted_count}-machine line instead of another mall cell"
         )
     mall_provider: Point | None = None

@@ -797,3 +797,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added `expansion_target`, which walks the recipe DAG from a stalled item to the deepest extraction stage, following whichever input the base is shortest of per craft and guarding against recipe cycles; `expand_upstream` now uses it and names the traced bottleneck.
 - Why: Expansion only checked DIRECT ingredients for a mineable one, so fast-transport-belt (transport-belt + iron-gear-wheel, neither mineable) deferred forever at 11/25 while its real constraint, iron ore, sat two levels down.
 - Next: Only extraction is scaled. When a stage's own line is saturated rather than starved the runner still has no move, because `ensure_produced` refuses to duplicate an existing machine.
+
+## [2026-08-01] Saturated intermediates promote on the mining phase ladder
+- Files: `orchestrator/intermediate_scaling.py`, `orchestrator/autonomous_builder.py`, `tests/test_intermediate_promotion.py`, `CURRENT_STATUS.md`
+- What: A promotable intermediate whose machines are all working now promotes to a shared line on that evidence alone, and line size snaps to `EXTRACTION_DRILL_PHASES` (6, 20, 50, 100) -- reused, not copied -- stepping past the current size each time it saturates again.
+- Why: `live_intermediate_demand` only sums consumers that are WORKING, and the consumers a starved intermediate blocks are exactly the ones not working, so a flat-out gear cell measured 0.00/s demand, never cleared the 3.0/s promotion threshold, and starved every downstream line indefinitely.
+- Next: Promotion is still gated by `PROMOTABLE_INTERMEDIATES`, a hardcoded allowlist; an intermediate outside it saturates with no move available.
