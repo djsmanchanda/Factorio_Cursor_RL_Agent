@@ -809,3 +809,9 @@ backfilled from git history because this file did not exist yet.
 - What: Added `DRILL_MINING_AREAS` (electric 5x5, big 13x13) and `drill_siting_conflicts`, which rejects a centre with no target ore under it OR any foreign ore inside its mining area; `drill_footprints_have_resource` now wraps it so every existing siting search inherits the rule.
 - Why: The probe only checked the 3x3 footprint for the target, but an electric drill mines 5x5 -- one tile past its footprint on every side -- so a drill sited entirely on iron near a patch border also mined the adjacent copper and jammed its output with an item nothing downstream accepts.
 - Next: `DRILL_MINING_AREAS` covers the two electric drills; anything else raises rather than guessing a reach.
+
+## [2026-08-01] A promoted line resolves real sources, not stocked buffers
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_promoted_line_sources.py`, `CURRENT_STATUS.md`
+- What: Added `may_consume_stocked_inputs`; the bootstrap-from-stock shortcut is now taken only for a plain mall cell, never when promoting an intermediate to a shared line.
+- Why: The shortcut `continue`s without recording a source position, which is right for a requester-fed mall cell but not for a belt-fed line; promoting gears while 13 iron plates sat in a chest left `build_conversion_stage` with nothing to route from and ended the run on "iron-gear-wheel feeds on ['iron-plate'], which have no producing stage to supply them".
+- Next: Promotion retires the mall cell before the shared line completes, and the next pass rebuilds that cell -- observed twice in one run at (35, 31); worth confirming it converges rather than churning.

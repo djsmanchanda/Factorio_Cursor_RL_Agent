@@ -94,6 +94,27 @@ def _mineable(recipe: str) -> bool:
     )
 
 
+def may_consume_stocked_inputs(
+    *, upgrade_bootstrap: bool, promote_to_line: bool,
+) -> bool:
+    """Whether this build may satisfy an ingredient from a stocked buffer
+    instead of resolving a producing stage for it.
+
+    A readiness MALL CELL may: it is requester-fed, so bots really do supply it
+    from whatever is in a chest. Demanding a live upstream line first would
+    deadlock bootstrap items such as inserters, whose plates and gears are
+    already stocked while the iron-plate line itself needs those very inserters
+    as construction ghosts.
+
+    A PROMOTED LINE may not: it is belt-fed from a producing stage, so it needs
+    a real source POSITION, which a stocked buffer cannot give. Taking the
+    shortcut left build_conversion_stage with nothing to route from and ended a
+    run on "iron-gear-wheel feeds on ['iron-plate'], which have no producing
+    stage to supply them" -- while 13 iron plates sat in a chest.
+    """
+    return not upgrade_bootstrap and not promote_to_line
+
+
 def expansion_target(item: str, stock: Mapping[str, int]) -> str | None:
     """The deepest extraction stage that limits `item`, or None if none does.
 
@@ -1068,14 +1089,11 @@ def ensure_produced(
 
     if not _mineable(item):
         sources: dict[str, Point] = {}
-        # A readiness mall is allowed to consume a complete stocked input
-        # buffer. Requiring a live upstream line first creates a deadlock for
-        # bootstrap items such as inserters: their iron plates/gears/circuits
-        # are already available, but the iron-plate line itself needs the same
-        # inserters as construction ghosts.
         stocked = (
             live_base.available_items(client, surface, force)
-            if not upgrade_bootstrap else {}
+            if may_consume_stocked_inputs(
+                upgrade_bootstrap=upgrade_bootstrap, promote_to_line=promote_to_line,
+            ) else {}
         )
         crafts_needed = math.ceil(
             mall_stock_target / max(1, spec.get("product_amount", 1)),
