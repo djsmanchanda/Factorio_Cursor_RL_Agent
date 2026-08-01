@@ -1,3 +1,6 @@
+# Path: scripts/combine_docs.py
+# Purpose: Concatenate README.md and docs/ into the single FULL_DOCUMENTATION.md bundle.
+
 import os
 
 def combine_markdown_files(output_file, docs_dir='docs', readme_file='README.md'):

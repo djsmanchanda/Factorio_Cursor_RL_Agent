@@ -1009,3 +1009,31 @@ retargeted in the same change, and each retarget verified by confirming the test
 fails when the patch is removed.
 
 **Next:** the goal's closing audit and verification.
+
+## Closing audit for this batch of work
+
+**Verified:**
+- 971 passed, 1 skipped. All 17 mod Lua files compile.
+- Every module in orchestrator/planners/core/tools imports cleanly -- the two
+  new modules introduce no cycle.
+- Every .py and mod .lua file carries its `Path:`/`Purpose:` header
+  (`scripts/combine_docs.py` was the last one missing them).
+- The growth ladder coheres end to end: prep sizes extraction from its own draw
+  (iron 8.75/s -> 14 furnaces -> 20 drills; copper 3.00/s -> 5 -> 6), prep tops
+  out at 2 machines and promotion starts at 6 so the two cannot fight, and a
+  saturated cell climbs 2 -> 6 -> 20 -> 50 -> 100 on the identical ladder the
+  drills use. steel-plate is correctly excluded from promotion: it is a furnace
+  recipe the mining stage already sizes.
+- Four guards were verified by reintroducing the bug they catch: the batch
+  prefix (5 failures), the Lua section bookkeeping (4 separate bugs, all
+  caught), the orphan schema field, and the SETTING_FIELDS omission.
+
+**Known open, in priority order:**
+1. `FEEDER_RATES` derating is a policy margin, not a measurement. The live
+   procedure is in docs/21; running it is the only thing that closes this.
+2. LOC: nine files remain over the 500-line charter. The `autonomous_builder.py`
+   split is blocked on retargeting monkeypatch sites, described above.
+3. `planners/pipe_bridge.py` is a genuine orphan, kept deliberately.
+4. Nothing in this batch has been exercised against a live game. Prep,
+   corridor truncation, and the promotion set are all decision-layer changes
+   verified by test only.
