@@ -845,3 +845,22 @@ backfilled from git history because this file did not exist yet.
 - What: `compact_input_inserter` now takes the machine and recipe and sizes from intake rate via `inserter_for_demand`; added `compact_output_inserter` for the output face, which was a hardcoded fast-inserter; deleted the unreferenced `generate_compact_mall_layout`.
 - Why: Sizing from the requested batch left 8 of 13 mall recipes undersized -- an electronic-circuit cell draws 6.0 items/s and got a 1.4/s inserter, running at a quarter speed however full its requester was -- and a machine throttled by its inserter still reports as working, so the cell read as saturated and promotion built six more equally throttled machines.
 - Next: `FEEDER_RATES` remain estimates; the plain inserter's 1.4/s is derived from base-rate ratios rather than measured live.
+
+## Prep raises extraction, and retirement waits for its replacement
+
+**Files:** `orchestrator/autonomous_builder.py`, `tests/test_prep_extraction.py`
+
+**What:** Production prep now grows the plate lines to the furnace count its own
+draw implies (iron 14, copper 5) before it builds any intermediate cell, one
+plate per pass so the next pass re-surveys. A blocked corridor logs
+`PREP DEFERRED` and the run continues. Separately, the promoted-mall retirement
+plan is now submitted AFTER `build_conversion_stage` rather than before it.
+
+**Why:** An intermediate built over a starved plate line starves too, so prep
+that only placed assemblers was declaring a readiness it did not have.
+Retiring the mall cell first meant a pass that failed to finish the replacement
+line left the recipe with no machine at all, and the next survey rebuilt the
+very cell just removed -- observed twice in fifteen seconds at cell (35,31).
+
+**Next:** Deferral has no memory: a blocked drill site is retried identically
+on every later pass.

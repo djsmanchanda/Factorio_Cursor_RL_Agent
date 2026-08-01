@@ -12,8 +12,8 @@ from typing import Callable
 from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
 from orchestrator import live_base
 from orchestrator.baseline_production import (
-    BASELINE_MACHINES, baseline_build_order, baseline_drill_phase,
-    baseline_plate_draw,
+    BASELINE_MACHINES, BASELINE_PLATES, baseline_build_order,
+    baseline_drill_phase, baseline_plate_draw, baseline_smelter_count,
 )
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mine_retirement import retire_depleted_mines
@@ -1154,19 +1154,6 @@ def ensure_produced(
                 return None  # built something upstream this round; re-survey next loop
             sources[ingredient] = position
         if promote_to_line:
-            if mall_provider is not None and existing and len(existing.machine_positions) == 1:
-                retirement = generate_promoted_mall_retirement_plan(
-                    item, spec["machine"], existing.machine_positions[0], mall_provider,
-                )
-                retirement["surface"], retirement["force"] = surface, force
-                emit(
-                    f"  MALL RETIRE: removing the old {item} cell and clearing its "
-                    "request group before the dedicated line takes over"
-                )
-                _submit(
-                    client, bridge, surface, retirement,
-                    f"retire_promoted_mall_{item}", emit,
-                )
             # Site the line beside the input it eats most of, not beside the
             # mall. A 6-machine copper-cable line placed at the mall needed
             # 9.00/s of plate belted ~90 tiles from the mine and died on
@@ -1190,6 +1177,23 @@ def ensure_produced(
                 allow_logistic_inputs=False,
                 side_tap_output=True,
             )
+            # Retire the old cell only now the line that replaces it exists.
+            # Retiring first meant a pass that did not finish the line left the
+            # recipe with no machine at all, so the next survey rebuilt the very
+            # cell just removed -- seen twice in fifteen seconds at cell (35,31).
+            if mall_provider is not None and existing and len(existing.machine_positions) == 1:
+                retirement = generate_promoted_mall_retirement_plan(
+                    item, spec["machine"], existing.machine_positions[0], mall_provider,
+                )
+                retirement["surface"], retirement["force"] = surface, force
+                emit(
+                    f"  MALL RETIRE: the {item} line is up; removing the old cell "
+                    "and clearing its request group"
+                )
+                _submit(
+                    client, bridge, surface, retirement,
+                    f"retire_promoted_mall_{item}", emit,
+                )
         elif not upgrade_bootstrap:
             build_compact_mall_stage(
                 client, bridge, surface, force, item, sources, reference_point,
@@ -1348,6 +1352,44 @@ def run(
                     f"next review in {wait_ticks or 60} ticks"
                 )
                 time.sleep(5)
+                continue
+            # Extraction first: the prep set's draw is what sizes it, and an
+            # intermediate built over a starved plate line just starves too.
+            # Failure here is not fatal -- a blocked corridor should cost this
+            # pass, not the run, and the ladder still climbs on demand.
+            short_plate = next(
+                (plate for plate in BASELINE_PLATES if plate not in prepped), None,
+            )
+            if short_plate is not None:
+                wanted_furnaces = baseline_smelter_count(short_plate)
+                plate_line = live_base.find_line(
+                    client, surface, force, short_plate,
+                    LINE_RECIPES[short_plate]["machine"],
+                )
+                have = plate_line.machine_count if plate_line else 0
+                if have >= wanted_furnaces:
+                    prepped.add(short_plate)
+                    emit(
+                        f"  PREP READY: {short_plate} has {have}/{wanted_furnaces} furnace(s)"
+                    )
+                    continue
+                emit(
+                    f"--- production prep: {short_plate} extraction to "
+                    f"{wanted_furnaces} furnace(s) for "
+                    f"{baseline_plate_draw()[short_plate]:.2f}/s "
+                    f"(have {have}, drill phase {baseline_drill_phase(short_plate)}) ---"
+                )
+                try:
+                    build_mining_stage(
+                        client, bridge, surface, force, short_plate,
+                        reference_point, emit, expand=plate_line is not None,
+                    )
+                except (StuckError, ValueError) as error:
+                    prepped.add(short_plate)
+                    emit(
+                        f"  PREP DEFERRED: {short_plate} extraction stays at {have} "
+                        f"furnace(s) -- {error}"
+                    )
                 continue
             pending = [r for r in baseline_build_order() if r not in prepped]
             if pending:
