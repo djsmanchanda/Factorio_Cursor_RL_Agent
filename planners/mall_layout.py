@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 
 from planners.recipe_data import FEED_HEADROOM, MACHINE_SPEEDS, inserter_for_demand
+from planners.stock_gating import stock_gate
 
 MALL_MINIMUM_STACKS = {
     "production": 4,
@@ -247,6 +248,11 @@ def generate_paired_mall_layout(
     machine_action = {
         "action_type": "place_ghost", "entity": machine,
         "position": {"x": machine_x, "y": oy + 1.5},
+        # Stop crafting once the network already holds the target. Without this
+        # the only brake was the planner noticing on a LATER pass and dropping
+        # the target, which cost a pass and did nothing in the meantime -- the
+        # mall spent that time consuming stock to make more of what it had.
+        "logistic_condition": stock_gate(recipe, stock_target),
     }
     if set_recipe:
         machine_action["recipe"] = recipe

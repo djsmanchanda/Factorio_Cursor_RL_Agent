@@ -1313,3 +1313,50 @@ cross-base run meets several obstacles.
 
 This is the same defect as the stock cap, at the other end -- the opening
 figure was as wrong as the ceiling.
+
+## A mall cell stops itself once the network holds enough
+
+**Files:** `planners/stock_gating.py` (new), `planners/mall_layout.py`,
+`factorio_mod/layout_executor.lua`, `factorio_mod/logistic_sections.lua`,
+`schemas/build_plan.schema.json`, `tests/test_stock_gating.py`
+
+**What:** Every paired mall cell carries a `logistic_condition` on its machine:
+craft only while the logistic network holds fewer than the cell's stock target.
+
+**Why:** Before this the only brake was the planner noticing on a LATER pass
+and dropping the target. That cost a pass, and did nothing in between -- the
+mall spent the interval consuming stock to make more of what it already had,
+which is how a run ate its starter intermediates.
+
+**Design change from the plan.** The plan was roboport -> red/green wire ->
+decider -> machine. Verified against the live API instead of assumed, and
+`LuaAssemblingMachineControlBehavior` inherits `connect_to_logistic_network`
+and `logistic_condition` from `LuaGenericOnOffControlBehavior`: a machine reads
+the logistic network DIRECTLY. No wire, no roboport connection, no combinator,
+no constant combinator holding targets. It only has to stand inside roboport
+coverage, which a requester-fed mall cell does by construction.
+
+That also settles the inspectability question raised when this was proposed:
+the gate is a per-entity setting the planner writes into the build plan,
+exactly like `logistic_sections`. Nothing moves out of the plan and into
+in-world wiring.
+
+**API verified, not guessed** (lua-api.factorio.com): `circuit_enable_disable`
+and `circuit_condition` are the CIRCUIT pair; `connect_to_logistic_network` and
+`logistic_condition` are the LOGISTIC pair, which is the one that needs no
+wire. `CircuitConditionDefinition` is `{first_signal, comparator, constant}`,
+and the game returns unicode comparators when read back even where ASCII was
+written.
+
+**Guards:** the gate is in `SETTING_FIELDS`, so an already-built cell gets it
+reapplied when the target changes -- omitting it is the silent skip where the
+entity reports already_present, nothing fails, and the setting never lands. The
+executor also re-reads `connect_to_logistic_network` after writing, because
+pcall succeeding is not proof the property took. Verified by dropping the
+SETTING_FIELDS entry (3 tests fail) and by loosening the comparator to `<=`
+(2 tests fail).
+
+**Not built:** the red/green wire foundation, the roboport read-mode, and the
+constant-combinator target vector are all unnecessary for this. They stay
+unbuilt until something actually needs a signal the logistic network cannot
+supply.

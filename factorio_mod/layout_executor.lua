@@ -236,6 +236,27 @@ local function configure_created_entity(entity, action)
     end)
     if not ok then return "logistic_request_set_failed" end
   end
+  if action.logistic_condition then
+    -- A machine reads the LOGISTIC network directly; it needs no wire, no
+    -- roboport connection and no combinator, only to stand inside roboport
+    -- coverage. Failure is reported rather than swallowed: a gate that never
+    -- lands looks exactly like a machine nobody asked to gate, which is the
+    -- silent-skip failure SETTING_FIELDS exists to prevent.
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    local ok = pcall(function()
+      behavior.connect_to_logistic_network = true
+      behavior.logistic_condition = {
+        first_signal = { type = "item", name = action.logistic_condition.signal },
+        comparator = action.logistic_condition.comparator,
+        constant = action.logistic_condition.constant,
+      }
+    end)
+    if not ok then return "logistic_condition_set_failed" end
+    if behavior.connect_to_logistic_network ~= true then
+      return "logistic_condition_not_applied"
+    end
+  end
   if action.clear_logistic_groups then
     local ok, detail = pcall(function()
       clear_logistic_groups(entity, action.clear_logistic_groups)

@@ -1,185 +1,293 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "BuildPlan 1.2",
-  "type": "object",
-  "required": [
-    "phases"
-  ],
-  "properties": {
-    "phases": {
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "title": "BuildPlan 1.2",
+ "type": "object",
+ "required": [
+  "phases"
+ ],
+ "properties": {
+  "phases": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "name",
+     "actions"
+    ],
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "actions": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "actions"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
+       "type": "object",
+       "required": [
+        "action_type",
+        "entity",
+        "position"
+       ],
+       "properties": {
+        "action_type": {
+         "type": "string",
+         "enum": [
+          "place_ghost",
+          "place_entity",
+          "remove_entity"
+         ]
+        },
+        "entity": {
+         "type": "string"
+        },
+        "position": {
+         "type": "object",
+         "required": [
+          "x",
+          "y"
+         ],
+         "properties": {
+          "x": {
+           "type": "number"
           },
-          "actions": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "action_type",
-                "entity",
-                "position"
-              ],
-              "properties": {
-                "action_type": {
-                  "type": "string",
-                  "enum": [
-                    "place_ghost",
-                    "place_entity",
-                    "remove_entity"
-                  ]
-                },
-                "entity": {
-                  "type": "string"
-                },
-                "position": {
-                  "type": "object",
-                  "required": [
-                    "x",
-                    "y"
-                  ],
-                  "properties": {
-                    "x": {
-                      "type": "number"
-                    },
-                    "y": {
-                      "type": "number"
-                    }
-                  }
-                },
-                "direction": {
-                  "type": "string",
-                  "enum": [
-                    "north",
-                    "east",
-                    "south",
-                    "west"
-                  ]
-                },
-                "underground_type": {
-                  "type": "string",
-                  "enum": [
-                    "input",
-                    "output"
-                  ]
-                },
-                "recipe": {
-                  "type": "string"
-                },
-                "logistic_request": {
-                  "type": "object",
-                  "description": "Logistic request set on a requester/buffer chest, so bots deliver an ingredient instead of a belt carrying it.",
-                  "required": ["name", "count"],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": { "type": "string" },
-                    "count": { "type": "integer", "minimum": 1 }
-                  }
-                },
-                "logistic_requests": {
-                  "type": "array",
-                  "description": "Multiple item requests configured as slots in one logistic section.",
-                  "minItems": 1,
-                  "items": {
-                    "type": "object",
-                    "required": ["name", "count"],
-                    "additionalProperties": false,
-                    "properties": {
-                      "name": { "type": "string" },
-                      "count": { "type": "integer", "minimum": 1 }
-                    }
-                  }
-                },
-                "logistic_group": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Named Factorio logistic group shared by copies of this requester configuration."
-                },
-                "logistic_sections": {
-                  "type": "array",
-                  "description": "One named logistic section per set of machines this chest feeds. Each section is upserted by group name, so a chest serving two machines carries two independently maintained groups and the game sums them. Requests are the group's per-craft amounts; multiplier scales them for this chest.",
-                  "minItems": 1,
-                  "items": {
-                    "type": "object",
-                    "required": ["group", "requests"],
-                    "additionalProperties": false,
-                    "properties": {
-                      "group": { "type": "string", "minLength": 1 },
-                      "multiplier": { "type": "integer", "minimum": 1 },
-                      "requests": {
-                        "type": "array",
-                        "minItems": 1,
-                        "items": {
-                          "type": "object",
-                          "required": ["name", "count"],
-                          "additionalProperties": false,
-                          "properties": {
-                            "name": { "type": "string" },
-                            "count": { "type": "integer", "minimum": 1 }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "clear_logistic_groups": {
-                  "type": "array",
-                  "description": "Clear named requester sections when a mall machine is retired.",
-                  "minItems": 1,
-                  "items": { "type": "string", "minLength": 1 }
-                },                "inventory_limit": {
-                  "type": "object",
-                  "description": "Item-count target converted by the executor into a chest slot bar using the live item stack size.",
-                  "required": ["name", "count", "minimum_stacks_by_group", "growth_stacks"],
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": { "type": "string" },
-                    "count": { "type": "integer", "minimum": 1 },
-                    "growth_stacks": { "type": "integer", "minimum": 1 },
-                    "minimum_stacks_by_group": {
-                      "type": "object",
-                      "required": ["production", "logistics", "intermediate-products"],
-                      "additionalProperties": false,
-                      "properties": {
-                        "production": { "type": "integer", "minimum": 1 },
-                        "logistics": { "type": "integer", "minimum": 1 },
-                        "intermediate-products": { "type": "integer", "minimum": 1 }
-                      }
-                    }
-                  }
-                },
-                "infinity_filter": {
-                  "type": "string"
-                },
-                "fill_percentage": {
-                  "type": "number",
-                  "minimum": 0,
-                  "maximum": 1
-                }
-              },
-              "allOf": [
-                {
-                  "if": {
-                    "required": ["entity", "action_type"],
-                    "properties": {
-                      "entity": {"pattern": "underground-belt$"},
-                      "action_type": {"enum": ["place_ghost", "place_entity"]}
-                    }
-                  },
-                  "then": {"required": ["underground_type"]}
-                }
-              ]
-            }
+          "y": {
+           "type": "number"
           }
+         }
+        },
+        "direction": {
+         "type": "string",
+         "enum": [
+          "north",
+          "east",
+          "south",
+          "west"
+         ]
+        },
+        "underground_type": {
+         "type": "string",
+         "enum": [
+          "input",
+          "output"
+         ]
+        },
+        "recipe": {
+         "type": "string"
+        },
+        "logistic_request": {
+         "type": "object",
+         "description": "Logistic request set on a requester/buffer chest, so bots deliver an ingredient instead of a belt carrying it.",
+         "required": [
+          "name",
+          "count"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "name": {
+           "type": "string"
+          },
+          "count": {
+           "type": "integer",
+           "minimum": 1
+          }
+         }
+        },
+        "logistic_requests": {
+         "type": "array",
+         "description": "Multiple item requests configured as slots in one logistic section.",
+         "minItems": 1,
+         "items": {
+          "type": "object",
+          "required": [
+           "name",
+           "count"
+          ],
+          "additionalProperties": false,
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "count": {
+            "type": "integer",
+            "minimum": 1
+           }
+          }
+         }
+        },
+        "logistic_group": {
+         "type": "string",
+         "minLength": 1,
+         "description": "Named Factorio logistic group shared by copies of this requester configuration."
+        },
+        "logistic_sections": {
+         "type": "array",
+         "description": "One named logistic section per set of machines this chest feeds. Each section is upserted by group name, so a chest serving two machines carries two independently maintained groups and the game sums them. Requests are the group's per-craft amounts; multiplier scales them for this chest.",
+         "minItems": 1,
+         "items": {
+          "type": "object",
+          "required": [
+           "group",
+           "requests"
+          ],
+          "additionalProperties": false,
+          "properties": {
+           "group": {
+            "type": "string",
+            "minLength": 1
+           },
+           "multiplier": {
+            "type": "integer",
+            "minimum": 1
+           },
+           "requests": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+             "type": "object",
+             "required": [
+              "name",
+              "count"
+             ],
+             "additionalProperties": false,
+             "properties": {
+              "name": {
+               "type": "string"
+              },
+              "count": {
+               "type": "integer",
+               "minimum": 1
+              }
+             }
+            }
+           }
+          }
+         }
+        },
+        "clear_logistic_groups": {
+         "type": "array",
+         "description": "Clear named requester sections when a mall machine is retired.",
+         "minItems": 1,
+         "items": {
+          "type": "string",
+          "minLength": 1
+         }
+        },
+        "inventory_limit": {
+         "type": "object",
+         "description": "Item-count target converted by the executor into a chest slot bar using the live item stack size.",
+         "required": [
+          "name",
+          "count",
+          "minimum_stacks_by_group",
+          "growth_stacks"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "name": {
+           "type": "string"
+          },
+          "count": {
+           "type": "integer",
+           "minimum": 1
+          },
+          "growth_stacks": {
+           "type": "integer",
+           "minimum": 1
+          },
+          "minimum_stacks_by_group": {
+           "type": "object",
+           "required": [
+            "production",
+            "logistics",
+            "intermediate-products"
+           ],
+           "additionalProperties": false,
+           "properties": {
+            "production": {
+             "type": "integer",
+             "minimum": 1
+            },
+            "logistics": {
+             "type": "integer",
+             "minimum": 1
+            },
+            "intermediate-products": {
+             "type": "integer",
+             "minimum": 1
+            }
+           }
+          }
+         }
+        },
+        "infinity_filter": {
+         "type": "string"
+        },
+        "fill_percentage": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "logistic_condition": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "signal",
+          "comparator",
+          "constant"
+         ],
+         "properties": {
+          "signal": {
+           "type": "string",
+           "minLength": 1
+          },
+          "comparator": {
+           "enum": [
+            "<",
+            ">",
+            "=",
+            "\u2265",
+            "\u2264",
+            "\u2260",
+            ">=",
+            "<=",
+            "!="
+           ]
+          },
+          "constant": {
+           "type": "integer"
+          }
+         }
         }
+       },
+       "allOf": [
+        {
+         "if": {
+          "required": [
+           "entity",
+           "action_type"
+          ],
+          "properties": {
+           "entity": {
+            "pattern": "underground-belt$"
+           },
+           "action_type": {
+            "enum": [
+             "place_ghost",
+             "place_entity"
+            ]
+           }
+          }
+         },
+         "then": {
+          "required": [
+           "underground_type"
+          ]
+         }
+        }
+       ]
       }
+     }
     }
+   }
   }
+ }
 }
