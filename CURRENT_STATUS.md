@@ -1532,3 +1532,36 @@ which is the tier the mall can actually produce. An unroutable bridge is still a
 hard failure, because more belt cannot fix geometry.
 
 **Verified** by reverting both: 4 of 10 tests fail.
+
+## Smelting is a block decision, not one long line
+
+**Files:** `planners/smelter_block.py` (new), `tests/test_smelter_block.py`
+
+**What:** `block_shape(furnaces)` folds a furnace count into rows -- filling a
+row to its cap before starting the next -- and `block_is_full` says when the
+block has outgrown its phase and a SECOND block at another patch is the answer.
+
+Sizes are the user's, 2026-08-03: 15 furnaces per row in the opening phase and
+50 late, 4 rows opening and 30 late.
+
+**Why:** the existing rule puts every furnace in ONE row. At the top drill phase
+that is 104 furnaces in a 312-tile line, and a belt long enough to serve it has
+to cross whatever the base has already built -- which is the "very inefficient"
+belt design reported, and a large part of why siting drifted so far from the
+mine. Measured, feed belt per drill phase:
+
+| drills | furnaces | one row | block | block belt |
+|---|---|---|---|---|
+| 6 | 7 | 21 t | 7 x 1 | 21 t |
+| 20 | 21 | 63 t | 15 x 2 | 61 t |
+| 50 | 52 | 156 t | 15 x 4 | 77 t |
+| 100 | 104 | 312 t | 15 x 7 | 101 t |
+
+A test found a real modelling error while writing this: `feed_belt_length` was
+adding the cross-row run even for a single row, which has none -- it IS the
+line.
+
+**NOT WIRED YET.** This is the decision only. `_smelter_layout_geometry` and
+`generate_line_layout` still emit a single row, so nothing on the ground changes
+until the layout generator can lay a block. That is the next piece and it is a
+real geometry change, not a constant.
