@@ -1427,3 +1427,39 @@ there back to the reference point at (3,-1). Reported as "the design of the
 transport belt to the iron smelting was very inefficient", and the screenshot
 shows the belt looping around. Not yet fixed -- see the analysis below before
 changing a spatial heuristic that cannot be validated offline.
+
+## Two faults from the 01:01 run
+
+**Files:** `orchestrator/stage_services.py`, `orchestrator/autonomous_builder.py`,
+`tests/test_belt_survey_and_tiers.py`
+
+### 1. Belt laid over the mine's own belt, so no ore reached the furnaces
+`_BRIDGE_SURVEY_MARGIN` was 24 while `_ROUTE_SEARCH_MARGIN` is 48: the detour
+router could search TWICE as far as the collision survey covered, and emit belt
+onto tiles never checked for occupancy. The iron-ore bridge did exactly that,
+laying transport-belt over the mine's existing fast-transport-belt at
+x=15.5..17.5, y=-1.5, and the ore never arrived.
+
+The survey margin is now derived from the router's own constant, so raising the
+search radius cannot silently outrun the survey again.
+
+### 2. Iron dropped to a bot-fed smelter because ONE belt tier was short
+`_DEFAULT_BELT` is `fast-transport-belt`. A `MaterialShortage` naming it went
+straight to `build_logistic_smelter` -- a beltless, requester-fed line -- while
+plain `transport-belt` sat on a 200-unit mall target. Reported as "very slow and
+inefficient, just unacceptable for basic resource like iron and copper".
+
+Every stocked tier is now tried, preferred first, before belts are abandoned.
+The beltless smelter remains only for a genuine cold start where no tier can be
+afforded at all, and its log line now says it is to be replaced.
+
+**Verified** by reintroducing both: 8 of 9 tests fail.
+
+**Note on the repeated `inventory_limit_set_failed`:** that run still used the
+mod from before the `set_bar()` fix. The failing branch is inside the mod, so it
+needs a redeploy to take effect.
+
+**Still open -- smelter siting.** Unchanged from the previous entry: iron went to
+(6,51) again against a mine output at (12.5,-3.5). The anchor ordering, the
+60-tile drift in `find_clear_area`, and the equal weighting of ore haul against
+plate haul are all suspects, and none can be judged offline.

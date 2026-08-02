@@ -65,6 +65,7 @@ from orchestrator.stage_services import (
     validate_builder_target,
 )
 from orchestrator.stage_transport import (
+    _BELT_TIERS_CHEAPEST_FIRST,
     _publish_output_chest,
     _direct_single_belt_feed,
     _swap_infinity_chests,
@@ -404,23 +405,40 @@ def build_mining_stage(
         max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
         flow_direction=extraction.smelter_flow_direction,
     )
-    try:
-        return build_conversion_stage(
-            client, bridge, surface, force, recipe,
-            {extraction.ore: ore_output}, reference_point, emit,
-            **conversion_args,
-        )
-    except MaterialShortage as shortage:
-        if _DEFAULT_BELT not in shortage.required:
-            raise
-        emit(
-            f"  BOOTSTRAP: {recipe} cannot wait for {_DEFAULT_BELT}; "
-            "building a beltless logistic smelter"
-        )
-        return build_logistic_smelter(
-            client, bridge, surface, force, recipe, extraction.ore,
-            extraction.smelter_origin, ore_output, emit,
-        )
+    # Try every belt tier before giving up on belts. A bot-fed smelter is a
+    # last resort for a BASIC plate -- it is far slower than a belt and the
+    # bots are needed elsewhere -- so being short of one tier must never cost
+    # the line its belts while a cheaper tier is stocked. One run dropped iron
+    # to bot feeding purely because fast-transport-belt was short, with the
+    # plain belt sitting on a 200-unit mall target.
+    stock = live_base.available_items(client, surface, force)
+    tiers = [_DEFAULT_BELT] + [
+        tier for tier in _BELT_TIERS_CHEAPEST_FIRST
+        if tier != _DEFAULT_BELT and stock.get(tier, 0)
+    ]
+    shortage: MaterialShortage | None = None
+    for tier in tiers:
+        try:
+            return build_conversion_stage(
+                client, bridge, surface, force, recipe,
+                {extraction.ore: ore_output}, reference_point, emit,
+                belt_type=tier, **conversion_args,
+            )
+        except MaterialShortage as short_of:
+            if not any(belt in short_of.required for belt in _BELT_TIERS_CHEAPEST_FIRST):
+                raise
+            shortage = short_of
+            emit(f"  BELT TIER: {recipe} cannot afford {tier}; trying the next tier")
+    if not _mineable(recipe):
+        raise shortage
+    emit(
+        f"  BOOTSTRAP: no belt tier can be afforded for {recipe}; building a "
+        "beltless logistic smelter, to be replaced once belts exist"
+    )
+    return build_logistic_smelter(
+        client, bridge, surface, force, recipe, extraction.ore,
+        extraction.smelter_origin, ore_output, emit,
+    )
 
 
 def build_logistic_smelter(

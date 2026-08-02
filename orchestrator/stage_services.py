@@ -15,6 +15,7 @@ from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
 from orchestrator.roboport_placement import clear_chain_positions
+from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import distance, l_route, step_points
 from planners.plan_validation import ENTITY_FOOTPRINTS
@@ -79,7 +80,13 @@ _LOGISTIC_CHEST_ENTITIES = frozenset({
 _STAGE_CHEST_REACH = 30.0
 # How far outside the source->destination box to survey obstacles, so a route
 # has room to detour around something sitting right on the straight path.
-_BRIDGE_SURVEY_MARGIN = 24.0
+#
+# This must cover at least as much ground as the detour router is allowed to
+# SEARCH. At half the search margin, a detour could leave the surveyed box and
+# emit belt onto tiles never checked for occupancy -- an iron-ore bridge did
+# exactly that, laying transport-belt over the mine's own fast-transport-belt
+# at x=15.5..17.5, and the ore never reached the furnaces.
+_BRIDGE_SURVEY_MARGIN = max(24.0, _ROUTE_SEARCH_MARGIN)
 # Blockage remediation: bounded rounds of (wait -> diagnose -> fix -> recheck).
 # One round is long enough for bots to make visible progress, and the round
 # count bounds how long a genuinely unfixable stage can spin.
