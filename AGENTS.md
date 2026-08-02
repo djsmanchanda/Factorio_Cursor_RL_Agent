@@ -178,7 +178,44 @@ Every file begins with:
 # Purpose: <what this file does and why it exists>
 ```
 
-- Keep files ≤ 500 LOC; split or refactor if exceeded
+**Size limits.** Keep functions ≤ 80 LOC. This is the hard one, because it is
+the measure that has actually predicted defects here: the prep/promotion
+collision hid inside a 283-line `ensure_produced`, and the silent-skip gate came
+from one decision spelled out in three places. A function you cannot read in one
+screen is one where two features can sit side by side without noticing each
+other.
+
+File length is a **review trigger, not a gate**. Crossing 500 LOC means justify
+it in `CURRENT_STATUS.md`; it does not mean split it. Length on its own says
+nothing — measured 2026-08-02:
+
+| File | LOC | fns | avg | max | internal calls |
+|---|---|---|---|---|---|
+| `orchestrator/autonomous_builder.py` | 1185 | 9 | 120 | 281 | 20 |
+| `orchestrator/live_base.py` | 851 | 31 | 23 | 70 | 31 |
+| `planners/belt_bridge.py` | 521 | 19 | 22 | 70 | 67 |
+
+Same rule, three verdicts. `autonomous_builder.py` is a genuine tangle — but the
+number that says so is the 281-line function, and splitting the file only
+relocates it. `live_base.py` is 31 small RCON helpers; splitting it means
+inventing categories for "ask the game a question." `belt_bridge.py` is the most
+cohesive file in the repo at 67 internal call edges; splitting it would sever a
+tight cluster and make it harder to follow.
+
+**Standing waivers** (long for structural reasons, not for tangle):
+`orchestrator/live_base.py`, `planners/belt_bridge.py`, `core/metrics.py`,
+`tools/verify_factory_invariants.py`.
+
+**Split for a seam, not for a number.** The extraction that paid off was
+`factorio_mod/logistic_sections.lua` — it made untestable Lua testable. The line
+count fell as a side effect. When a split would only move code, don't.
+
+**Before moving a function, check who monkeypatches it.** Tests here patch by
+module attribute (`autonomous_builder.bring_stage_up`). Move a callee out from
+under a patched caller and the patch silently stops applying: the test then
+exercises the real function and still passes. Retarget the patch in the same
+change, and verify each retarget by confirming the test fails without it.
+
 - Prefer clarity over cleverness
 
 ---
