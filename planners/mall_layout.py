@@ -218,6 +218,7 @@ def generate_paired_mall_layout(
     product_amount: float = 1,
     craft_time: float,
     set_recipe: bool = True,
+    stock_gate_target: int | None = None,
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -248,12 +249,15 @@ def generate_paired_mall_layout(
     machine_action = {
         "action_type": "place_ghost", "entity": machine,
         "position": {"x": machine_x, "y": oy + 1.5},
-        # Stop crafting once the network already holds the target. Without this
-        # the only brake was the planner noticing on a LATER pass and dropping
-        # the target, which cost a pass and did nothing in the meantime -- the
-        # mall spent that time consuming stock to make more of what it had.
-        "logistic_condition": stock_gate(recipe, stock_target),
     }
+    # Gate a CONSTRUCTION cell on how many the network holds, so the mall stops
+    # rebuilding stock it already has. Only when a real stock figure is given:
+    # an intermediate feeding other machines is throttled by its own provider
+    # chest filling up, and gating one on a network count stops the whole chain
+    # behind it. Passing the machine COUNT here once produced a copper-cable
+    # cell that refused to craft above two cables.
+    if stock_gate_target is not None:
+        machine_action["logistic_condition"] = stock_gate(recipe, stock_gate_target)
     if set_recipe:
         machine_action["recipe"] = recipe
     actions = [

@@ -70,8 +70,8 @@ def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
 
 
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
-    """8.75 plate/s needs 14 furnaces; a standard row builds 7."""
-    assert baseline_smelter_count("iron-plate") == 14
+    """7.5 plate/s needs 12 furnaces; a standard row builds 7."""
+    assert baseline_smelter_count("iron-plate") == 12
     assert baseline_drill_phase("iron-plate") == 20
 
 

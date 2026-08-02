@@ -34,11 +34,19 @@ def _output_rate(recipe: str, machines: int) -> float:
 
 def test_the_prep_set_is_the_agreed_one() -> None:
     assert BASELINE_MACHINES == {
-        "steel-plate": 2,
         "iron-gear-wheel": 2,
         "copper-cable": 2,
         "electronic-circuit": 1,
     }
+
+
+def test_nothing_smelted_is_prepped_as_a_mall_cell() -> None:
+    """A furnace takes its recipe from what is inserted, so an idle one reports
+    none and find_line can never count it. Prep saw zero however many it had
+    built and placed another cell every pass -- twelve steel-plate furnaces
+    across six mall cells in one run."""
+    for recipe in BASELINE_MACHINES:
+        assert LINE_RECIPES[recipe].get("set_recipe", True), recipe
 
 
 def test_cable_capacity_covers_the_circuit_machine_it_feeds() -> None:
@@ -59,7 +67,7 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
     draw = baseline_plate_draw()
 
     assert set(draw) == set(BASELINE_PLATES)
-    assert draw["iron-plate"] == pytest.approx(8.75)
+    assert draw["iron-plate"] == pytest.approx(7.5)
     assert draw["copper-plate"] == pytest.approx(3.0)
 
 

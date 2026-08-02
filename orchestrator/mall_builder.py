@@ -129,17 +129,30 @@ def build_compact_mall_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,
     bring_stage_up: Callable, emit: Callable[[str], None], *, stock_target: int = 1,
+    stock_gate_target: int | None = None,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
+    spec = LINE_RECIPES[recipe]
+    if not spec.get("set_recipe", True):
+        # find_line counts machines by the recipe they have SET. A furnace takes
+        # its recipe from whatever is inserted, so an idle one has none and can
+        # never be counted -- the caller sees zero however many were built, and
+        # builds another every pass. Twelve steel-plate furnaces went up across
+        # six mall cells that way before the livelock guard stopped it.
+        raise StuckError(
+            f"{recipe} is smelted, not assembled: its machines take a recipe from "
+            "what is inserted, so a mall cell for it could never be counted again "
+            "and would be rebuilt every pass. It needs a smelting stage."
+        )
     allocation = _choose_slot(client, surface, recipe, reference_point)
     if allocation is None:
         raise StuckError(f"No assignable slot remains in the compact parts mall for {recipe}")
     origin, side = allocation
-    spec = LINE_RECIPES[recipe]
     plan = generate_paired_mall_layout(
         recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        stock_gate_target=stock_gate_target,
     )
     plan["surface"], plan["force"] = surface, force
     machine = _slot_position(origin, side)

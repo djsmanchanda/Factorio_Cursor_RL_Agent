@@ -1360,3 +1360,39 @@ SETTING_FIELDS entry (3 tests fail) and by loosening the comparator to `<=`
 constant-combinator target vector are all unnecessary for this. They stay
 unbuilt until something actually needs a signal the logistic network cannot
 supply.
+
+## Three faults from the 23:30 run
+
+**Files:** `planners/mall_layout.py`, `orchestrator/mall_builder.py`,
+`orchestrator/autonomous_builder.py`, `orchestrator/baseline_production.py`,
+`tests/test_stock_gating.py`, `tests/test_baseline_production.py`
+
+### 1. Cells gated at "< 2"
+`_prep_intermediate` passes `stock_target=wanted`, where `wanted` is a MACHINE
+COUNT from `BASELINE_MACHINES`, not a quantity of product. The gate added last
+commit turned that long-standing conflation into a hard production stop: the
+copper-cable cell refused to craft above two cables.
+
+Gating is now opt-in (`gate_on_stock`), and only the mall-task path asks for it,
+because only that path has a real count of finished goods. An intermediate that
+feeds other machines is throttled by its own provider chest filling up; gating
+one on a network count stops every line behind it.
+
+### 2. Twelve steel furnaces across six mall cells
+`find_line` counts machines by the recipe they have SET. `steel-plate` carries
+`set_recipe: False` because a furnace takes its recipe from whatever is
+inserted -- so an idle one reports none and can never be counted. Prep read
+`have=0` however many it had built, and placed another cell every pass until the
+livelock guard stopped it (it did stop it, after twelve furnaces).
+
+`build_compact_mall_stage` now refuses any recipe with `set_recipe: False`,
+because such a cell can never be re-counted and would be rebuilt forever. A
+silent infinite loop becomes a stated error.
+
+### 3. steel-plate does not belong in the prep set
+Removed. It is smelted, not assembled, and it wants an iron-plate BELT that does
+not exist that early. It is built on demand by whatever needs it, through a
+smelting stage. Iron prep draw falls 8.75 -> 7.50/s, 14 -> 12 furnaces; the
+drill phase stays 20.
+
+**Verified** by reintroducing all three together: 5 tests fail.

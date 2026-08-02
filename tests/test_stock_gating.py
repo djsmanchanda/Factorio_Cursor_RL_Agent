@@ -22,11 +22,12 @@ _EXECUTOR = (REPO_ROOT / "factorio_mod" / "layout_executor.lua").read_text(encod
 _SECTIONS = (REPO_ROOT / "factorio_mod" / "logistic_sections.lua").read_text(encoding="utf-8")
 
 
-def _cell(stock_target: int = 50) -> dict:
+def _cell(stock_target: int = 50, *, gated: bool = True) -> dict:
     plan = generate_paired_mall_layout(
         "transport-belt", "assembling-machine-2", ["iron-gear-wheel", "iron-plate"],
         [1, 1], (0, 0), "left", stock_target=stock_target, product_amount=2,
         craft_time=0.5,
+        stock_gate_target=stock_target if gated else None,
     )
     plan["surface"], plan["force"] = "nauvis", "player"
     return plan
@@ -135,3 +136,41 @@ def test_the_gate_is_verified_after_it_is_written() -> None:
     block = block[:block.index("if action.clear_logistic_groups then")]
 
     assert "behavior.connect_to_logistic_network ~= true" in block
+
+
+def test_a_prep_cell_is_not_gated() -> None:
+    """An intermediate feeding other machines is throttled by its own provider
+    chest filling up. Gating one on a network count stops the chain behind it --
+    prep passed the MACHINE COUNT as the target and produced a copper-cable cell
+    that refused to craft above two cables."""
+    machine = next(
+        action for action in actions(_cell(gated=False))
+        if action["entity"] == "assembling-machine-2"
+    )
+
+    assert "logistic_condition" not in machine
+
+
+def test_only_a_construction_target_asks_for_a_gate() -> None:
+    """The mall task path has a real count of finished goods; prep does not."""
+    import inspect
+
+    from orchestrator import autonomous_builder as builder
+
+    served = inspect.getsource(builder._serve_mall_task)
+    prepped = inspect.getsource(builder._prep_intermediate)
+
+    assert "gate_on_stock=True" in served
+    assert "gate_on_stock" not in prepped
+
+
+def test_a_smelted_recipe_is_refused_a_mall_cell() -> None:
+    """It could never be counted again, so it would be rebuilt every pass."""
+    import inspect
+
+    from orchestrator.mall_builder import build_compact_mall_stage
+
+    source = inspect.getsource(build_compact_mall_stage)
+
+    assert 'spec.get("set_recipe", True)' in source
+    assert "needs a smelting stage" in source

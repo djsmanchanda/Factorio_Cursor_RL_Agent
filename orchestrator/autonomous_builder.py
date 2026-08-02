@@ -1078,6 +1078,7 @@ def _build_assembled_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
     mall_provider: Point | None, *, upgrade_bootstrap: bool,
+    gate_on_stock: bool = False, stock_target: int = 1,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
     sources = _ingredient_sources(
@@ -1148,6 +1149,7 @@ def ensure_produced(
     reference_point: Point, emit: Callable[[str], None], *,
     upgrade_bootstrap: bool = True, stock_target: int = 1,
     minimum_machines: int = 1, allow_promotion: bool = True,
+    gate_on_stock: bool = False,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -1196,6 +1198,7 @@ def ensure_produced(
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
+            gate_on_stock=gate_on_stock, stock_target=stock_target,
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
@@ -1223,6 +1226,11 @@ def _serve_mall_task(
         output = ensure_produced(
             client, bridge, surface, force, item, reference_point, emit,
             upgrade_bootstrap=False, stock_target=target,
+            # A construction target is a real count of finished goods, so the
+            # cell may stop itself once the network holds that many. Prep does
+            # not pass this: its "target" is a machine count, and gating an
+            # intermediate on one stops every line behind it.
+            gate_on_stock=True,
         )
     except MaterialShortage as shortage:
         add_demands(mall_targets, shortage)

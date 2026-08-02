@@ -16,8 +16,13 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 # Counts are machines, and deliberately small -- this is a standing baseline,
 # not a target. iron-gear-wheel sits in the mall as two cells (both halves of
 # one paired cell) until saturation promotes it to a dedicated line.
+# steel-plate is deliberately NOT here. It is smelted, not assembled: a furnace
+# takes its recipe from what is inserted, so an idle one reports no recipe and
+# find_line can never count it. Prep saw zero however many it had built and
+# placed another cell every pass -- twelve furnaces across six mall cells in one
+# run. It also wants an iron-plate BELT, which does not exist this early. Steel
+# belongs to a smelting stage, and is built on demand by whatever needs it.
 BASELINE_MACHINES = {
-    "steel-plate": 2,
     "iron-gear-wheel": 2,
     "copper-cable": 2,
     "electronic-circuit": 1,
