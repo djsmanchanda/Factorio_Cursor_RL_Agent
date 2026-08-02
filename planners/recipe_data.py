@@ -391,6 +391,19 @@ MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3
 MACHINE_CAPABILITIES: Dict[str, dict] = {}
 
 
+# item -> stack size, from the live game. "Fill the chest" is only a real
+# number if the stack size is the game's rather than a guess.
+ITEM_STACK_SIZES: Dict[str, int] = {}
+
+
+def install_catalog_stack_sizes(catalog: Mapping) -> int:
+    """Record live item stack sizes; returns how many were learned."""
+    for item, size in (catalog.get("stack_sizes") or {}).items():
+        if isinstance(item, str) and isinstance(size, int) and size > 0:
+            ITEM_STACK_SIZES[item] = size
+    return len(ITEM_STACK_SIZES)
+
+
 def install_catalog_machines(catalog: Mapping) -> tuple[str, ...]:
     """Record what each crafting machine can actually run, from the live game."""
     learned: list[str] = []

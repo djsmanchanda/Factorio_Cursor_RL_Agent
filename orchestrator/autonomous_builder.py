@@ -19,6 +19,7 @@ from orchestrator.build_decisions import (
     may_consume_stocked_inputs,
 )
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
+from orchestrator.construction_stock import BULK_CONSTRUCTION_ITEMS, standing_target
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, baseline_build_order,
     baseline_drill_phase, baseline_plate_draw, baseline_smelter_count,
@@ -84,8 +85,10 @@ from planners.mall_layout import (
 )
 from planners.recipe_data import (
     LINE_RECIPES,
+    ITEM_STACK_SIZES,
     install_catalog_line_recipes,
     install_catalog_machines,
+    install_catalog_stack_sizes,
 )
 from tools.rcon_client import RconClient
 
@@ -1405,9 +1408,36 @@ def _advance_the_goal(
         return _SHORTAGE
 
 
+def _lift_targets_the_base_can_supply(
+    client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
+    emit: Callable[[str], None],
+) -> None:
+    """Take the cap off any bulk item the base now makes for itself.
+
+    While an item is scarce every one comes out of the player's starter kit, so
+    the opening figure stands. Once a line is making them the cap is pointless:
+    an expansion can want a thousand belts and hundreds of splitters, and a
+    base cannot overproduce what it cannot produce.
+    """
+    for item, target in sorted(mall_targets.items()):
+        if item not in BULK_CONSTRUCTION_ITEMS:
+            continue
+        lifted = standing_target(
+            item, target,
+            self_sufficient=_has_producer(client, surface, force, item),
+            stack_sizes=ITEM_STACK_SIZES,
+        )
+        if lifted > target:
+            mall_targets[item] = lifted
+            emit(
+                f"  STOCK CAP LIFTED: {item} {target} -> {lifted}; the base makes "
+                "its own, so the chest is simply filled"
+            )
+
+
 def _survey_pass(
     client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
-    priorities: PriorityList,
+    priorities: PriorityList, emit: Callable[[str], None],
 ) -> tuple[int, object | None]:
     """Read the base, retire targets stock already covers, pick the next task.
 
@@ -1417,6 +1447,7 @@ def _survey_pass(
     """
     stock = live_base.available_items(client, surface, force)
     tick = live_base.game_tick(client)
+    _lift_targets_the_base_can_supply(client, surface, force, mall_targets, emit)
     priorities.sync(mall_targets, stock, tick)
     for stocked_item, stocked_target in list(mall_targets.items()):
         if stock.get(stocked_item, 0) >= stocked_target:
@@ -1476,6 +1507,7 @@ def _open_the_run(
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
     machines = install_catalog_machines(catalog)
+    install_catalog_stack_sizes(catalog)
     emit(
         f"RECIPE CATALOG: loaded {len(catalog.get('recipes', []))} force recipes; "
         f"{len(learned)} additional solid recipes are executable"
@@ -1538,7 +1570,7 @@ def run(
         iteration = 0
         while iteration < max_iterations:
             tick, task = _survey_pass(
-                client, surface, force, mall_targets, priorities,
+                client, surface, force, mall_targets, priorities, emit,
             )
             signature = _pass_signature(task, mall_targets, prepped)
             unchanged_passes = (

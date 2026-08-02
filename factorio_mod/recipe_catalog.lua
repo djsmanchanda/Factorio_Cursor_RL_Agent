@@ -116,7 +116,18 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
     end
   end
   table.sort(machines, function(a, b) return a.name < b.name end)
-  local payload = { version = "1.1.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes, machines = machines }
+  -- Stack sizes for everything a recipe produces. "Fill the chest" is only a
+  -- real number if the stack size is the game's, not a guess.
+  local stack_sizes = {}
+  for _, recipe in pairs(recipes) do
+    for _, product in pairs(recipe.products or {}) do
+      if product.type == "item" and not stack_sizes[product.name] then
+        local item = prototypes.item[product.name]
+        if item then stack_sizes[product.name] = item.stack_size end
+      end
+    end
+  end
+  local payload = { version = "1.2.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes, machines = machines, stack_sizes = stack_sizes }
   local path = "factorio_mod/recipe_catalogs/recipe_catalog_" .. game.tick .. ".json"
   local json = helpers.table_to_json(payload)
   -- An EMPTY Lua table serialises to `{}` (object), not `[]` (array), so any

@@ -1264,3 +1264,31 @@ catalog -- 6 items the agent still cannot build:
 - `electric-engine-unit` -- crafting-with-fluid, needs lubricant.
 - `flying-robot-frame` -- now learnable, but blocked on the two above.
 - `construction-robot`, `logistic-robot` -- blocked on the frame.
+
+## Construction stock fills the chest once the base makes its own
+
+**Files:** `orchestrator/construction_stock.py` (new),
+`orchestrator/autonomous_builder.py`, `planners/recipe_data.py`,
+`factorio_mod/recipe_catalog.lua`, `schemas/recipe_catalog.schema.json`,
+`tests/test_construction_stock.py`
+
+**What:** A bulk construction item keeps its small opening figure only while
+nothing on the base produces it. Once a line does, the cap comes off and the
+target becomes a full provider chest (48 slots x the live stack size -- 4800
+belts). Machines are exempt. The catalog (v1.2.0) now exports item stack sizes
+so that figure is the game's rather than a guess.
+
+**Why:** User standard, 2026-08-02: "< 50 is restrictive in the long term,
+there will be blueprints where more than 1000 of belt will be required as well
+as hundred splitters and underground belts", and "after the game is out of the
+starter phase, just let it build and fill up the chest".
+
+**Why self-sufficiency is the phase boundary** rather than a schedule or a
+refill count: while an item is scarce, every one comes out of the player's
+starter kit and an opening figure protects it. Once the base makes them, the
+cap is pointless and self-limiting in the right way -- a base cannot
+overproduce what it cannot produce.
+
+**Superseded:** a first attempt used a 5-rung ladder (50/200/500/1000/2000)
+climbing on a persisted refill count in the priority list. Dropped as
+over-built once the rule was stated plainly: it is a phase change, not a curve.

@@ -15,7 +15,8 @@
   "version": {
    "enum": [
     "1.0.0",
-    "1.1.0"
+    "1.1.0",
+    "1.2.0"
    ]
   },
   "force": {
@@ -79,6 +80,13 @@
       }
      }
     }
+   }
+  },
+  "stack_sizes": {
+   "type": "object",
+   "additionalProperties": {
+    "type": "integer",
+    "minimum": 1
    }
   }
  },
