@@ -1634,3 +1634,33 @@ column (three at 9.00/s through a fast inserter) and the bridge fills those
 chests rather than running belt into the line. `feed_style="sideload"` exists
 and feeds from belt columns instead. Switching the conversion stage to it is a
 real layout change and is NOT done.
+
+## A feed endpoint nothing could fill
+
+**Files:** `orchestrator/stage_transport.py`, `orchestrator/autonomous_builder.py`,
+`tests/test_feed_endpoints.py`
+
+**The fault:** a transport-belt line was built with its gear belt connected and
+its iron-plate belt not, and stayed that way -- seven machines, zero working.
+
+**Two causes, compounding.**
+
+1. `_swap_infinity_chests` gave a BELT-mode feed endpoint a plain `steel-chest`.
+   Only a belt can fill one. When the iron-plate bridge failed, nothing could
+   ever fill it, and the repair pass kept reporting the line as merely
+   "supply-starved" -- which reads as "upstream is slow" rather than "this
+   ingredient has no supply route at all".
+
+   Every feed endpoint is now a requester chest with a request, per user
+   direction: "no need for the steel chest, just directly connect the line or
+   put a requester". A requester takes belt input through its inserter exactly
+   as a steel chest does, and bots keep the line alive meanwhile. Once the belt
+   runs the chest stays full and the request goes quiet on its own, so it costs
+   nothing where the belt does exist.
+
+2. The `MaterialShortage` that aborted the bridge was caught and swallowed
+   without a word. A stage that failed half-built looked identical in the log to
+   one nobody had started. It now names what it is short of and says the stage
+   resumes once the mall has it.
+
+**Verified** by reverting both: 4 of 6 tests fail.

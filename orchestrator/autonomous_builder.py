@@ -1264,7 +1264,18 @@ def _serve_mall_task(
             gate_on_stock=True, stock_buffer=buffer,
         )
     except MaterialShortage as shortage:
+        # SAY SO. This was silent, so a stage that failed half-built looked
+        # identical in the log to one nobody had started -- the iron-plate belt
+        # for a transport-belt line simply never appeared, with no line
+        # explaining why.
         add_demands(mall_targets, shortage)
+        emit(
+            f"  MALL DEMAND: {shortage.stage} needs "
+            + ", ".join(
+                f"{name}={count}" for name, count in sorted(shortage.required.items())
+            )
+            + " -- queued; this stage resumes once the mall has them"
+        )
         return
     if output is not None:
         def expand_upstream() -> bool:

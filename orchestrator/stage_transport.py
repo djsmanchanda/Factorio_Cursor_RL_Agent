@@ -610,12 +610,20 @@ def _swap_infinity_chests(
         for action in phase["actions"]:
             if action.get("entity") == "infinity-chest":
                 ingredient = action.pop("infinity_filter")
-                if modes.get(ingredient, "logistic") == "logistic":
-                    action["entity"] = "requester-chest"
-                    action["logistic_request"] = {"name": ingredient, "count": request_count}
-                else:
-                    # Belt-fed: a plain chest the incoming belt unloads into.
-                    action["entity"] = "steel-chest"
+                # A REQUESTER either way. A belt-fed endpoint used to be a
+                # plain steel chest, which only a belt can fill -- so when the
+                # bridge for that ingredient failed, nothing could ever fill it
+                # and the line was permanently dead. Observed on a
+                # transport-belt line whose gear belt was built and whose
+                # iron-plate belt was not: seven machines, zero working, and a
+                # repair pass that kept reporting it merely "supply-starved".
+                #
+                # A requester takes belt input through its inserter exactly as
+                # a steel chest does, and bots keep it alive meanwhile. Once the
+                # belt runs, the chest stays full and the request goes quiet on
+                # its own, so this costs nothing when the belt does exist.
+                action["entity"] = "requester-chest"
+                action["logistic_request"] = {"name": ingredient, "count": request_count}
                 positions[ingredient] = (action["position"]["x"], action["position"]["y"])
     return positions
 
