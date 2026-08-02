@@ -15,7 +15,14 @@ from orchestrator import autonomous_builder  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage, add_demands  # noqa: E402
 
 _RUN = inspect.getsource(autonomous_builder.run)
-_PREP = _RUN[_RUN.index("# Extraction first:"):_RUN.index("pending = [r for r")]
+_PREP = inspect.getsource(autonomous_builder._prep_plate_extraction)
+_LOOP = _RUN + "".join(
+    inspect.getsource(helper) for helper in (
+        autonomous_builder._serve_mall_task,
+        autonomous_builder._prep_plate_extraction,
+        autonomous_builder._prep_intermediate,
+    )
+)
 
 
 def test_a_material_shortage_in_plate_prep_is_not_fatal() -> None:
@@ -49,9 +56,9 @@ def test_material_shortage_is_not_caught_by_the_deferral_clause() -> None:
 
 def test_every_build_call_in_the_run_loop_handles_a_shortage() -> None:
     """One unguarded call is enough to end a run, and this one was."""
-    guarded = _RUN.count("except MaterialShortage as shortage:")
+    guarded = _LOOP.count("except MaterialShortage as shortage:")
 
-    assert guarded >= 4, f"only {guarded} shortage handlers in run()"
+    assert guarded >= 4, f"only {guarded} shortage handlers across the run loop"
 
 
 def test_demands_keep_the_largest_target() -> None:

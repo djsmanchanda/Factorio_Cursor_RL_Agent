@@ -1060,3 +1060,39 @@ drills come from the mall -- and it needs to push back a step, not die.
 
 **Note:** a shortage must NOT take the `PREP DEFERRED` path, which marks a plate
 finished for the whole run. The mall is about to fix it; prep should retry.
+
+## No function in autonomous_builder.py exceeds the 80-line charter limit
+
+**Files:** `orchestrator/autonomous_builder.py`, `tests/test_run_loop_bounds.py`,
+`tests/test_prep_extraction.py`, `tests/test_prep_precedence.py`,
+`tests/test_prep_shortage.py`
+
+**What:** The five oversized functions are decomposed into 32 functions, largest
+now 80 lines (was 281). `ensure_produced` 281 -> 57, `run` 232 -> 80,
+`build_conversion_stage` 219 -> 80, `build_mining_stage` 145 -> 72,
+`bring_stage_up` 115 -> 41. The file grew 1185 -> 1537 LOC, which is the point:
+file length was never the metric.
+
+**Why:** Per the revised AGENTS.md 11, function size is the hard limit because
+it is what predicted the defects. Every helper stays in this module on purpose
+-- tests patch `bring_stage_up` and `build_conversion_stage` by module
+attribute, and a callee moved to another module would resolve the real function
+instead of the patch, silently, with the test still passing.
+
+**How it was verified.** Tests alone do not prove a move refactor: they pass
+just as happily if a name silently resolves to the wrong scope. `pyflakes` was
+the real check and it caught six genuine defects the suite did not --
+`area`, `expand`, `ore_output`, `modes`, `max_belt_route_tiles`, and
+`direct_belt_input` all became unbound when their block moved. Bodies were
+taken verbatim from source rather than retyped, after an early attempt at
+retyping introduced differences.
+
+Three source-slicing tests broke because the text they searched for had moved.
+Two of them (`test_run_loop_bounds.py`) are now behavioural instead: the stall
+signature and the livelock bound are pure functions, so they are called rather
+than grepped, and the file gained five tests in the process. That is the seam
+benefit the charter asks for -- the split paid for itself in testability, not
+in line count.
+
+**Still over 80 LOC repo-wide:** 33 functions, largest
+`planners/line_layouts.py:generate_line_layout` at 295.

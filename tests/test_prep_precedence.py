@@ -32,7 +32,7 @@ def test_ensure_produced_can_be_told_not_to_promote() -> None:
 def test_prep_asks_for_mall_cells_and_forbids_promotion() -> None:
     """The live fault: prep asked for 2 copper-cable machines, and promotion
     turned the second pass into a 6-machine dedicated line instead."""
-    prep = _SOURCE[_SOURCE.index("--- production prep:"):]
+    prep = inspect.getsource(autonomous_builder._prep_intermediate)
     call = prep[:prep.index(")", prep.index("ensure_produced("))]
 
     assert "minimum_machines=wanted" in call

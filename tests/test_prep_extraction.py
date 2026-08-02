@@ -19,12 +19,13 @@ from orchestrator.baseline_production import (  # noqa: E402
 )
 
 _SOURCE = inspect.getsource(autonomous_builder)
-_PREP = _SOURCE[_SOURCE.index("# Extraction first:"):_SOURCE.index("--- iteration {iteration}")]
+_PREP = inspect.getsource(autonomous_builder._prep_plate_extraction)
+_LOOP = inspect.getsource(autonomous_builder.run)
 
 
 def test_plates_are_prepped_before_intermediates() -> None:
     """An intermediate built over a starved plate line just starves too."""
-    assert _PREP.index("short_plate") < _PREP.index("baseline_build_order()")
+    assert _LOOP.index("_prep_plate_extraction(") < _LOOP.index("_prep_intermediate(")
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
