@@ -8,6 +8,11 @@ from typing import Callable
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
+from orchestrator.pole_relocation import (
+    choose_pole_move,
+    corridor_tiles,
+    relocation_plan,
+)
 from orchestrator.stage_services import (
     StuckError,
     _BOT_THROUGHPUT_LIMIT,
@@ -391,6 +396,65 @@ def preflight_ingredient_transport(
     )
 
 
+def relocate_blocking_poles(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    source_position: Point, feed_position: Point, emit: Callable[[str], None],
+) -> int:
+    """Nudge aside any pole standing on the corridor, and report how many moved.
+
+    A pole is the one obstacle worth moving rather than routing around: it is a
+    one-tile entity whose job is to stand *somewhere* in a supply area, not on
+    one exact tile. Everything else on a route -- a machine, a chest, a drill --
+    is where it is for a reason.
+
+    A pole only moves when the new position still covers every consumer it was
+    powering AND still reaches every pole it was wired to. If no such position
+    exists it stays, and the caller routes around it as before.
+    """
+    corridor = corridor_tiles(source_position, feed_position)
+    area = (
+        (min(source_position[0], feed_position[0]) - 2,
+         min(source_position[1], feed_position[1]) - 2),
+        (max(source_position[0], feed_position[0]) + 2,
+         max(source_position[1], feed_position[1]) + 2),
+    )
+    standing = [
+        (name, position)
+        for name, position in live_base.poles_in_area(client, surface, area)
+        if (math.floor(position[0]), math.floor(position[1])) in corridor
+    ]
+    if not standing:
+        return 0
+    blocked = live_base.occupied_tiles(client, surface, *area)
+    moves = []
+    for name, position in standing:
+        context = live_base.pole_context(client, surface, position)
+        if context is None:
+            continue
+        move = choose_pole_move(
+            name, position,
+            supplied=context["supplied"], neighbours=context["neighbours"],
+            blocked=blocked, keep_clear=corridor,
+        )
+        if move is None:
+            emit(
+                f"  POLE STAYS: {name} at {position} blocks the route but cannot "
+                "move without dropping something off the network -- routing around"
+            )
+            continue
+        emit(
+            f"  POLE MOVED: {name} {position} -> {move.new} to clear the belt "
+            f"route ({move.tiles:.0f} tile(s); supply and wiring preserved)"
+        )
+        moves.append(move)
+    if not moves:
+        return 0
+    plan = relocation_plan(moves)
+    plan["surface"], plan["force"] = surface, force
+    _submit(client, bridge, surface, plan, "relocate_blocking_poles", emit)
+    return len(moves)
+
+
 def ensure_ingredient_transport(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ingredient: str, source_position: Point, feed_position: Point,
@@ -430,11 +494,24 @@ def ensure_ingredient_transport(
              f"fit inside the {_BOT_THROUGHPUT_LIMIT}/s bot limit"
     )
     emit(f"  {recipe}: {ingredient} needs a belt ({reason})")
-    actions, belt_type, _ = _plan_belt_transport(
-        client, surface, force, ingredient, source_position, feed_position,
-        reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
-        upstream_shift=upstream_shift,
-    )
+    try:
+        actions, belt_type, _ = _plan_belt_transport(
+            client, surface, force, ingredient, source_position, feed_position,
+            reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
+            upstream_shift=upstream_shift,
+        )
+    except StuckError as blocked_route:
+        # Before giving up, check whether what is in the way is merely a pole.
+        emit(f"  ROUTE BLOCKED: {blocked_route}")
+        if not relocate_blocking_poles(
+            client, bridge, surface, force, source_position, feed_position, emit,
+        ):
+            raise
+        actions, belt_type, _ = _plan_belt_transport(
+            client, surface, force, ingredient, source_position, feed_position,
+            reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
+            upstream_shift=upstream_shift,
+        )
     plan = {
         "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": actions}],
         "surface": surface, "force": force,

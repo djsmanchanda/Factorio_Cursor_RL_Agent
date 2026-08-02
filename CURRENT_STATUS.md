@@ -1179,3 +1179,37 @@ deadlocks. Prep needs an assembling machine, which comes from the mall, which
 needs circuits and gears -- so the mall must be able to spend stock on the very
 assemblers the producing lines are made of. Ordering fixes the failure; the
 check makes the remaining risk visible instead of silent.
+
+## A pole blocking a belt route steps aside instead of forcing a detour
+
+**Files:** `orchestrator/pole_relocation.py` (new), `orchestrator/live_base.py`,
+`orchestrator/stage_transport.py`, `tests/test_pole_relocation.py`
+
+**What:** When a belt route fails outright, `relocate_blocking_poles` looks at
+the poles standing on the corridor and nudges the movable ones aside, then the
+route is planned again. `live_base.pole_context` fetches what a pole supplies
+and what it is wired to in one round trip; `live_base.poles_in_area` lists
+candidates.
+
+**Why:** User direction -- a pole is the one obstacle worth moving rather than
+routing around. It is a one-tile entity whose job is to stand SOMEWHERE in a
+supply area, not on one exact tile. A machine, chest, or drill is where it is
+for a reason; a pole usually is not.
+
+**What stops it doing damage:**
+- A pole moves only if the new position still covers every consumer it powered
+  AND still reaches every pole it was wired to. Checking only the nearest
+  neighbour is how a nudge silently cuts a network in two.
+- Supply area is compared per-axis, because Factorio's is a SQUARE. A radius
+  check rejects legal corner positions and accepts illegal edge ones.
+- Substations and big poles (2x2) are never moved for a belt -- that is a
+  network decision, not a routing one.
+- The replacement is placed BEFORE the original is removed, so nothing loses
+  power in between.
+- A pole may not step onto the corridor it is clearing, or onto an occupied
+  tile, and moves are capped at 3 tiles with a 1-tile wire margin.
+- Relocation runs only AFTER a route has failed. If no pole can move, the
+  original failure is re-raised and the router detours as before.
+
+**Verified** by subverting three guards (nearest-neighbour-only wire check,
+circular supply area, allowing 2x2 poles); each was caught.

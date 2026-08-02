@@ -849,3 +849,74 @@ def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:
     )
     logistic, construction, networks = (int(part) for part in _sc(client, lua).split())
     return {"logistic_bots": logistic, "construction_bots": construction, "electric_networks": networks}
+
+
+def pole_context(
+    client: RconClient, surface: str, position: Point,
+) -> dict | None:
+    """The pole at `position` with what it powers and what it is wired to.
+
+    One round trip, because deciding whether a pole may step aside needs both
+    halves at once: the consumers inside its supply area, and the poles its
+    copper wire actually reaches. Reading them separately let the two answers
+    describe different moments.
+
+    `supplied` deliberately excludes other poles -- a pole standing inside
+    another's supply area is not powered BY it, and counting one would pin a
+    nudge to a constraint that does not exist.
+    """
+    x, y = position[0], position[1]
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local p=s.find_entities_filtered{position={" + str(x) + "," + str(y) + "},"
+        "radius=0.4,limit=1}[1];"
+        "if not p or p.type~='electric-pole' then rcon.print('NONE') return end;"
+        "local r=p.prototype.supply_area_distance;"
+        "local sup={};"
+        "for _,e in pairs(s.find_entities_filtered{area={{p.position.x-r,p.position.y-r},"
+        "{p.position.x+r,p.position.y+r}}}) do "
+        "if e.type~='electric-pole' and e.valid and e.prototype.electric_energy_source_prototype then "
+        "sup[#sup+1]=string.format('%.1f,%.1f',e.position.x,e.position.y) end end;"
+        "local nb={};"
+        "for _,n in pairs(p.neighbours and p.neighbours.copper or {}) do "
+        "nb[#nb+1]=string.format('%.1f,%.1f',n.position.x,n.position.y) end;"
+        "rcon.print(p.name..'|'..table.concat(sup,';')..'|'..table.concat(nb,';'))"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE" or "|" not in raw:
+        return None
+    name, supplied_raw, neighbours_raw = raw.split("|", 2)
+
+    def _points(blob: str) -> list[Point]:
+        return [
+            (float(part.split(",")[0]), float(part.split(",")[1]))
+            for part in blob.split(";") if part
+        ]
+
+    return {
+        "name": name,
+        "supplied": _points(supplied_raw),
+        "neighbours": _points(neighbours_raw),
+    }
+
+
+def poles_in_area(
+    client: RconClient, surface: str, area: tuple[Point, Point],
+) -> list[tuple[str, Point]]:
+    """Every electric pole inside `area`, as (name, position)."""
+    (min_x, min_y), (max_x, max_y) = area
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for _,e in pairs(s.find_entities_filtered{type='electric-pole',"
+        "area={{" + str(min_x) + "," + str(min_y) + "},"
+        "{" + str(max_x) + "," + str(max_y) + "}}}) do "
+        "out[#out+1]=string.format('%s %.1f %.1f',e.name,e.position.x,e.position.y) end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    found: list[tuple[str, Point]] = []
+    for record in _sc(client, lua).split(";"):
+        if not record:
+            continue
+        name, x, y = record.rsplit(" ", 2)
+        found.append((name, (float(x), float(y))))
+    return found
