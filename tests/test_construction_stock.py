@@ -99,36 +99,50 @@ def test_an_item_absent_from_the_capability_map_is_treated_as_scarce() -> None:
     }
 
 
-def test_the_run_loop_lifts_caps_before_it_picks_a_task() -> None:
-    """Otherwise a pass completes a target that was about to be raised, and the
-    item is dropped from the mall for a whole cycle."""
+def test_a_buffer_never_becomes_something_the_run_waits_for() -> None:
+    """Raising the mall TARGET to a chest-full turned a satisfied 200-belt
+    requirement into a 4800-belt gate: the loop sat in wait_for_stock polling
+    every five seconds and expanding iron every sixty, at 597/4800 and
+    climbing, while the research it was launched for never started."""
     import inspect
 
     from orchestrator import autonomous_builder as builder
 
-    source = inspect.getsource(builder._survey_pass)
+    survey = inspect.getsource(builder._survey_pass)
 
-    assert source.index("_lift_targets_the_base_can_supply(") < source.index(
-        "priorities.sync("
-    )
+    assert "standing_target" not in survey
+    assert "mall_targets[item] =" not in survey
 
 
-def test_only_bulk_items_are_ever_lifted() -> None:
+def test_the_buffer_is_offered_to_the_cell_not_to_the_priority_list() -> None:
     import inspect
 
     from orchestrator import autonomous_builder as builder
 
-    source = inspect.getsource(builder._lift_targets_the_base_can_supply)
+    served = inspect.getsource(builder._serve_mall_task)
+
+    assert "stock_buffer_for(" in served
+    assert "stock_target=target" in served, "the run still waits for the mission figure"
+    assert "stock_buffer=buffer" in served
+
+
+def test_only_bulk_items_get_a_raised_buffer() -> None:
+    import inspect
+
+    from orchestrator import autonomous_builder as builder
+
+    source = inspect.getsource(builder.stock_buffer_for)
 
     assert "BULK_CONSTRUCTION_ITEMS" in source
     assert "_has_producer(" in source, "self-sufficiency is the phase boundary"
 
 
-def test_a_lift_never_lowers_a_target() -> None:
+def test_a_machine_buffer_is_just_its_target() -> None:
+    """A base needs a handful of refineries however large it grows."""
     import inspect
 
     from orchestrator import autonomous_builder as builder
 
-    source = inspect.getsource(builder._lift_targets_the_base_can_supply)
+    source = inspect.getsource(builder.stock_buffer_for)
 
-    assert "if lifted > target:" in source
+    assert "return target" in source

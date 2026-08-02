@@ -1173,7 +1173,7 @@ def ensure_produced(
     reference_point: Point, emit: Callable[[str], None], *,
     upgrade_bootstrap: bool = True, stock_target: int = 1,
     minimum_machines: int = 1, allow_promotion: bool = True,
-    gate_on_stock: bool = False,
+    gate_on_stock: bool = False, stock_buffer: int | None = None,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -1222,7 +1222,8 @@ def ensure_produced(
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
-            gate_on_stock=gate_on_stock, stock_target=stock_target,
+            gate_on_stock=gate_on_stock,
+            stock_target=stock_buffer if stock_buffer else stock_target,
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
@@ -1247,6 +1248,12 @@ def _serve_mall_task(
         )
     emit(f"--- parts mall: ensuring {item} production for stock target {target} ---")
     try:
+        buffer = stock_buffer_for(client, surface, force, item, target)
+        if buffer > target:
+            emit(
+                f"  STOCK BUFFER: {item} keeps making up to {buffer} once the "
+                f"{target} this mission needs is covered"
+            )
         output = ensure_produced(
             client, bridge, surface, force, item, reference_point, emit,
             upgrade_bootstrap=False, stock_target=target,
@@ -1254,7 +1261,7 @@ def _serve_mall_task(
             # cell may stop itself once the network holds that many. Prep does
             # not pass this: its "target" is a machine count, and gating an
             # intermediate on one stops every line behind it.
-            gate_on_stock=True,
+            gate_on_stock=True, stock_buffer=buffer,
         )
     except MaterialShortage as shortage:
         add_demands(mall_targets, shortage)
@@ -1440,36 +1447,34 @@ def _advance_the_goal(
         return _SHORTAGE
 
 
-def _lift_targets_the_base_can_supply(
-    client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
-    emit: Callable[[str], None],
-) -> None:
-    """Take the cap off any bulk item the base now makes for itself.
+def stock_buffer_for(
+    client: RconClient, surface: str, force: str, item: str, target: int,
+) -> int:
+    """How much of `item` a cell may keep making, once the mission is covered.
 
-    While an item is scarce every one comes out of the player's starter kit, so
-    the opening figure stands. Once a line is making them the cap is pointless:
-    an expansion can want a thousand belts and hundreds of splitters, and a
-    base cannot overproduce what it cannot produce.
+    A BUFFER, never a requirement. Filling a chest is worth doing in the
+    background -- an expansion can want a thousand belts and hundreds of
+    splitters -- but it is not something the run should stand still for.
+
+    Raising the mall TARGET to a chest-full did exactly that: a satisfied
+    200-belt requirement became a 4800-belt gate, and the loop sat in
+    wait_for_stock polling every five seconds and expanding iron every sixty,
+    at 597/4800 and climbing, while the research it was launched for never
+    started. The target is what the mission asked for; this is only how far the
+    cell keeps going after that.
     """
-    for item, target in sorted(mall_targets.items()):
-        if item not in BULK_CONSTRUCTION_ITEMS:
-            continue
-        lifted = standing_target(
-            item, target,
-            self_sufficient=_has_producer(client, surface, force, item),
-            stack_sizes=ITEM_STACK_SIZES,
-        )
-        if lifted > target:
-            mall_targets[item] = lifted
-            emit(
-                f"  STOCK CAP LIFTED: {item} {target} -> {lifted}; the base makes "
-                "its own, so the chest is simply filled"
-            )
+    if item not in BULK_CONSTRUCTION_ITEMS:
+        return target
+    return standing_target(
+        item, target,
+        self_sufficient=_has_producer(client, surface, force, item),
+        stack_sizes=ITEM_STACK_SIZES,
+    )
 
 
 def _survey_pass(
     client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
-    priorities: PriorityList, emit: Callable[[str], None],
+    priorities: PriorityList,
 ) -> tuple[int, object | None]:
     """Read the base, retire targets stock already covers, pick the next task.
 
@@ -1479,7 +1484,6 @@ def _survey_pass(
     """
     stock = live_base.available_items(client, surface, force)
     tick = live_base.game_tick(client)
-    _lift_targets_the_base_can_supply(client, surface, force, mall_targets, emit)
     priorities.sync(mall_targets, stock, tick)
     for stocked_item, stocked_target in list(mall_targets.items()):
         if stock.get(stocked_item, 0) >= stocked_target:
@@ -1602,7 +1606,7 @@ def run(
         iteration = 0
         while iteration < max_iterations:
             tick, task = _survey_pass(
-                client, surface, force, mall_targets, priorities, emit,
+                client, surface, force, mall_targets, priorities,
             )
             signature = _pass_signature(task, mall_targets, prepped)
             unchanged_passes = (

@@ -1608,3 +1608,29 @@ self-check: 9 tests fail.
 **Left alone:** the mod still does not call `can_place_entity`. Plan-time
 checking now covers self-collisions, but a plan colliding with something ALREADY
 on the ground is still only caught by the centre-exact check.
+
+## A buffer is not something the run waits for
+
+**Files:** `orchestrator/autonomous_builder.py`, `tests/test_construction_stock.py`
+
+**What:** `_lift_targets_the_base_can_supply` is replaced by `stock_buffer_for`.
+The mall TARGET stays at what the mission asked for; the chest-full figure is
+passed to the cell as its gate and provider limit only.
+
+**Why:** lifting the target to 4800 turned a satisfied 200-belt requirement into
+a 4800-belt gate. The loop sat in `wait_for_stock` polling every five seconds
+and expanding iron every sixty -- "MALL WAIT: transport-belt stock is 597/4800;
+production continues", over and over -- while the research the run was launched
+for never started. Filling a chest is worth doing in the background; it is not
+worth standing still for.
+
+The run now waits for 200 and moves on, while the cell keeps making belts up to
+a chest because its logistic gate says 4800.
+
+**Still open -- the promoted line is fed through CHESTS.** Reported as "3 steel
+chests on each side ... then did a hop with the gear". `generate_line_layout`
+uses `feed_style="chest"`, so each ingredient gets one feed chest per feeder
+column (three at 9.00/s through a fast inserter) and the bridge fills those
+chests rather than running belt into the line. `feed_style="sideload"` exists
+and feeds from belt columns instead. Switching the conversion stage to it is a
+real layout change and is NOT done.
