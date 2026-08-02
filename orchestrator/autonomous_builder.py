@@ -1603,12 +1603,16 @@ def run(
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a
             # starved plate line just starves too.
-            short_plate = next(
-                (plate for plate in BASELINE_PLATES if plate not in prepped), None,
-            )
-            if short_plate is not None and _prep_plate_extraction(
-                client, bridge, surface, force, short_plate, prepped,
-                mall_targets, reference_point, emit,
+            # EVERY unprepped plate gets a turn, not just the first. Taking
+            # only the head of the list let iron -- which yields the pass every
+            # time it is short of drills -- block copper forever: a whole run
+            # finished with no copper being produced at all.
+            if any(
+                _prep_plate_extraction(
+                    client, bridge, surface, force, plate, prepped,
+                    mall_targets, reference_point, emit,
+                )
+                for plate in BASELINE_PLATES if plate not in prepped
             ):
                 continue
             if task is not None:

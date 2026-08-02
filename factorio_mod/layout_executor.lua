@@ -216,8 +216,13 @@ local function configure_created_entity(entity, action)
   if action.inventory_limit then
     local inventory, bar, detail = inventory_limit_details(entity, action.inventory_limit)
     if detail then return detail end
+    -- set_bar() with no argument CLEARS the limit; there is no clear_bar().
+    -- The clearing branch only runs when the target needs the whole chest, so
+    -- it went unexercised until a stock cap lifted to a full chest of belts and
+    -- the first plan that reached it died on a nil method.
     local ok = pcall(function()
-      if bar <= #inventory then inventory.set_bar(bar) else inventory.clear_bar() end
+      if not inventory.supports_bar() then return end
+      if bar <= #inventory then inventory.set_bar(bar) else inventory.set_bar() end
     end)
     if not ok then return "inventory_limit_set_failed" end
   end

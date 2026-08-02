@@ -174,3 +174,18 @@ def test_a_smelted_recipe_is_refused_a_mall_cell() -> None:
 
     assert 'spec.get("set_recipe", True)' in source
     assert "needs a smelting stage" in source
+
+
+def test_a_full_chest_target_clears_the_bar_rather_than_setting_one() -> None:
+    """set_bar() with no argument clears the limit; there is no clear_bar().
+    The clearing branch only runs when the target needs the whole chest, so it
+    went unexercised until a stock cap lifted to 4800 belts -- and the first
+    plan that reached it died on a nil method."""
+    assert "inventory.set_bar()" in _EXECUTOR
+    assert "clear_bar" not in _EXECUTOR.replace(
+        "-- set_bar() with no argument CLEARS the limit; there is no clear_bar().", ""
+    )
+
+
+def test_the_bar_is_only_touched_on_inventories_that_support_one() -> None:
+    assert "supports_bar()" in _EXECUTOR

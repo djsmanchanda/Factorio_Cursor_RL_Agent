@@ -1396,3 +1396,34 @@ smelting stage. Iron prep draw falls 8.75 -> 7.50/s, 14 -> 12 furnaces; the
 drill phase stays 20.
 
 **Verified** by reintroducing all three together: 5 tests fail.
+
+## Two faults from the 23:52 run
+
+**Files:** `factorio_mod/layout_executor.lua`, `orchestrator/autonomous_builder.py`,
+`tests/test_plate_prep_fairness.py`, `tests/test_stock_gating.py`
+
+### 1. `inventory_limit_set_failed` ended the run
+`LuaInventory` has no `clear_bar()`. The limit is cleared by calling `set_bar()`
+with no argument. That branch only runs when a target needs the WHOLE chest, so
+it had never executed -- until `STOCK CAP LIFTED: transport-belt 200 -> 4800`
+produced the first plan that reached it, and it died on a nil method.
+
+Verified against the API rather than reasoned about: `set_bar(bar?)`, "omitting
+this parameter or passing nil will clear the limit", and `supports_bar()` should
+gate both. Clearing the bar is the correct behaviour for a full-chest target:
+no limit means fill it.
+
+### 2. A whole run produced no copper
+`_prep_plate_extraction` was offered only the FIRST unprepped plate. iron-plate
+yields the pass every time it is short of drills and never enters `prepped`, so
+copper-plate never got a turn at all. Every unprepped plate is now offered the
+pass, and the first one that does work spends it.
+
+**Verified** by reintroducing both: 3 tests fail.
+
+**Still open -- smelter siting.** The run put the iron smelter at (6,51) with
+the mine output at (12.5,-3.5): a 61-tile ore haul, and 55 tiles again from
+there back to the reference point at (3,-1). Reported as "the design of the
+transport belt to the iron smelting was very inefficient", and the screenshot
+shows the belt looping around. Not yet fixed -- see the analysis below before
+changing a spatial heuristic that cannot be validated offline.
