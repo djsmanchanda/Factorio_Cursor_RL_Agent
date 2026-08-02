@@ -1002,6 +1002,26 @@ def _repair_stalled_line(
     return None
 
 
+# Ingredients a mall cell drew from stock while NOTHING was producing them.
+# Stock is a buffer, not a supply: a draw with no line behind it is the player's
+# starter chest being eaten, and the run stalls the moment it runs out. Recorded
+# rather than refused -- refusing deadlocks, because the mall must be able to
+# build the very assemblers the producing lines are made of.
+UNBACKED_DRAWS: set[str] = set()
+
+
+def _has_producer(
+    client: RconClient, surface: str, force: str, ingredient: str,
+) -> bool:
+    """Whether anything on the base is actually making `ingredient`."""
+    if ingredient not in LINE_RECIPES:
+        return True  # mined or externally supplied; not ours to produce
+    line = live_base.find_line(
+        client, surface, force, ingredient, LINE_RECIPES[ingredient]["machine"],
+    )
+    return line is not None and line.machine_count > 0
+
+
 def _ingredient_sources(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan, *,
@@ -1027,10 +1047,16 @@ def _ingredient_sources(
     for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
         required = math.ceil(amount * crafts_needed)
         if not upgrade_bootstrap and stocked.get(ingredient, 0) >= required:
+            backed = _has_producer(client, surface, force, ingredient)
             emit(
                 f"  MALL BOOTSTRAP: using stocked {ingredient} "
                 f"({stocked[ingredient]}/{required}) for {item}"
+                + ("" if backed else " -- NOTHING IS PRODUCING IT")
             )
+            if not backed:
+                UNBACKED_DRAWS.add(ingredient)
+            elif ingredient in UNBACKED_DRAWS:
+                UNBACKED_DRAWS.discard(ingredient)
             continue
         if ingredient not in LINE_RECIPES:
             raise StuckError(f"{item} needs {ingredient!r}, which has no recipe and isn't mineable")
@@ -1244,8 +1270,13 @@ def _prep_plate_extraction(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     short_plate: str, prepped: set[str], mall_targets: dict[str, int],
     reference_point: Point, emit: Callable[[str], None],
-) -> None:
-    """Grow one plate line to the furnace count its own prep draw implies."""
+) -> bool:
+    """Grow one plate line to the furnace count its own prep draw implies.
+
+    Returns whether it spent the pass. A material shortage hands the pass back
+    so the mall can build the drills it is short of -- prep runs before the mall
+    now, so holding on would re-hit the identical shortage forever.
+    """
     wanted_furnaces = baseline_smelter_count(short_plate)
     plate_line = live_base.find_line(
         client, surface, force, short_plate,
@@ -1257,7 +1288,7 @@ def _prep_plate_extraction(
         emit(
             f"  PREP READY: {short_plate} has {have}/{wanted_furnaces} furnace(s)"
         )
-        return
+        return True
     emit(
         f"--- production prep: {short_plate} extraction to "
         f"{wanted_furnaces} furnace(s) for "
@@ -1285,13 +1316,14 @@ def _prep_plate_extraction(
             )
             + " -- queued for the mall"
         )
+        return False
     except (StuckError, ValueError) as error:
         prepped.add(short_plate)
         emit(
             f"  PREP DEFERRED: {short_plate} extraction stays at {have} "
             f"furnace(s) -- {error}"
         )
-    return
+    return True
 
 
 def _prep_intermediate(
@@ -1321,17 +1353,27 @@ def _prep_intermediate(
             f"(have {have}) ---"
         )
         try:
-            produced = ensure_produced(
+            ensure_produced(
                 client, bridge, surface, force, recipe, reference_point, emit,
                 upgrade_bootstrap=False, stock_target=wanted,
                 minimum_machines=wanted, allow_promotion=False,
             )
         except MaterialShortage as shortage:
+            # Yield the pass to the mall rather than keeping it. Prep runs
+            # FIRST, so holding on here would re-hit the identical shortage
+            # every pass and never reach the mall block that builds the missing
+            # part -- a spin the livelock guard would eventually abort.
             add_demands(mall_targets, shortage)
-            return True
-        if produced is None:
-            return True  # built one stage; re-survey and carry on
-        return True
+            emit(
+                f"  PREP BLOCKED: {recipe} needs "
+                + ", ".join(
+                    f"{item}={target}"
+                    for item, target in sorted(shortage.required.items())
+                )
+                + " -- handing the pass to the mall"
+            )
+            return False
+        return True  # built one stage (or all of it); re-survey and carry on
     return False
 
 
@@ -1404,12 +1446,17 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
     """Stop once repeating has stopped telling us anything new."""
     if unchanged_passes < _MAX_UNCHANGED_PASSES:
         return
+    unbacked = (
+        " Nothing is producing " + ", ".join(sorted(UNBACKED_DRAWS))
+        + ", which the mall has been drawing from stock -- those lines have to "
+        "exist before the buffer runs out." if UNBACKED_DRAWS else ""
+    )
     raise StuckError(
         f"No progress in {unchanged_passes} passes: "
         f"{signature[0] or goal_item} has been at "
         f"{signature[1]}% with the same outstanding work each time. "
         "Something it needs cannot be built, and retrying is not "
-        "finding it -- see the repeated reason above."
+        f"finding it -- see the repeated reason above.{unbacked}"
     )
 
 
@@ -1424,6 +1471,7 @@ def _open_the_run(
     time: the first check only knows the hardcoded recipes, and the point of
     loading is that the live force may know more.
     """
+    UNBACKED_DRAWS.clear()   # module state must not leak between runs
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
     emit(
@@ -1490,6 +1538,31 @@ def run(
             )
             last_signature = signature
             _refuse_to_spin(unchanged_passes, signature, goal_item)
+            # PREP BEFORE THE MALL. The standing cells are what everything the
+            # mall builds is made OF: no copper-cable cell means no circuits,
+            # which means no drills and no assemblers. Ordered after the mall
+            # this never ran at all -- mall_targets starts with ten entries and
+            # only empties once every one is satisfied, so the mall spent every
+            # pass consuming the player's starter stock through MALL BOOTSTRAP
+            # while the lines that would refill it were never built. The run
+            # stalled with the seed corn eaten. Prep hands the pass back when it
+            # cannot afford a machine, so the mall still makes progress.
+            if _prep_intermediate(
+                client, bridge, surface, force, prepped, mall_targets,
+                reference_point, emit,
+            ):
+                continue
+            # Extraction second: it is the expensive half -- 14 drills against
+            # the prep set's two assemblers -- and an intermediate built over a
+            # starved plate line just starves too.
+            short_plate = next(
+                (plate for plate in BASELINE_PLATES if plate not in prepped), None,
+            )
+            if short_plate is not None and _prep_plate_extraction(
+                client, bridge, surface, force, short_plate, prepped,
+                mall_targets, reference_point, emit,
+            ):
+                continue
             if task is not None:
                 _serve_mall_task(
                     client, bridge, surface, force, task, tick, mall_targets,
@@ -1503,22 +1576,6 @@ def run(
                     f"next review in {wait_ticks or 60} ticks"
                 )
                 time.sleep(5)
-                continue
-            # Extraction first: the prep set's draw is what sizes it, and an
-            # intermediate built over a starved plate line just starves too.
-            short_plate = next(
-                (plate for plate in BASELINE_PLATES if plate not in prepped), None,
-            )
-            if short_plate is not None:
-                _prep_plate_extraction(
-                    client, bridge, surface, force, short_plate, prepped,
-                    mall_targets, reference_point, emit,
-                )
-                continue
-            if _prep_intermediate(
-                client, bridge, surface, force, prepped, mall_targets,
-                reference_point, emit,
-            ):
                 continue
             emit(f"--- iteration {iteration}: checking {goal_item} ---")
             position = _advance_the_goal(

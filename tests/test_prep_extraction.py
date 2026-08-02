@@ -23,9 +23,34 @@ _PREP = inspect.getsource(autonomous_builder._prep_plate_extraction)
 _LOOP = inspect.getsource(autonomous_builder.run)
 
 
-def test_plates_are_prepped_before_intermediates() -> None:
-    """An intermediate built over a starved plate line just starves too."""
-    assert _LOOP.index("_prep_plate_extraction(") < _LOOP.index("_prep_intermediate(")
+def test_the_standing_cells_come_before_the_expensive_extraction() -> None:
+    """Superseded the reverse ordering, 2026-08-02. Plates first was defensible
+    -- an intermediate over a starved plate line starves too -- but extraction
+    prep asks for 14 drills, and drills need circuits, which need the very
+    copper-cable cell that was queued behind it. The cheap half goes first."""
+    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_prep_plate_extraction(")
+
+
+def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
+    """The live stall: mall_targets starts with ten entries and only empties
+    when all are met, so prep ordered after it never ran. The mall spent every
+    pass eating the player's starter intermediates through MALL BOOTSTRAP while
+    the lines that would refill them were never built."""
+    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_mall_task(")
+
+
+def test_blocked_prep_hands_the_pass_to_the_mall() -> None:
+    """Prep runs first now, so keeping the pass on a shortage would re-hit the
+    identical shortage every pass and never reach the mall that fixes it."""
+    import inspect
+
+    from orchestrator import autonomous_builder as builder
+
+    for helper in (builder._prep_intermediate, builder._prep_plate_extraction):
+        source = inspect.getsource(helper)
+        clause = source[source.index("except MaterialShortage"):]
+        clause = clause[:clause.index("return") + len("return False")]
+        assert "return False" in clause, f"{helper.__name__} keeps a blocked pass"
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:

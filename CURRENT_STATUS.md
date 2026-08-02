@@ -1143,3 +1143,39 @@ transport-belt cannot span is routed cleanly by a fast-transport-belt.
 **Verified** by an exhaustive check: all 1024 obstacle layouts on a 12-tile run,
 for all four belt tiers, are either continuous or refused -- never silently
 broken. Reintroducing the bug fails 9 of the 11 tests.
+
+## Prep runs before the mall, and an unbacked stock draw is now visible
+
+**Files:** `orchestrator/autonomous_builder.py`, `tests/test_precursor_check.py`,
+`tests/test_prep_extraction.py`
+
+**What:** Two changes.
+
+1. The run loop now does standing-cell prep FIRST, then plate extraction, then
+   mall construction. Both prep paths hand the pass back to the mall when they
+   cannot afford a machine, instead of keeping it.
+2. `_has_producer` checks whether anything is actually making an ingredient
+   before a mall cell draws it from stock. An unbacked draw is logged as
+   `NOTHING IS PRODUCING IT`, recorded in `UNBACKED_DRAWS`, and named in the
+   stall report.
+
+**Why:** Reported live -- the run never built a copper-cable cell, so no
+electronic-circuit, so no electric-mining-drill and no assembling-machine-1. It
+consumed the player's manually supplied starter stock and could not continue.
+
+`mall_targets` starts with ten entries and only empties once every one is
+satisfied, and prep sat *after* the `if mall_targets:` gate -- so prep never ran
+at all. Every pass went to mall construction, which drew the starter
+intermediates through `MALL BOOTSTRAP` while the lines that would refill them
+were never built.
+
+Ordering intermediates before plate extraction reverses an earlier decision, on
+purpose: plates-first was defensible, but extraction prep asks for 14 drills,
+and drills need circuits, which need the copper-cable cell that was queued
+behind it. The cheap half (four assemblers) goes before the expensive half.
+
+**Why the check WARNS rather than refuses:** refusing to draw unbacked stock
+deadlocks. Prep needs an assembling machine, which comes from the mall, which
+needs circuits and gears -- so the mall must be able to spend stock on the very
+assemblers the producing lines are made of. Ordering fixes the failure; the
+check makes the remaining risk visible instead of silent.
