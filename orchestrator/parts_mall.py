@@ -10,8 +10,21 @@ from orchestrator import live_base
 from tools.rcon_client import RconClient
 
 
+# Opening stock, before anything is known about what the mission will cost.
+#
+# The belt figure is sized from a REAL connection, not from a round number: the
+# observed mine at (12.5,-3.5) feeding a refinery at (-34,-26) is about seventy
+# tiles on its own, and a conversion stage bridges one route per ingredient on
+# top of its own line. 50 was under a third of a single link, so the first
+# bridge failed, raised the target through MaterialShortage, and cost a pass
+# doing it -- every time. User report, 2026-08-02: "just to connect two
+# different spots sometimes 200+ belts are required".
+#
+# Undergrounds are placed in pairs wherever a route meets an obstacle, and a
+# long cross-base run meets several.
 STARTER_MALL_TARGETS = (
-    ("transport-belt", 50),
+    ("transport-belt", 200),
+    ("underground-belt", 20),
     ("inserter", 20),
     ("assembling-machine-1", 6),
     ("electric-furnace", 4),

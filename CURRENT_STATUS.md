@@ -1292,3 +1292,24 @@ overproduce what it cannot produce.
 **Superseded:** a first attempt used a 5-rung ladder (50/200/500/1000/2000)
 climbing on a persisted refill count in the priority list. Dropped as
 over-built once the rule was stated plainly: it is a phase change, not a curve.
+
+## The opening belt stock now covers one real connection
+
+**Files:** `orchestrator/parts_mall.py`, `tests/test_starter_stock.py`
+
+**What:** `STARTER_MALL_TARGETS` raises `transport-belt` from 50 to 200 and adds
+`underground-belt` at 20.
+
+**Why:** User report, 2026-08-02: "even in the previous runs, just to connect
+two different spots sometimes 200+ belts are required". The figure is sized off
+a link actually observed -- the mine at (12.5,-3.5) feeding the refinery placed
+at (-34,-26) is about seventy tiles by itself, and a conversion stage bridges
+one route per ingredient on top of its own line. At 50 the first bridge could
+never be paid for: it failed, raised its own target through `MaterialShortage`,
+and spent a pass doing so every time.
+
+Undergrounds are stocked because a tunnel is a PAIR of entities and a long
+cross-base run meets several obstacles.
+
+This is the same defect as the stock cap, at the other end -- the opening
+figure was as wrong as the ceiling.
