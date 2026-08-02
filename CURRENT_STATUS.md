@@ -1692,3 +1692,43 @@ every sixty seconds, at 2496/4800 and still counting.
 
 **No manual cleanup needed:** the stale 4800 in `autonomous_priorities.json` is
 overwritten on the next sync rather than inherited.
+
+## A buffer the base has to earn
+
+**Files:** `orchestrator/construction_stock.py`, `orchestrator/autonomous_builder.py`,
+`tests/test_construction_stock.py`
+
+**What:** the standing buffer for a bulk construction item is now
+`BUFFER_SECONDS` of that item's OWN live output, capped at `MAX_BUFFER_STACKS`,
+and floored at whatever the mission asked for. `_live_output_rate` measures it
+from the line rather than from stock, which a starter kit inflates.
+
+| the base makes | buffer |
+|---|---|
+| nothing | 200 (the mission figure) |
+| 3/s -- one machine | 200 |
+| 6/s | 360 |
+| 18/s -- a six-machine line | 1000 |
+| 60/s | 1000 (ceiling) |
+
+**Why a rule rather than a number.** 4800 was replaced with 10 stacks and the
+same class of fault remained available, because the fault was never the figure.
+The rule is: SPEND ON CAPACITY WHILE CAPACITY IS SCARCE, AND STOCKPILE ONLY OUT
+OF SURPLUS. A base that cannot make something quickly does not hold much of it,
+so the plates go to whatever would make more; a base that already makes them
+fast can afford a bigger buffer by construction.
+
+User standard, 2026-08-03: "I set the 10 stack limit so that it doesn't waste
+the limited resources in building transport belt, and the resources can be used
+to build more important things faster", and "conserve resource usage, and make
+more resources, so that it can then use the resources a little more freely".
+
+The ten-stack ceiling survives as a CEILING -- past it, stock is material
+sitting in a chest instead of doing something -- but a six-machine line arriving
+at roughly a thousand belts is now a consequence of the rule, not the rule.
+
+**Terminology, corrected.** "Sideload" here means the game mechanic: a feeder
+belt T-junctions into the side of an input belt so its item occupies one lane
+and another item can use the other. `feed_style="sideload"` in
+`line_layouts.py` already means exactly that, and docs/21 records it. Earlier
+notes in this file describing it loosely as "belt-fed columns" understate it.

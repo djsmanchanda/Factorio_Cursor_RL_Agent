@@ -5,22 +5,34 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-# Stacks the mall keeps of a bulk construction item once it is no longer
-# scarce. Ten stacks is a thousand belts: enough for the expansions that
-# prompted lifting the cap at all, and cheap enough that the plates behind it
-# are still available for something else.
+# How much of its OWN output a bulk item keeps standing, expressed in seconds
+# of production rather than as a count.
 #
-# That last part is the whole point. A belt is not free -- it is iron that did
-# not become a drill, an assembler, or a science pack. User standard,
-# 2026-08-03: "I set the 10 stack limit so that it doesn't waste the limited
-# resources in building transport belt, and the resources can be used to build
-# more important things faster".
+# This is the rule, and the number is only its consequence: SPEND ON CAPACITY
+# WHILE CAPACITY IS SCARCE, AND STOCKPILE ONLY OUT OF SURPLUS. A base making
+# three belts a second holds a couple of hundred; the same base at eighteen a
+# second holds a thousand, and it can afford to. The buffer follows what the
+# base can already make, so it never competes with building the thing that
+# would make more.
 #
-# It was a full 48-slot chest, 4800 belts. That is not a buffer, it is a
-# milestone: one run spent forty minutes climbing toward it, expanding iron
-# every sixty seconds, and never started the research it was launched for --
-# "the goal is to do science not hit milestone in transport belt stock".
-PROVIDER_CHEST_SLOTS = 10
+# That is what a fixed figure could not express. 4800 belts was a milestone a
+# run climbed toward for forty minutes, expanding iron every sixty seconds to
+# reach it -- iron that did not become a drill, an assembler, or a science
+# pack. User standard, 2026-08-03: "I set the 10 stack limit so that it doesn't
+# waste the limited resources in building transport belt, and the resources can
+# be used to build more important things faster", and "conserve resource usage,
+# and make more resources, so that it can then use the resources a little more
+# freely".
+BUFFER_SECONDS = 60.0
+
+# Ceiling, in stacks. Even a base that can afford more has no use for it: past
+# this, belts are iron sitting in a chest instead of iron doing something.
+MAX_BUFFER_STACKS = 10
+
+# Used only when the live stack size is unknown. Deliberately low: understating
+# it holds less, which costs a later top-up. Overstating it asks the mall for
+# stock the chest cannot hold, and the cell never reads as done.
+FALLBACK_STACK_SIZE = 50
 
 # Items whose demand scales with how much the base BUILDS. Machines are not
 # here: a base needs a handful of refineries however large it grows, and a
@@ -40,48 +52,52 @@ BULK_CONSTRUCTION_ITEMS = frozenset({
 FALLBACK_STACK_SIZE = 50
 
 
-def chest_full_target(item: str, stack_sizes: Mapping[str, int]) -> int:
-    """How many of `item` a full provider chest holds."""
+def buffer_ceiling(item: str, stack_sizes: Mapping[str, int]) -> int:
+    """The most of `item` worth holding, however productive the base gets."""
     stack = stack_sizes.get(item) or FALLBACK_STACK_SIZE
-    return PROVIDER_CHEST_SLOTS * stack
+    return MAX_BUFFER_STACKS * stack
 
 
 def standing_target(
     item: str,
     opening: int,
     *,
-    self_sufficient: bool,
+    production_rate: float = 0.0,
     stack_sizes: Mapping[str, int] = (),
 ) -> int:
-    """The stock target for `item`, for the phase the base is in.
+    """The stock target for `item`, given what the base can currently make.
 
-    While an item is scarce -- nothing on the base makes it, so every one comes
-    out of the player's starter kit -- the opening figure stands, and the mall
-    builds only what the mission actually asked for.
+    `production_rate` is the item's own live output in items per second -- zero
+    while nothing produces it. That zero is what keeps the early game honest:
+    an item coming entirely out of the player's starter kit gets the opening
+    figure and nothing more, so the mall builds what the mission asked for
+    instead of hoarding a resource it cannot replace.
 
-    Once the base MAKES it, the cap comes off and the chest is simply filled.
-    That is self-limiting in the right way: a base cannot overproduce what it
-    cannot produce, and an opening figure of 50 belts otherwise caps a base that
-    has long outgrown it. A single belted expansion can want a thousand belts
-    plus hundreds of splitters and undergrounds.
+    Once a line exists the buffer is BUFFER_SECONDS of that line's own output,
+    which grows as the line does and is by construction affordable -- the base
+    is already making them that fast. It is capped at `buffer_ceiling` because
+    past that, stock is material sitting in a chest rather than doing something.
 
-    Machines are exempt, however self-sufficient the base becomes.
+    Machines are exempt: a base needs a handful of refineries however large it
+    grows, and a chest of them would eat the plates the belts joining them are
+    made of.
     """
-    if not self_sufficient or item not in BULK_CONSTRUCTION_ITEMS:
+    if item not in BULK_CONSTRUCTION_ITEMS or production_rate <= 0:
         return opening
-    return max(opening, chest_full_target(item, dict(stack_sizes or {})))
+    earned = int(production_rate * BUFFER_SECONDS)
+    return max(opening, min(earned, buffer_ceiling(item, dict(stack_sizes or {}))))
 
 
 def standing_targets(
     opening: Mapping[str, int],
-    self_sufficient: Mapping[str, bool],
+    production_rates: Mapping[str, float],
     stack_sizes: Mapping[str, int] = (),
 ) -> dict[str, int]:
     """Apply `standing_target` across a whole mall target table."""
     return {
         item: standing_target(
             item, target,
-            self_sufficient=bool(self_sufficient.get(item)),
+            production_rate=production_rates.get(item, 0.0),
             stack_sizes=stack_sizes,
         )
         for item, target in opening.items()

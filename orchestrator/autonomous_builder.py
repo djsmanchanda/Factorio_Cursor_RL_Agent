@@ -86,6 +86,7 @@ from planners.mall_layout import (
 )
 from planners.recipe_data import (
     LINE_RECIPES,
+    MACHINE_SPEEDS,
     ITEM_STACK_SIZES,
     install_catalog_line_recipes,
     install_catalog_machines,
@@ -1458,27 +1459,46 @@ def _advance_the_goal(
         return _SHORTAGE
 
 
+def _live_output_rate(
+    client: RconClient, surface: str, force: str, item: str,
+) -> float:
+    """What the base currently makes of `item`, in items per second.
+
+    Zero when nothing produces it, which is the honest answer and the one that
+    keeps a scarce item on its opening figure.
+    """
+    spec = LINE_RECIPES.get(item)
+    if spec is None or spec["machine"] not in MACHINE_SPEEDS:
+        return 0.0
+    line = live_base.find_line(client, surface, force, item, spec["machine"])
+    if line is None or line.machine_count <= 0:
+        return 0.0
+    return (
+        line.machine_count
+        * MACHINE_SPEEDS[spec["machine"]]
+        / spec["craft_time"]
+        * spec.get("product_amount", 1)
+    )
+
+
 def stock_buffer_for(
     client: RconClient, surface: str, force: str, item: str, target: int,
 ) -> int:
     """How much of `item` a cell may keep making, once the mission is covered.
 
-    A BUFFER, never a requirement. Filling a chest is worth doing in the
-    background -- an expansion can want a thousand belts and hundreds of
-    splitters -- but it is not something the run should stand still for.
-
-    Raising the mall TARGET to a chest-full did exactly that: a satisfied
-    200-belt requirement became a 4800-belt gate, and the loop sat in
-    wait_for_stock polling every five seconds and expanding iron every sixty,
-    at 597/4800 and climbing, while the research it was launched for never
-    started. The target is what the mission asked for; this is only how far the
-    cell keeps going after that.
+    A BUFFER, never a requirement -- and one the base has to EARN. It is
+    BUFFER_SECONDS of the item's own live output, so a base that cannot make
+    something quickly does not stockpile it, and the plates go to whatever
+    would make more instead. Raising the mall TARGET to a flat figure did the
+    opposite: 4800 belts became a gate, and the loop sat in wait_for_stock
+    expanding iron every sixty seconds to reach a number, while the research it
+    was launched for never started.
     """
     if item not in BULK_CONSTRUCTION_ITEMS:
         return target
     return standing_target(
         item, target,
-        self_sufficient=_has_producer(client, surface, force, item),
+        production_rate=_live_output_rate(client, surface, force, item),
         stack_sizes=ITEM_STACK_SIZES,
     )
 
