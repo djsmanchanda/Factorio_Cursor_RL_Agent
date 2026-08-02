@@ -444,6 +444,33 @@ def _route_points(route: Sequence[Point]) -> list[tuple[Point, str, int]]:
     return points
 
 
+def _tunnelled_points(
+    points, blocked: set[tuple[int, int]],
+) -> list[bool]:
+    """Which route tiles must run underground: the blocked ones, and any free
+    tile trapped between two of them.
+
+    A single free tile between two blocked runs cannot carry the first tunnel's
+    EXIT and the second tunnel's ENTRY -- that is two entities on one tile. The
+    tile is therefore swallowed and the two runs become one tunnel, whose longer
+    span is then checked against the tier's reach like any other.
+
+    Left unhandled this severed the belt silently: the second entry overwrote
+    the first exit, so items went underground and never came back up. Seen live
+    on the iron-plate haul from the mine at (12.5,-3.5), which arrived as three
+    disconnected belts with the break at (-9.5,-25.5).
+    """
+    underground = [_tile(point) in blocked for point, _direction, _leg in points]
+    swallowed = True
+    while swallowed:
+        swallowed = False
+        for index in range(1, len(underground) - 1):
+            if not underground[index] and underground[index - 1] and underground[index + 1]:
+                underground[index] = True
+                swallowed = True
+    return underground
+
+
 def _belt_run(
     route: Sequence[Point], belt_type: str, blocked: set[tuple[int, int]],
 ) -> list[dict]:
@@ -461,11 +488,12 @@ def _belt_run(
     underground = belt_type.replace("transport-belt", "underground-belt")
     reach = UNDERGROUND_REACH[belt_type]
     points = _route_points(route)
+    tunnelled = _tunnelled_points(points, blocked)
     actions: list[dict] = []
     index = 0
     while index < len(points):
         point, direction, leg = points[index]
-        if _tile(point) not in blocked:
+        if not tunnelled[index]:
             actions.append({
                 "action_type": "place_ghost", "entity": belt_type,
                 "position": {"x": point[0], "y": point[1]}, "direction": direction,
@@ -474,7 +502,7 @@ def _belt_run(
             continue
 
         span_end = index
-        while span_end < len(points) and _tile(points[span_end][0]) in blocked:
+        while span_end < len(points) and tunnelled[span_end]:
             span_end += 1
         if index == 0 or span_end >= len(points):
             raise ValueError(

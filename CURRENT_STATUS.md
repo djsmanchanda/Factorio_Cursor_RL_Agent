@@ -1118,3 +1118,28 @@ under 800 is alright, under 500 recommended."
   `electronics_execution.py` 507.
 
 No further LOC work is planned.
+
+## A belt route is never emitted severed
+
+**Files:** `planners/belt_bridge.py`, `tests/test_belt_continuity.py`
+
+**What:** `_tunnelled_points` marks which route tiles run underground: the
+blocked ones, plus any free tile trapped between two blocked runs. `_belt_run`
+works from that instead of from the raw blocked set.
+
+**Why:** A single free tile between two obstacles was used as BOTH the first
+tunnel's exit and the second tunnel's entrance. `actions.pop()` removed the
+exit and replaced it with a second entrance, so the emitted plan had two
+underground inputs and one output -- items went underground and never came back
+up. Reported live on the iron-plate haul from the mine at (12.5,-3.5), which
+arrived as three disconnected belts with the break at (-9.5,-25.5).
+
+The trapped tile is now swallowed and the two runs merge into one tunnel, whose
+longer span is checked against the tier's reach like any other. When the merged
+span does not fit, the route is REFUSED rather than severed, which lets the
+caller detour or buy a longer tier -- verified: the same obstacle that a plain
+transport-belt cannot span is routed cleanly by a fast-transport-belt.
+
+**Verified** by an exhaustive check: all 1024 obstacle layouts on a 12-tile run,
+for all four belt tiers, are either continuous or refused -- never silently
+broken. Reintroducing the bug fails 9 of the 11 tests.
