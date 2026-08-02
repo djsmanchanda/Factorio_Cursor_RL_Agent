@@ -1096,3 +1096,25 @@ in line count.
 
 **Still over 80 LOC repo-wide:** 33 functions, largest
 `planners/line_layouts.py:generate_line_layout` at 295.
+
+## File-size budget set to the user's actual standard
+
+**Files:** `AGENTS.md`
+
+**What:** File length is a budget, not a gate: under 500 recommended, under 800
+acceptable, past 800 justify it here. Added the note that splitting functions
+to meet the 80-line rule will often GROW a file, and that this is fine.
+
+**Why:** User direction, 2026-08-02: "no need for extensive loc correction /
+under 800 is alright, under 500 recommended."
+
+**Where the repo stands** (excluding tests and experimental/):
+- Over 800: `autonomous_builder.py` (1537), `live_base.py` (851). Both waived --
+  the first is long precisely because its functions are now all under 80, and
+  the second is 31 small RCON helpers.
+- 500-800, acceptable, no action: `stage_services.py` 716,
+  `stage_extraction.py` 609, `verify_factory_invariants.py` 600,
+  `stage_transport.py` 556, `core/metrics.py` 555, `belt_bridge.py` 521,
+  `electronics_execution.py` 507.
+
+No further LOC work is planned.

@@ -185,9 +185,11 @@ from one decision spelled out in three places. A function you cannot read in one
 screen is one where two features can sit side by side without noticing each
 other.
 
-File length is a **review trigger, not a gate**. Crossing 500 LOC means justify
-it in `CURRENT_STATUS.md`; it does not mean split it. Length on its own says
-nothing — measured 2026-08-02:
+File length is a **budget, not a gate**: **under 500 recommended, under 800
+acceptable.** Past 800, justify it in `CURRENT_STATUS.md` rather than reflexively
+splitting — and never chase the number for its own sake. Splitting functions to
+meet the limit above will often *grow* a file, and that is fine. Length on its
+own says nothing — measured 2026-08-02:
 
 | File | LOC | fns | avg | max | internal calls |
 |---|---|---|---|---|---|
@@ -204,7 +206,9 @@ tight cluster and make it harder to follow.
 
 **Standing waivers** (long for structural reasons, not for tangle):
 `orchestrator/live_base.py`, `planners/belt_bridge.py`, `core/metrics.py`,
-`tools/verify_factory_invariants.py`.
+`tools/verify_factory_invariants.py`, and `orchestrator/autonomous_builder.py`
+— the last is 1537 LOC *because* its functions were brought under 80, which
+traded one 281-line function for a longer file. That was the right trade.
 
 **Split for a seam, not for a number.** The extraction that paid off was
 `factorio_mod/logistic_sections.lua` — it made untestable Lua testable. The line
