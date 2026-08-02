@@ -31,21 +31,23 @@ def test_a_scarce_item_holds_its_opening_figure() -> None:
     ) == 50
 
 
-def test_a_self_made_item_fills_the_chest() -> None:
-    """'after the game is out of the starter phase, just let it build and fill
-    up the chest'."""
+def test_a_self_made_item_stocks_a_standing_buffer() -> None:
     assert standing_target(
         "transport-belt", 50, self_sufficient=True, stack_sizes=_STACKS,
     ) == PROVIDER_CHEST_SLOTS * 100
 
 
-def test_the_cap_that_was_too_low_is_gone() -> None:
-    """The reported limit: blueprints wanting more than a thousand belts."""
+def test_the_buffer_covers_an_expansion_without_becoming_an_errand() -> None:
+    """Ten stacks is a thousand belts: enough for the expansions that prompted
+    lifting the cap, and small enough that reaching it is incidental. At a full
+    48-slot chest it was a milestone -- a run spent forty minutes climbing to
+    4800, expanding iron every sixty seconds, and never started its research."""
     target = standing_target(
         "transport-belt", 50, self_sufficient=True, stack_sizes=_STACKS,
     )
 
-    assert target > 1000
+    assert target >= 1000
+    assert target <= 1200
 
 
 @pytest.mark.parametrize("item", ["splitter", "underground-belt"])
@@ -146,3 +148,43 @@ def test_a_machine_buffer_is_just_its_target() -> None:
     source = inspect.getsource(builder.stock_buffer_for)
 
     assert "return target" in source
+
+
+def test_a_persisted_target_never_outlives_the_mission_that_set_it() -> None:
+    """max() meant a target could only rise, and it is saved to disk -- so one
+    run that raised transport-belt to 4800 left every LATER run waiting for
+    4800, with nothing in the log saying where the number came from."""
+    import tempfile
+    from pathlib import Path as _Path
+
+    from orchestrator.priority_list import PriorityItem, PriorityList
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = _Path(directory) / "priorities.json"
+        stale = PriorityList(path, 0)
+        stale.items["transport-belt"] = PriorityItem(
+            item="transport-belt", target=4800, base_rating=100, created_tick=0,
+        )
+        stale._save()
+
+        fresh = PriorityList(path, 0)
+        fresh.sync({"transport-belt": 200}, {"transport-belt": 0}, 10)
+
+        assert fresh.items["transport-belt"].target == 200
+
+
+def test_a_shortage_can_still_raise_a_target_within_a_run() -> None:
+    import tempfile
+    from pathlib import Path as _Path
+
+    from orchestrator.parts_mall import MaterialShortage, add_demands
+    from orchestrator.priority_list import PriorityList
+
+    with tempfile.TemporaryDirectory() as directory:
+        priorities = PriorityList(_Path(directory) / "p.json", 0)
+        targets = {"electric-mining-drill": 6}
+        priorities.sync(targets, {}, 10)
+        add_demands(targets, MaterialShortage("mine", {"electric-mining-drill": 14}, {}))
+        priorities.sync(targets, {}, 20)
+
+        assert priorities.items["electric-mining-drill"].target == 14

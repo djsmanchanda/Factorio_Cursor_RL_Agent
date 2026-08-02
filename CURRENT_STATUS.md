@@ -1664,3 +1664,31 @@ its iron-plate belt not, and stayed that way -- seven machines, zero working.
    resumes once the mall has it.
 
 **Verified** by reverting both: 4 of 6 tests fail.
+
+## The 4800-belt errand, and why it outlived its fix
+
+**Files:** `orchestrator/priority_list.py`, `orchestrator/construction_stock.py`,
+`tests/test_construction_stock.py`
+
+### A persisted target could only ever rise
+`PriorityList.sync` did `task.target = max(task.target, target)`, and the list is
+saved to disk. So the 4800 written by one run became the target of EVERY later
+run -- which is why a log printed "stock target 4800" with no `STOCK CAP LIFTED`
+line anywhere above it, and why separating buffer from requirement did not take
+effect. The caller's figure is now authoritative; `add_demands` still raises it
+within a run by raising the mapping `sync` is given.
+
+### The buffer itself was a milestone, not a buffer
+`PROVIDER_CHEST_SLOTS` drops 48 -> 10. Ten stacks is a thousand belts.
+
+User standard, 2026-08-03: "I set the 10 stack limit so that it doesn't waste
+the limited resources in building transport belt, and the resources can be used
+to build more important things faster", and "the goal is to do science not hit
+milestone in transport belt stock".
+
+A belt is iron that did not become a drill, an assembler, or a science pack. At
+4800 the run spent forty minutes climbing toward the number, expanding iron
+every sixty seconds, at 2496/4800 and still counting.
+
+**No manual cleanup needed:** the stale 4800 in `autonomous_priorities.json` is
+overwritten on the next sync rather than inherited.

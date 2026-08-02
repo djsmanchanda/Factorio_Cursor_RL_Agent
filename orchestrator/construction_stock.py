@@ -5,11 +5,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-# Chest slots the mall provider fills once an item is no longer scarce. A
-# steel-chest is 48 slots; at 100 to a stack that is 4800 belts, which is the
-# scale real blueprint work needs. User standard, 2026-08-02: "after the game is
-# out of the starter phase, just let it build and fill up the chest".
-PROVIDER_CHEST_SLOTS = 48
+# Stacks the mall keeps of a bulk construction item once it is no longer
+# scarce. Ten stacks is a thousand belts: enough for the expansions that
+# prompted lifting the cap at all, and cheap enough that the plates behind it
+# are still available for something else.
+#
+# That last part is the whole point. A belt is not free -- it is iron that did
+# not become a drill, an assembler, or a science pack. User standard,
+# 2026-08-03: "I set the 10 stack limit so that it doesn't waste the limited
+# resources in building transport belt, and the resources can be used to build
+# more important things faster".
+#
+# It was a full 48-slot chest, 4800 belts. That is not a buffer, it is a
+# milestone: one run spent forty minutes climbing toward it, expanding iron
+# every sixty seconds, and never started the research it was launched for --
+# "the goal is to do science not hit milestone in transport belt stock".
+PROVIDER_CHEST_SLOTS = 10
 
 # Items whose demand scales with how much the base BUILDS. Machines are not
 # here: a base needs a handful of refineries however large it grows, and a

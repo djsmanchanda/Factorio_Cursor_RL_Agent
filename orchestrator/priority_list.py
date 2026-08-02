@@ -80,7 +80,13 @@ class PriorityList:
                     base_rating=_DEFAULT_RATINGS.get(item, 45), created_tick=tick,
                 )
                 self.items[item] = task
-            task.target = max(task.target, target)
+            # The CALLER's figure wins. Ratcheting with max() meant a target
+            # could only ever rise, and it is persisted -- so one run that
+            # raised transport-belt to 4800 left every later run waiting for
+            # 4800, with no line in the log saying where the number came from.
+            # add_demands still raises it within a run by raising the mapping
+            # this is given.
+            task.target = target
             task.progress_percent = min(100, stock.get(item, 0) * 100 // task.target)
             if task.progress_percent < 100 and task.status == "complete":
                 task.status = "ready"
