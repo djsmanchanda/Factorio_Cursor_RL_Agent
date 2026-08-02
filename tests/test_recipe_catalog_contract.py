@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
+from planners.recipe_data import (
+    LINE_MAX_INGREDIENTS,
+    LINE_RECIPES,
+    MACHINE_SPEEDS,
+    MALL_ONLY_RECIPES,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "fixtures" if False else ROOT / "tests" / "fixtures" / "player_recipe_catalog.json"
@@ -134,8 +139,19 @@ def test_three_ingredient_recipes_declare_the_auxiliary_at_index_one() -> None:
     """generate_line_layout only supports a third solid ingredient when it is
     declared as the auxiliary AT INDEX 1; anything else raises at plan time."""
     for name, spec in LINE_RECIPES.items():
-        if len(spec["ingredients"]) < 3:
+        if len(spec["ingredients"]) != LINE_MAX_INGREDIENTS:
             continue
         assert spec.get("auxiliary_ingredient_index") == 1, (
             f"{name} has {len(spec['ingredients'])} ingredients but no auxiliary at index 1"
         )
+
+
+def test_a_recipe_too_wide_for_a_line_declares_no_auxiliary() -> None:
+    """An auxiliary index on a four-ingredient recipe would claim it fits a
+    line layout, which refuses a fourth ingredient outright. These are mall
+    cells for good -- see MALL_ONLY_RECIPES."""
+    for name, spec in LINE_RECIPES.items():
+        if len(spec["ingredients"]) <= LINE_MAX_INGREDIENTS:
+            continue
+        assert name in MALL_ONLY_RECIPES, f"{name} is too wide for a line and unlisted"
+        assert "auxiliary_ingredient_index" not in spec, name

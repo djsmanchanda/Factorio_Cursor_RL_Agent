@@ -1,9 +1,162 @@
 {
-  "$schema":"http://json-schema.org/draft-07/schema#","$id":"recipe_catalog.schema.json","title":"RecipeCatalog","type":"object","additionalProperties":false,
-  "required":["version","force","tick","raw_resources","recipes"],
-  "properties":{"version":{"const":"1.0.0"},"force":{"type":"string","minLength":1},"tick":{"type":"integer","minimum":0},"raw_resources":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},"recipes":{"type":"array","items":{"$ref":"#/definitions/recipe"}}},
-  "definitions":{
-    "part":{"type":"object","additionalProperties":false,"required":["name","type","amount"],"properties":{"name":{"type":"string","minLength":1},"type":{"enum":["item","fluid"]},"amount":{"type":"number","minimum":0}}},
-    "recipe":{"type":"object","additionalProperties":false,"required":["name","enabled","category","energy_ticks","ingredients","products","supported"],"properties":{"name":{"type":"string","minLength":1},"enabled":{"type":"boolean"},"category":{"type":"string","minLength":1},"energy_ticks":{"type":"integer","minimum":1},"ingredients":{"type":"array","items":{"$ref":"#/definitions/part"}},"products":{"type":"array","minItems":1,"items":{"$ref":"#/definitions/part"}},"supported":{"type":"boolean"},"unsupported_reason":{"type":"string","minLength":1}}}
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "$id": "recipe_catalog.schema.json",
+ "title": "RecipeCatalog",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "version",
+  "force",
+  "tick",
+  "raw_resources",
+  "recipes"
+ ],
+ "properties": {
+  "version": {
+   "enum": [
+    "1.0.0",
+    "1.1.0"
+   ]
+  },
+  "force": {
+   "type": "string",
+   "minLength": 1
+  },
+  "tick": {
+   "type": "integer",
+   "minimum": 0
+  },
+  "raw_resources": {
+   "type": "array",
+   "uniqueItems": true,
+   "items": {
+    "type": "string",
+    "minLength": 1
+   }
+  },
+  "recipes": {
+   "type": "array",
+   "items": {
+    "$ref": "#/definitions/recipe"
+   }
+  },
+  "machines": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "name",
+     "type",
+     "ingredient_count",
+     "crafting_speed",
+     "categories"
+    ],
+    "properties": {
+     "name": {
+      "type": "string",
+      "minLength": 1
+     },
+     "type": {
+      "enum": [
+       "assembling-machine",
+       "furnace"
+      ]
+     },
+     "ingredient_count": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "crafting_speed": {
+      "type": "number",
+      "minimum": 0
+     },
+     "categories": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "minLength": 1
+      }
+     }
+    }
+   }
   }
+ },
+ "definitions": {
+  "part": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "name",
+    "type",
+    "amount"
+   ],
+   "properties": {
+    "name": {
+     "type": "string",
+     "minLength": 1
+    },
+    "type": {
+     "enum": [
+      "item",
+      "fluid"
+     ]
+    },
+    "amount": {
+     "type": "number",
+     "minimum": 0
+    }
+   }
+  },
+  "recipe": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "name",
+    "enabled",
+    "category",
+    "energy_ticks",
+    "ingredients",
+    "products",
+    "supported"
+   ],
+   "properties": {
+    "name": {
+     "type": "string",
+     "minLength": 1
+    },
+    "enabled": {
+     "type": "boolean"
+    },
+    "category": {
+     "type": "string",
+     "minLength": 1
+    },
+    "energy_ticks": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "ingredients": {
+     "type": "array",
+     "items": {
+      "$ref": "#/definitions/part"
+     }
+    },
+    "products": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "$ref": "#/definitions/part"
+     }
+    },
+    "supported": {
+     "type": "boolean"
+    },
+    "unsupported_reason": {
+     "type": "string",
+     "minLength": 1
+    }
+   }
+  }
+ }
 }

@@ -1213,3 +1213,54 @@ for a reason; a pole usually is not.
 
 **Verified** by subverting three guards (nearest-neighbour-only wire check,
 circular supply area, allowing 2x2 poles); each was caught.
+
+## The agent can build the machine it builds everything with
+
+**Files:** `planners/recipe_data.py`, `planners/assembler_tiers.py` (new),
+`factorio_mod/recipe_catalog.lua`, `schemas/recipe_catalog.schema.json`,
+`orchestrator/intermediate_scaling.py`, `orchestrator/autonomous_builder.py`,
+`tools/starter_kit_audit.py` (new), plus tests.
+
+**What:**
+1. `MALL_ONLY_RECIPES` now admits `assembling-machine-2`, `bulk-inserter`, and
+   `flying-robot-frame`. The catalog filter rejected them for having four
+   ingredients, so the agent could never build them at all.
+2. `is_promotable` also rejects recipes wider than `LINE_MAX_INGREDIENTS` --
+   a belt-fed line carries two main lanes plus one auxiliary and refuses a
+   fourth, so promoting one would have crashed the layout.
+3. The recipe catalog (v1.1.0) exports crafting machines with their live
+   ingredient slot counts, speeds, and categories.
+4. `planners/assembler_tiers.py` chooses the tier for a line or a mall cell.
+5. `tools/starter_kit_audit.py` reports which hand-placed kit items the base
+   can now make for itself.
+
+**Why:** Every production line in the system runs on an assembling-machine-2,
+and the agent had no way to make one -- so the whole base rested on the player
+having stocked them by hand. Same for bulk-inserter, which the rate-driven
+selector reaches for on busy lines.
+
+**The tier policy** (user standard, 2026-08-02):
+- Bootstrap: lines take tier 1, tier 2 is reserved for mall cells that need
+  four ingredient slots.
+- Once the base PRODUCES tier 2, everything uses it, and spare tier-2 stock
+  above `UPGRADE_RESERVE` rebuilds tier-1 lines in place.
+- Tier 3 is demand-based -- only for recipes at or above
+  `TIER3_MIN_CRAFT_SECONDS`, only once the base makes them, and the mall gets
+  first claim.
+
+**Slot counts are read, never assumed.** They are the reason the tiers are not
+interchangeable, and putting a three-ingredient recipe on a two-slot machine
+leaves a line that builds and then cannot set its own recipe. With no live
+export the recipe's declared machine is kept, so an un-redeployed base behaves
+exactly as before.
+
+**Remaining starter-kit dependencies**, from the audit against the live
+catalog -- 6 items the agent still cannot build:
+- `stone-brick` -- category `smelting`, which the catalog filter does not learn
+  (it only takes assembler categories). Blocks `electric-furnace` and
+  `oil-refinery`. Needs a stone mining stage plus a furnace recipe, both of
+  which follow the existing iron/copper pattern.
+- `battery` -- chemistry category, needs sulfuric acid.
+- `electric-engine-unit` -- crafting-with-fluid, needs lubricant.
+- `flying-robot-frame` -- now learnable, but blocked on the two above.
+- `construction-robot`, `logistic-robot` -- blocked on the frame.

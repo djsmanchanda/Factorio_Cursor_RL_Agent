@@ -93,7 +93,30 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
   local raw_resources = {}
   for name, _ in pairs(raw_set) do table.insert(raw_resources, name) end
   table.sort(raw_resources)
-  local payload = { version = "1.0.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes }
+  -- Crafting machines, with the two facts that decide which tier a recipe can
+  -- run on: how many ingredient slots it has, and which categories it accepts.
+  -- Exported rather than assumed because guessing the slot count assigns a
+  -- three-ingredient recipe to a machine that cannot hold it, and the whole
+  -- line then fails to set its recipe.
+  local machines = {}
+  for _, prototype in pairs(prototypes.entity) do
+    if prototype.type == "assembling-machine" or prototype.type == "furnace" then
+      local categories = {}
+      for category, _ in pairs(prototype.crafting_categories or {}) do
+        table.insert(categories, category)
+      end
+      table.sort(categories)
+      table.insert(machines, {
+        name = prototype.name,
+        type = prototype.type,
+        ingredient_count = prototype.ingredient_count or 0,
+        crafting_speed = prototype.get_crafting_speed and prototype.get_crafting_speed() or 0,
+        categories = categories,
+      })
+    end
+  end
+  table.sort(machines, function(a, b) return a.name < b.name end)
+  local payload = { version = "1.1.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes, machines = machines }
   local path = "factorio_mod/recipe_catalogs/recipe_catalog_" .. game.tick .. ".json"
   local json = helpers.table_to_json(payload)
   -- An EMPTY Lua table serialises to `{}` (object), not `[]` (array), so any
@@ -102,6 +125,8 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
   -- and live_execution.lua already apply to their own list fields.
   json = json:gsub('"ingredients":{}', '"ingredients":[]')
   json = json:gsub('"products":{}', '"products":[]')
+  json = json:gsub('"categories":{}', '"categories":[]')
+  json = json:gsub('"machines":{}', '"machines":[]')
   helpers.write_file(path, json, false)
   rcon.print("recipe_catalog=" .. path)
 end)

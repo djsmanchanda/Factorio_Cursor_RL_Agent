@@ -8,7 +8,13 @@ import math
 from orchestrator import live_base
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES
 from tools.rcon_client import RconClient
-from planners.recipe_data import BELT_TIERS, LINE_RECIPES, MACHINE_SPEEDS, machine_ingredient_rates
+from planners.recipe_data import (
+    BELT_TIERS,
+    LINE_MAX_INGREDIENTS,
+    LINE_RECIPES,
+    MACHINE_SPEEDS,
+    machine_ingredient_rates,
+)
 
 Point = tuple[float, float]
 
@@ -53,6 +59,10 @@ def is_promotable(item: str) -> bool:
     - It needs a fluid. A promoted line is belt-fed and inserter-served and has
       no pipe run, so the machines would sit empty waiting on an input that
       never arrives.
+    - It takes more ingredients than a line can carry. generate_line_layout
+      runs two main belt lanes plus one auxiliary and refuses a fourth, so a
+      recipe like assembling-machine-2 is a mall cell for good -- which is the
+      right shape for it anyway, being built in small batches on demand.
 
     The old hand-written list got both edges wrong in the same direction. It
     named processing-unit, which takes sulfuric acid and so could never have run
@@ -63,6 +73,8 @@ def is_promotable(item: str) -> bool:
     if spec is None:
         return False
     if spec.get("fluid_ingredients"):
+        return False
+    if len(spec["ingredients"]) > LINE_MAX_INGREDIENTS:
         return False
     machine = spec["machine"]
     return machine in MACHINE_SPEEDS and machine not in STAGE_OWNED_MACHINES

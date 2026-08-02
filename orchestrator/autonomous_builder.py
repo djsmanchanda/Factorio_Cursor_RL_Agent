@@ -85,6 +85,7 @@ from planners.mall_layout import (
 from planners.recipe_data import (
     LINE_RECIPES,
     install_catalog_line_recipes,
+    install_catalog_machines,
 )
 from tools.rcon_client import RconClient
 
@@ -1474,9 +1475,16 @@ def _open_the_run(
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
+    machines = install_catalog_machines(catalog)
     emit(
         f"RECIPE CATALOG: loaded {len(catalog.get('recipes', []))} force recipes; "
         f"{len(learned)} additional solid recipes are executable"
+    )
+    emit(
+        f"MACHINE CATALOG: {len(machines)} crafting machine(s) with live ingredient "
+        "slot counts" if machines else
+        "MACHINE CATALOG: none exported -- assembler tiers stay as declared "
+        "(redeploy the mod to enable tier selection)"
     )
     validate_builder_target(goal_item, surface, LINE_RECIPES)
     mall_targets = mission_mall_targets(

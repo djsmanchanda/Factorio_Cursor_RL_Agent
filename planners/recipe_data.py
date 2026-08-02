@@ -102,7 +102,22 @@ LINE_RECIPES: Dict[str, dict] = {
 _GENERIC_ASSEMBLER_CATEGORIES = {
     "advanced-crafting", "basic-crafting", "crafting", "electronics", "pressing",
 }
-_COMPACT_MALL_RECIPES = {"chemical-plant", "oil-refinery", "pumpjack"}
+# Recipes allowed more than the line layout's three ingredients, because they
+# are only ever built as MALL CELLS -- a requester-fed single machine, which
+# does not care how many ingredients it asks for. A belt-fed line does: it
+# carries two main lanes and one auxiliary, and refuses a fourth.
+#
+# assembling-machine-2 is here because every line in the system runs on one
+# (LINE_RECIPES[*]["machine"]), and its recipe takes four ingredients -- so
+# without this the agent could never build the machine it builds everything
+# with, and depended on the player having stocked them by hand. Same for
+# bulk-inserter, which the rate-driven selector reaches for on busy lines.
+MALL_ONLY_RECIPES = {
+    "chemical-plant", "oil-refinery", "pumpjack",
+    "assembling-machine-2", "bulk-inserter", "flying-robot-frame",
+}
+MALL_ONLY_MAX_INGREDIENTS = 5
+LINE_MAX_INGREDIENTS = 3
 
 
 def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
@@ -119,8 +134,9 @@ def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
             or not recipe.get("supported")
             or recipe.get("category") not in _GENERIC_ASSEMBLER_CATEGORIES
             or not (
-                1 <= len(ingredients) <= 3
-                or (name in _COMPACT_MALL_RECIPES and len(ingredients) <= 5)
+                1 <= len(ingredients) <= LINE_MAX_INGREDIENTS
+                or (name in MALL_ONLY_RECIPES
+                    and len(ingredients) <= MALL_ONLY_MAX_INGREDIENTS)
             )
             or any(part.get("type") != "item" for part in ingredients)
             or len(products) != 1
@@ -135,10 +151,8 @@ def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
             "product_amount": products[0]["amount"],
             "craft_time": recipe["energy_ticks"] / 60,
         }
-        if len(ingredients) == 3:
+        if len(ingredients) == LINE_MAX_INGREDIENTS:
             spec["auxiliary_ingredient_index"] = 1
-        elif len(ingredients) > 3:
-            spec["mall_only"] = True
         LINE_RECIPES[name] = spec
         learned.append(name)
     return tuple(sorted(learned))
@@ -354,3 +368,57 @@ def _reject_fuel_entities(plan: dict) -> None:
         raise ValueError(f"Electric-only invariant violated by: {', '.join(offenders)}")
 
 MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3
+
+
+# --- Assembler tier policy -------------------------------------------------
+#
+# User standard, 2026-08-02: while advanced circuits are scarce, PRODUCTION
+# LINES run on assembling-machine-1 and assembling-machine-2 is reserved for
+# MALL cells, until assembling-machine-3 can be made.
+#
+# The reason the two tiers are not interchangeable is ingredient slots, not
+# speed. A mall cell builds construction items with four or five ingredients;
+# a line carries at most three. Spending a tier-2 machine on a two-ingredient
+# gear line uses a slot count the line cannot use, and each one costs a tier-1
+# machine plus steel on top.
+#
+# Slot counts are read from the live game (see MACHINE_CAPABILITIES), never
+# assumed: putting a three-ingredient recipe on a machine with two slots leaves
+# a line that cannot set its own recipe.
+# name -> {"ingredient_count": int, "crafting_speed": float, "categories": [...]}
+# Empty until a live catalog is installed; every reader falls back to the
+# recipe's declared machine, so an un-exported base behaves exactly as before.
+MACHINE_CAPABILITIES: Dict[str, dict] = {}
+
+
+def install_catalog_machines(catalog: Mapping) -> tuple[str, ...]:
+    """Record what each crafting machine can actually run, from the live game."""
+    learned: list[str] = []
+    for machine in catalog.get("machines", []):
+        name = machine.get("name")
+        if not isinstance(name, str):
+            continue
+        MACHINE_CAPABILITIES[name] = {
+            "ingredient_count": machine.get("ingredient_count", 0),
+            "crafting_speed": machine.get("crafting_speed", 0.0),
+            "categories": tuple(machine.get("categories", ())),
+        }
+        if machine.get("crafting_speed"):
+            MACHINE_SPEEDS.setdefault(name, machine["crafting_speed"])
+        learned.append(name)
+    return tuple(sorted(learned))
+
+
+def machine_holds(machine: str, ingredient_count: int) -> bool:
+    """Whether `machine` has enough ingredient slots for that many inputs.
+
+    An unknown machine answers False. Slot counts are the whole reason the
+    tiers are not interchangeable, so assuming one fits is the guess that
+    strands a three-ingredient recipe on a two-slot machine -- the line builds,
+    then cannot set its own recipe. `line_machine` handles the no-data case by
+    keeping the recipe's declared machine instead.
+    """
+    capability = MACHINE_CAPABILITIES.get(machine)
+    if capability is None:
+        return False
+    return capability["ingredient_count"] >= ingredient_count
