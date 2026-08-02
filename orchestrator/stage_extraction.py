@@ -332,8 +332,23 @@ def smelter_search_anchors(
     patch_max: Point,
     footprint: tuple[float, float],
     reference_point: Point,
+    ore_output: Point | None = None,
 ) -> list[Point]:
-    """Cardinal search anchors; live resource clearance remains authoritative."""
+    """Cardinal search anchors, nearest the ORE first.
+
+    A smelter is sited beside the thing it consumes, which for a furnace row
+    is unambiguously the ore -- the same rule a promoted line already follows
+    through `_heaviest_source`. Ordering by distance to the BASE instead put
+    the search on the far side of the patch from where the ore comes out, and
+    the site that won was 61 tiles from the mine it was smelting for.
+
+    The ore haul is the expensive side of the trade: it carries the drill
+    row's whole output, and it is re-laid every time the row grows
+    6 -> 20 -> 50 -> 100, so its length is paid over and over. The plate belt
+    leaving the smelter is built once. `reference_point` only breaks ties.
+
+    Live resource clearance remains authoritative over all of this.
+    """
     (min_x, min_y), (max_x, max_y) = ore_reservation(patch_min, patch_max)
     width, height = footprint
     centre_x = (min_x + max_x) / 2
@@ -344,13 +359,31 @@ def smelter_search_anchors(
         (centre_x - width / 2, min_y - height),
         (centre_x - width / 2, max_y),
     ]
+    if ore_output is not None:
+        # The four cardinal anchors are edges of the whole PATCH. None of
+        # them is where the ore actually leaves, so on a long patch the
+        # search began tens of tiles from the belt it was meant to meet.
+        # These two put the footprint immediately beyond the reservation,
+        # level with the output, on whichever side it sits.
+        beside_x = min_x - width if ore_output[0] < centre_x else max_x
+        beside_y = min_y - height if ore_output[1] < centre_y else max_y
+        anchors.append((beside_x, ore_output[1] - height / 2))
+        anchors.append((ore_output[0] - width / 2, beside_y))
+    near = ore_output if ore_output is not None else reference_point
+
+    def belt_tiles(point: Point, to: Point) -> float:
+        # MANHATTAN, because that is what a belt costs and what the candidate
+        # scoring downstream measures. Ranking anchors by straight-line
+        # distance disagreed with the thing being minimised, and put a site
+        # 16.5 belt-tiles from the ore behind one at 18.0.
+        centre = (point[0] + width / 2, point[1] + height / 2)
+        return abs(centre[0] - to[0]) + abs(centre[1] - to[1])
+
     return sorted(
         anchors,
         key=lambda point: (
-            math.dist(
-                (point[0] + width / 2, point[1] + height / 2),
-                reference_point,
-            ),
+            belt_tiles(point, near),
+            belt_tiles(point, reference_point),
             point[1],
             point[0],
         ),
@@ -530,7 +563,7 @@ def plan_local_extraction(
     smelter_flow_direction = "east"
     candidates: list[tuple[bool, bool, float, float, str, Point]] = []
     for anchor in smelter_search_anchors(
-        patch_min, patch_max, footprint, reference_point
+        patch_min, patch_max, footprint, reference_point, ore_output,
     ):
         for direction in ("east", "west"):
             bounds, feed_offset, output_offset = geometries[direction]
@@ -570,14 +603,19 @@ def plan_local_extraction(
                 candidates.append((
                     input_tiles > mine_to_output,
                     output_tiles > target_to_feed,
-                    input_tiles + output_tiles,
+                    # ORE HAUL FIRST. Summing the two hauls let a site 61
+                    # tiles from the mine beat one far closer that happened
+                    # to sit further from the base -- but the ore belt is
+                    # re-laid every time the drill row grows, and the plate
+                    # belt out is built once.
                     input_tiles,
+                    input_tiles + output_tiles,
                     direction,
                     candidate,
                 ))
     if candidates:
         (
-            _input_wrong_way, _output_wrong_way, _total, _input,
+            _input_wrong_way, _output_wrong_way, _input, _total,
             smelter_flow_direction, smelter_origin,
         ) = min(candidates)
     if smelter_origin is None:

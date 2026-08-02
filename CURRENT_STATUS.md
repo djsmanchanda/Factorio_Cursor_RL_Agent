@@ -1463,3 +1463,42 @@ needs a redeploy to take effect.
 (6,51) again against a mine output at (12.5,-3.5). The anchor ordering, the
 60-tile drift in `find_clear_area`, and the equal weighting of ore haul against
 plate haul are all suspects, and none can be judged offline.
+
+## The smelter is sited beside the ore, not beside the base
+
+**Files:** `orchestrator/stage_extraction.py`, `tests/test_smelter_siting.py`
+
+**What:** Three changes to the siting DECISION, not to any placement:
+
+1. `smelter_search_anchors` takes the mine's `ore_output` and adds two anchors
+   derived from it -- the footprint immediately beyond the ore reservation,
+   level with the output, on whichever side it sits. The four existing anchors
+   are edges of the whole PATCH, so on a long patch none of them is near the
+   belt the smelter has to meet.
+2. Anchors are ranked by MANHATTAN distance, which is what a belt costs and
+   what the candidate scoring downstream already measured. Ranking by
+   straight-line distance disagreed with the quantity being minimised and put a
+   16.5-tile site behind an 18.0-tile one.
+3. Candidate scoring puts the ore haul BEFORE the sum of both hauls. Summing
+   them let a site far from the mine win because it happened to sit near the
+   base -- which is how iron landed at (6,51) against a mine output at
+   (12.5,-3.5), a 61-tile haul.
+
+**Why the ore haul outranks the plate haul:** the ore belt carries the drill
+row's whole output and is re-laid every time the row grows 6 -> 20 -> 50 -> 100,
+so its length is paid over and over. The plate belt leaving the smelter is built
+once, and its far end can be served by bots if it comes to that.
+
+This is the same rule a promoted line already follows through `_heaviest_source`
+-- sit beside the input you consume most -- now applied to the smelter, which
+had its own unrelated anchor and scoring logic.
+
+**Verified** by reverting all three decisions: 3 of 8 tests fail. Anchors are
+still proven never to overlap the ore reservation, and callers that do not know
+where the ore leaves keep the old ordering.
+
+**Not changed, and still a suspect:** `find_clear_area(max_radius=60)` lets a
+site drift up to 60 tiles from its anchor, and `LOCAL_MODE_MAX_LINK_TILES` still
+admits a 300-tile ore haul. If a run still sites badly with good anchors, the
+cause is the base's own sprawl having filled the ground next to the mine, which
+is a zoning problem rather than a scoring one.
