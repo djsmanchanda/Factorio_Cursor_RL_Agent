@@ -1037,3 +1037,26 @@ fails when the patch is removed.
 4. Nothing in this batch has been exercised against a live game. Prep,
    corridor truncation, and the promotion set are all decision-layer changes
    verified by test only.
+
+## Prep now queues a drill shortfall instead of ending the run
+
+**Files:** `orchestrator/autonomous_builder.py`, `tests/test_prep_shortage.py`
+
+**What:** The plate-prep block catches `MaterialShortage` and calls
+`add_demands`, so the shortfall becomes a mall target.
+
+**Why:** Live run 2026-08-02 17:02:22 ended on
+`mining_iron-ore needs material the base does not have -- electric-mining-drill:
+need 14, short 6`. Prep correctly decided iron needs drill phase 20, asked for
+14 drills, and the base held 8. `MaterialShortage` is a `RuntimeError`, so the
+`except (StuckError, ValueError)` deferral never saw it. Every other build call
+in `run()` already fed shortages back to the mall; the block added last commit
+was the only one that did not.
+
+Prep is the first thing that ever asks for a whole drill phase in one batch, so
+it is the first thing to discover the base cannot afford one. That is the
+recursive bottleneck working as intended -- raising iron requires drills, and
+drills come from the mall -- and it needs to push back a step, not die.
+
+**Note:** a shortage must NOT take the `PREP DEFERRED` path, which marks a plate
+finished for the whole run. The mall is about to fix it; prep should retry.

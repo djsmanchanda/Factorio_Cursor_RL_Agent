@@ -1125,6 +1125,22 @@ def run(
                         client, bridge, surface, force, short_plate,
                         reference_point, emit, expand=plate_line is not None,
                     )
+                except MaterialShortage as shortage:
+                    # Raising a drill phase needs drills, and drills come from
+                    # the mall. Push the shortfall back as a mall target instead
+                    # of dying on it: prep is the first thing that ever asks for
+                    # 14 drills at once, so it is also the first thing to find
+                    # the base holding 8. Every other path in this loop already
+                    # does this -- omitting it here ended a run outright.
+                    add_demands(mall_targets, shortage)
+                    emit(
+                        f"  PREP DEMAND: {short_plate} extraction needs "
+                        + ", ".join(
+                            f"{item}={target}"
+                            for item, target in sorted(shortage.required.items())
+                        )
+                        + " -- queued for the mall"
+                    )
                 except (StuckError, ValueError) as error:
                     prepped.add(short_plate)
                     emit(
