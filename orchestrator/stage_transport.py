@@ -8,6 +8,7 @@ from typing import Callable
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
+from orchestrator.parts_mall import MaterialShortage
 from orchestrator.pole_relocation import (
     choose_pole_move,
     corridor_tiles,
@@ -28,6 +29,7 @@ from orchestrator.stage_services import (
 from planners.belt_bridge import (
     DIRECTION_VECTORS,
     UNDERGROUND_REACH,
+    bridge_belt_to_belt,
     bridge_belt_to_chest,
     bridge_chest_to_chest,
     opposite,
@@ -289,7 +291,7 @@ def _plan_belt_transport(
     client: RconClient, surface: str, force: str, ingredient: str, source_position: Point,
     feed_position: Point, *, reuse_existing: bool, max_belt_route_tiles: int | None,
     additional_blocked: set[tuple[int, int]] | None = None,
-    upstream_shift: int = 1,
+    upstream_shift: int = 1, destination_is_belt: bool = False,
 ) -> tuple[list[dict], str, bool]:
     belt_source = _through_belt_source(
         client, surface, ingredient, source_position,
@@ -332,10 +334,24 @@ def _plan_belt_transport(
     # straight-line guess rejected bridges that were affordable in practice.
     ordered = [preferred] + [t for t in _BELT_TIERS_CHEAPEST_FIRST if t != preferred]
     shortfalls: list[str] = []
+    requirements: dict[str, dict[str, int]] = {}
     route_error: ValueError | None = None
     for tier in ordered:
         try:
-            if belt_source is not None:
+            if belt_source is not None and destination_is_belt:
+                # BOTH ENDS ARE BELTS, so the join is belt to belt and needs
+                # no inserter at all. The preflight already planned it this
+                # way; the build path did not know, so it used a chest-shaped
+                # bridge and dropped an inserter into the middle of what
+                # should be one continuous belt. That is the extra hop seen
+                # between an ore mine and its furnace row -- and it also made
+                # the build disagree with the plan the preflight approved.
+                actions = bridge_belt_to_belt(
+                    belt_source, feed_position, entry_direction=entry_direction,
+                    belt_type=tier, blocked_tiles=blocked,
+                    max_route_tiles=max_belt_route_tiles,
+                )
+            elif belt_source is not None:
                 actions = bridge_belt_to_chest(
                     belt_source, feed_position, entry_direction=entry_direction,
                     belt_type=tier, inserter_type=_DEFAULT_INSERTER,
@@ -365,6 +381,7 @@ def _plan_belt_transport(
         }
         if not short:
             return actions, tier, belt_source is not None
+        requirements[tier] = required
         shortfalls.append(
             f"{tier} route short " + ", ".join(
                 f"{item} by {missing}" for item, missing in sorted(short.items())
@@ -372,6 +389,21 @@ def _plan_belt_transport(
         )
     if not shortfalls and route_error is not None:
         raise StuckError(f"no belt route is available for this bridge: {route_error}")
+    # BEING SHORT OF BELT IS NOT A DEAD END. Every other build path turns a
+    # shortage into a mall target and retries once the base has made the
+    # missing part; raising StuckError here ended whole runs on a bridge the
+    # base could have supplied minutes later -- observed as "no belt tier can
+    # be afforded ... short transport-belt by 96" while the mall held a
+    # 4800-belt target it had not filled yet.
+    #
+    # The CHEAPEST tier's bill is the one to ask for: it is the tier the mall
+    # can actually produce, and asking for a faster one would queue a part
+    # the base may have no recipe for.
+    for tier in _BELT_TIERS_CHEAPEST_FIRST:
+        if tier in requirements:
+            raise MaterialShortage(
+                f"belt bridge for {ingredient}", requirements[tier], stock,
+            )
     raise StuckError(
         "no belt tier can be afforded for this bridge -- " + "; ".join(shortfalls)
     )
@@ -384,6 +416,7 @@ def preflight_ingredient_transport(
     additional_blocked: set[tuple[int, int]] | None = None,
     mode: str | None = None,
     upstream_shift: int = 1,
+    destination_is_belt: bool = False,
 ) -> None:
     """Reject an illegal belt route before its destination stage is submitted."""
     if (mode or _transport_mode(recipe, ingredient, machine_count)) == "logistic":
@@ -392,7 +425,7 @@ def preflight_ingredient_transport(
         client, surface, force, ingredient, source_position, feed_position,
         reuse_existing=False, max_belt_route_tiles=max_belt_route_tiles,
         additional_blocked=additional_blocked,
-        upstream_shift=upstream_shift,
+        upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
     )
 
 
@@ -462,6 +495,7 @@ def ensure_ingredient_transport(
     max_belt_route_tiles: int | None = None,
     mode: str | None = None,
     upstream_shift: int = 1,
+    destination_is_belt: bool = False,
 ) -> float:
     """Idempotently ensure one declared source-to-feed link."""
     demand = _ingredient_demand(recipe, ingredient, machine_count)
@@ -498,7 +532,7 @@ def ensure_ingredient_transport(
         actions, belt_type, _ = _plan_belt_transport(
             client, surface, force, ingredient, source_position, feed_position,
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
-            upstream_shift=upstream_shift,
+            upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
         )
     except StuckError as blocked_route:
         # Before giving up, check whether what is in the way is merely a pole.
@@ -510,7 +544,7 @@ def ensure_ingredient_transport(
         actions, belt_type, _ = _plan_belt_transport(
             client, surface, force, ingredient, source_position, feed_position,
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
-            upstream_shift=upstream_shift,
+            upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
         )
     plan = {
         "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": actions}],

@@ -1502,3 +1502,33 @@ site drift up to 60 tiles from its anchor, and `LOCAL_MODE_MAX_LINK_TILES` still
 admits a 300-tile ore haul. If a run still sites badly with good anchors, the
 cause is the base's own sprawl having filled the ground next to the mine, which
 is a zoning problem rather than a scoring one.
+
+## The build now lays the bridge the preflight approved
+
+**Files:** `orchestrator/stage_transport.py`, `orchestrator/autonomous_builder.py`,
+`tests/test_belt_to_belt_feed.py`
+
+### 1. An inserter spliced into a belt-to-belt join
+`destination_is_belt` existed and was threaded to the PREFLIGHT only. The
+preflight therefore planned `bridge_belt_to_belt` -- one continuous belt, no
+inserter -- while the build path, which had no such parameter, laid a
+chest-shaped bridge with an inserter in the middle of it. The two planned
+different things, so the bill of materials that was checked was not the bill
+that got built.
+
+Ore mine to furnace row, by bridge shape: chest->chest 2 inserters,
+belt->chest 1, belt->belt 0. The flag now reaches the build.
+
+That is also the answer to why copper looked right and iron did not: whether
+`_through_belt_source` finds the mine's through belt decides between the
+one-inserter and two-inserter shapes, and neither was the zero-inserter one.
+
+### 2. Running short of belt ended the run
+`_plan_belt_transport` raised `StuckError` when no tier was affordable. Every
+other build path turns a shortage into a mall target and retries; this one
+killed the run -- "short transport-belt by 96" while the mall held an unfilled
+4800-belt target. It now raises `MaterialShortage` for the CHEAPEST tier's bill,
+which is the tier the mall can actually produce. An unroutable bridge is still a
+hard failure, because more belt cannot fix geometry.
+
+**Verified** by reverting both: 4 of 10 tests fail.

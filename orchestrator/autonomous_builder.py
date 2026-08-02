@@ -652,6 +652,12 @@ def _connect_stage_feeds(
                 source_position, feed_position, machine_count, emit,
                 max_belt_route_tiles=max_belt_route_tiles,
                 mode=modes[ingredient],
+                # The preflight already approved a belt-to-belt join for this
+                # feed. Not telling the BUILD meant it laid a chest-shaped
+                # bridge instead, with an inserter in the middle of what should
+                # be one continuous belt -- and a different bill of materials
+                # from the one that was checked.
+                destination_is_belt=direct_belt_input,
             ),
         )
     # A stage cannot possibly run before its first ingredient physically
