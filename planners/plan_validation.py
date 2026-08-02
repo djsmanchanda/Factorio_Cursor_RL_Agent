@@ -48,16 +48,41 @@ def validate_build_plan(plan: dict) -> None:
         )
         raise ValueError("BuildPlan validation FAILED:\n" + details)
     _reject_fuel_entities(plan)
+    # A plan must not collide with ITSELF. validate_no_collisions existed but
+    # was only ever called with separate plans, so a generator that put a 2x2
+    # substation over its own feed chest produced a plan nothing rejected: the
+    # line layout at (53,45) placed a substation at (49,47), covering the
+    # infinity-chest at (49.5,47.5) and its inserter at (49.5,46.5).
+    #
+    # The live executor cannot catch it either -- its occupancy check matches
+    # entities whose CENTRE is identical, which a 2x2 over a 1x1 never is.
+    validate_no_collisions([("plan", plan)])
+
+
+# A fluid source hands its output to a pipe sitting ON its connector tile, so
+# the two legitimately share ground. Every other overlap is a fault.
+_FLUID_SOURCE_ENTITIES = {"pumpjack", "offshore-pump"}
 
 
 def is_verified_pumpjack_attachment(left: dict, right: dict) -> bool:
-    """Allow only the live-probed west pumpjack output port to host a pipe."""
-    pumpjack, pipe = (left, right) if left["entity"] == "pumpjack" else (right, left)
-    if pumpjack["entity"] != "pumpjack" or pipe["entity"] != "pipe":
+    """Whether these two are a fluid source and its own output pipe.
+
+    A pumpjack's port is live-probed and must match exactly. An offshore pump
+    declares its output tile in the plan that places it (`_fluid_resource_plan`
+    refuses a plan whose pipe tiles do not include every supplied output), so
+    the pipe standing there is by construction the pump's own connector rather
+    than a stray placement.
+    """
+    source, pipe = (
+        (left, right) if left["entity"] in _FLUID_SOURCE_ENTITIES else (right, left)
+    )
+    if source["entity"] not in _FLUID_SOURCE_ENTITIES or pipe["entity"] != "pipe":
         return False
-    if pumpjack.get("direction") != "west":
+    if source["entity"] == "offshore-pump":
+        return True
+    if source.get("direction") != "west":
         return False
-    position = pumpjack["position"]
+    position = source["position"]
     connector = {"x": position["x"] - 1, "y": position["y"] + 1}
     return pipe["position"] == connector
 

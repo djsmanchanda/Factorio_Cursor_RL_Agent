@@ -1565,3 +1565,46 @@ line.
 `generate_line_layout` still emit a single row, so nothing on the ground changes
 until the layout generator can lay a block. That is the next piece and it is a
 real geometry change, not a constant.
+
+## A plan is now checked against itself
+
+**Files:** `planners/plan_validation.py`, `planners/line_layouts.py`,
+`tests/test_plan_self_collision.py`
+
+### The reported fault
+A substation shared ground with a fast inserter and a steel chest. Reproduced
+exactly: the line layout at (53,45) placed a substation at (49,47), whose 2x2
+footprint covers the feed chest at (49.5,47.5) and its inserter at (49.5,46.5).
+
+### Why nothing caught it
+`validate_no_collisions` existed but was only ever called with SEPARATE plans,
+so a generator colliding with its own output was never checked. The live
+executor could not catch it either: `exact_position_occupants` matches entities
+whose CENTRE is identical, which a 2x2 over a 1x1 never is. `can_place_entity`
+-- the game's own footprint-aware check -- is not used anywhere in the mod.
+
+`validate_build_plan` now runs the collision check on the plan against itself.
+Every plan goes through it, so this covers every generator.
+
+### The deeper fault it exposed
+Scaffolding was pinned at x=-4.0 and -7.5 while the feed columns GROW westward
+with machine count: x=-2.5 at three machines, -10.5 at twenty-one, -24.5 at
+fifty. Past about nine machines a line grew into its own power.
+
+Scaffolding now sits SOUTH of the feed columns -- west of the machines only
+y=-1.5..2.5 is occupied -- tracking the line's west edge but clamped at
+`_SCAFFOLD_WEST_LIMIT`. The clamp is not cosmetic: the pole rows never run west
+of x=0.5, so a substation tracking a fifty-machine line lands 26 tiles out, past
+its 18-tile WIRE reach, and an unwired substation reads as no_power on every
+machine it was meant to supply. A test caught that while the fix was being
+written.
+
+An offshore pump and the pipe on its own connector are excused, like the
+pumpjack -- that is an attachment, not a fault.
+
+**Verified** by restoring the old substation position and disabling the
+self-check: 9 tests fail.
+
+**Left alone:** the mod still does not call `can_place_entity`. Plan-time
+checking now covers self-collisions, but a plan colliding with something ALREADY
+on the ground is still only caught by the centre-exact check.

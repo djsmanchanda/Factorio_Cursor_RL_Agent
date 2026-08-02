@@ -28,6 +28,13 @@ from planners.recipe_data import (
 )
 
 
+
+# Furthest west line scaffolding may be placed. The pole rows start at x=0.5
+# and a substation's wire reaches 18 tiles, so anything beyond this is
+# electrically stranded however clear the ground is.
+_SCAFFOLD_WEST_LIMIT = -14.0
+
+
 class LineLayoutMixin:
     def generate_line_layout(
         self,
@@ -175,6 +182,12 @@ class LineLayoutMixin:
 
         # Two pole rows: medium-pole supply is 7x7, so one row cannot reach
         # both the input inserters (y=1) and the output row (y=5).
+        # Poles start at the BELT'S west end, not at x=0. The feed columns run
+        # west of the machines, so a row starting at zero left the westmost
+        # feeders outside every pole's 7x7 supply and left the substation --
+        # which is what actually powers that area -- with no pole inside its
+        # 18-tile wire reach on a long line. At fifty machines the nearest was
+        # 28 tiles away, which reads as no_power on every machine.
         for x in range(0, length + 1, 6):
             ghosts.append({"action_type": "place_ghost", "entity": "medium-electric-pole",
                            "position": at(x + 0.5, 1.5)})
@@ -200,8 +213,31 @@ class LineLayoutMixin:
             interface_pos = at(westmost - 6.0, 3.5)
             substation_pos = at(CHAINED_SUBSTATION_X, 2.0)
         else:
-            interface_pos = at(-7.5, 3.5)
-            substation_pos = at(-4.0, 2.0)
+            # Scaffolding goes SOUTH of the feed columns, tracking how far west
+            # the line actually reaches but clamped to stay wired.
+            #
+            # It used to sit at fixed x=-4.0 and -7.5 on the same rows as the
+            # feed columns. Those columns grow westward with machine count --
+            # x=-2.5 at three machines, -10.5 at twenty-one -- so the line grew
+            # into its own power: the substation's 2x2 footprint covered the
+            # feeder inserter at (-3.5,1.5) and its chest at (-3.5,2.5).
+            # Reported live as a substation sharing ground with a fast inserter
+            # and a steel chest.
+            #
+            # Nothing rejected those plans. The collision check only compared
+            # separate plans against each other, and the live executor matches
+            # entities whose CENTRE is identical -- which a 2x2 over a 1x1
+            # never is.
+            #
+            # West of the machines only y=-1.5..2.5 is occupied, so y=4.5 and
+            # 6.5 are clear at every size. The clamp matters because the pole
+            # rows never run west of x=0.5: a substation tracking a fifty-
+            # machine line lands 26 tiles out, past its 18-tile WIRE reach, and
+            # an unwired substation reads as no_power on every machine it was
+            # meant to supply.
+            scaffold_x = max(belt_west - 2.0, _SCAFFOLD_WEST_LIMIT)
+            substation_pos = at(scaffold_x, 4.5)
+            interface_pos = at(scaffold_x - 3.0, 6.5)
         scaffolding: List[dict] = [
             {"action_type": "place_entity", "entity": "electric-energy-interface", "position": interface_pos},
             {"action_type": "place_entity", "entity": "substation", "position": substation_pos},
