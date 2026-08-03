@@ -1772,3 +1772,39 @@ by a fast-inserter belonging to the copper-cable line built 25 seconds earlier.
 `occupied_tiles` DOES count ghosts (a ghost's `e.name` is `entity-ghost`, never
 in the ignore list), so the survey should have seen it. Not diagnosed further,
 and NOT fixed.
+
+## A bridge that cannot reach its endpoint now says so
+
+**Files:** `orchestrator/stage_transport.py`,
+`orchestrator/extraction_transport.py`, `tests/test_blocked_feed_endpoint.py`
+
+**The fault, found:** `_clear_side` ended with `return preferred`. Its docstring
+said so deliberately -- "falls back to the preferred side when nothing is clear,
+so the caller still gets a plan and a real placement error rather than a silent
+no-op".
+
+So when EVERY side of a feed chest is occupied, the bridge attached to a blocked
+one anyway and emitted belt onto whatever stood there. That is what put a
+transport-belt ghost at (117.5,-18.5) on top of a fast-inserter the same system
+had placed twenty-five seconds earlier: the copper-cable line's feed chest is
+flanked by the line's OWN feed inserters, so no side was free.
+
+The plan was invalid before it was ever submitted. The executor's
+`exact_position_occupied_by_different_entity` was not a detection -- it was the
+planned outcome arriving.
+
+**What changed.** `_clear_side` returns None when no side is usable, and every
+caller states which endpoint cannot be reached. A plan known to collide is not a
+better diagnostic than a stated failure; it is a build that damages the base and
+then reports the damage.
+
+**A second, unguarded call** was found while testing: `extraction_transport`
+passed `_clear_side(...)` straight into `bridge_chest_to_chest` as
+`exit_direction`, so None would have leaked in as a direction. Guarded too.
+
+**Ruled out along the way,** so it is not re-investigated: `occupied_tiles` DOES
+count ghosts -- a ghost's `e.name` is `entity-ghost`, never in the ignore list --
+and the survey box did cover the tile. The blocked set was correct; the decision
+that consumed it was not.
+
+**Verified** by restoring `return preferred`: the surrounded-chest test fails.

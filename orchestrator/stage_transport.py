@@ -164,17 +164,29 @@ def _toward(source: Point, dest: Point) -> str:
     return "south" if dy > 0 else "north"
 
 
-def _clear_side(chest: Point, preferred: str, blocked: set[tuple[int, int]]) -> str:
-    """Pick the side of `chest` a bridge can actually attach to.
+def _clear_side(
+    chest: Point, preferred: str, blocked: set[tuple[int, int]],
+) -> str | None:
+    """The side of `chest` a bridge can actually attach to, or None.
 
     bridge_chest_to_chest puts an inserter one tile out and the belt's first
     tile two tiles out, so a side is usable only when BOTH are free. Facing the
-    destination is merely the preference: a production stage sits on one side
-    of its own output chest, so the direct side is frequently its own machine
-    row -- observed live, where every attempt drove the belt back through the
-    furnaces it had just built. Falls back to the preferred side when nothing
-    is clear, so the caller still gets a plan and a real placement error
-    rather than a silent no-op.
+    destination is merely the preference: a production stage sits on one side of
+    its own output chest, so the direct side is frequently its own machine row
+    -- observed live, where every attempt drove the belt back through the
+    furnaces it had just built.
+
+    RETURNS NONE WHEN NO SIDE IS USABLE. This used to fall back to the preferred
+    side regardless, deliberately, so that a caller "still gets a plan and a real
+    placement error rather than a silent no-op". That trade is what put a
+    transport-belt ghost at (117.5,-18.5) on top of a fast-inserter the same
+    system had placed twenty-five seconds earlier: the copper-cable line's feed
+    chest is flanked by the line's own feed inserters, every side was blocked,
+    and the bridge attached to one anyway.
+
+    A plan known to collide before it is submitted is not a better diagnostic
+    than a stated failure -- it is a build that damages the base and then
+    reports the damage. The caller now says which chest cannot be reached.
     """
     ordered = [preferred, *(d for d in DIRECTION_VECTORS if d != preferred)]
     for direction in ordered:
@@ -185,7 +197,7 @@ def _clear_side(chest: Point, preferred: str, blocked: set[tuple[int, int]]) -> 
         }
         if not (tiles & blocked):
             return direction
-    return preferred
+    return None
 
 
 def _ingredient_demand(recipe: str, ingredient: str, machine_count: int) -> float:
@@ -326,6 +338,18 @@ def _plan_belt_transport(
     direction = _toward(route_source, feed_position)
     exit_direction = _clear_side(route_source, direction, blocked)
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
+    if entry_direction is None:
+        raise StuckError(
+            f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
+            "every side of it is already occupied, so no inserter and belt "
+            "pair fits. Building anyway would place belt on top of whatever "
+            "is standing there."
+        )
+    if exit_direction is None:
+        raise StuckError(
+            f"{ingredient} cannot leave its source at {route_source}: every "
+            "side of it is already occupied."
+        )
 
     # Route first, price second. Each tier reaches a different distance
     # underground, so only a generated route knows what it actually costs; the

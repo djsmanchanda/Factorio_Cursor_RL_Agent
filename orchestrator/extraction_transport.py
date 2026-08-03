@@ -6,7 +6,11 @@ from __future__ import annotations
 import math
 
 from orchestrator import live_base
-from orchestrator.stage_services import _BRIDGE_SURVEY_MARGIN, _DEFAULT_INSERTER
+from orchestrator.stage_services import (
+    _BRIDGE_SURVEY_MARGIN,
+    _DEFAULT_INSERTER,
+    StuckError,
+)
 from orchestrator.stage_transport import (
     _clear_side,
     _replace_existing_source_belt,
@@ -109,6 +113,14 @@ def preflight_ingredient_transport(
         if destination_is_belt
         else _clear_side(feed_position, opposite(direction), blocked)
     )
+    if entry_direction is None:
+        # Same rule as the build path: a plan known to collide is worse
+        # than a stated failure, and the preflight exists to find exactly
+        # this before anything is placed.
+        raise StuckError(
+            f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
+            "every side of it is already occupied."
+        )
     if belt_source is not None:
         if destination_is_belt:
             exit_direction = None
@@ -133,9 +145,16 @@ def preflight_ingredient_transport(
             client, surface, belt_source, actions,
         )
     else:
+        exit_direction = _clear_side(source_position, direction, blocked)
+        if exit_direction is None:
+            # Unguarded, this handed None straight to the bridge as a direction.
+            raise StuckError(
+                f"{ingredient} cannot leave its source at {source_position}: "
+                "every side of it is already occupied."
+            )
         actions = bridge_chest_to_chest(
             source_position, feed_position,
-            exit_direction=_clear_side(source_position, direction, blocked),
+            exit_direction=exit_direction,
             entry_direction=entry_direction,
             belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
             blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
