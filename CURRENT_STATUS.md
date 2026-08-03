@@ -1732,3 +1732,43 @@ belt T-junctions into the side of an input belt so its item occupies one lane
 and another item can use the other. `feed_style="sideload"` in
 `line_layouts.py` already means exactly that, and docs/21 records it. Earlier
 notes in this file describing it loosely as "belt-fed columns" understate it.
+
+## Promotion now needs a backlog, not just a busy machine
+
+**Files:** `orchestrator/intermediate_scaling.py`,
+`orchestrator/autonomous_builder.py`, `tests/test_promotion_patience.py`,
+`tests/test_extraction_separation.py`
+
+**The fault:** transport-belt was promoted to a six-machine line -- eighteen a
+second, with six feed requesters to supply -- for a stock target of 200 that one
+cell covers in about a minute. Capacity built for work already nearly done, paid
+for in the plates everything else was waiting on.
+
+**Why saturation alone was the wrong trigger.** A single mall cell runs flat out
+whenever it has ANY work, so `saturated` was true the entire time it filled a
+one-off chest. Measured demand was 0.00/s and the promotion happened anyway,
+because saturation bypassed the rate limit entirely.
+
+`backlog_seconds` now asks how long the cells already built need to finish what
+is OUTSTANDING, and saturation only counts when that exceeds
+`PROMOTION_PATIENCE_SECONDS`. Measured with the reported numbers:
+
+| case | backlog | promoted to |
+|---|---|---|
+| 200 target, 42 stocked, 1 cell | 53 s | not promoted |
+| a line that never clears its backlog | 33333 s | 6 machines |
+| real demand above the rate limit | n/a | 6 machines |
+
+Infinite backlog when nothing is built, so the first cell is never blocked.
+
+The promotion log line now carries the outstanding count and the backlog, since
+"all 1 machine(s) running flat out" gave no way to see the decision was wrong.
+
+**Verified** by removing the patience check: 2 tests fail.
+
+**Still open -- a bridge collided with the stage it was feeding.**
+`bridge_copper-plate_to_copper-cable` tried to place belt at (117.5,-18.5), held
+by a fast-inserter belonging to the copper-cable line built 25 seconds earlier.
+`occupied_tiles` DOES count ghosts (a ghost's `e.name` is `entity-ghost`, never
+in the ignore list), so the survey should have seen it. Not diagnosed further,
+and NOT fixed.

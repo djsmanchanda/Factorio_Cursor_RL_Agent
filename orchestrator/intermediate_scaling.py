@@ -30,6 +30,20 @@ PROMOTED_LINE_PHASES = EXTRACTION_DRILL_PHASES
 PROMOTED_LINE_MIN_MACHINES = PROMOTED_LINE_PHASES[0]
 PROMOTED_LINE_HEADROOM = 1.25
 
+# How long the existing cells may take to finish what is OUTSTANDING before
+# a saturated cell justifies a dedicated line.
+#
+# Saturation alone is far too weak a trigger. A single mall cell runs flat
+# out whenever it has any work at all, so "saturated" fired while filling a
+# one-off chest: transport-belt was promoted to six machines -- eighteen a
+# second, with six feed requesters to supply -- for a target of two hundred
+# that one cell covers in about a minute. That is capacity built for work
+# already nearly done, paid for in the plates everything else needed.
+#
+# A line that is genuinely behind never finishes its backlog inside this
+# window, so real demand still promotes.
+PROMOTION_PATIENCE_SECONDS = 120.0
+
 
 def _line_phase(minimum_machines: int) -> int:
     """The smallest phase on the ladder that covers `minimum_machines`."""
@@ -97,9 +111,33 @@ def live_intermediate_demand(
     return total
 
 
+def output_per_machine(item: str) -> float:
+    """One machine's output of `item`, in items per second."""
+    spec = LINE_RECIPES[item]
+    return (
+        spec.get("product_amount", 1)
+        * MACHINE_SPEEDS[spec["machine"]]
+        / spec["craft_time"]
+    )
+
+
+def backlog_seconds(item: str, outstanding: int, machines: int) -> float:
+    """How long the machines already built need to finish `outstanding`.
+
+    Infinite when nothing is built, so the first cell is never blocked from
+    being created; zero when there is no backlog to clear.
+    """
+    if outstanding <= 0:
+        return 0.0
+    if machines <= 0 or item not in LINE_RECIPES:
+        return float("inf")
+    rate = output_per_machine(item) * machines
+    return outstanding / rate if rate > 0 else float("inf")
+
+
 def promoted_line_machine_count(
     item: str, demand_per_second: float, existing_machines: int = 0,
-    *, saturated: bool = False,
+    *, saturated: bool = False, backlog: float | None = None,
 ) -> int | None:
     """Return the new shared-line size when mall capacity is no longer enough.
 
@@ -115,14 +153,14 @@ def promoted_line_machine_count(
     """
     if not is_promotable(item):
         return None
+    if saturated and backlog is not None and backlog <= PROMOTION_PATIENCE_SECONDS:
+        # Busy, but the work is nearly done. A cell filling a one-off chest
+        # is saturated the whole time it is filling it, which says nothing
+        # about whether a dedicated line is warranted.
+        saturated = False
     if not saturated and demand_per_second <= MALL_INTERMEDIATE_RATE_LIMIT:
         return None
-    spec = LINE_RECIPES[item]
-    per_machine = (
-        spec.get("product_amount", 1)
-        * MACHINE_SPEEDS[spec["machine"]]
-        / spec["craft_time"]
-    )
+    per_machine = output_per_machine(item)
     existing_capacity = max(0, existing_machines) * per_machine
     required = max(0.0, demand_per_second - existing_capacity)
     needed = math.ceil(required * PROMOTED_LINE_HEADROOM / per_machine)

@@ -32,6 +32,7 @@ from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
 )
 from orchestrator.intermediate_scaling import (
+    backlog_seconds,
     live_intermediate_demand, promoted_line_belt_type, promoted_line_machine_count,
 )
 from orchestrator.priority_list import PriorityList
@@ -840,8 +841,20 @@ def _plan_line(
         and existing.machine_count > 0
         and existing.working_count >= existing.machine_count
     )
+    # How long the cells already built need to finish what is still OUTSTANDING.
+    # Saturation on its own is far too weak: a single cell runs flat out
+    # whenever it has any work, so it fired while filling a one-off chest and
+    # promoted transport-belt to six machines -- and six feed requesters -- for
+    # a 200 target one cell covers in about a minute.
+    outstanding = max(0, stock_target - live_base.available_items(
+        client, surface, force,
+    ).get(item, 0))
+    backlog = backlog_seconds(
+        item, outstanding, existing.machine_count if existing else 0,
+    )
     promoted_count = promoted_line_machine_count(
         item, demand, existing.machine_count if existing else 0, saturated=saturated,
+        backlog=backlog,
     )
     # Production prep asks for a standing number of MALL cells and must be
     # allowed to finish. Promotion outranking it turned "copper-cable to 2
@@ -853,7 +866,8 @@ def _plan_line(
     )
     if promote_to_line:
         why = (
-            f"all {existing.machine_count} machine(s) running flat out"
+            f"all {existing.machine_count} machine(s) flat out with "
+            f"{outstanding} still to make ({backlog:.0f}s of backlog)"
             if saturated and existing else f"demand is {demand:.2f}/s"
         )
         emit(

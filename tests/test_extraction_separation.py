@@ -536,6 +536,9 @@ def test_pending_smelter_is_repaired_instead_of_duplicate_mining(monkeypatch) ->
     monkeypatch.setattr(live_base, "nearest_container", lambda *_a, **_k: None)
     monkeypatch.setattr(live_base, "nearest_pole_on_other_network", lambda *_a: None)
     monkeypatch.setattr(live_base, "entity_statuses", lambda *_a: {})
+    # Promotion now weighs the OUTSTANDING requirement against what the built
+    # cells can clear, so the survey reads stock.
+    monkeypatch.setattr(live_base, "available_items", lambda *_a, **_k: {})
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(
         autonomous_builder, "build_mining_stage",
