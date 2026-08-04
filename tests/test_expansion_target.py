@@ -64,6 +64,11 @@ def test_a_mineable_stage_is_its_own_target() -> None:
     assert expansion_target("iron-plate", {}) == "iron-plate"
 
 
+def test_stone_brick_is_a_mineable_furnace_stage() -> None:
+    assert _mineable("stone-brick")
+    assert expansion_target("stone-brick", {}) == "stone-brick"
+
+
 @pytest.mark.parametrize("item", ["automation-science-pack", "electronic-circuit", "inserter"])
 def test_every_real_goal_resolves_to_an_extraction_stage(item: str) -> None:
     target = expansion_target(item, {})

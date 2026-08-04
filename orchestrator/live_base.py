@@ -307,13 +307,18 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
         "local e=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
         "radius=0.4,limit=1}[1];"
         "if not e then rcon.print('NONE') return end;"
-        "rcon.print(e.name..' '..e.type..' '..(e.force and e.force.name or 'neutral'))"
+        "local ghost=(e.type=='entity-ghost' and e.ghost_name or '-');"
+        "rcon.print(e.name..' '..e.type..' '..(e.force and e.force.name or 'neutral')..' '..ghost)"
     )
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
-    name, entity_type, force = raw.split(" ", 2)
-    return {"name": name, "type": entity_type, "force": force}
+    parts = raw.split(" ", 3)
+    name, entity_type, force = parts[:3]
+    result = {"name": name, "type": entity_type, "force": force}
+    if len(parts) == 4 and parts[3] != "-":
+        result["ghost_name"] = parts[3]
+    return result
 
 
 

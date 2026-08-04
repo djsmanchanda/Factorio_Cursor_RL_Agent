@@ -65,6 +65,16 @@ fast-inserter has a live datapoint behind it. The plain inserter's figure is
 arithmetic (~0.36x a fast one, applied to the researched fast value) and the two
 high-capacity tiers are prototype claims, so all three are listed in
 `UNMEASURED_FEEDER_RATES` and discounted by `UNMEASURED_RATE_DERATING` before
+
+The complete user-supplied Factorio 2.0.26 experimental table is preserved in
+`docs/reference/inserter_throughput_factorio_2_0_26.txt`. It covers
+chest-to-chest, chest-to-belt, chest-to-splitter, and perpendicular
+belt-to-chest cases across capacity bonuses, qualities, belt tiers, and belt
+stacking. It is a diagnostic reference, not yet an active lookup table: the
+real-base snapshot does not currently export the inserter-capacity research,
+quality, destination belt tier/occupancy, or pickup geometry needed to choose a
+safe row. Collapsing those dimensions into one speed would recreate the
+underfeeding bug this section warns about.
 anything is sized from them. Callers use `feeder_rate()`, never the table.
 
 The derating is a safety margin, NOT a measurement. Erring low buys a

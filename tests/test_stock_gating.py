@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,7 +14,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from planners.mall_layout import generate_paired_mall_layout  # noqa: E402
+from orchestrator import autonomous_builder as builder  # noqa: E402
+from planners.mall_layout import (  # noqa: E402
+    generate_mall_stock_gate_update, generate_paired_mall_layout,
+)
 from planners.plan_validation import actions, validate_build_plan  # noqa: E402
 from planners.stock_gating import BELOW, gate_matches, stock_gate  # noqa: E402
 
@@ -151,17 +155,140 @@ def test_a_prep_cell_is_not_gated() -> None:
     assert "logistic_condition" not in machine
 
 
+def test_real_build_uses_the_reserve_for_both_the_bar_and_gate(monkeypatch) -> None:
+    """The mission can proceed at 200, while the mall keeps prebuilding to 1000."""
+    observed = {}
+    plan = SimpleNamespace(
+        existing=None,
+        spec={
+            "machine": "assembling-machine-2",
+            "ingredients": ["iron-gear-wheel", "iron-plate"],
+            "amounts": [1, 1],
+            "product_amount": 2,
+            "craft_time": 0.5,
+        },
+        production_target=200,
+        mall_storage_limit=1000,
+        promote_to_line=False,
+        fill_provider=False,
+        promoted_count=None,
+    )
+    monkeypatch.setattr(builder, "_ingredient_sources", lambda *_a, **_k: {})
+
+    def capture(*_args, **kwargs) -> None:
+        observed.update(kwargs)
+
+    monkeypatch.setattr(builder, "build_compact_mall_stage", capture)
+
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (0.0, 0.0), lambda _message: None, plan, None,
+        upgrade_bootstrap=False, stock_gate_target=1000,
+    )
+
+    assert observed["stock_target"] == 1000
+    assert observed["stock_gate_target"] == 1000
+
+
+def test_ensure_produced_preserves_requirement_and_capacity_to_the_build(
+    monkeypatch,
+) -> None:
+    """Regression for the real call chain: gate_on_stock used to stop at
+    ensure_produced and never reached the compact-mall layout."""
+    plan = SimpleNamespace(existing=None)
+    observed = {}
+
+    def planned(*_args, **kwargs):
+        observed["planned_storage_limit"] = kwargs["storage_limit"]
+        return plan
+
+    def refreshed(*_args, **kwargs):
+        observed["refreshed_gate"] = kwargs["stock_gate_target"]
+        return None
+
+    def built(*_args, **kwargs) -> None:
+        observed["built_gate"] = kwargs["stock_gate_target"]
+
+    monkeypatch.setattr(builder, "_plan_line", planned)
+    monkeypatch.setattr(builder, "_refresh_mall_cell", refreshed)
+    monkeypatch.setattr(builder, "_build_assembled_stage", built)
+
+    result = builder.ensure_produced(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (0.0, 0.0), lambda _message: None,
+        upgrade_bootstrap=False,
+        stock_target=200,
+        stock_gate_target=1000,
+        storage_limit=1000,
+    )
+
+    assert result is None
+    assert observed == {
+        "planned_storage_limit": 1000,
+        "refreshed_gate": 1000,
+        "built_gate": 1000,
+    }
+
+
+def test_existing_mall_cell_gets_the_reserve_gate_and_storage_limit(
+    monkeypatch,
+) -> None:
+    machines = ((10.5, 10.5), (16.5, 10.5))
+    provider = (13.5, 9.5)
+    existing = SimpleNamespace(machine_positions=machines)
+    plan = SimpleNamespace(
+        existing=existing,
+        spec={
+            "machine": "assembling-machine-2",
+            "ingredients": ["iron-gear-wheel", "iron-plate"],
+            "amounts": [1, 1],
+            "product_amount": 2,
+        },
+        production_target=200,
+        mall_storage_limit=1000,
+        fill_provider=False,
+    )
+    submitted = []
+    monkeypatch.setattr(builder, "_paired_mall_provider", lambda *_a, **_k: provider)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _client, _bridge, _surface, plan, _name, _emit: submitted.append(plan),
+    )
+
+    builder._refresh_mall_cell(
+        object(), object(), "nauvis", "player", "transport-belt", plan,
+        lambda _message: None, upgrade_bootstrap=False, stock_gate_target=1000,
+    )
+
+    limit = next(actions(submitted[0]))["inventory_limit"]
+    gates = [
+        action["logistic_condition"]
+        for action in actions(submitted[1])
+    ]
+    assert limit["count"] == 1000
+    assert gates == [stock_gate("transport-belt", 1000)] * 2
+
+
+def test_existing_gate_update_is_a_valid_reconfiguration_plan() -> None:
+    plan = generate_mall_stock_gate_update(
+        "transport-belt", "assembling-machine-2", [(10.5, 10.5)], 200,
+    )
+    plan["surface"], plan["force"] = "nauvis", "player"
+
+    validate_build_plan(plan)
+
+
 def test_only_a_construction_target_asks_for_a_gate() -> None:
     """The mall task path has a real count of finished goods; prep does not."""
     import inspect
 
     from orchestrator import autonomous_builder as builder
 
-    served = inspect.getsource(builder._serve_mall_task)
+    ensured = inspect.getsource(builder._ensure_mall_item)
     prepped = inspect.getsource(builder._prep_intermediate)
 
-    assert "gate_on_stock=True" in served
-    assert "gate_on_stock" not in prepped
+    assert "stock_gate_target=reserve.gate_target" in ensured
+    assert "stock_gate_target" not in prepped
 
 
 def test_a_smelted_recipe_is_refused_a_mall_cell() -> None:
@@ -189,3 +316,49 @@ def test_a_full_chest_target_clears_the_bar_rather_than_setting_one() -> None:
 
 def test_the_bar_is_only_touched_on_inventories_that_support_one() -> None:
     assert "supports_bar()" in _EXECUTOR
+
+
+def test_bootstrap_inventory_limits_are_exact_stack_counts() -> None:
+    assert "local usable_slots = math.max(minimum_stacks, target_stacks)" in _EXECUTOR
+    assert "growth_stacks" not in _EXECUTOR
+
+
+def test_a_mature_cell_explicitly_fills_the_provider_chest() -> None:
+    plan = generate_paired_mall_layout(
+        "transport-belt", "assembling-machine-2",
+        ["iron-gear-wheel", "iron-plate"], [1, 1], (0, 0), "left",
+        stock_target=250, product_amount=2, craft_time=0.5,
+        fill_chest=True,
+    )
+    provider = next(
+        action for action in actions(plan)
+        if action["entity"] == "passive-provider-chest"
+    )
+
+    assert provider["inventory_limit"]["fill_chest"] is True
+
+
+def test_a_mature_cell_clears_its_old_bootstrap_gate() -> None:
+    plan = generate_mall_stock_gate_update(
+        "transport-belt", "assembling-machine-2", [(10.5, 10.5)], None,
+    )
+    plan["surface"], plan["force"] = "nauvis", "player"
+
+    validate_build_plan(plan)
+    assert next(actions(plan))["clear_logistic_condition"] is True
+
+
+def test_the_executor_clears_and_verifies_an_old_gate() -> None:
+    assert "behavior.connect_to_logistic_network = false" in _EXECUTOR
+    assert "logistic_condition_not_cleared" in _EXECUTOR
+    assert "logistic_condition_clear_failed" in _EXECUTOR
+
+
+def test_the_schema_distinguishes_exact_reserve_from_full_chest() -> None:
+    fields = (
+        _SCHEMA["properties"]["phases"]["items"]["properties"]["actions"]
+        ["items"]["properties"]
+    )
+
+    assert fields["inventory_limit"]["properties"]["fill_chest"]["type"] == "boolean"
+    assert fields["clear_logistic_condition"]["type"] == "boolean"

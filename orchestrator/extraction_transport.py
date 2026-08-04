@@ -12,7 +12,7 @@ from orchestrator.stage_services import (
     StuckError,
 )
 from orchestrator.stage_transport import (
-    _clear_side,
+    _direct_belt_entry,
     _replace_existing_source_belt,
     _through_belt_source,
     _transport_mode,
@@ -32,31 +32,6 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 
-
-def _direct_belt_entry(
-    feed_position: Point, route_source: Point, preferred: str,
-    blocked: set[tuple[int, int]], belt_direction: str,
-) -> str:
-    """Choose a clear approach that feeds with, never against, the input belt."""
-    if belt_direction not in {"east", "west"}:
-        raise ValueError("Direct refinery belt direction must be east or west")
-    if preferred == belt_direction:
-        preferred = "north" if route_source[1] < feed_position[1] else "south"
-    allowed = [opposite(belt_direction), "north", "south"]
-    ordered = [preferred, *allowed]
-    vectors = {
-        "east": (1, 0), "west": (-1, 0),
-        "north": (0, -1), "south": (0, 1),
-    }
-    for direction in dict.fromkeys(ordered):
-        vx, vy = vectors[direction]
-        approach = {
-            (math.floor(feed_position[0] + vx), math.floor(feed_position[1] + vy)),
-            (math.floor(feed_position[0] + 2 * vx), math.floor(feed_position[1] + 2 * vy)),
-        }
-        if not approach & blocked:
-            return direction
-    raise ValueError(f"No clear direct-belt approach to {feed_position}")
 
 def planned_footprint_tiles(plan: dict) -> set[tuple[int, int]]:
     """All tiles occupied by a future plan, including multi-tile bodies."""
@@ -107,8 +82,7 @@ def preflight_ingredient_transport(
     direction = _toward(route_source, feed_position)
     entry_direction = (
         _direct_belt_entry(
-            feed_position, route_source, opposite(direction), blocked,
-            destination_belt_direction,
+            feed_position, blocked, destination_belt_direction,
         )
         if destination_is_belt
         else _clear_side(feed_position, opposite(direction), blocked)
@@ -131,6 +105,7 @@ def preflight_ingredient_transport(
                     exit_direction = "east"
             actions = bridge_belt_to_belt(
                 belt_source, feed_position, entry_direction=entry_direction,
+                destination_direction=destination_belt_direction,
                 belt_type=belt_type, blocked_tiles=blocked,
                 max_route_tiles=max_belt_route_tiles,
                 exit_direction=exit_direction,
@@ -143,6 +118,11 @@ def preflight_ingredient_transport(
             )
         actions = _replace_existing_source_belt(
             client, surface, belt_source, actions,
+        )
+    elif destination_is_belt:
+        raise StuckError(
+            f"{ingredient} refinery feed requires a detected source belt at "
+            f"{source_position}; refusing a chest/inserter side-feed."
         )
     else:
         exit_direction = _clear_side(source_position, direction, blocked)

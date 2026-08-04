@@ -83,15 +83,15 @@ def test_a_half_built_stage_says_why_it_stopped() -> None:
     """It was silent, so a stage that failed part-way looked identical in the
     log to one nobody had started -- the iron-plate belt simply never appeared,
     with no line explaining it."""
-    served = inspect.getsource(builder._serve_mall_task)
-    clause = served[served.index("except MaterialShortage"):]
+    ensured = inspect.getsource(builder._ensure_mall_item)
+    clause = ensured[ensured.index("except MaterialShortage"):]
 
     assert "emit(" in clause[:clause.index("return")]
     assert "MALL DEMAND" in clause
 
 
 def test_the_shortage_names_what_is_missing() -> None:
-    served = inspect.getsource(builder._serve_mall_task)
+    ensured = inspect.getsource(builder._ensure_mall_item)
 
-    assert "shortage.required.items()" in served
-    assert "add_demands(mall_targets, shortage)" in served
+    assert "shortage.required.items()" in ensured
+    assert "add_demands(mall_targets, shortage)" in ensured

@@ -1,5 +1,5 @@
 # Path: tests/test_construction_stock.py
-# Purpose: Prove a construction buffer is earned from what the base can already make, so scarce resources go to capacity rather than into a stockpile.
+# Purpose: Prove mall cells prebuild deterministic stack reserves without making the mission wait for the full reserve.
 
 from __future__ import annotations
 
@@ -16,157 +16,158 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator.construction_stock import (  # noqa: E402
-    BUFFER_SECONDS,
     BULK_CONSTRUCTION_ITEMS,
     FALLBACK_STACK_SIZE,
-    MAX_BUFFER_STACKS,
-    buffer_ceiling,
-    standing_target,
-    standing_targets,
+    MallReserve,
+    mall_reserve,
 )
 from orchestrator.parts_mall import MaterialShortage, add_demands  # noqa: E402
 from orchestrator.priority_list import PriorityItem, PriorityList  # noqa: E402
 
-_STACKS = {"transport-belt": 100, "splitter": 50, "underground-belt": 50}
-_OPENING = 200
+_STACKS = {
+    "transport-belt": 200,
+    "inserter": 50,
+    "assembling-machine-2": 50,
+}
 
 
-def _belt(rate: float) -> int:
-    return standing_target(
-        "transport-belt", _OPENING, production_rate=rate, stack_sizes=_STACKS,
-    )
+def test_belts_prebuild_four_live_game_stacks() -> None:
+    assert mall_reserve(
+        "transport-belt", 250, stack_sizes=_STACKS,
+    ) == MallReserve(800, 800, 4)
 
 
-# --- scarce: spend on capacity, not on stock -------------------------------
+def test_a_job_using_exactly_half_the_reserve_does_not_expand_it() -> None:
+    reserve = mall_reserve("transport-belt", 400, stack_sizes=_STACKS)
 
-def test_an_item_nothing_produces_gets_only_what_the_mission_asked() -> None:
-    """Every one comes out of the player's starter kit, so stockpiling spends a
-    resource the base cannot replace."""
-    assert _belt(0.0) == _OPENING
-
-
-def test_a_barely_producing_base_does_not_stockpile() -> None:
-    """One machine at three a second has better uses for its iron -- 'the
-    resources can be used to build more important things faster'."""
-    assert _belt(3.0) == _OPENING
+    assert reserve.storage_stacks == 4
+    assert reserve.storage_count == 800
 
 
-# --- productive: the buffer is earned --------------------------------------
+def test_a_job_over_half_the_reserve_expands_in_two_stack_steps() -> None:
+    reserve = mall_reserve("transport-belt", 401, stack_sizes=_STACKS)
 
-def test_the_buffer_grows_with_what_the_base_can_make() -> None:
-    assert _belt(6.0) > _belt(3.0)
-    assert _belt(18.0) > _belt(6.0)
-
-
-def test_the_buffer_is_that_many_seconds_of_its_own_output() -> None:
-    """Affordable by construction: the base is already making them that fast."""
-    assert _belt(6.0) == int(6.0 * BUFFER_SECONDS)
+    assert reserve.storage_stacks == 6
+    assert reserve.storage_count == 1200
 
 
-def test_a_six_machine_line_earns_about_a_thousand_belts() -> None:
-    """The figure the user set by hand, now a consequence rather than a rule."""
-    assert 900 <= _belt(18.0) <= 1100
+def test_machine_reserve_starts_at_one_stack_then_grows_for_a_large_job() -> None:
+    reserve = mall_reserve("assembling-machine-2", 30, stack_sizes=_STACKS)
+
+    assert reserve.storage_stacks == 2
+    assert reserve.storage_count == 100
 
 
-# --- the ceiling -----------------------------------------------------------
+def test_other_bulk_parts_use_the_same_four_stack_policy() -> None:
+    reserve = mall_reserve("inserter", 60, stack_sizes=_STACKS)
 
-def test_the_buffer_stops_at_the_ceiling() -> None:
-    """Past this it is iron sitting in a chest instead of iron doing something."""
-    assert _belt(1000.0) == MAX_BUFFER_STACKS * _STACKS["transport-belt"]
-
-
-def test_the_ceiling_is_the_ten_stacks_that_was_asked_for() -> None:
-    assert MAX_BUFFER_STACKS == 10
-    assert buffer_ceiling("transport-belt", _STACKS) == 1000
+    assert "inserter" in BULK_CONSTRUCTION_ITEMS
+    assert reserve.storage_stacks == 4
+    assert reserve.storage_count == 200
 
 
-def test_the_old_full_chest_figure_is_unreachable() -> None:
-    """4800 was a milestone a run climbed toward for forty minutes, expanding
-    iron every sixty seconds to reach it."""
-    assert _belt(10_000.0) < 4800
+def test_an_unknown_stack_size_uses_the_conservative_fallback() -> None:
+    reserve = mall_reserve("mystery-machine", 1, stack_sizes={})
+
+    assert reserve.storage_count == FALLBACK_STACK_SIZE
 
 
-def test_an_unknown_stack_size_falls_back_low_rather_than_high() -> None:
-    assert buffer_ceiling("mystery-item", {}) == MAX_BUFFER_STACKS * FALLBACK_STACK_SIZE
+def test_a_mature_base_removes_the_bar_and_the_stock_gate() -> None:
+    assert mall_reserve(
+        "transport-belt", 250, stack_sizes=_STACKS, mature=True,
+    ) == MallReserve(None, 250, None, fill_chest=True)
 
 
-# --- what never gets a buffer ----------------------------------------------
-
-@pytest.mark.parametrize("item", ["oil-refinery", "pumpjack", "assembling-machine-2"])
-def test_a_machine_never_earns_a_buffer(item: str) -> None:
-    """A base needs a handful of refineries however large it grows."""
-    assert item not in BULK_CONSTRUCTION_ITEMS
-    assert standing_target(item, 2, production_rate=99.0, stack_sizes=_STACKS) == 2
+def test_a_reserve_requires_a_real_job() -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        mall_reserve("transport-belt", 0, stack_sizes=_STACKS)
 
 
-def test_the_belt_family_does_earn_one() -> None:
-    for item in ("transport-belt", "splitter", "underground-belt"):
-        assert item in BULK_CONSTRUCTION_ITEMS
+def test_reserve_capacity_is_monotonic_in_job_size() -> None:
+    capacities = [
+        mall_reserve("transport-belt", size, stack_sizes=_STACKS).storage_count
+        for size in (1, 250, 400, 401, 600, 601, 1200)
+    ]
+
+    assert capacities == sorted(capacities)
 
 
-# --- invariants ------------------------------------------------------------
-
-def test_the_buffer_never_drops_below_the_mission_requirement() -> None:
-    """A mission needing 9000 must not be cut to a buffer."""
-    assert standing_target(
-        "transport-belt", 9000, production_rate=18.0, stack_sizes=_STACKS,
-    ) == 9000
-
-
-def test_the_buffer_is_monotonic_in_production_rate() -> None:
-    previous = 0
-    for rate in (0.0, 1.0, 3.0, 6.0, 12.0, 18.0, 60.0, 600.0):
-        current = _belt(rate)
-        assert current >= previous
-        previous = current
-
-
-def test_a_whole_table_is_decided_per_item() -> None:
-    decided = standing_targets(
-        {"transport-belt": 200, "oil-refinery": 2, "inserter": 20},
-        {"transport-belt": 18.0, "oil-refinery": 99.0},
-        _STACKS,
-    )
-
-    assert 900 <= decided["transport-belt"] <= 1100
-    assert decided["oil-refinery"] == 2
-    assert decided["inserter"] == 20, "no production, so no buffer"
-
-
-# --- the run must not wait on a buffer -------------------------------------
-
-def test_a_buffer_never_becomes_something_the_run_waits_for() -> None:
-    """Raising the mall TARGET to a buffer turned a satisfied 200-belt
-    requirement into a gate: the loop sat in wait_for_stock polling every five
-    seconds and expanding iron every sixty, while the research it was launched
-    for never started."""
-    survey = inspect.getsource(builder._survey_pass)
-
-    assert "standing_target" not in survey
-    assert "mall_targets[item] =" not in survey
-
-
-def test_the_buffer_is_offered_to_the_cell_not_to_the_priority_list() -> None:
+def test_the_runner_waits_for_the_job_not_the_reserve() -> None:
+    ensured = inspect.getsource(builder._ensure_mall_item)
     served = inspect.getsource(builder._serve_mall_task)
 
-    assert "stock_buffer_for(" in served
-    assert "stock_target=target" in served, "the run still waits for the mission figure"
-    assert "stock_buffer=buffer" in served
+    assert "stock_target=target" in ensured
+    assert "stock_gate_target=reserve.gate_target" in ensured
+    assert "storage_limit=reserve.storage_count" in ensured
+    assert "fill_provider=reserve.fill_chest" in ensured
+    assert "wait_for_stock" in served
 
 
-def test_the_buffer_is_measured_from_the_live_line() -> None:
-    """Not from stock, which a starter kit inflates, and not from a constant."""
-    source = inspect.getsource(builder.stock_buffer_for)
+def test_background_reserve_starts_a_producer_without_waiting(monkeypatch) -> None:
+    background = {"transport-belt": 200}
+    blocking: dict[str, int] = {}
+    calls: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_args, **kwargs: (
+            calls.append((_args[4], _args[5], kwargs["background"])) or (True, None)
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "wait_for_stock",
+        lambda *_args, **_kwargs: pytest.fail("background reserve waited for stock"),
+    )
 
-    assert "_live_output_rate(" in source
-    assert "BULK_CONSTRUCTION_ITEMS" in source
+    spent = builder._serve_background_mall_task(
+        object(), object(), "nauvis", "player", background, blocking,
+        (0.0, 0.0), lambda _message: None,
+    )
+
+    assert spent is True
+    assert calls == [("transport-belt", 200, True)]
+    assert background == {}
 
 
-def test_an_item_with_no_line_reports_no_output() -> None:
-    source = inspect.getsource(builder._live_output_rate)
+def test_background_reserve_is_part_of_the_progress_signature() -> None:
+    before = builder._pass_signature(
+        None, {}, set(), {"transport-belt": 200, "inserter": 20},
+    )
+    after = builder._pass_signature(None, {}, set(), {"inserter": 20})
 
-    assert "return 0.0" in source
-    assert "machine_count <= 0" in source
+    assert before != after
+
+
+def test_the_reserve_uses_live_stack_sizes() -> None:
+    source = inspect.getsource(builder.mall_reserve_for)
+
+    assert "ITEM_STACK_SIZES" in source
+
+
+def test_maturity_requires_a_live_assembler_three_producer() -> None:
+    source = inspect.getsource(builder.mall_reserve_for)
+
+    assert '"assembling-machine-3"' in source
+    assert "_has_producer" in source
+
+
+def test_live_reserve_passes_the_job_size_and_stack_catalog(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"transport-belt": 200},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+
+    reserve = builder.mall_reserve_for(
+        object(), "nauvis", "player", "transport-belt", 250,
+    )
+
+    assert reserve == MallReserve(800, 800, 4)
+
+
+def test_live_reserve_lifts_after_an_assembler_three_producer(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: True)
+    assert builder.mall_reserve_for(
+        object(), "nauvis", "player", "transport-belt", 250,
+    ).fill_chest is True
 
 
 # --- the persisted-target trap ---------------------------------------------

@@ -9,8 +9,8 @@ from planners.recipe_data import FEED_HEADROOM, MACHINE_SPEEDS, inserter_for_dem
 from planners.stock_gating import stock_gate
 
 MALL_MINIMUM_STACKS = {
-    "production": 4,
-    "logistics": 5,
+    "production": 1,
+    "logistics": 4,
     "intermediate-products": 10,
 }
 
@@ -20,13 +20,15 @@ MALL_MINIMUM_STACKS = {
 MALL_SUPPLY_SECONDS = 10.0
 
 
-def _inventory_limit(recipe: str, stock_target: int) -> dict:
-    return {
+def _inventory_limit(recipe: str, stock_target: int, *, fill_chest: bool = False) -> dict:
+    limit = {
         "name": recipe,
         "count": stock_target,
-        "growth_stacks": 2,
         "minimum_stacks_by_group": dict(MALL_MINIMUM_STACKS),
     }
+    if fill_chest:
+        limit["fill_chest"] = True
+    return limit
 
 
 def compact_requests(
@@ -154,14 +156,37 @@ def generate_compact_mall_request_update(
 
 def generate_mall_provider_limit_update(
     recipe: str, provider_position: tuple[float, float], stock_target: int,
+    *, fill_chest: bool = False,
 ) -> dict:
-    """Resize an existing mall provider to the current construction target."""
+    """Resize an existing mall provider to its storage ceiling."""
     action = {
         "action_type": "place_entity", "entity": "passive-provider-chest",
         "position": {"x": provider_position[0], "y": provider_position[1]},
-        "inventory_limit": _inventory_limit(recipe, stock_target),
+        "inventory_limit": _inventory_limit(
+            recipe, stock_target, fill_chest=fill_chest),
     }
     return {"phases": [{"name": f"mall_provider_limit_{recipe}", "actions": [action]}]}
+
+
+def generate_mall_stock_gate_update(
+    recipe: str,
+    machine: str,
+    machine_positions: list[tuple[float, float]],
+    stock_target: int | None,
+) -> dict:
+    """Apply a construction readiness target to existing mall machines."""
+    updates = [{
+        "action_type": "place_ghost",
+        "entity": machine,
+        "position": {"x": x, "y": y},
+        "recipe": recipe,
+    } for x, y in machine_positions]
+    for action in updates:
+        if stock_target is None:
+            action["clear_logistic_condition"] = True
+        else:
+            action["logistic_condition"] = stock_gate(recipe, stock_target)
+    return {"phases": [{"name": f"mall_stock_gate_{recipe}", "actions": updates}]}
 
 
 def generate_promoted_mall_retirement_plan(
@@ -219,6 +244,7 @@ def generate_paired_mall_layout(
     craft_time: float,
     set_recipe: bool = True,
     stock_gate_target: int | None = None,
+    fill_chest: bool = False,
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -277,6 +303,7 @@ def generate_paired_mall_layout(
          "direction": output_direction},
         {"action_type": "place_entity", "entity": "passive-provider-chest",
          "position": {"x": ox + 4.5, "y": provider_y},
-         "inventory_limit": _inventory_limit(recipe, stock_target)},
+         "inventory_limit": _inventory_limit(
+             recipe, stock_target, fill_chest=fill_chest)},
     ]
     return {"phases": [{"name": f"paired_mall_{recipe}", "actions": actions}]}

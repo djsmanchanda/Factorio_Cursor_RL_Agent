@@ -21,14 +21,14 @@ def test_every_unprepped_plate_is_offered_the_pass() -> None:
     """The live fault: iron-plate yields the pass every time it is short of
     drills, so copper-plate never got a turn and a whole run finished with no
     copper being produced at all."""
-    block = _RUN[_RUN.index("Extraction second"):_RUN.index("if task is not None")]
+    block = _RUN[_RUN.index("Extraction second"):_RUN.index("_serve_ready_pass(")]
 
     assert "for plate in BASELINE_PLATES if plate not in prepped" in block
     assert "next(" not in block, "taking only the head is what starved copper"
 
 
 def test_the_pass_is_spent_by_whichever_plate_did_work() -> None:
-    block = _RUN[_RUN.index("Extraction second"):_RUN.index("if task is not None")]
+    block = _RUN[_RUN.index("Extraction second"):_RUN.index("_serve_ready_pass(")]
 
     assert "any(" in block, "stop at the first plate that spends the pass"
 

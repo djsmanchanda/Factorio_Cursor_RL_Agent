@@ -18,6 +18,7 @@ _RUN = inspect.getsource(autonomous_builder.run)
 _PREP = inspect.getsource(autonomous_builder._prep_plate_extraction)
 _LOOP = _RUN + "".join(
     inspect.getsource(helper) for helper in (
+        autonomous_builder._ensure_mall_item,
         autonomous_builder._serve_mall_task,
         autonomous_builder._prep_plate_extraction,
         autonomous_builder._prep_intermediate,

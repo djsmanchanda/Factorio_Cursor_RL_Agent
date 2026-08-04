@@ -16,7 +16,7 @@ from orchestrator.stage_services import _BRIDGE_SURVEY_MARGIN  # noqa: E402
 from orchestrator.stage_transport import _BELT_TIERS_CHEAPEST_FIRST  # noqa: E402
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN  # noqa: E402
 
-_MINING = inspect.getsource(builder.build_mining_stage)
+_MINING = inspect.getsource(builder._build_initial_plate_smelter)
 
 
 def test_the_survey_covers_everywhere_the_router_may_go() -> None:
@@ -47,6 +47,14 @@ def test_every_stocked_belt_tier_is_tried_before_giving_up_on_belts() -> None:
     assert "BELT TIER:" in _MINING
 
 
+def test_beltless_fallback_is_restricted_to_supported_plate_recipes() -> None:
+    assert 'if recipe not in {"iron-plate", "copper-plate"}:' in _MINING
+
+def test_nonplate_belt_shortages_do_not_escalate_to_faster_tiers() -> None:
+    shortage = _MINING[_MINING.index("shortage = short_of"):]
+    stop = shortage.index("emit(f\"  BELT TIER:")
+
+    assert 'if recipe not in {"iron-plate", "copper-plate"}:' in shortage[:stop]
 def test_the_beltless_smelter_is_reached_only_after_every_tier_fails() -> None:
     body = _MINING[_MINING.index("stock = live_base.available_items"):]
     tried = body[:body.index("BOOTSTRAP:")]
@@ -62,7 +70,8 @@ def test_the_beltless_smelter_is_described_as_temporary() -> None:
 
 
 def test_a_shortage_that_is_not_about_belts_is_never_swallowed() -> None:
-    assert "if not any(belt in short_of.required" in _MINING
+    assert "if not any(" in _MINING
+    assert "belt in short_of.required" in _MINING
 
 
 def test_the_preferred_tier_is_tried_first() -> None:

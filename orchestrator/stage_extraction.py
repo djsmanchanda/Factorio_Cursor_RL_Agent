@@ -182,18 +182,21 @@ def direct_mine_plan(
     ox, oy = origin
     upper = mining_drill_positions(origin, machine_count)
     belt_anchor = (ox - 2.5, oy + 0.5)
-    # The provider is a low-priority sample from the through belt. A fast
-    # inserter starves downstream consumers until the chest fills.
+    # Dedicated refinery feeds are belt-only: belt_anchor is the west turn tile.
+    # Side taps remain available to generic multi-input layouts, but never sit
+    # in the raw ore path.
+    output_chest = (belt_anchor[0] + 2, belt_anchor[1])
     inserter_type = "inserter"
     plan = generate_direct_mining_to_chest(
-        upper, belt_anchor, belt_type=belt_type, inserter_type=inserter_type,
+        upper, output_chest, belt_type=belt_type, inserter_type=inserter_type,
         output_side="west", reserved_pair_columns=reserved_pair_columns,
         prebuilt_pair_columns=prebuilt_pair_columns,
+        include_side_tap=False,
     )
     lower = [(x, belt_anchor[1] + 2) for x, _ in upper]
     mirrored = generate_direct_mine_row_expansion(lower, belt_anchor[1])
     plan["phases"].extend(mirrored["phases"])
-    return plan, (belt_anchor[0], belt_anchor[1] - 2)
+    return plan, belt_anchor
 
 
 def _new_direct_mine(

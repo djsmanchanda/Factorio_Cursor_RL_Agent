@@ -130,6 +130,7 @@ def build_compact_mall_stage(
     recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,
     bring_stage_up: Callable, emit: Callable[[str], None], *, stock_target: int = 1,
     stock_gate_target: int | None = None,
+    fill_chest: bool = False,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     spec = LINE_RECIPES[recipe]
@@ -153,6 +154,7 @@ def build_compact_mall_stage(
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
         stock_gate_target=stock_gate_target,
+        fill_chest=fill_chest,
     )
     plan["surface"], plan["force"] = surface, force
     machine = _slot_position(origin, side)

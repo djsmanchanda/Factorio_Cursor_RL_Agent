@@ -135,8 +135,9 @@ def generate_direct_mining_to_chest(
     output_side: str = "east",
     reserved_pair_columns: int = 0,
     prebuilt_pair_columns: int = 0,
+    include_side_tap: bool = True,
 ) -> dict:
-    """Mine onto a continuous belt with a side-tapped real steel chest.
+    """Mine onto a continuous belt, optionally with a side-tapped steel chest.
 
     Drills are deliberately south-facing and share their output row. This is
     the smallest real-base raw-resource primitive: it uses no infinity source
@@ -172,7 +173,7 @@ def generate_direct_mining_to_chest(
             raise ValueError("Output tap needs a belt endpoint east of every drill")
         terminal_inserter_x, belt_direction = chest_x - 1, "east"
     else:
-        belt_start_x = chest_x
+        belt_start_x = chest_x - 2
         # Only the affordable part of the reserved corridor is paved now.
         belt_end_x = last_x + 2 + 3 * prebuilt_pair_columns
         if belt_start_x > first_x:
@@ -192,42 +193,42 @@ def generate_direct_mining_to_chest(
         {"action_type": "place_ghost", "entity": "electric-mining-drill",
          "position": {"x": x, "y": y}, "direction": "south"}
         for x, y in drills
-    ] + belts + [
-        {"action_type": "place_ghost", "entity": inserter_type,
-         "position": {"x": chest_x, "y": chest_y - 1},
-         "direction": "south"},
-        {"action_type": "place_ghost", "entity": "steel-chest",
-         "position": {"x": chest_x, "y": chest_y - 2}},
-    ]
-    # The row poles are positioned for the DRILL row and their supply area stops
-    # short of the output row four tiles south, leaving the inserter that loads
-    # the chest unpowered. The drills then read as healthy while the belt backs
-    # up and the provider chest never fills -- and because an inserter is not a
-    # "machine", nothing in the stage health check noticed. One pole beside the
-    # inserter covers the output row; it stays inside the last row pole's wire
-    # reach so the whole mine remains one connected chain.
+    ] + belts
+    if include_side_tap:
+        mine_actions += [
+            {"action_type": "place_ghost", "entity": inserter_type,
+             "position": {"x": chest_x, "y": chest_y - 1},
+             "direction": "south"},
+            {"action_type": "place_ghost", "entity": "steel-chest",
+             "position": {"x": chest_x, "y": chest_y - 2}},
+        ]
+    # The row poles cover the drill row. A side-tapped chest, when requested,
+    # also gets a nearby pole so its loading inserter is powered; direct refinery
+    # feeds omit that tap and keep the turn column entirely belt-only.
     anchor = (first_x - 2, belt_y - 4)
     row_poles = _row_pole_positions(
         anchor, "electric-mining-drill", max(x for x, _ in drills),
     )
-    output_pole = (terminal_inserter_x, chest_y + 2)
-    reach = min(
-        ((output_pole[0] - pole_x) ** 2 + (output_pole[1] - pole_y) ** 2) ** 0.5
-        for pole_x, pole_y in row_poles
-    )
-    if reach > POLE_SPECS[ROW_POLE]["wire"]:
-        raise ValueError(
-            f"Output-row pole at {output_pole} is {reach:.2f} tiles from the nearest "
-            f"row pole, past {ROW_POLE}'s {POLE_SPECS[ROW_POLE]['wire']}-tile wire reach"
+    output_pole = None
+    if include_side_tap:
+        output_pole = (terminal_inserter_x, chest_y + 2)
+        reach = min(
+            ((output_pole[0] - pole_x) ** 2 + (output_pole[1] - pole_y) ** 2) ** 0.5
+            for pole_x, pole_y in row_poles
         )
+        if reach > POLE_SPECS[ROW_POLE]["wire"]:
+            raise ValueError(
+                f"Output-row pole at {output_pole} is {reach:.2f} tiles from the nearest "
+                f"row pole, past {ROW_POLE}'s {POLE_SPECS[ROW_POLE]['wire']}-tile wire reach"
+            )
     plan = {"phases": [
         {"name": "direct_mine_power", "actions": _power_scaffold(
             anchor, "electric-mining-drill", max(x for x, _ in drills),
             include_energy_interface=False,
-        ) + [
+        ) + ([
             {"action_type": "place_ghost", "entity": ROW_POLE,
              "position": {"x": output_pole[0], "y": output_pole[1]}},
-        ]},
+        ] if output_pole is not None else [])},
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
     validate_build_plan(plan)

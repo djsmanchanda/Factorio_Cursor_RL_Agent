@@ -105,18 +105,23 @@ def wait_for_stock(
     report_seconds: float = 30.0, expansion_seconds: float = 60.0,
     on_stalled: Callable[[], bool] | None = None,
 ) -> bool:
-    """Wait for stock; return false when expansion is safely deferred."""
+    """Wait for stock; expand only after a full window with no progress."""
     last_report = 0.0
     next_expansion = time.monotonic() + expansion_seconds
+    best_have = -1
     while True:
         have = live_base.available_items(client, surface, force).get(item, 0)
         if have >= target:
             emit(f"  MALL READY: {item} stock reached {have}/{target}")
             return True
         now = time.monotonic()
+        if have > best_have:
+            best_have = have
+            next_expansion = now + expansion_seconds
         if on_stalled is not None and now >= next_expansion:
             emit(
-                f"  MALL CAPACITY: {item} remains below {target}; "
+                f"  MALL CAPACITY: {item} made no stock progress for "
+                f"{expansion_seconds:.0f}s and remains below {target}; "
                 "requesting the next upstream expansion phase"
             )
             if not on_stalled():

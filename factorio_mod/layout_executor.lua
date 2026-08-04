@@ -68,14 +68,13 @@ local function inventory_limit_details(entity, limit)
   if not prototype then return nil, nil, "inventory_limit_unknown_item" end
   local group_name = prototype.subgroup and prototype.subgroup.group
     and prototype.subgroup.group.name or ""
+  if limit.fill_chest then
+    return inventory, #inventory + 1, nil
+  end
   local group_minimums = limit.minimum_stacks_by_group or {}
   local minimum_stacks = tonumber(group_minimums[group_name]) or 1
   local target_stacks = math.ceil(limit.count / prototype.stack_size)
-  local growth_stacks = math.max(1, tonumber(limit.growth_stacks) or 2)
-  local usable_slots = minimum_stacks
-  while target_stacks * 2 > usable_slots and usable_slots < #inventory do
-    usable_slots = math.min(#inventory, usable_slots + growth_stacks)
-  end
+  local usable_slots = math.max(minimum_stacks, target_stacks)
   return inventory, math.min(#inventory + 1, usable_slots + 1), nil
 end
 
@@ -149,6 +148,13 @@ local function configuration_error(entity, action, direction)
     if not ok then return "inventory_limit_read_failed" end
     if actual ~= expected then
       return "inventory_limit_mismatch:expected=" .. expected .. ",actual=" .. tostring(actual)
+    end
+  end
+  if action.clear_logistic_condition then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    if behavior.connect_to_logistic_network == true then
+      return "logistic_condition_not_cleared"
     end
   end
   local requests = action.logistic_requests
@@ -240,6 +246,16 @@ local function configure_created_entity(entity, action)
       write_section_slots(section, requests)
     end)
     if not ok then return "logistic_request_set_failed" end
+  end
+  if action.clear_logistic_condition then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    local ok = pcall(function()
+      behavior.connect_to_logistic_network = false
+    end)
+    if not ok or behavior.connect_to_logistic_network == true then
+      return "logistic_condition_clear_failed"
+    end
   end
   if action.logistic_condition then
     -- A machine reads the LOGISTIC network directly; it needs no wire, no

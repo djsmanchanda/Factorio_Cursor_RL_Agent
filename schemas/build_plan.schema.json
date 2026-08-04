@@ -173,12 +173,11 @@
         },
         "inventory_limit": {
          "type": "object",
-         "description": "Item-count target converted by the executor into a chest slot bar using the live item stack size.",
+         "description": "Exact item-count reserve converted into a chest slot bar using the live item stack size, or an explicit request to fill the chest.",
          "required": [
           "name",
           "count",
-          "minimum_stacks_by_group",
-          "growth_stacks"
+          "minimum_stacks_by_group"
          ],
          "additionalProperties": false,
          "properties": {
@@ -189,9 +188,8 @@
            "type": "integer",
            "minimum": 1
           },
-          "growth_stacks": {
-           "type": "integer",
-           "minimum": 1
+          "fill_chest": {
+           "type": "boolean"
           },
           "minimum_stacks_by_group": {
            "type": "object",
@@ -225,6 +223,9 @@
          "type": "number",
          "minimum": 0,
          "maximum": 1
+        },
+        "clear_logistic_condition": {
+         "type": "boolean"
         },
         "logistic_condition": {
          "type": "object",

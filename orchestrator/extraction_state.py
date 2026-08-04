@@ -171,6 +171,36 @@ def _classify_direct_mines(
     if candidates:
         return [mine for _distance, mine in sorted(candidates, key=lambda item: item[0])]
 
+    direct_candidates: list[tuple[float, ResourceMine]] = []
+    belt_rows = sorted({position[1] for position in belts})
+    for belt_y in belt_rows:
+        row_drills = {
+            position: built for position, built in drills.items()
+            if (math.isclose(position[1] + 2, belt_y)
+                or math.isclose(position[1] - 2, belt_y))
+        }
+        if not row_drills:
+            continue
+        drill_xs = sorted({position[0] for position in row_drills})
+        output_x = min(position[0] for position in belts if position[1] == belt_y)
+        required_end = max(drill_xs) + 2
+        required_belts = [
+            (output_x + offset, belt_y)
+            for offset in range(round(required_end - output_x) + 1)
+        ]
+        complete = (
+            all(row_drills.values())
+            and all(belts.get(position, False) for position in required_belts)
+        )
+        mine = ResourceMine(
+            (output_x, belt_y), len(drill_xs), pending=not complete,
+            expansion_step=1, row_capacity=len(drill_xs) + RESERVED_PAIR_COLUMNS,
+            belt_y=belt_y,
+        )
+        distance = (output_x - near[0]) ** 2 + (belt_y - near[1]) ** 2
+        direct_candidates.append((distance, mine))
+    if direct_candidates:
+        return [mine for _distance, mine in sorted(direct_candidates, key=lambda item: item[0])]
     pending_drills = list(drills)
     if pending_drills:
         drill = min(
@@ -212,6 +242,11 @@ def _resource_mine_entities(
         "area={{g.position.x-1.5,g.position.y-1.5},"
         "{g.position.x+1.5,g.position.y+1.5}},limit=1}>0 then "
         "add('drill',g,false) end end;"
+        "local belt_area={{" + str(near[0] - 320) + "," + str(near[1] - 320) + "},{"
+        + str(near[0] + 320) + "," + str(near[1] + 320) + "}};"
+        "for _,e in pairs(s.find_entities_filtered{type='transport-belt',force=f,area=belt_area}) do add('belt',e,true) end;"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f,area=belt_area}) do "
+        "if g.ghost_name and g.ghost_name:find('transport-belt',1,true) then add('belt',g,false) end end;"
         "local chests=s.find_entities_filtered{name={'passive-provider-chest','steel-chest'},force=f};"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
         "if g.ghost_name=='passive-provider-chest' or g.ghost_name=='steel-chest' "

@@ -1,33 +1,16 @@
 # Path: orchestrator/construction_stock.py
-# Purpose: Decide how much of a construction item to keep standing -- a small opening figure while it is scarce, and a full chest once the base makes its own.
+# Purpose: Set deterministic mall reserve stacks: bounded during bootstrap, expandable for large jobs, and unrestricted once the base is mature.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
+from dataclasses import dataclass
 
-# How much of its OWN output a bulk item keeps standing, expressed in seconds
-# of production rather than as a count.
-#
-# This is the rule, and the number is only its consequence: SPEND ON CAPACITY
-# WHILE CAPACITY IS SCARCE, AND STOCKPILE ONLY OUT OF SURPLUS. A base making
-# three belts a second holds a couple of hundred; the same base at eighteen a
-# second holds a thousand, and it can afford to. The buffer follows what the
-# base can already make, so it never competes with building the thing that
-# would make more.
-#
-# That is what a fixed figure could not express. 4800 belts was a milestone a
-# run climbed toward for forty minutes, expanding iron every sixty seconds to
-# reach it -- iron that did not become a drill, an assembler, or a science
-# pack. User standard, 2026-08-03: "I set the 10 stack limit so that it doesn't
-# waste the limited resources in building transport belt, and the resources can
-# be used to build more important things faster", and "conserve resource usage,
-# and make more resources, so that it can then use the resources a little more
-# freely".
-BUFFER_SECONDS = 60.0
-
-# Ceiling, in stacks. Even a base that can afford more has no use for it: past
-# this, belts are iron sitting in a chest instead of iron doing something.
-MAX_BUFFER_STACKS = 10
+INITIAL_BULK_STACKS = 4
+INITIAL_MACHINE_STACKS = 1
+RESERVE_GROWTH_STACKS = 2
+MAX_JOB_SHARE = 0.5
 
 # Used only when the live stack size is unknown. Deliberately low: understating
 # it holds less, which costs a later top-up. Overstating it asks the mall for
@@ -46,59 +29,56 @@ BULK_CONSTRUCTION_ITEMS = frozenset({
     "pipe", "pipe-to-ground", "steel-chest", "iron-chest",
 })
 
-# Used only when the live stack size is unknown. Deliberately low: understating
-# it fills less of the chest, which costs a later top-up. Overstating it asks
-# the mall for stock the chest cannot hold, and the cell never reads as done.
-FALLBACK_STACK_SIZE = 50
 
+@dataclass(frozen=True)
+class MallReserve:
+    """One cell's reserve and bar policy.
 
-def buffer_ceiling(item: str, stack_sizes: Mapping[str, int]) -> int:
-    """The most of `item` worth holding, however productive the base gets."""
-    stack = stack_sizes.get(item) or FALLBACK_STACK_SIZE
-    return MAX_BUFFER_STACKS * stack
-
-
-def standing_target(
-    item: str,
-    opening: int,
-    *,
-    production_rate: float = 0.0,
-    stack_sizes: Mapping[str, int] = (),
-) -> int:
-    """The stock target for `item`, given what the base can currently make.
-
-    `production_rate` is the item's own live output in items per second -- zero
-    while nothing produces it. That zero is what keeps the early game honest:
-    an item coming entirely out of the player's starter kit gets the opening
-    figure and nothing more, so the mall builds what the mission asked for
-    instead of hoarding a resource it cannot replace.
-
-    Once a line exists the buffer is BUFFER_SECONDS of that line's own output,
-    which grows as the line does and is by construction affordable -- the base
-    is already making them that fast. It is capped at `buffer_ceiling` because
-    past that, stock is material sitting in a chest rather than doing something.
-
-    Machines are exempt: a base needs a handful of refineries however large it
-    grows, and a chest of them would eat the plates the belts joining them are
-    made of.
+    `gate_target=None` deliberately leaves a mature cell running until its
+    unrestricted provider is full.
     """
-    if item not in BULK_CONSTRUCTION_ITEMS or production_rate <= 0:
+
+    gate_target: int | None
+    storage_count: int
+    storage_stacks: int | None
+    fill_chest: bool = False
+
+
+def _round_growth(stacks: int, opening: int, growth: int) -> int:
+    if stacks <= opening:
         return opening
-    earned = int(production_rate * BUFFER_SECONDS)
-    return max(opening, min(earned, buffer_ceiling(item, dict(stack_sizes or {}))))
+    return opening + math.ceil((stacks - opening) / growth) * growth
 
 
-def standing_targets(
-    opening: Mapping[str, int],
-    production_rates: Mapping[str, float],
+def mall_reserve(
+    item: str,
+    job_size: int,
+    *,
     stack_sizes: Mapping[str, int] = (),
-) -> dict[str, int]:
-    """Apply `standing_target` across a whole mall target table."""
-    return {
-        item: standing_target(
-            item, target,
-            production_rate=production_rates.get(item, 0.0),
-            stack_sizes=stack_sizes,
-        )
-        for item, target in opening.items()
-    }
+    mature: bool = False,
+) -> MallReserve:
+    """Reserve construction stock ahead of demand without making a job wait.
+
+    During bootstrap, high-volume construction parts start at four stacks and
+    machines at one. If one job is larger than half the opening reserve, grow
+    in deterministic stack increments until that job again uses at most half.
+    A mature self-producing base removes the bar and stock gate; the provider
+    chest itself becomes the limit.
+    """
+    if job_size <= 0:
+        raise ValueError("Mall job size must be positive")
+    if mature:
+        return MallReserve(None, job_size, None, fill_chest=True)
+    stack_size = dict(stack_sizes or {}).get(item) or FALLBACK_STACK_SIZE
+    opening = (
+        INITIAL_BULK_STACKS
+        if item in BULK_CONSTRUCTION_ITEMS
+        else INITIAL_MACHINE_STACKS
+    )
+    stacks = opening
+    if job_size > opening * stack_size * MAX_JOB_SHARE:
+        needed = math.ceil(job_size / (stack_size * MAX_JOB_SHARE))
+        growth = RESERVE_GROWTH_STACKS if opening > 1 else 1
+        stacks = _round_growth(needed, opening, growth)
+    count = stacks * stack_size
+    return MallReserve(count, count, stacks)

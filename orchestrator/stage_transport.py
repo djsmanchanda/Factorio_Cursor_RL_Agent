@@ -41,30 +41,75 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 
 
+def _direct_belt_entry(
+    feed_position: Point, blocked: set[tuple[int, int]], belt_direction: str,
+) -> str:
+    """Return the only approach that continues inline with a refinery bus.
+
+    A belt flowing west may only be supplied from its east/upstream end (and
+    vice versa). Allowing a clear north or south approach makes a valid-looking
+    T merge, but it compresses ore onto one lane. A refinery must join the
+    endpoint tangentially or fail.
+    """
+    if belt_direction not in {"east", "west"}:
+        raise ValueError("Direct refinery belt direction must be east or west")
+    entry_direction = opposite(belt_direction)
+    vx, vy = DIRECTION_VECTORS[entry_direction]
+    approach = {
+        (math.floor(feed_position[0] + vx * step),
+         math.floor(feed_position[1] + vy * step))
+        for step in (1, 2)
+    }
+    if approach & blocked:
+        raise StuckError(
+            f"No inline direct-belt approach to {feed_position}; the upstream "
+            f"end of its {belt_direction}bound bus is occupied"
+        )
+    return entry_direction
+
+
 def _through_belt_source(
     client: RconClient, surface: str, ingredient: str, provider: Point, *,
     upstream_shift: int = 1,
 ) -> Point | None:
     """Existing through-belt that should continue to the consuming stage.
 
-    A mine provider is a side tap: provider, inserter one tile south, and the
-    uninterrupted ore belt two tiles south. Treating that provider as a
-    terminal chest made the bridge run through the inserter and chest.
+    Legacy mines may expose a side tap (provider, inserter, then belt); newer
+    refinery mines expose the belt directly at provider. Both must hand the
+    bridge the uninterrupted belt, never a chest-shaped terminal source.
     """
+    direct_belt = live_base.entity_at(client, surface, provider)
+    if _entity_or_ghost_is(direct_belt, "transport-belt"):
+        return (provider[0] + 1, provider[1])
+
     mine_inserter = (provider[0], provider[1] + 1)
     mine_belt = (provider[0], provider[1] + 2)
     mine_entities = [
         live_base.entity_at(client, surface, mine_inserter),
         live_base.entity_at(client, surface, mine_belt),
     ]
+    shifted_tap_belt = (provider[0] - 2, provider[1] + 2)
+    shifted_handoff = (provider[0] - 1, provider[1] + 2)
+    shifted_entities = [
+        live_base.entity_at(client, surface, shifted_tap_belt),
+        live_base.entity_at(client, surface, shifted_handoff),
+    ]
     if (
-        mine_entities[0] and mine_entities[0]["type"] == "inserter"
-        and mine_entities[1] and mine_entities[1]["type"] == "transport-belt"
+        _entity_or_ghost_is(mine_entities[0], "inserter")
+        and all(
+            _entity_or_ghost_is(entity, "transport-belt")
+            for entity in shifted_entities
+        )
+    ):
+        return shifted_handoff
+    if (
+        _entity_or_ghost_is(mine_entities[0], "inserter")
+        and _entity_or_ghost_is(mine_entities[1], "transport-belt")
     ):
         shifted = (mine_belt[0] + upstream_shift, mine_belt[1])
         if upstream_shift:
             shifted_entity = live_base.entity_at(client, surface, shifted)
-            if shifted_entity and shifted_entity["type"] == "transport-belt":
+            if _entity_or_ghost_is(shifted_entity, "transport-belt"):
                 return shifted
         return mine_belt
 
@@ -84,6 +129,18 @@ def _through_belt_source(
     ):
         return (provider[0] + 2, provider[1] - 2)
     return None
+
+
+def _entity_or_ghost_is(entity: dict | None, entity_type: str) -> bool:
+    """Recognize planned transport before construction bots revive its ghost."""
+    if not entity:
+        return False
+    if entity.get("type") == entity_type:
+        return True
+    ghost = entity.get("ghost_name", "")
+    if entity_type == "transport-belt":
+        return ghost.endswith("transport-belt")
+    return entity_type == "inserter" and ghost.endswith("inserter")
 
 
 def _preserve_existing_side_tap_belts(
@@ -304,11 +361,17 @@ def _plan_belt_transport(
     feed_position: Point, *, reuse_existing: bool, max_belt_route_tiles: int | None,
     additional_blocked: set[tuple[int, int]] | None = None,
     upstream_shift: int = 1, destination_is_belt: bool = False,
+    destination_belt_direction: str = "east",
 ) -> tuple[list[dict], str, bool]:
     belt_source = _through_belt_source(
         client, surface, ingredient, source_position,
         upstream_shift=upstream_shift,
     )
+    if destination_is_belt and belt_source is None:
+        raise StuckError(
+            f"{ingredient} refinery feed requires an existing source belt at "
+            f"{source_position}; refusing a chest/inserter side-feed"
+        )
     route_source = belt_source or source_position
     span = int(abs(route_source[0] - feed_position[0])
                + abs(route_source[1] - feed_position[1])) + 4
@@ -337,7 +400,11 @@ def _plan_belt_transport(
     }
     direction = _toward(route_source, feed_position)
     exit_direction = _clear_side(route_source, direction, blocked)
-    entry_direction = _clear_side(feed_position, opposite(direction), blocked)
+    entry_direction = (
+        _direct_belt_entry(feed_position, blocked, destination_belt_direction)
+        if destination_is_belt
+        else _clear_side(feed_position, opposite(direction), blocked)
+    )
     if entry_direction is None:
         raise StuckError(
             f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
@@ -374,6 +441,7 @@ def _plan_belt_transport(
                     belt_source, feed_position, entry_direction=entry_direction,
                     belt_type=tier, blocked_tiles=blocked,
                     max_route_tiles=max_belt_route_tiles,
+                    destination_direction=destination_belt_direction,
                 )
             elif belt_source is not None:
                 actions = bridge_belt_to_chest(
@@ -441,6 +509,7 @@ def preflight_ingredient_transport(
     mode: str | None = None,
     upstream_shift: int = 1,
     destination_is_belt: bool = False,
+    destination_belt_direction: str = "east",
 ) -> None:
     """Reject an illegal belt route before its destination stage is submitted."""
     if (mode or _transport_mode(recipe, ingredient, machine_count)) == "logistic":
@@ -450,7 +519,8 @@ def preflight_ingredient_transport(
         reuse_existing=False, max_belt_route_tiles=max_belt_route_tiles,
         additional_blocked=additional_blocked,
         upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
-    )
+            destination_belt_direction=destination_belt_direction,
+        )
 
 
 def relocate_blocking_poles(
@@ -520,6 +590,7 @@ def ensure_ingredient_transport(
     mode: str | None = None,
     upstream_shift: int = 1,
     destination_is_belt: bool = False,
+    destination_belt_direction: str = "east",
 ) -> float:
     """Idempotently ensure one declared source-to-feed link."""
     demand = _ingredient_demand(recipe, ingredient, machine_count)
@@ -540,7 +611,7 @@ def ensure_ingredient_transport(
         upstream_shift=upstream_shift,
     ) is not None:
         emit(f"  {recipe}: {ingredient} continues from its production belt; "
-             "a regular inserter side-taps it without interrupting the main belt")
+             "the belt continues directly without a side-loading inserter")
     # State the ACTUAL reason. This used to assert the demand exceeded the bot
     # limit on every belt route, including ones a caller forced -- so the log
     # read "0.30/s exceeds the 3.0/s bot limit", which is plainly false and hid
@@ -557,6 +628,7 @@ def ensure_ingredient_transport(
             client, surface, force, ingredient, source_position, feed_position,
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
+            destination_belt_direction=destination_belt_direction,
         )
     except StuckError as blocked_route:
         # Before giving up, check whether what is in the way is merely a pole.
@@ -569,6 +641,7 @@ def ensure_ingredient_transport(
             client, surface, force, ingredient, source_position, feed_position,
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
+            destination_belt_direction=destination_belt_direction,
         )
     plan = {
         "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": actions}],

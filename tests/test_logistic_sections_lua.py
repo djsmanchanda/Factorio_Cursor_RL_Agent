@@ -245,6 +245,7 @@ def test_a_slot_value_may_be_a_name_or_a_table(lua) -> None:
 @pytest.mark.parametrize("field", [
     "logistic_request", "logistic_requests", "logistic_sections",
     "clear_logistic_groups", "inventory_limit", "infinity_filter",
+    "logistic_condition", "clear_logistic_condition",
 ])
 def test_every_settable_field_marks_an_action_as_carrying_settings(lua, field: str) -> None:
     """An omission here is silent: the entity reports already_present, nothing

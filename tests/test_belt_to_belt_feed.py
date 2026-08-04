@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import inspect
 import sys
+
+import pytest
 from collections import Counter
 from pathlib import Path
 
@@ -13,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
-from orchestrator import stage_transport  # noqa: E402
+from orchestrator import live_base, stage_transport  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from planners.belt_bridge import (  # noqa: E402
     bridge_belt_to_belt,
@@ -37,6 +39,104 @@ def test_a_belt_to_belt_join_needs_no_inserter() -> None:
     extra hop for no reason."""
     assert _shape(bridge_belt_to_belt, entry_direction="west")["inserter"] == 0
 
+def test_refinery_bus_requires_an_inline_upstream_approach() -> None:
+    assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "west") == "east"
+    assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "east") == "west"
+
+
+def test_refinery_bus_rejects_a_side_merge_when_its_upstream_end_is_blocked() -> None:
+    with pytest.raises(Exception, match="inline direct-belt approach"):
+        stage_transport._direct_belt_entry((20.5, 0.5), {(21, 0)}, "west")
+
+def test_refinery_bridge_reaches_the_inline_bus_end_without_a_t_merge() -> None:
+    bus = {(x, 31) for x in range(24)} - {(23, 31)}
+    actions = bridge_belt_to_belt(
+        (13.5, -1.5), (23.5, 31.5),
+        entry_direction="east", exit_direction="west",
+        destination_direction="west", belt_type="transport-belt",
+        blocked_tiles=bus,
+    )
+    endpoints = [
+        action for action in actions
+        if action["position"] in ({"x": 24.5, "y": 31.5}, {"x": 23.5, "y": 31.5})
+    ]
+
+    assert [action["direction"] for action in endpoints] == ["west", "west"]
+    positions = [
+        (action["position"]["x"], action["position"]["y"])
+        for action in actions
+    ]
+    assert len(positions) == len(set(positions))
+
+def test_iron_mine_to_smelter_is_one_direct_unbuffered_belt() -> None:
+    actions = bridge_belt_to_belt(
+        (13.5, -1.5), (13.5, -31.5),
+        entry_direction="south", exit_direction="west",
+        destination_direction="west",
+        belt_type="fast-transport-belt",
+    )
+    assert not any(
+        action["entity"].endswith(("chest", "inserter")) for action in actions
+    )
+    positions = [
+        (action["position"]["x"], action["position"]["y"])
+        for action in actions
+    ]
+    assert len(positions) == len(set(positions))
+    final = next(
+        action for action in actions
+        if action["position"] == {"x": 12.5, "y": -30.5}
+    )
+    assert final["direction"] == "north"
+
+
+def test_pending_mine_ghosts_are_recognized_as_a_through_belt(
+    monkeypatch,
+) -> None:
+    entities = {
+        (12.5, -2.5): {
+            "name": "entity-ghost", "type": "entity-ghost",
+            "force": "player", "ghost_name": "inserter",
+        },
+        (12.5, -1.5): {
+            "name": "entity-ghost", "type": "entity-ghost",
+            "force": "player", "ghost_name": "fast-transport-belt",
+        },
+        (13.5, -1.5): {
+            "name": "entity-ghost", "type": "entity-ghost",
+            "force": "player", "ghost_name": "fast-transport-belt",
+        },
+    }
+    monkeypatch.setattr(live_base, "entity_at", lambda _c, _s, p: entities.get(p))
+
+    assert stage_transport._through_belt_source(
+        object(), "nauvis", "iron-ore", (12.5, -3.5)
+    ) == (13.5, -1.5)
+def test_direct_mine_belt_is_used_without_a_side_tap(monkeypatch) -> None:
+    entities = {
+        (7.5, 20.5): {
+            "type": "entity-ghost", "ghost_name": "fast-transport-belt",
+        },
+    }
+    monkeypatch.setattr(live_base, "entity_at", lambda _c, _s, p: entities.get(p))
+    assert stage_transport._through_belt_source(
+        object(), "nauvis", "iron-ore", (7.5, 20.5)
+    ) == (8.5, 20.5)
+
+def test_shifted_mine_side_tap_leaves_the_turn_column_clear(monkeypatch) -> None:
+    entities = {
+        (14.5, -2.5): {"type": "entity-ghost", "ghost_name": "inserter"},
+        (12.5, -1.5): {
+            "type": "entity-ghost", "ghost_name": "fast-transport-belt",
+        },
+        (13.5, -1.5): {
+            "type": "entity-ghost", "ghost_name": "fast-transport-belt",
+        },
+    }
+    monkeypatch.setattr(live_base, "entity_at", lambda _c, _s, p: entities.get(p))
+    assert stage_transport._through_belt_source(
+        object(), "nauvis", "iron-ore", (14.5, -3.5)
+    ) == (13.5, -1.5)
 
 def test_the_chest_shaped_bridges_do_need_them() -> None:
     """Which is why using one for a belt destination was the defect: the
@@ -57,7 +157,15 @@ def test_the_build_path_knows_when_the_destination_is_a_belt() -> None:
     assert "destination_is_belt" in inspect.signature(
         stage_transport._plan_belt_transport
     ).parameters
+    assert "destination_belt_direction" in inspect.signature(
+        stage_transport._plan_belt_transport
+    ).parameters
 
+
+def test_refinery_never_falls_back_to_a_chest_side_feed() -> None:
+    assert "refusing a chest/inserter side-feed" in inspect.getsource(
+        stage_transport._plan_belt_transport
+    )
 
 def test_both_belt_ends_produce_a_belt_to_belt_bridge() -> None:
     assert "if belt_source is not None and destination_is_belt:" in _PLAN
@@ -75,6 +183,7 @@ def test_the_conversion_stage_passes_the_flag_to_the_build_not_only_the_prefligh
     connect = inspect.getsource(builder._connect_stage_feeds)
 
     assert "destination_is_belt=direct_belt_input" in connect
+    assert "destination_belt_direction=destination_belt_direction" in connect
 
 
 def test_running_short_of_belt_is_recoverable() -> None:

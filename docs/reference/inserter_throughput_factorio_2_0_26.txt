@@ -1,0 +1,506 @@
+# Path: docs/reference/inserter_throughput_factorio_2_0_26.txt
+# Purpose: Preserve the user-supplied experimental inserter throughput reference without collapsing context-dependent measurements into one rate.
+# Source note: Factorio 2.0.26 experimental data supplied 2026-08-04. Chest-to-belt values depend on capacity bonus, belt tier, quality, stacking, and belt occupancy.
+
+Inserter throughput
+Chest to chest
+Note: Experimental data from 2.0.26, recorded in this doc [2]. Chest to chest transfer transfers the entire hand size during a single tick, so most of the time is spent during the swing to and from.
+
+Type	Arm cycles per second (ticks per cycle)	Items/second at capacity bonus level (stack size)
+No capacity bonus	Capacity bonus 2	Capacity bonus 7	Transport belt stacking 
+Burner inserter	
+Normal quality	0.79 (76 ticks)
+Uncommon	1.03 (58 ticks)	Rare	1.25 (48 ticks)
+Epic	1.5 (40 ticks)	Legendary	2 (30 ticks)
+Normal quality	0.79
+Uncommon	1.03	Rare	1.25
+Epic	1.5	Legendary	2
+(1)	
+Normal quality	1.58
+Uncommon	2.07	Rare	2.5
+Epic	3	Legendary	4
+(2)	
+Normal quality	2.37
+Uncommon	3.10	Rare	3.75
+Epic	4.5	Legendary	6
+(3)	
+Normal quality	3.16
+Uncommon	4.14	Rare	5
+Epic	6	Legendary	8
+(4)
+Inserter	
+Normal quality	0.86 (70 ticks)
+Uncommon	1.11 (54 ticks)	Rare	1.36 (44 ticks)
+Epic	1.67 (36 ticks)	Legendary	2.14 (28 ticks)
+Normal quality	0.86
+Uncommon	1.11	Rare	1.36
+Epic	1.67	Legendary	2.14
+(1)	
+Normal quality	1.71
+Uncommon	2.22	Rare	2.73
+Epic	3.33	Legendary	4.29
+(2)	
+Normal quality	2.57
+Uncommon	3.33	Rare	4.09
+Epic	5	Legendary	6.43
+(3)	
+Normal quality	3.43
+Uncommon	4.44	Rare	5.45
+Epic	6.67	Legendary	8.57
+(4)
+Long-handed inserter	
+Normal quality	1.25 (48 ticks)
+Uncommon	1.58 (38 ticks)	Rare	2 (30 ticks)
+Epic	2.31 (26 ticks)	Legendary	3.33 (18 ticks)
+Normal quality	1.25
+Uncommon	1.58	Rare	2
+Epic	2.31	Legendary	3.33
+(1)	
+Normal quality	2.5
+Uncommon	3.16	Rare	4
+Epic	4.62	Legendary	6.67
+(2)	
+Normal quality	3.75
+Uncommon	4.74	Rare	6
+Epic	6.92	Legendary	10
+(3)	
+Normal quality	5
+Uncommon	6.32	Rare	8
+Epic	9.23	Legendary	13.33
+(4)
+Fast inserter	
+Normal quality	2.5 (24 ticks)
+Uncommon	3.33 (18 ticks)	Rare	4.29 (14 ticks)
+Epic	5 (12 ticks)	Legendary	7.5 (8 ticks)
+Normal quality	2.5
+Uncommon	3.33	Rare	4.29
+Epic	5	Legendary	7.5
+(1)	
+Normal quality	5
+Uncommon	6.67	Rare	8.57
+Epic	10	Legendary	15
+(2)	
+Normal quality	7.5
+Uncommon	10	Rare	12.86
+Epic	15	Legendary	22.5
+(3)	
+Normal quality	10
+Uncommon	13.33	Rare	17.14
+Epic	20	Legendary	30
+(4)
+Bulk inserter	
+Normal quality	2.5 (24 ticks)
+Uncommon	3.33 (18 ticks)	Rare	4.29 (14 ticks)
+Epic	5 (12 ticks)	Legendary	7.5 (8 ticks)
+Normal quality	5
+Uncommon	6.673	Rare	8.57
+Epic	10	Legendary	15
+(2)	
+Normal quality	10
+Uncommon	13.33	Rare	17.14
+Epic	20	Legendary	30
+(4)	
+Normal quality	30
+Uncommon	40	Rare	51.43
+Epic	60	Legendary	90
+(12)	
+Normal quality	30
+Uncommon	40	Rare	51.43
+Epic	60	Legendary	90
+(12)
+Stack inserter	
+Normal quality	2.5 (24 ticks)
+Uncommon	3.33 (18 ticks)	Rare	4.29 (14 ticks)
+Epic	5 (12 ticks)	Legendary	7.5 (8 ticks)
+Normal quality	15
+Uncommon	20	Rare	25.71
+Epic	30	Legendary	45
+(6)	
+Normal quality	20
+Uncommon	26.67	Rare	34.29
+Epic	40	Legendary	60
+(8)	
+Normal quality	40
+Uncommon	53.33	Rare	68.57
+Epic	80	Legendary	120
+(16)	
+Normal quality	40
+Uncommon	53.33	Rare	68.57
+Epic	80	Legendary	120
+(16)
+Chest to belt
+Throughput going from chest to belt depends on how full the belt is. An inserter will not put down an item on a belt that has items back-to-back (aka full compression) - it waits until there is a gap. However, if the gap is narrower than the item, then the items upstream on the belt will stop to make room for the item being inserted. The direction of the belt compared to the inserter does not matter however.
+
+In these measurements inserters move items onto an empty belt. Values are given for the stack sizes at four different capacity bonus levels.
+
+Note: Experimental data from 2.0
+
+Type	Items/second at capacity bonus level (stack size)
+No capacity bonus	Capacity Bonus 2	Capacity bonus 7	Transport belt stacking 
+																			
+Burner inserter	
+Normal quality	0.78
+Uncommon	1.03	Rare	1.25
+Epic	1.5	Legendary	2
+Normal quality	0.78
+Uncommon	1.03	Rare	1.25
+Epic	1.5	Legendary	2
+Normal quality	0.78
+Uncommon	1.03	Rare	1.25
+Epic	1.5	Legendary	2
+Normal quality	0.78
+Uncommon	1.03	Rare	1.25
+Epic	1.5	Legendary	2
+(1)	
+Normal quality	1.57
+Uncommon	2.03	Rare	2.43
+Epic	2.93	Legendary	3.87
+Normal quality	1.57
+Uncommon	2.03	Rare	2.43
+Epic	2.93	Legendary	3.87
+Normal quality	1.57
+Uncommon	2.03	Rare	2.43
+Epic	2.93	Legendary	3.87
+Normal quality	1.57
+Uncommon	2.03	Rare	2.43
+Epic	2.93	Legendary	3.87
+(2)	
+Normal quality	2.15
+Uncommon	2.72	Rare	3.2
+Epic	3.75	Legendary	4.75
+Normal quality	2.25
+Uncommon	2.9	Rare	3.45
+Epic	4.1	Legendary	5.3
+Normal quality	2.3
+Uncommon	3	Rare	3.6
+Epic	4.3	Legendary	5.6
+Normal quality	2.3
+Uncommon	3	Rare	3.6
+Epic	4.3	Legendary	5.6
+(3)	
+Normal quality	2.6
+Uncommon	3.27	Rare	3.73
+Epic	4.27	Legendary	5.2
+Normal quality	2.87
+Uncommon	3.65	Rare	4.27
+Epic	5	Legendary	6.33
+Normal quality	2.93
+Uncommon	3.8	Rare	4.53
+Epic	5.33	Legendary	6.87
+Normal quality	3
+Uncommon	3.87	Rare	4.6
+Epic	5.47	Legendary	7.07
+(4)
+Inserter	
+Normal quality	0.85
+Uncommon	1.12	Rare	1.37
+Epic	1.67	Legendary	2.13
+Normal quality	0.85
+Uncommon	1.12	Rare	1.37
+Epic	1.67	Legendary	2.13
+Normal quality	0.85
+Uncommon	1.12	Rare	1.37
+Epic	1.67	Legendary	2.13
+Normal quality	0.85
+Uncommon	1.12	Rare	1.37
+Epic	1.67	Legendary	2.13
+(1)	
+Normal quality	1.7
+Uncommon	2.17	Rare	2.67
+Epic	3.23	Legendary	4.13
+Normal quality	1.7
+Uncommon	2.17	Rare	2.67
+Epic	3.23	Legendary	4.13
+Normal quality	1.7
+Uncommon	2.17	Rare	2.67
+Epic	3.23	Legendary	4.13
+Normal quality	1.7
+Uncommon	2.17	Rare	2.67
+Epic	3.23	Legendary	4.13
+(2)	
+Normal quality	2.3
+Uncommon	2.9	Rare	3.45
+Epic	4.1	Legendary	5
+Normal quality	2.45
+Uncommon	3.1	Rare	3.75
+Epic	4.5	Legendary	5.6
+Normal quality	2.5
+Uncommon	3.2	Rare	3.9
+Epic	4.75	Legendary	6
+Normal quality	2.5
+Uncommon	3.2	Rare	3.9
+Epic	4.75	Legendary	6
+(3)	
+Normal quality	2.8
+Uncommon	3.43	Rare	4
+Epic	4.6	Legendary	5.47
+Normal quality	3.07
+Uncommon	3.87	Rare	4.6
+Epic	5.47	Legendary	6.67
+Normal quality	3.2
+Uncommon	4.07	Rare	4.87
+Epic	5.87	Legendary	7.27
+Normal quality	3.27
+Uncommon	4.13	Rare	5
+Epic	6	Legendary	7.48
+(4)
+Long-handed inserter	
+Normal quality	1.2
+Uncommon	1.58	Rare	2
+Epic	2.3	Legendary	3.33
+Normal quality	1.2
+Uncommon	1.58	Rare	2
+Epic	2.3	Legendary	3.33
+Normal quality	1.2
+Uncommon	1.58	Rare	2
+Epic	2.3	Legendary	3.33
+Normal quality	1.2
+Uncommon	1.58	Rare	2
+Epic	2.3	Legendary	3.33
+(1)	
+Normal quality	2.33
+Uncommon	3	Rare	3.87
+Epic	4.43	Legendary	6.3
+Normal quality	2.33
+Uncommon	3	Rare	3.87
+Epic	4.43	Legendary	6.3
+Normal quality	2.33
+Uncommon	3	Rare	3.87
+Epic	4.43	Legendary	6.3
+Normal quality	2.33
+Uncommon	3	Rare	3.87
+Epic	4.43	Legendary	6.3
+(2)	
+Normal quality	3.1
+Uncommon	3.9	Rare	4.75
+Epic	5.3	Legendary	6.92
+Normal quality	3.35
+Uncommon	4.3	Rare	5.3
+Epic	6	Legendary	8.18
+Normal quality	3.45
+Uncommon	4.5	Rare	5.6
+Epic	6.4	Legendary	9
+Normal quality	3.45
+Uncommon	4.5	Rare	5.6
+Epic	6.4	Legendary	9
+(3)	
+Normal quality	3.65
+Uncommon	4.45	Rare	5.20
+Epic	5.72	Legendary	7.07
+Normal quality	4.13
+Uncommon	5.2	Rare	6.33
+Epic	7.07	Legendary	9.23
+Normal quality	4.33
+Uncommon	5.6	Rare	6.87
+Epic	7.73	Legendary	10.43
+Normal quality	4.47
+Uncommon	5.73	Rare	7.07
+Epic	8	Legendary	10.92
+(4)
+Fast inserter	
+Normal quality	2.5
+Uncommon	3.33	Rare	4.28
+Epic	5	Legendary	7.5
+Normal quality	2.5
+Uncommon	3.33	Rare	4.28
+Epic	5	Legendary	7.5
+Normal quality	2.5
+Uncommon	3.33	Rare	4.28
+Epic	5	Legendary	7.5
+Normal quality	2.5
+Uncommon	3.33	Rare	4.28
+Epic	5	Legendary	7.5
+(1)	
+Normal quality	4.8
+Uncommon	6.3	Rare	7.5
+Epic	7.5	Legendary	7.52
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+(2)	
+Normal quality	5.62
+Uncommon	6.92	Rare	7.5
+Epic	7.5	Legendary	7.52
+Normal quality	6.42
+Uncommon	8.18	Rare	10
+Epic	11.25	Legendary	15
+Normal quality	6.9
+Uncommon	9	Rare	11.25
+Epic	12.85	Legendary	18
+Normal quality	6.9
+Uncommon	9	Rare	11.25
+Epic	12.85	Legendary	18
+(3)	
+Normal quality	6
+Uncommon	7.07	Rare	7.5
+Epic	7.52	Legendary	7.52
+Normal quality	7.5
+Uncommon	9.23	Rare	10.92
+Epic	12	Legendary	15
+Normal quality	8.27
+Uncommon	10.43	Rare	12.62
+Epic	14.13	Legendary	18.47
+Normal quality	8.58
+Uncommon	10.92	Rare	13.33
+Epic	15	Legendary	20
+(4)
+Bulk inserter	
+Normal quality	4.8
+Uncommon	6.3	Rare	7.5
+Epic	7.5	Legendary	7.52
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+Normal quality	4.8
+Uncommon	6.3	Rare	8
+Epic	9.23	Legendary	13.33
+(2)	
+Normal quality	6
+Uncommon	7.07	Rare	7.5
+Epic	7.52	Legendary	7.52
+Normal quality	7.5
+Uncommon	9.23	Rare	10.92
+Epic	12	Legendary	15
+Normal quality	8.27
+Uncommon	10.43	Rare	12.62
+Epic	14.13	Legendary	18.47
+Normal quality	8.58
+Uncommon	10.92	Rare	13.33
+Epic	15	Legendary	20
+(4)	
+Normal quality	6.93
+Uncommon	7.35	Rare	7.5
+Epic	7.52	Legendary	7.52
+Normal quality	11.23
+Uncommon	12.4	Rare	13.33
+Epic	13.85	Legendary	15
+Normal quality	14.4
+Uncommon	16.38	Rare	18
+Epic	18.95	Legendary	21.18
+Normal quality	16.4
+Uncommon	18.97	Rare	21.2
+Epic	22.5	Legendary	25.72
+(12)	
+Normal quality	6.93
+Uncommon	7.35	Rare	7.5
+Epic	7.52	Legendary	7.52
+Normal quality	11.12
+Uncommon	12.4	Rare	13.33
+Epic	13.85	Legendary	15
+Normal quality	14.4
+Uncommon	16.38	Rare	18
+Epic	18.95	Legendary	21.18
+Normal quality	16.4
+Uncommon	18.97	Rare	21.2
+Epic	22.5	Legendary	25.72
+(12)
+Stack inserter	
+Normal quality	11.27
+Uncommon	13.87	Rare	15
+Epic	15	Legendary	15.03
+Normal quality	12.87
+Uncommon	16.37	Rare	20
+Epic	22.5	Legendary	30
+Normal quality	13.8
+Uncommon	18	Rare	22.5
+Epic	25.7	Legendary	36
+Normal quality	13.8
+Uncommon	18	Rare	22.5
+Epic	25.7	Legendary	36
+(6)	
+Normal quality	12
+Uncommon	14.13	Rare	15
+Epic	15.03	Legendary	15.03
+Normal quality	15
+Uncommon	18.47	Rare	21.83
+Epic	24	Legendary	30
+Normal quality	16.53
+Uncommon	20.87	Rare	25.23
+Epic	28.27	Legendary	36.93
+Normal quality	17.17
+Uncommon	21.83	Rare	26.67
+Epic	30	Legendary	40
+(8)	
+Normal quality	13.33
+Uncommon	14.57	Rare	15
+Epic	15.03	Legendary	15.03
+Normal quality	20
+Uncommon	22.87	Rare	25.27
+Epic	26.67	Legendary	30
+Normal quality	24
+Uncommon	28.27	Rare	32
+Epic	34.3	Legendary	40
+Normal quality	26.67
+Uncommon	32	Rare	36.9
+Epic	40	Legendary	48
+(16)	
+Normal quality	24
+Uncommon	28.27	Rare	30
+Epic	30.07	Legendary	30.07
+Normal quality	30
+Uncommon	36.93	Rare	43.67
+Epic	48	Legendary	60
+Normal quality	33.07
+Uncommon	41.73	Rare	50.47
+Epic	56.53	Legendary	73.87
+Normal quality	34.33
+Uncommon	43.67	Rare	53.33
+Epic	60	Legendary	80
+(16)
+Chest to splitter
+When an inserter drops items onto the side of a perpendicular splitter, it always is considered to do so on the input side, enabling the splitter to move half of the items to the other belt (assuming that the splitter filter/priority settings allow it to do so and that there is available space on both belts). This allows the inserter to drop its items more quickly. A bulk inserter with capacity bonus 7 can move 16.0 items/second instead of the usual 14.4 items/second.
+
+By inserting onto the side of a splitter, a fully-upgraded bulk inserter can fill 71% of an express belt lane instead of the usual 64%. (Gif from 1.1)
+By inserting onto the side of a splitter, a fully-upgraded bulk inserter can fill 71% of an express belt lane instead of the usual 64%. (Gif from 1.1)
+ 
+In 1.1, three bulk inserters could saturate an express belt if one of them inserts onto a splitter. In 2.0, three bulk inserters can saturate an express belt if two of them insert onto splitters. (Gif from 1.1)
+In 1.1, three bulk inserters could saturate an express belt if one of them inserts onto a splitter. In 2.0, three bulk inserters can saturate an express belt if two of them insert onto splitters. (Gif from 1.1)
+Belt to chest (perpendicular)
+Note: The following is based on experimental data from 1.1. Most of the 1.1 experimental data was gathered using the following circuit blueprint to measure the exact tick difference between inserter swings. A lot of the data on this page (specifically the belt to chest data) relies heavily on the conditions of the setup on which the measurements are done. If your setup differs from the ones tested on this page, you can use the following blueprint to do the measurements yourself.
+
+  Copy blueprint string
+When picking items from a belt, many more factors come into play besides belt fullness:
+
+How fast the items move (i.e. if they are queued up on the belt or move at belt speed).
+Whether the belt is perpendicular to the inserter or approaches it head on.
+Whether items are on the near or far lane of a perpendicular belt.
+Whether the belt turns or not, and whether the items are in the inner or outer side of the bend.
+If the belt is an underground entrance or exit. This shortens the time items are visible to the inserter for pickup.
+All sorts of intricate timing factors between the inserter and the items on the belt, since the game simulates the arm homing in on every item.
+The test setup used below is with an inserter taking items from a perpendicular belt with items on the far lane only. The belt is fully compressed and timings are both for items that move at full speed and queued up as much as possible. Values are given for the stack sizes at three different capacity bonus levels.
+
+Type	Items/second at capacity bonus level (stack size)
+No capacity bonus	Capacity bonus 2	Capacity bonus 7
+Items at
+belt speed	Items
+queued
+up		Items at
+belt speed	Items
+queued
+up		Items at
+belt speed	Items
+queued
+up	
+								
+Burner inserter	0.60	0.65	0.50	0.64	(1)	1.11	1.20	1.13	1.26	(2)	1.61	1.61	1.65	1.71 /
+1.73 /
+1.86 *	(3)
+Inserter	0.94	0.94	0.94	0.88	(1)	1.67	1.67	1.50	1.74	(2)	2.50	2.25	2.33	2.37 /
+2.37 /
+2.54 *	(3)
+Long-handed inserter	1.18	1.18	1.25	1.20	(1)	2.20	2.31	2.40	2.40	(2)	3.21	3.21	3.46	3.40	(3)
+Fast inserter	2.50	2.31	2.50	2.50	(1)	4.50	4.29	5.00	4.80	(2)	6.43	6.00	6.43	6.43	(3)
+Bulk inserter	4.50	4.29	5.00	4.80	(2)	7.50	7.50	8.00	7.50 /
+8.57 /
+8.28 *	(4)	7.50	11.25	15.00	7.50 /
+13.09 /
+15.32 *	(12)

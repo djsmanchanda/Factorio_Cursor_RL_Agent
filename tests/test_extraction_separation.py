@@ -47,12 +47,11 @@ def test_direct_mine_plan_contains_drills_and_egress_but_no_furnaces() -> None:
         belt_type="fast-transport-belt", inserter_type="fast-inserter",
     )
 
-    assert output == (7.5, 18.5)
+    assert output == (7.5, 20.5)
     assert _entities(plan).count("electric-mining-drill") == 6
     assert "electric-furnace" not in _entities(plan)
-    assert "steel-chest" in _entities(plan)
-    assert "inserter" in _entities(plan)
-    assert "fast-inserter" not in _entities(plan)
+    assert "steel-chest" not in _entities(plan)
+    assert "inserter" not in _entities(plan)
 
 def test_furnaces_use_force_productivity_instead_of_copying_drill_count() -> None:
     assert smelter_count_for_drills("iron-plate", 2, 0.0) == 2
@@ -238,6 +237,27 @@ def test_direct_mine_classifier_recognizes_side_tapped_output() -> None:
     assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
         (7.5, 18.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
     )
+
+def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
+    entities = [
+        *(ExtractionEntity("drill", (x, 18.5), True) for x in (11.5, 14.5)),
+        *(ExtractionEntity("drill", (x, 22.5), True) for x in (11.5, 14.5)),
+        *(ExtractionEntity("belt", (x + 0.5, 20.5), True) for x in range(7, 17)),
+    ]
+
+    assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
+        (7.5, 20.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
+    )
+
+
+def test_direct_mine_classifier_marks_belt_only_ghosts_pending() -> None:
+    entities = [
+        ExtractionEntity("drill", (11.5, 18.5), True),
+        ExtractionEntity("drill", (14.5, 18.5), False),
+        *(ExtractionEntity("belt", (x + 0.5, 20.5), x != 10) for x in range(7, 17)),
+    ]
+
+    assert _classify_direct_mine(entities, (0.0, 0.0)).pending
 
 def test_direct_mine_classifier_fails_closed_on_orphan_drill_ghost() -> None:
     entities = [ExtractionEntity("drill", (11.5, 18.5), False)]
@@ -480,9 +500,9 @@ def test_real_builder_submits_ore_only_then_calls_separate_smelter(
     assert output == (120.5, 90.5)
     assert len(submitted) == 1
     assert "electric-furnace" not in _entities(submitted[0])
-    assert "passive-provider-chest" in _entities(submitted[0])
+    assert "passive-provider-chest" not in _entities(submitted[0])
     assert conversion == {
-        "ingredient_sources": {"iron-ore": (7.5, 18.5)},
+        "ingredient_sources": {"iron-ore": (7.5, 20.5)},
         "placement_origin": (85.0, 82.0),
         "machine_count": 2,
         "max_belt_route_tiles": 300,

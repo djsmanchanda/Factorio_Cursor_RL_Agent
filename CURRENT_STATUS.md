@@ -204,6 +204,7 @@ backfilled from git history because this file did not exist yet.
 ## [2026-07-22] Deterministic autonomy compiler and restart runtime
 - Files: core/autonomy_*.py, core/recipe_dag.py, schemas/*autonomy*.json, schemas/recipe_catalog.schema.json, factorio_mod/recipe_catalog.lua, orchestrator/game_bridge.py, orchestrator/expansion_daemon.py, tools/compile_autonomy_goal.py, tests/test_autonomy.py
 - What: Added live recipe contracts, exact DAG expansion, surveyed electronics program compilation, immutable phases, restart-safe state, and fail-closed executable action selection.
+
 - Why: Goals must compile from observed resources into authorized deterministic plans without structural RL, production cheats, or unsupported runtime actions.
 - Next: Live validation requires explicit approval and a running planner sandbox.
 
@@ -1808,3 +1809,77 @@ and the survey box did cover the tile. The blocked set was correct; the decision
 that consumed it was not.
 
 **Verified** by restoring `return preferred`: the surrounded-chest test fails.
+
+## [2026-08-04] Mall topology and real stock-stall detection
+- Files: `orchestrator/autonomous_builder.py`, `orchestrator/parts_mall.py`, `tests/test_live_mall_recovery.py`, `tests/test_parts_mall_progress.py`
+- What: Paired mall cells are recognized during science calls, growing stock postpones capacity expansion, and real expansion shortages are logged.
+- Why: A deferred gear promotion fell back into belt-line recovery for two valid mall assemblers, while a fixed timer repeatedly planned the same unaffordable iron expansion even as construction stock rose.
+- Next: Restart the Python runner from the safe save and rerun `mining-productivity-4`; no Lua mod redeploy is needed.
+
+## [2026-08-04] Mall storage limits no longer drive production
+- Files: `orchestrator/autonomous_builder.py`, `planners/mall_layout.py`, `tests/test_construction_stock.py`, `tests/test_stock_gating.py`
+- What: Construction mall cells gate production at the current requirement while provider bars remain capacity ceilings; existing cells are reconfigured and intermediate prep cells remain ungated.
+- Why: The real build path dropped the machine gate and reused chest capacity for ingredient sizing, so a stack limit behaved like an instruction to consume scarce inputs.
+- Validation: `1217 passed, 1 skipped`.
+- Next: Restart the Python runner from the safe save and rerun `mining-productivity-4`; no Lua mod redeploy is needed.
+
+## [2026-08-04] Mall reserves prebuild to exact stack limits
+- Files: orchestrator/construction_stock.py, orchestrator/autonomous_builder.py, orchestrator/mall_builder.py, planners/mall_layout.py, factorio_mod/layout_executor.lua, factorio_mod/logistic_sections.lua, schemas/build_plan.schema.json, docs/21_external_game_knowledge.md, docs/reference/inserter_throughput_factorio_2_0_26.txt, and focused tests
+- What: Bootstrap mall cells now maintain deterministic reserves (four live stacks for bulk construction parts, one for machines), grow when one job exceeds half the reserve, and remove their bar/gate after a live assembling-machine-3 producer proves the base mature; the runner still advances at the immediate job quantity.
+- Why: The chest stack setting is a production reserve for future expansion, not merely storage permission and not the mission readiness target. This entry supersedes the preceding storage-limit interpretation.
+- Reference: Preserved the complete user-supplied Factorio 2.0.26 inserter table as diagnostic evidence; active row selection remains deferred until live capacity bonus, quality, belt, and geometry context is exported.
+- Validation: 1221 passed, 1 skipped; schema valid; Python compilation passed; git diff --check clean after cleanup.
+- Next: Redeploy the Lua mod and restart the Factorio server/runtime, then restart the Python runner from the safe save. The next code milestone is active stall diagnosis: recursively expand deficient inputs, repair delivery, upgrade inserters, then upgrade/add assemblers.
+
+## [2026-08-04] Background reserves and cohesive smelter growth
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`, and focused stock, prep, feed, and belt-tier regressions
+- What: Opening mall reserves now start producers without waiting for the reserve quantity; exact construction shortages remain blocking. Plate extraction expansion now validates one managed smelter, rate-sizes total furnace capacity, and extends that row using addition-only direct-belt geometry instead of choosing another refinery site.
+- Why: The run waited for a stale transport-belt=200 readiness target before serving the real fast-belt/drill shortage, while each mining phase independently searched for a new smelter and created the iron/copper belt tangle.
+- Safety: Existing side-tap providers and both belt trunks remain in place; westbound rows grow away from their fixed ore handoff. Ambiguous legacy multi-site rows fail before another drill plan is submitted.
+- Validation: `1228 passed, 1 skipped`; Python compilation, function-size audit, and `git diff --check` passed.
+- Next: Python-only round -- restart the runner from the safe save; no new Lua redeploy is required for this change. The next transport milestone is the reserved multi-row mine/smelter blueprint with phase-1 splitters and fixed future corridors.
+
+## [2026-08-05] Direct mine-to-smelter belts and stone-brick production
+- Files: `planners/recipe_data.py`, `planners/belt_bridge.py`, `orchestrator/live_base.py`, `orchestrator/stage_transport.py`, `orchestrator/extraction_transport.py`, and belt/recipe regressions
+- What: Added the live `2 stone -> 1 stone-brick` electric-furnace recipe; pending mine ghosts now count as the planned through-belt; ore bridges turn immediately into the downstream furnace trunk with no automatic chest/inserter buffer.
+- Why: The runner saw an unfinished mine belt as absent and downgraded its side-tap provider into a terminal chest source, creating two inserter-limited belt hops. The belt endpoint constraint also requested the opposite final facing.
+- Live evidence: Read-only survey on `nauvis/player` confirmed the chest drain at `(12.5,-4.5)`, separate vertical belt, and furnace-feed inserter at `(13.5,-30.5)`.
+- Validation: `1231 passed, 1 skipped`; exact iron coordinates produce 31 continuous belt actions and zero chests/inserters; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- restart the runner from the safe save; no Lua mod redeploy is required.
+## [2026-08-05] Move raw-mine side taps off the direct turn column
+- Files: `planners/resource_layouts.py`, `orchestrator/stage_extraction.py`, `orchestrator/stage_transport.py`, and extraction/belt regressions
+- What: Iron and copper mine output belts now turn on the clear tile west of the shifted side tap; the provider chest is two tiles east and the through-belt detector returns the correct upstream handoff.
+- Why: The previous direct bridge still placed its vertical turn through the side-tap inserter/chest, so the tap blocked the ore line and the bridge could continue straight past the intended turn.
+- Validation: `1232 passed, 1 skipped`; focused raw-mine/belt tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+
+## [2026-08-05] Direct raw belts and stone mine classification
+- Files: `core/science_recipe_graph.py`, `planners/resource_layouts.py`, `orchestrator/stage_extraction.py`, `orchestrator/stage_transport.py`, `orchestrator/extraction_state.py`, and focused regressions
+- What: Stone is now an authoritative Nauvis mineable input; dedicated iron/copper refinery mines emit belt-only output, transport detects the direct belt, and restart surveys classify belt-only rows without inventing a chest source.
+- Why: Stone-brick was rejected as non-mineable, while raw ore was routed through a side-tap chest/inserter that blocked the direct furnace belt and caused the observed two-hop transport mess.
+- Validation: `103 passed, 1 skipped` focused extraction/transport/recipe tests; Python compilation passed. A full-suite retry reached 163 tests but was blocked by the host pytest temp-directory ACL, not a test failure.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required. Capture the next live log for any remaining power-network issue.
+## [2026-08-05] Remove side-fed belt joins from refinery transport
+- Files: `orchestrator/stage_transport.py`, `orchestrator/autonomous_builder.py`, and belt-feed regressions
+- What: Runtime belt-to-belt bridges now receive the furnace belt direction and join the downstream belt tile, keeping raw refinery transport continuous; the runtime path no longer falls back to a side-loading inserter bridge.
+- Why: The preflight already used the destination direction, but the actual build path dropped it, so the submitted geometry could meet a furnace belt at a T-shaped upstream tile. That is the side-fed ore path visible in the latest screenshot.
+- Validation: `60 passed`; Python compilation passed.
+- Next: Python-only round -- reset the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Fail closed on missing refinery source belts
+- Files: `orchestrator/stage_transport.py`, `orchestrator/extraction_transport.py`, and belt-feed regressions
+- What: If a refinery destination is belt-fed but its source belt cannot be detected, preflight and build now stop instead of generating a chest/inserter T-feed.
+- Why: A missing source survey must never degrade into side-loading all ore onto one belt lane.
+- Validation: `61 passed`; Python compilation passed.
+- Next: Python-only round -- reset the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Stone-brick shortage must remain recoverable
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_belt_survey_and_tiers.py`
+- What: Beltless logistic smelting fallback is now limited to iron/copper plates; stone-brick and other unsupported furnace recipes return the belt `MaterialShortage` so the mall can produce more belts and retry.
+- Why: The latest run mined stone successfully, then exhausted belt tiers and called a logistic smelter that explicitly rejects `stone-brick`, ending with `ValueError`.
+- Validation: `71 passed`; Python compilation passed.
+- Next: Python-only round -- reset the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Enforce inline refinery-bus joins and early belt shortages
+- Files: `orchestrator/extraction_transport.py`, `orchestrator/stage_transport.py`, `orchestrator/autonomous_builder.py`, and focused belt tests
+- What: Raw ore bridges now may enter a furnace input belt only from its upstream end, aligned with the bus flow; non-plate refinery belt shortages stop at the first requested early belt rather than escalating through express/turbo.
+- Why: The endpoint selector accepted a clear north/south approach, producing the observed T merge and lane compression; the bootstrap tier loop raised its final turbo shortfall for stone-brick even though faster belts were unnecessary.
+- Validation: `28 passed` focused belt/tier tests and Python compilation; generated blocked-bus geometry ends with two westbound tiles into the westbound bus.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.

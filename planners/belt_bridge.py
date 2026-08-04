@@ -102,9 +102,9 @@ def _aligned_final_route(
         if exit_direction not in _FACING_TO_VECTOR:
             raise ValueError(f"Unknown belt exit direction: {exit_direction!r}")
         exit_vector = _FACING_TO_VECTOR[exit_direction]
-        forced = _add(source_belt, _scaled(exit_vector, 2))
-        # Keep the existing source and side-tap tiles facing with the mine.
-        # The following tile owns the turn toward the destination.
+        forced = _add(source_belt, exit_vector)
+        # Keep the existing source tile facing with the mine. The following
+        # tile owns the turn toward the destination.
         turn = (
             (forced[0], approach[1])
             if exit_direction in {"east", "west"}
@@ -283,8 +283,16 @@ def bridge_belt_to_belt(
     blocked_tiles: set[tuple[int, int]] | None = None,
     max_route_tiles: int | None = None,
     exit_direction: str | None = None,
+    add_turn_buffer: bool = False,
+    destination_direction: str | None = None,
 ) -> list[dict]:
-    """Continue one belt into the free tile beside another belt."""
+    """Continue one belt into another without inserting a chest hop."""
+    if destination_direction is not None:
+        if destination_direction not in _FACING_TO_VECTOR:
+            raise ValueError(
+                f"Unknown destination belt direction: {destination_direction!r}"
+            )
+        dest_belt = _add(dest_belt, _FACING_TO_VECTOR[destination_direction])
     entry_vector = _FACING_TO_VECTOR[entry_direction]
     belt_end = _add(dest_belt, entry_vector)
     route = _aligned_final_route(
@@ -299,9 +307,10 @@ def bridge_belt_to_belt(
         )
     blocked = blocked_tiles or set()
     actions, built = _route_or_detour(
-        route, belt_type, blocked, final_direction=entry_direction,
+        route, belt_type, blocked, final_direction=opposite(entry_direction),
     )
-    actions.extend(_turn_buffer_actions(built, blocked, actions))
+    if add_turn_buffer:
+        actions.extend(_turn_buffer_actions(built, blocked, actions))
     return actions
 
 

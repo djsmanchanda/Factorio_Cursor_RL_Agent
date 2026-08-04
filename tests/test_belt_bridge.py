@@ -154,7 +154,7 @@ def test_every_belt_tile_feeds_into_the_next_one() -> None:
         )
 
 
-def test_mine_side_tap_stays_westbound_before_the_bridge_turns_south() -> None:
+def test_mine_bridge_turns_on_the_tile_after_its_preserved_side_tap() -> None:
     actions = bridge_belt_to_belt(
         (78.5, -39.5), (77.5, -18.5),
         entry_direction="north", exit_direction="west",
@@ -166,8 +166,7 @@ def test_mine_side_tap_stays_westbound_before_the_bridge_turns_south() -> None:
         if action.get("entity") == "transport-belt"
     }
     assert facings[(78.5, -39.5)] == "west"
-    assert facings[(77.5, -39.5)] == "west"
-    assert facings[(76.5, -39.5)] == "south"
+    assert facings[(77.5, -39.5)] == "south"
 
 
 def test_opposite_rejects_an_unknown_facing() -> None:
@@ -197,6 +196,7 @@ def test_belt_turn_gets_an_offline_reserve_chest() -> None:
         entry_direction="north",
         belt_type="fast-transport-belt",
         blocked_tiles=set(),
+        add_turn_buffer=True,
     )
 
     assert {
@@ -225,6 +225,7 @@ def test_turn_buffer_is_skipped_when_its_output_would_hit_a_tunnel() -> None:
         entry_direction="north",
         belt_type="fast-transport-belt",
         blocked_tiles={(0, 2)},
+        add_turn_buffer=True,
     )
 
     assert not any(action["entity"] == "steel-chest" for action in actions)

@@ -32,11 +32,8 @@ def test_the_standing_cells_come_before_the_expensive_extraction() -> None:
 
 
 def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
-    """The live stall: mall_targets starts with ten entries and only empties
-    when all are met, so prep ordered after it never ran. The mall spent every
-    pass eating the player's starter intermediates through MALL BOOTSTRAP while
-    the lines that would refill them were never built."""
-    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_mall_task(")
+    """Standing precursor cells run before either blocking or background mall work."""
+    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_ready_pass(")
 
 
 def test_blocked_prep_hands_the_pass_to_the_mall() -> None:

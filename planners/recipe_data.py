@@ -97,6 +97,10 @@ LINE_RECIPES: Dict[str, dict] = {
         "machine": "electric-furnace", "ingredients": ["copper-ore"],
         "amounts": [1], "product_amount": 1, "craft_time": 3.2, "set_recipe": False,
     },
+    "stone-brick": {
+        "machine": "electric-furnace", "ingredients": ["stone"],
+        "amounts": [2], "product_amount": 1, "craft_time": 3.2, "set_recipe": False,
+    },
 }
 
 _GENERIC_ASSEMBLER_CATEGORIES = {
