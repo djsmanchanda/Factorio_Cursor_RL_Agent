@@ -75,6 +75,10 @@ button { border: 0; color: inherit; font: inherit; cursor: pointer; }
 .action-message { min-height: 64px; margin: 0; padding: 16px 20px; border-top: 1px solid var(--line); font: .78rem/1.5 ui-monospace, monospace; }
 .console-panel { min-width: 0; }
 .priority-table-wrap { overflow-x: auto; }
+.priority-tabs { display: flex; gap: 7px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.priority-tab { padding: 8px 11px; background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.priority-tab:hover { color: var(--text); border-color: #665b4c; }
+.priority-tab.active { border-color: var(--orange); color: var(--text); background: #e8872f16; }
 .priority-panel table { width: 100%; border-collapse: collapse; font: .75rem/1.35 ui-monospace, monospace; }
 .priority-panel th, .priority-panel td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .priority-panel th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }

@@ -16,6 +16,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator.autonomous_builder import StuckError, run
 from orchestrator.game_bridge import GameBridge, load_json
+from tools.runner_log_retention import archive_runner_sessions
+from tools.runner_process import runner_pid_record
 
 
 class _RunLogger:
@@ -148,27 +150,35 @@ def main(argv: list[str] | None = None) -> int:
             "production-increase goals are unsupported: declare a real-base rate measurement and capacity policy first"
         )
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
-    logger = _RunLogger(log_path)
-    logger.emit(
-        f"RUN START: command={args.command} "
-        f"target={getattr(args, 'item', getattr(args, 'technology', 'unknown'))} "
-        f"surface={args.surface} force={args.force} log={log_path}"
-    )
-    try:
-        if args.command == "produce":
-            _run_item(args, args.item, logger.emit)
-            return 0
-        return _research(args, logger.emit)
-    except StuckError as error:
-        logger.emit(f"STUCK: {error}")
-        return 2
-    except Exception as error:
-        logger.emit(f"ERROR: {type(error).__name__}: {error}")
-        logger.exception()
-        return 1
-    finally:
-        logger.emit("RUN END")
-        logger.close()
+    archived = archive_runner_sessions(log_path, keep=2)
+    pid_path = log_path.with_name("autonomous-run.pid")
+    with runner_pid_record(pid_path):
+        logger = _RunLogger(log_path)
+        logger.emit(
+            f"RUN START: command={args.command} "
+            f"target={getattr(args, 'item', getattr(args, 'technology', 'unknown'))} "
+            f"surface={args.surface} force={args.force} log={log_path}"
+        )
+        if archived is not None:
+            logger.emit(
+                f"LOG RETENTION: archived {archived.session_count} older run(s) "
+                f"to {archived.path}"
+            )
+        try:
+            if args.command == "produce":
+                _run_item(args, args.item, logger.emit)
+                return 0
+            return _research(args, logger.emit)
+        except StuckError as error:
+            logger.emit(f"STUCK: {error}")
+            return 2
+        except Exception as error:
+            logger.emit(f"ERROR: {type(error).__name__}: {error}")
+            logger.exception()
+            return 1
+        finally:
+            logger.emit("RUN END")
+            logger.close()
 
 
 if __name__ == "__main__":

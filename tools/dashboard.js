@@ -8,6 +8,7 @@ const actionMessage = document.querySelector('#action-message');
 const operationState = document.querySelector('#operation-state');
 const priorityBody = document.querySelector('#priority-body');
 const priorityCount = document.querySelector('#priority-count');
+const priorityTabs = [...document.querySelectorAll('[data-priority-tab]')];
 const actionButtons = [...document.querySelectorAll('[data-action]')];
 const titles = {
   runner: 'Autonomous runner',
@@ -18,6 +19,8 @@ const titles = {
 let selectedLog = 'runner';
 let offset = 0;
 let clearedAtOffset = false;
+let selectedPriorityTab = 'active';
+let priorityItems = [];
 
 function setOnline(id, online, detail = '') {
   const element = document.querySelector(id);
@@ -75,17 +78,22 @@ function priorityCell(text, className = '') {
 
 function renderPriorities(items) {
   priorityBody.replaceChildren();
-  const ordered = [...items].sort((a, b) =>
-    (a.status === 'complete') - (b.status === 'complete') ||
+  priorityItems = items;
+  const activeItems = items.filter(item => item.status !== 'complete');
+  const completedItems = items.filter(item => item.status === 'complete');
+  const visibleItems = selectedPriorityTab === 'completed' ? completedItems : activeItems;
+  const ordered = [...visibleItems].sort((a, b) =>
     b.rating - a.rating ||
     a.created_tick - b.created_tick ||
     a.item.localeCompare(b.item)
   );
-  const active = ordered.filter(item => item.status !== 'complete').length;
-  priorityCount.textContent = `${active} ACTIVE · ${ordered.length} TOTAL`;
+  priorityCount.textContent = `${activeItems.length} ACTIVE · ${completedItems.length} COMPLETED`;
   if (!ordered.length) {
     const row = document.createElement('tr');
-    const cell = priorityCell('Queue will appear when the runner starts.');
+    const message = selectedPriorityTab === 'completed'
+      ? 'Completed tasks will appear here.'
+      : 'Queue will appear when the runner starts.';
+    const cell = priorityCell(message);
     cell.colSpan = 5;
     cell.className = 'empty-priority';
     row.append(cell);
@@ -157,6 +165,15 @@ async function runAction(action) {
 }
 
 actionButtons.forEach(button => button.addEventListener('click', () => runAction(button.dataset.action)));
+priorityTabs.forEach(button => button.addEventListener('click', () => {
+  selectedPriorityTab = button.dataset.priorityTab;
+  priorityTabs.forEach(tab => {
+    const selected = tab === button;
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+  });
+  renderPriorities(priorityItems);
+}));
 document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
   document.querySelector('.tab.active').classList.remove('active');
   button.classList.add('active');

@@ -20,6 +20,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.rcon_client import RconClient, RconError
+from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
+from tools.runner_process import clear_runner_pid, running_runner_pid
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,10 @@ class DashboardConfig:
     @property
     def runner_log(self) -> Path:
         return self.server_data / "logs" / "autonomous-run.log"
+
+    @property
+    def runner_pid_file(self) -> Path:
+        return self.server_data / "logs" / "autonomous-run.pid"
 
     @property
     def priority_file(self) -> Path:
@@ -67,6 +73,11 @@ class OperationManager:
         self._started_at: str | None = None
         self._runner: subprocess.Popen[bytes] | None = None
         self.control_log = config.server_data / "logs" / "dashboard-control.log"
+        if not self._runner_pids():
+            try:
+                self._archive_runner_logs()
+            except OSError as error:
+                self._last_result = f"Runner log retention skipped: {error}"
 
     @property
     def logs(self) -> dict[str, Path]:
@@ -201,6 +212,8 @@ class OperationManager:
                 capture_output=True, text=True,
             )
         self._runner = None
+        for pid in pids:
+            clear_runner_pid(self.config.runner_pid_file, pid)
         self._write(f"Stopped runner PID(s): {', '.join(map(str, pids))}")
 
     def _restart_server(self) -> None:
@@ -312,19 +325,24 @@ class OperationManager:
         if completed.returncode:
             raise OperationError(f"Command exited {completed.returncode}")
 
+    def _archive_runner_logs(self) -> None:
+        archived = archive_runner_sessions(self.config.runner_log, keep=3)
+        moved = archive_stale_runner_files(self.config.runner_log)
+        if archived is not None:
+            self._write(
+                f"Archived {archived.session_count} old runner session(s) to "
+                f"{archived.path}"
+            )
+        if moved:
+            self._write(f"Archived {len(moved)} legacy runner log file(s)")
+
     def _runner_pids(self) -> list[int]:
-        if self._runner is not None and self._runner.poll() is None:
-            return [self._runner.pid]
-        query = (
-            "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-            "Where-Object { $_.CommandLine -like '*tools\\autonomous_run.py*' } | "
-            "Select-Object -ExpandProperty ProcessId"
-        )
-        completed = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", query],
-            capture_output=True, text=True, timeout=10,
-        )
-        return [int(line) for line in completed.stdout.splitlines() if line.strip().isdigit()]
+        if self._runner is not None:
+            if self._runner.poll() is None:
+                return [self._runner.pid]
+            self._runner = None
+        pid = running_runner_pid(self.config.runner_pid_file)
+        return [pid] if pid is not None else []
 
     @staticmethod
     def _port_open(port: int) -> bool:

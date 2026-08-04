@@ -2030,3 +2030,15 @@ that consumed it was not.
 - What: The six-furnace basic refinery output tap now sizes its chest collector from total furnace output and selects a fast inserter.
 - Why: The terminal collector at `(13.5, 42.5)` was hard-coded to a plain inserter, throttling the 3.75/s output of the bootstrap refinery.
 - Validation: 40 focused smelter/state/refinery tests passed; Python-only change, so restart the runner; no Lua deployment or Factorio server restart is needed.
+
+## [2026-08-06] Bound dashboard runner history and separate completed priorities
+- Files: `tools/{autonomous_run,dashboard_runtime,runner_log_retention,runner_process}.py`, `tools/dashboard.{html,js,css}`, focused dashboard tests
+- What: The live runner log now retains three sessions and archives older sessions/files; dashboard polling uses a validated PID record instead of repeated WMI scans, and construction priorities have separate Active and Completed tabs.
+- Why: The 2.29 MB live log held 99 sessions since July 29, while every status poll launched an access-denied CIM query and 15 completed tasks obscured the three active tasks.
+- Validation: 27 focused tests passed; Python compilation, JavaScript syntax, and `git diff --check` passed. Live migration retained 3 sessions (183366 bytes) and archived 96 sessions plus 15 legacy log files.
+
+## [2026-08-06] Launch dashboard without a persistent shell
+- Files: `scripts/launch_dashboard.ps1`
+- What: The launcher now starts the server through hidden `pythonw.exe`, reuses an already-online dashboard, waits for readiness, and opens the browser without a `powershell.exe -NoExit` host.
+- Why: The previous launcher left a visible background PowerShell window for the dashboard lifetime.
+- Validation: PowerShell parsing passed; live launch returned HTTP 200 on port 9137 under hidden PID 17432 with RCON online and the runner stopped.
