@@ -95,3 +95,13 @@ def test_basic_splitter_priorities_survive_translation() -> None:
     assert {(action["input_priority"], action["output_priority"]) for action in splitters} == {
         ("right", "right"),
     }
+
+
+def test_furnace_actions_do_not_send_recipe_to_factorio() -> None:
+    for template in ("middle", "end", "basic_middle", "basic_end"):
+        furnace_actions = [
+            action for action in template_actions(template, recipe="iron-plate")
+            if action["entity"] == "electric-furnace"
+        ]
+        assert furnace_actions
+        assert all("recipe" not in action for action in furnace_actions)

@@ -20,6 +20,7 @@ from orchestrator.stage_extraction import direct_mine_plan  # noqa: E402
 from orchestrator.stage_transport import (  # noqa: E402
     _BELT_TIERS_CHEAPEST_FIRST,
     _choose_route_belt_tier,
+    _mixed_belt_actions,
     _raw_belt_exit_direction,
     _route_belt_tiers,
 )
@@ -28,6 +29,27 @@ from planners.belt_bridge import _ROUTE_SEARCH_MARGIN  # noqa: E402
 _PLAN = inspect.getsource(stage_transport._plan_belt_transport)
 _PREFLIGHT = inspect.getsource(extraction_transport.preflight_ingredient_transport)
 
+
+def test_mixed_route_uses_fast_belts_only_for_regular_shortfall() -> None:
+    actions = [
+        {"action_type": "place_ghost", "entity": "transport-belt", "position": {"x": index, "y": 0}}
+        for index in range(4)
+    ]
+    actions.append({"action_type": "place_ghost", "entity": "inserter", "position": {"x": 0, "y": 1}})
+
+    mixed = _mixed_belt_actions(
+        actions, {"transport-belt": 2, "fast-transport-belt": 2},
+    )
+
+    assert [action["entity"] for action in mixed] == [
+        "transport-belt", "transport-belt", "fast-transport-belt",
+        "fast-transport-belt", "inserter",
+    ]
+
+
+def test_mixed_route_does_not_replace_without_fast_stock() -> None:
+    actions = [{"action_type": "place_ghost", "entity": "transport-belt"}]
+    assert _mixed_belt_actions(actions, {"transport-belt": 0}) == actions
 
 def test_refinery_routes_ignore_stocked_advanced_belts() -> None:
     stock = {
@@ -65,6 +87,22 @@ def test_modular_refinery_preflight_uses_the_shared_affordability_router() -> No
     assert "for tier in ordered:" in _PLAN
     assert "if not short:" in _PLAN
 
+
+def test_refinery_preflight_reserves_template_belts_before_routing(monkeypatch) -> None:
+    captured = {}
+
+    def route(*_args, **kwargs):
+        captured.update(kwargs)
+        return [], "transport-belt", False
+
+    monkeypatch.setattr(extraction_transport, "_plan_belt_transport", route)
+    extraction_transport.preflight_ingredient_transport(
+        object(), "nauvis", "player", "iron-plate", "iron-ore",
+        (10.5, 0.5), (0.5, 10.5), 6, max_belt_route_tiles=100,
+        mode="belt", destination_is_belt=True, reserved_transport_belts=7,
+    )
+
+    assert captured["reserved_transport_belts"] == 7
 
 def test_direct_refinery_shortage_remains_recoverable(monkeypatch) -> None:
     shortage = MaterialShortage(

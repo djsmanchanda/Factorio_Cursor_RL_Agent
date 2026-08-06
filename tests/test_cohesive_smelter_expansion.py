@@ -373,6 +373,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     assert captured["feed"] == interface.ore_inputs[0]
     assert captured["kwargs"]["destination_is_belt"] is True
     assert captured["kwargs"]["destination_belt_direction"] == "east"
+    assert captured["kwargs"]["reserved_transport_belts"] > 0
     assert output == interface.provider
     assert any(
         action["entity"] == "passive-provider-chest"

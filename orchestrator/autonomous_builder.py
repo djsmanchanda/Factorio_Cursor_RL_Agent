@@ -40,7 +40,7 @@ from orchestrator.intermediate_scaling import (
 )
 from orchestrator.priority_list import PriorityList
 from orchestrator.extraction_transport import (
-    planned_footprint_tiles, preflight_ingredient_transport,
+    planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
 )
 from orchestrator.refinery_state import (
     ManagedRefineryState, assert_refinery_removals_owned, recover_managed_refinery,
@@ -702,8 +702,10 @@ def _prepare_initial_refinery(
     )
     planned_blocked = planned_footprint_tiles(plan)
     build_plan = getattr(extraction, "build_plan", None)
+    reserved_transport_belts = planned_entity_count(plan, "transport-belt")
     if build_plan is not None:
         planned_blocked |= planned_footprint_tiles(build_plan)
+        reserved_transport_belts += planned_entity_count(build_plan, "transport-belt")
         planned_blocked -= {
             (math.floor(ore_output[0]), math.floor(ore_output[1])),
             (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
@@ -714,6 +716,7 @@ def _prepare_initial_refinery(
         max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
         additional_blocked=planned_blocked,
         mode="belt", destination_is_belt=True,
+        reserved_transport_belts=reserved_transport_belts,
         planned_belt_source=(ore_output[0] + 1, ore_output[1])
         if preflight_only else None,
         destination_belt_direction="east",

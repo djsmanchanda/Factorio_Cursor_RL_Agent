@@ -23,6 +23,17 @@ def planned_footprint_tiles(plan: dict) -> set[tuple[int, int]]:
     ))
 
 
+def planned_entity_count(plan: dict, entity: str) -> int:
+    """Count ghost placements of one entity already reserved by a plan."""
+    return sum(
+        1
+        for phase in plan["phases"]
+        for action in phase["actions"]
+        if action.get("action_type") == "place_ghost"
+        and action.get("entity") == entity
+    )
+
+
 def preflight_ingredient_transport(
     client: RconClient, surface: str, force: str, recipe: str, ingredient: str,
     source_position: Point, feed_position: Point, machine_count: int, *,
@@ -30,6 +41,7 @@ def preflight_ingredient_transport(
     additional_blocked: set[tuple[int, int]] | None = None,
     mode: str | None = None,
     destination_is_belt: bool = False,
+    reserved_transport_belts: int = 0,
     planned_belt_source: Point | None = None,
     destination_belt_direction: str = "east",
 ) -> tuple[list[dict], str] | None:
@@ -41,6 +53,7 @@ def preflight_ingredient_transport(
         reuse_existing=True, max_belt_route_tiles=max_belt_route_tiles,
         additional_blocked=additional_blocked,
         destination_is_belt=destination_is_belt,
+        reserved_transport_belts=reserved_transport_belts,
         planned_belt_source=planned_belt_source,
         destination_belt_direction=destination_belt_direction,
     )

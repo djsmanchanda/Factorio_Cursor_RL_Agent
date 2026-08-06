@@ -200,6 +200,9 @@ def template_actions(
         if entity["name"] == "electric-furnace":
             if not recipe:
                 raise ValueError(f"{name} refinery template requires a smelting recipe")
-            action["recipe"] = recipe
+            # Furnaces auto-select the smelting recipe from their first ore input.
+            # Factorio rejects set_recipe on a furnace; keep recipe validation above
+            # so callers cannot forget which line they are composing, but do not
+            # serialize it into the executor action.
         actions.append(action)
     return actions

@@ -305,6 +305,34 @@ def _route_belt_tiers(destination_is_belt: bool) -> tuple[str, ...]:
     return executable or ("transport-belt",)
 
 
+def _mixed_belt_actions(actions: list[dict], stock: dict[str, int]) -> list[dict]:
+    """Use stocked fast belts for a shortfall in a regular-belt route."""
+    regular = sum(
+        1 for action in actions
+        if action.get("action_type") == "place_ghost"
+        and action.get("entity") == "transport-belt"
+    )
+    shortage = max(0, regular - stock.get("transport-belt", 0))
+    replacements = min(shortage, stock.get("fast-transport-belt", 0))
+    if replacements <= 0:
+        return actions
+    mixed: list[dict] = []
+    regular_available = stock.get("transport-belt", 0)
+    for action in actions:
+        candidate = dict(action)
+        is_regular = (
+            candidate.get("action_type") == "place_ghost"
+            and candidate.get("entity") == "transport-belt"
+        )
+        if is_regular and regular_available:
+            regular_available -= 1
+        elif is_regular and replacements:
+            candidate["entity"] = "fast-transport-belt"
+            replacements -= 1
+        mixed.append(candidate)
+    return mixed
+
+
 def _choose_route_belt_tier(
     stock: dict[str, int], needed: int, *, destination_is_belt: bool,
 ) -> str:
@@ -498,6 +526,7 @@ def _plan_belt_transport(
     feed_position: Point, *, reuse_existing: bool, max_belt_route_tiles: int | None,
     additional_blocked: set[tuple[int, int]] | None = None,
     upstream_shift: int = 1, destination_is_belt: bool = False,
+    reserved_transport_belts: int = 0,
     destination_belt_direction: str = "east",
     planned_belt_source: Point | None = None,
 ) -> tuple[list[dict], str, bool]:
@@ -513,7 +542,11 @@ def _plan_belt_transport(
     )
     span = int(abs(route_source[0] - feed_position[0])
                + abs(route_source[1] - feed_position[1])) + 4
-    stock = live_base.available_items(client, surface, force)
+    stock = dict(live_base.available_items(client, surface, force))
+    if reserved_transport_belts:
+        stock["transport-belt"] = max(
+            0, stock.get("transport-belt", 0) - reserved_transport_belts,
+        )
     preferred = _choose_route_belt_tier(
         stock, span, destination_is_belt=destination_is_belt,
     )
@@ -547,6 +580,22 @@ def _plan_belt_transport(
             for item, count in required.items()
             if stock.get(item, 0) < count
         }
+        if tier == "transport-belt" and short:
+            actions = _mixed_belt_actions(actions, stock)
+            required = {
+                action["entity"]: sum(
+                    1 for candidate in actions
+                    if candidate.get("action_type") == "place_ghost"
+                    and candidate["entity"] == action["entity"]
+                )
+                for action in actions
+                if action.get("action_type") == "place_ghost"
+            }
+            short = {
+                item: count - stock.get(item, 0)
+                for item, count in required.items()
+                if stock.get(item, 0) < count
+            }
         if not short:
             return actions, tier, belt_source is not None
         requirements[tier] = required

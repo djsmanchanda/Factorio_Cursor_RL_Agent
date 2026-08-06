@@ -2014,3 +2014,8 @@ that consumed it was not.
 - What: Compact mall producers now seed from one craft instead of the full stock target; a blocked plate preflight stops later baseline plate mining from spending the starter belt reserve; the initial refinery transaction permits only its authorized mine-output interface tiles during the second preflight.
 - Why: The run queued 116 belts for iron before any iron line existed, then demanded 58 plates before placing the belt assembler and spent the same pass on copper mining; copper's subsequent refinery preflight misclassified its own output belt at `(77,-40)` as foreign infrastructure.
 - Validation: 88 focused tests passed; Python compilation and `git diff --check` passed. Python-only change -- restart the runner; no Lua mod redeploy or Factorio server restart is required.
+## [2026-08-07] Use fast-belt shortfall fallback and repair refinery startup
+- Files: `orchestrator/{stage_transport,extraction_transport,autonomous_builder,mine_retirement}.py`, `planners/refinery_blueprints.py`, focused tests
+- What: Reserved regular belts are protected for the initial refinery while stocked fast belts can fill only the remaining direct route; malformed mine surveys now fail closed, and refinery furnace ghosts no longer send unsupported recipes to Factorio.
+- Why: The live run stalled at 108/116 belts, then crashed on a malformed retirement survey; when plates were added manually, every furnace ghost failed with `recipe_set_failed`.
+- Validation: 47 focused belt/refinery/mine tests passed; Python compilation and `git diff --check` passed. Python-only change: restart the runner; no Lua deployment is needed.

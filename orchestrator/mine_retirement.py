@@ -74,11 +74,25 @@ def _managed_entities(
         "rcon.print(table.concat(out,';'))"
     )
     raw = client.command("/sc " + lua).strip()
+    if not raw:
+        return []
     entities = []
     for record in raw.split(";"):
-        if record:
-            name, x, y = record.split(",")
-            entities.append({"name": name, "position": {"x": float(x), "y": float(y)}})
+        fields = record.strip().split(",")
+        if len(fields) != 3:
+            raise RuntimeError(
+                "managed mine survey returned malformed RCON data: "
+                + record.strip()[:120]
+            )
+        name, x, y = fields
+        try:
+            position = {"x": float(x), "y": float(y)}
+        except ValueError as error:
+            raise RuntimeError(
+                "managed mine survey returned invalid coordinates: "
+                + record.strip()[:120]
+            ) from error
+        entities.append({"name": name, "position": position})
     return entities
 
 
