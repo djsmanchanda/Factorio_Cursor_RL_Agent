@@ -10,7 +10,7 @@ from typing import Iterable
 
 from planners.plan_validation import actions as plan_actions
 from planners.plan_validation import validate_build_plan
-from planners.refinery_blueprints import template_actions
+from planners.refinery_blueprints import template_actions, template_name
 
 
 FURNACES_PER_MODULE = 6
@@ -82,12 +82,13 @@ def _deduplicate(actions: Iterable[dict]) -> list[dict]:
 
 def _repeated_actions(
     template: str, columns: int, *, origin_x: float, origin_y: float, recipe: str,
+    variant: str = "standard",
 ) -> list[dict]:
     return _deduplicate(
         action
         for column in range(columns)
         for action in template_actions(
-            template,
+            template_name(template, variant),
             origin_x=origin_x + column * COLUMN_PITCH,
             origin_y=origin_y,
             recipe=recipe,
@@ -105,14 +106,21 @@ def generate_refinery_plan(
     *,
     origin_x: float = 0,
     origin_y: float = 0,
+    variant: str = "standard",
+    start_variant: str | None = None,
+    middle_variant: str | None = None,
+    end_variant: str | None = None,
 ) -> dict:
     """Build Start, zero or more Middle rows, then one End merge."""
     shape = block_shape(furnaces)
+    start_variant = start_variant or variant
+    middle_variant = middle_variant or variant
+    end_variant = end_variant or variant
     phases = [
         _phase(
             f"refinery_start_{recipe}",
             _repeated_actions(
-                "start", shape.columns, origin_x=origin_x, origin_y=origin_y, recipe=recipe,
+                "start", shape.columns, origin_x=origin_x, origin_y=origin_y, recipe=recipe, variant=start_variant,
             ),
         )
     ]
@@ -122,7 +130,7 @@ def generate_refinery_plan(
             _phase(
                 f"refinery_middle_{recipe}_{row + 1}",
                 _repeated_actions(
-                    "middle", shape.columns, origin_x=origin_x, origin_y=row_y, recipe=recipe,
+                    "middle", shape.columns, origin_x=origin_x, origin_y=row_y, recipe=recipe, variant=middle_variant,
                 ),
             )
         )
@@ -131,7 +139,7 @@ def generate_refinery_plan(
         _phase(
             f"refinery_end_{recipe}",
             _repeated_actions(
-                "end", shape.columns, origin_x=origin_x, origin_y=end_y, recipe=recipe,
+                "end", shape.columns, origin_x=origin_x, origin_y=end_y, recipe=recipe, variant=end_variant,
             ),
         )
     )
@@ -169,14 +177,40 @@ def generate_refinery_extension_plan(
     *,
     origin_x: float = 0,
     origin_y: float = 0,
+    current_variant: str = "standard",
+    target_variant: str | None = None,
 ) -> dict:
-    """Retire only the old End delta, extend, and cap the new tail with End."""
+    """Retire the old End, or replace a bootstrap variant before expanding."""
     if new_furnaces <= current_furnaces:
         raise ValueError("Refinery extension must increase furnace capacity")
-    old_plan = generate_refinery_plan(recipe, current_furnaces, origin_x=origin_x, origin_y=origin_y)
-    new_plan = generate_refinery_plan(recipe, new_furnaces, origin_x=origin_x, origin_y=origin_y)
+    target_variant = target_variant or current_variant
+    old_plan = generate_refinery_plan(
+        recipe, current_furnaces, origin_x=origin_x, origin_y=origin_y,
+        variant=current_variant,
+    )
+    new_plan = generate_refinery_plan(
+        recipe, new_furnaces, origin_x=origin_x, origin_y=origin_y,
+        variant=target_variant,
+    )
     old = list(plan_actions(old_plan))
     new = list(plan_actions(new_plan))
+    if current_variant != target_variant:
+        old_keys = {_action_key(action) for action in old}
+        new_keys = {_action_key(action) for action in new}
+        removals = [
+            _removal_action(action) for action in old
+            if _action_key(action) not in new_keys
+        ]
+        additions = [
+            action for action in new if _action_key(action) not in old_keys
+        ]
+        phases = [
+            _phase(f"retire_refinery_{current_variant}_{recipe}", removals),
+            _phase(f"replace_refinery_{recipe}", additions),
+        ]
+        plan = {"phases": [phase for phase in phases if phase["actions"]]}
+        validate_build_plan(plan)
+        return plan
     old_keys = {_action_key(action) for action in old}
     new_keys = {_action_key(action) for action in new}
     missing_old_keys = old_keys - new_keys
@@ -202,53 +236,73 @@ def generate_refinery_extension_plan(
 
 def refinery_interfaces(
     furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
+    variant: str = "standard",
 ) -> RefineryInterfaces:
-    """Return the exact external positions defined by the composed templates."""
+    """Return the exact external positions defined by one template variant."""
     shape = block_shape(furnaces)
     end_y = origin_y + START_DEPTH + shape.middle_rows * MIDDLE_PITCH
-    terminal_x = origin_x + COLUMN_PITCH * shape.columns + 3.5
+    terminal_x = origin_x + COLUMN_PITCH * shape.columns + (
+        2.5 if variant == "basic" else 3.5
+    )
+    if variant == "basic":
+        ore_inputs = ((origin_x - 0.5, origin_y + 1.5),)
+        plate_outputs = ((terminal_x, end_y + 9.5),)
+    elif variant == "standard":
+        ore_inputs = ((origin_x - 0.5, origin_y + 0.5),
+                      (origin_x - 0.5, origin_y + 1.5))
+        plate_outputs = ((terminal_x, end_y + 9.5),
+                         (terminal_x, end_y + 10.5))
+    else:
+        raise ValueError(f"Unknown refinery variant {variant!r}")
     return RefineryInterfaces(
-        ore_inputs=((origin_x - 0.5, origin_y + 0.5),
-                    (origin_x - 0.5, origin_y + 1.5)),
-        plate_outputs=((terminal_x, end_y + 9.5),
-                       (terminal_x, end_y + 10.5)),
-        provider=(terminal_x + 1, end_y + 12.5),
+        ore_inputs=ore_inputs, plate_outputs=plate_outputs,
+        provider=(
+            terminal_x + 1,
+            end_y + (11.5 if variant == "basic" else 12.5),
+        ),
         power_anchor=(terminal_x - 2, end_y + 12.5),
     )
 
 
 def _output_adapter_actions(
-    furnaces: int, *, origin_x: float, origin_y: float,
+    furnaces: int, *, origin_x: float, origin_y: float, variant: str,
 ) -> list[dict]:
-    interface = refinery_interfaces(furnaces, origin_x=origin_x, origin_y=origin_y)
-    upper, lower = interface.plate_outputs
-    tap_x, tap_y = lower[0] + 1, lower[1]
-    return [
-        {"action_type": "place_ghost", "entity": "fast-transport-belt",
-         "position": {"x": upper[0], "y": upper[1]}, "direction": "east"},
-        {"action_type": "place_ghost", "entity": "fast-transport-belt",
-         "position": {"x": lower[0], "y": lower[1]}, "direction": "east"},
-        {"action_type": "place_ghost", "entity": "fast-transport-belt",
+    interface = refinery_interfaces(
+        furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
+    )
+    belt = "transport-belt" if variant == "basic" else "fast-transport-belt"
+    inserter = "inserter" if variant == "basic" else "fast-inserter"
+    actions = [
+        {"action_type": "place_ghost", "entity": belt,
+         "position": {"x": x, "y": y}, "direction": "east"}
+        for x, y in interface.plate_outputs
+    ]
+    tap_x, tap_y = interface.plate_outputs[-1][0] + 1, interface.plate_outputs[-1][1]
+    actions.extend([
+        {"action_type": "place_ghost", "entity": belt,
          "position": {"x": tap_x, "y": tap_y}, "direction": "east"},
-        {"action_type": "place_ghost", "entity": "fast-inserter",
+        {"action_type": "place_ghost", "entity": inserter,
          "position": {"x": tap_x, "y": tap_y + 1}, "direction": "north"},
         {"action_type": "place_ghost", "entity": "passive-provider-chest",
          "position": {"x": interface.provider[0], "y": interface.provider[1]}},
         {"action_type": "place_ghost", "entity": "medium-electric-pole",
          "position": {"x": interface.power_anchor[0], "y": interface.power_anchor[1]}},
-    ]
-
+    ])
+    return actions
 
 def generate_managed_refinery_plan(
     recipe: str, furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
+    variant: str = "standard",
 ) -> dict:
     """Add a non-blocking provider side tap to the approved refinery block."""
     plan = generate_refinery_plan(
-        recipe, furnaces, origin_x=origin_x, origin_y=origin_y,
+        recipe, furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
     )
     plan["phases"].append(_phase(
         f"refinery_output_{recipe}",
-        _output_adapter_actions(furnaces, origin_x=origin_x, origin_y=origin_y),
+        _output_adapter_actions(
+            furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
+        ),
     ))
     validate_build_plan(plan)
     return plan
@@ -257,17 +311,22 @@ def generate_managed_refinery_plan(
 def generate_managed_refinery_extension_plan(
     recipe: str, current_furnaces: int, new_furnaces: int, *,
     origin_x: float = 0, origin_y: float = 0,
+    current_variant: str = "standard", target_variant: str | None = None,
 ) -> dict:
-    """Move the planner-owned provider tap together with the End migration."""
+    """Move the planner-owned provider tap with End or variant migration."""
+    target_variant = target_variant or current_variant
     plan = generate_refinery_extension_plan(
         recipe, current_furnaces, new_furnaces,
         origin_x=origin_x, origin_y=origin_y,
+        current_variant=current_variant, target_variant=target_variant,
     )
     old = _output_adapter_actions(
         current_furnaces, origin_x=origin_x, origin_y=origin_y,
+        variant=current_variant,
     )
     new = _output_adapter_actions(
         new_furnaces, origin_x=origin_x, origin_y=origin_y,
+        variant=target_variant,
     )
     old_keys, new_keys = {_action_key(a) for a in old}, {_action_key(a) for a in new}
     removals = [_removal_action(a) for a in old if _action_key(a) not in new_keys]

@@ -27,13 +27,16 @@ class ManagedRefineryState:
     shape: BlockShape
     machine_positions: tuple[Point, ...]
     interfaces: RefineryInterfaces
+    variant: str = "standard"
 
     @property
     def furnace_count(self) -> int:
         return len(self.machine_positions)
 
 
-def infer_refinery_state(recipe: str, positions: tuple[Point, ...]) -> ManagedRefineryState:
+def infer_refinery_state(
+    recipe: str, positions: tuple[Point, ...], *, variant: str = "standard",
+) -> ManagedRefineryState:
     """Infer only the exact rectangular furnace lattice produced by the templates."""
     if not positions:
         raise ValueError(f"{recipe} modular refinery has no furnaces")
@@ -54,7 +57,10 @@ def infer_refinery_state(recipe: str, positions: tuple[Point, ...]) -> ManagedRe
         raise ValueError(f"{recipe} furnace lattice does not match phased block growth")
     return ManagedRefineryState(
         recipe, origin, shape, unique,
-        refinery_interfaces(len(unique), origin_x=origin[0], origin_y=origin[1]),
+        refinery_interfaces(
+            len(unique), origin_x=origin[0], origin_y=origin[1], variant=variant,
+        ),
+        variant,
     )
 
 
@@ -96,17 +102,31 @@ def recover_managed_refinery(
     machine_positions: tuple[Point, ...],
 ) -> ManagedRefineryState:
     """Recover a block only when its furnace lattice and splitter signature agree."""
-    state = infer_refinery_state(recipe, machine_positions)
-    plan = generate_managed_refinery_plan(
-        recipe, state.furnace_count,
-        origin_x=state.origin[0], origin_y=state.origin[1],
-    )
-    signature = [
-        action for action in plan_actions(plan)
-        if action["action_type"] in {"place_entity", "place_ghost"}
-    ]
-    _assert_live_actions(client, surface, force, signature, f"{recipe} refinery")
-    return state
+    candidates = []
+    first_error: ValueError | None = None
+    for variant in ("standard", "basic"):
+        state = infer_refinery_state(recipe, machine_positions, variant=variant)
+        plan = generate_managed_refinery_plan(
+            recipe, state.furnace_count,
+            origin_x=state.origin[0], origin_y=state.origin[1], variant=variant,
+        )
+        signature = [
+            action for action in plan_actions(plan)
+            if action["action_type"] in {"place_entity", "place_ghost"}
+        ]
+        try:
+            _assert_live_actions(
+                client, surface, force, signature, f"{recipe} refinery",
+            )
+        except (KeyError, ValueError) as error:
+            normalized = error if isinstance(error, ValueError) else ValueError(str(error))
+            first_error = first_error or normalized
+            candidates.append(normalized)
+            continue
+        return state
+    raise first_error or (candidates[-1] if candidates else ValueError(
+        f"{recipe} refinery has no approved template variant"
+    ))
 
 
 def assert_refinery_removals_owned(
@@ -116,7 +136,7 @@ def assert_refinery_removals_owned(
     """Authorize a delta only when every removal still matches the old template."""
     full = generate_managed_refinery_plan(
         state.recipe, state.furnace_count,
-        origin_x=state.origin[0], origin_y=state.origin[1],
+        origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
     )
     owned = {
         (action["entity"], _action_position(action)): action

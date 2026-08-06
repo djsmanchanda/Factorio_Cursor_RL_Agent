@@ -149,3 +149,20 @@ def test_batch_signature_survey_parses_entities_and_missing_slots() -> None:
     assert found[(1.0, 2.0)]["direction"] == 4
     assert found[(3.0, 4.0)]["name"] == "NONE"
     assert "math.abs(candidate.position.x-p[1])<0.01" in client.commands[0]
+
+
+def test_live_recovery_accepts_regular_belt_bootstrap_variant(monkeypatch) -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    signatures = _signatures(plan)
+    monkeypatch.setattr(
+        live_base, "entity_signatures_at",
+        lambda _c, _s, _f, positions: {position: signatures[position] for position in positions},
+    )
+
+    state = refinery_state.recover_managed_refinery(
+        object(), "nauvis", "player", "iron-plate", _furnaces(plan),
+    )
+
+    assert state.variant == "basic"
+    assert state.interfaces.ore_inputs == ((-0.5, 1.5),)
+    assert state.interfaces.plate_outputs == ((14.5, 12.5),)

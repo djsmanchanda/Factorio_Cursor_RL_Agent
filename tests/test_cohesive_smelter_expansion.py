@@ -285,6 +285,24 @@ def test_existing_modular_refinery_runs_power_recovery(monkeypatch) -> None:
     assert calls
 
 
+def test_basic_refinery_no_growth_keeps_basic_provider(monkeypatch) -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    state = refinery_state.infer_refinery_state("iron-plate", _furnaces(plan), variant="basic")
+    calls = []
+    monkeypatch.setattr(
+        builder, "_bring_modular_refinery_up",
+        lambda *_a, **_k: calls.append(_k.get("variant")),
+    )
+
+    output = builder._extend_plate_smelter(
+        object(), object(), "nauvis", "player", "iron-plate",
+        state, 6, (10.0, 10.0), lambda _message: None,
+    )
+
+    assert output == state.interfaces.provider
+    assert calls == ["basic"]
+
+
 def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
     state = _state()
     calls = []
@@ -335,7 +353,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
         (5.5, -2.5), (0.0, 0.0), lambda _message: None,
     )
 
-    interface = refinery_interfaces(6, origin_x=20, origin_y=-10)
+    interface = refinery_interfaces(6, origin_x=20, origin_y=-10, variant="basic")
     assert captured["source"] == (5.5, -2.5)
     assert captured["feed"] == interface.ore_inputs[0]
     assert captured["kwargs"]["destination_is_belt"] is True

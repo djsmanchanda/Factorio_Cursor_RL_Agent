@@ -10,6 +10,10 @@ import zlib
 from collections import Counter
 from dataclasses import dataclass
 
+from planners.refinery_basic_blueprints import (
+    REFINERY_BASIC_END, REFINERY_BASIC_MIDDLE, REFINERY_BASIC_START,
+)
+
 
 REFINERY_START = (
     "0eNq1lu9qwyAUxd/lfjajmv95lTGKbW0npBr0ZqyUvPu0XRnryvDK9iXB3OvP4wnH5AybcVaT0wZhOIM3cirQFgend3H8DgMXDE4wlAsDvbXGw/Ac+vTByDF2GHlUMMBeeizQSeMn67DYqBEhzjA7FRnLCwNlUKNWV8BlcFqb+bhRLjSw30AMJuvDXGs+NRWrp/qiKtzDKjvt1PZarhb2Ay4y4TwFXtLgJOFVHjtJd01jc4ruhsYWFHabx07ypMvzJInd09glxRO++g7306gRQ+UHtrpJvoMysDNOM67DSWBdYAeU04fXqEybh4VHOnjeJpMM5MQY1yQHy1QHm/91kBj5jrRJYuZbErzJU5727ts85WlwauxJZzgnBr8nfdlWmdKTjBE8T3oanBjnW+7EPbx7BE+O8+2UEH8Q5/CPo1Edw4OvfyoGowwbik1qr41yp7VH6WLhTTl/WaxuRF/1fd1VTRsuy/IBRzkwYA=="
@@ -27,7 +31,7 @@ _ENTITY_FIELDS = {
 }
 _ALLOWED_ENTITIES = {
     "electric-furnace", "fast-splitter", "fast-transport-belt", "inserter",
-    "medium-electric-pole",
+    "medium-electric-pole", "splitter", "transport-belt",
 }
 
 
@@ -59,8 +63,33 @@ _SPECS = {
          ("medium-electric-pole", 3)),
         "d33db416e47bb8a4dbfdbd6c060466088cb12a1846d0343e37cdd43a4b0a61f2",
     ),
+    "basic_start": TemplateSpec(
+        REFINERY_BASIC_START, "refinery_start_basic", (12, 3),
+        (("splitter", 1), ("transport-belt", 13)),
+        "b5eea473374c5c58ccb15bd59bcac24cb1a2124d2c1c5aa320ddc73bb8a1b396",
+    ),
+    "basic_middle": TemplateSpec(
+        REFINERY_BASIC_MIDDLE, "refinery_repeating_basic", (12, 9),
+        (("electric-furnace", 6), ("inserter", 12),
+         ("medium-electric-pole", 3), ("transport-belt", 27)),
+        "ace99b1bccb098f94de8050b1b920beab5d514cbe47279c0fdc88be1532141d1",
+    ),
+    "basic_end": TemplateSpec(
+        REFINERY_BASIC_END, "refinery_ending_basic", (12, 11),
+        (("electric-furnace", 6), ("inserter", 12),
+         ("medium-electric-pole", 3), ("splitter", 2),
+         ("transport-belt", 38)),
+        "a7879f48d0d1b6f5dd5d8d2048bb08313a984460c8786c33779c3c90e76a7a86",
+    ),
 }
 
+
+_VARIANT_TEMPLATES = {
+    "standard": {"start": "start", "middle": "middle", "end": "end"},
+    "basic": {
+        "start": "basic_start", "middle": "basic_middle", "end": "basic_end",
+    },
+}
 
 def _decode(encoded: str) -> dict:
     if not encoded.startswith("0"):
@@ -105,7 +134,9 @@ def _validate_entity(entity: dict, label: str) -> None:
     priorities = (entity.get("input_priority"), entity.get("output_priority"))
     if any(value not in {None, "left", "none", "right"} for value in priorities):
         raise ValueError(f"{label} has an invalid splitter priority")
-    if any(value is not None for value in priorities) and entity["name"] != "fast-splitter":
+    if any(value is not None for value in priorities) and entity["name"] not in {
+        "fast-splitter", "splitter",
+    }:
         raise ValueError(f"{label} applies splitter priority to {entity['name']}")
 
 
@@ -135,6 +166,16 @@ def decoded_template(name: str) -> dict:
     _validate_entities(blueprint, spec)
     _validate_wires(blueprint, spec)
     return blueprint
+
+
+def template_name(role: str, variant: str = "standard") -> str:
+    """Resolve a logical refinery role to an approved blueprint variant."""
+    try:
+        return _VARIANT_TEMPLATES[variant][role]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown refinery role/variant {role!r}/{variant!r}"
+        ) from exc
 
 
 def template_actions(

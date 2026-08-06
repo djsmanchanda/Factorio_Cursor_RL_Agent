@@ -2001,3 +2001,10 @@ that consumed it was not.
 - Why: Incremental furnace rows and independently planned bridges created disconnected power, T-side-feeds, wrong terminal directions, scattered refinery sites, and unsafe expansion over real infrastructure or water.
 - Validation: 1303-test full suite passed with 1 skipped; final modular/refinery regression suite passed 107 tests after the handoff-geometry fix, plus Python compilation and diff checks.
 - Next: Deploy the already-committed BuildPlan 1.4 Lua mod changes and restart the Factorio server, then restart the Python runner from the safe save.
+
+## [2026-08-07] Add regular-belt refinery bootstrap
+- Files: `planners/refinery_basic_blueprints.py`, `planners/refinery_blueprints.py`, `planners/smelter_block.py`, `orchestrator/{autonomous_builder,refinery_state}.py`, focused refinery tests
+- What: Added the supplied regular-belt Start/Middle/End templates; the first refinery now uses one six-furnace basic Start+End module, while later growth migrates to the standard fast-belt templates.
+- Why: The previous first refinery required 131 fast belts before iron plates could be produced, creating a circular bootstrap deadlock.
+- Validation: 77 focused blueprint/smelter/state/extraction tests passed; Python compilation passed.
+- Next: Reset to the safe save and restart the Python runner; no Lua mod redeploy or Factorio server restart is needed.

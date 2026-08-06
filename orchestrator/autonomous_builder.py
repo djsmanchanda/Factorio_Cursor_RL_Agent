@@ -105,7 +105,7 @@ from planners.recipe_data import (
     install_catalog_stack_sizes,
 )
 from planners.smelter_block import (
-    block_shape, generate_managed_refinery_extension_plan,
+    FURNACES_PER_MODULE, block_shape, generate_managed_refinery_extension_plan,
     generate_managed_refinery_plan, refinery_interfaces,
 )
 from tools.rcon_client import RconClient
@@ -502,10 +502,11 @@ def _bring_modular_refinery_up(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, plan: dict, furnace_count: int, origin: Point,
     emit: Callable[[str], None], *, feed_grace_seconds: float = 0.0,
+    variant: str = "standard",
 ) -> None:
     """Power, cover, and diagnose the complete modular refinery footprint."""
     interface = refinery_interfaces(
-        furnace_count, origin_x=origin[0], origin_y=origin[1],
+        furnace_count, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
     machines = _modular_machine_positions(plan, recipe)
     support_positions = {
@@ -539,11 +540,17 @@ def _extend_plate_smelter(
     """Expand one recovered block by migrating its planner-owned End/output cap."""
     del ore_output
     origin = state.origin
+    target_variant = (
+        state.variant if target_machines <= state.furnace_count
+        else ("standard" if state.variant == "basic" else state.variant)
+    )
     full = generate_managed_refinery_plan(
         recipe, target_machines, origin_x=origin[0], origin_y=origin[1],
+        variant=target_variant,
     )
     interface = refinery_interfaces(
         target_machines, origin_x=origin[0], origin_y=origin[1],
+        variant=target_variant,
     )
     if target_machines <= state.furnace_count:
         emit(
@@ -552,12 +559,13 @@ def _extend_plate_smelter(
         )
         _bring_modular_refinery_up(
             client, bridge, surface, force, recipe, full,
-            target_machines, origin, emit,
+            target_machines, origin, emit, variant=target_variant,
         )
         return interface.provider
     delta = generate_managed_refinery_extension_plan(
         recipe, state.furnace_count, target_machines,
         origin_x=origin[0], origin_y=origin[1],
+        current_variant=state.variant, target_variant=target_variant,
     )
     try:
         assert_refinery_removals_owned(client, surface, force, state, delta)
@@ -574,7 +582,7 @@ def _extend_plate_smelter(
     _submit(client, bridge, surface, delta, f"extend_{recipe}_refinery", emit)
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, full,
-        target_machines, origin, emit,
+        target_machines, origin, emit, variant=target_variant,
     )
     return interface.provider
 
@@ -586,9 +594,11 @@ def _assert_atomic_plate_expansion_affordable(
     """Preflight the mine and exact modular refinery delta before either grows."""
     if target_machines <= state.furnace_count:
         return None
+    target_variant = "standard" if state.variant == "basic" else state.variant
     smelter_delta = generate_managed_refinery_extension_plan(
         recipe, state.furnace_count, target_machines,
         origin_x=state.origin[0], origin_y=state.origin[1],
+        current_variant=state.variant, target_variant=target_variant,
     )
     try:
         assert_refinery_removals_owned(
@@ -675,15 +685,16 @@ def _prepare_initial_refinery(
 ) -> tuple[dict, dict | None, tuple[float, float], str, int]:
     """Preflight the refinery, route, landfill, bill, and planned mine together."""
     origin = extraction.smelter_origin
-    target = block_shape(extraction.furnace_count).capacity
+    target = FURNACES_PER_MODULE
+    variant = "basic"
     plan = generate_managed_refinery_plan(
-        recipe, target, origin_x=origin[0], origin_y=origin[1],
+        recipe, target, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
     interface = refinery_interfaces(
-        target, origin_x=origin[0], origin_y=origin[1],
+        target, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
     emit(
-        f"modular refinery for {recipe}: building Start + End at {origin} "
+        f"modular refinery for {recipe}: building basic Start + End at {origin} "
         f"with {target} furnace(s)"
     )
     planned_blocked = planned_footprint_tiles(plan)
@@ -779,9 +790,10 @@ def _build_initial_plate_smelter(
     _submit(client, bridge, surface, plan, f"modular_{recipe}_refinery", emit)
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, plan,
-        block_shape(extraction.furnace_count).capacity,
+        FURNACES_PER_MODULE,
         extraction.smelter_origin, emit,
         feed_grace_seconds=transport_grace_seconds(belt_type, belt_tiles),
+        variant="basic",
     )
     return provider
 

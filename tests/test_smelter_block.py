@@ -174,3 +174,42 @@ def test_invalid_shapes_are_rejected() -> None:
         block_shape(0)
     with pytest.raises(ValueError, match="must increase"):
         generate_refinery_extension_plan("iron-plate", 6, 6)
+
+
+def test_basic_variant_bootstraps_one_six_furnace_regular_belt_module() -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    placements = _placements(plan)
+    assert [phase["name"] for phase in plan["phases"][:2]] == [
+        "refinery_start_iron-plate", "refinery_end_iron-plate",
+    ]
+    assert sum(action["entity"] == "electric-furnace" for action in placements) == 6
+    assert all("fast-" not in action["entity"] for action in placements)
+    assert sum(action["entity"] == "transport-belt" for action in placements) == 53
+    interface = refinery_interfaces(6, variant="basic")
+    positions = {(a["position"]["x"], a["position"]["y"]): a for a in placements}
+    assert interface.plate_outputs == ((14.5, 12.5),)
+    assert positions[(14.5, 12.5)]["entity"] == "transport-belt"
+    assert positions[(15.5, 12.5)]["entity"] == "transport-belt"
+    assert positions[(15.5, 13.5)]["entity"] == "inserter"
+    assert positions[interface.provider]["entity"] == "passive-provider-chest"
+    assert interface.provider == (15.5, 14.5)
+
+
+def test_basic_to_standard_expansion_replaces_bootstrap_before_growth() -> None:
+    plan = generate_managed_refinery_extension_plan(
+        "iron-plate", 6, 12, current_variant="basic", target_variant="standard",
+    )
+    assert [phase["name"] for phase in plan["phases"][:2]] == [
+        "retire_refinery_output_iron-plate",
+        "retire_refinery_basic_iron-plate",
+    ]
+    assert plan["phases"][2]["name"] == "replace_refinery_iron-plate"
+    core_removed = plan["phases"][1]["actions"]
+    assert all(
+        action["entity"] not in {"electric-furnace", "inserter", "medium-electric-pole"}
+        for action in core_removed
+    )
+    assert any(
+        action["entity"] == "fast-transport-belt"
+        for action in plan["phases"][2]["actions"]
+    )
