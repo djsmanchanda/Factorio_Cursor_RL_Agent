@@ -88,6 +88,13 @@ def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     assert "PREP DEFERRED" in _PREP
 
 
+def test_plate_shortage_stops_later_plate_from_spending_belts() -> None:
+    """The first blocked plate must not let the other baseline plate submit."""
+    assert "plate in pending_plate_materials" in _LOOP
+    assert "plate_spent = False" in _LOOP
+    assert "if plate_spent:" in _LOOP
+
+
 def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatch) -> None:
     available = {"fast-transport-belt": 73}
     attempts: list[str] = []

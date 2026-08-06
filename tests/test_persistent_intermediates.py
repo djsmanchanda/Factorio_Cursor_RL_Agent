@@ -34,6 +34,27 @@ def _plan(item: str, ingredient: str) -> SimpleNamespace:
     )
 
 
+
+def test_compact_mall_seeds_from_one_craft_not_full_stock_target(monkeypatch):
+    """A belt cell must be placeable before its whole reserve is available."""
+    spec = {
+        "ingredients": ["iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
+    }
+    plan = SimpleNamespace(spec=spec, promote_to_line=False, production_target=116)
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_args: {"iron-gear-wheel": 1, "iron-plate": 1},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+
+    result = builder._ingredient_sources(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (0.0, 0.0), lambda _message: None, plan, upgrade_bootstrap=False,
+    )
+
+    assert result == {}
+
 def test_stocked_iron_stick_schedules_a_real_producer(monkeypatch):
     calls = []
     monkeypatch.setattr(

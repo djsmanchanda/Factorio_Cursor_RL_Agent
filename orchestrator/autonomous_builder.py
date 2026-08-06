@@ -418,6 +418,7 @@ def _planned_removal_tiles(plan: dict) -> set[tuple[int, int]]:
 
 def _plate_expansion_foundation(
     client: RconClient, surface: str, recipe: str, smelter_delta: dict,
+    *, allowed_tiles: set[tuple[int, int]] | None = None,
 ) -> dict | None:
     """Survey a refinery extension before mining and stage needed landfill."""
     if not hasattr(client, "command"):
@@ -430,7 +431,9 @@ def _plate_expansion_foundation(
         client, surface, minimum, maximum, include_water=False,
     )
     replacement_tiles = _planned_removal_tiles(smelter_delta)
-    collision = sorted(footprint & (occupied - replacement_tiles))
+    collision = sorted(
+        footprint & (occupied - replacement_tiles - (allowed_tiles or set()))
+    )
     if collision:
         raise StuckError(
             f"{recipe} refinery extension intersects real infrastructure at "
@@ -722,7 +725,13 @@ def _prepare_initial_refinery(
         "name": f"bridge_{extraction.ore}_to_{recipe}",
         "actions": route_actions,
     })
-    foundation = _plate_expansion_foundation(client, surface, recipe, plan)
+    ore_interface_tiles = {
+        (math.floor(ore_output[0]), math.floor(ore_output[1])),
+        (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
+    }
+    foundation = _plate_expansion_foundation(
+        client, surface, recipe, plan, allowed_tiles=ore_interface_tiles,
+    )
     bill_route = route_actions
     build_plan = getattr(extraction, "build_plan", None)
     if preflight_only and build_plan is not None:
@@ -1611,8 +1620,15 @@ def _ingredient_sources(
     crafts_needed = math.ceil(
         plan.production_target / max(1, spec.get("product_amount", 1)),
     )
+    # A compact mall cell is a producer, not a request to consume the entire
+    # future stock target up front. Requiring all target inputs before placing
+    # its first machine deadlocks bootstrap items: transport-belt wanted 58
+    # plates before the iron line could exist. One craft seeds the requester;
+    # the running producer then draws the remainder through the network. A
+    # promoted line still needs its full declared production bill.
+    setup_crafts = crafts_needed if promote_to_line else 1
     for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
-        required = math.ceil(amount * crafts_needed)
+        required = math.ceil(amount * setup_crafts)
         managed_source = MANAGED_INTERMEDIATE_SOURCES.get(ingredient)
         if managed_source is not None:
             sources[ingredient] = managed_source
@@ -2338,13 +2354,23 @@ def run(
             # opening iron baseline; a completed baseline must not freeze that
             # capacity. Deferred plate targets are retried only when demand
             # rises, so a failed corridor does not spin every pass.
-            if any(
-                _prep_plate_extraction(
+            plate_spent = False
+            for plate in BASELINE_PLATES:
+                spent = _prep_plate_extraction(
                     client, bridge, surface, force, plate, prepped,
                     deferred_plate_targets, mall_targets, reference_point, emit,
                     background_targets, pending_plate_materials,
-                ) for plate in BASELINE_PLATES
-            ):
+                )
+                if spent:
+                    plate_spent = True
+                    break
+                # A material-shortage pass belongs to the mall. Stop here so
+                # another plate cannot consume the finite starter belt reserve;
+                # then fall through to _serve_ready_pass to build the queued
+                # mall item in this same pass.
+                if plate in pending_plate_materials:
+                    break
+            if plate_spent:
                 continue
             position = _serve_ready_pass(
                 client, bridge, surface, force, task, tick, mall_targets,

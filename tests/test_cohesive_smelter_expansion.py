@@ -118,6 +118,21 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
         builder._plate_expansion_foundation(client, "nauvis", "iron-plate", plan)
 
 
+def test_authorized_ore_interface_tiles_do_not_collide_with_refinery(monkeypatch) -> None:
+    """The mine output belt is part of the same initial refinery transaction."""
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "transport-belt",
+        "position": {"x": 0.5, "y": 0.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: {(0, 0)})
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    assert builder._plate_expansion_foundation(
+        client, "nauvis", "copper-plate", plan, allowed_tiles={(0, 0)},
+    ) is None
+
+
 def test_replacement_tiles_do_not_collide_with_the_owned_end(monkeypatch) -> None:
     plan = {"phases": [{"actions": [
         {"action_type": "remove_entity", "entity": "fast-transport-belt",
@@ -340,7 +355,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
         }], "transport-belt")
 
     monkeypatch.setattr(builder, "preflight_ingredient_transport", preflight)
-    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a: None)
+    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
     monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
     monkeypatch.setattr(

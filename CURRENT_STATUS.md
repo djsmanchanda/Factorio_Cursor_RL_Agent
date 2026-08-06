@@ -2008,3 +2008,9 @@ that consumed it was not.
 - Why: The previous first refinery required 131 fast belts before iron plates could be produced, creating a circular bootstrap deadlock.
 - Validation: 77 focused blueprint/smelter/state/extraction tests passed; Python compilation passed.
 - Next: Reset to the safe save and restart the Python runner; no Lua mod redeploy or Factorio server restart is needed.
+
+## [2026-08-07] Break initial plate and transport-belt bootstrap deadlock
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`, `tests/test_persistent_intermediates.py`, `tests/test_prep_extraction.py`
+- What: Compact mall producers now seed from one craft instead of the full stock target; a blocked plate preflight stops later baseline plate mining from spending the starter belt reserve; the initial refinery transaction permits only its authorized mine-output interface tiles during the second preflight.
+- Why: The run queued 116 belts for iron before any iron line existed, then demanded 58 plates before placing the belt assembler and spent the same pass on copper mining; copper's subsequent refinery preflight misclassified its own output belt at `(77,-40)` as foreign infrastructure.
+- Validation: 88 focused tests passed; Python compilation and `git diff --check` passed. Python-only change -- restart the runner; no Lua mod redeploy or Factorio server restart is required.
