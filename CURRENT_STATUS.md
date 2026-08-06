@@ -1959,3 +1959,10 @@ that consumed it was not.
 - Why: The supplied run ended at a bounded petroleum-gas route refusal; the fluid planner could only route around water and could not emit a legal narrow-water underground crossing.
 - Validation: 175 focused fluid/electronics/extraction/belt tests passed; Python compilation and `git diff --check` passed.
 - Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+
+## [2026-08-06] Reopen iron prep for later construction demand
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_prep_extraction.py`, `tests/test_cohesive_smelter_expansion.py`
+- What: Plate prep now re-evaluates completed baseline capacity against later mall shortages, and refinery expansion recovers the deployed row before merging recipe-less furnaces.
+- Why: A 685-pipe chemical-cell bill waited 13 minutes while iron remained at its opening capacity: completed prep ignored the new bounded five-minute plate draw, then expansion compared the live row with a newly searched refinery site.
+- Validation: 111 focused prep/smelter/extraction/mall-progress/run-bound tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the autonomous runner; no Lua mod redeploy is required.

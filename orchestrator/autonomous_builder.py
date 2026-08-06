@@ -638,12 +638,12 @@ def _cohesive_smelter_target(
         return None, None
     if recipe in {"iron-plate", "copper-plate"}:
         # A starved furnace loses its recipe, so merge recipe-visible and
-        # recipe-less furnaces before computing the extension diff. Otherwise
-        # the planner thinks a seven-furnace row has six and submits a ghost
-        # over the surviving idle furnace.
+        # recipe-less furnaces around a REAL deployed machine before computing
+        # the extension diff. The fresh extraction search may choose another
+        # free site, so it cannot identify this row's immutable origin.
         idle = live_base.find_idle_machine_row(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
-            extraction.smelter_origin,
+            existing.machine_positions[0],
         )
         if idle is not None:
             positions = tuple(sorted(set(existing.machine_positions) | set(idle.machine_positions)))
@@ -658,9 +658,7 @@ def _cohesive_smelter_target(
                     existing.machine_positions = positions
     # Validate before placing another drill: ambiguous legacy/multi-site
     # smelters fail closed instead of making the transport tangle worse.
-    _existing_plate_smelter(
-        client, surface, existing, extraction.smelter_origin,
-    )
+    _existing_plate_smelter(client, surface, existing)
     total_drills = extraction.system_drill_count_before + extraction.drill_count
     target = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
@@ -1855,7 +1853,8 @@ def _serve_mall_task(
 
 def _prep_plate_extraction(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    short_plate: str, prepped: set[str], mall_targets: dict[str, int],
+    short_plate: str, prepped: set[str], deferred_targets: dict[str, int],
+    mall_targets: dict[str, int],
     reference_point: Point, emit: Callable[[str], None],
     demand_targets: Mapping[str, int] | None = None,
 ) -> bool:
@@ -1871,17 +1870,23 @@ def _prep_plate_extraction(
         targets[item] = max(targets.get(item, 0), target)
     adjusted_draw = demand_adjusted_plate_draw(targets, available)
     wanted_furnaces = smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
+    deferred_target = deferred_targets.get(short_plate)
+    if deferred_target is not None and wanted_furnaces <= deferred_target:
+        return False
+    deferred_targets.pop(short_plate, None)
     plate_line = live_base.find_line(
         client, surface, force, short_plate,
         LINE_RECIPES[short_plate]["machine"],
     )
     have = plate_line.machine_count if plate_line else 0
     if have >= wanted_furnaces:
+        newly_prepped = short_plate not in prepped
         prepped.add(short_plate)
-        emit(
-            f"  PREP READY: {short_plate} has {have}/{wanted_furnaces} furnace(s)"
-        )
-        return True
+        if newly_prepped:
+            emit(
+                f"  PREP READY: {short_plate} has {have}/{wanted_furnaces} furnace(s)"
+            )
+        return newly_prepped
     emit(
         f"--- production prep: {short_plate} extraction to "
         f"{wanted_furnaces} furnace(s) for "
@@ -1911,6 +1916,7 @@ def _prep_plate_extraction(
         )
         return False
     except (StuckError, ValueError) as error:
+        deferred_targets[short_plate] = wanted_furnaces
         prepped.add(short_plate)
         emit(
             f"  PREP DEFERRED: {short_plate} extraction stays at {have} "
@@ -2034,6 +2040,7 @@ def _survey_pass(
 def _pass_signature(
     task, mall_targets: dict[str, int], prepped: set[str],
     background_targets: dict[str, int] | None = None,
+    deferred_plate_targets: Mapping[str, int] | None = None,
 ) -> tuple:
     """What this pass chose to work on, and what work is still outstanding.
 
@@ -2047,6 +2054,7 @@ def _pass_signature(
         task.progress_percent if task else None,
         tuple(sorted(mall_targets)),
         tuple(sorted(background_targets or {})),
+        tuple(sorted((deferred_plate_targets or {}).items())),
         tuple(sorted(prepped)),
     )
 
@@ -2180,6 +2188,7 @@ def run(
             script_output, emit,
         )
         prepped: set[str] = set()
+        deferred_plate_targets: dict[str, int] = {}
         last_signature: tuple | None = None
         unchanged_passes = 0
         iteration = 0
@@ -2189,6 +2198,7 @@ def run(
             )
             signature = _pass_signature(
                 task, mall_targets, prepped, background_targets,
+                deferred_plate_targets,
             )
             unchanged_passes = (
                 unchanged_passes + 1 if signature == last_signature else 0
@@ -2207,17 +2217,17 @@ def run(
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a
             # starved plate line just starves too.
-            # EVERY unprepped plate gets a turn, not just the first. Taking
-            # only the head of the list let iron -- which yields the pass every
-            # time it is short of drills -- block copper forever: a whole run
-            # finished with no copper being produced at all.
+            # Recheck every plate after mall targets change. A later shortage
+            # such as a chemical cell's pipe bill can legitimately outgrow the
+            # opening iron baseline; a completed baseline must not freeze that
+            # capacity. Deferred plate targets are retried only when demand
+            # rises, so a failed corridor does not spin every pass.
             if any(
                 _prep_plate_extraction(
                     client, bridge, surface, force, plate, prepped,
-                    mall_targets, reference_point, emit,
+                    deferred_plate_targets, mall_targets, reference_point, emit,
                     background_targets,
-                )
-                for plate in BASELINE_PLATES if plate not in prepped
+                ) for plate in BASELINE_PLATES
             ):
                 continue
             position = _serve_ready_pass(

@@ -152,6 +152,42 @@ def test_cohesive_target_merges_recipe_less_furnace_before_extension(monkeypatch
     assert existing.machine_count == 7
     assert existing.machine_positions[0] == (1.5, 3.5)
 
+def test_cohesive_expansion_recovers_the_deployed_row_not_a_new_site(monkeypatch) -> None:
+    """An expansion search may choose a different free site than the live row."""
+    line = SimpleNamespace(
+        recipe="iron-plate", machine_count=2,
+        machine_positions=((1.5, 3.5), (4.5, 3.5)),
+    )
+    entities = {
+        (-1.5, 8.5): {"name": "steel-chest"},
+        (0.5, 0.5): {"name": "transport-belt"},
+        (1.5, 1.5): {"name": "fast-inserter"},
+    }
+    idle_searches: list[tuple[float, float]] = []
+    extraction = SimpleNamespace(
+        smelter_origin=(85.0, 82.0), system_drill_count_before=6,
+        drill_count=14, mining_productivity_bonus=0.0, ore="iron-ore",
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_args: line)
+    monkeypatch.setattr(
+        builder.live_base, "find_idle_machine_row",
+        lambda *_args: idle_searches.append(_args[-1]) or None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _client, _surface, position: entities.get(tuple(position)),
+    )
+
+    existing, target = builder._cohesive_smelter_target(
+        object(), "nauvis", "player", "iron-plate", extraction, True,
+        lambda _message: None,
+    )
+
+    assert existing is line
+    assert target is not None
+    assert idle_searches == [(1.5, 3.5)]
+
+
 def test_mining_expansion_validates_cohesion_before_submitting_drills() -> None:
     target_source = inspect.getsource(builder._cohesive_smelter_target)
     build_source = inspect.getsource(builder.build_mining_stage)
