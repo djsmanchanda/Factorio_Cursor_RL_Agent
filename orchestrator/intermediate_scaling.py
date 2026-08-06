@@ -177,7 +177,13 @@ def promoted_line_belt_type(
     """Choose the cheapest stocked belt whose full rate carries the line input."""
     spec = LINE_RECIPES[item]
     demand = max(machine_ingredient_rates(item, machine_count), default=0.0)
-    tiers = ("transport-belt", "fast-transport-belt", "express-transport-belt", "turbo-transport-belt")
+    tiers = tuple(
+        tier for tier in (
+            "transport-belt", "fast-transport-belt",
+            "express-transport-belt", "turbo-transport-belt",
+        )
+        if tier in LINE_RECIPES
+    ) or ("transport-belt",)
     for tier in tiers:
         if available.get(tier, 0) > 0 and BELT_TIERS[tier] >= demand:
             return tier

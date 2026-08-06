@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
@@ -60,9 +61,7 @@ def baseline_plate_draw() -> dict[str, float]:
 
 def baseline_smelter_count(plate: str) -> int:
     """Furnaces needed to keep up with the prep set's draw on `plate`."""
-    spec = LINE_RECIPES[plate]
-    per_furnace = _machine_craft_rate(plate) * spec.get("product_amount", 1)
-    return math.ceil(baseline_plate_draw()[plate] / per_furnace)
+    return smelter_count_for_draw(plate, baseline_plate_draw()[plate])
 
 
 def baseline_drill_phase(plate: str) -> int:
@@ -73,12 +72,80 @@ def baseline_drill_phase(plate: str) -> int:
     EXTRACTION_DRILL_PHASES keeps prep on the same ladder the rest of the
     system expands along.
     """
-    drills = math.ceil(baseline_plate_draw()[plate] / ELECTRIC_DRILL_ITEMS_PER_SECOND)
+    return drill_phase_for_draw(baseline_plate_draw()[plate])
+
+
+MALL_DEMAND_HORIZON_SECONDS = 300.0
+MALL_DEMAND_HEADROOM = 1.10
+
+
+def mall_plate_draw(
+    targets: Mapping[str, int], available: Mapping[str, int] | None = None,
+) -> dict[str, float]:
+    """Convert outstanding mall targets into raw plate requirements.
+
+    Construction stock is a finite burst, not a steady-state consumer. The
+    planner spreads that burst over a bounded five-minute horizon so it raises
+    ore capacity early without treating every chest target as an infinite
+    production line. Unknown/fluid ingredients are intentionally skipped.
+    """
+    remaining = dict(available or {})
+    draw = {plate: 0.0 for plate in BASELINE_PLATES}
+
+    def visit(item: str, quantity: float, path: set[str]) -> None:
+        if quantity <= 0:
+            return
+        covered = min(quantity, remaining.get(item, 0))
+        remaining[item] = remaining.get(item, 0) - covered
+        quantity -= covered
+        if quantity <= 0:
+            return
+        if item in draw:
+            draw[item] += quantity
+            return
+        spec = LINE_RECIPES.get(item)
+        if spec is None or item in path:
+            return
+        product_amount = max(1, spec.get("product_amount", 1))
+        crafts = quantity / product_amount
+        next_path = path | {item}
+        for ingredient, amount in zip(
+            spec.get("ingredients", ()), spec.get("amounts", ()), strict=True,
+        ):
+            visit(ingredient, crafts * amount, next_path)
+
+    for item, target in targets.items():
+        visit(item, float(max(0, target)), set())
+    return draw
+
+
+def demand_adjusted_plate_draw(
+    targets: Mapping[str, int], available: Mapping[str, int] | None = None,
+) -> dict[str, float]:
+    """Baseline plate draw plus a bounded, headroomed mall burst."""
+    burst = mall_plate_draw(targets, available)
+    baseline = baseline_plate_draw()
+    return {
+        plate: baseline[plate]
+        + burst[plate] * MALL_DEMAND_HEADROOM / MALL_DEMAND_HORIZON_SECONDS
+        for plate in BASELINE_PLATES
+    }
+
+
+def smelter_count_for_draw(plate: str, draw_per_second: float) -> int:
+    """Furnaces required for a requested plate rate."""
+    spec = LINE_RECIPES[plate]
+    per_furnace = _machine_craft_rate(plate) * spec.get("product_amount", 1)
+    return max(1, math.ceil(draw_per_second / per_furnace))
+
+
+def drill_phase_for_draw(draw_per_second: float) -> int:
+    """Smallest shared mining phase that covers a plate draw."""
+    drills = math.ceil(draw_per_second / ELECTRIC_DRILL_ITEMS_PER_SECOND)
     return next(
         (phase for phase in EXTRACTION_DRILL_PHASES if phase >= drills),
         EXTRACTION_DRILL_PHASES[-1],
     )
-
 
 def baseline_build_order() -> tuple[str, ...]:
     """Prep recipes ordered so a line is built after whatever feeds it."""

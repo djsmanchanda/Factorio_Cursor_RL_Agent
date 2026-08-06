@@ -16,11 +16,22 @@ from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E4
 from orchestrator.intermediate_scaling import (  # noqa: E402
     MALL_INTERMEDIATE_RATE_LIMIT,
     PROMOTED_LINE_PHASES,
+    promoted_line_belt_type,
     promoted_line_machine_count,
 )
 
 GEARS = "iron-gear-wheel"
 
+
+def test_promotion_does_not_use_unexecutable_stocked_belts(monkeypatch) -> None:
+    from planners.recipe_data import LINE_RECIPES
+
+    for tier in ("fast-transport-belt", "express-transport-belt", "turbo-transport-belt"):
+        monkeypatch.delitem(LINE_RECIPES, tier, raising=False)
+
+    assert promoted_line_belt_type(
+        GEARS, 6, {"transport-belt": 100, "express-transport-belt": 4000},
+    ) == "transport-belt"
 
 def test_a_saturated_cell_promotes_without_measurable_demand() -> None:
     """The chicken-and-egg: live_intermediate_demand only counts WORKING

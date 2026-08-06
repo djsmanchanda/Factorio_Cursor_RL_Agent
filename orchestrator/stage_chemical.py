@@ -111,7 +111,7 @@ def ensure_coal_mine(
         raise StuckError("No clear two-drill coal extraction site found")
     origin, count = chosen
     plan, output = direct_mine_plan(
-        origin, count, belt_type="fast-transport-belt", inserter_type="fast-inserter",
+        origin, count, belt_type="transport-belt", inserter_type="fast-inserter",
     )
     plan = strip_local_power(plan, remove_substations=False)
     _publish_output_chest(plan)
@@ -120,10 +120,14 @@ def ensure_coal_mine(
     service_origin, area, substation, drills = existing_mine_service_geometry(
         output, count, shared_belt_y=output[1] + 2,
     )
+    # `direct_mine_plan` emits a continuous belt endpoint, not a chest. Passing
+    # that belt tile to the logistic probe makes its nil logistic network look
+    # like an orphaned chest and spends every remediation round waiting on a
+    # coverage fault that cannot exist. The belt is serviced by power only.
     service_stage(
         client, bridge, surface, force, "mining stage for coal", service_origin,
         area, substation, drills, emit,
-        logistic_chest_positions=[output],
+        logistic_chest_positions=[],
     )
     return None
 

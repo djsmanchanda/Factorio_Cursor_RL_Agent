@@ -19,6 +19,8 @@ from orchestrator.baseline_production import (  # noqa: E402
     baseline_drill_phase,
     baseline_plate_draw,
     baseline_smelter_count,
+    demand_adjusted_plate_draw,
+    mall_plate_draw,
 )
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E402
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS  # noqa: E402
@@ -70,6 +72,28 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
     assert draw["iron-plate"] == pytest.approx(7.5)
     assert draw["copper-plate"] == pytest.approx(3.0)
 
+
+def test_mall_burst_draw_expands_nested_plate_requirements() -> None:
+    draw = mall_plate_draw({"transport-belt": 200})
+
+    assert draw["iron-plate"] == pytest.approx(300.0)
+    assert draw["copper-plate"] == pytest.approx(0.0)
+
+
+def test_mall_burst_subtracts_stocked_intermediates_recursively() -> None:
+    draw = mall_plate_draw(
+        {"transport-belt": 200},
+        {"transport-belt": 100, "iron-gear-wheel": 50},
+    )
+
+    assert draw["iron-plate"] == pytest.approx(50.0)
+
+def test_mall_burst_has_a_bounded_influence_on_standing_draw() -> None:
+    adjusted = demand_adjusted_plate_draw({"transport-belt": 200})
+    baseline = baseline_plate_draw()
+
+    assert adjusted["iron-plate"] > baseline["iron-plate"]
+    assert adjusted["copper-plate"] == baseline["copper-plate"]
 
 def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
     """8.75 plate/s is well past what six drills carry -- the reason prep has

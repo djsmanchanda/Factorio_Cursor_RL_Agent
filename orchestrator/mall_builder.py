@@ -13,7 +13,11 @@ from planners.recipe_data import LINE_RECIPES
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
-_CELL_PITCH = (14, 7)
+# Keep two tiles between adjacent machine footprints while removing the old
+# five-tile horizontal and four-tile vertical dead space.  The 2x2 substation
+# still clears the next row at six tiles; five would overlap the lower-row
+# input inserter.
+_CELL_PITCH = (11, 6)
 _CELL_COLUMNS = 3
 _CELL_ROWS = 8
 

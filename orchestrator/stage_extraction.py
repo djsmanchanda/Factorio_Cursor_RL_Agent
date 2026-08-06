@@ -301,17 +301,19 @@ def smelter_count_for_drills(
     if not math.isfinite(mining_productivity_bonus) or mining_productivity_bonus < 0:
         raise ValueError("mining_productivity_bonus must be finite and non-negative")
     spec = LINE_RECIPES[recipe]
-    furnace_rate = (
-        MACHINE_SPEEDS[spec["machine"]]
-        * spec.get("product_amount", 1)
-        / spec["craft_time"]
+    # Size on the actual first-input draw, not merely output units. Stone
+    # brick consumes two stone per craft, so treating its product rate as the
+    # ore rate overbuilds a row (7 furnaces fed by 6 drills at roughly 45%).
+    input_amount = spec.get("amounts", [1])[0]
+    furnace_input_rate = (
+        MACHINE_SPEEDS[spec["machine"]] * input_amount / spec["craft_time"]
     )
     ore_rate = (
         drill_count
         * ELECTRIC_DRILL_ITEMS_PER_SECOND
         * (1.0 + mining_productivity_bonus)
     )
-    return max(1, math.ceil(ore_rate / furnace_rate))
+    return max(1, math.ceil(ore_rate / furnace_input_rate))
 
 
 def ore_reservation(
