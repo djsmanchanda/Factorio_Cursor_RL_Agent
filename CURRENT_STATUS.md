@@ -1987,3 +1987,10 @@ that consumed it was not.
 - Why: The 14:59 iron expansion regenerated a chest-feed extension, attempted to replace the live ore trunk at `(24.5, 31.5)`/`(25.5, 31.5)`, and only failed after 12 new drills had been placed. Water must be made solid before any furnace ghost is submitted.
 - Validation: 66 focused expansion/prep/extraction tests passed; reviewer approval confirmed west/east direct-feed and foundation ordering.
 - Next: Python-only round if the prior landfill-tile-ghost Lua deployment is already active; otherwise deploy that existing Lua change and restart the server before testing on the safe save.
+
+## [2026-08-06] Pin modular refinery templates and safe tail migration
+- Files: `planners/refinery_blueprints.py`, `planners/smelter_block.py`, `schemas/build_plan.schema.json`, `factorio_mod/{layout_executor,logistic_sections}.lua`, focused tests
+- What: Imported and hash-pinned the approved Start/Middle/End blueprints, preserved splitter priorities through BuildPlan 1.4 and Lua, widened through five columns, and made depth growth retire only the planner-owned End delta before adding Middle rows and a new End.
+- Why: Refinery geometry must be planned as one repeatable belt/furnace system; expansion may migrate its terminal cap but must never infer permission to remove Start, Middle, or unrelated live infrastructure.
+- Validation: 73 focused blueprint/schema/executor/layout tests passed; Python compilation, schema validation, function-size checks, and `git diff --check` passed; reviewer confirmed the corrected 15-tile width and End-only removal boundary.
+- Next: Wire this validated primitive into live refinery siting, recovery, direct ore input, plate output, landfill, and power before deploying it.

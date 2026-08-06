@@ -1,5 +1,5 @@
 # Path: tests/test_smelter_block.py
-# Purpose: Prove a growing mine widens a compact smelting block instead of extending one enormous furnace line.
+# Purpose: Prove modular refinery sizing and End-to-Middle expansion preserve the approved structure.
 
 from __future__ import annotations
 
@@ -12,99 +12,128 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E402
-from orchestrator.stage_extraction import smelter_count_for_drills  # noqa: E402
+from planners.plan_validation import actions  # noqa: E402
 from planners.smelter_block import (  # noqa: E402
-    BLOCK_ROWS_LATE,
-    BLOCK_ROWS_START,
-    FURNACE_PITCH,
-    ROW_FURNACES_LATE,
-    ROW_FURNACES_START,
-    block_capacity,
-    block_is_full,
+    FURNACES_PER_MODULE,
     block_shape,
-    feed_belt_length,
-    row_capacity,
+    generate_refinery_extension_plan,
+    generate_refinery_plan,
 )
 
 
-def test_the_opening_row_holds_what_was_asked_for() -> None:
-    """'atleast 15 furnaces in the line (15 in starting phase, upto 50 in late
-    game) and 4 rows (in the starting phase upto 30 in late game)'."""
-    assert ROW_FURNACES_START == 15
-    assert ROW_FURNACES_LATE == 50
-    assert BLOCK_ROWS_START == 4
-    assert BLOCK_ROWS_LATE == 30
+def _placements(plan: dict) -> list[dict]:
+    return [action for action in actions(plan) if action["action_type"] == "place_ghost"]
 
 
-def test_a_row_fills_before_a_second_is_started() -> None:
-    """A small mine gets one short row, not a wide sparse block, so the feed
-    belt runs the length of a row it can actually saturate."""
-    assert block_shape(7).rows == 1
-    assert block_shape(7).per_row == 7
+def _at(plan: dict, x: float, y: float) -> list[dict]:
+    return [
+        action
+        for action in _placements(plan)
+        if action["position"] == {"x": x, "y": y}
+    ]
 
 
-def test_a_row_never_exceeds_its_cap() -> None:
-    for furnaces in range(1, 200):
-        assert block_shape(furnaces).per_row <= row_capacity()
-        assert block_shape(furnaces, late_game=True).per_row <= row_capacity(True)
+def test_the_smallest_refinery_is_start_plus_end_with_six_furnaces() -> None:
+    shape = block_shape(1)
+    plan = generate_refinery_plan("iron-plate", 1)
+
+    assert shape.columns == 1
+    assert shape.middle_rows == 0
+    assert shape.capacity == FURNACES_PER_MODULE
+    assert [phase["name"] for phase in plan["phases"]] == [
+        "refinery_start_iron-plate", "refinery_end_iron-plate",
+    ]
+    assert sum(action["entity"] == "electric-furnace" for action in _placements(plan)) == 6
 
 
-def test_rows_are_the_growth_axis_beyond_one_row() -> None:
-    assert block_shape(ROW_FURNACES_START + 1).rows == 2
-    assert block_shape(ROW_FURNACES_START * 4).rows == 4
+def test_the_180_furnace_example_is_five_columns_and_five_middle_rows() -> None:
+    shape = block_shape(180)
+    plan = generate_refinery_plan("iron-plate", 180)
+
+    assert (shape.columns, shape.middle_rows, shape.capacity) == (5, 5, 180)
+    assert sum(action["entity"] == "electric-furnace" for action in _placements(plan)) == 180
 
 
-def test_every_furnace_asked_for_has_a_place() -> None:
-    for furnaces in range(1, 200):
-        assert block_shape(furnaces).capacity >= furnaces
+def test_the_refinery_widens_before_it_moves_the_end() -> None:
+    assert (block_shape(6).columns, block_shape(6).middle_rows) == (1, 0)
+    assert (block_shape(30).columns, block_shape(30).middle_rows) == (5, 0)
+    assert (block_shape(31).columns, block_shape(31).middle_rows) == (5, 1)
 
 
-def test_a_block_beats_a_line_on_belt_at_every_drill_phase() -> None:
-    """The point of the change: the same furnace count behind a much shorter
-    run of belt. One row of 104 furnaces is a 312-tile line, and a belt long
-    enough to serve it has to cross whatever the base already built."""
-    for drills in EXTRACTION_DRILL_PHASES:
-        furnaces = smelter_count_for_drills("iron-plate", drills, 0.30)
-        one_row = furnaces * FURNACE_PITCH
-        block = feed_belt_length(block_shape(furnaces))
+def test_middle_topology_is_plate_furnace_ore_furnace_plate() -> None:
+    plan = generate_refinery_plan("iron-plate", 31)
 
-        assert block <= one_row, f"{drills} drills: block {block} vs line {one_row}"
+    assert _at(plan, 0.5, 3.5)[0]["entity"] == "fast-transport-belt"
+    assert _at(plan, 3.5, 4.5)[0]["entity"] == "electric-furnace"
+    assert _at(plan, 6.5, 3.5)[0]["entity"] == "fast-transport-belt"
+    assert _at(plan, 9.5, 4.5)[0]["entity"] == "electric-furnace"
+    assert _at(plan, 12.5, 3.5)[0]["entity"] == "fast-transport-belt"
 
 
-def test_the_top_drill_phase_is_a_third_of_the_belt() -> None:
-    furnaces = smelter_count_for_drills("iron-plate", EXTRACTION_DRILL_PHASES[-1], 0.30)
+def test_x_repeats_share_belts_and_poles_without_duplicate_actions() -> None:
+    plan = generate_refinery_plan("copper-plate", 30)
+    slots = [
+        (action["position"]["x"], action["position"]["y"])
+        for action in _placements(plan)
+    ]
 
-    assert feed_belt_length(block_shape(furnaces)) < furnaces * FURNACE_PITCH / 2
-
-
-def test_a_block_past_its_rows_says_so() -> None:
-    """At that size the ore feeding it is more than one mine can supply, so the
-    answer is a second block at another patch, not a deeper one here."""
-    assert not block_is_full(ROW_FURNACES_START * BLOCK_ROWS_START)
-    assert block_is_full(ROW_FURNACES_START * BLOCK_ROWS_START + 1)
+    assert len(slots) == len(set(slots))
 
 
-def test_late_game_holds_far_more_before_it_is_full() -> None:
-    at_start_limit = ROW_FURNACES_START * BLOCK_ROWS_START + 1
+def test_adding_a_middle_row_retires_only_end_belts_and_splitters() -> None:
+    old = generate_refinery_plan("iron-plate", 30)
+    plan = generate_refinery_extension_plan("iron-plate", 30, 31)
+    retire = plan["phases"][0]
+    old_end_slots = {
+        (action["entity"], action["position"]["x"], action["position"]["y"])
+        for action in old["phases"][-1]["actions"]
+    }
+    removed_slots = {
+        (action["entity"], action["position"]["x"], action["position"]["y"])
+        for action in retire["actions"]
+    }
 
-    assert block_is_full(at_start_limit)
-    assert not block_is_full(at_start_limit, late_game=True)
-    assert block_capacity(True) > block_capacity()
+    assert retire["name"] == "retire_refinery_end_iron-plate"
+    assert {action["entity"] for action in retire["actions"]} <= {
+        "fast-transport-belt", "fast-splitter",
+    }
+    assert all(action["action_type"] == "remove_entity" for action in retire["actions"])
+    assert removed_slots <= old_end_slots
 
 
-def test_the_late_game_block_covers_the_final_drill_phase() -> None:
-    """100 drills is the last rung of the extraction ladder; the block for it
-    must not already be full."""
-    furnaces = smelter_count_for_drills("iron-plate", EXTRACTION_DRILL_PHASES[-1], 0.30)
+def test_old_end_furnaces_become_the_first_middle_row() -> None:
+    old = generate_refinery_plan("iron-plate", 30)
+    extension = generate_refinery_extension_plan("iron-plate", 30, 31)
+    old_furnaces = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in _placements(old)
+        if action["entity"] == "electric-furnace"
+    }
+    removals = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in actions(extension)
+        if action["action_type"] == "remove_entity"
+    }
 
-    assert not block_is_full(furnaces, late_game=True)
+    assert old_furnaces.isdisjoint(removals)
+    assert sum(
+        action["entity"] == "electric-furnace"
+        for action in extension["phases"][-1]["actions"]
+    ) == 30
 
 
-def test_an_empty_block_is_refused() -> None:
+def test_extension_order_is_retire_then_repeat_then_end() -> None:
+    plan = generate_refinery_extension_plan("iron-plate", 30, 31)
+
+    assert [phase["name"] for phase in plan["phases"]] == [
+        "retire_refinery_end_iron-plate",
+        "extend_refinery_iron-plate",
+        "finish_refinery_end_iron-plate",
+    ]
+
+
+def test_invalid_shapes_are_rejected() -> None:
     with pytest.raises(ValueError, match="at least one furnace"):
         block_shape(0)
-
-
-def test_the_shape_is_deterministic() -> None:
-    assert block_shape(37) == block_shape(37)
+    with pytest.raises(ValueError, match="must increase"):
+        generate_refinery_extension_plan("iron-plate", 6, 6)

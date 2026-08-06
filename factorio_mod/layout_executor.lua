@@ -110,6 +110,26 @@ local clear_logistic_groups = logistic_sections.clear_logistic_groups
 local has_settings = logistic_sections.has_settings
 local needs_reconfiguration = logistic_sections.needs_reconfiguration
 
+local function splitter_priority_error(entity, action)
+  if action.input_priority then
+    local ok, actual = pcall(function() return entity.splitter_input_priority end)
+    if not ok then return "splitter_input_priority_read_failed" end
+    if actual ~= action.input_priority then
+      return "splitter_input_priority_mismatch:expected=" .. action.input_priority
+        .. ",actual=" .. tostring(actual)
+    end
+  end
+  if action.output_priority then
+    local ok, actual = pcall(function() return entity.splitter_output_priority end)
+    if not ok then return "splitter_output_priority_read_failed" end
+    if actual ~= action.output_priority then
+      return "splitter_output_priority_mismatch:expected=" .. action.output_priority
+        .. ",actual=" .. tostring(actual)
+    end
+  end
+  return nil
+end
+
 local function configuration_error(entity, action, direction)
   if direction ~= nil and entity.direction ~= direction then
     return "direction_mismatch"
@@ -129,6 +149,8 @@ local function configuration_error(entity, action, direction)
       return "recipe_mismatch:expected=" .. action.recipe .. ",actual=" .. tostring(actual)
     end
   end
+  local priority_error = splitter_priority_error(entity, action)
+  if priority_error then return priority_error end
   if action.infinity_filter then
     local filter, read_error = infinity_filter_configuration(entity)
     if read_error then return read_error end
@@ -216,6 +238,14 @@ local function configure_created_entity(entity, action)
   if action.recipe then
     local ok = pcall(function() entity.set_recipe(action.recipe) end)
     if not ok then return "recipe_set_failed" end
+  end
+  if action.input_priority then
+    local ok = pcall(function() entity.splitter_input_priority = action.input_priority end)
+    if not ok then return "splitter_input_priority_set_failed" end
+  end
+  if action.output_priority then
+    local ok = pcall(function() entity.splitter_output_priority = action.output_priority end)
+    if not ok then return "splitter_output_priority_set_failed" end
   end
   if action.infinity_filter then
     local ok
