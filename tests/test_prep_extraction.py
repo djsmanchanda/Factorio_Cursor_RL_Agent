@@ -51,7 +51,7 @@ def test_blocked_prep_hands_the_pass_to_the_mall() -> None:
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
-    assert "baseline_smelter_count(short_plate)" in _PREP
+    assert "smelter_count_for_draw(short_plate, adjusted_draw[short_plate])" in _PREP
     assert "build_mining_stage(" in _PREP
 
 

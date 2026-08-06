@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import inspect
 import sys
+from types import SimpleNamespace
+
+import pytest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -13,11 +16,28 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator.stage_services import _BRIDGE_SURVEY_MARGIN  # noqa: E402
-from orchestrator.stage_transport import _BELT_TIERS_CHEAPEST_FIRST  # noqa: E402
+from orchestrator.stage_transport import (  # noqa: E402
+    _BELT_TIERS_CHEAPEST_FIRST, _choose_route_belt_tier, _route_belt_tiers,
+)
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN  # noqa: E402
 
 _MINING = inspect.getsource(builder._build_initial_plate_smelter)
 
+
+def test_refinery_routes_ignore_stocked_advanced_belts() -> None:
+    stock = {
+        "transport-belt": 0,
+        "fast-transport-belt": 0,
+        "express-transport-belt": 4000,
+        "turbo-transport-belt": 4000,
+    }
+
+    assert _choose_route_belt_tier(
+        stock, 100, destination_is_belt=True,
+    ) in {"transport-belt", "fast-transport-belt"}
+    assert _choose_route_belt_tier(
+        stock, 100, destination_is_belt=False,
+    ) == _route_belt_tiers(False)[0]
 
 def test_the_survey_covers_everywhere_the_router_may_go() -> None:
     """A detour that leaves the surveyed box emits belt onto tiles never
@@ -47,27 +67,46 @@ def test_every_stocked_belt_tier_is_tried_before_giving_up_on_belts() -> None:
     assert "BELT TIER:" in _MINING
 
 
-def test_beltless_fallback_is_restricted_to_supported_plate_recipes() -> None:
-    assert 'if recipe not in {"iron-plate", "copper-plate"}:' in _MINING
+def test_plate_belt_shortage_never_falls_back_to_a_requester() -> None:
+    assert "build_logistic_smelter(" not in _MINING
+    assert "BELT DEMAND" in _MINING
+    assert "raise shortage" in _MINING
+
 
 def test_nonplate_belt_shortages_do_not_escalate_to_faster_tiers() -> None:
     shortage = _MINING[_MINING.index("shortage = short_of"):]
     stop = shortage.index("emit(f\"  BELT TIER:")
 
     assert 'if recipe not in {"iron-plate", "copper-plate"}:' in shortage[:stop]
-def test_the_beltless_smelter_is_reached_only_after_every_tier_fails() -> None:
-    body = _MINING[_MINING.index("stock = live_base.available_items"):]
-    tried = body[:body.index("BOOTSTRAP:")]
-
-    assert "for tier in tiers:" in tried
-    assert "build_conversion_stage(" in tried
 
 
-def test_the_beltless_smelter_is_described_as_temporary() -> None:
-    """It is slower than a belt and spends bots the base needs elsewhere, so it
-    exists to be replaced."""
-    assert "to be replaced once belts exist" in _MINING
+def test_direct_plate_route_propagates_belt_shortage(monkeypatch) -> None:
+    extraction = SimpleNamespace(
+        smelter_origin=(10.0, 10.0), furnace_count=2,
+        smelter_flow_direction="east", ore="copper-ore",
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            builder.MaterialShortage("conversion", {"transport-belt": 4}, {})
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "build_logistic_smelter",
+        lambda *_a, **_k: pytest.fail("plate refineries must stay on a direct belt"),
+    )
+    with pytest.raises(builder.MaterialShortage):
+        builder._build_initial_plate_smelter(
+            None, None, "nauvis", "player", "copper-plate", extraction,
+            (77.5, -39.5), (0.0, 0.0), lambda _message: None,
+        )
 
+
+def test_direct_plate_route_still_tries_each_stocked_belt_tier() -> None:
+    body = _MINING[_MINING.index("for tier in tiers"):]
+    assert "build_conversion_stage(" in body
+    assert "BELT DEMAND" in body
 
 def test_a_shortage_that_is_not_about_belts_is_never_swallowed() -> None:
     assert "if not any(" in _MINING

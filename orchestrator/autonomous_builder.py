@@ -6,8 +6,8 @@ from __future__ import annotations
 import json
 import math
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +23,9 @@ from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plat
 from orchestrator.construction_stock import MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, baseline_build_order,
-    baseline_drill_phase, baseline_plate_draw, baseline_smelter_count,
+    baseline_drill_phase, baseline_plate_draw,
+    demand_adjusted_plate_draw, drill_phase_for_draw,
+    smelter_count_for_draw,
 )
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mine_retirement import retire_depleted_mines
@@ -137,8 +139,10 @@ def _apply_remedy(
             client, bridge, surface, force, logistic_chest_positions, emit,
         )
         if not acted:
-            emit("    coverage is already geometrically sufficient -- waiting for the "
-                 "covering roboport to finish powering up")
+            emit(
+                "    coverage is already geometrically sufficient -- waiting for "
+                "the covering roboport to finish powering up"
+            )
     elif remedy == "roboport_power":
         nearest = live_base.nearest_roboport(client, surface, force, origin)
         if nearest is not None and not extend_power(
@@ -183,6 +187,17 @@ def _apply_remedy(
                     f"{name}: {description}, but none of {stranded} can be reached "
                     "by a pole chain from any generating network"
                 )
+    elif remedy.startswith("materials:"):
+        _, item, required_text = remedy.split(":", 2)
+        required = int(required_text)
+        stock = live_base.available_items(client, surface, force)
+        if stock.get(item, 0) < required:
+            raise MaterialShortage(name, {item: required}, stock)
+        raise StuckError(
+            f"{name}: {description}; {item} exists in the base but not in the "
+            "construction network, so a provider/requester or roboport link must "
+            "be repaired before retrying"
+        )
     else:
         raise StuckError(f"{name}: {description} -- no automatic remedy")
     return bool(acted)
@@ -270,6 +285,7 @@ def _place_new_mine(
         raise StuckError(f"mining plan for {extraction.ore} has no power anchor")
     substation_position = power_positions[0]
     plan["surface"], plan["force"] = surface, force
+    _ensure_plan_construction_coverage(client, bridge, surface, force, plan, emit)
     _submit(client, bridge, surface, plan, f"mining_{extraction.ore}", emit)
     stage_xs = [x for x, _y in machine_positions] + [extraction.ore_output[0]]
     stage_ys = [y for _x, y in machine_positions] + [extraction.ore_output[1]]
@@ -314,7 +330,16 @@ def _service_legacy_mine(
     extraction, ore_output: Point, emit: Callable[[str], None],
 ) -> None:
     """Service a mine built before side taps, upgrading its terminal chest."""
-    if extraction.shared_belt_y == extraction.ore_output[1]:
+    direct_belt = False
+    if hasattr(client, "command"):
+        existing_output = live_base.entity_at(
+            client, surface, extraction.ore_output,
+        )
+        direct_belt = existing_output and (
+            existing_output.get("type") == "transport-belt"
+            or existing_output.get("ghost_name", "").endswith("transport-belt")
+        )
+    if extraction.shared_belt_y == extraction.ore_output[1] and not direct_belt:
         emit(
             f"upgrading legacy {extraction.ore} terminal chest at "
             f"{extraction.ore_output} to a side tap"
@@ -336,7 +361,11 @@ def _service_legacy_mine(
     bring_stage_up(
         client, bridge, surface, force, f"existing mine for {extraction.ore}",
         origin, area, substation_position, machines, emit,
-        logistic_chest_positions=[ore_output],
+        # A direct belt is the mine's transport endpoint, not a logistic
+        # chest. Passing its tile to the logistic-network probe makes the
+        # belt's naturally absent `logistic_network` look like a stranded
+        # chest and blocks the refinery behind a false coverage fault.
+        logistic_chest_positions=[] if direct_belt else [ore_output],
     )
 
 
@@ -432,8 +461,9 @@ def _plate_line_extension_plan(
 
 def _existing_plate_smelter(
     client: RconClient, surface: str, line,
+    expected_origin: Point | None = None,
 ) -> _ExistingPlateSmelter:
-    """Recover one contiguous row; refuse ambiguous multi-site plate systems."""
+    """Recover one managed row even when starved furnaces lose their recipe."""
     positions = sorted(line.machine_positions)
     rows = {position[1] for position in positions}
     if len(rows) != 1:
@@ -442,23 +472,46 @@ def _existing_plate_smelter(
             "refusing to add another refinery site"
         )
     xs = sorted(position[0] for position in positions)
-    if any(round(right - left, 3) != 3.0 for left, right in zip(xs, xs[1:])):
+    if expected_origin is None and any(
+        round(right - left, 3) != 3.0 for left, right in zip(xs, xs[1:])
+    ):
         raise StuckError(
             f"{line.recipe} machines are not one contiguous managed row; "
             "refusing to infer an expansion footprint"
         )
     machine_y = next(iter(rows))
-    origin = (xs[0] - 1.5, machine_y - 3.5)
-    east_output = (origin[0] + line.machine_count * 3 + 1.5, origin[1] + 8.5)
-    west_output = (origin[0] - 1.5, origin[1] + 8.5)
-    outputs = [
-        (direction, position)
-        for direction, position in (("east", east_output), ("west", west_output))
-        if (
-            (entity := live_base.entity_at(client, surface, position))
-            and entity["name"] == "passive-provider-chest"
+    origin = expected_origin or (xs[0] - 1.5, machine_y - 3.5)
+    misaligned = any(
+        abs(position[1] - (origin[1] + 3.5)) > 0.001
+        or abs(
+            (position[0] - origin[0] - 1.5) / 3
+            - round((position[0] - origin[0] - 1.5) / 3)
+        ) > 0.001
+        for position in positions
+    )
+    if misaligned:
+        raise StuckError(
+            f"{line.recipe} machines do not fit the managed row origin; "
+            "refusing to infer an expansion footprint"
         )
+    # The west terminal is independent of row length. The east terminal moves
+    # with the original row size, so search a small reserve around the
+    # recipe-visible count; this survives a starved furnace disappearing from
+    # the live recipe survey without inventing a second refinery site.
+    east_outputs = [
+        (origin[0] + count * 3 + 1.5, origin[1] + 8.5)
+        for count in range(max(1, line.machine_count), line.machine_count + 5)
     ]
+    candidates = [("west", (origin[0] - 1.5, origin[1] + 8.5))] + [
+        ("east", position) for position in east_outputs
+    ]
+    outputs = []
+    for direction, position in candidates:
+        entity = live_base.entity_at(client, surface, position)
+        if entity and entity.get("ghost_name", entity.get("name")) in {
+            "passive-provider-chest", "steel-chest",
+        }:
+            outputs.append((direction, position))
     if len(outputs) != 1:
         raise StuckError(
             f"{line.recipe} has no unique managed side-tap output; "
@@ -467,15 +520,35 @@ def _existing_plate_smelter(
     belt = live_base.entity_at(
         client, surface, (origin[0] + 0.5, origin[1] + 0.5),
     )
-    inserter = live_base.entity_at(client, surface, (xs[0], machine_y - 2))
-    if not belt or belt["name"] not in BELT_TIERS:
+    inserter = live_base.entity_at(
+        client, surface, (origin[0] + 1.5, origin[1] + 1.5),
+    )
+    belt_name = belt.get("ghost_name", belt.get("name")) if belt else None
+    inserter_name = (
+        inserter.get("ghost_name", inserter.get("name")) if inserter else None
+    )
+    if belt_name not in BELT_TIERS:
         raise StuckError(f"{line.recipe} managed input belt is missing")
-    if not inserter or not inserter["name"].endswith("inserter"):
+    if not inserter_name or not inserter_name.endswith("inserter"):
         raise StuckError(f"{line.recipe} managed input inserter is missing")
     return _ExistingPlateSmelter(
-        origin, outputs[0][0], belt["name"], inserter["name"], outputs[0][1],
+        origin, outputs[0][0], belt_name, inserter_name, outputs[0][1],
     )
 
+
+def _plate_substation_position(
+    recipe: str, machine_count: int, origin: Point,
+    belt_type: str, inserter_type: str, flow_direction: str,
+) -> Point:
+    """Recompute the exact dedicated power anchor for a surveyed row."""
+    plan, _feed, _output = _plate_line_layout(
+        recipe, machine_count, origin, belt_type, inserter_type, flow_direction,
+    )
+    return next(
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action["entity"] == "substation"
+    )
 
 def _extend_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
@@ -488,6 +561,19 @@ def _extend_plate_smelter(
         emit(
             f"SMELTER COHESION: existing {recipe} row already has "
             f"{line.machine_count}/{target_machines} furnace(s)"
+        )
+        substation = _plate_substation_position(
+            recipe, line.machine_count, existing.origin, existing.belt_type,
+            existing.inserter_type, existing.flow_direction,
+        )
+        length = line.machine_count * 3
+        area = (
+            (existing.origin[0] - 15, existing.origin[1] - 15),
+            (existing.origin[0] + length + 15, existing.origin[1] + 15),
+        )
+        bring_stage_up(
+            client, bridge, surface, force, f"existing {recipe} smelter",
+            existing.origin, area, substation, list(line.machine_positions), emit,
         )
         return existing.output
     delta, full, output = _plate_line_extension_plan(
@@ -538,11 +624,43 @@ def _cohesive_smelter_target(
     existing = live_base.find_line(
         client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
     )
+    if existing is None and recipe in {"iron-plate", "copper-plate"}:
+        existing = live_base.find_idle_machine_row(
+            client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+            extraction.smelter_origin,
+        )
+        if existing is not None:
+            emit(
+                f"SMELTER RECOVERY: found {existing.machine_count} idle "
+                f"{recipe} furnace(s) near {extraction.smelter_origin}"
+            )
     if existing is None:
         return None, None
+    if recipe in {"iron-plate", "copper-plate"}:
+        # A starved furnace loses its recipe, so merge recipe-visible and
+        # recipe-less furnaces before computing the extension diff. Otherwise
+        # the planner thinks a seven-furnace row has six and submits a ghost
+        # over the surviving idle furnace.
+        idle = live_base.find_idle_machine_row(
+            client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+            extraction.smelter_origin,
+        )
+        if idle is not None:
+            positions = tuple(sorted(set(existing.machine_positions) | set(idle.machine_positions)))
+            if len(positions) > existing.machine_count:
+                if hasattr(existing, "__dataclass_fields__"):
+                    existing = replace(
+                        existing, machine_count=len(positions),
+                        machine_positions=positions,
+                    )
+                else:
+                    existing.machine_count = len(positions)
+                    existing.machine_positions = positions
     # Validate before placing another drill: ambiguous legacy/multi-site
     # smelters fail closed instead of making the transport tangle worse.
-    _existing_plate_smelter(client, surface, existing)
+    _existing_plate_smelter(
+        client, surface, existing, extraction.smelter_origin,
+    )
     total_drills = extraction.system_drill_count_before + extraction.drill_count
     target = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
@@ -568,8 +686,9 @@ def _build_initial_plate_smelter(
     )
     stock = live_base.available_items(client, surface, force)
     tiers = [_DEFAULT_BELT] + [
-        tier for tier in _BELT_TIERS_CHEAPEST_FIRST
-        if tier != _DEFAULT_BELT and stock.get(tier, 0)
+        tier for tier in _BELT_TIERS_CHEAPEST_FIRST[:2]
+        if tier != _DEFAULT_BELT
+        and stock.get(tier, 0) and tier in LINE_RECIPES
     ]
     shortage: MaterialShortage | None = None
     for tier in tiers:
@@ -592,14 +711,18 @@ def _build_initial_plate_smelter(
             emit(f"  BELT TIER: {recipe} cannot afford {tier}; trying the next tier")
     if recipe not in {"iron-plate", "copper-plate"}:
         raise shortage
+    # Plate refineries are the raw-material spine. A requester chest cannot
+    # replace their direct mine-to-furnace belt: the mine output is a belt
+    # endpoint, not a logistic provider, so a requester-fed fallback would
+    # have no copper/iron source at all. Propagate the cheapest belt bill to
+    # the mall and retry this same direct route after belts are produced.
+    if shortage is None:
+        raise StuckError(f"no direct belt route is available for {recipe}")
     emit(
-        f"  BOOTSTRAP: no belt tier can be afforded for {recipe}; building a "
-        "beltless logistic smelter, to be replaced once belts exist"
+        f"  BELT DEMAND: deferring direct {recipe} refinery until the mall "
+        "produces its belt bill"
     )
-    return build_logistic_smelter(
-        client, bridge, surface, force, recipe, extraction.ore,
-        extraction.smelter_origin, ore_output, emit,
-    )
+    raise shortage
 
 
 def build_mining_stage(
@@ -770,8 +893,9 @@ def _conversion_feed_plan(
     direct_belt_input = (
         recipe in {"iron-plate", "copper-plate"}
         and len(modes) == 1
-        and next(iter(modes.values())) == "belt"
     )
+    if direct_belt_input:
+        modes[next(iter(modes))] = "belt"
     if direct_belt_input:
         ingredient = next(iter(modes))
         feed_positions = {
@@ -806,6 +930,30 @@ def _conversion_feed_plan(
                     "actions": route[0],
                 })
     return modes, feed_positions, preflighted, direct_belt_input
+
+
+def _ensure_plan_construction_coverage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    plan: dict, emit: Callable[[str], None],
+) -> None:
+    """Extend construction coverage to the complete submitted footprint."""
+    if not hasattr(client, "command"):
+        return
+    positions = [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan.get("phases", [])
+        for action in phase.get("actions", [])
+        if "position" in action
+    ]
+    if not positions:
+        return
+    xs, ys = zip(*positions)
+    targets = {
+        (min(xs), min(ys)), (min(xs), max(ys)),
+        (max(xs), min(ys)), (max(xs), max(ys)),
+    }
+    for target in sorted(targets):
+        extend_roboport_coverage(client, bridge, surface, force, target, emit)
 
 
 def _power_and_raise_stage(
@@ -912,6 +1060,23 @@ def _connect_stage_feeds(
         raise StuckError(f"conversion stage for {recipe} built but not healthy: {stuck}")
 
 
+def _recover_partial_conversion_power(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, substation_position: Point, emit: Callable[[str], None],
+) -> None:
+    """Bridge a scaffold left behind when a later conversion action failed."""
+    if live_base.pole_network_id(client, surface, substation_position) is None:
+        return
+    emit(
+        f"CONVERSION RECOVERY: {recipe} submit failed after scaffolding; "
+        f"connecting its substation at {substation_position}"
+    )
+    try:
+        extend_power(client, bridge, surface, force, substation_position, emit)
+    except StuckError as error:
+        emit(f"  CONVERSION RECOVERY: power bridge unavailable: {error}")
+
+
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
@@ -978,7 +1143,14 @@ def build_conversion_stage(
         if action["entity"] == "substation"
     )
     plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, f"conversion_{recipe}", emit)
+    _ensure_plan_construction_coverage(client, bridge, surface, force, plan, emit)
+    try:
+        _submit(client, bridge, surface, plan, f"conversion_{recipe}", emit)
+    except StuckError:
+        _recover_partial_conversion_power(
+            client, bridge, surface, force, recipe, substation_position, emit,
+        )
+        raise
     _power_and_raise_stage(
         client, bridge, surface, force, recipe, plan, machine_positions,
         substation_position, ingredient_sources, modes, machine_count, ox, oy,
@@ -1295,10 +1467,20 @@ def _repair_stalled_line(
 UNBACKED_DRAWS: set[str] = set()
 
 
+# These are intermediate goods, not one-off mall stock. When a construction
+# recipe consumes the starter reserve for them, start a real producer first so
+# the reserve is a bootstrap input rather than the only supply behind the mall.
+# Steel is a small logistic-fed furnace line because an unset furnace recipe
+# cannot be rediscovered by ``find_line`` later.
+PERSISTENT_INTERMEDIATES = frozenset({"iron-stick", "steel-plate"})
+MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
+
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
 ) -> bool:
     """Whether anything on the base is actually making `ingredient`."""
+    if ingredient in MANAGED_INTERMEDIATE_SOURCES:
+        return True
     if ingredient not in LINE_RECIPES:
         return True  # mined or externally supplied; not ours to produce
     line = live_base.find_line(
@@ -1331,6 +1513,10 @@ def _ingredient_sources(
     )
     for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
         required = math.ceil(amount * crafts_needed)
+        managed_source = MANAGED_INTERMEDIATE_SOURCES.get(ingredient)
+        if managed_source is not None:
+            sources[ingredient] = managed_source
+            continue
         if not upgrade_bootstrap and stocked.get(ingredient, 0) >= required:
             backed = _has_producer(client, surface, force, ingredient)
             emit(
@@ -1338,6 +1524,30 @@ def _ingredient_sources(
                 f"({stocked[ingredient]}/{required}) for {item}"
                 + ("" if backed else " -- NOTHING IS PRODUCING IT")
             )
+            if not backed and ingredient in PERSISTENT_INTERMEDIATES:
+                emit(
+                    f"  MALL BOOTSTRAP: scheduling a persistent {ingredient} "
+                    "producer before consuming the reserve"
+                )
+                position = ensure_produced(
+                    client, bridge, surface, force, ingredient, reference_point,
+                    emit, upgrade_bootstrap=False, stock_target=max(1, required),
+                )
+                if position is None:
+                    return None
+                MANAGED_INTERMEDIATE_SOURCES[ingredient] = position
+                sources[ingredient] = position
+                continue
+            if item == "steel-plate" and ingredient == "iron-plate":
+                source = live_base.nearest_container(
+                    client, surface, force, reference_point,
+                    names=(
+                        "passive-provider-chest", "buffer-chest", "storage-chest",
+                    ),
+                )
+                if source is not None:
+                    sources[ingredient] = source
+                    continue
             if not backed:
                 UNBACKED_DRAWS.add(ingredient)
             elif ingredient in UNBACKED_DRAWS:
@@ -1371,6 +1581,17 @@ def _build_assembled_stage(
     existing, spec = plan.existing, plan.spec
     promote_to_line, promoted_count = plan.promote_to_line, plan.promoted_count
     mall_storage_limit = plan.mall_storage_limit
+    if item == "steel-plate":
+        output = build_conversion_stage(
+            client, bridge, surface, force, item, sources, reference_point, emit,
+            machine_count=1, allow_logistic_inputs=True, side_tap_output=True,
+        )
+        MANAGED_INTERMEDIATE_SOURCES[item] = output
+        emit(
+            "  PERSISTENT INTERMEDIATE: steel-plate now has a dedicated "
+            "logistic-fed furnace producer"
+        )
+        return
     if promote_to_line:
         # Site the line beside the input it eats most of, not beside the
         # mall. A 6-machine copper-cable line placed at the mall needed
@@ -1413,12 +1634,14 @@ def _build_assembled_stage(
                 f"retire_promoted_mall_{item}", emit,
             )
     elif not upgrade_bootstrap:
-        build_compact_mall_stage(
+        output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,
             bring_stage_up, emit, stock_target=mall_storage_limit,
             stock_gate_target=stock_gate_target,
             fill_chest=plan.fill_provider,
         )
+        if item in PERSISTENT_INTERMEDIATES:
+            MANAGED_INTERMEDIATE_SOURCES[item] = output
     else:
         build_conversion_stage(
             client, bridge, surface, force, item, sources, reference_point, emit,
@@ -1438,6 +1661,8 @@ def ensure_produced(
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
+    if item in MANAGED_INTERMEDIATE_SOURCES:
+        return MANAGED_INTERMEDIATE_SOURCES[item]
     if item == "coal":
         return ensure_coal_mine(
             client, bridge, surface, force, reference_point, bring_stage_up, emit,
@@ -1632,6 +1857,7 @@ def _prep_plate_extraction(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     short_plate: str, prepped: set[str], mall_targets: dict[str, int],
     reference_point: Point, emit: Callable[[str], None],
+    demand_targets: Mapping[str, int] | None = None,
 ) -> bool:
     """Grow one plate line to the furnace count its own prep draw implies.
 
@@ -1639,7 +1865,12 @@ def _prep_plate_extraction(
     so the mall can build the drills it is short of -- prep runs before the mall
     now, so holding on would re-hit the identical shortage forever.
     """
-    wanted_furnaces = baseline_smelter_count(short_plate)
+    available = live_base.available_items(client, surface, force)
+    targets = dict(demand_targets or {})
+    for item, target in mall_targets.items():
+        targets[item] = max(targets.get(item, 0), target)
+    adjusted_draw = demand_adjusted_plate_draw(targets, available)
+    wanted_furnaces = smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
     plate_line = live_base.find_line(
         client, surface, force, short_plate,
         LINE_RECIPES[short_plate]["machine"],
@@ -1654,8 +1885,8 @@ def _prep_plate_extraction(
     emit(
         f"--- production prep: {short_plate} extraction to "
         f"{wanted_furnaces} furnace(s) for "
-        f"{baseline_plate_draw()[short_plate]:.2f}/s "
-        f"(have {have}, drill phase {baseline_drill_phase(short_plate)}) ---"
+        f"{adjusted_draw[short_plate]:.2f}/s "
+        f"(have {have}, drill phase {drill_phase_for_draw(adjusted_draw[short_plate])}) ---"
     )
     try:
         build_mining_stage(
@@ -1850,6 +2081,7 @@ def _open_the_run(
     loading is that the live force may know more.
     """
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
+    MANAGED_INTERMEDIATE_SOURCES.clear()
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
     machines = install_catalog_machines(catalog)
@@ -1983,6 +2215,7 @@ def run(
                 _prep_plate_extraction(
                     client, bridge, surface, force, plate, prepped,
                     mall_targets, reference_point, emit,
+                    background_targets,
                 )
                 for plate in BASELINE_PLATES if plate not in prepped
             ):

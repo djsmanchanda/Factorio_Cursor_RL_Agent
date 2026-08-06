@@ -93,7 +93,7 @@ def generate_coal_mine(
     drill_positions: list[tuple[float, float]],
     output_y: float,
     output_x: float,
-    belt_type: str = "express-transport-belt",
+    belt_type: str = "transport-belt",
 ) -> dict:
     if not drill_positions:
         raise ValueError("Coal mine needs supplied drill coordinates")

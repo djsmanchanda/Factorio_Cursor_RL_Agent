@@ -25,7 +25,7 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 
 _DEFAULT_MACHINE_COUNT = 2
-_DEFAULT_BELT = "fast-transport-belt"
+_DEFAULT_BELT = "transport-belt"
 _DEFAULT_INSERTER = "fast-inserter"
 # Statuses that mean the machine itself is fine and is only waiting on supply.
 # These are indistinguishable BY STATUS from a genuinely broken feed, so they

@@ -29,6 +29,16 @@ def test_coal_mine_drops_to_declared_output_row_deterministically() -> None:
     validate_no_collisions([("coal", plan)])
 
 
+def test_coal_layout_defaults_to_an_early_game_belt() -> None:
+    plan = generate_coal_mine(
+        [(1.5, 10.5), (4.5, 10.5)], 12.5, 8.5,
+    )
+
+    assert {
+        action["entity"] for action in actions(plan)
+        if action["entity"].endswith("transport-belt")
+    } == {"transport-belt"}
+
 def test_direct_mining_to_chest_is_real_electric_output_primitive() -> None:
     plan = generate_direct_mining_to_chest(
         [(1.5, 10.5), (4.5, 10.5)], (8.5, 12.5),

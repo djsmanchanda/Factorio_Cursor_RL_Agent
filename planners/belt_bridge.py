@@ -83,6 +83,7 @@ def _aligned_final_route(
     source_belt: Point, belt_end: Point, entry_direction: str,
     blocked_tiles: set[tuple[int, int]] | None,
     exit_direction: str | None = None,
+    include_endpoint: bool = True,
 ) -> list[Point]:
     """Route to a belt endpoint through a straight, aligned final leg.
 
@@ -114,7 +115,7 @@ def _aligned_final_route(
         for point in (source_belt, forced, turn, approach):
             if not route or point != route[-1]:
                 route.append(point)
-    if route[-1] != belt_end:
+    if include_endpoint and route[-1] != belt_end:
         route.append(belt_end)
     return route
 
@@ -132,7 +133,8 @@ _ROUTE_SEARCH_LIMIT = 400_000
 
 def search_clear_route(
     start: Point, end: Point, blocked: set[tuple[int, int]],
-    *, final_direction: str | None = None,
+    *, initial_direction: str | None = None,
+    final_direction: str | None = None,
 ) -> list[Point] | None:
     """A rectilinear route from `start` to `end` over free tiles, or None.
 
@@ -167,6 +169,11 @@ def search_clear_route(
         if expanded > _ROUTE_SEARCH_LIMIT:
             return None
         for direction in order:
+            if heading is None and initial_direction is not None:
+                if direction != initial_direction:
+                    continue
+            if heading is not None and direction == _OPPOSITE[heading]:
+                continue
             vector = _FACING_TO_VECTOR[direction]
             nxt = (point[0] + vector[0], point[1] + vector[1])
             if not (low_x <= nxt[0] <= high_x and low_y <= nxt[1] <= high_y):
@@ -215,14 +222,16 @@ def _corners(path: Sequence[Point]) -> list[Point]:
 
 def _route_or_detour(
     route: Sequence[Point], belt_type: str, blocked: set[tuple[int, int]],
-    *, final_direction: str | None = None,
+    *, initial_direction: str | None = None,
+    final_direction: str | None = None,
 ) -> tuple[list[dict], list[Point]]:
     """Belt the chosen route, or search a clear one when it cannot be belted."""
     try:
         return _belt_run(route, belt_type, blocked), list(route)
     except ValueError as blocked_route:
         detour = search_clear_route(
-            route[0], route[-1], blocked, final_direction=final_direction,
+            route[0], route[-1], blocked,
+            initial_direction=initial_direction, final_direction=final_direction,
         )
         if detour is None:
             raise ValueError(
@@ -297,8 +306,23 @@ def bridge_belt_to_belt(
     belt_end = _add(dest_belt, entry_vector)
     route = _aligned_final_route(
         source_belt, belt_end, entry_direction, blocked_tiles,
-        exit_direction=exit_direction,
+        exit_direction=exit_direction, include_endpoint=False,
     )
+    desired_direction = opposite(entry_direction)
+    if exit_direction and _leg_direction(route[-2], route[-1]) != desired_direction:
+        detour = search_clear_route(
+            source_belt, route[-1], blocked_tiles or set(),
+            initial_direction=exit_direction, final_direction=desired_direction,
+        )
+        if detour is None:
+            raise ValueError("no route satisfies the source and destination belt directions")
+        route = detour
+    inline_destination = (
+        destination_direction is not None
+        and entry_direction == opposite(destination_direction)
+    )
+    if not inline_destination and route[-1] != belt_end:
+        route.append(belt_end)
     route_tiles = len(_route_points(route))
     if max_route_tiles is not None and route_tiles > max_route_tiles:
         raise ValueError(
@@ -307,7 +331,9 @@ def bridge_belt_to_belt(
         )
     blocked = blocked_tiles or set()
     actions, built = _route_or_detour(
-        route, belt_type, blocked, final_direction=opposite(entry_direction),
+        route, belt_type, blocked,
+        initial_direction=exit_direction,
+        final_direction=opposite(entry_direction),
     )
     if add_turn_buffer:
         actions.extend(_turn_buffer_actions(built, blocked, actions))

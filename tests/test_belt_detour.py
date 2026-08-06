@@ -100,3 +100,14 @@ def test_the_bridge_falls_back_to_a_detour_and_reports_when_it_cannot() -> None:
             (0.5, 0.5), (40.5, 0.5), entry_direction="west",
             belt_type="turbo-transport-belt", blocked_tiles=wall,
         )
+def test_belt_detour_preserves_the_declared_source_exit_direction() -> None:
+    actions = bridge_belt_to_belt(
+        (0.5, 0.5), (40.5, 0.5), entry_direction="west",
+        exit_direction="west", belt_type="transport-belt",
+        blocked_tiles={(x, 0) for x in range(1, 31)},
+    )
+    first = next(
+        action for action in actions
+        if action["position"] == {"x": 0.5, "y": 0.5}
+    )
+    assert first["direction"] == "west"

@@ -280,6 +280,26 @@ _BELT_TIERS_CHEAPEST_FIRST = (
     "transport-belt", "fast-transport-belt", "express-transport-belt",
     "turbo-transport-belt",
 )
+_REFINERY_BELT_TIERS = ("transport-belt", "fast-transport-belt")
+
+
+def _route_belt_tiers(destination_is_belt: bool) -> tuple[str, ...]:
+    """Return belt tiers the live force can actually build for this route."""
+    candidates = _REFINERY_BELT_TIERS if destination_is_belt else _BELT_TIERS_CHEAPEST_FIRST
+    executable = tuple(tier for tier in candidates if tier in LINE_RECIPES)
+    return executable or ("transport-belt",)
+
+
+def _choose_route_belt_tier(
+    stock: dict[str, int], needed: int, *, destination_is_belt: bool,
+) -> str:
+    """Prefer the cheapest stocked executable tier; route cost decides upgrades."""
+    del needed  # The Manhattan estimate must not promote a long link by itself.
+    tiers = _route_belt_tiers(destination_is_belt)
+    return next(
+        (tier for tier in tiers if stock.get(tier, 0) > 0),
+        tiers[0],
+    )
 
 
 def choose_belt_tier(stock: dict[str, int], needed: int) -> str:
@@ -376,7 +396,9 @@ def _plan_belt_transport(
     span = int(abs(route_source[0] - feed_position[0])
                + abs(route_source[1] - feed_position[1])) + 4
     stock = live_base.available_items(client, surface, force)
-    preferred = choose_belt_tier(stock, span)
+    preferred = _choose_route_belt_tier(
+        stock, span, destination_is_belt=destination_is_belt,
+    )
     ignored = ()
     if reuse_existing:
         belt_names = tuple(UNDERGROUND_REACH)
@@ -400,11 +422,11 @@ def _plan_belt_transport(
     }
     direction = _toward(route_source, feed_position)
     exit_direction = _clear_side(route_source, direction, blocked)
-    entry_direction = (
-        _direct_belt_entry(feed_position, blocked, destination_belt_direction)
-        if destination_is_belt
-        else _clear_side(feed_position, opposite(direction), blocked)
-    )
+    entry_direction = _clear_side(feed_position, opposite(direction), blocked)
+    if destination_is_belt:
+        entry_direction = _direct_belt_entry(
+            feed_position, blocked, destination_belt_direction,
+        )
     if entry_direction is None:
         raise StuckError(
             f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
@@ -423,7 +445,8 @@ def _plan_belt_transport(
     # first tier whose REAL bill of materials the base can pay wins, starting
     # from the estimate's preference and then widening. Judging tiers on a
     # straight-line guess rejected bridges that were affordable in practice.
-    ordered = [preferred] + [t for t in _BELT_TIERS_CHEAPEST_FIRST if t != preferred]
+    tier_order = _route_belt_tiers(destination_is_belt)
+    ordered = [preferred] + [t for t in tier_order if t != preferred]
     shortfalls: list[str] = []
     requirements: dict[str, dict[str, int]] = {}
     route_error: ValueError | None = None
@@ -442,6 +465,7 @@ def _plan_belt_transport(
                     belt_type=tier, blocked_tiles=blocked,
                     max_route_tiles=max_belt_route_tiles,
                     destination_direction=destination_belt_direction,
+                    exit_direction=exit_direction,
                 )
             elif belt_source is not None:
                 actions = bridge_belt_to_chest(
@@ -491,7 +515,7 @@ def _plan_belt_transport(
     # The CHEAPEST tier's bill is the one to ask for: it is the tier the mall
     # can actually produce, and asking for a faster one would queue a part
     # the base may have no recipe for.
-    for tier in _BELT_TIERS_CHEAPEST_FIRST:
+    for tier in tier_order:
         if tier in requirements:
             raise MaterialShortage(
                 f"belt bridge for {ingredient}", requirements[tier], stock,

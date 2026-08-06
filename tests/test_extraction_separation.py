@@ -59,6 +59,11 @@ def test_furnaces_use_force_productivity_instead_of_copying_drill_count() -> Non
     assert smelter_count_for_drills("iron-plate", 2, 0.40) == 3
 
 
+def test_stone_brick_furnaces_are_sized_on_two_stone_per_craft() -> None:
+    # Six drills at +30% produce 3.9 stone/s; each electric furnace consumes
+    # 1.25 stone/s for stone-brick, so four furnaces cover that row.
+    assert smelter_count_for_drills("stone-brick", 6, 0.30) == 4
+
 def test_exact_smelter_bounds_include_west_feed_and_substation() -> None:
     bounds, feed = _smelter_geometry(
         "iron-plate", 2, "fast-transport-belt", "fast-inserter"
@@ -349,6 +354,30 @@ def _patch_and_rates(monkeypatch, *, existing: ResourceMine | None = None) -> No
         )
 
 
+def test_coal_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatch) -> None:
+    from orchestrator import stage_chemical
+
+    captured = {}
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a, **_k: 0)
+    monkeypatch.setattr(stage_chemical.extraction_state, "find_resource_mine", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.resource_patches, "nearest_viable_patch",
+        lambda *_a, **_k: resource_patches.ResourcePatch((10, 10), (0, 0), (20, 20), 500_000),
+    )
+    monkeypatch.setattr(stage_chemical, "choose_mining_origin", lambda *_a, **_k: ((10, 10), 2))
+    monkeypatch.setattr(stage_chemical, "direct_mine_plan", lambda *_a, **_k: ({"phases": []}, (7.5, 12.5)))
+    monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
+    monkeypatch.setattr(stage_chemical, "_publish_output_chest", lambda _plan: None)
+    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical, "existing_mine_service_geometry",
+        lambda *_a, **_k: ((0, 0), ((-1, -1), (1, 1)), (0, 0), []),
+    )
+    service_stage = lambda *_a, **kwargs: captured.update(kwargs)
+
+    stage_chemical.ensure_coal_mine(object(), object(), "nauvis", "player", (0, 0), service_stage, lambda _m: None)
+    assert captured["logistic_chest_positions"] == []
+
 def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     monkeypatch,
 ) -> None:
@@ -601,3 +630,31 @@ def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
         "existing mine for iron-ore", (5.5, 16.5),
         ((14.5, 18.5), (11.5, 18.5), (14.5, 22.5), (11.5, 22.5)),
     )]
+def test_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatch) -> None:
+    """A reconciled mine's belt endpoint must not create a fake coverage fault."""
+    class _Client:
+        def command(self, _text: str) -> str:
+            return ""
+
+    extraction = LocalExtractionPlan(
+        ore="stone", mine_origin=None, drill_count=2, furnace_count=2,
+        mining_productivity_bonus=0.0, smelter_origin=(3.0, -91.0),
+        ore_output=(49.5, -65.5), build_plan=None,
+        row_drill_count=2, expansion_step=-1, shared_belt_y=-65.5,
+    )
+    captured: dict = {}
+    monkeypatch.setattr(
+        live_base, "entity_at",
+        lambda *_args, **_kwargs: {"name": "transport-belt", "type": "transport-belt"},
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "bring_stage_up",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+
+    autonomous_builder._service_legacy_mine(
+        _Client(), object(), "nauvis", "player", extraction, extraction.ore_output,
+        lambda _message: None,
+    )
+
+    assert captured["logistic_chest_positions"] == []

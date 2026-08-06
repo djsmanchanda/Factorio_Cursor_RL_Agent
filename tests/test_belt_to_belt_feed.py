@@ -61,7 +61,9 @@ def test_refinery_bridge_reaches_the_inline_bus_end_without_a_t_merge() -> None:
         if action["position"] in ({"x": 24.5, "y": 31.5}, {"x": 23.5, "y": 31.5})
     ]
 
-    assert [action["direction"] for action in endpoints] == ["west", "west"]
+    # The existing inline bus tile is authoritative; only the upstream
+    # approach may be planned.
+    assert [action["direction"] for action in endpoints] == ["west"]
     positions = [
         (action["position"]["x"], action["position"]["y"])
         for action in actions
@@ -200,7 +202,7 @@ def test_the_shortage_asks_for_the_cheapest_tier() -> None:
     """It is the tier the mall can actually produce; asking for a faster one
     would queue a part the base may have no recipe for."""
     tail = _PLAN[_PLAN.index("raise MaterialShortage("):]
-    ordering = _PLAN[_PLAN.index("for tier in _BELT_TIERS_CHEAPEST_FIRST:"):]
+    ordering = _PLAN[_PLAN.index("for tier in tier_order:"):]
 
     assert ordering.index("raise MaterialShortage(") < len(ordering)
     assert "requirements[tier]" in tail

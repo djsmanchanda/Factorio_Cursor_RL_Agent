@@ -12,12 +12,13 @@ from orchestrator.stage_services import (
     StuckError,
 )
 from orchestrator.stage_transport import (
+    _clear_side,
     _direct_belt_entry,
     _replace_existing_source_belt,
     _through_belt_source,
     _transport_mode,
     _toward,
-    choose_belt_tier,
+    _choose_route_belt_tier,
 )
 from planners.belt_bridge import (
     UNDERGROUND_REACH,
@@ -61,7 +62,10 @@ def preflight_ingredient_transport(
     route_source = belt_source or source_position
     span = int(abs(route_source[0] - feed_position[0])
                + abs(route_source[1] - feed_position[1])) + 4
-    belt_type = choose_belt_tier(live_base.available_items(client, surface, force), span)
+    belt_type = _choose_route_belt_tier(
+        live_base.available_items(client, surface, force), span,
+        destination_is_belt=destination_is_belt,
+    )
     blocked = live_base.occupied_tiles(
         client, surface,
         (min(route_source[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
