@@ -567,6 +567,28 @@ def occupied_tiles(
 
 
 
+def water_tiles(
+    client: RconClient, surface: str, min_point: Point, max_point: Point,
+) -> set[tuple[int, int]]:
+    """Return water terrain in a bounded area for underground route planning."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,t in pairs(s.find_tiles_filtered{area=area,collision_mask='water_tile'}) do "
+        "out[#out+1]=t.position.x..','..t.position.y end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    result: set[tuple[int, int]] = set()
+    for pair in raw.split(';'):
+        if not pair:
+            continue
+        x, _, y = pair.partition(',')
+        result.add((int(x), int(y)))
+    return result
+
+
 def ghost_blockages(
     client: RconClient, surface: str, force: str,
     area: tuple[Point, Point] | None = None,

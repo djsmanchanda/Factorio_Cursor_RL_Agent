@@ -1953,3 +1953,9 @@ that consumed it was not.
 - Why: The latest run had no copper refinery because both belt tiers were unaffordable, then fed a requester from a belt endpoint that could never enter logistics; stone ghosts later stopped with no recorded blockage.
 - Validation: 75 targeted tests passed; 41 critical prep/extraction tests passed; Python compilation passed. The test suite reached 1252 passed/1 skipped, with only existing host temporary-directory ACL failures (2 failed/13 errors).
 - Next: Python-only round -- reset the safe save and restart the autonomous runner; no Lua mod redeploy is required.
+## [2026-08-06] Bound narrow water crossings in fluid routing
+- Files: `planners/fluid_routing.py`, `orchestrator/live_base.py`, `orchestrator/stage_chemical.py`, `tests/test_fluid_routing.py`
+- What: Chemical routes now survey water terrain, use paired pipe-to-ground endpoints for water runs under nine tiles, and reject wider crossings for a route-around retry.
+- Why: The supplied run ended at a bounded petroleum-gas route refusal; the fluid planner could only route around water and could not emit a legal narrow-water underground crossing.
+- Validation: 175 focused fluid/electronics/extraction/belt tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.

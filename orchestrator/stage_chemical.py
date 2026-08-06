@@ -207,9 +207,18 @@ def ensure_oil_cell(
         (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
     )
     hard |= _planned_hard_tiles(*plans)
-    hard -= {(math.floor(x), math.floor(y)) for x, y in endpoints}
-    # occupied_tiles includes water terrain, matching belt preflight: pipes may
-    # route around lakes but can never be emitted on a water tile.
+    terrain_water = live_base.water_tiles(
+        client, surface,
+        (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
+        (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
+    )
+    terrain_water -= hard
+    endpoint_tiles = {(math.floor(x), math.floor(y)) for x, y in endpoints}
+    terrain_water -= endpoint_tiles
+    hard -= endpoint_tiles
+    # Water is hard for surface pipes, but a narrow contiguous patch may be
+    # crossed by a paired pipe-to-ground span. Wider water remains a route
+    # obstacle and must be detoured around.
     foreign = (
         [
             {
@@ -239,13 +248,15 @@ def ensure_oil_cell(
         try:
             link = generate_shortest_fluid_chain_link(
                 source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                clearance=0, search_margin=48, existing_tiles=existing_tiles,
-                mixing_margin=True,
+                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
+                existing_tiles=existing_tiles, mixing_margin=True,
+                allow_terrain_tunnels=True,
             )
             links.append(link)
             foreign.extend(shortest_fluid_chain_segments(
                 source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                clearance=0, search_margin=48, mixing_margin=True,
+                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
+                mixing_margin=True, allow_terrain_tunnels=True,
             ))
         except ValueError as error:
             raise StuckError(
