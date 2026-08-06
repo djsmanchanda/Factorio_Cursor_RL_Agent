@@ -99,11 +99,15 @@ def test_reconcile_refuses_a_still_split_topology(monkeypatch) -> None:
 
 
 def _single_action_plan(action_type: str) -> dict:
-    return {"phases": [{"name": "test", "actions": [{
+    action = {
         "action_type": action_type,
-        "entity": "pipe",
         "position": {"x": 0, "y": 0},
-    }]}]}
+    }
+    if action_type == "place_tile_ghost":
+        action["tile"] = "landfill"
+    else:
+        action["entity"] = "pipe"
+    return {"phases": [{"name": "test", "actions": [action]}]}
 
 
 def test_layout_authorization_derives_only_required_mutation_contracts() -> None:
@@ -111,12 +115,14 @@ def test_layout_authorization_derives_only_required_mutation_contracts() -> None
 
     ghost = build_layout_authorization([_single_action_plan("place_ghost")])
     entity = build_layout_authorization([_single_action_plan("place_entity")])
+    tile = build_layout_authorization([_single_action_plan("place_tile_ghost")])
     mixed = build_layout_authorization([
         _single_action_plan("place_entity"), _single_action_plan("remove_entity")
     ])
 
     assert ghost["approved_actions"] == ["project_more_ghosts"]
     assert entity["approved_actions"] == ["place_core_infrastructure"]
+    assert tile["approved_actions"] == ["project_more_ghosts"]
     assert set(mixed["approved_actions"]) == {"place_core_infrastructure", "remove_entities"}
     assert "remove_entities" not in ghost["approved_actions"]
     assert "remove_entities" not in entity["approved_actions"]

@@ -10,15 +10,17 @@ from typing import List
 
 from jsonschema import Draft7Validator
 
-from core.fluid_systems import validate_network_purity, validate_underground_span
+from core.fluid_systems import (
+    MAX_UNDERGROUND_SPAN, validate_network_purity, validate_underground_span,
+)
 from planners.local_layout_planner import _reject_fuel_entities
 
 LINK_TUNNEL_CLEARANCE = 2
 ROUTE_CLEARANCE = 1
 ROUTE_SEARCH_MARGIN = 24
-# A pipe-to-ground span includes both land endpoints. Keeping the water run
-# below nine tiles leaves a conservative margin inside the ten-tile limit.
-MAX_TERRAIN_TUNNEL_TILES = 8
+# A pipe-to-ground pair can bridge nine water tiles between endpoints. Longer
+# straight crossings add landfill under the next pair of pipe endpoints.
+MAX_TERRAIN_TUNNEL_TILES = MAX_UNDERGROUND_SPAN - 1
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -252,7 +254,7 @@ def _bounded_shortest_path(
     bounds: tuple[int, int, int, int],
     tunnelable: set[tuple[int, int]] = frozenset(),
 ) -> list[tuple[int, int]]:
-    """Deterministic bounded A* path with straight, bounded terrain tunnels."""
+    """Deterministic bounded A* path with straight terrain crossings."""
     min_x, max_x, min_y, max_y = bounds
     frontier: list[tuple[int, int, int, int, str, int]] = []
     state_type = tuple[tuple[int, int], str | None, int]
@@ -297,8 +299,6 @@ def _bounded_shortest_path(
             if nxt in tunnelable:
                 next_heading = next_heading or headings[(dx, dy)]
                 next_run += 1
-                if next_run > MAX_TERRAIN_TUNNEL_TILES:
-                    continue
             else:
                 next_heading, next_run = None, 0
             next_cost = cost + 1
@@ -315,12 +315,45 @@ def _bounded_shortest_path(
     raise ValueError(f"No clear fluid route to {goal} inside bounded search area")
 
 
+def _terrain_run_tunnels(
+    path: list[tuple[int, int]], start: int, end: int,
+) -> tuple[list[tuple[tuple[int, int], tuple[int, int]]], set[tuple[int, int]]]:
+    """Bridge one straight water run with legal underground spans and landfill."""
+    if start == 0 or end == len(path):
+        raise ValueError("A terrain tunnel needs clear land on both sides")
+    tunnels: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    landfill: set[tuple[int, int]] = set()
+    cursor, exit_index = start - 1, end
+    while True:
+        if exit_index - cursor <= MAX_UNDERGROUND_SPAN:
+            next_index = exit_index
+        else:
+            next_index = cursor + MAX_UNDERGROUND_SPAN
+        entry, exit = path[cursor], path[next_index]
+        validate_underground_span(entry, exit)
+        if entry[0] != exit[0] and entry[1] != exit[1]:
+            raise ValueError("A terrain tunnel cannot turn underground")
+        tunnels.append((entry, exit))
+        if start <= cursor < end:
+            landfill.add(entry)
+        if start <= next_index < end:
+            landfill.add(exit)
+        if next_index == exit_index or next_index + 1 == exit_index:
+            return tunnels, landfill
+        cursor = next_index + 1
+
+
 def _surface_path_and_tunnels(
     path: list[tuple[int, int]], tunnelable: set[tuple[int, int]],
-) -> tuple[list[tuple[int, int]], list[tuple[tuple[int, int], tuple[int, int]]]]:
-    """Replace each straight terrain run with its two pipe-to-ground ends."""
-    surface = [point for point in path if point not in tunnelable]
+) -> tuple[
+    list[tuple[int, int]],
+    list[tuple[tuple[int, int], tuple[int, int]]],
+    set[tuple[int, int]],
+]:
+    """Replace terrain runs with pipe-to-ground pairs and landfill endpoints."""
+    surface = {point for point in path if point not in tunnelable}
     tunnels: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    landfill: set[tuple[int, int]] = set()
     index = 0
     while index < len(path):
         if path[index] not in tunnelable:
@@ -329,30 +362,32 @@ def _surface_path_and_tunnels(
         start = index
         while index < len(path) and path[index] in tunnelable:
             index += 1
-        if start == 0 or index == len(path):
-            raise ValueError("A terrain tunnel needs clear land on both sides")
-        entry, exit = path[start - 1], path[index]
-        validate_underground_span(entry, exit)
-        if entry[0] != exit[0] and entry[1] != exit[1]:
-            raise ValueError("A terrain tunnel cannot turn underground")
-        tunnels.append((entry, exit))
-    return surface, tunnels
-
+        run_tunnels, run_landfill = _terrain_run_tunnels(path, start, index)
+        tunnels.extend(run_tunnels)
+        landfill.update(run_landfill)
+    surface.update(landfill)
+    endpoints = [point for pair in tunnels for point in pair]
+    duplicates = sorted({point for point in endpoints if endpoints.count(point) > 1})
+    if duplicates:
+        raise ValueError(
+            "Terrain crossings need two clear surface tiles between spans; "
+            f"shared pipe-to-ground endpoint at {duplicates[0]}"
+        )
+    return sorted(surface), tunnels, landfill
 
 def _tunnel_direction(
     entry: tuple[int, int], exit: tuple[int, int],
 ) -> tuple[str, str]:
-    """Return opposing normal-end facings for one axis-aligned tunnel."""
+    """Return normal-end facings away from one axis-aligned underground span."""
     if entry[0] < exit[0]:
-        return "east", "west"
-    if entry[0] > exit[0]:
         return "west", "east"
+    if entry[0] > exit[0]:
+        return "east", "west"
     if entry[1] < exit[1]:
-        return "south", "north"
-    if entry[1] > exit[1]:
         return "north", "south"
+    if entry[1] > exit[1]:
+        return "south", "north"
     raise ValueError("A terrain tunnel needs distinct endpoints")
-
 
 def _chain_network(
     from_point: tuple,
@@ -388,6 +423,7 @@ def _chain_network(
     )
     remaining = set(targets)
     tunnels: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    landfill: set[tuple[int, int]] = set()
     while remaining:
         used_tunnel_ends = {point for pair in tunnels for point in pair}
         candidates = []
@@ -396,21 +432,22 @@ def _chain_network(
                 network, target, blocked - network, bounds,
                 tunnelable if allow_tunnels else set(),
             )
-            surface, path_tunnels = _surface_path_and_tunnels(
+            surface, path_tunnels, path_landfill = _surface_path_and_tunnels(
                 path, tunnelable if allow_tunnels else set(),
             )
             if used_tunnel_ends & {point for pair in path_tunnels for point in pair}:
                 continue
-            candidates.append((len(path), target, surface, path_tunnels))
+            candidates.append((len(path), target, surface, path_tunnels, path_landfill))
         if not candidates:
             raise ValueError("No non-overlapping fluid tunnel route inside bounded search area")
-        _, target, surface, path_tunnels = min(
+        _, target, surface, path_tunnels, path_landfill = min(
             candidates, key=lambda candidate: (candidate[0], candidate[1]),
         )
         network.update(surface)
         tunnels.extend(path_tunnels)
+        landfill.update(path_landfill)
         remaining.remove(target)
-    return sorted(network), sorted(set(tunnels))
+    return sorted(network), sorted(set(tunnels)), sorted(landfill)
 
 
 def shortest_fluid_chain_tiles(
@@ -428,7 +465,7 @@ def shortest_fluid_chain_tiles(
     ``shortest_fluid_chain_segments``, which emit the verified underground
     endpoints explicitly.
     """
-    network, _ = _chain_network(
+    network, _, _ = _chain_network(
         from_point, to_points, hard_tiles, tunnelable_tiles,
         clearance, search_margin, allow_tunnels=False,
     )
@@ -467,7 +504,7 @@ def shortest_fluid_chain_segments(
         else _obstacles(foreign, fluid)
     )
     hard = set(hard_tiles) | blocked | _foreign_tunnel_endpoints(foreign, fluid)
-    network, tunnels = _chain_network(
+    network, tunnels, _ = _chain_network(
         from_point, to_points, hard, tunnelable_tiles,
         clearance, search_margin, allow_tunnels=allow_terrain_tunnels,
     )
@@ -498,14 +535,14 @@ def _route_segment_with_tunnels(
         else _obstacles(foreign, fluid)
     )
     hard = set(hard_tiles) | blocked | _foreign_tunnel_endpoints(foreign, fluid)
-    network, tunnels = _chain_network(
+    network, tunnels, landfill = _chain_network(
         from_point, to_points, hard, tunnelable_tiles,
         clearance, search_margin, allow_tunnels=allow_terrain_tunnels,
     )
     return {
         "fluid": fluid, "separated_by_pump": False, "tiles": network,
         "tunnel_endpoints": tunnels,
-    }, tunnels
+    }, tunnels, landfill
 
 
 def generate_shortest_fluid_chain_link(
@@ -523,7 +560,7 @@ def generate_shortest_fluid_chain_link(
 ) -> dict:
     """Return a schema-validated fluid link, tunnelling only narrow terrain."""
     foreign = list(foreign)
-    segment, tunnels = _route_segment_with_tunnels(
+    segment, tunnels, landfill = _route_segment_with_tunnels(
         from_point, to_points, fluid, foreign, hard_tiles, tunnelable_tiles,
         clearance, search_margin, mixing_margin, allow_terrain_tunnels,
     )
@@ -538,6 +575,10 @@ def generate_shortest_fluid_chain_link(
     }
     tunnel_ends = {point for pair in tunnels for point in pair}
     actions = [
+        {"action_type": "place_tile_ghost", "tile": "landfill",
+         "position": {"x": x, "y": y}}
+        for x, y in landfill
+    ] + [
         {"action_type": "place_ghost", "entity": "pipe",
          "position": {"x": x + 0.5, "y": y + 0.5}}
         for x, y in segment["tiles"]

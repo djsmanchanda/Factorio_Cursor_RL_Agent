@@ -1,6 +1,6 @@
 {
  "$schema": "http://json-schema.org/draft-07/schema#",
- "title": "BuildPlan 1.2",
+ "title": "BuildPlan 1.3",
  "type": "object",
  "required": [
   "phases"
@@ -24,7 +24,6 @@
        "type": "object",
        "required": [
         "action_type",
-        "entity",
         "position"
        ],
        "properties": {
@@ -32,12 +31,17 @@
          "type": "string",
          "enum": [
           "place_ghost",
+          "place_tile_ghost",
           "place_entity",
           "remove_entity"
          ]
         },
         "entity": {
          "type": "string"
+        },
+        "tile": {
+         "type": "string",
+         "description": "Tile item placed as a construction ghost; currently used for landfill water crossings."
         },
         "position": {
          "type": "object",
@@ -260,6 +264,51 @@
         }
        },
        "allOf": [
+        {
+         "if": {
+          "required": [
+           "action_type"
+          ],
+          "properties": {
+           "action_type": {
+            "enum": [
+             "place_ghost",
+             "place_entity",
+             "remove_entity"
+            ]
+           }
+          }
+         },
+         "then": {
+          "required": [
+           "entity"
+          ]
+         }
+        },
+        {
+         "if": {
+          "required": [
+           "action_type"
+          ],
+          "properties": {
+           "action_type": {
+            "enum": [
+             "place_tile_ghost"
+            ]
+           }
+          }
+         },
+         "then": {
+          "required": [
+           "tile"
+          ],
+          "not": {
+           "required": [
+            "entity"
+           ]
+          }
+         }
+        },
         {
          "if": {
           "required": [

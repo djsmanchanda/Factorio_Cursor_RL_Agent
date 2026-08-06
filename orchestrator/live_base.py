@@ -510,7 +510,7 @@ def nearest_powered_pole(
 def occupied_tiles(
     client: RconClient, surface: str, min_point: Point, max_point: Point,
     *, ignore_names: Sequence[str] = (), include_resources: bool = False,
-    include_clutter: bool = False,
+    include_clutter: bool = False, include_water: bool = True,
 ) -> set[tuple[int, int]]:
     """Every tile index inside the box that a route may not occupy.
 
@@ -531,9 +531,16 @@ def occupied_tiles(
     working" until its rounds run out. Observed live: one fast-transport-belt
     ghost at (-38.5, 44.5) on a water tile stalled a whole science stage.
     Water is therefore blocked unconditionally -- unlike ore, nothing can be
-    built on it and no caller ever wants to route through it.
+    built on it and no caller ever wants to route through it. Fluid routing is
+    the sole exception: it requests ``include_water=False`` and handles the
+    separately surveyed terrain only through pipe-to-ground/landfill actions.
     """
     ignored = "{" + ",".join("['" + name + "']=true" for name in ignore_names) + "}"
+    water_scan = (
+        "for _,t in pairs(s.find_tiles_filtered{area=area,collision_mask='water_tile'}) do "
+        "out[#out+1]=t.position.x..','..t.position.y end;"
+        if include_water else ""
+    )
     resource_check = "" if include_resources else "e.type~='resource' and "
     clutter_check = (
         "" if include_clutter else
@@ -545,9 +552,7 @@ def occupied_tiles(
         "local ignored=" + ignored + ";"
         "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
-        "for _,t in pairs(s.find_tiles_filtered{area=area,collision_mask='water_tile'}) do "
-        "out[#out+1]=t.position.x..','..t.position.y end;"
-        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        + water_scan + "for _,e in pairs(s.find_entities_filtered{area=area}) do "
         "if " + resource_check + "e.type~='character' and "
         + clutter_check + "not ignored[e.name] then "
         "local b=e.bounding_box;"

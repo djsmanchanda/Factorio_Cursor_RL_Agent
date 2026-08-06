@@ -23,7 +23,7 @@ _SCHEMA = json.loads(
 _NOT_STANDALONE_SETTINGS = {
     "recipe",          # ghosts carry it from creation; guarded separately
     "fill_percentage",  # qualifies infinity_filter
-    "entity", "position", "direction", "action_type", "underground_type",
+    "entity", "tile", "position", "direction", "action_type", "underground_type",
     "logistic_group",   # qualifies logistic_requests
 }
 

@@ -25,6 +25,7 @@ CANONICAL_POWER_SOURCE = (-160.0, -160.0)
 CANONICAL_ROBOPORT_HUB = (-128.0, -128.0)
 _ACTION_PERMISSIONS = {
     "place_ghost": "project_more_ghosts",
+    "place_tile_ghost": "project_more_ghosts",
     "place_entity": "place_core_infrastructure",
     "remove_entity": "remove_entities",
 }

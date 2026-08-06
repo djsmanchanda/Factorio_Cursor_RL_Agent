@@ -79,3 +79,4 @@ cosmetic. Apply flip first, then rotation.
    long-run refresh (every <320 tiles).
 4. Machine orientation becomes a planning variable for the first time —
    which side inputs arrive on is chosen, not given.
+5. Water terrain is not a normal pipe tile. A span with at most nine water tiles uses land endpoints; a longer straight crossing alternates pipe-to-ground spans of at most ten tiles and pairs of landfill tile ghosts. The landfill ghosts must be built before their pipe-to-ground ghosts are submitted, and each consumes real landfill from construction stock.

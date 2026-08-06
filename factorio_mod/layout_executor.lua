@@ -26,6 +26,24 @@ local function find_exact_ghost(surface, force, inner_name, position)
   return nil
 end
 
+local function find_exact_tile_ghost(surface, force, tile_name, position)
+  local ghosts = surface.find_entities_filtered({
+    name = "tile-ghost",
+    area = {
+      { position.x - 0.01, position.y - 0.01 },
+      { position.x + 0.01, position.y + 0.01 }
+    },
+    force = force
+  })
+  for _, ghost in pairs(ghosts) do
+    if ghost.position.x == position.x and ghost.position.y == position.y
+      and ghost.ghost_name == tile_name then
+      return ghost
+    end
+  end
+  return nil
+end
+
 local function exact_position_occupants(surface, force, position)
   local exact = {}
   local candidates = surface.find_entities_filtered({
@@ -374,6 +392,7 @@ local function execute_build_plan(authorization, build_plan)
 
   local required_authorization = {
     place_ghost = "project_more_ghosts",
+    place_tile_ghost = "project_more_ghosts",
     place_entity = "place_core_infrastructure",
     remove_entity = "remove_entities"
   }
@@ -404,7 +423,7 @@ local function execute_build_plan(authorization, build_plan)
     table.insert(placement_failures, {
       phase = phase.name,
       action_type = action.action_type,
-      entity = action.entity,
+      entity = action.entity or action.tile,
       position = { x = action.position.x, y = action.position.y },
       reason = reason
     })
@@ -436,7 +455,7 @@ local function execute_build_plan(authorization, build_plan)
           placement_bounds.max_x = math.max(placement_bounds.max_x, position.x)
           placement_bounds.max_y = math.max(placement_bounds.max_y, position.y)
         end
-        local prototype = prototypes.entity[action.entity]
+        local prototype = action.entity and prototypes.entity[action.entity] or nil
         if prototype and prototype.type == "electric-pole" then
           pole_wire_margin = math.max(
             pole_wire_margin, prototype.get_max_wire_distance()
@@ -451,7 +470,32 @@ local function execute_build_plan(authorization, build_plan)
         end
       end
 
-      if action.action_type == "place_ghost" then
+      if action.action_type == "place_tile_ghost" then
+        counts.attempted_ghosts = counts.attempted_ghosts + 1
+        local tile = surface.get_tile(position.x, position.y)
+        local existing = find_exact_tile_ghost(surface, force, action.tile, position)
+        if tile and tile.valid and tile.name == action.tile then
+          counts.already_present_ghosts = counts.already_present_ghosts + 1
+        elseif existing then
+          counts.already_present_ghosts = counts.already_present_ghosts + 1
+        elseif not tile or not tile.valid or not tile.collides_with("water_tile") then
+          counts.failed_ghosts = counts.failed_ghosts + 1
+          record_failure(phase, action, "landfill_target_is_not_water")
+        else
+          local ghost = surface.create_entity({
+            name = "tile-ghost",
+            inner_name = action.tile,
+            position = { position.x, position.y },
+            force = force
+          })
+          if ghost and ghost.valid then
+            counts.placed_ghosts = counts.placed_ghosts + 1
+          else
+            counts.failed_ghosts = counts.failed_ghosts + 1
+            record_failure(phase, action, "create_tile_ghost_returned_nil")
+          end
+        end
+      elseif action.action_type == "place_ghost" then
         counts.attempted_ghosts = counts.attempted_ghosts + 1
         local built = find_exact_entity(surface, force, action.entity, position)
         local ghost = find_exact_ghost(surface, force, action.entity, position)

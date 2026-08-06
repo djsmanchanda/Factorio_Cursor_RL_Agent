@@ -172,6 +172,21 @@ def test_build_plan_schema_requires_entity_and_complete_position() -> None:
     }
     assert any("y" in error.message for error in Draft7Validator(schema).iter_errors(incomplete))
 
+    tile_ghost = {
+        "phases": [{"name": "landfill", "actions": [{
+            "action_type": "place_tile_ghost", "tile": "landfill",
+            "position": {"x": 4, "y": 7},
+        }]}]
+    }
+    assert not list(Draft7Validator(schema).iter_errors(tile_ghost))
+
+    invalid_tile_ghost = {
+        "phases": [{"name": "landfill", "actions": [{
+            "action_type": "place_tile_ghost", "position": {"x": 4, "y": 7},
+        }]}]
+    }
+    assert any("tile" in error.message for error in Draft7Validator(schema).iter_errors(invalid_tile_ghost))
+
 
 def test_shared_composer_strips_local_power() -> None:
     from planners.local_layout_planner import LocalLayoutPlanner

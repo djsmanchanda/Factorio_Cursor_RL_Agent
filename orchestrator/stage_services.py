@@ -132,6 +132,8 @@ def _ghost_materials(plan: dict) -> dict[str, int]:
         for action in phase["actions"]:
             if action.get("action_type") == "place_ghost":
                 required[action["entity"]] = required.get(action["entity"], 0) + 1
+            elif action.get("action_type") == "place_tile_ghost":
+                required[action["tile"]] = required.get(action["tile"], 0) + 1
     return required
 
 
@@ -212,9 +214,11 @@ def _submit(
 def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[Point, Point],
                       *, timeout_seconds: float = 180.0, poll_seconds: float = 1.0,
                       stall_seconds: float = 8.0,
-                      minimum_wait_seconds: float = 0.0) -> int:
-    """Ghosts remaining, returning as soon as progress STOPS rather than when a
-    long timeout expires.
+                      minimum_wait_seconds: float = 0.0,
+                      include_entity_ghosts: bool = True,
+                      include_tile_ghosts: bool = True) -> int:
+    """Entity and tile ghosts remaining, returning as soon as progress STOPS
+    rather than when a long timeout expires.
 
     Bots build continuously while they can; once the count stops falling, more
     waiting changes nothing and the real answer is a diagnosis (no coverage, no
@@ -222,11 +226,19 @@ def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[P
     builder feel like it took minutes to notice an obvious problem.
     """
     min_point, max_point = area
+    entity_count = (
+        "s.count_entities_filtered{name='entity-ghost',force='" + force + "',area=area}"
+        if include_entity_ghosts else "0"
+    )
+    tile_count = (
+        "s.count_entities_filtered{name='tile-ghost',force='" + force + "',area=area}"
+        if include_tile_ghosts else "0"
+    )
     lua = (
-        "local s=game.surfaces['" + surface + "'];"
-        "rcon.print(s.count_entities_filtered{name='entity-ghost',force='" + force + "',"
-        "area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
-        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}}})"
+        "local s=game.surfaces['" + surface + "'];local area={{"
+        + str(min_point[0]) + "," + str(min_point[1]) + "},{"
+        + str(max_point[0]) + "," + str(max_point[1]) + "}};rcon.print("
+        + entity_count + "+" + tile_count + ")"
     )
     deadline = time.monotonic() + timeout_seconds
     remaining = int(client.command("/sc " + lua).strip())

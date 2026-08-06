@@ -1966,3 +1966,10 @@ that consumed it was not.
 - Why: A 685-pipe chemical-cell bill waited 13 minutes while iron remained at its opening capacity: completed prep ignored the new bounded five-minute plate draw, then expansion compared the live row with a newly searched refinery site.
 - Validation: 111 focused prep/smelter/extraction/mall-progress/run-bound tests passed; Python compilation and `git diff --check` passed.
 - Next: Python-only round -- reset to the safe save and restart the autonomous runner; no Lua mod redeploy is required.
+
+## [2026-08-06] Stage landfill before wide-water oil pipes
+- Files: `schemas/build_plan.schema.json`, `factorio_mod/layout_executor.lua`, `planners/fluid_routing.py`, `orchestrator/stage_chemical.py`, `orchestrator/live_base.py`, `orchestrator/stage_services.py`, focused regressions, and `docs/23_fluid_systems.md`
+- What: Added authorized landfill tile ghosts, then split oil-cell construction into landfill foundation and pipe-route submissions; long straight water runs now use legal ten-tile underground spans with a landfill pair between spans. Tunnel endpoint facings now connect successive spans, while one-land-tile gaps fail closed.
+- Why: Chemical routing both rejected wide water and accidentally removed all water from its tunnelable survey because general occupancy includes water; pipe ghosts must never be submitted before their water tiles become solid.
+- Validation: 121 focused fluid/schema/executor/preflight/layout tests passed; Python compilation, JSON validation, and `git diff --check` passed. Lua is static-contract tested; no live mod deployment was performed.
+- Next: Deploy the Lua mod copy and restart the Factorio server, then reset to the safe save and restart the Python runner for a real Nauvis/player validation.

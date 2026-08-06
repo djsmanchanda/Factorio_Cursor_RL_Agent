@@ -14,6 +14,7 @@ from orchestrator.stage_extraction import (
 )
 from orchestrator.stage_services import (
     StuckError, _diagnose_machines, _logistic_chest_positions, _submit,
+    _wait_for_ghosts, extend_roboport_coverage,
 )
 from orchestrator.stage_transport import (
     _publish_output_chest, _swap_infinity_chests, ensure_ingredient_transport,
@@ -37,6 +38,79 @@ EnsureItem = Callable[[str], Point | None]
 
 def _merge(*plans: dict) -> dict:
     return {"phases": [phase for plan in plans for phase in plan["phases"]]}
+
+
+def _separate_landfill_ghosts(*plans: dict) -> tuple[dict | None, dict]:
+    """Keep tile construction ahead of pipes that need the new land."""
+    landfill = []
+    fluid_phases = []
+    for plan in plans:
+        for phase in plan["phases"]:
+            actions = phase["actions"]
+            landfill.extend(
+                action for action in actions
+                if action.get("action_type") == "place_tile_ghost"
+            )
+            fluid_actions = [
+                action for action in actions
+                if action.get("action_type") != "place_tile_ghost"
+            ]
+            if fluid_actions:
+                fluid_phases.append({"name": phase["name"], "actions": fluid_actions})
+    foundation = None
+    if landfill:
+        foundation = {"phases": [{"name": "oil_landfill_foundation", "actions": landfill}]}
+    return foundation, {"phases": fluid_phases}
+
+
+def _ensure_plan_construction_coverage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    plan: dict, emit: Callable[[str], None],
+) -> None:
+    """Cover the complete chemical footprint before any construction ghost lands."""
+    if not hasattr(client, "command"):
+        return
+    positions = [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+    ]
+    if not positions:
+        return
+    xs, ys = zip(*positions)
+    for target in sorted({
+        (min(xs), min(ys)), (min(xs), max(ys)),
+        (max(xs), min(ys)), (max(xs), max(ys)),
+    }):
+        extend_roboport_coverage(client, bridge, surface, force, target, emit)
+
+
+def _submit_oil_cell_plans(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    plans: list[dict], links: list[dict], emit: Callable[[str], None],
+) -> None:
+    """Submit landfill, wait for solid ground, then submit its pipe route."""
+    landfill, fluid_links = _separate_landfill_ghosts(*links)
+    if landfill is None:
+        combined = _merge(*plans, *links)
+        combined["surface"], combined["force"] = surface, force
+        _ensure_plan_construction_coverage(client, bridge, surface, force, combined, emit)
+        _submit(client, bridge, surface, combined, "chemical_oil_cell", emit)
+        return
+    foundation = _merge(*plans, landfill)
+    foundation["surface"], foundation["force"] = surface, force
+    _ensure_plan_construction_coverage(client, bridge, surface, force, foundation, emit)
+    _submit(client, bridge, surface, foundation, "chemical_oil_cell_foundation", emit)
+    remaining = _wait_for_ghosts(
+        client, surface, force, _area(landfill), include_entity_ghosts=False,
+    )
+    if remaining:
+        raise StuckError(
+            f"chemical_oil_cell landfill foundation has {remaining} ghost(s) remaining; "
+            "refusing to place pipe ghosts on water before the landfill is built"
+        )
+    fluid_links["surface"], fluid_links["force"] = surface, force
+    _ensure_plan_construction_coverage(client, bridge, surface, force, fluid_links, emit)
+    _submit(client, bridge, surface, fluid_links, "chemical_oil_cell_fluid_links", emit)
 
 
 def _positions(plan: dict, entity: str) -> list[Point]:
@@ -205,6 +279,7 @@ def ensure_oil_cell(
         client, surface,
         (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
         (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
+        include_water=False,
     )
     hard |= _planned_hard_tiles(*plans)
     terrain_water = live_base.water_tiles(
@@ -262,9 +337,7 @@ def ensure_oil_cell(
             raise StuckError(
                 f"{fluid} cannot be routed from {source} to {targets}: {error}"
             ) from error
-    combined = _merge(*plans, *links)
-    combined["surface"], combined["force"] = surface, force
-    _submit(client, bridge, surface, combined, "chemical_oil_cell", emit)
+    _submit_oil_cell_plans(client, bridge, surface, force, plans, links, emit)
 
     for name, plan, machine in (
         ("crude-oil source", crude_source, "pumpjack"),

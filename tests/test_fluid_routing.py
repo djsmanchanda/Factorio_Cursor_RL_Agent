@@ -61,17 +61,58 @@ def test_narrow_water_uses_paired_underground_pipes() -> None:
         if action["entity"] == "pipe-to-ground"
     ]
     assert len(underground) == 2
-    assert {(int(action["position"]["x"] - 0.5),
-             int(action["position"]["y"] - 0.5)) for action in underground} == {(3, 0), (12, 0)}
-    assert {action["direction"] for action in underground} == {"east", "west"}
+    directions = {
+        (int(action["position"]["x"] - 0.5), int(action["position"]["y"] - 0.5)): action["direction"]
+        for action in underground
+    }
+    assert directions == {(3, 0): "west", (13, 0): "east"}
 
 
-def test_wide_water_is_not_tunnelled() -> None:
-    water = {(x, 0) for x in range(4, 4 + MAX_TERRAIN_TUNNEL_TILES + 1)}
+def test_wide_water_uses_landfill_between_underground_spans() -> None:
+    water = {(x, 0) for x in range(4, 46)}
 
-    with pytest.raises(ValueError, match="bounded search area"):
+    plan = generate_shortest_fluid_chain_link(
+        (0, 0), [(50, 0)], "water", tunnelable_tiles=water,
+        clearance=0, search_margin=0, allow_terrain_tunnels=True,
+    )
+
+    landfills = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in plan["phases"][0]["actions"]
+        if action["action_type"] == "place_tile_ghost"
+    }
+    underground = {
+        (int(action["position"]["x"] - 0.5), int(action["position"]["y"] - 0.5))
+        for action in plan["phases"][0]["actions"]
+        if action.get("entity") == "pipe-to-ground"
+    }
+    surface_pipes = {
+        (int(action["position"]["x"] - 0.5), int(action["position"]["y"] - 0.5))
+        for action in plan["phases"][0]["actions"]
+        if action.get("entity") == "pipe"
+    }
+
+    assert landfills == {(13, 0), (14, 0), (24, 0), (25, 0), (35, 0), (36, 0)}
+    assert landfills <= underground
+    assert not (surface_pipes & water)
+    assert len(underground) == 8
+    directions = {
+        (int(action["position"]["x"] - 0.5), int(action["position"]["y"] - 0.5)): action["direction"]
+        for action in plan["phases"][0]["actions"]
+        if action.get("entity") == "pipe-to-ground"
+    }
+    assert directions == {
+        (3, 0): "west", (13, 0): "east", (14, 0): "west", (24, 0): "east",
+        (25, 0): "west", (35, 0): "east", (36, 0): "west", (46, 0): "east",
+    }
+
+
+def test_water_runs_with_only_one_land_tile_between_are_refused() -> None:
+    water = {(x, 0) for x in range(4, 9)} | {(x, 0) for x in range(10, 15)}
+
+    with pytest.raises(ValueError, match="two clear surface tiles"):
         generate_shortest_fluid_chain_link(
-            (0, 0), [(16, 0)], "water", tunnelable_tiles=water,
+            (0, 0), [(18, 0)], "water", tunnelable_tiles=water,
             clearance=0, search_margin=0, allow_terrain_tunnels=True,
         )
 
