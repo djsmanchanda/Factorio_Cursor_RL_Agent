@@ -17,13 +17,15 @@ from orchestrator.baseline_production import BASELINE_PLATES  # noqa: E402
 _RUN = inspect.getsource(builder.run)
 
 
-def test_every_unprepped_plate_is_offered_the_pass() -> None:
-    """The live fault: iron-plate yields the pass every time it is short of
-    drills, so copper-plate never got a turn and a whole run finished with no
-    copper being produced at all."""
+def test_every_plate_is_rechecked_after_mall_targets_change() -> None:
+    """A completed baseline must still grow when later work raises demand.
+
+    Iterating the full pair lets iron and copper each react to a changed mall
+    bill, while ``any`` still gives the pass to the first one that acts.
+    """
     block = _RUN[_RUN.index("Extraction second"):_RUN.index("_serve_ready_pass(")]
 
-    assert "for plate in BASELINE_PLATES if plate not in prepped" in block
+    assert "for plate in BASELINE_PLATES" in block
     assert "next(" not in block, "taking only the head is what starved copper"
 
 

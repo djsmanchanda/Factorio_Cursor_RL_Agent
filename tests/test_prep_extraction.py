@@ -88,6 +88,35 @@ def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     assert "PREP DEFERRED" in _PREP
 
 
+def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatch) -> None:
+    available = {"fast-transport-belt": 73}
+    attempts: list[str] = []
+    pending = {"iron-plate": {"fast-transport-belt": 74}}
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: available)
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **_k: attempts.append("build"),
+    )
+    prepped: set[str] = set()
+    deferred: dict[str, int] = {}
+
+    assert not autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", prepped,
+        deferred, {"fast-transport-belt": 74}, (0.0, 0.0), lambda _m: None,
+        pending_materials=pending,
+    )
+    assert attempts == [] and pending
+
+    available["fast-transport-belt"] = 74
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", prepped,
+        deferred, {"fast-transport-belt": 74}, (0.0, 0.0), lambda _m: None,
+        pending_materials=pending,
+    )
+    assert attempts == ["build"] and not pending
+
+
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
     """7.5 plate/s needs 12 furnaces; a standard row builds 7."""
     assert baseline_smelter_count("iron-plate") == 12

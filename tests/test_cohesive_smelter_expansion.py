@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator import live_base  # noqa: E402
+from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from orchestrator.stage_services import StuckError  # noqa: E402
 
 
@@ -196,11 +197,91 @@ def test_mining_expansion_validates_cohesion_before_submitting_drills() -> None:
     assert build_source.index("_cohesive_smelter_target(") < build_source.index(
         "_submit_mining_plan("
     )
+    assert build_source.index("_assert_atomic_plate_expansion_affordable(") < build_source.index(
+        "_submit_mining_plan("
+    )
     assert build_source.index("_extend_plate_smelter(") < build_source.index(
         "_build_initial_plate_smelter("
     )
     assert "system_drill_count_before + extraction.drill_count" in target_source
 
+
+def test_atomic_expansion_preflight_counts_mine_and_smelter_ghosts(monkeypatch) -> None:
+    captured: dict = {}
+    extraction = SimpleNamespace(build_plan={"phases": [{"actions": [
+        {"action_type": "place_ghost", "entity": "electric-mining-drill"},
+    ]}]})
+    line = SimpleNamespace(recipe="iron-plate", machine_count=7)
+    existing = SimpleNamespace(
+        origin=(0.0, 0.0), belt_type="transport-belt",
+        inserter_type="inserter", flow_direction="west",
+    )
+    monkeypatch.setattr(builder, "_existing_plate_smelter", lambda *_a: existing)
+    monkeypatch.setattr(
+        builder, "_plate_line_extension_plan",
+        lambda *_a: ({"phases": [{"actions": [
+            {"action_type": "place_ghost", "entity": "electric-furnace"},
+        ]}]}, {}, (0.0, 0.0)),
+    )
+    monkeypatch.setattr(
+        builder, "assert_affordable",
+        lambda *_a: captured.update(plan=_a[3], name=_a[4]),
+    )
+
+    builder._assert_atomic_plate_expansion_affordable(
+        object(), "nauvis", "player", "iron-plate", extraction, line, 19,
+        lambda _message: None,
+    )
+
+    assert captured["name"] == "expand_iron-plate_system"
+    assert [
+        action["entity"] for phase in captured["plan"]["phases"]
+        for action in phase["actions"]
+    ] == ["electric-mining-drill", "electric-furnace"]
+
+
+def test_mining_expansion_rejects_the_full_bill_before_submitting_mine(monkeypatch) -> None:
+    extraction = SimpleNamespace(build_plan={"phases": []})
+    line = SimpleNamespace(machine_count=7)
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (line, 19))
+    monkeypatch.setattr(
+        builder, "_assert_atomic_plate_expansion_affordable",
+        lambda *_a: (_ for _ in ()).throw(
+            MaterialShortage("expand_iron-plate_system", {"fast-transport-belt": 74}, {})
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan",
+        lambda *_a: pytest.fail("mining must wait for its smelter bill"),
+    )
+
+    with pytest.raises(MaterialShortage, match="fast-transport-belt"):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (0.0, 0.0), lambda _message: None, expand=True,
+        )
+
+
+@pytest.mark.parametrize("recipe", ["iron-plate", "stone-brick"])
+def test_mining_expansion_refuses_without_a_recoverable_refinery(monkeypatch, recipe) -> None:
+    extraction = SimpleNamespace(build_plan={"phases": []})
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (None, None))
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan",
+        lambda *_a: pytest.fail("a missing refinery must block mine expansion"),
+    )
+
+    with pytest.raises(StuckError, match="no recoverable managed refinery"):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", recipe,
+            (0.0, 0.0), lambda _message: None, expand=True,
+        )
 
 
 def test_westbound_expansion_keeps_the_existing_ore_feed_fixed() -> None:

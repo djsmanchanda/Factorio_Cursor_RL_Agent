@@ -1973,3 +1973,10 @@ that consumed it was not.
 - Why: Chemical routing both rejected wide water and accidentally removed all water from its tunnelable survey because general occupancy includes water; pipe ghosts must never be submitted before their water tiles become solid.
 - Validation: 121 focused fluid/schema/executor/preflight/layout tests passed; Python compilation, JSON validation, and `git diff --check` passed. Lua is static-contract tested; no live mod deployment was performed.
 - Next: Deploy the Lua mod copy and restart the Factorio server, then reset to the safe save and restart the Python runner for a real Nauvis/player validation.
+
+## [2026-08-06] Keep mine and furnace expansion in one material gate
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`, `tests/test_prep_extraction.py`, `tests/test_plate_prep_fairness.py`
+- What: Plate expansion now checks the combined mine and smelter ghost bill before it submits the mine; a temporary material shortage records its exact bill and waits for stock rather than launching another mining phase or marking prep deferred. An expansion without a recoverable refinery, including stone-brick, fails before drill placement.
+- Why: The 13:25 run grew iron mining, then the 7-to-19 furnace extension lacked 74 fast belts; a later siting deferral prevented the completed belt stock from ever retrying that furnace work.
+- Validation: 112 focused prep/extraction/smelter/promotion tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the autonomous runner; no Lua mod redeploy is required.

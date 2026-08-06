@@ -64,6 +64,7 @@ from orchestrator.stage_services import (
     _logistic_chest_positions,
     _submit,
     _wait_for_ghosts,
+    assert_affordable,
     ensure_logistic_coverage,
     extend_power,
     extend_roboport_coverage,
@@ -614,6 +615,30 @@ def _extend_plate_smelter(
     return output
 
 
+def _assert_atomic_plate_expansion_affordable(
+    client: RconClient, surface: str, force: str, recipe: str, extraction,
+    line, target_machines: int, emit: Callable[[str], None],
+) -> None:
+    """Require the mine and its added furnaces before submitting either."""
+    if target_machines <= line.machine_count:
+        return
+    existing = _existing_plate_smelter(client, surface, line)
+    smelter_delta, _full, _output = _plate_line_extension_plan(
+        recipe, line.machine_count, target_machines, existing.origin,
+        existing.belt_type, existing.inserter_type, existing.flow_direction,
+    )
+    plans = [smelter_delta]
+    if extraction.build_plan is not None:
+        plans.insert(0, extraction.build_plan)
+    combined = {
+        "force": force,
+        "phases": [phase for plan in plans for phase in plan["phases"]],
+    }
+    assert_affordable(
+        client, surface, force, combined, f"expand_{recipe}_system", emit,
+    )
+
+
 def _cohesive_smelter_target(
     client: RconClient, surface: str, force: str, recipe: str,
     extraction, expand: bool, emit: Callable[[str], None],
@@ -749,6 +774,16 @@ def build_mining_stage(
     existing_smelter, cohesive_target = _cohesive_smelter_target(
         client, surface, force, recipe, extraction, expand, emit,
     )
+    if expand and existing_smelter is None:
+        raise StuckError(
+            f"{recipe} expansion has no recoverable managed refinery; refusing to "
+            "expand its mine ahead of the refinery"
+        )
+    if cohesive_target is not None:
+        _assert_atomic_plate_expansion_affordable(
+            client, surface, force, recipe, extraction, existing_smelter,
+            cohesive_target, emit,
+        )
     if expand and extraction.build_plan is not None:
         emit(
             f"MINING SYSTEM PHASE: {extraction.system_drill_count_before} -> "
@@ -1857,6 +1892,7 @@ def _prep_plate_extraction(
     mall_targets: dict[str, int],
     reference_point: Point, emit: Callable[[str], None],
     demand_targets: Mapping[str, int] | None = None,
+    pending_materials: dict[str, dict[str, int]] | None = None,
 ) -> bool:
     """Grow one plate line to the furnace count its own prep draw implies.
 
@@ -1865,6 +1901,11 @@ def _prep_plate_extraction(
     now, so holding on would re-hit the identical shortage forever.
     """
     available = live_base.available_items(client, surface, force)
+    pending = (pending_materials or {}).get(short_plate)
+    if pending and any(available.get(item, 0) < count for item, count in pending.items()):
+        return False
+    if pending_materials is not None:
+        pending_materials.pop(short_plate, None)
     targets = dict(demand_targets or {})
     for item, target in mall_targets.items():
         targets[item] = max(targets.get(item, 0), target)
@@ -1906,6 +1947,8 @@ def _prep_plate_extraction(
         # the base holding 8. Every other path in this loop already
         # does this -- omitting it here ended a run outright.
         add_demands(mall_targets, shortage)
+        if pending_materials is not None:
+            pending_materials[short_plate] = dict(shortage.required)
         emit(
             f"  PREP DEMAND: {short_plate} extraction needs "
             + ", ".join(
@@ -2041,6 +2084,7 @@ def _pass_signature(
     task, mall_targets: dict[str, int], prepped: set[str],
     background_targets: dict[str, int] | None = None,
     deferred_plate_targets: Mapping[str, int] | None = None,
+    pending_plate_materials: Mapping[str, Mapping[str, int]] | None = None,
 ) -> tuple:
     """What this pass chose to work on, and what work is still outstanding.
 
@@ -2055,6 +2099,10 @@ def _pass_signature(
         tuple(sorted(mall_targets)),
         tuple(sorted(background_targets or {})),
         tuple(sorted((deferred_plate_targets or {}).items())),
+        tuple(sorted(
+            (plate, tuple(sorted(required.items())))
+            for plate, required in (pending_plate_materials or {}).items()
+        )),
         tuple(sorted(prepped)),
     )
 
@@ -2189,6 +2237,7 @@ def run(
         )
         prepped: set[str] = set()
         deferred_plate_targets: dict[str, int] = {}
+        pending_plate_materials: dict[str, dict[str, int]] = {}
         last_signature: tuple | None = None
         unchanged_passes = 0
         iteration = 0
@@ -2198,7 +2247,7 @@ def run(
             )
             signature = _pass_signature(
                 task, mall_targets, prepped, background_targets,
-                deferred_plate_targets,
+                deferred_plate_targets, pending_plate_materials,
             )
             unchanged_passes = (
                 unchanged_passes + 1 if signature == last_signature else 0
@@ -2226,7 +2275,7 @@ def run(
                 _prep_plate_extraction(
                     client, bridge, surface, force, plate, prepped,
                     deferred_plate_targets, mall_targets, reference_point, emit,
-                    background_targets,
+                    background_targets, pending_plate_materials,
                 ) for plate in BASELINE_PLATES
             ):
                 continue
