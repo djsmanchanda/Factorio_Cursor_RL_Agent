@@ -1994,3 +1994,10 @@ that consumed it was not.
 - Why: Refinery geometry must be planned as one repeatable belt/furnace system; expansion may migrate its terminal cap but must never infer permission to remove Start, Middle, or unrelated live infrastructure.
 - Validation: 73 focused blueprint/schema/executor/layout tests passed; Python compilation, schema validation, function-size checks, and `git diff --check` passed; reviewer confirmed the corrected 15-tile width and End-only removal boundary.
 - Next: Wire this validated primitive into live refinery siting, recovery, direct ore input, plate output, landfill, and power before deploying it.
+
+## [2026-08-06] Integrate modular refineries into live extraction
+- Files: `orchestrator/{autonomous_builder,extraction_transport,live_base,refinery_state,stage_extraction,stage_transport}.py`, `planners/smelter_block.py`, focused tests
+- What: The Nauvis/player extraction path now builds Start+End refineries, widens to five columns, then expands by retiring only the verified End/output cap, inserting Middle rows, and placing a new End; ore stays on one affordable head-on belt with no chest or inserter hop.
+- Why: Incremental furnace rows and independently planned bridges created disconnected power, T-side-feeds, wrong terminal directions, scattered refinery sites, and unsafe expansion over real infrastructure or water.
+- Validation: 1303-test full suite passed with 1 skipped; final modular/refinery regression suite passed 107 tests after the handoff-geometry fix, plus Python compilation and diff checks.
+- Next: Deploy the already-committed BuildPlan 1.4 Lua mod changes and restart the Factorio server, then restart the Python runner from the safe save.

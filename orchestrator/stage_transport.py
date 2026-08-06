@@ -221,6 +221,21 @@ def _toward(source: Point, dest: Point) -> str:
     return "south" if dy > 0 else "north"
 
 
+def _raw_belt_exit_direction(
+    ingredient: str, belt_source: Point, source_position: Point,
+) -> str | None:
+    """Continue a raw-resource belt toward its surveyed terminal, never sideways."""
+    if ingredient not in {"iron-ore", "copper-ore", "coal", "stone"}:
+        return None
+    dx = belt_source[0] - source_position[0]
+    dy = belt_source[1] - source_position[1]
+    if abs(dx) >= abs(dy) and dx:
+        return "west" if dx > 0 else "east"
+    if dy:
+        return "north" if dy > 0 else "south"
+    return None
+
+
 def _clear_side(
     chest: Point, preferred: str, blocked: set[tuple[int, int]],
 ) -> str | None:
@@ -376,37 +391,34 @@ def logistic_grace_seconds(
     return _STUCK_GRACE_SECONDS + (flight + fill) * _TRANSIT_SAFETY, flight + fill
 
 
-def _plan_belt_transport(
-    client: RconClient, surface: str, force: str, ingredient: str, source_position: Point,
-    feed_position: Point, *, reuse_existing: bool, max_belt_route_tiles: int | None,
-    additional_blocked: set[tuple[int, int]] | None = None,
-    upstream_shift: int = 1, destination_is_belt: bool = False,
-    destination_belt_direction: str = "east",
-) -> tuple[list[dict], str, bool]:
+def _survey_belt_route(
+    client: RconClient, surface: str, force: str, ingredient: str,
+    source_position: Point, feed_position: Point, *, reuse_existing: bool,
+    additional_blocked: set[tuple[int, int]] | None, upstream_shift: int,
+    destination_is_belt: bool, destination_belt_direction: str,
+    planned_belt_source: Point | None,
+) -> tuple[Point | None, Point, set[tuple[int, int]], str, str]:
+    """Survey the exact source/endpoint geometry before pricing belt tiers."""
     belt_source = _through_belt_source(
         client, surface, ingredient, source_position,
         upstream_shift=upstream_shift,
-    )
+    ) or planned_belt_source
     if destination_is_belt and belt_source is None:
         raise StuckError(
             f"{ingredient} refinery feed requires an existing source belt at "
             f"{source_position}; refusing a chest/inserter side-feed"
         )
     route_source = belt_source or source_position
-    span = int(abs(route_source[0] - feed_position[0])
-               + abs(route_source[1] - feed_position[1])) + 4
-    stock = live_base.available_items(client, surface, force)
-    preferred = _choose_route_belt_tier(
-        stock, span, destination_is_belt=destination_is_belt,
-    )
     ignored = ()
     if reuse_existing:
         belt_names = tuple(UNDERGROUND_REACH)
         ignored = (
             *belt_names,
-            *(name.replace("transport-belt", "underground-belt") for name in belt_names),
-            _DEFAULT_INSERTER,
+            *(name.replace("transport-belt", "underground-belt")
+              for name in belt_names),
         )
+        if not destination_is_belt:
+            ignored = (*ignored, _DEFAULT_INSERTER)
     blocked = live_base.occupied_tiles(
         client, surface,
         (min(route_source[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
@@ -421,7 +433,10 @@ def _plan_belt_transport(
         (math.floor(feed_position[0]), math.floor(feed_position[1])),
     }
     direction = _toward(route_source, feed_position)
-    exit_direction = _clear_side(route_source, direction, blocked)
+    exit_direction = (
+        _raw_belt_exit_direction(ingredient, route_source, source_position)
+        if belt_source is not None and destination_is_belt else None
+    ) or _clear_side(route_source, direction, blocked)
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
     if destination_is_belt:
         entry_direction = _direct_belt_entry(
@@ -439,57 +454,94 @@ def _plan_belt_transport(
             f"{ingredient} cannot leave its source at {route_source}: every "
             "side of it is already occupied."
         )
+    return belt_source, route_source, blocked, entry_direction, exit_direction
 
-    # Route first, price second. Each tier reaches a different distance
-    # underground, so only a generated route knows what it actually costs; the
-    # first tier whose REAL bill of materials the base can pay wins, starting
-    # from the estimate's preference and then widening. Judging tiers on a
-    # straight-line guess rejected bridges that were affordable in practice.
+
+def _route_belt_actions(
+    client: RconClient, surface: str, ingredient: str,
+    source_position: Point, feed_position: Point, belt_source: Point | None,
+    route_source: Point, blocked: set[tuple[int, int]], entry_direction: str,
+    exit_direction: str, tier: str, max_belt_route_tiles: int | None,
+    destination_is_belt: bool, destination_belt_direction: str,
+) -> list[dict]:
+    """Generate one route tier after geometry has passed the fail-closed survey."""
+    if belt_source is not None and destination_is_belt:
+        actions = bridge_belt_to_belt(
+            belt_source, feed_position, entry_direction=entry_direction,
+            belt_type=tier, blocked_tiles=blocked,
+            max_route_tiles=max_belt_route_tiles,
+            destination_direction=destination_belt_direction,
+            exit_direction=exit_direction,
+        )
+        return _replace_existing_source_belt(
+            client, surface, belt_source, actions,
+        )
+    if belt_source is not None:
+        actions = bridge_belt_to_chest(
+            belt_source, feed_position, entry_direction=entry_direction,
+            belt_type=tier, inserter_type=_DEFAULT_INSERTER,
+            blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
+        )
+        return _replace_existing_source_belt(
+            client, surface, belt_source, actions,
+        )
+    return bridge_chest_to_chest(
+        source_position, feed_position,
+        exit_direction=exit_direction, entry_direction=entry_direction,
+        belt_type=tier, inserter_type=_DEFAULT_INSERTER,
+        blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
+    )
+
+
+def _plan_belt_transport(
+    client: RconClient, surface: str, force: str, ingredient: str, source_position: Point,
+    feed_position: Point, *, reuse_existing: bool, max_belt_route_tiles: int | None,
+    additional_blocked: set[tuple[int, int]] | None = None,
+    upstream_shift: int = 1, destination_is_belt: bool = False,
+    destination_belt_direction: str = "east",
+    planned_belt_source: Point | None = None,
+) -> tuple[list[dict], str, bool]:
+    """Choose the first affordable legal tier after one shared geometry survey."""
+    belt_source, route_source, blocked, entry_direction, exit_direction = (
+        _survey_belt_route(
+            client, surface, force, ingredient, source_position, feed_position,
+            reuse_existing=reuse_existing, additional_blocked=additional_blocked,
+            upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
+            destination_belt_direction=destination_belt_direction,
+            planned_belt_source=planned_belt_source,
+        )
+    )
+    span = int(abs(route_source[0] - feed_position[0])
+               + abs(route_source[1] - feed_position[1])) + 4
+    stock = live_base.available_items(client, surface, force)
+    preferred = _choose_route_belt_tier(
+        stock, span, destination_is_belt=destination_is_belt,
+    )
     tier_order = _route_belt_tiers(destination_is_belt)
-    ordered = [preferred] + [t for t in tier_order if t != preferred]
+    ordered = [preferred] + [tier for tier in tier_order if tier != preferred]
     shortfalls: list[str] = []
     requirements: dict[str, dict[str, int]] = {}
     route_error: ValueError | None = None
     for tier in ordered:
         try:
-            if belt_source is not None and destination_is_belt:
-                # BOTH ENDS ARE BELTS, so the join is belt to belt and needs
-                # no inserter at all. The preflight already planned it this
-                # way; the build path did not know, so it used a chest-shaped
-                # bridge and dropped an inserter into the middle of what
-                # should be one continuous belt. That is the extra hop seen
-                # between an ore mine and its furnace row -- and it also made
-                # the build disagree with the plan the preflight approved.
-                actions = bridge_belt_to_belt(
-                    belt_source, feed_position, entry_direction=entry_direction,
-                    belt_type=tier, blocked_tiles=blocked,
-                    max_route_tiles=max_belt_route_tiles,
-                    destination_direction=destination_belt_direction,
-                    exit_direction=exit_direction,
-                )
-            elif belt_source is not None:
-                actions = bridge_belt_to_chest(
-                    belt_source, feed_position, entry_direction=entry_direction,
-                    belt_type=tier, inserter_type=_DEFAULT_INSERTER,
-                    blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
-                )
-                actions = _replace_existing_source_belt(
-                    client, surface, belt_source, actions,
-                )
-            else:
-                actions = bridge_chest_to_chest(
-                    source_position, feed_position,
-                    exit_direction=exit_direction, entry_direction=entry_direction,
-                    belt_type=tier, inserter_type=_DEFAULT_INSERTER,
-                    blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
-                )
+            actions = _route_belt_actions(
+                client, surface, ingredient, source_position, feed_position,
+                belt_source, route_source, blocked, entry_direction,
+                exit_direction, tier, max_belt_route_tiles,
+                destination_is_belt, destination_belt_direction,
+            )
         except ValueError as error:
             route_error = error
             continue
-        required: dict[str, int] = {}
-        for action in actions:
-            if action.get("action_type") == "place_ghost":
-                required[action["entity"]] = required.get(action["entity"], 0) + 1
+        required = {
+            action["entity"]: sum(
+                1 for candidate in actions
+                if candidate.get("action_type") == "place_ghost"
+                and candidate["entity"] == action["entity"]
+            )
+            for action in actions
+            if action.get("action_type") == "place_ghost"
+        }
         short = {
             item: count - stock.get(item, 0)
             for item, count in required.items()
@@ -505,16 +557,6 @@ def _plan_belt_transport(
         )
     if not shortfalls and route_error is not None:
         raise StuckError(f"no belt route is available for this bridge: {route_error}")
-    # BEING SHORT OF BELT IS NOT A DEAD END. Every other build path turns a
-    # shortage into a mall target and retries once the base has made the
-    # missing part; raising StuckError here ended whole runs on a bridge the
-    # base could have supplied minutes later -- observed as "no belt tier can
-    # be afforded ... short transport-belt by 96" while the mall held a
-    # 4800-belt target it had not filled yet.
-    #
-    # The CHEAPEST tier's bill is the one to ask for: it is the tier the mall
-    # can actually produce, and asking for a faster one would queue a part
-    # the base may have no recipe for.
     for tier in tier_order:
         if tier in requirements:
             raise MaterialShortage(
@@ -523,7 +565,6 @@ def _plan_belt_transport(
     raise StuckError(
         "no belt tier can be afforded for this bridge -- " + "; ".join(shortfalls)
     )
-
 
 def preflight_ingredient_transport(
     client: RconClient, surface: str, force: str, recipe: str, ingredient: str,

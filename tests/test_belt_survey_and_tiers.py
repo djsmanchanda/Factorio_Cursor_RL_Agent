@@ -1,27 +1,32 @@
 # Path: tests/test_belt_survey_and_tiers.py
-# Purpose: Prove a bridge surveys every tile its router may use, and that a basic plate keeps its belts when only one belt tier is short.
+# Purpose: Prove refinery routes survey their detours and share the affordable early-belt policy.
 
 from __future__ import annotations
 
 import inspect
 import sys
-from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from orchestrator import autonomous_builder as builder  # noqa: E402
+from orchestrator import extraction_transport, stage_transport  # noqa: E402
+from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from orchestrator.stage_services import _BRIDGE_SURVEY_MARGIN  # noqa: E402
+from orchestrator.stage_extraction import direct_mine_plan  # noqa: E402
 from orchestrator.stage_transport import (  # noqa: E402
-    _BELT_TIERS_CHEAPEST_FIRST, _choose_route_belt_tier, _route_belt_tiers,
+    _BELT_TIERS_CHEAPEST_FIRST,
+    _choose_route_belt_tier,
+    _raw_belt_exit_direction,
+    _route_belt_tiers,
 )
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN  # noqa: E402
 
-_MINING = inspect.getsource(builder._build_initial_plate_smelter)
+_PLAN = inspect.getsource(stage_transport._plan_belt_transport)
+_PREFLIGHT = inspect.getsource(extraction_transport.preflight_ingredient_transport)
 
 
 def test_refinery_routes_ignore_stocked_advanced_belts() -> None:
@@ -39,17 +44,12 @@ def test_refinery_routes_ignore_stocked_advanced_belts() -> None:
         stock, 100, destination_is_belt=False,
     ) == _route_belt_tiers(False)[0]
 
+
 def test_the_survey_covers_everywhere_the_router_may_go() -> None:
-    """A detour that leaves the surveyed box emits belt onto tiles never
-    checked for occupancy. An iron-ore bridge did exactly that, laying
-    transport-belt over the mine's own fast-transport-belt at x=15.5..17.5,
-    and the ore never reached the furnaces."""
     assert _BRIDGE_SURVEY_MARGIN >= _ROUTE_SEARCH_MARGIN
 
 
 def test_the_two_margins_cannot_drift_apart() -> None:
-    """Derived from the router's own constant rather than restated, so raising
-    the search radius cannot silently outrun the survey again."""
     source = inspect.getsource(sys.modules["orchestrator.stage_services"])
     line = next(
         line for line in source.splitlines()
@@ -59,73 +59,122 @@ def test_the_two_margins_cannot_drift_apart() -> None:
     assert "_ROUTE_SEARCH_MARGIN" in line
 
 
-def test_every_stocked_belt_tier_is_tried_before_giving_up_on_belts() -> None:
-    """Being short of one tier must not cost a basic plate its belts while a
-    cheaper tier is stocked -- one run dropped iron to bot feeding purely
-    because fast-transport-belt was short, with plain belt on a 200 target."""
-    assert "_BELT_TIERS_CHEAPEST_FIRST" in _MINING
-    assert "BELT TIER:" in _MINING
+def test_modular_refinery_preflight_uses_the_shared_affordability_router() -> None:
+    assert "_plan_belt_transport(" in _PREFLIGHT
+    assert "_route_belt_tiers(destination_is_belt)" in _PLAN
+    assert "for tier in ordered:" in _PLAN
+    assert "if not short:" in _PLAN
 
 
-def test_plate_belt_shortage_never_falls_back_to_a_requester() -> None:
-    assert "build_logistic_smelter(" not in _MINING
-    assert "BELT DEMAND" in _MINING
-    assert "raise shortage" in _MINING
-
-
-def test_nonplate_belt_shortages_do_not_escalate_to_faster_tiers() -> None:
-    shortage = _MINING[_MINING.index("shortage = short_of"):]
-    stop = shortage.index("emit(f\"  BELT TIER:")
-
-    assert 'if recipe not in {"iron-plate", "copper-plate"}:' in shortage[:stop]
-
-
-def test_direct_plate_route_propagates_belt_shortage(monkeypatch) -> None:
-    extraction = SimpleNamespace(
-        smelter_origin=(10.0, 10.0), furnace_count=2,
-        smelter_flow_direction="east", ore="copper-ore",
-    )
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
-    monkeypatch.setattr(
-        builder, "build_conversion_stage",
-        lambda *_a, **_k: (_ for _ in ()).throw(
-            builder.MaterialShortage("conversion", {"transport-belt": 4}, {})
-        ),
+def test_direct_refinery_shortage_remains_recoverable(monkeypatch) -> None:
+    shortage = MaterialShortage(
+        "belt bridge for copper-ore", {"transport-belt": 40}, {"transport-belt": 8},
     )
     monkeypatch.setattr(
-        builder, "build_logistic_smelter",
-        lambda *_a, **_k: pytest.fail("plate refineries must stay on a direct belt"),
+        extraction_transport, "_plan_belt_transport",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(shortage),
     )
-    with pytest.raises(builder.MaterialShortage):
-        builder._build_initial_plate_smelter(
-            None, None, "nauvis", "player", "copper-plate", extraction,
-            (77.5, -39.5), (0.0, 0.0), lambda _message: None,
+
+    with pytest.raises(MaterialShortage) as raised:
+        extraction_transport.preflight_ingredient_transport(
+            object(), "nauvis", "player", "copper-plate", "copper-ore",
+            (77.5, -39.5), (80.5, -18.5), 6,
+            max_belt_route_tiles=100, mode="belt", destination_is_belt=True,
         )
 
-
-def test_direct_plate_route_still_tries_each_stocked_belt_tier() -> None:
-    body = _MINING[_MINING.index("for tier in tiers"):]
-    assert "build_conversion_stage(" in body
-    assert "BELT DEMAND" in body
-
-def test_a_shortage_that_is_not_about_belts_is_never_swallowed() -> None:
-    assert "if not any(" in _MINING
-    assert "belt in short_of.required" in _MINING
+    assert raised.value is shortage
 
 
-def test_the_preferred_tier_is_tried_first() -> None:
-    """Downgrading is a fallback, not the default: a mine that can afford the
-    faster belt should still get it."""
-    body = _MINING[_MINING.index("tiers = ["):]
+@pytest.mark.parametrize(
+    ("belt_source", "terminal", "expected"),
+    [
+        ((13.5, -1.5), (12.5, -1.5), "west"),
+        ((11.5, -1.5), (12.5, -1.5), "east"),
+        ((12.5, 0.5), (12.5, -0.5), "north"),
+        ((12.5, -1.5), (12.5, -0.5), "south"),
+    ],
+)
+def test_raw_ore_continues_toward_the_mine_terminal(
+    belt_source: tuple[float, float], terminal: tuple[float, float], expected: str,
+) -> None:
+    assert _raw_belt_exit_direction("iron-ore", belt_source, terminal) == expected
 
-    assert body.index("_DEFAULT_BELT") < body.index("_BELT_TIERS_CHEAPEST_FIRST")
+
+def test_non_raw_routes_do_not_override_the_router_exit() -> None:
+    assert _raw_belt_exit_direction(
+        "iron-plate", (13.5, -1.5), (12.5, -1.5),
+    ) is None
 
 
-def test_only_tiers_the_base_actually_holds_are_attempted() -> None:
-    """Placing ghosts of a belt nobody has just fails again one tier later."""
-    body = _MINING[_MINING.index("tiers = ["):_MINING.index("shortage:")]
+def test_direct_ore_route_reorients_the_terminal_without_an_inserter(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source",
+        lambda *_args, **_kwargs: (13.5, -1.5),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "available_items",
+        lambda *_args: {"transport-belt": 200},
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **kwargs: set() if kwargs.get("ignore_names") else {(12, -2)},
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at",
+        lambda _client, _surface, position: (
+            {"type": "transport-belt", "name": "transport-belt"}
+            if position == (13.5, -1.5) else None
+        ),
+    )
 
-    assert "stock.get(tier, 0)" in body
+    actions, tier, reused = stage_transport._plan_belt_transport(
+        object(), "nauvis", "player", "iron-ore",
+        (12.5, -1.5), (0.5, 10.5), reuse_existing=True,
+        max_belt_route_tiles=100, destination_is_belt=True,
+        destination_belt_direction="east",
+    )
+
+    assert (tier, reused) == ("transport-belt", True)
+    assert actions[0]["action_type"] == "remove_entity"
+    assert actions[1]["position"] == {"x": 13.5, "y": -1.5}
+    assert actions[1]["direction"] == "west"
+    assert not any(action["entity"].endswith("inserter") for action in actions)
+
+
+def test_planned_direct_mine_handoff_is_not_treated_as_an_obstacle(monkeypatch) -> None:
+    mine_plan, ore_output = direct_mine_plan(
+        (100.0, 100.0), 6, belt_type="transport-belt",
+        inserter_type="inserter", reserved_pair_columns=0,
+    )
+    planned = extraction_transport.planned_footprint_tiles(mine_plan)
+    planned -= {
+        (int(ore_output[0]), int(ore_output[1])),
+        (int(ore_output[0] + 1), int(ore_output[1])),
+    }
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **_kwargs: set(),
+    )
+
+    source, route_source, _blocked, _entry, exit_direction = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "iron-ore", ore_output,
+            (100.0, 130.0), reuse_existing=True,
+            additional_blocked=planned, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=(ore_output[0] + 1, ore_output[1]),
+        )
+    )
+
+    assert source == (ore_output[0] + 1, ore_output[1])
+    assert route_source == source
+    assert exit_direction == "west"
 
 
 def test_the_cheapest_tier_is_a_real_belt_the_agent_can_build() -> None:

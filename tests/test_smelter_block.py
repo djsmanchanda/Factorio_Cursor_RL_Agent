@@ -16,8 +16,11 @@ from planners.plan_validation import actions  # noqa: E402
 from planners.smelter_block import (  # noqa: E402
     FURNACES_PER_MODULE,
     block_shape,
+    generate_managed_refinery_extension_plan,
+    generate_managed_refinery_plan,
     generate_refinery_extension_plan,
     generate_refinery_plan,
+    refinery_interfaces,
 )
 
 
@@ -130,6 +133,40 @@ def test_extension_order_is_retire_then_repeat_then_end() -> None:
         "extend_refinery_iron-plate",
         "finish_refinery_end_iron-plate",
     ]
+
+
+def test_managed_output_taps_the_end_without_blocking_either_plate_belt() -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6)
+    interface = refinery_interfaces(6)
+    output = plan["phases"][-1]
+
+    assert output["name"] == "refinery_output_iron-plate"
+    assert all(
+        _at(plan, x, y)[0]["entity"] == "fast-transport-belt"
+        for x, y in interface.plate_outputs
+    )
+    assert _at(plan, *interface.provider)[0]["entity"] == "passive-provider-chest"
+    assert interface.provider not in interface.plate_outputs
+
+
+def test_managed_expansion_moves_the_output_tap_to_the_new_end() -> None:
+    old_interface = refinery_interfaces(30)
+    new_interface = refinery_interfaces(31)
+    extension = generate_managed_refinery_extension_plan("iron-plate", 30, 31)
+    removals = {
+        (action["entity"], action["position"]["x"], action["position"]["y"])
+        for action in actions(extension)
+        if action["action_type"] == "remove_entity"
+    }
+    additions = {
+        (action["entity"], action["position"]["x"], action["position"]["y"])
+        for action in actions(extension)
+        if action["action_type"] == "place_ghost"
+    }
+
+    assert ("passive-provider-chest", *old_interface.provider) in removals
+    assert ("passive-provider-chest", *new_interface.provider) in additions
+    assert new_interface.provider[1] > old_interface.provider[1]
 
 
 def test_invalid_shapes_are_rejected() -> None:

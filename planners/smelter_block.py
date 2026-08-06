@@ -45,6 +45,15 @@ class BlockShape:
     def depth(self) -> int:
         return START_DEPTH + END_DEPTH + MIDDLE_PITCH * self.middle_rows
 
+@dataclass(frozen=True)
+class RefineryInterfaces:
+    """Stable belt, provider, and power interfaces around one composed block."""
+
+    ore_inputs: tuple[tuple[float, float], tuple[float, float]]
+    plate_outputs: tuple[tuple[float, float], tuple[float, float]]
+    provider: tuple[float, float]
+    power_anchor: tuple[float, float]
+
 
 def block_shape(furnaces: int) -> BlockShape:
     """Choose a monotonic shape so an established column never moves sideways."""
@@ -188,5 +197,83 @@ def generate_refinery_extension_plan(
         _phase(f"finish_refinery_end_{recipe}", end),
     ]
     plan = {"phases": [phase for phase in phases if phase["actions"]]}
+    validate_build_plan(plan)
+    return plan
+
+def refinery_interfaces(
+    furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
+) -> RefineryInterfaces:
+    """Return the exact external positions defined by the composed templates."""
+    shape = block_shape(furnaces)
+    end_y = origin_y + START_DEPTH + shape.middle_rows * MIDDLE_PITCH
+    terminal_x = origin_x + COLUMN_PITCH * shape.columns + 3.5
+    return RefineryInterfaces(
+        ore_inputs=((origin_x - 0.5, origin_y + 0.5),
+                    (origin_x - 0.5, origin_y + 1.5)),
+        plate_outputs=((terminal_x, end_y + 9.5),
+                       (terminal_x, end_y + 10.5)),
+        provider=(terminal_x + 1, end_y + 12.5),
+        power_anchor=(terminal_x - 2, end_y + 12.5),
+    )
+
+
+def _output_adapter_actions(
+    furnaces: int, *, origin_x: float, origin_y: float,
+) -> list[dict]:
+    interface = refinery_interfaces(furnaces, origin_x=origin_x, origin_y=origin_y)
+    upper, lower = interface.plate_outputs
+    tap_x, tap_y = lower[0] + 1, lower[1]
+    return [
+        {"action_type": "place_ghost", "entity": "fast-transport-belt",
+         "position": {"x": upper[0], "y": upper[1]}, "direction": "east"},
+        {"action_type": "place_ghost", "entity": "fast-transport-belt",
+         "position": {"x": lower[0], "y": lower[1]}, "direction": "east"},
+        {"action_type": "place_ghost", "entity": "fast-transport-belt",
+         "position": {"x": tap_x, "y": tap_y}, "direction": "east"},
+        {"action_type": "place_ghost", "entity": "fast-inserter",
+         "position": {"x": tap_x, "y": tap_y + 1}, "direction": "north"},
+        {"action_type": "place_ghost", "entity": "passive-provider-chest",
+         "position": {"x": interface.provider[0], "y": interface.provider[1]}},
+        {"action_type": "place_ghost", "entity": "medium-electric-pole",
+         "position": {"x": interface.power_anchor[0], "y": interface.power_anchor[1]}},
+    ]
+
+
+def generate_managed_refinery_plan(
+    recipe: str, furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
+) -> dict:
+    """Add a non-blocking provider side tap to the approved refinery block."""
+    plan = generate_refinery_plan(
+        recipe, furnaces, origin_x=origin_x, origin_y=origin_y,
+    )
+    plan["phases"].append(_phase(
+        f"refinery_output_{recipe}",
+        _output_adapter_actions(furnaces, origin_x=origin_x, origin_y=origin_y),
+    ))
+    validate_build_plan(plan)
+    return plan
+
+
+def generate_managed_refinery_extension_plan(
+    recipe: str, current_furnaces: int, new_furnaces: int, *,
+    origin_x: float = 0, origin_y: float = 0,
+) -> dict:
+    """Move the planner-owned provider tap together with the End migration."""
+    plan = generate_refinery_extension_plan(
+        recipe, current_furnaces, new_furnaces,
+        origin_x=origin_x, origin_y=origin_y,
+    )
+    old = _output_adapter_actions(
+        current_furnaces, origin_x=origin_x, origin_y=origin_y,
+    )
+    new = _output_adapter_actions(
+        new_furnaces, origin_x=origin_x, origin_y=origin_y,
+    )
+    old_keys, new_keys = {_action_key(a) for a in old}, {_action_key(a) for a in new}
+    removals = [_removal_action(a) for a in old if _action_key(a) not in new_keys]
+    additions = [a for a in new if _action_key(a) not in old_keys]
+    plan["phases"].insert(0, _phase(f"retire_refinery_output_{recipe}", removals))
+    plan["phases"].append(_phase(f"finish_refinery_output_{recipe}", additions))
+    plan["phases"] = [phase for phase in plan["phases"] if phase["actions"]]
     validate_build_plan(plan)
     return plan

@@ -360,6 +360,42 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
 
 
 
+def entity_signatures_at(
+    client: RconClient, surface: str, force: str, positions: Sequence[Point],
+) -> dict[Point, dict]:
+    """Read exact named occupants and belt settings in one bounded RCON call."""
+    unique = tuple(dict.fromkeys(positions))
+    if not unique:
+        return {}
+    points = "{" + ",".join(f"{{{x},{y}}}" for x, y in unique) + "}"
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for _,p in ipairs(" + points + ") do local e=nil;"
+        "for _,candidate in pairs(s.find_entities_filtered{position=p,radius=0.4,force=f}) do "
+        "if math.abs(candidate.position.x-p[1])<0.01 and "
+        "math.abs(candidate.position.y-p[2])<0.01 then e=candidate break end end;"
+        "if not e then out[#out+1]=p[1]..'|'..p[2]..'|NONE|-|-|-';else "
+        "local name=(e.type=='entity-ghost' and e.ghost_name or e.name);"
+        "local ip='-';local op='-';"
+        "local ok,v=pcall(function() return e.splitter_input_priority end);"
+        "if ok and v then ip=v end;"
+        "ok,v=pcall(function() return e.splitter_output_priority end);"
+        "if ok and v then op=v end;"
+        "out[#out+1]=p[1]..'|'..p[2]..'|'..name..'|'..e.direction..'|'..ip..'|'..op end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    result: dict[Point, dict] = {}
+    for record in _sc(client, lua).split(";"):
+        x, y, name, direction, input_priority, output_priority = record.split("|")
+        result[(float(x), float(y))] = {
+            "name": name,
+            "direction": int(direction) if direction != "-" else None,
+            "input_priority": None if input_priority == "-" else input_priority,
+            "output_priority": None if output_priority == "-" else output_priority,
+        }
+    return result
+
+
 def logistic_request_total(
     client: RconClient, surface: str, force: str, item: str,
 ) -> int:

@@ -3,30 +3,7 @@
 
 from __future__ import annotations
 
-import math
-
-from orchestrator import live_base
-from orchestrator.stage_services import (
-    _BRIDGE_SURVEY_MARGIN,
-    _DEFAULT_INSERTER,
-    StuckError,
-)
-from orchestrator.stage_transport import (
-    _clear_side,
-    _direct_belt_entry,
-    _replace_existing_source_belt,
-    _through_belt_source,
-    _transport_mode,
-    _toward,
-    _choose_route_belt_tier,
-)
-from planners.belt_bridge import (
-    UNDERGROUND_REACH,
-    bridge_belt_to_chest,
-    bridge_belt_to_belt,
-    bridge_chest_to_chest,
-    opposite,
-)
+from orchestrator.stage_transport import _plan_belt_transport, _transport_mode
 from planners.infrastructure_geometry import footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS
 from tools.rcon_client import RconClient
@@ -35,14 +12,14 @@ Point = tuple[float, float]
 
 
 def planned_footprint_tiles(plan: dict) -> set[tuple[int, int]]:
-    """All tiles occupied by a future plan, including multi-tile bodies."""
+    """All tiles occupied by future placements, excluding retirement actions."""
     return set().union(*(
         footprint_tile_indices(
             (action["position"]["x"], action["position"]["y"]),
             ENTITY_FOOTPRINTS.get(action["entity"], 1),
         )
         for phase in plan["phases"] for action in phase["actions"]
-        if "position" in action
+        if action.get("action_type") in {"place_entity", "place_ghost"}
     ))
 
 
@@ -53,94 +30,18 @@ def preflight_ingredient_transport(
     additional_blocked: set[tuple[int, int]] | None = None,
     mode: str | None = None,
     destination_is_belt: bool = False,
+    planned_belt_source: Point | None = None,
     destination_belt_direction: str = "east",
 ) -> tuple[list[dict], str] | None:
-    """Return one exact legal belt route before structural submission."""
+    """Return one exact affordable route from the shared belt planner."""
     if (mode or _transport_mode(recipe, ingredient, machine_count)) == "logistic":
         return None
-    belt_source = _through_belt_source(client, surface, ingredient, source_position)
-    route_source = belt_source or source_position
-    span = int(abs(route_source[0] - feed_position[0])
-               + abs(route_source[1] - feed_position[1])) + 4
-    belt_type = _choose_route_belt_tier(
-        live_base.available_items(client, surface, force), span,
+    actions, belt_type, _reused = _plan_belt_transport(
+        client, surface, force, ingredient, source_position, feed_position,
+        reuse_existing=True, max_belt_route_tiles=max_belt_route_tiles,
+        additional_blocked=additional_blocked,
         destination_is_belt=destination_is_belt,
+        planned_belt_source=planned_belt_source,
+        destination_belt_direction=destination_belt_direction,
     )
-    blocked = live_base.occupied_tiles(
-        client, surface,
-        (min(route_source[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
-         min(route_source[1], feed_position[1]) - _BRIDGE_SURVEY_MARGIN),
-        (max(route_source[0], feed_position[0]) + _BRIDGE_SURVEY_MARGIN,
-         max(route_source[1], feed_position[1]) + _BRIDGE_SURVEY_MARGIN),
-        ignore_names=(
-            *tuple(UNDERGROUND_REACH),
-            *(name.replace("transport-belt", "underground-belt")
-              for name in UNDERGROUND_REACH),
-        ),
-    )
-    blocked |= additional_blocked or set()
-    blocked -= {
-        (math.floor(route_source[0]), math.floor(route_source[1])),
-        (math.floor(feed_position[0]), math.floor(feed_position[1])),
-    }
-    direction = _toward(route_source, feed_position)
-    entry_direction = (
-        _direct_belt_entry(
-            feed_position, blocked, destination_belt_direction,
-        )
-        if destination_is_belt
-        else _clear_side(feed_position, opposite(direction), blocked)
-    )
-    if entry_direction is None:
-        # Same rule as the build path: a plan known to collide is worse
-        # than a stated failure, and the preflight exists to find exactly
-        # this before anything is placed.
-        raise StuckError(
-            f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
-            "every side of it is already occupied."
-        )
-    if belt_source is not None:
-        if destination_is_belt:
-            exit_direction = None
-            if ingredient in {"iron-ore", "copper-ore", "coal", "stone"}:
-                if belt_source[0] > source_position[0]:
-                    exit_direction = "west"
-                elif belt_source[0] < source_position[0]:
-                    exit_direction = "east"
-            actions = bridge_belt_to_belt(
-                belt_source, feed_position, entry_direction=entry_direction,
-                destination_direction=destination_belt_direction,
-                belt_type=belt_type, blocked_tiles=blocked,
-                max_route_tiles=max_belt_route_tiles,
-                exit_direction=exit_direction,
-            )
-        else:
-            actions = bridge_belt_to_chest(
-                belt_source, feed_position, entry_direction=entry_direction,
-                belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
-                blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
-            )
-        actions = _replace_existing_source_belt(
-            client, surface, belt_source, actions,
-        )
-    elif destination_is_belt:
-        raise StuckError(
-            f"{ingredient} refinery feed requires a detected source belt at "
-            f"{source_position}; refusing a chest/inserter side-feed."
-        )
-    else:
-        exit_direction = _clear_side(source_position, direction, blocked)
-        if exit_direction is None:
-            # Unguarded, this handed None straight to the bridge as a direction.
-            raise StuckError(
-                f"{ingredient} cannot leave its source at {source_position}: "
-                "every side of it is already occupied."
-            )
-        actions = bridge_chest_to_chest(
-            source_position, feed_position,
-            exit_direction=exit_direction,
-            entry_direction=entry_direction,
-            belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
-            blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
-        )
     return actions, belt_type

@@ -67,7 +67,7 @@ def test_both_tiles_of_a_side_must_be_free() -> None:
 
 
 def test_the_build_path_refuses_rather_than_colliding() -> None:
-    source = inspect.getsource(stage_transport._plan_belt_transport)
+    source = inspect.getsource(stage_transport._survey_belt_route)
     guard = source[source.index("entry_direction = _clear_side"):]
 
     assert "if entry_direction is None:" in guard
@@ -76,7 +76,7 @@ def test_the_build_path_refuses_rather_than_colliding() -> None:
 
 
 def test_the_source_side_is_guarded_too() -> None:
-    source = inspect.getsource(stage_transport._plan_belt_transport)
+    source = inspect.getsource(stage_transport._survey_belt_route)
 
     assert "if exit_direction is None:" in source
 
@@ -85,15 +85,15 @@ def test_the_preflight_refuses_on_the_same_rule() -> None:
     """The preflight exists to find this before anything is placed, so it must
     not be the one path that still emits the colliding plan."""
     source = inspect.getsource(extraction_transport.preflight_ingredient_transport)
-    module = inspect.getsource(extraction_transport)
+    owner = inspect.getsource(stage_transport._survey_belt_route)
 
-    assert "entry_direction is None" in module
-    assert source is not None
+    assert "_plan_belt_transport(" in source
+    assert "entry_direction is None" in owner
 
 
 def test_the_failure_names_the_endpoint_that_cannot_be_reached() -> None:
     """'blocked by real infrastructure' said nothing about which chest or why."""
-    source = inspect.getsource(stage_transport._plan_belt_transport)
+    source = inspect.getsource(stage_transport._survey_belt_route)
 
     assert "{feed_position}" in source
 

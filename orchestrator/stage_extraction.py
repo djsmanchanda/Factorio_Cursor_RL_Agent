@@ -8,8 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
-from planners.local_layout_planner import LocalLayoutPlanner
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
+from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
 from planners.resource_layouts import (
     generate_direct_mine_row_expansion,
     generate_shared_belt_batch_expansion,
@@ -399,36 +399,25 @@ def _smelter_layout_geometry(
     recipe: str, machine_count: int, belt_type: str, inserter_type: str,
     flow_direction: str = "east",
 ) -> tuple[Rect, Point, Point]:
-    """Exact retained bounds plus input and output interface offsets."""
-    plan = LocalLayoutPlanner().generate_line_layout(
-        recipe, machine_count, 0, 0,
-        belt_type=belt_type, inserter_type=inserter_type,
-        feed_style="chest", terminal_collector=True,
-        flow_direction=flow_direction,
-    )
-    retained = [
-        action for action in actions(plan)
-        if action.get("entity") != "electric-energy-interface"
-    ]
+    """Exact modular bounds plus direct ore-belt and provider interfaces."""
+    del belt_type, inserter_type
+    if flow_direction != "east":
+        raise ValueError("The approved modular refinery blueprint is eastbound")
+    plan = generate_managed_refinery_plan(recipe, machine_count)
+    retained = list(actions(plan))
     extents = []
     for action in retained:
         size = ENTITY_FOOTPRINTS.get(action["entity"], 1)
         x, y = action["position"]["x"], action["position"]["y"]
         extents.append((x - size / 2, y - size / 2, x + size / 2, y + size / 2))
-    feed = next(
-        action for action in retained if action["entity"] == "infinity-chest"
-    )["position"]
-    output = next(
-        action for action in retained
-        if action["entity"] == "steel-chest" and action["position"]["y"] == 6.5
-    )["position"]
+    interface = refinery_interfaces(machine_count)
     return (
         Rect(
             min(box[0] for box in extents), min(box[1] for box in extents),
             max(box[2] for box in extents), max(box[3] for box in extents),
         ),
-        (feed["x"], feed["y"]),
-        (output["x"], output["y"]),
+        interface.ore_inputs[0],
+        interface.provider,
     )
 
 
@@ -554,10 +543,9 @@ def plan_local_extraction(
         expansion_step = 1
     furnace_count = smelter_count_for_drills(recipe, drill_count, productivity)
     geometries = {
-        direction: _smelter_layout_geometry(
-            recipe, furnace_count, belt_type, inserter_type, direction,
+        "east": _smelter_layout_geometry(
+            recipe, furnace_count, belt_type, inserter_type, "east",
         )
-        for direction in ("east", "west")
     }
     east_bounds = geometries["east"][0]
     footprint = (
@@ -570,8 +558,7 @@ def plan_local_extraction(
     for anchor in smelter_search_anchors(
         patch_min, patch_max, footprint, reference_point, ore_output,
     ):
-        for direction in ("east", "west"):
-            bounds, feed_offset, output_offset = geometries[direction]
+        for direction, (bounds, feed_offset, output_offset) in geometries.items():
             oriented_anchor = _align_area_anchor(anchor, bounds)
             area_min = live_base.find_clear_area(
                 client, surface, oriented_anchor,

@@ -42,6 +42,9 @@ from orchestrator.priority_list import PriorityList
 from orchestrator.extraction_transport import (
     planned_footprint_tiles, preflight_ingredient_transport,
 )
+from orchestrator.refinery_state import (
+    ManagedRefineryState, assert_refinery_removals_owned, recover_managed_refinery,
+)
 from orchestrator.stage_chemical import ensure_coal_mine, ensure_oil_cell
 from orchestrator.stage_extraction import (
     LOCAL_MODE_MAX_LINK_TILES, existing_mine_service_geometry,
@@ -85,11 +88,13 @@ from planners.bootstrap_smelting import (
     retire_logistic_smelter_plan,
 )
 from planners.infrastructure import strip_local_power
+from planners.infrastructure_geometry import footprint_tile_indices
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.mall_layout import (
     generate_compact_mall_request_update, generate_mall_provider_limit_update,
     generate_mall_stock_gate_update, generate_promoted_mall_retirement_plan,
 )
+from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.recipe_data import (
     BELT_TIERS,
     LINE_RECIPES,
@@ -98,6 +103,10 @@ from planners.recipe_data import (
     install_catalog_line_recipes,
     install_catalog_machines,
     install_catalog_stack_sizes,
+)
+from planners.smelter_block import (
+    block_shape, generate_managed_refinery_extension_plan,
+    generate_managed_refinery_plan, refinery_interfaces,
 )
 from tools.rcon_client import RconClient
 
@@ -387,112 +396,24 @@ def _submit_mining_plan(
 
 
 
-@dataclass(frozen=True)
-class _ExistingPlateSmelter:
-    """Reconstructed geometry for the one managed row that may be extended."""
-
-    origin: Point
-    flow_direction: str
-    belt_type: str
-    inserter_type: str
-    output: Point
-
-
-def _plate_line_layout(
-    recipe: str, machine_count: int, origin: Point, belt_type: str,
-    inserter_type: str, flow_direction: str,
-) -> tuple[dict, Point, Point]:
-    """Generate the exact direct-input, side-tap plate row used on the base."""
-    ox, oy = round(origin[0]), round(origin[1])
-    plan = LocalLayoutPlanner().generate_line_layout(
-        recipe, machine_count, ox, oy,
-        belt_type=belt_type, inserter_type=inserter_type,
-        feed_style="chest", terminal_collector=True,
-        flow_direction=flow_direction,
-    )
-    plan = strip_local_power(plan, remove_substations=False)
-    output = _side_sample_plate_output(
-        plan, (ox, oy), machine_count, belt_type, flow_direction,
-        tap_inserter_type=inserter_type,
-    )
-    _publish_output_chest(plan)
-    feed = _direct_single_belt_feed(
-        plan, LINE_RECIPES[recipe]["ingredients"][0], flow_direction,
-    )
-    return plan, feed, output
-
-
-def _retain_direct_feed_endpoint(
-    plan: dict, old_feed: Point, flow_direction: str,
-) -> None:
-    """Keep direct mine input fixed while a mirrored plate row grows.
-
-    ``generate_line_layout`` sizes chest-fed feeder belts by machine count.  A
-    direct ore line has no such feeder: extending that endpoint replaces the
-    live mine belt (and, when tiers differ, produces an executor collision).
-    The refinery may grow at its output tail, but its direct ore handoff is an
-    immutable interface.
-    """
-    feed_x, feed_y = old_feed
-    beyond_feed = (
-        (lambda x: x > feed_x) if flow_direction == "west"
-        else (lambda x: x < feed_x)
-    )
-    for phase in plan["phases"]:
-        phase["actions"] = [
-            action for action in phase["actions"]
-            if not (
-                action.get("action_type") == "place_ghost"
-                and "transport-belt" in action.get("entity", "")
-                and action["position"]["y"] == feed_y
-                and beyond_feed(action["position"]["x"])
-            )
-        ]
-
-
-def _plate_line_extension_plan(
-    recipe: str, current_machines: int, target_machines: int,
-    origin: Point, belt_type: str, inserter_type: str, flow_direction: str,
-) -> tuple[dict, dict, Point]:
-    """Add the missing tail of a plate row without removing live infrastructure."""
-    if target_machines <= current_machines:
-        raise ValueError("plate smelter extension must increase machine count")
-    old, old_feed, _old_output = _plate_line_layout(
-        recipe, current_machines, origin, belt_type, inserter_type, flow_direction,
-    )
-    target_origin = (
-        (origin[0] - (target_machines - current_machines) * 3, origin[1])
-        if flow_direction == "west" else origin
-    )
-    new, _new_feed, new_output = _plate_line_layout(
-        recipe, target_machines, target_origin,
-        belt_type, inserter_type, flow_direction,
-    )
-    _retain_direct_feed_endpoint(new, old_feed, flow_direction)
-    old_keys = {
-        json.dumps(action, sort_keys=True)
-        for phase in old["phases"] for action in phase["actions"]
-    }
-    additions = [
-        action
-        for phase in new["phases"] for action in phase["actions"]
-        if json.dumps(action, sort_keys=True) not in old_keys
-    ]
-    phases = [
-        {"name": "smelter_extension_scaffolding", "actions": [
-            action for action in additions if action["action_type"] == "place_entity"
-        ]},
-        {"name": f"extend_line_{recipe}", "actions": [
-            action for action in additions if action["action_type"] == "place_ghost"
-        ]},
-    ]
-    return {"phases": [phase for phase in phases if phase["actions"]]}, new, new_output
-
-
 def _tile_bounds(tiles: set[tuple[int, int]]) -> tuple[Point, Point]:
     """Return the smallest RCON survey box that contains the given tiles."""
     xs, ys = zip(*tiles)
     return (float(min(xs)), float(min(ys))), (float(max(xs) + 1), float(max(ys) + 1))
+
+
+def _planned_removal_tiles(plan: dict) -> set[tuple[int, int]]:
+    """Tiles the same authorized delta retires before replacement placement."""
+    removed: set[tuple[int, int]] = set()
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("action_type") != "remove_entity":
+                continue
+            removed.update(footprint_tile_indices(
+                (action["position"]["x"], action["position"]["y"]),
+                ENTITY_FOOTPRINTS.get(action["entity"], 1),
+            ))
+    return removed
 
 
 def _plate_expansion_foundation(
@@ -508,7 +429,8 @@ def _plate_expansion_foundation(
     occupied = live_base.occupied_tiles(
         client, surface, minimum, maximum, include_water=False,
     )
-    collision = sorted(footprint & occupied)
+    replacement_tiles = _planned_removal_tiles(smelter_delta)
+    collision = sorted(footprint & (occupied - replacement_tiles))
     if collision:
         raise StuckError(
             f"{recipe} refinery extension intersects real infrastructure at "
@@ -552,173 +474,128 @@ def _place_plate_expansion_foundation(
         )
 
 
-def _existing_plate_smelter(
-    client: RconClient, surface: str, line,
-    expected_origin: Point | None = None,
-) -> _ExistingPlateSmelter:
-    """Recover one managed row even when starved furnaces lose their recipe."""
-    positions = sorted(line.machine_positions)
-    rows = {position[1] for position in positions}
-    if len(rows) != 1:
-        raise StuckError(
-            f"{line.recipe} has machines at {len(rows)} separate row(s); "
-            "refusing to add another refinery site"
-        )
-    xs = sorted(position[0] for position in positions)
-    if expected_origin is None and any(
-        round(right - left, 3) != 3.0 for left, right in zip(xs, xs[1:])
-    ):
-        raise StuckError(
-            f"{line.recipe} machines are not one contiguous managed row; "
-            "refusing to infer an expansion footprint"
-        )
-    machine_y = next(iter(rows))
-    origin = expected_origin or (xs[0] - 1.5, machine_y - 3.5)
-    misaligned = any(
-        abs(position[1] - (origin[1] + 3.5)) > 0.001
-        or abs(
-            (position[0] - origin[0] - 1.5) / 3
-            - round((position[0] - origin[0] - 1.5) / 3)
-        ) > 0.001
-        for position in positions
-    )
-    if misaligned:
-        raise StuckError(
-            f"{line.recipe} machines do not fit the managed row origin; "
-            "refusing to infer an expansion footprint"
-        )
-    # The west terminal is independent of row length. The east terminal moves
-    # with the original row size, so search a small reserve around the
-    # recipe-visible count; this survives a starved furnace disappearing from
-    # the live recipe survey without inventing a second refinery site.
-    east_outputs = [
-        (origin[0] + count * 3 + 1.5, origin[1] + 8.5)
-        for count in range(max(1, line.machine_count), line.machine_count + 5)
-    ]
-    candidates = [("west", (origin[0] - 1.5, origin[1] + 8.5))] + [
-        ("east", position) for position in east_outputs
-    ]
-    outputs = []
-    for direction, position in candidates:
-        entity = live_base.entity_at(client, surface, position)
-        if entity and entity.get("ghost_name", entity.get("name")) in {
-            "passive-provider-chest", "steel-chest",
-        }:
-            outputs.append((direction, position))
-    if len(outputs) != 1:
-        raise StuckError(
-            f"{line.recipe} has no unique managed side-tap output; "
-            "refusing to guess its expansion direction"
-        )
-    belt = live_base.entity_at(
-        client, surface, (origin[0] + 0.5, origin[1] + 0.5),
-    )
-    inserter = live_base.entity_at(
-        client, surface, (origin[0] + 1.5, origin[1] + 1.5),
-    )
-    belt_name = belt.get("ghost_name", belt.get("name")) if belt else None
-    inserter_name = (
-        inserter.get("ghost_name", inserter.get("name")) if inserter else None
-    )
-    if belt_name not in BELT_TIERS:
-        raise StuckError(f"{line.recipe} managed input belt is missing")
-    if not inserter_name or not inserter_name.endswith("inserter"):
-        raise StuckError(f"{line.recipe} managed input inserter is missing")
-    return _ExistingPlateSmelter(
-        origin, outputs[0][0], belt_name, inserter_name, outputs[0][1],
-    )
-
-
-def _plate_substation_position(
-    recipe: str, machine_count: int, origin: Point,
-    belt_type: str, inserter_type: str, flow_direction: str,
-) -> Point:
-    """Recompute the exact dedicated power anchor for a surveyed row."""
-    plan, _feed, _output = _plate_line_layout(
-        recipe, machine_count, origin, belt_type, inserter_type, flow_direction,
-    )
-    return next(
+def _plan_area(plan: dict, padding: float = 15.0) -> tuple[Point, Point]:
+    """Bounds containing every action position with remediation space around it."""
+    positions = [
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
-        if action["entity"] == "substation"
+        if "position" in action
+    ]
+    xs, ys = zip(*positions)
+    return (
+        (min(xs) - padding, min(ys) - padding),
+        (max(xs) + padding, max(ys) + padding),
     )
+
+
+def _modular_machine_positions(plan: dict, recipe: str) -> list[Point]:
+    machine = LINE_RECIPES[recipe]["machine"]
+    return [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+        and action.get("entity") == machine
+    ]
+
+
+def _bring_modular_refinery_up(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, plan: dict, furnace_count: int, origin: Point,
+    emit: Callable[[str], None], *, feed_grace_seconds: float = 0.0,
+) -> None:
+    """Power, cover, and diagnose the complete modular refinery footprint."""
+    interface = refinery_interfaces(
+        furnace_count, origin_x=origin[0], origin_y=origin[1],
+    )
+    machines = _modular_machine_positions(plan, recipe)
+    support_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity", "").endswith("inserter")
+    }
+    for position in sorted(support_positions):
+        if live_base.entity_status_name(client, surface, position) == "no_power":
+            emit(f"  support inserter at {position} has no power -- connecting it")
+            if not extend_power(client, bridge, surface, force, position, emit):
+                raise StuckError(f"support inserter at {position} cannot reach generated power")
+    bring_stage_up(
+        client, bridge, surface, force, f"modular refinery for {recipe}",
+        origin, _plan_area(plan), interface.power_anchor, machines, emit,
+        logistic_chest_positions=[interface.provider],
+    )
+    stuck = _diagnose_machines(
+        client, surface, machines, emit, grace_seconds=feed_grace_seconds,
+        bridge=bridge, force=force,
+    )
+    if stuck:
+        raise StuckError(f"modular refinery for {recipe} built but not healthy: {stuck}")
+
 
 def _extend_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, line, target_machines: int, ore_output: Point,
-    emit: Callable[[str], None],
+    recipe: str, state: ManagedRefineryState, target_machines: int,
+    ore_output: Point, emit: Callable[[str], None],
 ) -> Point:
-    """Grow the original direct-belt smelter row and preserve its belt trunk."""
-    existing = _existing_plate_smelter(client, surface, line)
-    if target_machines <= line.machine_count:
+    """Expand one recovered block by migrating its planner-owned End/output cap."""
+    del ore_output
+    origin = state.origin
+    full = generate_managed_refinery_plan(
+        recipe, target_machines, origin_x=origin[0], origin_y=origin[1],
+    )
+    interface = refinery_interfaces(
+        target_machines, origin_x=origin[0], origin_y=origin[1],
+    )
+    if target_machines <= state.furnace_count:
         emit(
-            f"SMELTER COHESION: existing {recipe} row already has "
-            f"{line.machine_count}/{target_machines} furnace(s)"
+            f"SMELTER COHESION: existing modular {recipe} block already has "
+            f"{state.furnace_count}/{target_machines} furnace(s)"
         )
-        substation = _plate_substation_position(
-            recipe, line.machine_count, existing.origin, existing.belt_type,
-            existing.inserter_type, existing.flow_direction,
+        _bring_modular_refinery_up(
+            client, bridge, surface, force, recipe, full,
+            target_machines, origin, emit,
         )
-        length = line.machine_count * 3
-        area = (
-            (existing.origin[0] - 15, existing.origin[1] - 15),
-            (existing.origin[0] + length + 15, existing.origin[1] + 15),
-        )
-        bring_stage_up(
-            client, bridge, surface, force, f"existing {recipe} smelter",
-            existing.origin, area, substation, list(line.machine_positions), emit,
-        )
-        return existing.output
-    delta, full, output = _plate_line_extension_plan(
-        recipe, line.machine_count, target_machines, existing.origin,
-        existing.belt_type, existing.inserter_type, existing.flow_direction,
+        return interface.provider
+    delta = generate_managed_refinery_extension_plan(
+        recipe, state.furnace_count, target_machines,
+        origin_x=origin[0], origin_y=origin[1],
     )
-    target_origin = (
-        (
-            existing.origin[0] - (target_machines - line.machine_count) * 3,
-            existing.origin[1],
-        )
-        if existing.flow_direction == "west" else existing.origin
-    )
+    try:
+        assert_refinery_removals_owned(client, surface, force, state, delta)
+    except ValueError as error:
+        raise StuckError(str(error)) from error
     delta["surface"], delta["force"] = surface, force
     emit(
-        f"SMELTER COHESION: extending the existing {recipe} row at "
-        f"{existing.origin} from {line.machine_count} to {target_machines}; "
-        "the ore and plate trunks stay continuous"
+        f"SMELTER COHESION: expanding {recipe} at {origin} from "
+        f"{state.furnace_count} to {target_machines}; retire End, add Repeat, finish End"
     )
-    _submit(client, bridge, surface, delta, f"extend_{recipe}_smelter", emit)
-    machine = LINE_RECIPES[recipe]["machine"]
-    machines = [
-        (action["position"]["x"], action["position"]["y"])
-        for phase in full["phases"] for action in phase["actions"]
-        if action["entity"] == machine
-    ]
-    substation = next(
-        (action["position"]["x"], action["position"]["y"])
-        for phase in full["phases"] for action in phase["actions"]
-        if action["entity"] == "substation"
+    _ensure_plan_construction_coverage(
+        client, bridge, surface, force, delta, emit,
     )
-    ingredient = LINE_RECIPES[recipe]["ingredients"][0]
-    _power_and_raise_stage(
-        client, bridge, surface, force, recipe, full, machines, substation,
-        {ingredient: ore_output}, {ingredient: "belt"},
-        target_machines, target_origin[0], target_origin[1], emit,
+    _submit(client, bridge, surface, delta, f"extend_{recipe}_refinery", emit)
+    _bring_modular_refinery_up(
+        client, bridge, surface, force, recipe, full,
+        target_machines, origin, emit,
     )
-    return output
+    return interface.provider
 
 
 def _assert_atomic_plate_expansion_affordable(
     client: RconClient, surface: str, force: str, recipe: str, extraction,
-    line, target_machines: int, emit: Callable[[str], None],
+    state: ManagedRefineryState, target_machines: int, emit: Callable[[str], None],
 ) -> dict | None:
-    """Preflight the entire mine/refinery phase before submitting either."""
-    if target_machines <= line.machine_count:
+    """Preflight the mine and exact modular refinery delta before either grows."""
+    if target_machines <= state.furnace_count:
         return None
-    existing = _existing_plate_smelter(client, surface, line)
-    smelter_delta, _full, _output = _plate_line_extension_plan(
-        recipe, line.machine_count, target_machines, existing.origin,
-        existing.belt_type, existing.inserter_type, existing.flow_direction,
+    smelter_delta = generate_managed_refinery_extension_plan(
+        recipe, state.furnace_count, target_machines,
+        origin_x=state.origin[0], origin_y=state.origin[1],
     )
+    try:
+        assert_refinery_removals_owned(
+            client, surface, force, state, smelter_delta,
+        )
+    except ValueError as error:
+        raise StuckError(str(error)) from error
     foundation = _plate_expansion_foundation(
         client, surface, recipe, smelter_delta,
     )
@@ -737,118 +614,197 @@ def _assert_atomic_plate_expansion_affordable(
     return foundation
 
 
+def _refinery_machine_positions(
+    client: RconClient, surface: str, force: str, recipe: str,
+    line, near: Point, emit: Callable[[str], None],
+) -> tuple[Point, ...]:
+    """Merge recipe-visible and starved furnaces before structural recovery."""
+    visible = set(line.machine_positions) if line is not None else set()
+    anchor = next(iter(visible), near)
+    idle = live_base.find_idle_machine_row(
+        client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+        anchor, radius=150.0,
+    )
+    idle_positions = set(idle.machine_positions) if idle is not None else set()
+    positions = tuple(sorted(visible | idle_positions))
+    if idle_positions - visible:
+        emit(
+            f"SMELTER RECOVERY: merged {len(idle_positions - visible)} starved "
+            f"{recipe} furnace(s) into the managed block survey"
+        )
+    return positions
+
+
 def _cohesive_smelter_target(
     client: RconClient, surface: str, force: str, recipe: str,
     extraction, expand: bool, emit: Callable[[str], None],
-) -> tuple[object | None, int | None]:
-    """Resolve one existing refinery and its rate-sized expansion target."""
+) -> tuple[ManagedRefineryState | None, int | None]:
+    """Recover one modular refinery and round its rate target to whole modules."""
     if not expand:
         return None, None
-    existing = live_base.find_line(
+    line = live_base.find_line(
         client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
     )
-    if existing is None and recipe in {"iron-plate", "copper-plate"}:
-        existing = live_base.find_idle_machine_row(
-            client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
-            extraction.smelter_origin,
-        )
-        if existing is not None:
-            emit(
-                f"SMELTER RECOVERY: found {existing.machine_count} idle "
-                f"{recipe} furnace(s) near {extraction.smelter_origin}"
-            )
-    if existing is None:
+    positions = _refinery_machine_positions(
+        client, surface, force, recipe, line, extraction.smelter_origin, emit,
+    )
+    if not positions:
         return None, None
-    if recipe in {"iron-plate", "copper-plate"}:
-        # A starved furnace loses its recipe, so merge recipe-visible and
-        # recipe-less furnaces around a REAL deployed machine before computing
-        # the extension diff. The fresh extraction search may choose another
-        # free site, so it cannot identify this row's immutable origin.
-        idle = live_base.find_idle_machine_row(
-            client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
-            existing.machine_positions[0],
+    try:
+        existing = recover_managed_refinery(
+            client, surface, force, recipe, positions,
         )
-        if idle is not None:
-            positions = tuple(sorted(set(existing.machine_positions) | set(idle.machine_positions)))
-            if len(positions) > existing.machine_count:
-                if hasattr(existing, "__dataclass_fields__"):
-                    existing = replace(
-                        existing, machine_count=len(positions),
-                        machine_positions=positions,
-                    )
-                else:
-                    existing.machine_count = len(positions)
-                    existing.machine_positions = positions
-    # Validate before placing another drill: ambiguous legacy/multi-site
-    # smelters fail closed instead of making the transport tangle worse.
-    _existing_plate_smelter(client, surface, existing)
+    except ValueError as error:
+        raise StuckError(str(error)) from error
     total_drills = extraction.system_drill_count_before + extraction.drill_count
-    target = smelter_count_for_drills(
+    required = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
     )
+    target = block_shape(required).capacity
     emit(
         f"SMELTER SYSTEM TARGET: {total_drills} total {extraction.ore} "
-        f"drill(s) support {target} furnace(s) in the existing block"
+        f"drill(s) require {required} furnace(s); modular target is {target}"
     )
     return existing, target
+
+
+def _prepare_initial_refinery(
+    client: RconClient, surface: str, force: str, recipe: str,
+    extraction, ore_output: Point, emit: Callable[[str], None], *,
+    preflight_only: bool,
+) -> tuple[dict, dict | None, tuple[float, float], str, int]:
+    """Preflight the refinery, route, landfill, bill, and planned mine together."""
+    origin = extraction.smelter_origin
+    target = block_shape(extraction.furnace_count).capacity
+    plan = generate_managed_refinery_plan(
+        recipe, target, origin_x=origin[0], origin_y=origin[1],
+    )
+    interface = refinery_interfaces(
+        target, origin_x=origin[0], origin_y=origin[1],
+    )
+    emit(
+        f"modular refinery for {recipe}: building Start + End at {origin} "
+        f"with {target} furnace(s)"
+    )
+    planned_blocked = planned_footprint_tiles(plan)
+    build_plan = getattr(extraction, "build_plan", None)
+    if build_plan is not None:
+        planned_blocked |= planned_footprint_tiles(build_plan)
+        planned_blocked -= {
+            (math.floor(ore_output[0]), math.floor(ore_output[1])),
+            (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
+        }
+    route = preflight_ingredient_transport(
+        client, surface, force, recipe, extraction.ore,
+        ore_output, interface.ore_inputs[0], target,
+        max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+        additional_blocked=planned_blocked,
+        mode="belt", destination_is_belt=True,
+        planned_belt_source=(ore_output[0] + 1, ore_output[1])
+        if preflight_only else None,
+        destination_belt_direction="east",
+    )
+    if route is None:
+        raise StuckError(f"{recipe} direct ore route unexpectedly selected logistics")
+    route_actions, belt_type = route
+    plan["phases"].append({
+        "name": f"bridge_{extraction.ore}_to_{recipe}",
+        "actions": route_actions,
+    })
+    foundation = _plate_expansion_foundation(client, surface, recipe, plan)
+    bill_route = route_actions
+    build_plan = getattr(extraction, "build_plan", None)
+    if preflight_only and build_plan is not None:
+        existing = {
+            json.dumps(action, sort_keys=True)
+            for phase in build_plan["phases"] for action in phase["actions"]
+        }
+        bill_route = [
+            action for action in route_actions
+            if json.dumps(action, sort_keys=True) not in existing
+        ]
+    bill_plan = dict(plan)
+    bill_plan["phases"] = [
+        *plan["phases"][:-1],
+        {**plan["phases"][-1], "actions": bill_route},
+    ]
+    combined_plans = (
+        [build_plan] if preflight_only and build_plan is not None else []
+    ) + ([foundation] if foundation is not None else []) + [bill_plan]
+    combined = {
+        "force": force,
+        "phases": [phase for staged in combined_plans for phase in staged["phases"]],
+    }
+    assert_affordable(
+        client, surface, force, combined, f"initial_{recipe}_system", emit,
+    )
+    belt_tiles = sum(
+        1 for action in route_actions
+        if "transport-belt" in action.get("entity", "")
+    )
+    return plan, foundation, interface.provider, belt_type, belt_tiles
 
 
 def _build_initial_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, extraction, ore_output: Point, reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, preflight_only: bool = False,
 ) -> Point:
-    """Build the first off-ore smelter without escalating a belt shortage."""
-    conversion_args = dict(
-        placement_origin=extraction.smelter_origin,
-        machine_count=extraction.furnace_count,
-        max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
-        flow_direction=extraction.smelter_flow_direction,
+    """Build the first modular refinery with one continuous mine-to-ore belt."""
+    del reference_point
+    plan, foundation, provider, belt_type, belt_tiles = _prepare_initial_refinery(
+        client, surface, force, recipe, extraction, ore_output, emit,
+        preflight_only=preflight_only,
     )
-    stock = live_base.available_items(client, surface, force)
-    tiers = [_DEFAULT_BELT] + [
-        tier for tier in _BELT_TIERS_CHEAPEST_FIRST[:2]
-        if tier != _DEFAULT_BELT
-        and stock.get(tier, 0) and tier in LINE_RECIPES
-    ]
-    shortage: MaterialShortage | None = None
-    for tier in tiers:
-        try:
-            return build_conversion_stage(
-                client, bridge, surface, force, recipe,
-                {extraction.ore: ore_output}, reference_point, emit,
-                belt_type=tier, **conversion_args,
-            )
-        except MaterialShortage as short_of:
-            if not any(
-                belt in short_of.required for belt in _BELT_TIERS_CHEAPEST_FIRST
-            ):
-                raise
-            shortage = short_of
-            if recipe not in {"iron-plate", "copper-plate"}:
-                # Stone/ore refineries have no beltless bootstrap. Trying every
-                # faster tier replaces an early-belt shortage with turbo.
-                raise shortage
-            emit(f"  BELT TIER: {recipe} cannot afford {tier}; trying the next tier")
-    if recipe not in {"iron-plate", "copper-plate"}:
-        raise shortage
-    # Plate refineries are the raw-material spine. A requester chest cannot
-    # replace their direct mine-to-furnace belt: the mine output is a belt
-    # endpoint, not a logistic provider, so a requester-fed fallback would
-    # have no copper/iron source at all. Propagate the cheapest belt bill to
-    # the mall and retry this same direct route after belts are produced.
-    if shortage is None:
-        raise StuckError(f"no direct belt route is available for {recipe}")
+    if foundation is not None:
+        _place_plate_expansion_foundation(
+            client, bridge, surface, force, recipe, foundation, emit,
+        )
+    plan["surface"], plan["force"] = surface, force
+    coverage_plan = {
+        "surface": surface, "force": force,
+        "phases": [
+            action_phase for staged in (
+                ([extraction.build_plan] if preflight_only and
+                 getattr(extraction, "build_plan", None) is not None else [])
+                + [plan]
+            ) for action_phase in staged["phases"]
+        ],
+    }
+    _ensure_plan_construction_coverage(
+        client, bridge, surface, force, coverage_plan, emit,
+    )
+    if preflight_only:
+        return provider
+    _submit(client, bridge, surface, plan, f"modular_{recipe}_refinery", emit)
+    _bring_modular_refinery_up(
+        client, bridge, surface, force, recipe, plan,
+        block_shape(extraction.furnace_count).capacity,
+        extraction.smelter_origin, emit,
+        feed_grace_seconds=transport_grace_seconds(belt_type, belt_tiles),
+    )
+    return provider
+
+def _log_mining_expansion(extraction, emit: Callable[[str], None]) -> None:
+    """Describe the selected drill phase without inflating the orchestration gate."""
+    if extraction.build_plan is None:
+        return
     emit(
-        f"  BELT DEMAND: deferring direct {recipe} refinery until the mall "
-        "produces its belt bill"
+        f"MINING SYSTEM PHASE: {extraction.system_drill_count_before} -> "
+        f"{extraction.system_drill_target} total {extraction.ore} drills; "
+        f"building {extraction.drill_count} drill(s) in this batch"
     )
-    raise shortage
+    phase_names = {phase["name"] for phase in extraction.build_plan["phases"]}
+    if "shared_belt_batch" in phase_names:
+        emit("MINING CAPACITY: filling the current reserved corridor in one batch")
+    elif "direct_mine_output" in phase_names:
+        emit("MINING CAPACITY: opening the next mine at the current system phase")
 
 
 def build_mining_stage(
-    client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
-    reference_point: Point, emit: Callable[[str], None], *, expand: bool = False,
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, reference_point: Point, emit: Callable[[str], None], *,
+    expand: bool = False,
 ) -> Point:
     """Build or expand one cohesive mine-to-smelter system."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
@@ -883,17 +839,8 @@ def build_mining_stage(
             client, surface, force, recipe, extraction, existing_smelter,
             cohesive_target, emit,
         )
-    if expand and extraction.build_plan is not None:
-        emit(
-            f"MINING SYSTEM PHASE: {extraction.system_drill_count_before} -> "
-            f"{extraction.system_drill_target} total {extraction.ore} drills; "
-            f"building {extraction.drill_count} drill(s) in this batch"
-        )
-        phase_names = {phase["name"] for phase in extraction.build_plan["phases"]}
-        if "shared_belt_batch" in phase_names:
-            emit("MINING CAPACITY: filling the current reserved corridor in one batch")
-        elif "direct_mine_output" in phase_names:
-            emit("MINING CAPACITY: opening the next mine at the current system phase")
+    if expand:
+        _log_mining_expansion(extraction, emit)
     emit(
         f"{extraction.drill_count} drill(s) feed {extraction.furnace_count} "
         f"separate {recipe} furnace(s); mining productivity "
@@ -909,6 +856,11 @@ def build_mining_stage(
     if foundation is not None:
         _place_plate_expansion_foundation(
             client, bridge, surface, force, recipe, foundation, emit,
+        )
+    if cohesive_target is None:
+        _build_initial_plate_smelter(
+            client, bridge, surface, force, recipe, extraction, ore_output,
+            reference_point, emit, preflight_only=True,
         )
     _submit_mining_plan(
         client, bridge, surface, force, extraction, ore_output, emit,

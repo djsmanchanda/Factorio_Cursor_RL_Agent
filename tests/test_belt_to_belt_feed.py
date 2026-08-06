@@ -24,6 +24,7 @@ from planners.belt_bridge import (  # noqa: E402
 )
 
 _PLAN = inspect.getsource(stage_transport._plan_belt_transport)
+_ROUTE = inspect.getsource(stage_transport._route_belt_actions)
 
 
 def _shape(fn, **kwargs) -> Counter:
@@ -166,17 +167,17 @@ def test_the_build_path_knows_when_the_destination_is_a_belt() -> None:
 
 def test_refinery_never_falls_back_to_a_chest_side_feed() -> None:
     assert "refusing a chest/inserter side-feed" in inspect.getsource(
-        stage_transport._plan_belt_transport
+        stage_transport._survey_belt_route
     )
 
 def test_both_belt_ends_produce_a_belt_to_belt_bridge() -> None:
-    assert "if belt_source is not None and destination_is_belt:" in _PLAN
-    assert "bridge_belt_to_belt(" in _PLAN
+    assert "if belt_source is not None and destination_is_belt:" in _ROUTE
+    assert "bridge_belt_to_belt(" in _ROUTE
 
 
 def test_a_chest_destination_still_gets_its_inserter() -> None:
-    assert "elif belt_source is not None:" in _PLAN
-    assert "bridge_belt_to_chest(" in _PLAN
+    assert "if belt_source is not None:" in _ROUTE
+    assert "bridge_belt_to_chest(" in _ROUTE
 
 
 def test_the_conversion_stage_passes_the_flag_to_the_build_not_only_the_preflight() -> None:

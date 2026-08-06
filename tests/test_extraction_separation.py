@@ -22,7 +22,7 @@ from orchestrator.stage_extraction import (
     smelter_count_for_drills,
     smelter_search_anchors,
 )
-from planners.local_layout_planner import LocalLayoutPlanner
+from planners.smelter_block import generate_managed_refinery_plan
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.zoning_geometry import Rect
 
@@ -69,8 +69,8 @@ def test_exact_smelter_bounds_include_west_feed_and_substation() -> None:
         "iron-plate", 2, "fast-transport-belt", "fast-inserter"
     )
 
-    assert bounds == Rect(-5.0, -2.0, 8.0, 7.0)
-    assert feed == (-1.5, -1.5)
+    assert bounds == Rect(-1.0, 0.0, 17.0, 16.0)
+    assert feed == (-0.5, 0.5)
 
 
 def test_smelter_search_alignment_produces_integer_line_origins() -> None:
@@ -399,26 +399,21 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
         belt_type="fast-transport-belt", inserter_type="fast-inserter",
     )
 
-    assert planned.smelter_origin == (85.0, 82.0)
+    assert planned.smelter_origin == (81.0, 80.0)
     assert clear_calls[1][1] == {
         "max_radius": 60.0,
         "avoid_resources": True,
         "resource_clearance": 5.0,
     }
-    layout = LocalLayoutPlanner().generate_line_layout(
-        "iron-plate", 2, *planned.smelter_origin,
-        belt_type="fast-transport-belt", inserter_type="fast-inserter",
-        feed_style="chest", terminal_collector=True,
+    layout = generate_managed_refinery_plan(
+        "iron-plate", 2, origin_x=planned.smelter_origin[0],
+        origin_y=planned.smelter_origin[1],
     )
-    retained = [
-        action for action in actions(layout)
-        if action["entity"] != "electric-energy-interface"
-    ]
-    for action in retained:
+    for action in actions(layout):
         size = ENTITY_FOOTPRINTS.get(action["entity"], 1)
         x, y = action["position"]["x"], action["position"]["y"]
-        assert 80.0 <= x - size / 2 and x + size / 2 <= 93.0
-        assert 80.0 <= y - size / 2 and y + size / 2 <= 89.0
+        assert 80.0 <= x - size / 2 and x + size / 2 <= 98.0
+        assert 80.0 <= y - size / 2 and y + size / 2 <= 96.0
 
 
 def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:
@@ -486,7 +481,7 @@ def test_planner_fails_closed_beyond_local_mode_link_limit(monkeypatch) -> None:
     assert LOCAL_MODE_MAX_LINK_TILES == 300.0
 
 
-def test_real_builder_submits_ore_only_then_calls_separate_smelter(
+def test_real_builder_submits_ore_then_calls_modular_refinery(
     monkeypatch,
 ) -> None:
     submitted: list[dict] = []
@@ -512,14 +507,15 @@ def test_real_builder_submits_ore_only_then_calls_separate_smelter(
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: [])
 
-    def build_conversion(*args, **kwargs):
-        conversion["ingredient_sources"] = args[5]
-        conversion["placement_origin"] = kwargs["placement_origin"]
-        conversion["machine_count"] = kwargs["machine_count"]
-        conversion["max_belt_route_tiles"] = kwargs["max_belt_route_tiles"]
+    def build_modular(*args, **_kwargs):
+        conversion["recipe"] = args[4]
+        conversion["extraction"] = args[5]
+        conversion["ore_output"] = args[6]
         return (120.5, 90.5)
 
-    monkeypatch.setattr(autonomous_builder, "build_conversion_stage", build_conversion)
+    monkeypatch.setattr(
+        autonomous_builder, "_build_initial_plate_smelter", build_modular,
+    )
 
     output = autonomous_builder.build_mining_stage(
         object(), object(), "nauvis", "player", "iron-plate",
@@ -531,12 +527,9 @@ def test_real_builder_submits_ore_only_then_calls_separate_smelter(
     assert "electric-furnace" not in _entities(submitted[0])
     assert "passive-provider-chest" not in _entities(submitted[0])
     assert conversion == {
-        "ingredient_sources": {"iron-ore": (7.5, 20.5)},
-        "placement_origin": (85.0, 82.0),
-        "machine_count": 2,
-        "max_belt_route_tiles": 300,
+        "recipe": "iron-plate", "extraction": planned,
+        "ore_output": (7.5, 20.5),
     }
-
 
 
 def test_over_limit_route_rejects_before_smelter_submission(monkeypatch) -> None:
@@ -615,7 +608,8 @@ def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
         lambda *_a, **_k: pytest.fail("reconciled mine must not be resubmitted"),
     )
     monkeypatch.setattr(
-        autonomous_builder, "build_conversion_stage", lambda *_a, **_k: (1.0, 2.0),
+        autonomous_builder, "_build_initial_plate_smelter",
+        lambda *_a, **_k: (1.0, 2.0),
     )
     monkeypatch.setattr(
         autonomous_builder, "bring_stage_up",
@@ -630,6 +624,8 @@ def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
         "existing mine for iron-ore", (5.5, 16.5),
         ((14.5, 18.5), (11.5, 18.5), (14.5, 22.5), (11.5, 22.5)),
     )]
+
+
 def test_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatch) -> None:
     """A reconciled mine's belt endpoint must not create a fake coverage fault."""
     class _Client:
