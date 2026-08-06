@@ -206,6 +206,69 @@ def test_mining_expansion_validates_cohesion_before_submitting_drills() -> None:
     assert "system_drill_count_before + extraction.drill_count" in target_source
 
 
+def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: {(0, 0)})
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    with pytest.raises(StuckError, match="intersects real infrastructure"):
+        builder._plate_expansion_foundation(client, "nauvis", "iron-plate", plan)
+
+
+def test_plate_expansion_preflight_stages_landfill_for_water(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: {(0, 0), (2, 2), (9, 9)})
+
+    foundation = builder._plate_expansion_foundation(
+        client, "nauvis", "iron-plate", plan,
+    )
+
+    assert foundation is not None
+    assert [action["position"] for action in foundation["phases"][0]["actions"]] == [
+        {"x": 0, "y": 0}, {"x": 2, "y": 2},
+    ]
+
+
+def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
+    calls: list[str] = []
+    foundation = {"phases": [{"actions": [{
+        "action_type": "place_tile_ghost", "tile": "landfill",
+        "position": {"x": 0, "y": 0},
+    }]}]}
+    extraction = SimpleNamespace(
+        build_plan=None, drill_count=0, furnace_count=0,
+        mining_productivity_bonus=0.0, ore_output=(10.0, 20.0),
+        smelter_flow_direction="west", system_drill_count_before=7,
+        system_drill_target=7, ore="iron-ore",
+    )
+    line = SimpleNamespace(machine_count=7)
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (line, 19))
+    monkeypatch.setattr(builder, "_assert_atomic_plate_expansion_affordable", lambda *_a: foundation)
+    monkeypatch.setattr(builder, "_place_plate_expansion_foundation", lambda *_a: calls.append("foundation"))
+    monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append("mine"))
+    monkeypatch.setattr(builder, "_extend_plate_smelter", lambda *_a: (30.0, 40.0))
+
+    output = builder.build_mining_stage(
+        object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
+        lambda _message: None, expand=True,
+    )
+
+    assert output == (30.0, 40.0)
+    assert calls == ["foundation", "mine"]
+
+
 def test_atomic_expansion_preflight_counts_mine_and_smelter_ghosts(monkeypatch) -> None:
     captured: dict = {}
     extraction = SimpleNamespace(build_plan={"phases": [{"actions": [
@@ -284,16 +347,13 @@ def test_mining_expansion_refuses_without_a_recoverable_refinery(monkeypatch, re
         )
 
 
-def test_westbound_expansion_keeps_the_existing_ore_feed_fixed() -> None:
+def test_westbound_expansion_keeps_the_direct_ore_handoff_fixed() -> None:
     old, old_feed, _old_output = builder._plate_line_layout(
         "iron-plate", 5, (80, -19), "transport-belt", "inserter", "west",
     )
     plan, full, output = builder._plate_line_extension_plan(
         "iron-plate", 5, 12, (80, -19),
         "transport-belt", "inserter", "west",
-    )
-    _new, new_feed, _new_output = builder._plate_line_layout(
-        "iron-plate", 12, (59, -19), "transport-belt", "inserter", "west",
     )
     old_furnaces = {
         (action["position"]["x"], action["position"]["y"])
@@ -303,18 +363,22 @@ def test_westbound_expansion_keeps_the_existing_ore_feed_fixed() -> None:
         action for action in _actions(plan)
         if action["entity"] == "electric-furnace"
     ]
+    input_belts = [
+        action for action in _actions(full)
+        if "transport-belt" in action["entity"]
+        and action["position"]["y"] == old_feed[1]
+    ]
 
     assert any(
-        action["entity"] == "transport-belt"
-        and action["position"] == {"x": old_feed[0], "y": old_feed[1]}
-        for action in _actions(full)
-    ), "the original ore handoff remains a live tile on the expanded input trunk"
+        action["position"] == {"x": old_feed[0], "y": old_feed[1]}
+        for action in input_belts
+    ), "the original ore handoff remains the expanded row's endpoint"
+    assert max(action["position"]["x"] for action in input_belts) == old_feed[0]
     assert not [
         action for action in _actions(plan)
-        if action["position"] == {"x": old_feed[0], "y": old_feed[1]}
-        and action["entity"] != "transport-belt"
-    ]
-    assert new_feed[0] >= old_feed[0]
+        if action["position"]["y"] == old_feed[1]
+        and action["position"]["x"] > old_feed[0]
+    ], "a direct ore row must not overwrite or extend its mine-side belt endpoint"
     assert all(action["position"]["x"] < min(x for x, _y in old_furnaces)
                for action in added_furnaces)
     assert output == (57.5, -10.5)

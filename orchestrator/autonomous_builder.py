@@ -422,6 +422,34 @@ def _plate_line_layout(
     return plan, feed, output
 
 
+def _retain_direct_feed_endpoint(
+    plan: dict, old_feed: Point, flow_direction: str,
+) -> None:
+    """Keep direct mine input fixed while a mirrored plate row grows.
+
+    ``generate_line_layout`` sizes chest-fed feeder belts by machine count.  A
+    direct ore line has no such feeder: extending that endpoint replaces the
+    live mine belt (and, when tiers differ, produces an executor collision).
+    The refinery may grow at its output tail, but its direct ore handoff is an
+    immutable interface.
+    """
+    feed_x, feed_y = old_feed
+    beyond_feed = (
+        (lambda x: x > feed_x) if flow_direction == "west"
+        else (lambda x: x < feed_x)
+    )
+    for phase in plan["phases"]:
+        phase["actions"] = [
+            action for action in phase["actions"]
+            if not (
+                action.get("action_type") == "place_ghost"
+                and "transport-belt" in action.get("entity", "")
+                and action["position"]["y"] == feed_y
+                and beyond_feed(action["position"]["x"])
+            )
+        ]
+
+
 def _plate_line_extension_plan(
     recipe: str, current_machines: int, target_machines: int,
     origin: Point, belt_type: str, inserter_type: str, flow_direction: str,
@@ -429,7 +457,7 @@ def _plate_line_extension_plan(
     """Add the missing tail of a plate row without removing live infrastructure."""
     if target_machines <= current_machines:
         raise ValueError("plate smelter extension must increase machine count")
-    old, _old_feed, _old_output = _plate_line_layout(
+    old, old_feed, _old_output = _plate_line_layout(
         recipe, current_machines, origin, belt_type, inserter_type, flow_direction,
     )
     target_origin = (
@@ -440,6 +468,7 @@ def _plate_line_extension_plan(
         recipe, target_machines, target_origin,
         belt_type, inserter_type, flow_direction,
     )
+    _retain_direct_feed_endpoint(new, old_feed, flow_direction)
     old_keys = {
         json.dumps(action, sort_keys=True)
         for phase in old["phases"] for action in phase["actions"]
@@ -458,6 +487,69 @@ def _plate_line_extension_plan(
         ]},
     ]
     return {"phases": [phase for phase in phases if phase["actions"]]}, new, new_output
+
+
+def _tile_bounds(tiles: set[tuple[int, int]]) -> tuple[Point, Point]:
+    """Return the smallest RCON survey box that contains the given tiles."""
+    xs, ys = zip(*tiles)
+    return (float(min(xs)), float(min(ys))), (float(max(xs) + 1), float(max(ys) + 1))
+
+
+def _plate_expansion_foundation(
+    client: RconClient, surface: str, recipe: str, smelter_delta: dict,
+) -> dict | None:
+    """Survey a refinery extension before mining and stage needed landfill."""
+    if not hasattr(client, "command"):
+        return None
+    footprint = planned_footprint_tiles(smelter_delta)
+    if not footprint:
+        return None
+    minimum, maximum = _tile_bounds(footprint)
+    occupied = live_base.occupied_tiles(
+        client, surface, minimum, maximum, include_water=False,
+    )
+    collision = sorted(footprint & occupied)
+    if collision:
+        raise StuckError(
+            f"{recipe} refinery extension intersects real infrastructure at "
+            f"{collision[:3]}; refusing to expand its mine ahead of that conflict"
+        )
+    water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
+    if not water:
+        return None
+    return {"phases": [{
+        "name": f"{recipe}_smelter_landfill_foundation",
+        "actions": [
+            {"action_type": "place_tile_ghost", "tile": "landfill",
+             "position": {"x": x, "y": y}}
+            for x, y in water
+        ],
+    }]}
+
+
+def _place_plate_expansion_foundation(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, foundation: dict, emit: Callable[[str], None],
+) -> None:
+    """Build solid ground before a plate-refinery ghost is submitted there."""
+    foundation["surface"], foundation["force"] = surface, force
+    tiles = [
+        action["position"] for phase in foundation["phases"]
+        for action in phase["actions"]
+    ]
+    emit(f"SMELTER FOUNDATION: placing landfill on {len(tiles)} water tile(s) before {recipe}")
+    _ensure_plan_construction_coverage(client, bridge, surface, force, foundation, emit)
+    _submit(client, bridge, surface, foundation, f"{recipe}_smelter_foundation", emit)
+    positions = {(int(tile["x"]), int(tile["y"])) for tile in tiles}
+    remaining = _wait_for_ghosts(
+        client, surface, force, _tile_bounds(positions),
+        include_entity_ghosts=False,
+    )
+    if remaining:
+        raise StuckError(
+            f"{recipe} smelter landfill foundation has {remaining} tile ghost(s) remaining; "
+            "refusing to place furnaces on water before the landfill is built"
+        )
 
 
 def _existing_plate_smelter(
@@ -618,16 +710,21 @@ def _extend_plate_smelter(
 def _assert_atomic_plate_expansion_affordable(
     client: RconClient, surface: str, force: str, recipe: str, extraction,
     line, target_machines: int, emit: Callable[[str], None],
-) -> None:
-    """Require the mine and its added furnaces before submitting either."""
+) -> dict | None:
+    """Preflight the entire mine/refinery phase before submitting either."""
     if target_machines <= line.machine_count:
-        return
+        return None
     existing = _existing_plate_smelter(client, surface, line)
     smelter_delta, _full, _output = _plate_line_extension_plan(
         recipe, line.machine_count, target_machines, existing.origin,
         existing.belt_type, existing.inserter_type, existing.flow_direction,
     )
+    foundation = _plate_expansion_foundation(
+        client, surface, recipe, smelter_delta,
+    )
     plans = [smelter_delta]
+    if foundation is not None:
+        plans.insert(0, foundation)
     if extraction.build_plan is not None:
         plans.insert(0, extraction.build_plan)
     combined = {
@@ -637,6 +734,7 @@ def _assert_atomic_plate_expansion_affordable(
     assert_affordable(
         client, surface, force, combined, f"expand_{recipe}_system", emit,
     )
+    return foundation
 
 
 def _cohesive_smelter_target(
@@ -779,8 +877,9 @@ def build_mining_stage(
             f"{recipe} expansion has no recoverable managed refinery; refusing to "
             "expand its mine ahead of the refinery"
         )
+    foundation = None
     if cohesive_target is not None:
-        _assert_atomic_plate_expansion_affordable(
+        foundation = _assert_atomic_plate_expansion_affordable(
             client, surface, force, recipe, extraction, existing_smelter,
             cohesive_target, emit,
         )
@@ -807,6 +906,10 @@ def build_mining_stage(
         f"reference {reference_point}"
     )
 
+    if foundation is not None:
+        _place_plate_expansion_foundation(
+            client, bridge, surface, force, recipe, foundation, emit,
+        )
     _submit_mining_plan(
         client, bridge, surface, force, extraction, ore_output, emit,
     )

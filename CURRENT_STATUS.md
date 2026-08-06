@@ -1980,3 +1980,10 @@ that consumed it was not.
 - Why: The 13:25 run grew iron mining, then the 7-to-19 furnace extension lacked 74 fast belts; a later siting deferral prevented the completed belt stock from ever retrying that furnace work.
 - Validation: 112 focused prep/extraction/smelter/promotion tests passed; Python compilation and `git diff --check` passed.
 - Next: Python-only round -- reset to the safe save and restart the autonomous runner; no Lua mod redeploy is required.
+
+## [2026-08-06] Preflight plate-refinery expansion ground and direct ore handoff
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`
+- What: Westbound direct ore rows now keep their existing mine-side belt endpoint; refinery expansion surveys its full added footprint before drill placement, rejects occupied infrastructure, and stages/waits for landfill on water-only tiles.
+- Why: The 14:59 iron expansion regenerated a chest-feed extension, attempted to replace the live ore trunk at `(24.5, 31.5)`/`(25.5, 31.5)`, and only failed after 12 new drills had been placed. Water must be made solid before any furnace ghost is submitted.
+- Validation: 66 focused expansion/prep/extraction tests passed; reviewer approval confirmed west/east direct-feed and foundation ordering.
+- Next: Python-only round if the prior landfill-tile-ghost Lua deployment is already active; otherwise deploy that existing Lua change and restart the server before testing on the safe save.
