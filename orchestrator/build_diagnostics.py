@@ -103,6 +103,7 @@ def _diagnose_blockage(
 
     Ordered by what actually blocks construction first: bots cannot build
     outside coverage, and a roboport with no power provides no coverage at all.
+    Remaining ghosts are then checked for their concrete network/material cause.
     Logistic coverage is checked next because its remedy places AND powers a
     roboport, which can incidentally close a power gap near the stage -- the
     reverse is never true, so diagnosing it before machine power lets one round
@@ -120,6 +121,32 @@ def _diagnose_blockage(
         )
     if live_base.entity_status_name(client, surface, nearest) == "no_power":
         return (f"covering roboport at {nearest} has no power", "roboport_power")
+    if area is not None:
+        ghosts = live_base.ghost_blockages(client, surface, force, area)
+        for ghost in ghosts:
+            reason = str(ghost.get("reason", "pending"))
+            position = ghost["position"]
+            if reason == "out_of_construction_range":
+                return (
+                    f"ghost {ghost.get('entity', 'entity')} at {position} is outside "
+                    f"construction coverage ({_ROBOPORT_CONSTRUCTION_RADIUS:.0f}-tile radius)",
+                    "coverage",
+                )
+            if reason == "no_construction_robots":
+                return (
+                    f"ghost {ghost.get('entity', 'entity')} at {position} has no "
+                    "construction robots in its logistic network",
+                    "none",
+                )
+            if reason.startswith("missing_material:"):
+                item = str(ghost.get("item", reason.split(":", 2)[1]))
+                required = int(ghost.get("required", 1))
+                available = int(ghost.get("available", 0))
+                return (
+                    f"ghost {ghost.get('entity', 'entity')} at {position} needs "
+                    f"{required} {item}, but its network has {available}",
+                    f"materials:{item}:{required}",
+                )
     if logistic_chest_positions:
         # Only chests that are actually BUILT are judged here; ones still
         # waiting on a bot are absent from the reply and are the ghost count's

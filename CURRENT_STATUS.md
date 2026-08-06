@@ -1882,4 +1882,74 @@ that consumed it was not.
 - What: Raw ore bridges now may enter a furnace input belt only from its upstream end, aligned with the bus flow; non-plate refinery belt shortages stop at the first requested early belt rather than escalating through express/turbo.
 - Why: The endpoint selector accepted a clear north/south approach, producing the observed T merge and lane compression; the bootstrap tier loop raised its final turbo shortfall for stone-brick even though faster belts were unnecessary.
 - Validation: `28 passed` focused belt/tier tests and Python compilation; generated blocked-bus geometry ends with two westbound tiles into the westbound bus.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.## [2026-08-05] Preserve refinery belt direction through detours
+- Files: planners/belt_bridge.py, 	ests/test_belt_detour.py`r
+- What: Detour search now honors the declared source exit direction, rejects immediate U-turns, and regression coverage checks the first belt orientation.
+- Why: Live iron routing reversed the first belt and copper routing generated duplicate/side-feed geometry; the failed belt stage prevented refinery power bridging.
+- Validation: 71 focused belt/extraction tests passed; Python compilation passed.
 - Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Propagate source direction into refinery build execution
+- Files: orchestrator/stage_transport.py`r
+- What: The live build path now passes the surveyed source exit direction to belt-to-belt refinery bridges, matching preflight.
+- Why: The prior rerun loaded the detour fix but the executor discarded exit_direction, regenerating the same malformed iron/copper routes.
+- Validation: 82 focused belt/extraction/tier tests passed; Python compilation passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Remove refinery endpoint backtracking and obsolete mine side-tap migration
+- Files: planners/belt_bridge.py, orchestrator/autonomous_builder.py`r
+- What: Belt-to-belt bridges now route to a direction-compatible approach before joining the existing endpoint, and legacy tap migration skips outputs that are already direct belts.
+- Why: The prior route doubled back through (77.5, -18.5) and emitted duplicate endpoint ghosts; the legacy migration then tried to place a side tap over the direct iron belt. Both failures occurred before refinery power repair.
+- Validation: 82 focused belt/extraction/tier tests passed; Python compilation passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Enforce direct ore refinery feeds and full construction coverage
+- Files: orchestrator/autonomous_builder.py, planners/belt_bridge.py`r
+- What: Single-input iron/copper refineries are forced onto direct belt mode; endpoint routing avoids backtracking; conversion plans extend construction-roboport coverage to their full action bounds before ghost submission.
+- Why: Side-feed fallback remained possible, and long bridge endpoints such as (103, -12.5) could lie outside construction coverage even when the stage origin was covered.
+- Validation: 82 focused belt/extraction/tier tests passed; Python compilation passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Recover partial plate refineries after belt failures
+- Files: `planners/belt_bridge.py`, `orchestrator/autonomous_builder.py`, `orchestrator/live_base.py`, `orchestrator/stage_transport.py`, and belt/smelter regressions
+- What: Inline refinery bridges now stop at the existing downstream bus tile; idle or ghosted plate-furnace rows are structurally recovered, and partial conversion submits attempt to reconnect their placed substation before re-raising.
+- Why: The copper bridge submitted the bus endpoint a second time, so the non-transactional executor left a no-power refinery island before the normal power phase. Recipe-less idle furnaces were then invisible to `find_line`, allowing duplicate sites.
+- Validation: 91 focused tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Keep guarded extraction preflight resolvable
+- Files: `orchestrator/extraction_transport.py`, `orchestrator/stage_transport.py`
+- What: Extraction preflight now imports the fail-closed side selector, and the build path keeps an explicit guarded endpoint assignment before direct-belt override.
+- Why: Full test collection exposed an undefined `_clear_side` name that would only fail when a chest-to-chest extraction path ran; the explicit assignment also preserves the blocked-endpoint contract.
+- Validation: 155 focused tests passed; Python compilation passed. The broader suite reached 1232 passed/1 skipped before only host temp ACL failures remained.
+- Next: Python-only round -- reset the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-05] Derive recovery power from the canonical plate layout
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`
+- What: Existing-row recovery now recomputes the actual substation position from the surveyed row's belt, inserter, direction, and size, covering long and westbound rows.
+- Why: A fixed short-row offset would reconnect the wrong tile once a refinery grew or flowed west.
+- Validation: 219 focused transport/extraction/smelter/integrity tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+## [2026-08-06] Cover complete mining blueprints before submission
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_mining_coverage.py`
+- What: New mine plans now extend construction-roboport coverage to all action-footprint corners before submitting drill, belt, and pole ghosts; non-RCON test doubles safely skip the live coverage probe.
+- Why: The stone run covered only the mine origin, leaving a pole/drill ghost outside construction range. The stage then misdiagnosed the missing build as an unpowered machine and retried an unhelpful substation bridge until it stopped.
+- Validation: 220 focused transport/extraction/coverage/integrity tests passed; Python compilation and `git diff --check` passed.
+- Next: Python-only round -- reset to the safe save and restart the runner; no Lua mod redeploy is required.
+
+## [2026-08-06] Ignore direct belt endpoints in logistic coverage checks
+- Files: orchestrator/autonomous_builder.py, tests/test_extraction_separation.py
+- What: Existing mine servicing no longer treats a direct belt endpoint as a logistic chest; added regression coverage.
+- Why: The 2026-08-06T01:15 run falsely stalled on `logistic_network=None` for the belt at (49.5, -65.5), preventing the stone-brick refinery from being reached.
+- Next: Restart the Python runner before the next live run; no Lua redeploy is needed.
+## [2026-08-06] Recipe-aware capacity, persistent precursors, and denser mall cells
+- Files: `orchestrator/stage_extraction.py`, `orchestrator/stage_chemical.py`, `orchestrator/autonomous_builder.py`, `orchestrator/mall_builder.py`, and focused regressions
+- What: Furnace counts now use input draw (stone-brick is no longer overbuilt), direct coal belts are not probed as logistic chests, legacy steel output rows remain expandable, stocked iron-stick/steel-plate bootstrap persistent producers, and mall pitch is reduced to `(11, 6)` with collision coverage.
+- Why: The latest run starved iron, ran stone furnaces below half capacity, consumed starter steel/sticks without a refill line, and left avoidable mall dead space.
+- Validation: Focused precursor, extraction, smelter, and mall suites passed; Python compilation passed. These are Python/test changes only.
+- Next: Reset to the safe save and restart the autonomous runner; no Lua mod redeploy is required.
+## [2026-08-06] Early belt tiering and mall-demand plate sizing
+- Files: orchestrator/stage_transport.py, orchestrator/extraction_transport.py, orchestrator/autonomous_builder.py, orchestrator/baseline_production.py, orchestrator/intermediate_scaling.py, planners/resource_layouts.py, tests
+- What: Raw refinery routes are capped at regular/fast belts, coal defaults to regular belts, plate rows merge recipe-less furnaces from stable geometry, and finite mall targets add a bounded five-minute plate draw.
+- Why: Starter express stock was being mistaken for required capacity, starved furnaces made iron expansion look like a new/short row, and mall construction demand was absent from extraction sizing.
+- Next: Restart the Python runner on the safe save; no Lua redeploy is required.
+## [2026-08-06] Keep plate refineries direct and diagnose stalled ghosts
+- Files: `orchestrator/autonomous_builder.py`, `orchestrator/build_diagnostics.py`, `orchestrator/live_base.py`, `tests/test_belt_survey_and_tiers.py`, `tests/test_ghost_diagnostics.py`
+- What: Removed the copper/iron requester fallback; belt shortages now become mall demand and retry the direct mine-to-furnace route. Read-only ghost probes now report coverage, robot, and material blockers instead of a generic no-op stall.
+- Why: The latest run had no copper refinery because both belt tiers were unaffordable, then fed a requester from a belt endpoint that could never enter logistics; stone ghosts later stopped with no recorded blockage.
+- Validation: 75 targeted tests passed; 41 critical prep/extraction tests passed; Python compilation passed. The test suite reached 1252 passed/1 skipped, with only existing host temporary-directory ACL failures (2 failed/13 errors).
+- Next: Python-only round -- reset the safe save and restart the autonomous runner; no Lua mod redeploy is required.

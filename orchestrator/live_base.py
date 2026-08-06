@@ -76,6 +76,44 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
     )
 
 
+def find_idle_machine_row(
+    client: RconClient, surface: str, force: str, recipe: str, machine: str,
+    near: Point, *, radius: float = 24.0,
+) -> LineState | None:
+    """Find unset machines near a known refinery origin for recovery.
+
+    Furnaces infer their recipe from the inserted ore, so an unpowered or
+    starved plate row has no recipe and is invisible to `find_line`. This
+    narrow structural survey is only used by plate-recovery code; callers must
+    validate the returned row's belts, output, and contiguity before reusing it.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};local area={{" + str(near[0] - radius) + "," + str(near[1] - radius) + "},{"
+        + str(near[0] + radius) + "," + str(near[1] + radius) + "}};"
+        "local machines=s.find_entities_filtered{name='" + machine + "',force=f,area=area};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',ghost_name='" + machine + "',force=f,area=area}) do "
+        "table.insert(machines,g) end;"
+        "for _,e in pairs(machines) do "
+        "local ok,r=pcall(function() return e.get_recipe() end);"
+        "if ok and not r then out[#out+1]=e.position.x..':'..e.position.y end end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    positions = tuple(
+        sorted(
+            (float(pair.split(":")[0]), float(pair.split(":")[1]))
+            for pair in raw.split(",") if pair
+        )
+    )
+    if not positions:
+        return None
+    return LineState(
+        recipe=recipe, machine_count=len(positions), working_count=0,
+        output_position=positions[-1], machine_positions=positions,
+    )
+
+
 def nearest_resource(
     client: RconClient, surface: str, resource: str, near: Point, *, search_radius: float = 400.0,
 ) -> tuple[Point, Point, Point] | None:
@@ -526,6 +564,70 @@ def occupied_tiles(
         x, _, y = pair.partition(",")
         tiles.add((int(x), int(y)))
     return tiles
+
+
+
+def ghost_blockages(
+    client: RconClient, surface: str, force: str,
+    area: tuple[Point, Point] | None = None,
+) -> list[dict[str, object]]:
+    """Explain why the remaining construction ghosts are not reviving.
+
+    This is deliberately read-only.  It mirrors the mod's live ghost probe:
+    coverage, construction-bot availability, and the first required item are
+    checked in the same logistic network that would build each ghost.
+    """
+    area_clause = ""
+    if area is not None:
+        (min_x, min_y), (max_x, max_y) = area
+        area_clause = (
+            ",area={{" + str(min_x) + "," + str(min_y) + "},{"
+            + str(max_x) + "," + str(max_y) + "}}"
+        )
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f"
+        + area_clause + "}) do "
+        "local reason='pending';"
+        "local ok,network=pcall(function() return s.find_logistic_network_by_position(g.position,f) end);"
+        "if not ok or not network then reason='out_of_construction_range' else "
+        "local bots_ok,bots=pcall(function() return network.all_construction_robots end);"
+        "if not bots_ok or bots==0 then reason='no_construction_robots' else "
+        "local proto_ok,proto=pcall(function() return g.ghost_prototype end);"
+        "if proto_ok and proto and proto.items_to_place_this and proto.items_to_place_this[1] then "
+        "local item=proto.items_to_place_this[1];"
+        "local have_ok,have=pcall(function() return network.get_item_count(item.name) end);"
+        "if have_ok and have < (item.count or 1) then "
+        "reason='missing_material:'..item.name..':'..tostring(item.count or 1)..':'..tostring(have) end end end end;"
+        "out[#out+1]=string.format('%.1f|%.1f|%s|%s',g.position.x,g.position.y,g.ghost_name,reason) end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    records: list[dict[str, object]] = []
+    for record in raw.split(";"):
+        fields = record.split("|", 3)
+        if len(fields) != 4:
+            continue
+        try:
+            position = (float(fields[0]), float(fields[1]))
+        except ValueError:
+            continue
+        reason = fields[3]
+        detail: dict[str, object] = {
+            "position": position,
+            "entity": fields[2],
+            "reason": reason,
+        }
+        if reason.startswith("missing_material:"):
+            _, item, required, available = reason.split(":", 3)
+            detail.update({
+                "item": item,
+                "required": int(required),
+                "available": int(available),
+            })
+        records.append(detail)
+    return records
 
 
 def available_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
