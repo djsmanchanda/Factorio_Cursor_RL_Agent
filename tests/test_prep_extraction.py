@@ -63,13 +63,15 @@ def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:
     """A chemical build can need more iron than the opening mall baseline."""
     calls: list[tuple[str, bool]] = []
     line = type("Line", (), {"machine_count": 6})()
+    autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
     monkeypatch.setattr(
         autonomous_builder.live_base, "available_items", lambda *_args: {"pipe": 77},
     )
     monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_args: line)
     monkeypatch.setattr(
         autonomous_builder, "build_mining_stage",
-        lambda *_args, **kwargs: calls.append((_args[4], kwargs["expand"])),
+        lambda *_args, **kwargs: calls.append((_args[4], kwargs["expand"]))
+        or (13.5, 43.5),
     )
 
     spent = autonomous_builder._prep_plate_extraction(
@@ -79,6 +81,8 @@ def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:
 
     assert spent is True
     assert calls == [("iron-plate", True)]
+    assert autonomous_builder.MANAGED_INTERMEDIATE_SOURCES["iron-plate"] == (13.5, 43.5)
+    autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
 
 
 def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:

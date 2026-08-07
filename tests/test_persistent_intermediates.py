@@ -79,15 +79,16 @@ def test_stocked_iron_stick_schedules_a_real_producer(monkeypatch):
     assert calls[0][1]["upgrade_bootstrap"] is False
 
 
-def test_steel_line_can_use_a_stocked_iron_plate_chest(monkeypatch):
+def test_steel_line_reuses_the_real_iron_provider_not_starter_storage(monkeypatch):
     monkeypatch.setattr(
         builder.live_base, "available_items",
         lambda *_args: {"iron-plate": 100},
     )
     monkeypatch.setattr(builder, "_has_producer", lambda *_args: True)
+    calls = []
     monkeypatch.setattr(
-        builder.live_base, "nearest_container",
-        lambda *_args, **_kwargs: (12.5, 4.5),
+        builder, "ensure_produced",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or (12.5, 43.5),
     )
 
     result = builder._ingredient_sources(
@@ -96,7 +97,9 @@ def test_steel_line_can_use_a_stocked_iron_plate_chest(monkeypatch):
         upgrade_bootstrap=False,
     )
 
-    assert result == {"iron-plate": (12.5, 4.5)}
+    assert result == {"iron-plate": (12.5, 43.5)}
+    assert calls[0][0][4] == "iron-plate"
+    assert calls[0][1]["upgrade_bootstrap"] is True
 
 
 def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):

@@ -2069,3 +2069,9 @@ that consumed it was not.
 - What: Added explicit staged refinery capacities and exact scheduled lattice shapes; generation-1 growth now stops at 48 instead of rounding to an oversized block.
 - Why: Keep each refinery within its planned generation envelope and prevent mine expansion from silently overbuilding the starter footprint.
 - Next: Add generation-aware new-site placement before enabling generation-2+ schedules in the live builder.
+
+## [2026-08-07] Record plate providers for persistent intermediates
+- Files: orchestrator/autonomous_builder.py, tests/test_persistent_intermediates.py, tests/test_prep_extraction.py
+- What: Plate prep now records the refinery provider returned by mining stages; steel refuses arbitrary starter/storage chests and reuses the real iron provider.
+- Why: The steel line previously requested iron from the nearest chest at (0.5, -1.5), which was not a reliable producer feed and left the furnace empty.
+- Next: Restart the Python runner before the next live validation.

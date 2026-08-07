@@ -1704,15 +1704,17 @@ def _ingredient_sources(
                 sources[ingredient] = position
                 continue
             if item == "steel-plate" and ingredient == "iron-plate":
-                source = live_base.nearest_container(
-                    client, surface, force, reference_point,
-                    names=(
-                        "passive-provider-chest", "buffer-chest", "storage-chest",
-                    ),
+                # Steel is a persistent line: never point it at the nearest
+                # starter/storage chest. Re-survey or repair the real iron
+                # producer and use its recorded provider output instead.
+                source = ensure_produced(
+                    client, bridge, surface, force, ingredient, reference_point,
+                    emit, upgrade_bootstrap=True,
                 )
-                if source is not None:
-                    sources[ingredient] = source
-                    continue
+                if source is None:
+                    return None
+                sources[ingredient] = source
+                continue
             if not backed:
                 UNBACKED_DRAWS.add(ingredient)
             elif ingredient in UNBACKED_DRAWS:
@@ -2067,10 +2069,16 @@ def _prep_plate_extraction(
         f"(have {have}, drill phase {drill_phase_for_draw(adjusted_draw[short_plate])}) ---"
     )
     try:
-        build_mining_stage(
+        output_source = build_mining_stage(
             client, bridge, surface, force, short_plate,
             reference_point, emit, expand=plate_line is not None,
         )
+        if output_source is not None:
+            MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
+            emit(
+                f"  PLATE SOURCE: recorded {short_plate} provider at "
+                f"{output_source} for downstream logistic consumers"
+            )
     except MaterialShortage as shortage:
         # Raising a drill phase needs drills, and drills come from
         # the mall. Push the shortfall back as a mall target instead
