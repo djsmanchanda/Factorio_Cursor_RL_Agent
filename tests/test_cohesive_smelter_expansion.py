@@ -183,7 +183,7 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
         system_drill_target=30, ore="iron-ore",
     )
     state = _state()
-    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: calls.append("retire"))
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
     monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 60))
@@ -203,7 +203,7 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
     )
 
     assert output == (30.0, 40.0)
-    assert calls == ["foundation", "mine"]
+    assert calls == ["retire", "foundation", "mine"]
 
 
 def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:
