@@ -9,7 +9,9 @@ from dataclasses import dataclass
 
 from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
-from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
+from planners.smelter_block import (
+    FURNACES_PER_MODULE, generate_managed_refinery_plan, refinery_interfaces,
+)
 from planners.resource_layouts import (
     generate_direct_mine_row_expansion,
     generate_shared_belt_batch_expansion,
@@ -316,6 +318,22 @@ def smelter_count_for_drills(
     return max(1, math.ceil(ore_rate / furnace_input_rate))
 
 
+def planned_smelter_count_for_drills(
+    recipe: str, drill_count: int, mining_productivity_bonus: float,
+) -> int:
+    """Keep the initial furnace lattice proportional to its mine capacity.
+
+    Rate sizing may ask for one more furnace than a six-furnace module can
+    represent.  Rounding seven required furnaces to twelve doubles the
+    opening plant before the mine can feed it, so cap the planned count at the
+    available drill count and let the blueprint use whole modules.
+    """
+    required = smelter_count_for_drills(
+        recipe, drill_count, mining_productivity_bonus,
+    )
+    return min(required, max(FURNACES_PER_MODULE, drill_count))
+
+
 def ore_reservation(
     patch_min: Point,
     patch_max: Point,
@@ -541,7 +559,9 @@ def plan_local_extraction(
         )
         row_drill_count = drill_count // 2
         expansion_step = 1
-    furnace_count = smelter_count_for_drills(recipe, drill_count, productivity)
+    furnace_count = planned_smelter_count_for_drills(
+        recipe, drill_count, productivity,
+    )
     geometries = {
         "east": _smelter_layout_geometry(
             recipe, furnace_count, belt_type, inserter_type, "east",

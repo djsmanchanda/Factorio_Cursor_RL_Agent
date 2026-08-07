@@ -19,6 +19,7 @@ from orchestrator.stage_extraction import (
     direct_mine_plan,
     ore_reservation,
     plan_local_extraction,
+    planned_smelter_count_for_drills,
     smelter_count_for_drills,
     smelter_search_anchors,
 )
@@ -52,6 +53,12 @@ def test_direct_mine_plan_contains_drills_and_egress_but_no_furnaces() -> None:
     assert "electric-furnace" not in _entities(plan)
     assert "steel-chest" not in _entities(plan)
     assert "inserter" not in _entities(plan)
+
+def test_planned_metal_refinery_stays_proportional_to_drills() -> None:
+    assert planned_smelter_count_for_drills("iron-plate", 6, 0.30) == 6
+    assert planned_smelter_count_for_drills("copper-plate", 12, 0.30) == 12
+    assert planned_smelter_count_for_drills("iron-plate", 20, 0.30) == 20
+
 
 def test_furnaces_use_force_productivity_instead_of_copying_drill_count() -> None:
     assert smelter_count_for_drills("iron-plate", 2, 0.0) == 2

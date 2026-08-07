@@ -2107,3 +2107,9 @@ that consumed it was not.
 - What: Depleted mines are retired only after the replacement mine/refinery is built and healthy; retirement now preserves shared belts and power poles.
 - Why: The 04:35:37 run removed the only iron source before its 18-furnace replacement bill was available, and the broad teardown included infrastructure shared with the copper line.
 - Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
+
+## [2026-08-08] Keep opening refinery proportional to mine capacity
+- Files: orchestrator/stage_extraction.py, tests/test_extraction_separation.py
+- What: Planned furnace counts are capped at available drill capacity before blueprint module rounding; six drills now produce a six-furnace opening line instead of twelve.
+- Why: A +30% productivity rate required seven furnaces mathematically, and the six-furnace blueprint lattice rounded seven up to two modules.
+- Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
