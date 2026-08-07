@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from orchestrator import live_base
+from orchestrator import extraction_state, live_base
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
@@ -112,6 +112,11 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 _DEFAULT_MACHINE_COUNT = 2
+_FAST_BELT_IRON_CAPACITY = 24
+
+
+class ProductionPrerequisiteDeferred(RuntimeError):
+    """A construction item must wait for a cheaper upstream capacity phase."""
 
 # A livelock re-selects the same task and gets the same result forever.
 # max_iterations never bounded it: `iteration` only advances on goal work,
@@ -724,7 +729,10 @@ def _prepare_initial_refinery(
 ) -> tuple[dict, dict | None, tuple[float, float], str, int]:
     """Preflight the refinery, route, landfill, bill, and planned mine together."""
     origin = extraction.smelter_origin
-    target = FURNACES_PER_MODULE
+    # A new site can be opened for a later drill phase. Keep the first site at
+    # six furnaces, but size an unmanaged replacement for the phase that caused
+    # the expansion request so it immediately relieves the bottleneck.
+    target = max(FURNACES_PER_MODULE, extraction.furnace_count)
     variant = "basic"
     plan = generate_managed_refinery_plan(
         recipe, target, origin_x=origin[0], origin_y=origin[1], variant=variant,
@@ -890,10 +898,46 @@ def build_mining_stage(
         )
     except ValueError as error:
         raise StuckError(str(error)) from error
-    existing_smelter, cohesive_target = _cohesive_smelter_target(
-        client, surface, force, recipe, extraction, expand, emit,
-    )
-    if expand and existing_smelter is None:
+    unmanaged_refinery = False
+    try:
+        existing_smelter, cohesive_target = _cohesive_smelter_target(
+            client, surface, force, recipe, extraction, expand, emit,
+        )
+    except StuckError as error:
+        # Starter saves may contain a working furnace row that predates the
+        # approved Start/Repeat/End templates. We cannot safely retire or
+        # reshape that row, but refusing every expansion leaves the base
+        # permanently iron-starved. Preserve it and open a managed replacement
+        # at the newly selected site instead.
+        structural = (
+            "complete six-furnace modules",
+            "one contiguous managed block",
+            "does not match phased block growth",
+        )
+        if not expand or not any(marker in str(error) for marker in structural):
+            raise
+        unmanaged_refinery = True
+        existing_smelter, cohesive_target = None, None
+        emit(
+            f"SMELTER RECOVERY: existing {recipe} row is not an approved managed "
+            "template; preserving it and opening a managed replacement"
+        )
+    if (
+        expand and existing_smelter is not None
+        and existing_smelter.variant == "standard"
+        and existing_smelter.furnace_count < _FAST_BELT_IRON_CAPACITY
+    ):
+        # Standard templates consume fast belts. Before the iron system has
+        # reached its 24-furnace/24-drill bootstrap threshold, keep growth on
+        # the cheaper basic templates and preserve the existing standard row.
+        unmanaged_refinery = True
+        existing_smelter, cohesive_target = None, None
+        emit(
+            f"SMELTER RECOVERY: keeping fast-belt refinery growth deferred until "
+            f"iron reaches {_FAST_BELT_IRON_CAPACITY} furnaces and drills; opening "
+            "a basic managed replacement"
+        )
+    if expand and existing_smelter is None and not unmanaged_refinery:
         raise StuckError(
             f"{recipe} expansion has no recoverable managed refinery; refusing to "
             "expand its mine ahead of the refinery"
@@ -1839,6 +1883,19 @@ def _build_assembled_stage(
     return None
 
 
+def _iron_capacity_for_fast_belts(
+    client: RconClient, surface: str, force: str,
+) -> tuple[int, int]:
+    """Return built iron furnaces and drills used by the fast-belt gate."""
+    line = live_base.find_line(
+        client, surface, force, "iron-plate", LINE_RECIPES["iron-plate"]["machine"],
+    )
+    furnaces = line.machine_count if line is not None else 0
+    drills = extraction_state.resource_drill_count(
+        client, surface, force, "iron-ore",
+    )
+    return furnaces, drills
+
 def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], *,
@@ -1852,6 +1909,23 @@ def ensure_produced(
     first) and returns None so the caller re-surveys and calls again."""
     if item in MANAGED_INTERMEDIATE_SOURCES:
         return MANAGED_INTERMEDIATE_SOURCES[item]
+    if item == "fast-transport-belt":
+        iron_furnaces, iron_drills = _iron_capacity_for_fast_belts(
+            client, surface, force,
+        )
+        if min(iron_furnaces, iron_drills) < _FAST_BELT_IRON_CAPACITY:
+            emit(
+                f"  FAST BELT GATE: waiting for iron capacity {iron_furnaces}/"
+                f"{_FAST_BELT_IRON_CAPACITY} furnaces and {iron_drills}/"
+                f"{_FAST_BELT_IRON_CAPACITY} drills before producing fast belts"
+            )
+            build_mining_stage(
+                client, bridge, surface, force, "iron-plate", reference_point,
+                emit, expand=True,
+            )
+            raise ProductionPrerequisiteDeferred(
+                "fast-transport-belt is gated until iron reaches 24 furnaces and drills"
+            )
     if item == "coal":
         return ensure_coal_mine(
             client, bridge, surface, force, reference_point, bring_stage_up, emit,
@@ -1937,6 +2011,9 @@ def _ensure_mall_item(
             storage_limit=reserve.storage_count,
             fill_provider=reserve.fill_chest,
         )
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(f"  MALL DEFERRED: {deferred}")
+        return False, None
     except MaterialShortage as shortage:
         add_demands(mall_targets, shortage)
         emit(
@@ -2196,6 +2273,9 @@ def _advance_the_goal(
         return ensure_produced(
             client, bridge, surface, force, goal_item, reference_point, emit,
         )
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(f"  MALL DEFERRED: {deferred}")
+        return _SHORTAGE
     except MaterialShortage as shortage:
         add_demands(mall_targets, shortage)
         emit(

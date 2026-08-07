@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import inspect
+import pytest
 import sys
 from pathlib import Path
 
@@ -127,6 +128,24 @@ def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatc
     )
     assert attempts == ["build"] and not pending
 
+
+def test_fast_belts_expand_iron_before_their_own_producer(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        autonomous_builder, "_iron_capacity_for_fast_belts", lambda *_a: (6, 6),
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **_k: calls.append((_a[4], _k["expand"])),
+    )
+
+    with pytest.raises(autonomous_builder.ProductionPrerequisiteDeferred):
+        autonomous_builder.ensure_produced(
+            object(), object(), "nauvis", "player", "fast-transport-belt",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert calls == [("iron-plate", True)]
 
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
     """7.5 plate/s needs 12 furnaces; a standard row builds 7."""

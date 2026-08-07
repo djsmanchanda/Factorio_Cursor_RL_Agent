@@ -2097,3 +2097,8 @@ that consumed it was not.
 - What: Coverage remediation now extends roboports to the exact out-of-range ghost position instead of retrying from only the stage origin.
 - Why: Coal mining stalled six rounds on a belt at (25.5, -49.5) while the stage anchor was already covered, so every retry built nothing.
 - Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
+## [2026-08-08] Gate fast belts behind iron bootstrap capacity
+- Files: orchestrator/autonomous_builder.py, tests/test_prep_extraction.py, tests/test_cohesive_smelter_expansion.py
+- What: Fast-belt production now waits for 24 iron furnaces and 24 iron drills; regular belts or existing fast-belt stock remain usable, and unmanaged/standard starter rows open cheaper basic replacements instead of deferring iron growth.
+- Why: Iron prep required 14 furnaces but stayed at six after recovery rejected the starter geometry, while fast-belt demand could create a circular shortage.
+- Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
