@@ -2081,3 +2081,8 @@ that consumed it was not.
 - What: Upgrade/goal consumers now repair supply-starved mall cells; bootstrap-only prep still waits for its reserve.
 - Why: Automation science accepted an empty iron-gear provider instead of reconnecting its stalled two-machine cell.
 - Next: Restart the Python runner and rerun from the safe save.
+## [2026-08-08] Paired mall recovery and power-generation diagnosis
+- Files: orchestrator/autonomous_builder.py, tests/test_live_mall_recovery.py
+- What: supply-starved paired mall cells now wait on their requester transport instead of being misclassified as deterministic belt lines; the run log also confirmed no power-generation stage exists in the active builder.
+- Why: the 02:16:51 run stopped on valid six-tile mall geometry before any electricity policy could run; boilers/steam engines are additionally rejected by the repository's electric-only invariant.
+- Next: implement generation only after the electric-only invariant is explicitly revised; this Python fix needs a runner restart, not a mod redeploy.

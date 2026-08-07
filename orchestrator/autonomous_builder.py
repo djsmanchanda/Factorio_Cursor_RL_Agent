@@ -1594,6 +1594,18 @@ def _repair_stalled_line(
     if statuses and all(
         status == "item_ingredient_shortage" for status in statuses.values()
     ) and not _mineable(item):
+        # Paired mall cells intentionally use a six-tile machine spacing and
+        # requester/provider side-taps. They are valid compact topology, not
+        # the three-tile deterministic belt line reconstructed by
+        # ``repair_existing_ingredient_transport``. Treat the cell as a
+        # supply wait here; attempting line repair is what turned a healthy
+        # mall cell into a terminal geometry error in live runs.
+        if mall_provider is not None:
+            emit(
+                f"  MALL WAIT: existing {item} paired cell is supply-starved; "
+                "keeping its compact requester transport while inputs recover"
+            )
+            return mall_provider
         if not upgrade_bootstrap:
             chest = mall_provider or live_base.nearest_container(
                 client, surface, force, existing.machine_positions[-1],

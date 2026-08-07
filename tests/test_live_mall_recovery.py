@@ -53,8 +53,8 @@ def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None
         (3.0, -1.0), lambda _message: None, upgrade_bootstrap=True,
     )
 
-    assert output is None
-    assert repaired == [True]
+    assert output == provider
+    assert repaired == []
 
 
 def test_upgrade_call_still_detects_the_paired_mall_provider(monkeypatch) -> None:
