@@ -2047,3 +2047,8 @@ that consumed it was not.
 - What: Construction-coverage roboport candidates now avoid the complete footprint of the plan that is about to be submitted.
 - Why: The run left a medium-pole ghost at `(51.5,-59.5)` overlapping a `(53,-58)` roboport; the drills were powered, but the invalid ghost made the stage spend six rounds and report the stale earlier power issue.
 - Validation: 50 focused tests passed; Python-only change, so restart the runner; no Lua mod redeploy or Factorio server restart is needed.
+## [2026-08-07] Fix managed-mine survey position encoding
+- Files: `orchestrator/mine_retirement.py`, `tests/test_mine_retirement.py`
+- What: Managed-mine RCON surveys now emit `{x,y}` positions instead of nested `{{x,y}}` tables.
+- Why: The malformed Lua caused every iron expansion retry to defer with `real number expected got table`, leaving the mine/refinery at its starter capacity.
+- Validation: 40 focused extraction/coverage/diagnostic tests passed; Python-only change, so restart the runner; no Lua redeploy is required.

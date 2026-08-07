@@ -59,7 +59,7 @@ def _managed_entities(
 ) -> list[dict]:
     positions = _candidate_positions(mine)
     lua_positions = "{" + ",".join(
-        "{{" + str(x) + "," + str(y) + "}}" for x, y in positions
+        "{" + str(x) + "," + str(y) + "}" for x, y in positions
     ) + "}"
     allowed = "{" + ",".join("['" + name + "']=true" for name in _ENTITY_NAMES) + "}"
     lua = (
