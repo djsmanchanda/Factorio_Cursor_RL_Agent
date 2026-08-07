@@ -2113,3 +2113,9 @@ that consumed it was not.
 - What: Planned furnace counts are capped at available drill capacity before blueprint module rounding; six drills now produce a six-furnace opening line instead of twelve.
 - Why: A +30% productivity rate required seven furnaces mathematically, and the six-furnace blueprint lattice rounded seven up to two modules.
 - Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
+
+## [2026-08-08] Guarded replacement coverage before force-style migrations
+- Files: orchestrator/autonomous_builder.py, tests/test_cohesive_smelter_expansion.py
+- What: Refinery replacement deltas now stage the complete future construction footprint and power targets before owned removals; roboport removal is rejected without an alternate coverage chain.
+- Why: Super-force-style replacement is safe only when it cannot strand belts, power, or construction/logistic coverage; the Lua executor has no safe UI super-force primitive.
+- Next: Restart the Python runner after this Python-only change; no mod redeploy is required.

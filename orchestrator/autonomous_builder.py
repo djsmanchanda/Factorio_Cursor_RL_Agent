@@ -611,8 +611,8 @@ def _extend_plate_smelter(
         f"SMELTER COHESION: expanding {recipe} at {origin} from "
         f"{state.furnace_count} to {target_machines}; retire End, add Repeat, finish End"
     )
-    _ensure_plan_construction_coverage(
-        client, bridge, surface, force, delta, emit,
+    _prepare_replacement_services(
+        client, bridge, surface, force, full, delta, emit,
     )
     _submit(client, bridge, surface, delta, f"extend_{recipe}_refinery", emit)
     _bring_modular_refinery_up(
@@ -1160,6 +1160,58 @@ def _ensure_plan_construction_coverage(
             client, bridge, surface, force, target, emit,
             reserved_tiles=reserved_tiles,
         )
+
+
+def _prepare_replacement_services(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    replacement: dict, delta: dict, emit: Callable[[str], None],
+) -> None:
+    """Make a replacement footprint safe before its owned removals run.
+
+    Factorio's super-force placement is a player interaction, not an executor
+    API. The planner therefore uses the safe equivalent: only a delta that has
+    already passed its ownership check may replace infrastructure, and all
+    coverage/power needed by the replacement is staged first. A roboport is a
+    service dependency rather than a disposable obstruction; removing one
+    without an alternate chain would strand construction bots, so that case is
+    rejected until a caller supplies an explicit relocation plan.
+    """
+    if not hasattr(client, "command"):
+        return
+    removals = [
+        action for phase in delta.get("phases", [])
+        for action in phase.get("actions", [])
+        if action.get("action_type") == "remove_entity"
+    ]
+    if not removals:
+        _ensure_plan_construction_coverage(
+            client, bridge, surface, force, replacement, emit,
+        )
+        return
+    if any(action.get("entity") == "roboport" for action in removals):
+        raise StuckError(
+            "replacement would remove a roboport before an alternate coverage "
+            "chain exists; route around it or stage the replacement chain first"
+        )
+
+    # Use the complete future footprint, not just the delta. This matters when
+    # the old End is removed first: a chain derived from the partial delta can
+    # leave the newly-added Repeat rows outside construction range.
+    _ensure_plan_construction_coverage(
+        client, bridge, surface, force, replacement, emit,
+    )
+    power_targets = sorted({
+        (action["position"]["x"], action["position"]["y"])
+        for phase in replacement.get("phases", [])
+        for action in phase.get("actions", [])
+        if action.get("entity") in {
+            "substation", "medium-electric-pole", "big-electric-pole",
+        }
+    })
+    for target in power_targets:
+        # False means the target is already on a generating network (or no
+        # generator exists yet); it is not a reason to tear down the old path.
+        extend_power(client, bridge, surface, force, target, emit)
 
 
 def _power_and_raise_stage(

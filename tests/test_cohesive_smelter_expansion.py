@@ -379,17 +379,66 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
         builder, "_ensure_plan_construction_coverage",
         lambda *_a: calls.append("coverage"),
     )
+    monkeypatch.setattr(
+        builder, "extend_power", lambda *_a: calls.append("power") or True,
+    )
     monkeypatch.setattr(builder, "_submit", lambda *_a: calls.append("submit"))
     monkeypatch.setattr(
         builder, "_bring_modular_refinery_up", lambda *_a, **_k: calls.append("bring"),
     )
 
+    client = SimpleNamespace(command=lambda _text: "")
     builder._extend_plate_smelter(
-        object(), object(), "nauvis", "player", "iron-plate",
+        client, object(), "nauvis", "player", "iron-plate",
         state, 60, (10.0, 10.0), lambda _message: None,
     )
 
-    assert calls == ["coverage", "submit", "bring"]
+    assert calls[:2] == ["coverage", "power"]
+    assert calls[-2:] == ["submit", "bring"]
+
+
+def test_replacement_services_use_the_future_footprint(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        builder, "_ensure_plan_construction_coverage",
+        lambda *_a: calls.append("coverage"),
+    )
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a: calls.append(("power", _a[4])) or True,
+    )
+    replacement = {"phases": [{"actions": [
+        {"entity": "substation", "position": {"x": 10.0, "y": 10.0}},
+        {"entity": "medium-electric-pole", "position": {"x": 20.0, "y": 10.0}},
+    ]}]}
+    delta = {"phases": [{"actions": [
+        {"action_type": "remove_entity", "entity": "transport-belt",
+         "position": {"x": 1.0, "y": 1.0}},
+    ]}]}
+
+    builder._prepare_replacement_services(
+        SimpleNamespace(command=lambda _text: ""), object(), "nauvis", "player",
+        replacement, delta, lambda _message: None,
+    )
+
+    assert calls == ["coverage", ("power", (10.0, 10.0)), ("power", (20.0, 10.0))]
+
+
+def test_replacement_services_refuse_roboport_removal_without_alternative(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_ensure_plan_construction_coverage",
+        lambda *_a: pytest.fail("coverage must not be claimed before the alternate chain"),
+    )
+    delta = {"phases": [{"actions": [
+        {"action_type": "remove_entity", "entity": "roboport",
+         "position": {"x": 1.0, "y": 1.0}},
+    ]}]}
+
+    with pytest.raises(StuckError, match="alternate coverage chain"):
+        builder._prepare_replacement_services(
+            SimpleNamespace(command=lambda _text: ""), object(), "nauvis", "player",
+            {"phases": []}, delta, lambda _message: None,
+        )
 
 
 def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatch) -> None:
