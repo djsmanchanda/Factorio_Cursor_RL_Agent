@@ -6,6 +6,7 @@ from __future__ import annotations
 import math
 
 from orchestrator import live_base
+from planners.infrastructure_geometry import footprint_tile_indices
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -28,8 +29,10 @@ def clear_chain_positions(
     service_square: bool,
     link_distance: float,
     search_radius: int = 10,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> list[Point]:
-    """Move ideal chain centres only as far as needed to fit a 4x4 roboport."""
+    """Move chain centres off live and already-planned infrastructure."""
+    reserved = reserved_tiles or set()
     placed: list[Point] = []
     previous = source
     for index, ideal in enumerate(ideals):
@@ -50,6 +53,7 @@ def clear_chain_positions(
                 following is not None
                 or _service_distance(point, target, service_square) <= service_radius
             )
+            and not (footprint_tile_indices(point, 4) & reserved)
             and live_base.area_clear(
                 client, surface,
                 (point[0] - 2, point[1] - 2),

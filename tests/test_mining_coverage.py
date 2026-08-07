@@ -35,7 +35,7 @@ def test_new_mine_extends_coverage_to_full_blueprint_before_submit(monkeypatch) 
     monkeypatch.setattr(autonomous_builder, "_publish_output_chest", lambda _plan: None)
     monkeypatch.setattr(
         autonomous_builder, "extend_roboport_coverage",
-        lambda *_args: events.append(("coverage", _args[4])) or False,
+        lambda *_args, **_kwargs: events.append(("coverage", _args[4])) or False,
     )
     monkeypatch.setattr(
         autonomous_builder, "_submit",

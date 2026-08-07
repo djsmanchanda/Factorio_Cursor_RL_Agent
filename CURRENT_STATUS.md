@@ -2042,3 +2042,8 @@ that consumed it was not.
 - What: The launcher now starts the server through hidden `pythonw.exe`, reuses an already-online dashboard, waits for readiness, and opens the browser without a `powershell.exe -NoExit` host.
 - Why: The previous launcher left a visible background PowerShell window for the dashboard lifetime.
 - Validation: PowerShell parsing passed; live launch returned HTTP 200 on port 9137 under hidden PID 17432 with RCON online and the runner stopped.
+## [2026-08-07] Reserve refinery-plan footprints before roboport chaining
+- Files: `orchestrator/{autonomous_builder,roboport_placement,stage_services}.py`, `tests/test_{logistic,mining}_coverage.py`
+- What: Construction-coverage roboport candidates now avoid the complete footprint of the plan that is about to be submitted.
+- Why: The run left a medium-pole ghost at `(51.5,-59.5)` overlapping a `(53,-58)` roboport; the drills were powered, but the invalid ghost made the stage spend six rounds and report the stale earlier power issue.
+- Validation: 50 focused tests passed; Python-only change, so restart the runner; no Lua mod redeploy or Factorio server restart is needed.

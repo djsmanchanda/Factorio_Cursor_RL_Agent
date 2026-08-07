@@ -10,6 +10,7 @@ import pytest
 from orchestrator import live_base
 from orchestrator.autonomous_builder import _diagnose_blockage
 from orchestrator.roboport_placement import clear_chain_positions
+from planners.infrastructure_geometry import footprint_tile_indices
 from orchestrator.stage_services import (
     _LOGISTIC_CHEST_ENTITIES,
     _ROBOPORT_CONSTRUCTION_RADIUS,
@@ -120,6 +121,19 @@ def test_chain_relocates_a_roboport_off_a_stage_footprint(monkeypatch) -> None:
     assert placed[0] != ideal
     assert math.dist((0.0, 0.0), placed[0]) <= 46.0
     assert service_distance(placed[0], (40.0, 0.0), square=True) <= 25.0
+
+
+def test_chain_relocates_off_pending_plan_footprints(monkeypatch) -> None:
+    """A clear centre can still overlap a pending machine or pole ghost."""
+    ideal = (17.0, 0.0)
+    reserved = {(x, y) for x in range(15, 19) for y in range(-2, 2)}
+    monkeypatch.setattr(live_base, "area_clear", lambda *_a, **_k: True)
+    placed = clear_chain_positions(
+        None, "nauvis", (0.0, 0.0), (40.0, 0.0), [ideal],
+        service_radius=25.0, service_square=True, link_distance=46.0,
+        reserved_tiles=reserved,
+    )
+    assert not (footprint_tile_indices(placed[0], 4) & reserved)
 
 
 def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:

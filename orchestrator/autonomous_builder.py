@@ -1076,13 +1076,22 @@ def _ensure_plan_construction_coverage(
     ]
     if not positions:
         return
+    # Coverage infrastructure is placed before this plan is submitted. Keep
+    # its 4x4 roboports off every footprint the plan is about to reserve; a
+    # roboport centre can be clear while still covering a pending pole or
+    # machine ghost. The executor's centre-only check would otherwise accept
+    # the overlap and leave an unbuildable ghost behind.
+    reserved_tiles = planned_footprint_tiles(plan)
     xs, ys = zip(*positions)
     targets = {
         (min(xs), min(ys)), (min(xs), max(ys)),
         (max(xs), min(ys)), (max(xs), max(ys)),
     }
     for target in sorted(targets):
-        extend_roboport_coverage(client, bridge, surface, force, target, emit)
+        extend_roboport_coverage(
+            client, bridge, surface, force, target, emit,
+            reserved_tiles=reserved_tiles,
+        )
 
 
 def _power_and_raise_stage(

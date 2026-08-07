@@ -630,6 +630,7 @@ def extend_roboport_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_position: Point, emit: Callable[[str], None], *,
     purpose: str = "construction",
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> bool:
     """If `target_position` is beyond every existing roboport's service area
     for `purpose` ("construction" for ghosts, "logistic" for chests), chain new
@@ -656,6 +657,7 @@ def extend_roboport_coverage(
             client, surface, nearest, target_position, ideals,
             service_radius=radius, service_square=square,
             link_distance=_ROBOPORT_LINK_DISTANCE,
+            reserved_tiles=reserved_tiles,
         )
     except ValueError as error:
         raise StuckError(
