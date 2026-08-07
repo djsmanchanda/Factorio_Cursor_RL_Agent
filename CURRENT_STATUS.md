@@ -2091,3 +2091,9 @@ that consumed it was not.
 - What: restart_server now uses the visible user-approvable elevation path and closes the temporary PowerShell window after launching.
 - Why: hidden elevation returned Windows STATUS_CONTROL_C_EXIT (3221225786 / 0xC000013A) during restart, while restore's visible launch path succeeded.
 - Next: restart the dashboard process before using the Restart server button; no mod redeploy is required.
+
+## [2026-08-08] Target stranded construction ghosts for coverage repair
+- Files: orchestrator/autonomous_builder.py, tests/test_ghost_diagnostics.py
+- What: Coverage remediation now extends roboports to the exact out-of-range ghost position instead of retrying from only the stage origin.
+- Why: Coal mining stalled six rounds on a belt at (25.5, -49.5) while the stage anchor was already covered, so every retry built nothing.
+- Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.

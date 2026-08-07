@@ -77,6 +77,29 @@ def test_material_remedy_raises_shortage_when_base_lacks_item(monkeypatch) -> No
 
     assert raised.value.required == {"stone-brick": 8}
 
+def test_coverage_remedy_targets_the_stranded_ghost_not_stage_origin(monkeypatch) -> None:
+    targets = []
+    monkeypatch.setattr(
+        live_base, "ghost_blockages", lambda *_a: [{
+            "position": (25.5, -49.5), "entity": "transport-belt",
+            "reason": "out_of_construction_range",
+        }],
+    )
+    monkeypatch.setattr(
+        builder, "extend_roboport_coverage",
+        lambda *_args, **_kwargs: targets.append(_args[4]) or True,
+    )
+
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "mining stage for coal",
+        "coverage", "ghost transport-belt outside coverage", (10.0, -40.0),
+        (10.0, -40.0), [], [], ((0.0, -60.0), (40.0, -20.0)),
+        lambda _message: None,
+    )
+
+    assert acted
+    assert targets == [(25.5, -49.5)]
+
 def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch) -> None:
     calls = []
 

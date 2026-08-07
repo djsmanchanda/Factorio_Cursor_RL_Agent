@@ -134,8 +134,18 @@ def _apply_remedy(
     'nothing to do yet' -- the caller waits it out rather than giving up.
     """
     if remedy == "coverage":
+        # The stage origin is only an anchor. A long output belt can extend
+        # beyond it while the anchor itself remains covered, which used to
+        # make every coverage retry a no-op. Follow the exact stranded ghost
+        # reported by the diagnosis when one is available.
+        coverage_target = origin
+        if area is not None:
+            for ghost in live_base.ghost_blockages(client, surface, force, area):
+                if ghost.get("reason") == "out_of_construction_range":
+                    coverage_target = tuple(ghost["position"])
+                    break
         acted = extend_roboport_coverage(
-            client, bridge, surface, force, origin, emit,
+            client, bridge, surface, force, coverage_target, emit,
         )
     elif remedy == "logistic_coverage":
         # Unlike a power gap, this one CAN clear without the remedy doing
