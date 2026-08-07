@@ -11,6 +11,7 @@ from typing import Iterable
 from planners.plan_validation import actions as plan_actions
 from planners.plan_validation import validate_build_plan
 from planners.refinery_blueprints import template_actions, template_name
+from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS, inserter_for_demand
 
 
 FURNACES_PER_MODULE = 6
@@ -264,14 +265,25 @@ def refinery_interfaces(
     )
 
 
+def _output_adapter_inserter(recipe: str, furnaces: int, variant: str) -> str:
+    """Choose a collector tier for the complete refinery output rate."""
+    if variant != "basic":
+        return "fast-inserter"
+    spec = LINE_RECIPES[recipe]
+    crafts = furnaces * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+    output_rate = spec.get("product_amount", 1) * crafts
+    return inserter_for_demand(output_rate)
+
+
 def _output_adapter_actions(
     furnaces: int, *, origin_x: float, origin_y: float, variant: str,
+    recipe: str,
 ) -> list[dict]:
     interface = refinery_interfaces(
         furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
     )
     belt = "transport-belt" if variant == "basic" else "fast-transport-belt"
-    inserter = "inserter" if variant == "basic" else "fast-inserter"
+    inserter = _output_adapter_inserter(recipe, furnaces, variant)
     actions = [
         {"action_type": "place_ghost", "entity": belt,
          "position": {"x": x, "y": y}, "direction": "east"}
@@ -302,6 +314,7 @@ def generate_managed_refinery_plan(
         f"refinery_output_{recipe}",
         _output_adapter_actions(
             furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
+            recipe=recipe,
         ),
     ))
     validate_build_plan(plan)
@@ -322,11 +335,11 @@ def generate_managed_refinery_extension_plan(
     )
     old = _output_adapter_actions(
         current_furnaces, origin_x=origin_x, origin_y=origin_y,
-        variant=current_variant,
+        variant=current_variant, recipe=recipe,
     )
     new = _output_adapter_actions(
         new_furnaces, origin_x=origin_x, origin_y=origin_y,
-        variant=target_variant,
+        variant=target_variant, recipe=recipe,
     )
     old_keys, new_keys = {_action_key(a) for a in old}, {_action_key(a) for a in new}
     removals = [_removal_action(a) for a in old if _action_key(a) not in new_keys]

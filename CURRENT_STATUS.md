@@ -2024,3 +2024,9 @@ that consumed it was not.
 - What: Stage power recovery now bridges stranded no-power machines when the stage substation is already on the generating network.
 - Why: Stone mining had one drill on an unpowered local network while its substation was already on network 1, so the old remedy found no second powered network and stopped.
 - Validation: Focused ghost-diagnostics tests passed; Python-only change, so restart the runner; no Lua deployment or Factorio server restart is needed.
+
+## [2026-08-07] Size basic refinery output collectors
+- Files: `planners/smelter_block.py`, `tests/test_smelter_block.py`
+- What: The six-furnace basic refinery output tap now sizes its chest collector from total furnace output and selects a fast inserter.
+- Why: The terminal collector at `(13.5, 42.5)` was hard-coded to a plain inserter, throttling the 3.75/s output of the bootstrap refinery.
+- Validation: 40 focused smelter/state/refinery tests passed; Python-only change, so restart the runner; no Lua deployment or Factorio server restart is needed.

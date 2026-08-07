@@ -183,14 +183,18 @@ def test_basic_variant_bootstraps_one_six_furnace_regular_belt_module() -> None:
         "refinery_start_iron-plate", "refinery_end_iron-plate",
     ]
     assert sum(action["entity"] == "electric-furnace" for action in placements) == 6
-    assert all("fast-" not in action["entity"] for action in placements)
+    assert any(
+        action["entity"] == "fast-inserter"
+        and action["position"] == {"x": 15.5, "y": 13.5}
+        for action in placements
+    )
     assert sum(action["entity"] == "transport-belt" for action in placements) == 53
     interface = refinery_interfaces(6, variant="basic")
     positions = {(a["position"]["x"], a["position"]["y"]): a for a in placements}
     assert interface.plate_outputs == ((14.5, 12.5),)
     assert positions[(14.5, 12.5)]["entity"] == "transport-belt"
     assert positions[(15.5, 12.5)]["entity"] == "transport-belt"
-    assert positions[(15.5, 13.5)]["entity"] == "inserter"
+    assert positions[(15.5, 13.5)]["entity"] == "fast-inserter"
     assert positions[interface.provider]["entity"] == "passive-provider-chest"
     assert interface.provider == (15.5, 14.5)
 
