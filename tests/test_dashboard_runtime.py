@@ -37,3 +37,19 @@ def test_finished_managed_runner_falls_back_to_pid_record(monkeypatch) -> None:
 
     assert manager._runner_pids() == [5678]
     assert manager._runner is None
+
+
+def test_restart_server_uses_visible_elevation_path(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager._stop_runner = lambda: None
+    manager._stop_server = lambda: None
+    launched: list[bool] = []
+    waited: list[tuple[int, bool, int]] = []
+    manager._launch_server = lambda *, visible_admin_shell=False: launched.append(visible_admin_shell)
+    manager._wait_for_port = lambda port, wanted, timeout: waited.append((port, wanted, timeout))
+    manager.config = SimpleNamespace(rcon_port=27017)
+
+    manager._restart_server()
+
+    assert launched == [True]
+    assert waited == [(27017, True, 90)]

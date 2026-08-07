@@ -2086,3 +2086,8 @@ that consumed it was not.
 - What: supply-starved paired mall cells now wait on their requester transport instead of being misclassified as deterministic belt lines; the run log also confirmed no power-generation stage exists in the active builder.
 - Why: the 02:16:51 run stopped on valid six-tile mall geometry before any electricity policy could run; boilers/steam engines are additionally rejected by the repository's electric-only invariant.
 - Next: implement generation only after the electric-only invariant is explicitly revised; this Python fix needs a runner restart, not a mod redeploy.
+## [2026-08-08] Dashboard restart elevation reliability
+- Files: tools/dashboard_runtime.py, tests/test_dashboard_runtime.py
+- What: restart_server now uses the visible user-approvable elevation path and closes the temporary PowerShell window after launching.
+- Why: hidden elevation returned Windows STATUS_CONTROL_C_EXIT (3221225786 / 0xC000013A) during restart, while restore's visible launch path succeeded.
+- Next: restart the dashboard process before using the Restart server button; no mod redeploy is required.

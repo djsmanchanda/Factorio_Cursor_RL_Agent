@@ -219,7 +219,11 @@ class OperationManager:
     def _restart_server(self) -> None:
         self._stop_runner()
         self._stop_server()
-        self._launch_server()
+        # A hidden UAC-launched PowerShell can be terminated with
+        # STATUS_CONTROL_C_EXIT (0xC000013A) before the child server starts.
+        # Use the same visible, user-approvable elevation path as restore; the
+        # server launch is still bounded by the RCON readiness wait below.
+        self._launch_server(visible_admin_shell=True)
         self._wait_for_port(self.config.rcon_port, True, 90)
 
     def _restore_save(self) -> None:
@@ -291,7 +295,7 @@ class OperationManager:
 
     def _run_visible_elevated_script(self, script: Path, *arguments: str) -> None:
         values = [
-            "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
             str(script), *arguments,
         ]
         escaped = ",".join(
