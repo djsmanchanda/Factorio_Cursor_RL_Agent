@@ -76,3 +76,26 @@ def test_material_remedy_raises_shortage_when_base_lacks_item(monkeypatch) -> No
         )
 
     assert raised.value.required == {"stone-brick": 8}
+
+def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch) -> None:
+    calls = []
+
+    def fake_extend(_client, _bridge, _surface, _force, position, _emit):
+        calls.append(position)
+        return position == (59.5, -63.5)
+
+    monkeypatch.setattr(builder, "extend_power", fake_extend)
+    monkeypatch.setattr(
+        live_base, "entity_statuses",
+        lambda *_a: {(53.5, -67.5): "working", (59.5, -63.5): "no_power"},
+    )
+
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "mining stage for stone",
+        "stage_power", "1 machine(s) unpowered", (48.0, -70.0),
+        (48.0, -70.0), [(53.5, -67.5), (59.5, -63.5)], [], None,
+        lambda _message: None,
+    )
+
+    assert acted
+    assert calls == [(48.0, -70.0), (59.5, -63.5)]

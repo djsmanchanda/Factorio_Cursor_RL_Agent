@@ -170,16 +170,33 @@ def _apply_remedy(
         # recorded position or no second network to bridge to; the previous
         # code discarded that, so the loop re-ran an identical no-op for
         # every remaining round and reported only a bare timeout.
-        if not extend_power(
+        acted = extend_power(
             client, bridge, surface, force, substation_position, emit,
-        ):
+        )
+        if not acted:
+            # A scaffold can already be on the source network while one or
+            # more machines sit outside its supply area (for example, the
+            # second row of a two-row mine). In that shape the substation has
+            # no *other* powered network to bridge from, but the stranded
+            # machines still need individual hookup poles.
+            statuses = live_base.entity_statuses(
+                client, surface, machine_positions,
+            )
+            stranded = [
+                position for position in machine_positions
+                if statuses.get(tuple(position)) == "no_power"
+            ]
+            for position in stranded:
+                acted |= extend_power(
+                    client, bridge, surface, force, position, emit,
+                )
+        if not acted:
             raise StuckError(
                 f"{name}: {description}, but no power bridge can be built from "
                 f"{substation_position} -- either no pole stands there (check the "
                 "planned vs. built substation position) or the whole surface is "
                 "already one network, so retrying cannot change anything"
             )
-        acted = True
     elif remedy == "entity_power":
         stranded = live_base.unpowered_entities(client, surface, area)
         if not stranded:

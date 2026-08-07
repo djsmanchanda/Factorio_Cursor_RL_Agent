@@ -2019,3 +2019,8 @@ that consumed it was not.
 - What: Reserved regular belts are protected for the initial refinery while stocked fast belts can fill only the remaining direct route; malformed mine surveys now fail closed, and refinery furnace ghosts no longer send unsupported recipes to Factorio.
 - Why: The live run stalled at 108/116 belts, then crashed on a malformed retirement survey; when plates were added manually, every furnace ghost failed with `recipe_set_failed`.
 - Validation: 47 focused belt/refinery/mine tests passed; Python compilation and `git diff --check` passed. Python-only change: restart the runner; no Lua deployment is needed.
+## [2026-08-07] Repair partially powered mining stages
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_ghost_diagnostics.py`
+- What: Stage power recovery now bridges stranded no-power machines when the stage substation is already on the generating network.
+- Why: Stone mining had one drill on an unpowered local network while its substation was already on network 1, so the old remedy found no second powered network and stopped.
+- Validation: Focused ghost-diagnostics tests passed; Python-only change, so restart the runner; no Lua deployment or Factorio server restart is needed.
