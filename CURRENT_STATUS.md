@@ -2063,3 +2063,9 @@ that consumed it was not.
 - What: Expansion keeps the old mine operating until replacement mine/refinery collision and affordability checks pass.
 - Why: The prior ordering deconstructed the only iron mine before a refinery footprint conflict was discovered, leaving the base without iron production.
 - Validation: 55 focused tests passed; Python-only change, so restart the runner; no Lua redeploy is required.
+
+## [2026-08-07] Refinery capacity schedules
+- Files: planners/smelter_block.py, orchestrator/autonomous_builder.py, tests/test_smelter_block.py, tests/test_cohesive_smelter_expansion.py
+- What: Added explicit staged refinery capacities and exact scheduled lattice shapes; generation-1 growth now stops at 48 instead of rounding to an oversized block.
+- Why: Keep each refinery within its planned generation envelope and prevent mine expansion from silently overbuilding the starter footprint.
+- Next: Add generation-aware new-site placement before enabling generation-2+ schedules in the live builder.

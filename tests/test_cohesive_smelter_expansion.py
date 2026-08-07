@@ -79,7 +79,7 @@ def test_cohesive_target_merges_starved_furnaces_and_rounds_modules(monkeypatch)
 
     assert len(captured["positions"]) == 30
     assert state.furnace_count == 30
-    assert target == 60
+    assert target == 48
 
 
 def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -> None:
@@ -102,7 +102,7 @@ def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -
     )
 
     assert recovered.origin == (0.0, 0.0)
-    assert target == 60
+    assert target == 48
 
 
 def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> None:

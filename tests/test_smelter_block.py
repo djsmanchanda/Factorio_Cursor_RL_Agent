@@ -21,6 +21,8 @@ from planners.smelter_block import (  # noqa: E402
     generate_refinery_extension_plan,
     generate_refinery_plan,
     refinery_interfaces,
+    REFINERY_CAPACITY_SCHEDULES,
+    scheduled_refinery_target,
 )
 
 
@@ -61,6 +63,18 @@ def test_the_refinery_widens_before_it_moves_the_end() -> None:
     assert (block_shape(6).columns, block_shape(6).middle_rows) == (1, 0)
     assert (block_shape(30).columns, block_shape(30).middle_rows) == (5, 0)
     assert (block_shape(31).columns, block_shape(31).middle_rows) == (5, 1)
+
+
+def test_scheduled_capacities_keep_exact_lattice_counts() -> None:
+    for capacity in {value for schedule in REFINERY_CAPACITY_SCHEDULES for value in schedule}:
+        assert block_shape(capacity).capacity == capacity
+
+
+def test_first_generation_stops_at_its_cap_instead_of_rounding_to_sixty() -> None:
+    assert scheduled_refinery_target(6, 7) == 12
+    assert scheduled_refinery_target(12, 13) == 24
+    assert scheduled_refinery_target(24, 25) == 48
+    assert scheduled_refinery_target(48, 49) is None
 
 
 def test_middle_topology_is_plate_furnace_ore_furnace_plate() -> None:

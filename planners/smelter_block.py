@@ -21,6 +21,30 @@ START_DEPTH = 3
 END_DEPTH = 11
 PREFERRED_COLUMNS = 5
 
+# Capacity is deliberately policy data, not an emergent consequence of the
+# current drill count. A refinery generation expands through these checkpoints
+# before a later generation is opened elsewhere.
+REFINERY_GENERATION_1_CAPACITIES = (6, 12, 24, 48)
+REFINERY_GENERATION_2_CAPACITIES = (48, 96, 192, 288)
+REFINERY_GENERATION_3_CAPACITIES = (36, 72, 144, 288, 576)
+REFINERY_GENERATION_4_CAPACITIES = (144, 288, 576)
+REFINERY_GENERATION_5_CAPACITIES = (576,)
+REFINERY_CAPACITY_SCHEDULES = (
+    REFINERY_GENERATION_1_CAPACITIES,
+    REFINERY_GENERATION_2_CAPACITIES,
+    REFINERY_GENERATION_3_CAPACITIES,
+    REFINERY_GENERATION_4_CAPACITIES,
+    REFINERY_GENERATION_5_CAPACITIES,
+)
+
+# Scheduled capacities need exact lattice shapes. The legacy fallback below
+# remains for arbitrary demand targets and for recovering older deployments.
+_SCHEDULED_BLOCK_DIMENSIONS = {
+    6: (1, 1), 12: (2, 1), 24: (4, 1), 36: (6, 1), 48: (4, 2),
+    72: (6, 2), 96: (4, 4), 144: (6, 4), 192: (4, 8),
+    288: (4, 12), 576: (3, 32),
+}
+
 
 @dataclass(frozen=True)
 class BlockShape:
@@ -60,9 +84,35 @@ def block_shape(furnaces: int) -> BlockShape:
     """Choose a monotonic shape so an established column never moves sideways."""
     if furnaces < 1:
         raise ValueError(f"A smelting block needs at least one furnace, got {furnaces}")
+    scheduled = _SCHEDULED_BLOCK_DIMENSIONS.get(furnaces)
+    if scheduled is not None:
+        columns, rows = scheduled
+        return BlockShape(furnaces, columns, rows - 1)
     columns = min(PREFERRED_COLUMNS, math.ceil(furnaces / FURNACES_PER_MODULE))
     rows = math.ceil(furnaces / (FURNACES_PER_MODULE * columns))
     return BlockShape(furnaces, columns, rows - 1)
+
+
+def scheduled_refinery_target(
+    current_furnaces: int, required_furnaces: int, *, generation: int = 1,
+) -> int | None:
+    """Return the next policy checkpoint that can satisfy current demand.
+
+    ``None`` means this refinery reached its generation cap; the caller must
+    open the next refinery instead of silently overbuilding this footprint.
+    """
+    if current_furnaces < 1 or required_furnaces < 1:
+        raise ValueError("Refinery furnace counts must be positive")
+    if required_furnaces <= current_furnaces:
+        return current_furnaces
+    try:
+        schedule = REFINERY_CAPACITY_SCHEDULES[generation - 1]
+    except IndexError as error:
+        raise ValueError(f"Unknown refinery generation {generation}") from error
+    for capacity in schedule:
+        if capacity > current_furnaces and capacity >= required_furnaces:
+            return capacity
+    return None
 
 
 def _deduplicate(actions: Iterable[dict]) -> list[dict]:

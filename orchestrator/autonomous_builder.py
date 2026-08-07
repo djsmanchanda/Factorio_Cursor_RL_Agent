@@ -105,8 +105,8 @@ from planners.recipe_data import (
     install_catalog_stack_sizes,
 )
 from planners.smelter_block import (
-    FURNACES_PER_MODULE, block_shape, generate_managed_refinery_extension_plan,
-    generate_managed_refinery_plan, refinery_interfaces,
+    FURNACES_PER_MODULE, generate_managed_refinery_extension_plan,
+    generate_managed_refinery_plan, refinery_interfaces, scheduled_refinery_target,
 )
 from tools.rcon_client import RconClient
 
@@ -693,10 +693,16 @@ def _cohesive_smelter_target(
     required = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
     )
-    target = block_shape(required).capacity
+    target = scheduled_refinery_target(existing.furnace_count, required)
+    if target is None:
+        raise StuckError(
+            f"{recipe} refinery reached its generation-1 cap at "
+            f"{existing.furnace_count} furnace(s); refusing to overbuild this "
+            "footprint before a new refinery site is planned"
+        )
     emit(
         f"SMELTER SYSTEM TARGET: {total_drills} total {extraction.ore} "
-        f"drill(s) require {required} furnace(s); modular target is {target}"
+        f"drill(s) require {required} furnace(s); scheduled target is {target}"
     )
     return existing, target
 
