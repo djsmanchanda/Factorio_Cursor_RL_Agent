@@ -318,6 +318,27 @@ def test_basic_refinery_no_growth_keeps_basic_provider(monkeypatch) -> None:
     assert calls == ["basic"]
 
 
+
+def test_basic_refinery_growth_preserves_bootstrap_variant(monkeypatch) -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    state = refinery_state.infer_refinery_state("iron-plate", _furnaces(plan), variant="basic")
+    captured = {}
+    monkeypatch.setattr(
+        builder, "generate_managed_refinery_extension_plan",
+        lambda *args, **kwargs: captured.update(kwargs) or {"phases": []},
+    )
+    monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
+    monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
+    monkeypatch.setattr(builder, "_submit", lambda *_a: None)
+    monkeypatch.setattr(builder, "_bring_modular_refinery_up", lambda *_a, **_k: None)
+
+    builder._extend_plate_smelter(
+        object(), object(), "nauvis", "player", "iron-plate",
+        state, 12, (10.0, 10.0), lambda _message: None,
+    )
+
+    assert captured["current_variant"] == "basic"
+    assert captured["target_variant"] == "basic"
 def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
     state = _state()
     calls = []

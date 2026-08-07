@@ -560,10 +560,10 @@ def _extend_plate_smelter(
     """Expand one recovered block by migrating its planner-owned End/output cap."""
     del ore_output
     origin = state.origin
-    target_variant = (
-        state.variant if target_machines <= state.furnace_count
-        else ("standard" if state.variant == "basic" else state.variant)
-    )
+    # Keep the cheaper bootstrap geometry while it grows. Migrating a basic
+    # starter block to the standard two-row interface adds belts on its old
+    # footprint and can collide with valid infrastructure before capacity grows.
+    target_variant = state.variant
     full = generate_managed_refinery_plan(
         recipe, target_machines, origin_x=origin[0], origin_y=origin[1],
         variant=target_variant,
@@ -614,7 +614,10 @@ def _assert_atomic_plate_expansion_affordable(
     """Preflight the mine and exact modular refinery delta before either grows."""
     if target_machines <= state.furnace_count:
         return None
-    target_variant = "standard" if state.variant == "basic" else state.variant
+    # Expansion must not implicitly migrate a basic starter refinery. The
+    # basic Start/Repeat/End geometry is the low-budget growth path; migration
+    # is a separate, explicitly planned operation.
+    target_variant = state.variant
     smelter_delta = generate_managed_refinery_extension_plan(
         recipe, state.furnace_count, target_machines,
         origin_x=state.origin[0], origin_y=state.origin[1],

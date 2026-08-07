@@ -2052,3 +2052,8 @@ that consumed it was not.
 - What: Managed-mine RCON surveys now emit `{x,y}` positions instead of nested `{{x,y}}` tables.
 - Why: The malformed Lua caused every iron expansion retry to defer with `real number expected got table`, leaving the mine/refinery at its starter capacity.
 - Validation: 40 focused extraction/coverage/diagnostic tests passed; Python-only change, so restart the runner; no Lua redeploy is required.
+## [2026-08-07] Preserve basic refinery geometry during growth
+- Files: `orchestrator/autonomous_builder.py`, `tests/test_cohesive_smelter_expansion.py`
+- What: Refinery expansion keeps a basic Start/Repeat/End variant instead of implicitly migrating to the standard two-row interface.
+- Why: The automatic migration collided with existing starter infrastructure before adding capacity, after mine retirement had already removed the depleted mine.
+- Validation: 41 focused refinery/extraction tests passed; Python-only change, so restart the runner; no Lua redeploy is required.
