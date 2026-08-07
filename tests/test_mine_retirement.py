@@ -12,7 +12,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from orchestrator.mine_retirement import _managed_entities  # noqa: E402
+from orchestrator.mine_retirement import (  # noqa: E402
+    _RETIRABLE_ENTITY_NAMES,
+    _managed_entities,
+)
 from orchestrator.extraction_state import ResourceMine  # noqa: E402
 
 
@@ -46,3 +49,18 @@ def test_managed_entity_survey_rejects_malformed_records(response: str) -> None:
         _managed_entities(
             _Client(response), "nauvis", "player", ResourceMine((0.5, 0.5), 1),
         )
+
+def test_retirement_survey_can_exclude_shared_infrastructure() -> None:
+    client = _Client("electric-mining-drill,4,5")
+    entities = _managed_entities(
+        client, "nauvis", "player", ResourceMine((0.5, 0.5), 1),
+        _RETIRABLE_ENTITY_NAMES,
+    )
+
+    assert entities == [{
+        "name": "electric-mining-drill",
+        "position": {"x": 4.0, "y": 5.0},
+    }]
+    allowed = client.commands[0].split("allowed=")[1].split(";local out")[0]
+    assert "transport-belt" not in allowed
+    assert "medium-electric-pole" not in allowed

@@ -22,6 +22,14 @@ _ENTITY_NAMES = {
     "medium-electric-pole", "substation",
 }
 
+# Belts and poles often form shared corridors between mines and refineries.
+# They are infrastructure, not mine-owned teardown targets. Removing them
+# during retirement can disconnect a still-live neighbouring resource line.
+_RETIRABLE_ENTITY_NAMES = {
+    "electric-mining-drill", "inserter", "fast-inserter", "bulk-inserter",
+    "stack-inserter", "steel-chest", "passive-provider-chest",
+}
+
 
 def _candidate_positions(mine: ResourceMine) -> tuple[Point, ...]:
     """Exact positions belonging to the deterministic paired-mine geometry."""
@@ -56,12 +64,16 @@ def _candidate_positions(mine: ResourceMine) -> tuple[Point, ...]:
 
 def _managed_entities(
     client: RconClient, surface: str, force: str, mine: ResourceMine,
+    entity_names: set[str] | None = None,
 ) -> list[dict]:
     positions = _candidate_positions(mine)
     lua_positions = "{" + ",".join(
         "{" + str(x) + "," + str(y) + "}" for x, y in positions
     ) + "}"
-    allowed = "{" + ",".join("['" + name + "']=true" for name in _ENTITY_NAMES) + "}"
+    allowed_names = _ENTITY_NAMES if entity_names is None else entity_names
+    allowed = "{" + ",".join(
+        "['" + name + "']=true" for name in allowed_names
+    ) + "}"
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local allowed=" + allowed + ";local out={};local seen={};"
@@ -117,7 +129,9 @@ def retire_depleted_mines(
         remaining = patch.amount if patch is not None and math.dist(patch.nearest, drill) <= 4 else 0
         if remaining >= RETIRE_ACTIVE_PATCH_RESOURCE:
             continue
-        entities = _managed_entities(client, surface, force, mine)
+        entities = _managed_entities(
+            client, surface, force, mine, _RETIRABLE_ENTITY_NAMES,
+        )
         if not entities:
             continue
         actions = [
@@ -148,7 +162,9 @@ def retire_depleted_mines(
             f"deconstructing {len(actions)} managed mine entities"
         )
         deadline = time.monotonic() + timeout
-        while _managed_entities(client, surface, force, mine):
+        while _managed_entities(
+            client, surface, force, mine, _RETIRABLE_ENTITY_NAMES,
+        ):
             if time.monotonic() >= deadline:
                 raise RuntimeError(
                     f"Timed out waiting for construction bots to retire {resource} mine at {drill}"

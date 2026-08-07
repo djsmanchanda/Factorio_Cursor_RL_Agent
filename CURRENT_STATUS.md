@@ -2102,3 +2102,8 @@ that consumed it was not.
 - What: Fast-belt production now waits for 24 iron furnaces and 24 iron drills; regular belts or existing fast-belt stock remain usable, and unmanaged/standard starter rows open cheaper basic replacements instead of deferring iron growth.
 - Why: Iron prep required 14 furnaces but stayed at six after recovery rejected the starter geometry, while fast-belt demand could create a circular shortage.
 - Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.
+## [2026-08-08] Defer mine retirement until replacement is healthy
+- Files: orchestrator/autonomous_builder.py, orchestrator/mine_retirement.py, tests/test_cohesive_smelter_expansion.py, tests/test_mine_retirement.py
+- What: Depleted mines are retired only after the replacement mine/refinery is built and healthy; retirement now preserves shared belts and power poles.
+- Why: The 04:35:37 run removed the only iron source before its 18-furnace replacement bill was available, and the broad teardown included infrastructure shared with the copper line.
+- Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required.

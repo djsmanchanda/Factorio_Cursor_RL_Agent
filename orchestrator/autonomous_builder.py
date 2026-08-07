@@ -876,17 +876,9 @@ def build_mining_stage(
 ) -> Point:
     """Build or expand one cohesive mine-to-smelter system."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
-    # For an expansion, keep the depleted mine alive until the replacement
-    # mine/refinery bill has passed every collision and affordability check.
-    # Retiring first can leave the base with no supply when the later footprint
-    # is rejected by existing infrastructure.
-    if not expand:
-        try:
-            retire_depleted_mines(
-                client, bridge, surface, force, ore, reference_point, emit,
-            )
-        except RuntimeError as error:
-            raise StuckError(str(error)) from error
+    # Retirement is deferred until the replacement mine and refinery are
+    # built and healthy. Removing the only live source before prerequisite
+    # machines are available can strand the entire supply chain.
     try:
         extraction = plan_local_extraction(
             client, surface, force, recipe, reference_point, 3,
@@ -950,12 +942,6 @@ def build_mining_stage(
         )
     if expand:
         _log_mining_expansion(extraction, emit)
-        try:
-            retire_depleted_mines(
-                client, bridge, surface, force, ore, reference_point, emit,
-            )
-        except RuntimeError as error:
-            raise StuckError(str(error)) from error
     emit(
         f"{extraction.drill_count} drill(s) feed {extraction.furnace_count} "
         f"separate {recipe} furnace(s); mining productivity "
@@ -981,14 +967,22 @@ def build_mining_stage(
         client, bridge, surface, force, extraction, ore_output, emit,
     )
     if cohesive_target is not None:
-        return _extend_plate_smelter(
+        provider = _extend_plate_smelter(
             client, bridge, surface, force, recipe, existing_smelter,
             cohesive_target, ore_output, emit,
         )
-    return _build_initial_plate_smelter(
-        client, bridge, surface, force, recipe, extraction, ore_output,
-        reference_point, emit,
-    )
+    else:
+        provider = _build_initial_plate_smelter(
+            client, bridge, surface, force, recipe, extraction, ore_output,
+            reference_point, emit,
+        )
+    try:
+        retire_depleted_mines(
+            client, bridge, surface, force, ore, reference_point, emit,
+        )
+    except RuntimeError as error:
+        raise StuckError(str(error)) from error
+    return provider
 
 
 def build_logistic_smelter(

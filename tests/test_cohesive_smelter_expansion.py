@@ -203,7 +203,7 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
     )
 
     assert output == (30.0, 40.0)
-    assert calls == ["retire", "foundation", "mine"]
+    assert calls == ["foundation", "mine", "retire"]
 
 
 def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:
