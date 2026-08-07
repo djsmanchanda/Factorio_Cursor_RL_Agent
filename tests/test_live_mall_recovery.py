@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 from orchestrator import autonomous_builder as builder  # noqa: E402
 
 
-def test_science_call_keeps_starved_paired_mall_transport(monkeypatch) -> None:
+def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None:
     """The live fault: two valid mall gear assemblers were passed to line
     recovery, which rejected their six-tile spacing as invalid line geometry."""
     machines = ((50.5, 32.5), (56.5, 32.5))
@@ -42,13 +42,19 @@ def test_science_call_keeps_starved_paired_mall_transport(monkeypatch) -> None:
         "entity_statuses",
         lambda *_a, **_k: {position: "item_ingredient_shortage" for position in machines},
     )
+    repaired = []
+    monkeypatch.setattr(
+        builder, "repair_existing_ingredient_transport",
+        lambda *_a, **_k: repaired.append(True) or True,
+    )
 
     output = builder.ensure_produced(
         object(), object(), "nauvis", "player", "iron-gear-wheel",
         (3.0, -1.0), lambda _message: None, upgrade_bootstrap=True,
     )
 
-    assert output == provider
+    assert output is None
+    assert repaired == [True]
 
 
 def test_upgrade_call_still_detects_the_paired_mall_provider(monkeypatch) -> None:

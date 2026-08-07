@@ -1594,7 +1594,7 @@ def _repair_stalled_line(
     if statuses and all(
         status == "item_ingredient_shortage" for status in statuses.values()
     ) and not _mineable(item):
-        if mall_provider is not None or not upgrade_bootstrap:
+        if not upgrade_bootstrap:
             chest = mall_provider or live_base.nearest_container(
                 client, surface, force, existing.machine_positions[-1],
                 names=("passive-provider-chest",),

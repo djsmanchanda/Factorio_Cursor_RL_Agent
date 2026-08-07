@@ -2075,3 +2075,9 @@ that consumed it was not.
 - What: Plate prep now records the refinery provider returned by mining stages; steel refuses arbitrary starter/storage chests and reuses the real iron provider.
 - Why: The steel line previously requested iron from the nearest chest at (0.5, -1.5), which was not a reliable producer feed and left the furnace empty.
 - Next: Restart the Python runner before the next live validation.
+
+## [2026-08-08] Repair stalled mall intermediates for live consumers
+- Files: orchestrator/autonomous_builder.py, tests/test_live_mall_recovery.py
+- What: Upgrade/goal consumers now repair supply-starved mall cells; bootstrap-only prep still waits for its reserve.
+- Why: Automation science accepted an empty iron-gear provider instead of reconnecting its stalled two-machine cell.
+- Next: Restart the Python runner and rerun from the safe save.
