@@ -22,8 +22,8 @@ from orchestrator.build_decisions import (
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
 from orchestrator.construction_stock import MallReserve, mall_reserve
 from orchestrator.baseline_production import (
-    BASELINE_MACHINES, BASELINE_PLATES, baseline_build_order,
-    baseline_drill_phase, baseline_plate_draw,
+    BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
+    baseline_build_order, baseline_drill_phase, baseline_plate_draw,
     demand_adjusted_plate_draw, drill_phase_for_draw,
     smelter_count_for_draw,
 )
@@ -890,6 +890,21 @@ def build_mining_stage(
         )
     except ValueError as error:
         raise StuckError(str(error)) from error
+    bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
+    if (
+        bootstrap_cap is not None
+        and getattr(extraction, "furnace_count", 0) > bootstrap_cap
+        and not _electric_furnace_producer_started(client, surface, force)
+    ):
+        emit(
+            f"BOOTSTRAP FURNACE CAP: deferring {recipe} expansion at "
+            f"{bootstrap_cap} furnace(s) until electric-furnace production is working "
+            f"(planned {extraction.furnace_count})"
+        )
+        raise ProductionPrerequisiteDeferred(
+            f"{recipe} expansion waits for electric-furnace production after "
+            f"the {bootstrap_cap}-furnace bootstrap cap"
+        )
     unmanaged_refinery = False
     try:
         existing_smelter, cohesive_target = _cohesive_smelter_target(
@@ -1956,6 +1971,15 @@ def ensure_produced(
     if item in MANAGED_INTERMEDIATE_SOURCES:
         return MANAGED_INTERMEDIATE_SOURCES[item]
     if item == "fast-transport-belt":
+        if not _electric_furnace_producer_started(client, surface, force):
+            emit(
+                "  FAST BELT GATE: postponing fast belts until the "
+                "electric-furnace producer is working; use regular belts or "
+                "remaining fast-belt stock for bootstrap routes"
+            )
+            raise ProductionPrerequisiteDeferred(
+                "fast-transport-belt waits for electric-furnace production"
+            )
         iron_furnaces, iron_drills = _iron_capacity_for_fast_belts(
             client, surface, force,
         )
@@ -2165,6 +2189,21 @@ def _serve_mall_task(
     return
 
 
+def _electric_furnace_producer_started(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether the mall has a working producer for electric furnaces.
+
+    Smelting furnaces are not this producer: the item itself must be made by
+    an assembling-machine line. A working line is the point at which the
+    early extraction ceilings may be lifted to answer real demand.
+    """
+    line = live_base.find_line(
+        client, surface, force, "electric-furnace", "assembling-machine-2",
+    )
+    return bool(line is not None and getattr(line, "working_count", 0) > 0)
+
+
 def _prep_plate_extraction(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     short_plate: str, prepped: set[str], deferred_targets: dict[str, int],
@@ -2190,6 +2229,18 @@ def _prep_plate_extraction(
         targets[item] = max(targets.get(item, 0), target)
     adjusted_draw = demand_adjusted_plate_draw(targets, available)
     wanted_furnaces = smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
+    if (
+        short_plate in BOOTSTRAP_FURNACE_CAPS
+        and not _electric_furnace_producer_started(client, surface, force)
+    ):
+        cap = BOOTSTRAP_FURNACE_CAPS[short_plate]
+        if wanted_furnaces > cap:
+            emit(
+                f"  BOOTSTRAP FURNACE CAP: holding {short_plate} at {cap} "
+                f"furnaces until electric-furnace production is working "
+                f"(demand calculated {wanted_furnaces})"
+            )
+            wanted_furnaces = cap
     deferred_target = deferred_targets.get(short_plate)
     if deferred_target is not None and wanted_furnaces <= deferred_target:
         return False
@@ -2224,6 +2275,10 @@ def _prep_plate_extraction(
                 f"  PLATE SOURCE: recorded {short_plate} provider at "
                 f"{output_source} for downstream logistic consumers"
             )
+    except ProductionPrerequisiteDeferred as deferred:
+        deferred_targets[short_plate] = wanted_furnaces
+        emit(f"  PREP DEFERRED: {short_plate} extraction -- {deferred}")
+        return False
     except MaterialShortage as shortage:
         # Raising a drill phase needs drills, and drills come from
         # the mall. Push the shortfall back as a mall target instead
@@ -2457,6 +2512,11 @@ def _open_the_run(
             f"{recipe}x{BASELINE_MACHINES[recipe]}"
             for recipe in baseline_build_order()
         )
+        + "; bootstrap furnace caps "
+        + ", ".join(
+            f"{recipe}={cap}"
+            for recipe, cap in sorted(BOOTSTRAP_FURNACE_CAPS.items())
+        )
         + "; plate draw "
         + ", ".join(
             f"{plate} {rate:.2f}/s (drill phase {baseline_drill_phase(plate)})"
@@ -2559,6 +2619,9 @@ def run(
             # opening iron baseline; a completed baseline must not freeze that
             # capacity. Deferred plate targets are retried only when demand
             # rises, so a failed corridor does not spin every pass.
+            # The loop deliberately preserves any(...)'s short-circuit behavior:
+            # the first plate that spends the pass wins, while every plate gets
+            # reconsidered on the next pass.
             plate_spent = False
             for plate in BASELINE_PLATES:
                 spent = _prep_plate_extraction(

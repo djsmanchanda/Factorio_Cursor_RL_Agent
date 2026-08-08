@@ -2119,3 +2119,8 @@ that consumed it was not.
 - What: Refinery replacement deltas now stage the complete future construction footprint and power targets before owned removals; roboport removal is rejected without an alternate coverage chain.
 - Why: Super-force-style replacement is safe only when it cannot strand belts, power, or construction/logistic coverage; the Lua executor has no safe UI super-force primitive.
 - Next: Restart the Python runner after this Python-only change; no mod redeploy is required.
+## [2026-08-08] Gate electric-furnace bootstrap demand
+- Files: orchestrator/parts_mall.py, orchestrator/baseline_production.py, orchestrator/autonomous_builder.py, tests/test_starter_stock.py, tests/test_prep_extraction.py
+- What: Electric furnaces are demand-driven, early iron/copper/stone/steel furnace caps are 12/6/6/6, and new fast-belt production waits for a working electric-furnace producer.
+- Why: The former electric-furnace reserve created premature steel, stone-brick, plastic, and advanced-circuit demand that starved the initial resource bootstrap.
+- Next: Restart the Python runner; no Lua mod redeploy is required. Plastic blueprint ingestion remains a follow-up.

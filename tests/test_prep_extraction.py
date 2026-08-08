@@ -14,7 +14,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder  # noqa: E402
 from orchestrator.baseline_production import (  # noqa: E402
-    BASELINE_PLATES,
+    BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     baseline_drill_phase,
     baseline_smelter_count,
 )
@@ -129,8 +129,30 @@ def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatc
     assert attempts == ["build"] and not pending
 
 
-def test_fast_belts_expand_iron_before_their_own_producer(monkeypatch) -> None:
+def test_fast_belts_wait_for_an_electric_furnace_producer(monkeypatch) -> None:
     calls = []
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **_k: calls.append((_a[4], _k["expand"])),
+    )
+
+    with pytest.raises(autonomous_builder.ProductionPrerequisiteDeferred):
+        autonomous_builder.ensure_produced(
+            object(), object(), "nauvis", "player", "fast-transport-belt",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert calls == []
+
+
+def test_fast_belts_expand_iron_after_furnace_production_starts(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_a: True,
+    )
     monkeypatch.setattr(
         autonomous_builder, "_iron_capacity_for_fast_belts", lambda *_a: (6, 6),
     )
@@ -146,6 +168,27 @@ def test_fast_belts_expand_iron_before_their_own_producer(monkeypatch) -> None:
         )
 
     assert calls == [("iron-plate", True)]
+
+def test_bootstrap_furnace_caps_match_the_early_resource_policy() -> None:
+    assert BOOTSTRAP_FURNACE_CAPS == {
+        "iron-plate": 12, "copper-plate": 6,
+        "stone-brick": 6, "steel-plate": 6,
+    }
+
+
+def test_furnace_cap_lifts_only_after_a_working_furnace_producer(monkeypatch) -> None:
+    line = type("Line", (), {"working_count": 0})()
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line", lambda *_args: line,
+    )
+    assert not autonomous_builder._electric_furnace_producer_started(
+        object(), "nauvis", "player",
+    )
+    line.working_count = 1
+    assert autonomous_builder._electric_furnace_producer_started(
+        object(), "nauvis", "player",
+    )
+
 
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
     """7.5 plate/s needs 12 furnaces; a standard row builds 7."""

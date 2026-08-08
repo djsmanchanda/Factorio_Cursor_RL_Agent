@@ -47,6 +47,11 @@ def test_undergrounds_are_stocked_because_routes_meet_obstacles() -> None:
     assert _OPENING["underground-belt"] % 2 == 0
 
 
+def test_electric_furnaces_are_not_a_background_bootstrap_reserve() -> None:
+    """Their recipe is demand-driven after coal/oil/plastic prerequisites exist."""
+    assert "electric-furnace" not in _OPENING
+
+
 def test_every_opening_item_is_something_the_agent_can_build() -> None:
     import json
 

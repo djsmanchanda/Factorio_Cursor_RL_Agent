@@ -33,6 +33,17 @@ BASELINE_MACHINES = {
 # the set is produced by the set itself.
 BASELINE_PLATES = ("iron-plate", "copper-plate")
 
+# Before the electric-furnace mall chain is alive, extraction is deliberately
+# bounded. These are ceilings, not promises to build every line immediately:
+# the run may use fewer if the current demand is lower, but it cannot let a
+# temporary mall bill jump straight to a 24+ furnace bootstrap.
+BOOTSTRAP_FURNACE_CAPS = {
+    "iron-plate": 12,
+    "copper-plate": 6,
+    "stone-brick": 6,
+    "steel-plate": 6,
+}
+
 ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
 
 

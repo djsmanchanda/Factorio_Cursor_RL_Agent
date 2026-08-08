@@ -27,13 +27,18 @@ STARTER_MALL_TARGETS = (
     ("underground-belt", 20),
     ("inserter", 20),
     ("assembling-machine-1", 6),
-    ("electric-furnace", 4),
 )
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,
-    "electric-furnace": 8,
     "chemical-plant": 4,
 }
+
+# Electric furnaces are deliberately demand-driven. Their own recipe consumes
+# steel, stone-brick, and advanced circuits, so keeping them as a background
+# reserve creates a circular bootstrap demand before coal and oil are running.
+# Once a real construction shortage requests one, ensure_produced resolves the
+# prerequisite chain normally.
+
 _OIL_STOCK_TARGETS = {
     "oil-refinery": 2,
     "pumpjack": 2,
