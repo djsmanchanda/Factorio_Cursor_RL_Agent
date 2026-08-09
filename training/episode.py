@@ -80,7 +80,7 @@ def run_episode(
             "candidate_features": chosen["features"], "report": initial_report,
         })
         authorization = build_layout_authorization([chosen["plan"]])
-        execution = bridge.execute(authorization, chosen["plan"])
+        execution = bridge.execute(identifier, authorization, chosen["plan"])
         _progress(on_progress, "executed", identifier, {
             **context, "chosen_action_id": chosen["action_id"], "execution": execution,
         })

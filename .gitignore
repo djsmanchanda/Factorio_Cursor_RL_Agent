@@ -32,3 +32,6 @@ data/training/policy.json
 .training-test-tmp/
 .training-guidance-test-temp/
 .review-observer-tests/
+
+# Local isolated worker endpoints and passwords
+training-workers.json

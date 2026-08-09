@@ -3,23 +3,27 @@
 
 # Factorio Training Lab
 
-This mod provisions, observes, and recycles isolated `training/*` surfaces and
-`training-*` forces. It is intended only for a dedicated training server. It is
-not part of the normal deterministic-mod deployment and has no authority over
-`nauvis`, `player`, or `planner-sandbox`.
+This mod provisions, executes, observes, and recycles isolated `training/*`
+surfaces and `training-*` forces. It is intended only for a dedicated training
+server. It is not part of the normal deterministic-mod deployment and has no
+authority over `nauvis`, `player`, or `planner-sandbox`.
 
 Registered RCON-only commands:
 
 - `/training_provision <json>`
 - `/training_observe <json>`
 - `/training_recycle <json>`
+- `/training_upload <json>`
+- `/training_execute <json>`
+
+Large immutable plans are uploaded in bounded chunks, then executed only after
+the Python side has validated the BuildPlan and issued its authorization. The
+lab accepts only physical `place_entity` actions within the episode's scenario
+budget and force/surface identity. It never changes the deterministic executor
+or the Nauvis runtime.
 
 Reports are written beneath
 `script-output/factorio_training_lab/reports/`. Recycling completes
 asynchronously because Factorio removes a merged force at the end of the tick;
 the first recycle report says `pending_force_merge` and the final report says
 `completed`.
-
-The deterministic mod remains responsible for validating and executing approved
-BuildPlans. This mod only owns training environment lifecycle, delivery
-measurement, and enforcement of each scenario's virtual construction budget.

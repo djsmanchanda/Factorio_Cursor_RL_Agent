@@ -64,7 +64,7 @@ local function place_resources(surface, scenario)
 end
 
 local function place_fixtures(surface, force, scenario)
-  local fixture_records, sink_unit_number = {}, nil
+  local fixture_records, sink_fixture_id = {}, nil
   for _, fixture in ipairs(scenario.fixtures) do
     local entity = surface.create_entity({
       name = fixture.entity,
@@ -75,7 +75,7 @@ local function place_fixtures(surface, force, scenario)
     entity.minable, entity.destructible, entity.rotatable = false, false, false
     if fixture.kind == "item_sink" then
       entity.remove_unfiltered_items = false
-      sink_unit_number = entity.unit_number
+      sink_fixture_id = fixture.id
     end
     fixture_records[fixture.id] = {
       name = fixture.entity,
@@ -84,7 +84,7 @@ local function place_fixtures(surface, force, scenario)
       position = { x = entity.position.x, y = entity.position.y }
     }
   end
-  return fixture_records, sink_unit_number
+  return fixture_records, sink_fixture_id
 end
 
 local function begin_partial_cleanup(surface, force, request_id, episode_id)
@@ -104,8 +104,8 @@ local function build_episode(payload, scenario)
     surface = create_surface(scenario)
     force = create_force(scenario)
     local resource_tiles = place_resources(surface, scenario)
-    local fixtures, sink = place_fixtures(surface, force, scenario)
-    return { resource_tiles = resource_tiles, fixtures = fixtures, sink = sink }
+    local fixtures, sink_fixture_id = place_fixtures(surface, force, scenario)
+    return { resource_tiles = resource_tiles, fixtures = fixtures, sink_fixture_id = sink_fixture_id }
   end)
   if not ok then
     begin_partial_cleanup(surface, force, payload.request_id, payload.episode_id)
@@ -159,7 +159,7 @@ local function provision(payload)
     surface_name = scenario.environment.surface_name,
     force_name = scenario.environment.force_name, scenario = scenario,
     started_tick = game.tick, last_sample_tick = game.tick, status = "ready",
-    fixtures = created.fixtures, sink_unit_number = created.sink,
+    fixtures = created.fixtures, sink_fixture_id = created.sink_fixture_id,
     delivered_items = 0, sample_items = 0, sample_ticks = 0,
     rate_per_tick = 0, sustained_ticks = 0,
     failure_kind = "none", failure_reason = ""
@@ -191,6 +191,7 @@ local function recycle(payload)
   if not surface or not force then error("episode surface or force is missing") end
   if players_on_surface(surface) then error("cannot recycle a surface containing a connected player") end
   if not game.delete_surface(surface) then error("Factorio refused to delete the training surface") end
+  shared.clear_episode_uploads(payload.episode_id)
   episode.status = "recycling"
   shared.ensure_storage().pending_force_merges[force.name] = {
     request_id = payload.request_id, episode_id = payload.episode_id,

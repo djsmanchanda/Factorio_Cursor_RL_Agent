@@ -9,8 +9,10 @@ local function ensure_storage()
     version = VERSION,
     report_sequence = 0,
     episodes = {},
-    pending_force_merges = {}
+    pending_force_merges = {},
+    uploads = {}
   }
+  storage.training_lab.uploads = storage.training_lab.uploads or {}
   return storage.training_lab
 end
 
@@ -59,11 +61,19 @@ local function episode_for(episode_id)
   return episode
 end
 
+local function clear_episode_uploads(episode_id)
+  local uploads = ensure_storage().uploads
+  for upload_id, upload in pairs(uploads) do
+    if upload.episode_id == episode_id then uploads[upload_id] = nil end
+  end
+end
+
 return {
   VERSION = VERSION,
   OWNER = OWNER,
   ensure_storage = ensure_storage,
   parse_command = parse_command,
   write_report = write_report,
-  episode_for = episode_for
+  episode_for = episode_for,
+  clear_episode_uploads = clear_episode_uploads
 }

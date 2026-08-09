@@ -2165,3 +2165,19 @@ that consumed it was not.
 - What: The ready loop now attempts the research goal before starting another background mall producer; a missing prerequisite still queues the normal mall shortage.
 - Why: The 17:53 run had 28 starter iron gears in the provider, but background requesters claimed the scarce stock while the gear cell was supply-starved, leaving the automation-science requester empty and ending the run.
 - Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required. The separate RL training path was not modified.
+
+## [2026-08-09] Isolated training worker 01 provisioned
+- Files: `training-workers.json`; external `C:/Users/djsma/AppData/Local/Factorio-training-01` profile.
+- What: Created a dedicated Factorio training save with the training lab and its required executor dependency, running on game UDP 35001 and RCON TCP 28001 with loopback-only worker configuration.
+- Why: Provide a disposable live worker for bounded RL episodes without changing the deterministic Nauvis server.
+- Next: Set the runner's current-shell password and run a small benchmark before scaling worker count; do not redeploy or restart the deterministic server.
+## [2026-08-09] Training execution transport and fixture audit
+- Files: `factorio_training_lab/**`, `training/factorio_bridge.py`, training candidates/schema/tests.
+- What: Replaced oversized monolithic RCON BuildPlan calls with bounded training-only upload/execute commands, made training candidates physical placements, and validated protected fixtures from their exact surface identity.
+- Why: The first live batch spent 120 seconds per episode waiting for dropped 11-13KB RCON commands and falsely rejected intact fixtures through global unit lookup.
+- Next: Deploy only `factorio_training_lab` to the isolated worker, restart that training server and the Python batch, then benchmark a small batch before scaling workers.
+## [2026-08-09] Reviewed training execution safety gates
+- Files: `factorio_training_lab/training_geometry.lua`, execution/measurement bridge, focused tests.
+- What: Enforced cumulative per-episode budgets and complete entity footprints before placement; execution failures now produce negative transitions.
+- Why: Prevent a training plan from escaping its isolated scenario or vanishing as a generic worker error.
+- Next: Deploy only the training lab to worker 01, restart that worker and the Python training batch, then verify a 5-attempt benchmark.

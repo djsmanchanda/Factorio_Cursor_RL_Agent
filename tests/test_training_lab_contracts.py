@@ -23,7 +23,7 @@ def test_training_mod_is_separate_and_depends_on_the_executor_mod() -> None:
     info = json.loads((LAB / "info.json").read_text(encoding="utf-8"))
 
     assert info["name"] == "factorio_training_lab"
-    assert "factorio_cursor_rl_agent >= 0.2.0" in info["dependencies"]
+    assert all("factorio_cursor_rl_agent" not in item for item in info["dependencies"])
     assert not (ROOT / "factorio_mod" / "episode_world.lua").exists()
 
 
@@ -33,6 +33,8 @@ def test_control_registers_only_training_namespaced_commands() -> None:
     assert 'commands.add_command("training_provision"' in source
     assert 'commands.add_command("training_observe"' in source
     assert 'commands.add_command("training_recycle"' in source
+    assert 'commands.add_command("training_upload"' in source
+    assert 'commands.add_command("training_execute"' in source
     assert "training commands are RCON-only" in source
     assert 'game.surfaces["nauvis"]' not in source
     assert 'game.forces["player"]' not in source
@@ -98,3 +100,25 @@ def test_audit_scans_the_entire_training_surface() -> None:
     assert "surface.find_entities()" in source
     assert "entity.force ~= force" in source
     assert "neutral_resource" in source
+
+def test_fixture_audit_uses_surface_identity_not_global_unit_lookup() -> None:
+    source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")
+
+    assert "surface.find_entities_filtered" in source
+    assert "game.get_entity_by_unit_number" not in source
+
+def test_execution_report_is_schema_valid() -> None:
+    report = {
+        "version": "1.0.0", "kind": "execution", "request_id": "request-1",
+        "episode_id": "episode-1", "tick": 60, "ok": True, "status": "ready",
+        "scenario_id": "mining-delivery-00000001",
+        "surface": "training/mining-delivery-00000001",
+        "force": "training-mining-delivery-00000001",
+        "execution": {
+            "attempted_placements": 2, "succeeded_placements": 2,
+            "already_present_placements": 0, "failed_placements": 0,
+            "placement_failures": [],
+        },
+    }
+
+    assert list(_validator().iter_errors(report)) == []

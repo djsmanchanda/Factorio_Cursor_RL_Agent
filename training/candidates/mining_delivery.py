@@ -80,7 +80,8 @@ def _belt_actions(
     entry = _sink_entry(source, sink)
     blocked = occupied_tile_indices([("drills", {"phases": [{"actions": drills}]})])
     blocked.update({(-1, -1), (-1, 0), (0, -1), (0, 0)})
-    bridge = _safe_bridge(source, sink, entry, blocked)
+    bridge = [{**action, "action_type": "place_entity"}
+              for action in _safe_bridge(source, sink, entry, blocked)]
     direction = "east" if source_x > min(xs) else "west"
     row = [
         _placement("transport-belt", (x + 0.5, belt_y), direction)

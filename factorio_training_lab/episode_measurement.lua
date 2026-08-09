@@ -2,6 +2,7 @@
 -- Purpose: Sample item delivery and audit active training episodes every 60 ticks.
 
 local shared = require("training_shared")
+local geometry = require("training_geometry")
 
 local function advance_sample(episode, delivered, tick)
   local sample_ticks = tick - episode.last_sample_tick
@@ -34,11 +35,6 @@ local function fixture_units(episode)
   return units
 end
 
-local function position_in(bounds, position)
-  return position.x >= bounds.x_min and position.x < bounds.x_max_exclusive
-    and position.y >= bounds.y_min and position.y < bounds.y_max_exclusive
-end
-
 local function audit_entities(surface, force, episode)
   local allowed = episode.scenario.constraints.allowed_entities
   local allowed_lookup, counts, fixture_lookup = {}, {}, fixture_units(episode)
@@ -50,7 +46,7 @@ local function audit_entities(surface, force, episode)
       local name = entity.type == "entity-ghost" and entity.ghost_name or entity.name
       counts[name] = (counts[name] or 0) + 1
       if entity.force ~= force or not allowed_lookup[name] then forbidden = forbidden + 1 end
-      if not position_in(episode.scenario.constraints.allowed_build_area, entity.position) then
+      if not geometry.fits(episode.scenario.constraints.allowed_build_area, name, entity.position) then
         outside = outside + 1
       end
     end
@@ -62,12 +58,27 @@ local function audit_entities(surface, force, episode)
   return counts, forbidden, outside, overruns
 end
 
-local function check_fixtures(episode)
+local function fixture_entity(surface, force, fixture)
+  local candidates = surface.find_entities_filtered({
+    name = fixture.name,
+    area = {
+      { fixture.position.x - 0.01, fixture.position.y - 0.01 },
+      { fixture.position.x + 0.01, fixture.position.y + 0.01 }
+    },
+    force = force
+  })
+  for _, entity in pairs(candidates) do
+    if entity.valid and entity.position.x == fixture.position.x
+        and entity.position.y == fixture.position.y
+        and entity.unit_number == fixture.unit_number then return entity end
+  end
+  return nil
+end
+
+local function check_fixtures(surface, force, episode)
   for _, fixture in pairs(episode.fixtures) do
-    local entity = game.get_entity_by_unit_number(fixture.unit_number)
-    if not entity or not entity.valid or entity.name ~= fixture.name
-        or entity.surface.name ~= episode.surface_name
-        or entity.force.name ~= episode.force_name then return false end
+    local entity = fixture_entity(surface, force, fixture)
+    if not entity or entity.surface.name ~= episode.surface_name then return false end
   end
   return true
 end
@@ -81,8 +92,11 @@ end
 local function sample_episode(episode, tick)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then fail_safety(episode, "episode surface or force is missing"); return end
-  if not check_fixtures(episode) then fail_safety(episode, "protected fixture is missing or changed"); return end
-  local sink = game.get_entity_by_unit_number(episode.sink_unit_number)
+  if not check_fixtures(surface, force, episode) then
+    fail_safety(episode, "protected fixture is missing or changed")
+    return
+  end
+  local sink = fixture_entity(surface, force, episode.fixtures[episode.sink_fixture_id])
   local inventory = sink and sink.get_inventory(defines.inventory.chest) or nil
   if not inventory then fail_safety(episode, "item sink inventory is unavailable"); return end
   local item = episode.scenario.objective.item
@@ -121,7 +135,9 @@ local function observation(payload)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then error("episode surface or force is missing") end
   local counts, forbidden, outside, overruns = audit_entities(surface, force, episode)
-  if not check_fixtures(episode) then fail_safety(episode, "protected fixture is missing or changed") end
+  if not check_fixtures(surface, force, episode) then
+    fail_safety(episode, "protected fixture is missing or changed")
+  end
   if forbidden > 0 or outside > 0 or overruns > 0 then
     fail_safety(episode, "training entity constraint violated")
   end
@@ -141,7 +157,7 @@ local function observation(payload)
       sustained_ticks = episode.sustained_ticks,
       resource_remaining = resource_remaining(surface, episode), built_entities = counts,
       forbidden_entities = forbidden, out_of_bounds_entities = outside,
-      budget_overruns = overruns, fixtures_valid = check_fixtures(episode)
+      budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode)
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }
   }
@@ -168,6 +184,7 @@ end
 
 return {
   advance_sample = advance_sample,
+  check_fixtures = check_fixtures,
   register_commands = register_commands,
   sample_all = sample_all
 }

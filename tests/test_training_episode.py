@@ -10,8 +10,9 @@ from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
 
 class FakeBridge:
-    def __init__(self, fail_execution: bool = False):
+    def __init__(self, fail_execution: bool = False, failed_placements: int = 0):
         self.fail_execution = fail_execution
+        self.failed_placements = failed_placements
         self.recycled = []
         self.observations = 0
 
@@ -22,7 +23,8 @@ class FakeBridge:
         self.observations += 1
         terminal = self.observations > 1
         return {
-            "tick": 700 if terminal else 100, "status": "completed" if terminal else "ready",
+            "tick": 700 if terminal else 100,
+            "status": "failed" if terminal and self.failed_placements else "completed" if terminal else "ready",
             "elapsed_ticks": 600 if terminal else 0,
             "objective": {"target_rate_per_tick": 1 / 60},
             "metrics": {
@@ -30,15 +32,20 @@ class FakeBridge:
                 "sustained_ticks": 600 if terminal else 0,
                 "resource_remaining": 100_000, "delivered_items": 10 if terminal else 0,
             },
-            "failure": {"kind": "none", "reason": ""},
+            "failure": {
+                "kind": "execution" if terminal and self.failed_placements else "none",
+                "reason": "1 placement(s) failed" if terminal and self.failed_placements else "",
+            },
         }
 
-    def execute(self, authorization, plan):
+    def execute(self, episode_id, authorization, plan):
+        assert episode_id.startswith("episode-")
         if self.fail_execution:
             raise RuntimeError("placement failed")
         assert authorization["approved_actions"]
         assert plan["surface"].startswith("training/")
-        return {"succeeded_placements": 10, "failed_placements": 0}
+        return {"succeeded_placements": 10 - self.failed_placements,
+                "failed_placements": self.failed_placements}
 
     def recycle(self, episode_id):
         self.recycled.append(episode_id)
@@ -83,3 +90,17 @@ def test_episode_reports_live_phases_without_changing_the_transition():
         "provisioned", "observed", "selected", "executed", "measuring", "finished",
     ]
     assert transition["result"]["status"] == "completed"
+
+
+def test_episode_keeps_failed_placements_as_a_negative_transition():
+    scenario = generate_mining_delivery_scenario(6)
+    bridge = FakeBridge(failed_placements=1)
+
+    transition = run_episode(
+        bridge, scenario, mining_delivery_candidates(scenario), DeterministicBaseline(), 3,
+        episode_id="episode-placement-failure", poll_seconds=0,
+    )
+
+    assert transition["result"]["failure_kind"] == "execution"
+    assert transition["metrics"]["placements_failed"] == 1
+    assert transition["reward"]["failed_placements"] < 0

@@ -129,3 +129,77 @@ def test_tick_sampler_records_timeout_in_ticks(lua) -> None:
     module.advance_sample(state, 0, 600)
     assert state.status == "timed_out"
     assert state.failure_kind == "timeout"
+
+
+def test_fixture_check_uses_surface_lookup_even_when_global_lookup_is_empty(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}
+        game = {get_entity_by_unit_number=function() return nil end}
+        training_force = {name='training-mining-delivery-00000001'}
+        fixture_entity = {
+          valid=true, name='infinity-chest', unit_number=7,
+          position={x=8.5, y=-8.5},
+          surface={name='training/mining-delivery-00000001'}, force=training_force
+        }
+        fixture_surface = {find_entities_filtered=function(_) return {fixture_entity} end}
+        fixture_episode = {
+          surface_name='training/mining-delivery-00000001',
+          fixtures={sink={name='infinity-chest', unit_number=7, position={x=8.5, y=-8.5}}}
+        }
+    """)
+    module = lua.eval('require("episode_measurement")')[0]
+
+    assert module.check_fixtures(
+        lua.globals().fixture_surface, lua.globals().training_force, lua.globals().fixture_episode,
+    ) is True
+
+def test_chunked_plan_execution_module_loads(lua) -> None:
+    module = lua.eval('require("plan_execution")')[0]
+
+    assert module.MAX_CHUNK_BYTES == 1800
+
+def test_plan_execution_rejects_cumulative_budget_before_placement(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}, uploads={}}}
+        game = {
+          entity_prototypes={['transport-belt']={collision_box={left_top={x=-0.4,y=-0.4},right_bottom={x=0.4,y=0.4}}}},
+        surfaces={}, forces={}
+        }
+        existing = {type='transport-belt', name='transport-belt', unit_number=11, position={x=2,y=2}}
+        surface = {find_entities_filtered=function(filter)
+          if filter.force then return {existing} end
+          return {}
+        end}
+        force = {name='training-mining-delivery-00000001'}
+        episode = {
+          fixtures={},
+          scenario={constraints={allowed_entities={'transport-belt'},allowed_build_area={x_min=0,x_max_exclusive=10,y_min=0,y_max_exclusive=10}},construction_budget={['transport-belt']=1}}
+        }
+        plan = {phases={{name='placement',actions={{action_type='place_entity',entity='transport-belt',position={x=4,y=4}}}}}}
+    """)
+    module = lua.eval('require("plan_execution")')[0]
+
+    ok, message = lua.eval("(function() return pcall(function() return require('plan_execution').plan_actions(plan, episode, surface, force) end) end)()")
+
+    assert ok is False
+    assert "construction budget" in message
+
+
+def test_training_footprints_cannot_cross_the_build_boundary(lua) -> None:
+    lua.execute("""
+        game = {entity_prototypes={
+          ['electric-mining-drill']={collision_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}},
+          ['splitter']={collision_box={left_top={x=-0.9,y=-0.9},right_bottom={x=0.9,y=0.9}}}
+        }}
+        bounds = {x_min=0,x_max_exclusive=10,y_min=0,y_max_exclusive=10}
+        drill_inside = {x=1.5,y=1.5}
+        drill_outside = {x=1.0,y=1.5}
+        splitter_inside = {x=9.0,y=5.0}
+        splitter_outside = {x=9.5,y=5.0}
+    """)
+    geometry = lua.eval('require("training_geometry")')[0]
+
+    assert geometry.fits(lua.globals().bounds, "electric-mining-drill", lua.globals().drill_inside) is True
+    assert geometry.fits(lua.globals().bounds, "electric-mining-drill", lua.globals().drill_outside) is False
+    assert geometry.fits(lua.globals().bounds, "splitter", lua.globals().splitter_inside) is True
+    assert geometry.fits(lua.globals().bounds, "splitter", lua.globals().splitter_outside) is False

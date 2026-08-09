@@ -7,7 +7,7 @@
   "required": ["version", "kind", "request_id", "episode_id", "tick", "ok", "status"],
   "properties": {
     "version": {"const": "1.0.0"},
-    "kind": {"enum": ["provision", "observation", "recycle"]},
+    "kind": {"enum": ["provision", "observation", "recycle", "execution"]},
     "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "episode_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "tick": {"type": "integer", "minimum": 0},
@@ -25,6 +25,18 @@
     "started_tick": {"type": "integer", "minimum": 0},
     "elapsed_ticks": {"type": "integer", "minimum": 0},
     "unchanged": {"type": "boolean"},
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted_placements", "succeeded_placements", "already_present_placements", "failed_placements", "placement_failures"],
+      "properties": {
+        "attempted_placements": {"type": "integer", "minimum": 0},
+        "succeeded_placements": {"type": "integer", "minimum": 0},
+        "already_present_placements": {"type": "integer", "minimum": 0},
+        "failed_placements": {"type": "integer", "minimum": 0},
+        "placement_failures": {"type": "array"}
+      }
+    },
     "created": {
       "type": "object",
       "additionalProperties": false,
@@ -91,6 +103,10 @@
     {
       "if": {"properties": {"kind": {"const": "observation"}, "ok": {"const": true}}},
       "then": {"required": ["scenario_id", "surface", "force", "started_tick", "elapsed_ticks", "objective", "metrics", "failure"]}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "execution"}, "ok": {"const": true}}},
+      "then": {"required": ["scenario_id", "surface", "force", "execution"]}
     }
   ]
 }

@@ -34,8 +34,8 @@ hash binds the feature contract and policy parameters.
 
 ## Runtime components
 
-- `factorio_training_lab/` provisions, observes, measures, and recycles one
-  isolated episode. It is a separate mod and never owns Nauvis state.
+- `factorio_training_lab/` provisions, chunk-uploads, physically executes, measures,
+  and recycles one isolated episode. It is a separate mod and never owns Nauvis state.
 - `training/candidates/` compiles deterministic alternatives.
 - `training/episode.py` binds selection, execution, reward, transition, and
   guaranteed recycle.
@@ -174,5 +174,7 @@ paired evaluation before it can become a training-policy candidate.
 
 Python-only training changes require restarting training workers/controllers.
 Changes under `factorio_training_lab/` require deploying that separate training
-mod and restarting only the training Factorio server. Neither action requires
+mod and restarting only the training Factorio server. The lab owns its bounded
+physical execution subset, so this does not deploy the deterministic executor.
+Neither action requires
 redeploying or restarting the deterministic real-base mod/server.

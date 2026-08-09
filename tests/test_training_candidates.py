@@ -18,6 +18,7 @@ def test_one_hundred_scenarios_compile_two_valid_candidates_each():
             assert candidate["plan_hash"] == plan_hash(candidate["plan"])
             assert candidate["plan"]["surface"].startswith("training/")
             assert candidate["plan"]["force"].startswith("training-")
+            assert {action["action_type"] for action in actions(candidate["plan"])} == {"place_entity"}
 
 
 def test_candidates_only_place_budgeted_entities():
