@@ -2231,3 +2231,8 @@ that consumed it was not.
 - What: Used the port-bearing `--rcon-bind` form without the mutually exclusive `--rcon-port` option.
 - Why: Factorio rejected the initial headless launch before opening RCON.
 - Next: Relaunch the isolated WSL worker and verify bridge connectivity.
+## [2026-08-10] WSL training worker live validation
+- Files: WSL worker runtime under `~/factorio-training-01`; ignored local WSL worker config and bridge data.
+- What: Replaced the Windows training worker with a loopback-only Factorio 2.0.77 WSL headless worker and started a bridge-compatible smoke episode.
+- Why: Training now launches without Windows UAC or manual RCON password entry while keeping deterministic Nauvis isolated.
+- Next: Join `127.0.0.1:35001` from the GUI for the visual smoke check; diagnose the independent zero-delivery policy outcome after the episode ends.
