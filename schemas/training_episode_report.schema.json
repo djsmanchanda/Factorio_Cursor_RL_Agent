@@ -34,7 +34,12 @@
         "succeeded_placements": {"type": "integer", "minimum": 0},
         "already_present_placements": {"type": "integer", "minimum": 0},
         "failed_placements": {"type": "integer", "minimum": 0},
-        "placement_failures": {"type": "array"}
+        "placement_failures": {
+          "oneOf": [
+            {"type": "array"},
+            {"type": "object", "maxProperties": 0}
+          ]
+        }
       }
     },
     "created": {

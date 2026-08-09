@@ -123,3 +123,19 @@ def test_execution_report_is_schema_valid() -> None:
     }
 
     assert list(_validator().iter_errors(report)) == []
+
+def test_execution_report_accepts_factorio_empty_table_for_no_failures() -> None:
+    report = {
+        "version": "1.0.0", "kind": "execution", "request_id": "request-1",
+        "episode_id": "episode-1", "tick": 60, "ok": True, "status": "ready",
+        "scenario_id": "mining-delivery-00000001",
+        "surface": "training/mining-delivery-00000001",
+        "force": "training-mining-delivery-00000001",
+        "execution": {
+            "attempted_placements": 1, "succeeded_placements": 1,
+            "already_present_placements": 0, "failed_placements": 0,
+            "placement_failures": {},
+        },
+    }
+
+    assert list(_validator().iter_errors(report)) == []

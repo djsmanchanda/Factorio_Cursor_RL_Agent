@@ -2191,3 +2191,8 @@ that consumed it was not.
 - What: Resolved entity collision boxes through the Factorio 2 `prototypes.entity` API.
 - Why: The first physical execution reached the guard, where the removed `game.entity_prototypes` API failed before placement.
 - Next: Redeploy only the training lab, restart worker 01, then restart the Python benchmark.
+## [2026-08-09] Factorio empty execution-failure representation
+- Files: `schemas/training_episode_report.schema.json`, training-lab schema tests.
+- What: Accepted Factorio's `{}` serialization for an empty Lua `placement_failures` table.
+- Why: Physical executions succeeded but the Python schema rejected the empty success detail as an object instead of an array.
+- Next: Restart only the Python benchmark; no Lua deployment is required.
