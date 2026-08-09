@@ -8,8 +8,9 @@ import json
 import os
 import sys
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from queue import Empty, Queue
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -24,6 +25,7 @@ from training.policies import DiagonalLinUCB, policy_snapshot
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import WorkerSpec, validate_worker_specs
 from training.store import TrainingStore
+from training.telemetry import WorkerTelemetry, publish_best_effort
 
 
 def _load_workers(path: Path) -> list[WorkerSpec]:
@@ -53,25 +55,46 @@ def _jobs(scenarios: list[dict], attempts: int, workers: list[WorkerSpec]) -> di
 
 def _run_worker(
     worker: WorkerSpec, jobs: list[tuple], password: str, policy_payload: dict,
-) -> list[tuple]:
+    live_directory: Path, events: Queue,
+) -> None:
     bridge = FactorioTrainingBridge(
         worker.script_output, host=worker.host, port=worker.rcon_port, password=password,
     )
-    results, policy = [], DiagonalLinUCB.from_dict(policy_payload)
+    policy = DiagonalLinUCB.from_dict(policy_payload)
+    try:
+        telemetry = WorkerTelemetry(live_directory, worker.worker_id)
+    except OSError:
+        telemetry = None
     try:
         bridge.handshake()
         for episode_id, scenario, selection_seed in jobs:
+            def publish(event: dict) -> None:
+                publish_best_effort(telemetry, event)
+                if event.get("phase") == "provisioned":
+                    events.put(("running", episode_id, None, None))
+
             try:
                 transition = run_episode(
                     bridge, scenario, mining_delivery_candidates(scenario), policy,
                     selection_seed, episode_id=episode_id, update_policy=False,
+                    on_progress=publish,
                 )
-                results.append((episode_id, transition, None))
+                events.put(("result", episode_id, transition, None))
             except Exception as exc:  # worker isolation preserves later jobs
-                results.append((episode_id, None, f"{type(exc).__name__}: {exc}"))
+                error = f"{type(exc).__name__}: {exc}"
+                publish_best_effort(telemetry, {
+                    "phase": "failed", "episode_id": episode_id,
+                    "scenario_id": scenario["scenario_id"], "policy_id": policy.policy_id,
+                    "error": error,
+                })
+                events.put(("result", episode_id, None, error))
+    except Exception as exc:
+        publish_best_effort(telemetry, {
+            "phase": "worker_failed", "error": f"{type(exc).__name__}: {exc}",
+        })
+        raise
     finally:
         bridge.close()
-    return results
 
 
 def _prepare_store(store, scenarios, assignments, policy, generation: int) -> None:
@@ -82,7 +105,10 @@ def _prepare_store(store, scenarios, assignments, policy, generation: int) -> No
     )
     for worker_id, jobs in assignments.items():
         for episode_id, scenario, seed in jobs:
-            store.start_episode(episode_id, scenario["scenario_id"], policy.policy_id, worker_id, seed)
+            store.start_episode(
+                episode_id, scenario["scenario_id"], policy.policy_id, worker_id, seed,
+                status="queued",
+            )
 
 
 def _finish_store(store: TrainingStore, results: list[tuple]) -> tuple[int, int]:
@@ -101,6 +127,43 @@ def _finish_store(store: TrainingStore, results: list[tuple]) -> tuple[int, int]
         failed += transition["result"]["status"] != "completed"
     return completed, failed
 
+
+def _collect_results(future_jobs: dict, events: Queue, store: TrainingStore) -> tuple[list, int, int]:
+    results, completed, failed = [], 0, 0
+    terminal, checked = set(), set()
+
+    def persist(result: tuple) -> None:
+        nonlocal completed, failed
+        episode_id = result[0]
+        if episode_id in terminal:
+            raise RuntimeError(f"duplicate terminal result: {episode_id}")
+        done, rejected = _finish_store(store, [result])
+        results.append(result)
+        terminal.add(episode_id)
+        completed += done
+        failed += rejected
+
+    while len(checked) < len(future_jobs) or not events.empty():
+        try:
+            kind, episode_id, transition, error = events.get(timeout=0.2)
+        except Empty:
+            for future, episode_ids in future_jobs.items():
+                if future in checked or not future.done():
+                    continue
+                checked.add(future)
+                worker_error = future.exception()
+                reason = "worker exited without a terminal episode result"
+                if worker_error is not None:
+                    reason = f"worker failed: {type(worker_error).__name__}: {worker_error}"
+                for unfinished_id in episode_ids:
+                    if unfinished_id not in terminal:
+                        persist((unfinished_id, None, reason))
+            continue
+        if kind == "running":
+            store.mark_episode_running(episode_id)
+        else:
+            persist((episode_id, transition, error))
+    return results, completed, failed
 
 def _offline(scenarios: list[dict], attempts: int) -> dict:
     catalogs = [mining_delivery_candidates(scenario) for scenario in scenarios]
@@ -130,6 +193,7 @@ def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
         learned.update(transition["observation"], chosen, transition["reward"]["total"])
     return learned
 
+
 def _checkpoint(path: Path, generation: int, policy: DiagonalLinUCB) -> None:
     identity = {key: value for key, value in policy.to_dict().items() if key != "policy_id"}
     policy.policy_id = f"policy-g{generation:04d}-{canonical_sha256(identity)[7:19]}"
@@ -148,6 +212,7 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--workers", type=Path, help="Explicit worker JSON; omit for offline validation")
     parser.add_argument("--database", type=Path, default=Path("data/training/experience.db"))
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
+    parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
     parser.add_argument("--password-env", default="FACTORIO_TRAINING_RCON_PASSWORD")
     args = parser.parse_args(argv)
     if args.attempts_per_scenario < 1:
@@ -161,13 +226,16 @@ def _execute_live(args, scenarios: list[dict], password: str) -> dict:
     generation, policy = _load_policy(args.checkpoint)
     with TrainingStore(args.database) as store:
         _prepare_store(store, scenarios, assignments, policy, generation)
+        events = Queue()
         with ThreadPoolExecutor(max_workers=len(workers)) as pool:
-            futures = [pool.submit(
-                _run_worker, worker, assignments[worker.worker_id], password, policy.to_dict(),
-            ) for worker in workers]
-            batches = [future.result() for future in as_completed(futures)]
-        results = [item for batch in batches for item in batch]
-        completed, failed = _finish_store(store, results)
+            future_jobs = {
+                pool.submit(
+                    _run_worker, worker, assignments[worker.worker_id], password,
+                    policy.to_dict(), args.live_directory, events,
+                ): [job[0] for job in assignments[worker.worker_id]]
+                for worker in workers
+            }
+            results, completed, failed = _collect_results(future_jobs, events, store)
         learned = _learn_policy(policy, results)
         _checkpoint(args.checkpoint, generation + 1, learned)
         store.save_policy(

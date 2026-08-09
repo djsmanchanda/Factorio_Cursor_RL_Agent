@@ -1,0 +1,34 @@
+<!-- Path: tools/training_observer.html -->
+<!-- Purpose: Present live and durable isolated-RL training evidence. -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Factorio RL Observatory</title>
+  <link rel="stylesheet" href="/observer.css">
+</head>
+<body>
+  <header>
+    <div><p class="eyebrow">Factorio training sidecar</p><h1>RL Observatory</h1></div>
+    <div class="connection"><span id="pulse"></span><span id="connection">Connecting</span></div>
+  </header>
+  <main>
+    <section id="summary" class="cards"></section>
+    <section class="grid wide-left">
+      <article class="panel"><div class="panel-title"><h2>Live workers</h2><span>auto-refresh 3s</span></div><div id="workers"></div></article>
+      <article class="panel"><div class="panel-title"><h2>Bottlenecks</h2><span>structured outcomes</span></div><div id="bottlenecks"></div></article>
+    </section>
+    <section class="grid">
+      <article class="panel"><div class="panel-title"><h2>Recent episodes</h2><span>latest 30</span></div><div id="episodes"></div></article>
+      <article class="panel"><div class="panel-title"><h2>Autoresearch</h2><span>proposals and model runtime</span></div><div id="research"></div></article>
+    </section>
+    <section class="grid">
+      <article class="panel"><div class="panel-title"><h2>Policy lineage</h2><span>immutable generations</span></div><div id="policies"></div></article>
+      <article class="panel"><div class="panel-title"><h2>Human guidance</h2><span>autoresearch only</span></div><div id="guidance"></div></article>
+    </section>
+  </main>
+  <footer><span id="updated">No snapshot yet</span><span>Read-only · loopback · no Nauvis authority</span></footer>
+  <script src="/observer.js"></script>
+</body>
+</html>

@@ -58,7 +58,13 @@ CREATE TABLE IF NOT EXISTS llm_runtime_samples (
   prompt_tokens INTEGER, completion_tokens INTEGER, elapsed_ms REAL NOT NULL,
   peak_ram_mb REAL, peak_vram_mb REAL, created_utc TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS research_guidance (
+  guidance_id TEXT PRIMARY KEY, focus TEXT NOT NULL, message TEXT NOT NULL,
+  created_utc TEXT NOT NULL, expires_generation INTEGER, active INTEGER NOT NULL
+);
 """
+
+_GUIDANCE_FOCUS = {"throughput", "reliability", "efficiency", "exploration", "general"}
 
 
 def _json(payload: Mapping) -> str:
@@ -82,7 +88,7 @@ class TrainingStore:
         self.connection.execute("PRAGMA journal_mode=WAL")
         with self.connection:
             self.connection.executescript(_SCHEMA)
-            self.connection.execute("PRAGMA user_version=2")
+            self.connection.execute("PRAGMA user_version=3")
 
     def close(self) -> None:
         self.connection.close()
@@ -119,12 +125,14 @@ class TrainingStore:
 
     def start_episode(
         self, episode_id: str, scenario_id: str, policy_id: str,
-        worker_id: str, selection_seed: int,
+        worker_id: str, selection_seed: int, status: str = "running",
     ) -> None:
+        if status not in {"queued", "running"}:
+            raise ValueError("new episode status must be queued or running")
         with self.connection:
             self.connection.execute(
-                "INSERT INTO episodes VALUES (?,?,?,?,?,'running',NULL,NULL,NULL,?,NULL)",
-                (episode_id, scenario_id, policy_id, worker_id, selection_seed, _now()),
+                "INSERT INTO episodes VALUES (?,?,?,?,?,?,NULL,NULL,NULL,?,NULL)",
+                (episode_id, scenario_id, policy_id, worker_id, selection_seed, status, _now()),
             )
 
     def finish_episode(
@@ -141,6 +149,19 @@ class TrainingStore:
             )
             if cursor.rowcount != 1:
                 raise KeyError(f"unknown episode: {episode_id}")
+
+    def mark_episode_running(self, episode_id: str) -> None:
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE episodes SET status='running' WHERE episode_id=? AND status='queued'",
+                (episode_id,),
+            )
+            if cursor.rowcount != 1:
+                row = self.connection.execute(
+                    "SELECT status FROM episodes WHERE episode_id=?", (episode_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown episode: {episode_id}")
 
     def save_transition(self, payload: Mapping, step_index: int = 0) -> None:
         validate_transition(payload)
@@ -159,6 +180,7 @@ class TrainingStore:
                 (payload["episode_id"], step_index, payload["chosen_action_id"],
                  payload["reward"]["total"], _json(payload)),
             )
+
     def save_evaluation(
         self, evaluation_id: str, policy_id: str, split: str,
         scenario_set_hash: str, fitness: Mapping, frozen: bool,
@@ -201,10 +223,45 @@ class TrainingStore:
                 (*values, _now()),
             )
 
+    def save_guidance(
+        self, guidance_id: str, focus: str, message: str,
+        expires_generation: int | None = None,
+    ) -> None:
+        normalized = message.strip()
+        if focus not in _GUIDANCE_FOCUS:
+            raise ValueError(f"unknown guidance focus: {focus}")
+        if not normalized or len(normalized) > 1_000:
+            raise ValueError("guidance message must contain 1 through 1000 characters")
+        if expires_generation is not None and expires_generation < 0:
+            raise ValueError("expires_generation cannot be negative")
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO research_guidance VALUES (?,?,?,?,?,1)",
+                (guidance_id, focus, normalized, _now(), expires_generation),
+            )
+
+    def active_guidance(self, generation: int | None = None, limit: int = 10) -> list[dict]:
+        if limit < 1 or limit > 100:
+            raise ValueError("guidance limit must be between 1 and 100")
+        rows = self.connection.execute(
+            "SELECT * FROM research_guidance WHERE active=1 "
+            "AND (? IS NULL OR expires_generation IS NULL OR expires_generation>=?) "
+            "ORDER BY created_utc DESC LIMIT ?", (generation, generation, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def dismiss_guidance(self, guidance_id: str) -> None:
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE research_guidance SET active=0 WHERE guidance_id=?", (guidance_id,),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"unknown guidance: {guidance_id}")
+
     def rows(self, table: str) -> list[sqlite3.Row]:
         allowed = {
             "scenarios", "policies", "episodes", "transitions", "evaluations",
-            "champions", "research_proposals", "llm_runtime_samples",
+            "champions", "research_proposals", "llm_runtime_samples", "research_guidance",
         }
         if table not in allowed:
             raise ValueError("table is not queryable through the training store")

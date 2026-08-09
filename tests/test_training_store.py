@@ -61,3 +61,23 @@ def test_store_rejects_orphan_episode(tmp_path) -> None:
     with TrainingStore(tmp_path / "experience.db") as store:
         with pytest.raises(sqlite3.IntegrityError):
             store.start_episode("orphan", "missing", "missing", "worker", 1)
+
+
+def test_store_tracks_queue_progress_and_bounded_guidance(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(2)
+    with TrainingStore(tmp_path / "experience.db") as store:
+        store.save_scenario(scenario, "train", scenario["scenario_hash"])
+        store.save_policy("policy-1", "diagonal_linucb", 0, {"alpha": 1}, {})
+        store.start_episode(
+            "episode-queued", scenario["scenario_id"], "policy-1", "worker-1", 7,
+            status="queued",
+        )
+        store.mark_episode_running("episode-queued")
+        assert store.rows("episodes")[0]["status"] == "running"
+        store.save_guidance("guidance-1", "reliability", "Prefer robust candidates.", 3)
+        assert store.active_guidance(generation=2)[0]["guidance_id"] == "guidance-1"
+        assert store.active_guidance(generation=4) == []
+        store.dismiss_guidance("guidance-1")
+        assert store.active_guidance() == []
+        with pytest.raises(ValueError, match="1000"):
+            store.save_guidance("too-long", "general", "x" * 1001)

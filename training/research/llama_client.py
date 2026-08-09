@@ -35,6 +35,7 @@ class LlamaCppClient:
         self.model = model
         self.timeout = timeout
         self._opener = opener
+        self.last_usage: dict[str, int] = {}
 
     def complete_json(self, messages: Sequence[Mapping[str, str]]) -> dict:
         payload = {
@@ -52,6 +53,12 @@ class LlamaCppClient:
         try:
             with self._opener(request, timeout=self.timeout) as response:
                 result = json.loads(response.read().decode("utf-8"))
+            usage = result.get("usage") if isinstance(result, dict) else None
+            if isinstance(usage, Mapping):
+                self.last_usage = {
+                    key: int(usage[key]) for key in ("prompt_tokens", "completion_tokens")
+                    if isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool)
+                }
             content = result["choices"][0]["message"]["content"]
             proposal = json.loads(content)
         except (KeyError, IndexError, TypeError, ValueError, OSError) as error:

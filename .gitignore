@@ -19,3 +19,16 @@ script-output/
 Thumbs.db
 .DS_Store
 runs/
+
+# Local RL training evidence and checkpoints
+data/training/*.db*
+data/training/live/
+data/training/policy.json
+# Local pytest scratch directories
+.pytest_cache/
+.pytest-*/
+.tmp-pytest*/
+.tmp_pytest/
+.training-test-tmp/
+.training-guidance-test-temp/
+.review-observer-tests/

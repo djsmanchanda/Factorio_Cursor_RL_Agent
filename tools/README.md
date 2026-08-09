@@ -20,8 +20,12 @@ The direct invariant-script form currently has a broken import path. Live mutati
 `run_training_batch.py` validates 100 scenarios offline by default; supplying an
 explicit worker file runs disposable episodes only on loopback training
 servers. `report_training.py` summarizes the resulting SQLite evidence and
-local-model runtime measurements. `run_autoresearch.py` asks a loopback-only OpenAI-compatible endpoint for one allowlisted numeric experiment after a measured plateau. These tools do not import or invoke the
-active Nauvis orchestrator.
+local-model runtime measurements. `run_autoresearch.py` asks a loopback-only
+OpenAI-compatible endpoint for one allowlisted numeric experiment after a
+measured plateau. `training_observer.py serve` exposes a read-only dashboard at
+`http://127.0.0.1:8765`; its `nudge` subcommand records bounded guidance for
+future autoresearch packets. These tools do not import or invoke the active
+Nauvis orchestrator.
 
 ## Snapshot Validator
 

@@ -69,3 +69,17 @@ def test_episode_recycles_after_execution_error():
             DeterministicBaseline(), 1, episode_id="episode-error", poll_seconds=0,
         )
     assert bridge.recycled == ["episode-error"]
+
+
+def test_episode_reports_live_phases_without_changing_the_transition():
+    scenario = generate_mining_delivery_scenario(5)
+    phases = []
+    transition = run_episode(
+        FakeBridge(), scenario, mining_delivery_candidates(scenario),
+        DeterministicBaseline(), 2, episode_id="episode-progress", poll_seconds=0,
+        on_progress=lambda event: phases.append(event["phase"]),
+    )
+    assert phases == [
+        "provisioned", "observed", "selected", "executed", "measuring", "finished",
+    ]
+    assert transition["result"]["status"] == "completed"

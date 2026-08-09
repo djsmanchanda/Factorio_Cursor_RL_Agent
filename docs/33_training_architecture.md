@@ -60,6 +60,13 @@ the worker count only while those measurements remain healthy. Thousands of
 attempts come from repeated persisted batches, not hundreds of permanent forces
 or surfaces inside one save.
 
+The current batch and autoresearch commands are separate processes. The
+in-process `ResourcePhaseLock` does not coordinate them across process
+boundaries, so run local-LLM research between Factorio collection/evaluation
+batches, not concurrently. A future unattended supervisor must own a
+cross-process phase lease before it may overlap or alternate these commands
+without operator scheduling.
+
 An explicit worker file has this shape (repeat the object with unique ports and
 directories for 10-20 workers):
 
@@ -124,6 +131,44 @@ python tools/run_autoresearch.py --model <model-id> --policy policy.json `
 
 The command records runtime/offload measurements and the proposed numeric
 configuration. It does not edit source or automatically promote the result.
+
+## RL observatory and human guidance
+
+The observatory combines two evidence paths without becoming a controller:
+
+- atomic per-worker JSON in `data/training/live/` shows the current episode,
+  phase, measured rate, sustain progress, and worker error;
+- read-only SQLite queries show queue/completion counts, policy lineage, recent
+  rewards, structured bottleneck classes, autoresearch proposals, and local-LLM
+  runtime measurements.
+
+Start the loopback-only dashboard while a training batch is running:
+
+```powershell
+python tools/training_observer.py serve
+# Open http://127.0.0.1:8765
+```
+
+For terminals or automation, print the same stable snapshot:
+
+```powershell
+python tools/training_observer.py snapshot
+```
+
+The HTTP surface is deliberately read-only. A nudge is an explicit CLI action:
+
+```powershell
+python tools/training_observer.py nudge --focus throughput `
+  --message "Test whether direct-belt candidates sustain delivery more reliably." `
+  --expires-generation 12
+python tools/training_observer.py dismiss <guidance-id>
+```
+
+Guidance is capped, typed, auditable, and included only in future local-LLM
+research packets. It cannot change reward weights, evaluators, schemas, planner
+code, deployment, Factorio safety constraints, or the deterministic Nauvis
+runtime. A proposal still passes the existing numeric allowlist and frozen
+paired evaluation before it can become a training-policy candidate.
 
 ## Operational lifecycle
 

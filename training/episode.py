@@ -14,6 +14,11 @@ from training.contracts import validate_transition
 from training.policies import policy_snapshot
 
 
+def _progress(callback, phase: str, identifier: str, payload: Mapping) -> None:
+    if callback is not None:
+        callback({"phase": phase, "episode_id": identifier, **dict(payload)})
+
+
 def _observation(report: Mapping) -> dict[str, float]:
     metrics = report.get("metrics") or {}
     objective = report.get("objective") or {}
@@ -58,21 +63,33 @@ def _material_cost(candidate: Mapping) -> int:
 def run_episode(
     bridge, scenario: Mapping, candidates: Sequence[Mapping], policy, selection_seed: int,
     *, episode_id: str | None = None, poll_seconds: float = 0.25,
-    update_policy: bool = True,
+    update_policy: bool = True, on_progress=None,
 ) -> dict:
     """Run one candidate and always request disposal of its training world."""
     identifier = episode_id or f"episode-{uuid.uuid4().hex}"
     provision = bridge.provision(identifier, scenario)
+    context = {"scenario_id": scenario["scenario_id"], "policy_id": str(policy.policy_id)}
+    _progress(on_progress, "provisioned", identifier, {**context, "report": provision})
     try:
         initial_report = bridge.observe(identifier)
+        _progress(on_progress, "observed", identifier, {**context, "report": initial_report})
         initial = _observation(initial_report)
         chosen = policy.select(candidates, initial, selection_seed)
+        _progress(on_progress, "selected", identifier, {
+            **context, "chosen_action_id": chosen["action_id"],
+            "candidate_features": chosen["features"], "report": initial_report,
+        })
         authorization = build_layout_authorization([chosen["plan"]])
         execution = bridge.execute(authorization, chosen["plan"])
+        _progress(on_progress, "executed", identifier, {
+            **context, "chosen_action_id": chosen["action_id"], "execution": execution,
+        })
         report = bridge.observe(identifier)
+        _progress(on_progress, "measuring", identifier, {**context, "report": report})
         while report["status"] in {"ready", "running"}:
             time.sleep(poll_seconds)
             report = bridge.observe(identifier)
+            _progress(on_progress, "measuring", identifier, {**context, "report": report})
         failed = int(execution.get("failed_placements", 0))
         material_cost = _material_cost(chosen)
         transition = {
@@ -97,6 +114,10 @@ def run_episode(
         validate_transition(transition)
         if update_policy and hasattr(policy, "update"):
             policy.update(initial, chosen, transition["reward"]["total"])
+        _progress(on_progress, "finished", identifier, {
+            **context, "report": report, "reward_total": transition["reward"]["total"],
+            "chosen_action_id": chosen["action_id"],
+        })
         return transition
     finally:
         bridge.recycle(identifier)

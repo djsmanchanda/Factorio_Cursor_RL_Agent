@@ -2153,3 +2153,9 @@ that consumed it was not.
 - What: Added deterministic mining candidates, one-plan episodes, SQLite experience, contextual policy learning, seeded evolution, frozen holdout promotion, 1-20 worker scheduling, and bounded loopback LLM proposals.
 - Why: Enable repeated randomized trial-and-error and recursive policy improvement while deterministic planners retain all structural authority.
 - Next: Deploy only the training mod to a dedicated worker, benchmark one worker, then scale concurrency from measured UPS and latency.
+
+## [2026-08-09] RL observatory and bounded research guidance
+- Files: `training/telemetry.py`, `training/observation.py`, `training/store.py`, `training/episode.py`, `training/research/controller.py`, `tools/run_training_batch.py`, `tools/run_autoresearch.py`, `tools/training_observer.*`, focused tests and training docs.
+- What: Added live worker/autoresearch telemetry, incremental durable progress, a loopback read-only dashboard, structured bottlenecks, policy/LLM views, and expiring CLI nudges for bounded autoresearch packets.
+- Why: Long 10-20 worker experiments need visible progress and evidence-backed human steering without granting RL or the observer authority over deterministic planners, rewards, safety, deployment, or Nauvis.
+- Next: Restart only the Python training batch/autoresearch processes, run `python tools/training_observer.py serve`, and open `http://127.0.0.1:8765`; no Lua or deterministic-mod redeploy is required.
