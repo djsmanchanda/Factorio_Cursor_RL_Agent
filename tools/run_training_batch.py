@@ -23,23 +23,13 @@ from training.factorio_bridge import FactorioTrainingBridge
 from training.features import MINING_DELIVERY_FEATURES_V1
 from training.policies import DiagonalLinUCB, policy_snapshot
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
-from training.scheduler import WorkerSpec, validate_worker_specs
+from training.scheduler import WorkerSpec, load_worker_specs
 from training.store import TrainingStore
 from training.telemetry import WorkerTelemetry, publish_best_effort
 
 
 def _load_workers(path: Path) -> list[WorkerSpec]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    workers = [WorkerSpec(
-        worker_id=item["worker_id"], instance_id=item["instance_id"], host=item["host"],
-        game_port=int(item["game_port"]), rcon_port=int(item["rcon_port"]),
-        script_output=Path(item["script_output"]),
-        surface_prefix=item.get("surface_prefix", "training/"),
-        force_prefix=item.get("force_prefix", "training-"),
-    ) for item in payload["workers"]]
-    validate_worker_specs(workers)
-    return workers
-
+    return load_worker_specs(path)
 
 def _jobs(scenarios: list[dict], attempts: int, workers: list[WorkerSpec]) -> dict[str, list[tuple]]:
     assigned = {worker.worker_id: [] for worker in workers}

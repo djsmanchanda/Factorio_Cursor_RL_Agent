@@ -295,3 +295,34 @@ def test_joined_observer_charts_every_active_training_episode(lua) -> None:
     assert lua.globals().observer.charted_surface["name"] == "training/mining-delivery-00000001"
     assert lua.globals().observer.charted_area[1][1] == -64
     assert lua.globals().observer.charted_area[2][2] == 64
+
+
+def test_training_focus_moves_only_the_configured_connected_observer(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+          active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
+        }}}}
+        defines = {controllers={spectator=7}}
+        observer = {
+          name='main', connected=true,
+          force={chart=function(surface, area) observer.charted_surface=surface end},
+          set_controller=function(controller) observer.controller=controller end,
+          teleport=function(position, surface) observer.teleported_surface=surface; return true end,
+        }
+        game = {
+          get_player=function(name) if name == 'main' then return observer end end,
+          surfaces={['training/mining-delivery-00000001']={name='training/mining-delivery-00000001'}}
+        }
+        focus_payload = {
+          request_id='request-1', episode_id='active', observer_name='main',
+          confirmation_token='FOCUS_TRAINING_OBSERVER'
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    result = world.focus_observer(lua.globals().focus_payload)
+
+    assert result["ok"] is True
+    assert result["surface"] == "training/mining-delivery-00000001"
+    assert lua.globals().observer.controller["type"] == 7
+    assert lua.globals().observer.teleported_surface["name"] == "training/mining-delivery-00000001"

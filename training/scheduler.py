@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -50,6 +51,28 @@ def validate_worker_specs(workers: Sequence[WorkerSpec]) -> None:
         raise ValueError("worker script-output directories must be unique")
 
 
+def load_worker_specs(path: Path) -> list[WorkerSpec]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read training workers: {path}") from exc
+    raw_workers = payload.get("workers") if isinstance(payload, dict) else None
+    if not isinstance(raw_workers, list):
+        raise ValueError("training workers must contain a workers list")
+    try:
+        workers = [WorkerSpec(
+            worker_id=str(item["worker_id"]), instance_id=str(item["instance_id"]),
+            host=str(item["host"]), game_port=int(item["game_port"]),
+            rcon_port=int(item["rcon_port"]), script_output=Path(str(item["script_output"])),
+            surface_prefix=str(item.get("surface_prefix", "training/")),
+            force_prefix=str(item.get("force_prefix", "training-")),
+        ) for item in raw_workers if isinstance(item, dict)]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("training worker configuration is invalid") from exc
+    if len(workers) != len(raw_workers):
+        raise ValueError("each training worker must be an object")
+    validate_worker_specs(workers)
+    return workers
 class ResourcePhaseLock:
     """Allow concurrency within one phase while excluding competing phases."""
 

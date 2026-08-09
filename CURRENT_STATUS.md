@@ -2284,3 +2284,9 @@ that consumed it was not.
 - What: Charted every active training surface for connected players at provision time and when a GUI client joins.
 - Why: Factorio Remote view rendered an existing checkerboard lab black when the observer force had not charted it.
 - Next: The isolated WSL visual smoke episode is active; continue diagnosing its zero-delivery policy result separately.
+
+## [2026-08-10] RL Observatory training-surface viewer
+- Files: `training/observer_control.py`, `tools/training_observer.*`, `factorio_training_lab/episode_world.lua`, worker-config loader, tests and training docs.
+- What: Added a loopback-only View in Factorio button that moves only the configured connected observer into spectator view of a current owned `training/*` episode.
+- Why: Let human supervision inspect active training attempts without radar placement, episode contamination, or any Nauvis authority.
+- Next: Reconnect the GUI observer, use the active `training-wsl-01` button, and retain the zero-delivery result for separate policy diagnosis.

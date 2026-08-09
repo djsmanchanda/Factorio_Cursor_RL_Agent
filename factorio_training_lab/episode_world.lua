@@ -315,6 +315,41 @@ local function view_episode(command)
   player.print("Viewing " .. episode.surface_name .. " as a spectator; observer moves before recycle.")
 end
 
+local function focus_observer(payload)
+  if payload.confirmation_token ~= "FOCUS_TRAINING_OBSERVER" then
+    error("observer focus confirmation token is invalid")
+  end
+  if type(payload.observer_name) ~= "string" or payload.observer_name == ""
+      or #payload.observer_name > 128 then
+    error("observer_name must be a nonempty string of at most 128 characters")
+  end
+  local episode = shared.episode_for(payload.episode_id)
+  local player = game.get_player(payload.observer_name)
+  if not player or not player.connected then
+    error("configured observer is not connected: " .. payload.observer_name)
+  end
+  local surface = game.surfaces[episode.surface_name]
+  if not surface then error("training episode surface is missing") end
+  local bounds = episode.scenario.environment.bounds
+  player.set_controller({ type = defines.controllers.spectator })
+  chart_episode(player, surface, bounds)
+  if not player.teleport({ x = bounds.x_min + 2, y = bounds.y_min + 2 }, surface) then
+    error("unable to enter observer view for " .. episode.surface_name)
+  end
+  return {
+    request_id = payload.request_id, episode_id = payload.episode_id,
+    ok = true, status = "focused", observer_name = player.name,
+    surface = episode.surface_name
+  }
+end
+
+local function focus_command(command)
+  local ok, result = pcall(function()
+    return focus_observer(shared.parse_command(command))
+  end)
+  if not ok then result = { ok = false, error = tostring(result) } end
+  rcon.print(helpers.table_to_json(result))
+end
 local function command_handler(kind, operation)
   return function(command)
     local request_id, episode_id = "invalid", "invalid"
@@ -349,6 +384,8 @@ local function register_commands()
     command_handler("provision", provision))
   commands.add_command("training_recycle", "Recycle one owned training episode (RCON only).",
     command_handler("recycle", recycle))
+  commands.add_command("training_focus", "Focus the configured observer on one training surface (RCON only).",
+    focus_command)
   commands.add_command("training_view", "View one active training surface (client only).", view_episode)
 end
 
@@ -356,6 +393,7 @@ return {
   complete_primary_research = complete_primary_research,
   complete_force_merge = complete_force_merge,
   fill_visible_floor = fill_visible_floor,
+  focus_observer = focus_observer,
   reveal_active_episodes = reveal_active_episodes,
   register_commands = register_commands,
   view_episode = view_episode

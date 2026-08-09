@@ -13,6 +13,7 @@ Registered RCON-only commands:
 - `/training_provision <json>`
 - `/training_observe <json>`
 - `/training_recycle <json>`
+- `/training_focus <json>` (configured connected observer only)
 - `/training_upload <json>`
 - `/training_execute <json>`
 
@@ -24,6 +25,8 @@ Training surfaces use Factorio's actual grey lab chequerboard: alternating
 `lab-dark-1` and `lab-dark-2` tiles. Viewing switches the client to Factorio's
 no-character spectator controller, then moves it to the selected training surface.
 The spectator is moved to the training observatory before its viewed episode is recycled.
+The loopback Observatory may invoke the same spectator transition through `/training_focus`,
+but it derives the target surface from the owned episode and cannot address Nauvis.
 
 Large immutable plans are uploaded in bounded chunks, then executed only after
 the Python side has validated the BuildPlan and issued its authorization. The

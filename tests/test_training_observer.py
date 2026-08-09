@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 from concurrent.futures import Future
 from http.server import ThreadingHTTPServer
 from queue import Queue
@@ -15,6 +16,8 @@ import pytest
 
 from tools.run_training_batch import _collect_results
 from tools.training_observer import _handler, main
+from training.observer_control import TrainingSurfaceViewer
+from training.scheduler import WorkerSpec
 from training.observation import build_training_snapshot
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 from training.store import TrainingStore
@@ -207,3 +210,65 @@ def test_corrupt_database_is_visible_instead_of_looking_empty(tmp_path) -> None:
     assert snapshot["database_present"] is True
     assert "DatabaseError" in snapshot["database_error"]
     assert snapshot["summary"]["episodes"] == 0
+
+class FocusRcon:
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+        self.closed = False
+
+    def command(self, command: str) -> str:
+        self.commands.append(command)
+        payload = json.loads(command.removeprefix("/training_focus "))
+        return json.dumps({
+            "ok": True, "episode_id": payload["episode_id"],
+            "surface": "training/mining-delivery-00000001", "observer_name": "main",
+        })
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _viewer(rcon: FocusRcon) -> TrainingSurfaceViewer:
+    worker = WorkerSpec(
+        worker_id="training-01", instance_id="training-01", host="127.0.0.1",
+        game_port=35001, rcon_port=28001, script_output=Path("script-output"),
+        surface_prefix="training/", force_prefix="training-",
+    )
+    return TrainingSurfaceViewer(
+        {worker.worker_id: worker}, "secret", "main", rcon_factory=lambda *_args, **_kwargs: rcon,
+    )
+
+
+def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
+    rcon = FocusRcon()
+
+    result = _viewer(rcon).focus("training-01", "episode-mining-delivery-00000001")
+
+    assert result["surface"] == "training/mining-delivery-00000001"
+    assert rcon.closed is True
+    assert rcon.commands[0].startswith("/training_focus ")
+    with pytest.raises(Exception, match="unknown training worker"):
+        _viewer(FocusRcon()).focus("nauvis", "episode-mining-delivery-00000001")
+
+
+def test_http_dashboard_can_request_a_bounded_training_view(tmp_path) -> None:
+    database, live = tmp_path / "experience.db", tmp_path / "live"
+    rcon = FocusRcon()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(database, live, _viewer(rcon)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = Request(
+            f"{base}/api/view", method="POST", data=json.dumps({
+                "worker_id": "training-01", "episode_id": "episode-mining-delivery-00000001",
+            }).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=2) as response:
+            result = json.loads(response.read())
+        assert result["surface"] == "training/mining-delivery-00000001"
+        assert rcon.commands
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

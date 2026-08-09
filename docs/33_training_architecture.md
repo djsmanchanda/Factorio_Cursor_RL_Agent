@@ -182,10 +182,13 @@ For terminals or automation, print the same stable snapshot:
 python tools/training_observer.py snapshot
 ```
 
-The HTTP surface is deliberately read-only. Training maps use visible deterministic
-grey lab chequerboard tiles. A connected GUI observer can use `/training_view training/<scenario-id>`;
-the command switches it to Factorio's no-character spectator controller and moves it
-to a training-only observatory before recycling, so it cannot alter or pin an episode.
+The HTTP surface is read-only for evidence and guidance. It has one explicit local
+operator control: **View in Factorio**. The button targets only the configured
+loopback training worker and connected observer, derives the surface from an owned
+active episode, and uses Factorio's no-character spectator controller. It cannot
+address Nauvis, select a force, place an entity, or alter a candidate. Training maps
+use visible deterministic grey lab chequerboard tiles; the spectator is moved to a
+training-only observatory before recycling, so it cannot alter or pin an episode.
 A nudge is an explicit CLI action:
 
 ```powershell

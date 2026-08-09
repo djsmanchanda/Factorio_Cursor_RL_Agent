@@ -33,6 +33,7 @@ def test_control_registers_only_training_namespaced_commands() -> None:
     assert 'commands.add_command("training_provision"' in source
     assert 'commands.add_command("training_observe"' in source
     assert 'commands.add_command("training_recycle"' in source
+    assert 'commands.add_command("training_focus"' in source
     assert 'commands.add_command("training_upload"' in source
     assert 'commands.add_command("training_execute"' in source
     assert 'commands.add_command("training_view"' in source
