@@ -129,8 +129,8 @@ start_worker() {
     --mod-directory "$DATA_ROOT/mods" \
     --start-server "$DATA_ROOT/saves/training-01.zip" \
     --server-settings "$DATA_ROOT/server-settings.json" \
-    --bind "127.0.0.1" --port "$GAME_PORT" \
-    --rcon-port "$RCON_PORT" --rcon-bind "127.0.0.1" \
+    --bind "127.0.0.1:$GAME_PORT" \
+    --rcon-bind "127.0.0.1:$RCON_PORT" \
     --rcon-password "$(cat "$SECRET_PATH")" \
     --console-log "$DATA_ROOT/logs/factorio-console.log" \
     >"$DATA_ROOT/logs/factorio-stdout.log" 2>"$DATA_ROOT/logs/factorio-stderr.log" < /dev/null &

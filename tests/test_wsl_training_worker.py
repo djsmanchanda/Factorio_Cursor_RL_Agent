@@ -24,8 +24,9 @@ def test_wsl_worker_keeps_runtime_native_and_reports_windows_visible() -> None:
 def test_wsl_worker_is_loopback_only_and_uses_automatic_secret() -> None:
     source = SHELL.read_text(encoding="utf-8")
 
-    assert '--bind "127.0.0.1" --port "$GAME_PORT"' in source
-    assert '--rcon-bind "127.0.0.1"' in source
+    assert '--bind "127.0.0.1:$GAME_PORT"' in source
+    assert '--rcon-bind "127.0.0.1:$RCON_PORT"' in source
+    assert '--rcon-port' not in source
     assert '--rcon-password "$(cat "$SECRET_PATH")"' in source
     assert 'od -An -N32 -tx1 /dev/urandom' in source
 

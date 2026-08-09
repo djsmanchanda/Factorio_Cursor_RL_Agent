@@ -2226,3 +2226,8 @@ that consumed it was not.
 - What: Added an unprivileged Linux headless-worker path with native runtime data and automatic local RCON secret loading.
 - Why: Run isolated RL training without Windows UAC or manual password entry while preserving the existing Windows bridge.
 - Next: Bootstrap the WSL worker, verify its bridge, then retire the Windows training worker.
+## [2026-08-10] WSL worker RCON bind correction
+- Files: `scripts/wsl/training_worker.sh`, WSL worker contract test.
+- What: Used the port-bearing `--rcon-bind` form without the mutually exclusive `--rcon-port` option.
+- Why: Factorio rejected the initial headless launch before opening RCON.
+- Next: Relaunch the isolated WSL worker and verify bridge connectivity.
