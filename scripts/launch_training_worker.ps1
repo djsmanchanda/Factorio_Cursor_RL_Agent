@@ -11,13 +11,18 @@ $configPath = Join-Path $serverData "config.ini"
 $modsPath = Join-Path $serverData "mods"
 $savePath = Join-Path $serverData "saves\training-01.zip"
 $settingsPath = Join-Path $serverData "server-settings.json"
-$stdoutPath = Join-Path $serverData "factorio-current.log"
-$stderrPath = Join-Path $serverData "factorio-stderr.log"
+$logsPath = Join-Path $serverData "logs"
+$stdoutPath = Join-Path $logsPath "factorio-stdout.log"
+$stderrPath = Join-Path $logsPath "factorio-stderr.log"
 
 foreach ($path in @($factorioExe, $configPath, $modsPath, $savePath, $settingsPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Training worker prerequisite is missing: $path"
     }
+}
+
+if (-not (Test-Path -LiteralPath $logsPath -PathType Container)) {
+    New-Item -ItemType Directory -Path $logsPath -Force | Out-Null
 }
 
 if (Get-NetTCPConnection -State Listen -LocalPort 28001 -ErrorAction SilentlyContinue) {

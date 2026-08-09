@@ -2216,3 +2216,8 @@ that consumed it was not.
 - What: Added a fixed-profile launcher for the isolated training worker on ports 35001/28001.
 - Why: Training-server lifecycle can be authorized narrowly without broad PowerShell launch permission.
 - Next: Deploy the committed training lab and restart worker 01 with this launcher.
+## [2026-08-10] Training launcher log-path correction
+- Files: `scripts/launch_training_worker.ps1`.
+- What: Redirected child-process output into the worker logs directory.
+- Why: Redirecting into Factorio's own `factorio-current.log` prevented a second worker start.
+- Next: Relaunch worker 01 and verify its RCON endpoint.
