@@ -2254,3 +2254,9 @@ that consumed it was not.
 - What: Changed live viewing to Factorio's no-character spectator controller and reserved an observatory surface outside the episode namespace.
 - Why: A normal player character could alter an episode or collide with placement, and the original observatory name could collide with a valid scenario.
 - Next: Deploy the separate training mod, restart only the WSL training server, and reset/recreate training episodes to use visible tiles.
+
+## [2026-08-10] Training visual observer live validation
+- Files: WSL training worker runtime and its backed-up disposable save; `CURRENT_STATUS.md`.
+- What: Deployed the separate training lab, removed only the stale orphaned training surface/force, and verified a fresh live episode uses `grass-1` with zero audit violations.
+- Why: Existing lab-dark surfaces were blank in the GUI and the baseline save retained one obsolete episode without lab ownership state.
+- Next: Observe the active `training/mining-delivery-00000000` episode with `/training_view training/mining-delivery-00000000`.
