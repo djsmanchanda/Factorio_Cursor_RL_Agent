@@ -2266,3 +2266,9 @@ that consumed it was not.
 - What: Synchronized and hash-verified the GUI training-lab scripts against the deployed WSL training worker.
 - Why: Factorio multiplayer rejected the connection because the client retained an older lab revision.
 - Next: Restart only the Factorio GUI client and rejoin the WSL worker.
+
+## [2026-08-10] Training-lab chequerboard floor correction
+- Files: `factorio_training_lab/episode_world.lua`, training-lab tests and docs.
+- What: Replaced the grass workaround with Factorio's alternating `lab-dark-1`/`lab-dark-2` chequerboard floor.
+- Why: `generate_with_lab_tiles` alone emits a single dark tile, not the normal visible laboratory template.
+- Next: Deploy the separate training mod, restart only the WSL training server, sync the GUI training mod, and reprovision a visual smoke episode.

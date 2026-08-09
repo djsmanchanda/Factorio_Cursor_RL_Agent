@@ -4,7 +4,8 @@
 local shared = require("training_shared")
 local validation = require("scenario_validation")
 
-local FLOOR_TILE = "grass-1"
+local LAB_TILE_A = "lab-dark-1"
+local LAB_TILE_B = "lab-dark-2"
 local FLOOR_BATCH_SIZE = 1024
 local OBSERVATORY_SURFACE = "training-observatory"
 local OBSERVATORY_BOUNDS = {
@@ -33,11 +34,15 @@ local function map_settings(bounds, seed)
   }
 end
 
+local function lab_tile_name(x, y)
+  return (x + y) % 2 == 0 and LAB_TILE_A or LAB_TILE_B
+end
+
 local function fill_visible_floor(surface, bounds)
   local tiles = {}
   for y = bounds.y_min, bounds.y_max_exclusive - 1 do
     for x = bounds.x_min, bounds.x_max_exclusive - 1 do
-      tiles[#tiles + 1] = { name = FLOOR_TILE, position = { x = x, y = y } }
+      tiles[#tiles + 1] = { name = lab_tile_name(x, y), position = { x = x, y = y } }
       if #tiles == FLOOR_BATCH_SIZE then
         surface.set_tiles(tiles)
         tiles = {}

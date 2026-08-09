@@ -20,10 +20,10 @@ Client-only observation command:
 
 - `/training_view training/<scenario-id>`
 
-Training surfaces use an explicit grass floor rather than Factorio's black lab
-tiles. Viewing switches the client to Factorio's no-character spectator controller,
-then moves it to the selected training surface. The spectator is moved to the
-training observatory before its viewed episode is recycled.
+Training surfaces use Factorio's actual grey lab chequerboard: alternating
+`lab-dark-1` and `lab-dark-2` tiles. Viewing switches the client to Factorio's
+no-character spectator controller, then moves it to the selected training surface.
+The spectator is moved to the training observatory before its viewed episode is recycled.
 
 Large immutable plans are uploaded in bounded chunks, then executed only after
 the Python side has validated the BuildPlan and issued its authorization. The

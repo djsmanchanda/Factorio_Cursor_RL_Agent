@@ -241,8 +241,12 @@ def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
 
     world.fill_visible_floor(lua.globals().floor_surface, lua.globals().floor_bounds)
 
-    assert len(lua.globals().painted) == 12
-    assert all(tile["name"] == "grass-1" for tile in lua.globals().painted.values())
+    painted = list(lua.globals().painted.values())
+
+    assert len(painted) == 12
+    assert {tile["name"] for tile in painted} == {"lab-dark-1", "lab-dark-2"}
+    assert sum(tile["name"] == "lab-dark-1" for tile in painted) == 6
+    assert sum(tile["name"] == "lab-dark-2" for tile in painted) == 6
 
 
 def test_view_command_switches_to_spectator_before_teleport(lua) -> None:

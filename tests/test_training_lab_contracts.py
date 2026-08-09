@@ -107,7 +107,9 @@ def test_training_surfaces_use_visible_tiles_and_evict_observers_before_recyclin
     world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
 
     assert 'surface.generate_with_lab_tiles = false' in world
-    assert 'local FLOOR_TILE = "grass-1"' in world
+    assert 'local LAB_TILE_A = "lab-dark-1"' in world
+    assert 'local LAB_TILE_B = "lab-dark-2"' in world
+    assert "return (x + y) % 2 == 0 and LAB_TILE_A or LAB_TILE_B" in world
     assert "fill_visible_floor(surface, environment.bounds)" in world
     assert "evacuate_players(surface)" in world
     assert 'local OBSERVATORY_SURFACE = "training-observatory"' in world

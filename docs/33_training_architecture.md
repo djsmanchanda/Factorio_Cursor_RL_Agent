@@ -183,7 +183,7 @@ python tools/training_observer.py snapshot
 ```
 
 The HTTP surface is deliberately read-only. Training maps use visible deterministic
-floor tiles. A connected GUI observer can use `/training_view training/<scenario-id>`;
+grey lab chequerboard tiles. A connected GUI observer can use `/training_view training/<scenario-id>`;
 the command switches it to Factorio's no-character spectator controller and moves it
 to a training-only observatory before recycling, so it cannot alter or pin an episode.
 A nudge is an explicit CLI action:
