@@ -2130,3 +2130,8 @@ that consumed it was not.
 - What: Added strict scenario/transition contracts and a deterministic generator for batches of isolated mining-and-delivery curricula.
 - Why: The real-base builder retries hand-authored remedies but cannot persist experience or learn better choices across safe-save resets.
 - Next: Add an explicitly authorized Lua provisioner that creates, seeds, validates, and recycles one isolated training surface per episode.
+## [2026-08-09] Wait for temporarily reserved construction stock
+- Files: orchestrator/autonomous_builder.py, tests/test_ghost_diagnostics.py
+- What: A ghost material check now waits and retries when force-wide stock exists but the target construction network temporarily reports zero available items; true stock shortages still become mall demand.
+- Why: The 15:39:22 run stopped on one automation-science transport belt even though the transport-belt reserve existed; the network count reflected reservations from other construction jobs, not a missing provider.
+- Next: Restart the Python runner; no Lua mod redeploy is required. The separate experimental RL path was not modified.

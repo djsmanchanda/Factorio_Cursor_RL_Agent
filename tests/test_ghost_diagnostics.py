@@ -122,3 +122,19 @@ def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeyp
 
     assert acted
     assert calls == [(48.0, -70.0), (59.5, -63.5)]
+
+def test_material_remedy_waits_when_network_reserves_stock(monkeypatch) -> None:
+    """Global stock can exist while another construction job reserves it."""
+    messages: list[str] = []
+    monkeypatch.setattr(
+        live_base, "available_items", lambda *_a: {"transport-belt": 10},
+    )
+
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "conversion_automation-science-pack",
+        "materials:transport-belt:1", "ghost belt has no network stock",
+        (0.0, 0.0), (0.0, 0.0), [], [], None, messages.append,
+    )
+
+    assert acted
+    assert any("temporarily unavailable" in message for message in messages)

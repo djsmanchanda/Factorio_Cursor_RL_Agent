@@ -235,11 +235,18 @@ def _apply_remedy(
         stock = live_base.available_items(client, surface, force)
         if stock.get(item, 0) < required:
             raise MaterialShortage(name, {item: required}, stock)
-        raise StuckError(
-            f"{name}: {description}; {item} exists in the base but not in the "
-            "construction network, so a provider/requester or roboport link must "
-            "be repaired before retrying"
+        # ``available_items`` sees the whole force, while the ghost probe sees
+        # only the target logistic network. A zero network count with stock in
+        # the base is often temporary: other construction ghosts have reserved
+        # the items and the count returns as those jobs finish. Treating that
+        # moment as a broken provider stopped the science stage even though the
+        # belt reserve was healthy and the network was already connected.
+        emit(
+            f"    {item} exists in base stock ({stock[item]}) but is temporarily "
+            "unavailable to this construction network; waiting for reservations "
+            "or provider delivery to clear"
         )
+        return True
     else:
         raise StuckError(f"{name}: {description} -- no automatic remedy")
     return bool(acted)
