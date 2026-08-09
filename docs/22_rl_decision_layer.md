@@ -10,11 +10,12 @@ quarantined under `experimental/legacy_autonomy/`. The active Nauvis builder
 remains deterministic and does not import that package. Revival requires an
 explicit architecture review and must preserve the invariants below.
 
-The second-generation training path now begins under `training/`. Its first
-offline milestone defines strict scenario and transition contracts plus a
-seeded mining-delivery curriculum. It does not yet provision Factorio surfaces,
-execute episodes, persist experience, or update a policy, and it has no
-real-base authority. See `docs/32_training_curriculum.md`.
+The second-generation sidecar now includes strict contracts, disposable
+training surfaces, deterministic candidate catalogs, one-plan episodes,
+durable experience, an inspectable contextual policy, seeded evolution, frozen
+holdout promotion, explicit worker scheduling, and bounded local-model
+configuration proposals. It still has no real-base authority. See
+`docs/32_training_curriculum.md` and `docs/33_training_architecture.md`.
 
 ## Division of labor (invariant-compatible)
 

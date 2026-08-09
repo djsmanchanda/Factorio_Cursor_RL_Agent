@@ -1,0 +1,133 @@
+# Path: docs/33_training_architecture.md
+# Purpose: Define the isolated evolutionary training and bounded autoresearch runtime.
+
+# Training Architecture
+
+## Boundary
+
+Training is a sidecar system. It does not replace, import, deploy into, or
+silently influence the active `nauvis/player` runtime. The active builder stays
+deterministic. Training may import pure planner functions and submit their
+schema-valid BuildPlans to disposable `training/*` surfaces through the same
+authorization gate used by the deterministic executor.
+
+The dependency direction is one way:
+
+```text
+active runtime -> core + planners
+training       -> core + planners + training-only runtime
+active runtime -X-> training or experimental
+training       -X-> autonomous_builder or stage orchestration
+```
+
+## Learning unit
+
+One complete BuildPlan is one episode in version 1. The learner sees a bounded
+catalog of plans produced by deterministic code, selects one, and receives the
+result. It cannot add, move, or remove an entity action. A failed plan therefore
+teaches candidate selection, timing, and resource tradeoffs without weakening
+geometry, force, surface, budget, or fixture invariants.
+
+Each immutable artifact carries a canonical SHA-256 identity: scenario hash
+binds the environment and objective, plan hash binds every action, and policy
+hash binds the feature contract and policy parameters.
+
+## Runtime components
+
+- `factorio_training_lab/` provisions, observes, measures, and recycles one
+  isolated episode. It is a separate mod and never owns Nauvis state.
+- `training/candidates/` compiles deterministic alternatives.
+- `training/episode.py` binds selection, execution, reward, transition, and
+  guaranteed recycle.
+- `training/store.py` persists experience and metadata in SQLite WAL mode.
+- `training/policies.py` provides a baseline and contextual bandit.
+- `training/population.py` performs seeded elitist mutation.
+- `training/evaluation.py` gates promotion on paired frozen holdout scenarios.
+- `training/scheduler.py` assigns work to explicit training-only workers.
+- `training/research/` accepts bounded settings proposals from a local model;
+  it cannot edit or execute repository code.
+
+## Parallelism
+
+One Factorio process executes one episode at a time. Ten to twenty concurrent
+attempts require ten to twenty explicitly configured headless training workers,
+each with its own port, save, and `script-output` directory. The scheduler
+leases a scenario to each worker and recovers expired leases. It never discovers
+or connects to arbitrary Factorio processes.
+
+Start with one worker and measure UPS, RAM, report latency, and cleanup. Increase
+the worker count only while those measurements remain healthy. Thousands of
+attempts come from repeated persisted batches, not hundreds of permanent forces
+or surfaces inside one save.
+
+An explicit worker file has this shape (repeat the object with unique ports and
+directories for 10-20 workers):
+
+```json
+{
+  "workers": [{
+    "worker_id": "training-01",
+    "instance_id": "factorio-training-01",
+    "host": "127.0.0.1",
+    "game_port": 35001,
+    "rcon_port": 28001,
+    "script_output": "C:/Factorio-training-01/script-output",
+    "surface_prefix": "training/",
+    "force_prefix": "training-"
+  }]
+}
+```
+
+After dedicated workers are configured:
+
+```powershell
+$env:FACTORIO_TRAINING_RCON_PASSWORD = "<training-server-password>"
+python tools/run_training_batch.py --workers training-workers.json --count 100
+```
+## Evolution and promotion
+
+Training uses train, validation, and frozen holdout seed partitions. Elites
+survive and offspring receive seeded mutations. Promotion is lexicographic:
+
+1. zero safety violations;
+2. no regression in completion or earlier curriculum families;
+3. better sustained objective rate;
+4. faster completion;
+5. lower material and infrastructure cost;
+6. fewer failed placements.
+
+A scalar reward helps learning but can never compensate for a safety failure.
+The first release has no real-base authority. Future champions must first run in
+shadow mode; mutation authority requires a separate explicit review.
+
+## Bounded local autoresearch
+
+The local LLM is a proposal generator, not a free-form code editor. It receives
+aggregate evidence and may propose only allowlisted numeric settings. Proposals
+are range checked, deduplicated, evaluated on paired seeds, and rejected when
+worse. Prompts and responses are stored for audit.
+
+Do not assume stock `llama.cpp` exposes per-expert routing counts:
+`--n-cpu-moe` places whole expert layers on CPU. Initially record the model
+fingerprint, offload configuration, prompt/decode timing, and peak RAM/VRAM.
+Optimizing the most-used experts later requires a maintained instrumentation
+patch and its own benchmark milestone.
+
+
+After experiment scores plateau, request one allowlisted proposal from a local
+OpenAI-compatible `llama.cpp` endpoint:
+
+```powershell
+python tools/run_autoresearch.py --model <model-id> --policy policy.json `
+  --evidence evidence.json --parent-policy-id <policy-id>
+```
+
+The command records runtime/offload measurements and the proposed numeric
+configuration. It does not edit source or automatically promote the result.
+
+## Operational lifecycle
+
+Python-only training changes require restarting training workers/controllers.
+Changes under `factorio_training_lab/` require deploying that separate training
+mod and restarting only the training Factorio server. Neither action requires
+redeploying or restarting the deterministic real-base mod/server.

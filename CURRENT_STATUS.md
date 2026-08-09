@@ -2135,3 +2135,21 @@ that consumed it was not.
 - What: A ghost material check now waits and retries when force-wide stock exists but the target construction network temporarily reports zero available items; true stock shortages still become mall demand.
 - Why: The 15:39:22 run stopped on one automation-science transport belt even though the transport-belt reserve existed; the network count reflected reservations from other construction jobs, not a missing provider.
 - Next: Restart the Python runner; no Lua mod redeploy is required. The separate experimental RL path was not modified.
+
+## [2026-08-09] Training contract and dependency firewall
+- Files: `training/canonical.py`, `training/contracts.py`, `training/isolation.py`, `training/scenarios/mining_delivery.py`, training schemas/tests.
+- What: Upgraded training artifacts to tick-native v1.1 contracts with canonical scenario/plan/policy hashes, finite-number checks, integral fixtures, and active/training import isolation.
+- Why: Thousands of retries need immutable evidence and a hard boundary from the deterministic Nauvis runtime.
+- Next: Provision disposable episodes through the separate training lab.
+
+## [2026-08-09] Disposable Factorio training lab
+- Files: `factorio_training_lab/**`, `schemas/training_episode_report.schema.json`, Lua contract tests.
+- What: Added RCON-only provision/observe/recycle commands, protected fixtures, budget audits, per-tick measurement, and asynchronous force recycling.
+- Why: Small live tasks must fail safely and recycle indefinitely without touching Nauvis/player or exhausting Factorio's force limit.
+- Next: Execute deterministic candidates and persist learning evidence.
+
+## [2026-08-09] Isolated RL training runtime
+- Files: `training/**`, `tools/run_training_batch.py`, `tools/run_autoresearch.py`, `tools/report_training.py`, `docs/33_training_architecture.md`, focused tests.
+- What: Added deterministic mining candidates, one-plan episodes, SQLite experience, contextual policy learning, seeded evolution, frozen holdout promotion, 1-20 worker scheduling, and bounded loopback LLM proposals.
+- Why: Enable repeated randomized trial-and-error and recursive policy improvement while deterministic planners retain all structural authority.
+- Next: Deploy only the training mod to a dedicated worker, benchmark one worker, then scale concurrency from measured UPS and latency.

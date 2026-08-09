@@ -27,3 +27,4 @@ Documentation for each schema is maintained in this README.
 - `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
 - `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract
 - `training_transition.schema.json` - observation, candidate choice, measured outcome, failure class, and decomposed reward contract
+- `training_episode_report.schema.json` - training-mod provision, observation, and asynchronous recycle reports; all rates are per tick

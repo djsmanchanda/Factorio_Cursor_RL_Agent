@@ -76,7 +76,7 @@ stone and sustain delivery to a protected sink. Seeds vary:
 - resource type;
 - patch width, height, and quadrant;
 - sink position;
-- target rate from 0.5 to 3.0 items per second;
+- target rate equivalent to 0.5 to 3.0 items per second, stored per tick;
 - derived construction budget and route length.
 
 All scenarios use electric drills and electric infrastructure. The generator
@@ -117,7 +117,25 @@ python tools/generate_training_scenarios.py --count 100 --start-seed 0 --output-
 7. **Bounded real-base authority**: enable only decisions whose held-out
    curriculum score exceeds the baseline and whose confidence gate passes.
 
-Hundreds of scenarios are generated cheaply, but active Factorio surfaces
-should be provisioned in measured batches. The first live milestone runs one
-episode at a time; concurrency is increased only after UPS and report latency
-are measured.
+The contracts, separate training-lab mod, deterministic candidate compiler,
+episode runner, durable store, contextual policy, evolutionary population,
+promotion gate, scheduler, and bounded local-model proposal layer now exist.
+They have no real-base authority. See `docs/33_training_architecture.md`.
+
+Validate the default hundred scenarios and two candidates per scenario without
+starting Factorio:
+
+```powershell
+python tools/run_training_batch.py
+```
+
+Model a thousand offline attempts:
+
+```powershell
+python tools/run_training_batch.py --count 100 --attempts-per-scenario 10
+```
+
+Live batches require explicit worker configuration, unique ports and
+`script-output` directories, the separate training mod, and an RCON password in
+an environment variable. Start with one worker; increase concurrency only after
+UPS and report latency remain healthy.

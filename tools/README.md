@@ -14,6 +14,15 @@ python -m tools.verify_factory_invariants --rcon-host 127.0.0.1 --rcon-port 2701
 
 The direct invariant-script form currently has a broken import path. Live mutation and server lifecycle actions require explicit authorization.
 
+## Isolated RL training
+
+`generate_training_scenarios.py` exports immutable scenario contracts.
+`run_training_batch.py` validates 100 scenarios offline by default; supplying an
+explicit worker file runs disposable episodes only on loopback training
+servers. `report_training.py` summarizes the resulting SQLite evidence and
+local-model runtime measurements. `run_autoresearch.py` asks a loopback-only OpenAI-compatible endpoint for one allowlisted numeric experiment after a measured plateau. These tools do not import or invoke the
+active Nauvis orchestrator.
+
 ## Snapshot Validator
 
 ### Install dependency
