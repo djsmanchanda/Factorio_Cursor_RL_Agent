@@ -32,7 +32,10 @@ class ReportRcon:
             upload = self.uploads.setdefault(payload["upload_id"], {})
             upload[payload["chunk_index"]] = payload["chunk"]
             return ""
-        kind = "execution" if name == "/training_execute" else name.removeprefix("/training_")
+        kind = {
+            "/training_execute": "execution",
+            "/training_observe": "observation",
+        }.get(name, name.removeprefix("/training_"))
         report_kind = "recycle" if self.wrong_kind and kind == "provision" else kind
         report = {
             "version": "1.0.0", "kind": report_kind, "request_id": payload["request_id"],
@@ -47,6 +50,21 @@ class ReportRcon:
                 "force": scenario["environment"]["force_name"], "started_tick": 1,
                 "unchanged": False,
                 "created": {"surface": True, "force": True, "resource_tiles": 1, "fixtures": 2},
+            })
+        if kind == "observation":
+            report.update({
+                "scenario_id": "mining-delivery-00000001",
+                "surface": "training/mining-delivery-00000001",
+                "force": "training-mining-delivery-00000001",
+                "started_tick": 1, "elapsed_ticks": 0,
+                "objective": {"item": "iron-ore", "target_rate_per_tick": 1 / 60, "sustain_ticks": 60},
+                "metrics": {
+                    "delivered_items": 0, "sample_ticks": 0, "sample_items": 0,
+                    "rate_per_tick": 0, "sustained_ticks": 0, "resource_remaining": 1,
+                    "built_entities": {}, "forbidden_entities": 0, "out_of_bounds_entities": 0,
+                    "budget_overruns": 0, "fixtures_valid": True,
+                },
+                "failure": {"kind": "none", "reason": ""},
             })
         if kind == "execution":
             package = json.loads("".join(self.uploads[payload["upload_id"]].values()))
@@ -137,3 +155,13 @@ def test_bridge_rejects_uploads_beyond_the_lab_chunk_limit(tmp_path):
 
     with pytest.raises(TrainingBridgeError, match="chunk limit"):
         bridge._upload_plan("episode-1", {"data": "x" * (_UPLOAD_CHUNK_BYTES * _MAX_UPLOAD_CHUNKS)})
+
+def test_bridge_maps_observe_to_the_observation_report_kind(tmp_path):
+    bridge = FactorioTrainingBridge(
+        tmp_path, host="127.0.0.1", port=27015, password="x", rcon=ReportRcon(tmp_path),
+        poll_interval=0.001, command_timeout=1,
+    )
+
+    report = bridge.observe("episode-1")
+
+    assert report["kind"] == "observation"

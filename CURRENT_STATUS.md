@@ -2181,3 +2181,8 @@ that consumed it was not.
 - What: Enforced cumulative per-episode budgets and complete entity footprints before placement; execution failures now produce negative transitions.
 - Why: Prevent a training plan from escaping its isolated scenario or vanishing as a generic worker error.
 - Next: Deploy only the training lab to worker 01, restart that worker and the Python training batch, then verify a 5-attempt benchmark.
+## [2026-08-09] Training observation report mapping
+- Files: `training/factorio_bridge.py`, bridge regression tests.
+- What: Mapped `training_observe` to the lab's `observation` report kind.
+- Why: The first deployed benchmark correctly emitted observations but Python rejected the singular report name as unexpected.
+- Next: Restart only the Python benchmark; the training server already has the required Lua revision.

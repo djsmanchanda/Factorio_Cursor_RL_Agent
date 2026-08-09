@@ -20,6 +20,10 @@ _REPORT_SUBDIR = Path("factorio_training_lab") / "reports"
 _COMMAND_VERSION = "1.0.0"
 _UPLOAD_CHUNK_BYTES = 1_600
 _MAX_UPLOAD_CHUNKS = 256
+_REPORT_KINDS = {
+    "training_execute": "execution",
+    "training_observe": "observation",
+}
 
 
 class TrainingBridgeError(RuntimeError):
@@ -104,7 +108,7 @@ class FactorioTrainingBridge:
         response = self._rcon.command(f"/{name} " + json.dumps(payload, separators=(",", ":")))
         if "error" in response.lower():
             raise TrainingBridgeError(response.strip())
-        kind = "execution" if name == "training_execute" else name.removeprefix("training_")
+        kind = _REPORT_KINDS.get(name, name.removeprefix("training_"))
         report = self._wait_report(
             known,
             lambda item: item.get("request_id") == request_id
