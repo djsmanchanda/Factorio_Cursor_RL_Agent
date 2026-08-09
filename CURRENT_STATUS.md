@@ -2221,3 +2221,8 @@ that consumed it was not.
 - What: Redirected child-process output into the worker logs directory.
 - Why: Redirecting into Factorio's own `factorio-current.log` prevented a second worker start.
 - Next: Relaunch worker 01 and verify its RCON endpoint.
+## [2026-08-10] WSL-native training worker
+- Files: WSL lifecycle helpers, batch secret support, worker contract tests, training architecture.
+- What: Added an unprivileged Linux headless-worker path with native runtime data and automatic local RCON secret loading.
+- Why: Run isolated RL training without Windows UAC or manual password entry while preserving the existing Windows bridge.
+- Next: Bootstrap the WSL worker, verify its bridge, then retire the Windows training worker.

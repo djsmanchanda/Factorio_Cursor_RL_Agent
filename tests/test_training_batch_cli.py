@@ -3,7 +3,9 @@
 
 import json
 
-from tools.run_training_batch import _checkpoint, _learn_policy, _load_policy, main
+import pytest
+
+from tools.run_training_batch import _checkpoint, _learn_policy, _load_policy, _parse, _rcon_password, main
 from training.features import MINING_DELIVERY_FEATURES_V1
 from training.policies import DiagonalLinUCB
 
@@ -51,3 +53,18 @@ def test_completed_transitions_train_a_new_generation(tmp_path):
     assert generation == 1
     assert restored.policy_id.startswith("policy-g0001-")
     assert restored.a_diag == learned.a_diag
+
+def test_rcon_secret_file_overrides_environment(tmp_path, monkeypatch):
+    secret = tmp_path / "rcon-password"
+    secret.write_text("worker-secret\n", encoding="utf-8")
+    monkeypatch.setenv("FACTORIO_TRAINING_RCON_PASSWORD", "environment-secret")
+
+    assert _rcon_password(_parse(["--rcon-secret-file", str(secret)])) == "worker-secret"
+
+
+def test_rcon_secret_file_rejects_empty_file(tmp_path):
+    secret = tmp_path / "rcon-password"
+    secret.write_text("\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="RCON secret file is empty"):
+        _rcon_password(_parse(["--rcon-secret-file", str(secret)]) )

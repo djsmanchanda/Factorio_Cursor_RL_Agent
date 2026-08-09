@@ -214,10 +214,29 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
     parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
     parser.add_argument("--password-env", default="FACTORIO_TRAINING_RCON_PASSWORD")
+    parser.add_argument(
+        "--rcon-secret-file", type=Path,
+        help="Local training-worker RCON secret file; takes precedence over --password-env.",
+    )
     args = parser.parse_args(argv)
     if args.attempts_per_scenario < 1:
         parser.error("--attempts-per-scenario must be positive")
     return args
+
+
+def _rcon_password(args: argparse.Namespace) -> str:
+    if args.rcon_secret_file is not None:
+        try:
+            password = args.rcon_secret_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise SystemExit(f"RCON secret file is unavailable: {args.rcon_secret_file}") from exc
+        if not password:
+            raise SystemExit(f"RCON secret file is empty: {args.rcon_secret_file}")
+        return password
+    password = os.environ.get(args.password_env)
+    if password is None:
+        raise SystemExit(f"RCON password environment variable is missing: {args.password_env}")
+    return password
 
 
 def _execute_live(args, scenarios: list[dict], password: str) -> dict:
@@ -254,9 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.workers is None:
         print(json.dumps(_offline(scenarios, args.attempts_per_scenario), indent=2))
         return 0
-    password = os.environ.get(args.password_env)
-    if password is None:
-        raise SystemExit(f"RCON password environment variable is missing: {args.password_env}")
+    password = _rcon_password(args)
     result = _execute_live(args, scenarios, password)
     print(json.dumps(result, indent=2))
     return 0 if result["failed"] == 0 else 1

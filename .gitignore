@@ -35,3 +35,5 @@ data/training/policy.json
 
 # Local isolated worker endpoints and passwords
 training-workers.json
+training-workers-wsl.json
+data/training/logs/

@@ -95,6 +95,28 @@ After dedicated workers are configured:
 $env:FACTORIO_TRAINING_RCON_PASSWORD = "<training-server-password>"
 python tools/run_training_batch.py --workers training-workers.json --count 100
 ```
+## WSL-native training worker
+
+The preferred local worker runs the Linux headless package under the existing
+Ubuntu WSL2 distribution. Its Factorio runtime, save, mods, and logs live under
+`~/factorio-training-01` on the Linux filesystem. Only `script-output` is a
+symlink to `%LOCALAPPDATA%\Factorio-training-wsl-01\script-output`, preserving
+the Windows bridge and observatory without putting simulation data on DrvFS.
+
+The worker binds game and RCON only to `127.0.0.1` on the existing ports
+`35001` and `28001`. Bootstrap generates a local RCON secret outside Git; the
+batch helper passes its path to the runner, so no operator password entry is
+needed. RCON authentication remains enabled.
+
+```powershell
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action start
+powershell -File scripts\run_wsl_training_batch.ps1 --count 100 --attempts-per-scenario 20
+```
+
+Before reusing these ports, stop the Windows training worker. The WSL helper
+refuses to overwrite running worker mods and the WSL runtime has no authority
+over the real-base server or its data directory.
 ## Evolution and promotion
 
 Training uses train, validation, and frozen holdout seed partitions. Elites
