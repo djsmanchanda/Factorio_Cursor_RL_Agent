@@ -2260,3 +2260,9 @@ that consumed it was not.
 - What: Deployed the separate training lab, removed only the stale orphaned training surface/force, and verified a fresh live episode uses `grass-1` with zero audit violations.
 - Why: Existing lab-dark surfaces were blank in the GUI and the baseline save retained one obsolete episode without lab ownership state.
 - Next: Observe the active `training/mining-delivery-00000000` episode with `/training_view training/mining-delivery-00000000`.
+
+## [2026-08-10] Training GUI mod synchronization
+- Files: GUI client mod copy under `%APPDATA%\Factorio\mods\factorio_training_lab`; `CURRENT_STATUS.md`.
+- What: Synchronized and hash-verified the GUI training-lab scripts against the deployed WSL training worker.
+- Why: Factorio multiplayer rejected the connection because the client retained an older lab revision.
+- Next: Restart only the Factorio GUI client and rejoin the WSL worker.
