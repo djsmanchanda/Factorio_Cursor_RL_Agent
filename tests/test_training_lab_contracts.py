@@ -106,6 +106,7 @@ def test_fixture_audit_uses_surface_identity_not_global_unit_lookup() -> None:
 
     assert "surface.find_entities_filtered" in source
     assert "game.get_entity_by_unit_number" not in source
+    assert "prototypes.entity[name]" in (LAB / "training_geometry.lua").read_text(encoding="utf-8")
 
 def test_execution_report_is_schema_valid() -> None:
     report = {

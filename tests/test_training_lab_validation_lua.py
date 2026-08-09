@@ -161,10 +161,8 @@ def test_chunked_plan_execution_module_loads(lua) -> None:
 def test_plan_execution_rejects_cumulative_budget_before_placement(lua) -> None:
     lua.execute("""
         storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}, uploads={}}}
-        game = {
-          entity_prototypes={['transport-belt']={collision_box={left_top={x=-0.4,y=-0.4},right_bottom={x=0.4,y=0.4}}}},
-        surfaces={}, forces={}
-        }
+        game = {surfaces={}, forces={}}
+        prototypes = {entity={['transport-belt']={collision_box={left_top={x=-0.4,y=-0.4},right_bottom={x=0.4,y=0.4}}}}}
         existing = {type='transport-belt', name='transport-belt', unit_number=11, position={x=2,y=2}}
         surface = {find_entities_filtered=function(filter)
           if filter.force then return {existing} end
@@ -187,7 +185,7 @@ def test_plan_execution_rejects_cumulative_budget_before_placement(lua) -> None:
 
 def test_training_footprints_cannot_cross_the_build_boundary(lua) -> None:
     lua.execute("""
-        game = {entity_prototypes={
+        prototypes = {entity={
           ['electric-mining-drill']={collision_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}},
           ['splitter']={collision_box={left_top={x=-0.9,y=-0.9},right_bottom={x=0.9,y=0.9}}}
         }}

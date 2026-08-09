@@ -2186,3 +2186,8 @@ that consumed it was not.
 - What: Mapped `training_observe` to the lab's `observation` report kind.
 - Why: The first deployed benchmark correctly emitted observations but Python rejected the singular report name as unexpected.
 - Next: Restart only the Python benchmark; the training server already has the required Lua revision.
+## [2026-08-09] Factorio 2 training prototype lookup
+- Files: `factorio_training_lab/training_geometry.lua`, Lua regression tests.
+- What: Resolved entity collision boxes through the Factorio 2 `prototypes.entity` API.
+- Why: The first physical execution reached the guard, where the removed `game.entity_prototypes` API failed before placement.
+- Next: Redeploy only the training lab, restart worker 01, then restart the Python benchmark.

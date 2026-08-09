@@ -5,7 +5,7 @@ local function prototype_bounds(name, position)
   if type(position) ~= "table" or type(position.x) ~= "number" or type(position.y) ~= "number" then
     return nil
   end
-  local prototype = game.entity_prototypes[name]
+  local prototype = prototypes.entity[name]
   local box = prototype and (prototype.collision_box or prototype.selection_box)
   if not box or not box.left_top or not box.right_bottom then return nil end
   return {
