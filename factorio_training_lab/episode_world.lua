@@ -1,0 +1,246 @@
+-- Path: factorio_training_lab/episode_world.lua
+-- Purpose: Provision and recycle only mod-owned isolated training episodes.
+
+local shared = require("training_shared")
+local validation = require("scenario_validation")
+
+local function valid_hash(value)
+  if type(value) ~= "string" or #value ~= 71 or string.sub(value, 1, 7) ~= "sha256:" then
+    return false
+  end
+  return string.match(string.sub(value, 8), "^[0-9a-f]+$") ~= nil
+end
+
+local function map_settings(bounds, seed)
+  return {
+    seed = seed,
+    width = bounds.x_max_exclusive - bounds.x_min,
+    height = bounds.y_max_exclusive - bounds.y_min,
+    default_enable_all_autoplace_controls = false,
+    autoplace_settings = {
+      entity = { treat_missing_as_default = false, settings = {} },
+      tile = { treat_missing_as_default = false, settings = {} },
+      decorative = { treat_missing_as_default = false, settings = {} }
+    }
+  }
+end
+
+local function create_surface(scenario)
+  local environment = scenario.environment
+  local surface = game.create_surface(
+    environment.surface_name,
+    map_settings(environment.bounds, scenario.seed)
+  )
+  surface.generate_with_lab_tiles = true
+  local width = environment.bounds.x_max_exclusive - environment.bounds.x_min
+  local height = environment.bounds.y_max_exclusive - environment.bounds.y_min
+  surface.request_to_generate_chunks({ x = 0, y = 0 }, math.ceil(math.max(width, height) / 64) + 1)
+  surface.force_generate_chunk_requests()
+  return surface
+end
+
+local function create_force(scenario)
+  local force = game.create_force(scenario.environment.force_name)
+  force.reset()
+  local bootstrap = force.technologies["automation-science-pack"]
+  if bootstrap then bootstrap.researched = true end
+  return force
+end
+
+local function place_resources(surface, scenario)
+  local patch, count = scenario.resource_patch, 0
+  for x = patch.bounds.x1, patch.bounds.x2 do
+    for y = patch.bounds.y1, patch.bounds.y2 do
+      local entity = surface.create_entity({
+        name = patch.resource,
+        position = { x = x + 0.5, y = y + 0.5 },
+        amount = patch.amount_per_tile
+      })
+      if not entity then error("could not place resource at " .. x .. "," .. y) end
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function place_fixtures(surface, force, scenario)
+  local fixture_records, sink_unit_number = {}, nil
+  for _, fixture in ipairs(scenario.fixtures) do
+    local entity = surface.create_entity({
+      name = fixture.entity,
+      position = { x = fixture.position[1], y = fixture.position[2] },
+      force = force
+    })
+    if not entity then error("could not place fixture " .. fixture.id) end
+    entity.minable, entity.destructible, entity.rotatable = false, false, false
+    if fixture.kind == "item_sink" then
+      entity.remove_unfiltered_items = false
+      sink_unit_number = entity.unit_number
+    end
+    fixture_records[fixture.id] = {
+      name = fixture.entity,
+      kind = fixture.kind,
+      unit_number = entity.unit_number,
+      position = { x = entity.position.x, y = entity.position.y }
+    }
+  end
+  return fixture_records, sink_unit_number
+end
+
+local function begin_partial_cleanup(surface, force, request_id, episode_id)
+  if surface and surface.valid then game.delete_surface(surface) end
+  if force and force.valid then
+    local state = shared.ensure_storage()
+    state.pending_force_merges[force.name] = {
+      request_id = request_id, episode_id = episode_id, provision_rollback = true
+    }
+    game.merge_forces(force, game.forces.neutral)
+  end
+end
+
+local function build_episode(payload, scenario)
+  local surface, force
+  local ok, result = pcall(function()
+    surface = create_surface(scenario)
+    force = create_force(scenario)
+    local resource_tiles = place_resources(surface, scenario)
+    local fixtures, sink = place_fixtures(surface, force, scenario)
+    return { resource_tiles = resource_tiles, fixtures = fixtures, sink = sink }
+  end)
+  if not ok then
+    begin_partial_cleanup(surface, force, payload.request_id, payload.episode_id)
+    error(result)
+  end
+  return surface, force, result
+end
+
+local function existing_result(payload, scenario)
+  local episode = shared.ensure_storage().episodes[payload.episode_id]
+  if not episode then return nil end
+  if episode.scenario_hash ~= payload.scenario_hash
+      or episode.surface_name ~= scenario.environment.surface_name
+      or episode.force_name ~= scenario.environment.force_name then
+    error("episode_id already belongs to a different scenario")
+  end
+  return {
+    request_id = payload.request_id, episode_id = payload.episode_id,
+    ok = true, status = episode.status, scenario_id = episode.scenario_id,
+    scenario_hash = episode.scenario_hash, surface = episode.surface_name,
+    force = episode.force_name, started_tick = episode.started_tick,
+    unchanged = true
+  }
+end
+
+local function ensure_names_available(scenario)
+  if game.surfaces[scenario.environment.surface_name] then
+    error("training surface already exists without matching episode ownership")
+  end
+  if game.forces[scenario.environment.force_name] then
+    error("training force already exists without matching episode ownership")
+  end
+end
+
+local function provision(payload)
+  if payload.confirmation_token ~= "PROVISION_TRAINING_EPISODE" then
+    error("provision confirmation token is invalid")
+  end
+  if not valid_hash(payload.scenario_hash) then error("scenario_hash must be sha256") end
+  local scenario = validation.validate_scenario(payload.scenario)
+  if payload.scenario_hash ~= scenario.scenario_hash then
+    error("provision envelope scenario_hash does not match embedded scenario_hash")
+  end
+  local existing = existing_result(payload, scenario)
+  if existing then return existing end
+  ensure_names_available(scenario)
+  local _, _, created = build_episode(payload, scenario)
+  local episode = {
+    owner = shared.OWNER, episode_id = payload.episode_id,
+    scenario_id = scenario.scenario_id, scenario_hash = payload.scenario_hash,
+    surface_name = scenario.environment.surface_name,
+    force_name = scenario.environment.force_name, scenario = scenario,
+    started_tick = game.tick, last_sample_tick = game.tick, status = "ready",
+    fixtures = created.fixtures, sink_unit_number = created.sink,
+    delivered_items = 0, sample_items = 0, sample_ticks = 0,
+    rate_per_tick = 0, sustained_ticks = 0,
+    failure_kind = "none", failure_reason = ""
+  }
+  shared.ensure_storage().episodes[payload.episode_id] = episode
+  return {
+    request_id = payload.request_id, episode_id = payload.episode_id,
+    ok = true, status = "ready", scenario_id = scenario.scenario_id,
+    scenario_hash = payload.scenario_hash, surface = episode.surface_name,
+    force = episode.force_name, started_tick = game.tick, unchanged = false,
+    created = { surface = true, force = true,
+      resource_tiles = created.resource_tiles, fixtures = #scenario.fixtures }
+  }
+end
+
+local function players_on_surface(surface)
+  for _, player in pairs(game.connected_players) do
+    if player.surface == surface then return true end
+  end
+  return false
+end
+
+local function recycle(payload)
+  if payload.confirmation_token ~= "RECYCLE_TRAINING_EPISODE" then
+    error("recycle confirmation token is invalid")
+  end
+  local episode = shared.episode_for(payload.episode_id)
+  local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
+  if not surface or not force then error("episode surface or force is missing") end
+  if players_on_surface(surface) then error("cannot recycle a surface containing a connected player") end
+  if not game.delete_surface(surface) then error("Factorio refused to delete the training surface") end
+  episode.status = "recycling"
+  shared.ensure_storage().pending_force_merges[force.name] = {
+    request_id = payload.request_id, episode_id = payload.episode_id,
+    scenario_id = episode.scenario_id, surface = episode.surface_name
+  }
+  game.merge_forces(force, game.forces.neutral)
+  return {
+    request_id = payload.request_id, episode_id = payload.episode_id,
+    ok = true, status = "pending_force_merge", scenario_id = episode.scenario_id,
+    surface = episode.surface_name, force = episode.force_name
+  }
+end
+
+local function command_handler(kind, operation)
+  return function(command)
+    local request_id, episode_id = "invalid", "invalid"
+    local ok, result = pcall(function()
+      local payload = shared.parse_command(command)
+      request_id, episode_id = payload.request_id, payload.episode_id
+      return operation(payload)
+    end)
+    if not ok then
+      result = { request_id = request_id, episode_id = episode_id,
+        ok = false, status = "failed", error = tostring(result) }
+    end
+    shared.write_report(kind, result)
+  end
+end
+
+local function complete_force_merge(event)
+  local state = shared.ensure_storage()
+  local pending = state.pending_force_merges[event.source_name]
+  if not pending then return end
+  state.pending_force_merges[event.source_name] = nil
+  state.episodes[pending.episode_id] = nil
+  shared.write_report("recycle", {
+    request_id = pending.request_id, episode_id = pending.episode_id,
+    ok = true, status = "completed", scenario_id = pending.scenario_id,
+    surface = pending.surface, force = event.source_name
+  })
+end
+
+local function register_commands()
+  commands.add_command("training_provision", "Provision one isolated training episode (RCON only).",
+    command_handler("provision", provision))
+  commands.add_command("training_recycle", "Recycle one owned training episode (RCON only).",
+    command_handler("recycle", recycle))
+end
+
+return {
+  complete_force_merge = complete_force_merge,
+  register_commands = register_commands
+}

@@ -1,0 +1,12 @@
+{
+  "name": "factorio_training_lab",
+  "version": "0.1.0",
+  "title": "Factorio Training Lab",
+  "author": "Factorio_Cursor_RL_Agent",
+  "factorio_version": "2.0",
+  "dependencies": [
+    "base >= 2.0",
+    "factorio_cursor_rl_agent >= 0.2.0"
+  ],
+  "description": "Isolated training-surface lifecycle and instrumentation for approved deterministic plans."
+}

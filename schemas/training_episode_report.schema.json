@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "training_episode_report.schema.json",
+  "title": "TrainingEpisodeReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "request_id", "episode_id", "tick", "ok", "status"],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "kind": {"enum": ["provision", "observation", "recycle"]},
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "episode_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "tick": {"type": "integer", "minimum": 0},
+    "ok": {"type": "boolean"},
+    "status": {
+      "enum": [
+        "ready", "running", "completed", "failed", "timed_out",
+        "recycling", "pending_force_merge"
+      ]
+    },
+    "scenario_id": {"type": "string", "minLength": 1},
+    "scenario_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "surface": {"type": "string", "pattern": "^training/[a-z0-9][a-z0-9-]*$"},
+    "force": {"type": "string", "pattern": "^training-[a-z0-9][a-z0-9-]*$"},
+    "started_tick": {"type": "integer", "minimum": 0},
+    "elapsed_ticks": {"type": "integer", "minimum": 0},
+    "unchanged": {"type": "boolean"},
+    "created": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "force", "resource_tiles", "fixtures"],
+      "properties": {
+        "surface": {"type": "boolean"},
+        "force": {"type": "boolean"},
+        "resource_tiles": {"type": "integer", "minimum": 0},
+        "fixtures": {"type": "integer", "minimum": 0}
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item", "target_rate_per_tick", "sustain_ticks"],
+      "properties": {
+        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
+        "sustain_ticks": {"type": "integer", "minimum": 60}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delivered_items", "sample_ticks", "sample_items", "rate_per_tick",
+        "sustained_ticks", "resource_remaining", "built_entities",
+        "forbidden_entities", "out_of_bounds_entities", "budget_overruns",
+        "fixtures_valid"
+      ],
+      "properties": {
+        "delivered_items": {"type": "integer", "minimum": 0},
+        "sample_ticks": {"type": "integer", "minimum": 0},
+        "sample_items": {"type": "integer", "minimum": 0},
+        "rate_per_tick": {"type": "number", "minimum": 0},
+        "sustained_ticks": {"type": "integer", "minimum": 0},
+        "resource_remaining": {"type": "number", "minimum": 0},
+        "built_entities": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "forbidden_entities": {"type": "integer", "minimum": 0},
+        "out_of_bounds_entities": {"type": "integer", "minimum": 0},
+        "budget_overruns": {"type": "integer", "minimum": 0},
+        "fixtures_valid": {"type": "boolean"}
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason"],
+      "properties": {
+        "kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "timeout"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "error": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"ok": {"const": false}}},
+      "then": {"required": ["error"]}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "observation"}, "ok": {"const": true}}},
+      "then": {"required": ["scenario_id", "surface", "force", "started_tick", "elapsed_ticks", "objective", "metrics", "failure"]}
+    }
+  ]
+}
