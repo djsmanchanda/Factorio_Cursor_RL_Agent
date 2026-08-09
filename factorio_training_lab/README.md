@@ -21,6 +21,10 @@ the Python side has validated the BuildPlan and issued its authorization. The
 lab accepts only physical `place_entity` actions within the episode's scenario
 budget and force/surface identity. It never changes the deterministic executor
 or the Nauvis runtime.
+Each disposable training force completes every finite primary technology before
+its episode begins. Repeatable/infinite technologies remain unresearched. This
+keeps layout exercises focused on construction behavior; later research-focused
+scenario families can declare their own narrower technology baselines.
 
 Reports are written beneath
 `script-output/factorio_training_lab/reports/`. Recycling completes

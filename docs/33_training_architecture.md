@@ -66,6 +66,10 @@ boundaries, so run local-LLM research between Factorio collection/evaluation
 batches, not concurrently. A future unattended supervisor must own a
 cross-process phase lease before it may overlap or alternate these commands
 without operator scheduling.
+The mining-layout curriculum completes finite primary technologies on its
+disposable episode force before placement. It deliberately leaves repeatable
+technologies unresearched. This baseline is training-only; future research
+curricula will declare their own force technology state.
 
 An explicit worker file has this shape (repeat the object with unique ports and
 directories for 10-20 workers):

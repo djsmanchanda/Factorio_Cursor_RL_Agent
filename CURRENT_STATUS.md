@@ -2196,3 +2196,18 @@ that consumed it was not.
 - What: Accepted Factorio's `{}` serialization for an empty Lua `placement_failures` table.
 - Why: Physical executions succeeded but the Python schema rejected the empty success detail as an object instead of an array.
 - Next: Restart only the Python benchmark; no Lua deployment is required.
+## [2026-08-10] Training primary-research baseline
+- Files: `factorio_training_lab/episode_world.lua`, training docs and Lua regressions.
+- What: Completed finite primary technologies for each disposable training force while excluding repeatable research.
+- Why: Layout exercises need their construction technologies unlocked without changing real-base research or polluting research-focused curricula.
+- Next: Deploy only the training lab, restart worker 01, then restart the training batch.
+## [2026-08-10] Runtime-safe training primary research completion
+- Files: `factorio_training_lab/episode_world.lua`, training-lab regression tests.
+- What: Completed each finite technology through its numeric maximum level and excluded Factorio's numeric infinite-level sentinel.
+- Why: The runtime API represents infinite levels as `4294967295`, not the data-stage string form.
+- Next: Deploy only the training lab, restart worker 01, then restart the training batch.
+## [2026-08-10] Training research final-level completion guard
+- Files: `factorio_training_lab/episode_world.lua`, Lua regression tests.
+- What: Included unresearched technologies already at their maximum numeric level.
+- Why: Factorio represents a pending single-level technology as `level == max_level` until its researched flag is set.
+- Next: Deploy only the training lab, restart worker 01, then restart the training batch.

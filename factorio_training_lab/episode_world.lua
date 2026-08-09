@@ -39,11 +39,28 @@ local function create_surface(scenario)
   return surface
 end
 
+local INFINITE_TECH_LEVEL = 4294967295
+
+local function complete_primary_research(force)
+  local completed = 0
+  for _, technology in pairs(force.technologies) do
+    local max_level = technology.prototype.max_level
+    if technology.enabled and max_level ~= INFINITE_TECH_LEVEL
+        and (not technology.researched or technology.level < max_level) then
+      technology.level = max_level
+      technology.researched = true
+      completed = completed + 1
+    end
+  end
+  force.research_queue = {}
+  force.reset_technology_effects()
+  return completed
+end
+
 local function create_force(scenario)
   local force = game.create_force(scenario.environment.force_name)
   force.reset()
-  local bootstrap = force.technologies["automation-science-pack"]
-  if bootstrap then bootstrap.researched = true end
+  complete_primary_research(force)
   return force
 end
 
@@ -242,6 +259,7 @@ local function register_commands()
 end
 
 return {
+  complete_primary_research = complete_primary_research,
   complete_force_merge = complete_force_merge,
   register_commands = register_commands
 }

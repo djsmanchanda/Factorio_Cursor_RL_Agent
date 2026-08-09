@@ -201,3 +201,30 @@ def test_training_footprints_cannot_cross_the_build_boundary(lua) -> None:
     assert geometry.fits(lua.globals().bounds, "electric-mining-drill", lua.globals().drill_outside) is False
     assert geometry.fits(lua.globals().bounds, "splitter", lua.globals().splitter_inside) is True
     assert geometry.fits(lua.globals().bounds, "splitter", lua.globals().splitter_outside) is False
+
+def test_primary_research_completes_finite_technologies_only(lua) -> None:
+    lua.execute("""
+        research_force = {
+          research_queue={'stale'},
+          technologies={
+            finite={enabled=true, researched=false, level=1, prototype={max_level=1}},
+            final_level={enabled=true, researched=false, level=3, prototype={max_level=3}},
+            finished={enabled=true, researched=true, level=3, prototype={max_level=3}},
+            infinite={enabled=true, researched=false, level=4, prototype={max_level=4294967295}},
+            disabled={enabled=false, researched=false, level=1, prototype={max_level=2}}
+          },
+          reset_technology_effects=function() research_force.effects_reset=true end
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    assert world.complete_primary_research(lua.globals().research_force) == 2
+    assert lua.globals().research_force.technologies.finite.researched is True
+    assert lua.globals().research_force.technologies.finite.level == 1
+    assert lua.globals().research_force.technologies.final_level.researched is True
+    assert lua.globals().research_force.technologies.final_level.level == 3
+    assert lua.globals().research_force.technologies.finished.researched is True
+    assert lua.globals().research_force.technologies.infinite.researched is False
+    assert lua.globals().research_force.technologies.infinite.level == 4
+    assert lua.globals().research_force.technologies.disabled.researched is False
+    assert lua.globals().research_force.effects_reset is True

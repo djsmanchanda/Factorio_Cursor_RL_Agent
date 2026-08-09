@@ -139,3 +139,10 @@ def test_execution_report_accepts_factorio_empty_table_for_no_failures() -> None
     }
 
     assert list(_validator().iter_errors(report)) == []
+
+def test_training_force_completes_only_finite_primary_research() -> None:
+    world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
+
+    assert "INFINITE_TECH_LEVEL = 4294967295" in world
+    assert "technology.level = max_level" in world
+    assert "force.reset_technology_effects()" in world
