@@ -2211,3 +2211,8 @@ that consumed it was not.
 - What: Included unresearched technologies already at their maximum numeric level.
 - Why: Factorio represents a pending single-level technology as `level == max_level` until its researched flag is set.
 - Next: Deploy only the training lab, restart worker 01, then restart the training batch.
+## [2026-08-10] Scoped training-worker launcher
+- Files: `scripts/launch_training_worker.ps1`.
+- What: Added a fixed-profile launcher for the isolated training worker on ports 35001/28001.
+- Why: Training-server lifecycle can be authorized narrowly without broad PowerShell launch permission.
+- Next: Deploy the committed training lab and restart worker 01 with this launcher.
