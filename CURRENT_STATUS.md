@@ -2242,3 +2242,15 @@ that consumed it was not.
 - What: Bound the isolated WSL game UDP socket to its private virtual interface while retaining loopback-only RCON.
 - Why: A Windows Factorio GUI cannot reach a WSL NAT game server bound only to WSL loopback.
 - Next: Restart the WSL training worker and join through its current WSL IP on port 35001.
+
+## [2026-08-10] Training-lab visual observer surfaces
+- Files: `factorio_training_lab/episode_world.lua`, `factorio_training_lab/episode_measurement.lua`, training-lab tests and docs.
+- What: Replaced black lab tiles with deterministic grass floors and added a client-only observer view that is excluded from audits and evacuated before recycling.
+- Why: GUI viewers could only see black surfaces and their player character could otherwise contaminate or pin a disposable episode.
+- Next: Deploy the separate training mod, restart only the WSL training server, and reset/recreate training episodes to use visible tiles.
+
+## [2026-08-10] Training observer safety correction
+- Files: `factorio_training_lab/episode_world.lua`, `factorio_training_lab/episode_measurement.lua`, training-lab tests and docs.
+- What: Changed live viewing to Factorio's no-character spectator controller and reserved an observatory surface outside the episode namespace.
+- Why: A normal player character could alter an episode or collide with placement, and the original observatory name could collide with a valid scenario.
+- Next: Deploy the separate training mod, restart only the WSL training server, and reset/recreate training episodes to use visible tiles.

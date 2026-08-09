@@ -35,6 +35,7 @@ def test_control_registers_only_training_namespaced_commands() -> None:
     assert 'commands.add_command("training_recycle"' in source
     assert 'commands.add_command("training_upload"' in source
     assert 'commands.add_command("training_execute"' in source
+    assert 'commands.add_command("training_view"' in source
     assert "training commands are RCON-only" in source
     assert 'game.surfaces["nauvis"]' not in source
     assert 'game.forces["player"]' not in source
@@ -100,6 +101,18 @@ def test_audit_scans_the_entire_training_surface() -> None:
     assert "surface.find_entities()" in source
     assert "entity.force ~= force" in source
     assert "neutral_resource" in source
+
+
+def test_training_surfaces_use_visible_tiles_and_evict_observers_before_recycling() -> None:
+    world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
+
+    assert 'surface.generate_with_lab_tiles = false' in world
+    assert 'local FLOOR_TILE = "grass-1"' in world
+    assert "fill_visible_floor(surface, environment.bounds)" in world
+    assert "evacuate_players(surface)" in world
+    assert 'local OBSERVATORY_SURFACE = "training-observatory"' in world
+    assert "player.set_controller({ type = defines.controllers.spectator })" in world
+
 
 def test_fixture_audit_uses_surface_identity_not_global_unit_lookup() -> None:
     source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")

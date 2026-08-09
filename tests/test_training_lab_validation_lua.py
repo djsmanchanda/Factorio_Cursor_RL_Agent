@@ -228,3 +228,46 @@ def test_primary_research_completes_finite_technologies_only(lua) -> None:
     assert lua.globals().research_force.technologies.infinite.level == 4
     assert lua.globals().research_force.technologies.disabled.researched is False
     assert lua.globals().research_force.effects_reset is True
+
+def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
+    lua.execute("""
+        painted = {}
+        floor_surface = {set_tiles=function(tiles)
+          for _, tile in pairs(tiles) do table.insert(painted, tile) end
+        end}
+        floor_bounds = {x_min=-2,y_min=-1,x_max_exclusive=2,y_max_exclusive=2}
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.fill_visible_floor(lua.globals().floor_surface, lua.globals().floor_bounds)
+
+    assert len(lua.globals().painted) == 12
+    assert all(tile["name"] == "grass-1" for tile in lua.globals().painted.values())
+
+
+def test_view_command_switches_to_spectator_before_teleport(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+          active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
+        }}}}
+        defines = {controllers={spectator=7}}
+        player = {
+          force={chart=function(surface, area) player.charted_surface=surface; player.charted_area=area end},
+          set_controller=function(controller) player.controller=controller end,
+          teleport=function(position, surface) player.teleported_position=position; player.teleported_surface=surface; return true end,
+          print=function(message) player.message=message end
+        }
+        game = {
+          get_player=function(_) return player end,
+          surfaces={['training/mining-delivery-00000001']={name='training/mining-delivery-00000001'}}
+        }
+        view_command = {player_index=1, parameter='training/mining-delivery-00000001'}
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.view_episode(lua.globals().view_command)
+
+    assert lua.globals().player.controller["type"] == 7
+    assert lua.globals().player.teleported_surface["name"] == "training/mining-delivery-00000001"
+    assert lua.globals().player.teleported_position["x"] == -62
+    assert "spectator" in lua.globals().player.message
