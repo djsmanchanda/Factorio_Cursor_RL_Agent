@@ -95,6 +95,16 @@ def test_force_recycling_waits_for_the_merge_event() -> None:
     assert "complete_force_merge(event)" in control
 
 
+def test_joined_observers_are_given_training_surface_visibility() -> None:
+    world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
+    control = (LAB / "control.lua").read_text(encoding="utf-8")
+
+    assert "reveal_surface_to_connected_players" in world
+    assert "reveal_active_episodes = reveal_active_episodes" in world
+    assert "defines.events.on_player_joined_game" in control
+    assert "world.reveal_active_episodes(player)" in control
+
+
 def test_audit_scans_the_entire_training_surface() -> None:
     source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")
 
@@ -112,6 +122,7 @@ def test_training_surfaces_use_visible_tiles_and_evict_observers_before_recyclin
     assert "return (x + y) % 2 == 0 and LAB_TILE_A or LAB_TILE_B" in world
     assert "fill_visible_floor(surface, environment.bounds)" in world
     assert "evacuate_players(surface)" in world
+    assert "reveal_surface_to_connected_players(" in world
     assert 'local OBSERVATORY_SURFACE = "training-observatory"' in world
     assert "player.set_controller({ type = defines.controllers.spectator })" in world
 

@@ -25,3 +25,8 @@ end)
 script.on_event(defines.events.on_forces_merged, function(event)
   world.complete_force_merge(event)
 end)
+
+script.on_event(defines.events.on_player_joined_game, function(event)
+  local player = game.get_player(event.player_index)
+  if player then world.reveal_active_episodes(player) end
+end)

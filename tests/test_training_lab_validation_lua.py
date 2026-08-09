@@ -275,3 +275,23 @@ def test_view_command_switches_to_spectator_before_teleport(lua) -> None:
     assert lua.globals().player.teleported_surface["name"] == "training/mining-delivery-00000001"
     assert lua.globals().player.teleported_position["x"] == -62
     assert "spectator" in lua.globals().player.message
+
+def test_joined_observer_charts_every_active_training_episode(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+          active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
+        }}}}
+        observer = {
+          force={chart=function(surface, area) observer.charted_surface=surface; observer.charted_area=area end}
+        }
+        game = {
+          surfaces={['training/mining-delivery-00000001']={name='training/mining-delivery-00000001'}}
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.reveal_active_episodes(lua.globals().observer)
+
+    assert lua.globals().observer.charted_surface["name"] == "training/mining-delivery-00000001"
+    assert lua.globals().observer.charted_area[1][1] == -64
+    assert lua.globals().observer.charted_area[2][2] == 64

@@ -2278,3 +2278,9 @@ that consumed it was not.
 - What: Redeployed and hash-synchronized the lab revision, then verified a live episode alternates `lab-dark-1` and `lab-dark-2` tiles.
 - Why: The expected laboratory floor is a two-tile chequerboard, not a single generated lab tile or grass workaround.
 - Next: Restart only the Factorio GUI client, join the active WSL episode, and use `/training_view training/mining-delivery-00000000`.
+
+## [2026-08-10] Automatic training observer visibility
+- Files: `factorio_training_lab/control.lua`, `factorio_training_lab/episode_world.lua`, training-lab regression tests, `CURRENT_STATUS.md`.
+- What: Charted every active training surface for connected players at provision time and when a GUI client joins.
+- Why: Factorio Remote view rendered an existing checkerboard lab black when the observer force had not charted it.
+- Next: The isolated WSL visual smoke episode is active; continue diagnosing its zero-delivery policy result separately.

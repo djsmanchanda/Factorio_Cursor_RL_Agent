@@ -52,6 +52,27 @@ local function fill_visible_floor(surface, bounds)
   if #tiles > 0 then surface.set_tiles(tiles) end
 end
 
+local function chart_episode(player, surface, bounds)
+  player.force.chart(surface, {
+    { bounds.x_min, bounds.y_min }, { bounds.x_max_exclusive, bounds.y_max_exclusive }
+  })
+end
+
+local function reveal_surface_to_connected_players(surface, bounds)
+  for _, player in pairs(game.connected_players) do
+    chart_episode(player, surface, bounds)
+  end
+end
+
+local function reveal_active_episodes(player)
+  for _, episode in pairs(shared.ensure_storage().episodes) do
+    local surface = game.surfaces[episode.surface_name]
+    if surface then
+      chart_episode(player, surface, episode.scenario.environment.bounds)
+    end
+  end
+end
+
 local function create_surface(scenario)
   local environment = scenario.environment
   local surface = game.create_surface(
@@ -220,6 +241,9 @@ local function provision(payload)
     failure_kind = "none", failure_reason = ""
   }
   shared.ensure_storage().episodes[payload.episode_id] = episode
+  reveal_surface_to_connected_players(
+    game.surfaces[episode.surface_name], scenario.environment.bounds
+  )
   return {
     request_id = payload.request_id, episode_id = payload.episode_id,
     ok = true, status = "ready", scenario_id = scenario.scenario_id,
@@ -283,9 +307,7 @@ local function view_episode(command)
   local surface = game.surfaces[episode.surface_name]
   local bounds = episode.scenario.environment.bounds
   player.set_controller({ type = defines.controllers.spectator })
-  player.force.chart(surface, {
-    { bounds.x_min, bounds.y_min }, { bounds.x_max_exclusive, bounds.y_max_exclusive }
-  })
+  chart_episode(player, surface, bounds)
   if not player.teleport({ x = bounds.x_min + 2, y = bounds.y_min + 2 }, surface) then
     player.print("Unable to enter observer view for " .. episode.surface_name)
     return
@@ -334,6 +356,7 @@ return {
   complete_primary_research = complete_primary_research,
   complete_force_merge = complete_force_merge,
   fill_visible_floor = fill_visible_floor,
+  reveal_active_episodes = reveal_active_episodes,
   register_commands = register_commands,
   view_episode = view_episode
 }
