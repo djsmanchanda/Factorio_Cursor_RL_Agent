@@ -2272,3 +2272,9 @@ that consumed it was not.
 - What: Replaced the grass workaround with Factorio's alternating `lab-dark-1`/`lab-dark-2` chequerboard floor.
 - Why: `generate_with_lab_tiles` alone emits a single dark tile, not the normal visible laboratory template.
 - Next: Deploy the separate training mod, restart only the WSL training server, sync the GUI training mod, and reprovision a visual smoke episode.
+
+## [2026-08-10] Training-lab chequerboard live validation
+- Files: deployed WSL and GUI training-lab copies; `CURRENT_STATUS.md`.
+- What: Redeployed and hash-synchronized the lab revision, then verified a live episode alternates `lab-dark-1` and `lab-dark-2` tiles.
+- Why: The expected laboratory floor is a two-tile chequerboard, not a single generated lab tile or grass workaround.
+- Next: Restart only the Factorio GUI client, join the active WSL episode, and use `/training_view training/mining-delivery-00000000`.
