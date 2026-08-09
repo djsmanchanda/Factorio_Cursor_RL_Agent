@@ -2124,3 +2124,9 @@ that consumed it was not.
 - What: Electric furnaces are demand-driven, early iron/copper/stone/steel furnace caps are 12/6/6/6, and new fast-belt production waits for a working electric-furnace producer.
 - Why: The former electric-furnace reserve created premature steel, stone-brick, plastic, and advanced-circuit demand that starved the initial resource bootstrap.
 - Next: Restart the Python runner; no Lua mod redeploy is required. Plastic blueprint ingestion remains a follow-up.
+
+## [2026-08-09] Establish the mini-environment training contract
+- Files: `training/`, `schemas/training_*.schema.json`, `tools/generate_training_scenarios.py`, `tests/test_training_scenarios.py`, `docs/32_training_curriculum.md`, canonical docs
+- What: Added strict scenario/transition contracts and a deterministic generator for batches of isolated mining-and-delivery curricula.
+- Why: The real-base builder retries hand-authored remedies but cannot persist experience or learn better choices across safe-save resets.
+- Next: Add an explicitly authorized Lua provisioner that creates, seeds, validates, and recycles one isolated training surface per episode.

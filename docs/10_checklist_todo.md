@@ -20,6 +20,11 @@ Reconciled against actual code state on 2026-07-18 (see CURRENT_STATUS.md).
 - [ ] Instruction language (FIL) parsing (`goal.schema.json`)
 - [ ] RL executor (targeted at build efficiency) — legacy advisor quarantined at `experimental/legacy_autonomy/rl_advisor.py`; no learned policy is wired into the active runtime
 - [x] Reward function definition (Invariants-checked) — `rl_feedback_builder.py` (telemetry only, nothing consumes it yet)
+- [x] Versioned mini-environment and transition contracts (`training/`, `schemas/training_*.schema.json`)
+- [x] Deterministic mining-delivery curriculum generator (`tools/generate_training_scenarios.py`)
+- [ ] Isolated training-surface provisioner and episode recycler
+- [ ] Candidate-plan episode runner and durable transition store
+- [ ] Contextual-bandit policy trained against the deterministic baseline
 
 ## Phase 2.5 – Metrics & Policies
 - [x] FactoryGraph-derived metrics (`core/factory_graph.py`, `core/metrics.py`)

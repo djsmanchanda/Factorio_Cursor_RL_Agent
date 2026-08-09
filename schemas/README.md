@@ -25,3 +25,5 @@ Documentation for each schema is maintained in this README.
 - `ghost_plan.schema.json` — Ghost projection → ghost plan contract
 - `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract
 - `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
+- `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract
+- `training_transition.schema.json` - observation, candidate choice, measured outcome, failure class, and decomposed reward contract

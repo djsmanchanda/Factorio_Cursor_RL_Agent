@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "training_transition.schema.json",
+  "title": "TrainingTransition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "episode_id", "scenario_id", "scenario_seed", "policy_id",
+    "started_tick", "ended_tick", "observation", "candidates",
+    "chosen_action_id", "result", "metrics", "reward", "next_observation"
+  ],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "episode_id": {"type": "string", "minLength": 1},
+    "scenario_id": {"type": "string", "minLength": 1},
+    "scenario_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "policy_id": {"type": "string", "minLength": 1},
+    "started_tick": {"type": "integer", "minimum": 0},
+    "ended_tick": {"type": "integer", "minimum": 0},
+    "observation": {"$ref": "#/definitions/observation"},
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action_id", "plan_hash", "features"],
+        "properties": {
+          "action_id": {"type": "string", "minLength": 1},
+          "plan_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "features": {
+            "type": "object", "minProperties": 1,
+            "additionalProperties": {"type": "number"}
+          }
+        }
+      }
+    },
+    "chosen_action_id": {"type": "string", "minLength": 1},
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "failure_kind", "reason"],
+      "properties": {
+        "status": {"enum": ["completed", "failed", "timed_out"]},
+        "failure_kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "timeout"]},
+        "reason": {"type": "string"}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_rate_per_second", "final_rate_per_second", "delivered_items",
+        "material_cost", "placements_succeeded", "placements_failed"
+      ],
+      "properties": {
+        "initial_rate_per_second": {"type": "number", "minimum": 0},
+        "final_rate_per_second": {"type": "number", "minimum": 0},
+        "delivered_items": {"type": "integer", "minimum": 0},
+        "material_cost": {"type": "integer", "minimum": 0},
+        "placements_succeeded": {"type": "integer", "minimum": 0},
+        "placements_failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "reward": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completion", "throughput", "elapsed_ticks", "materials", "infrastructure", "failed_placements", "total"],
+      "properties": {
+        "completion": {"type": "number"},
+        "throughput": {"type": "number"},
+        "elapsed_ticks": {"type": "number"},
+        "materials": {"type": "number"},
+        "infrastructure": {"type": "number"},
+        "failed_placements": {"type": "number"},
+        "total": {"type": "number"}
+      }
+    },
+    "next_observation": {"$ref": "#/definitions/observation"}
+  },
+  "definitions": {
+    "observation": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "number"}
+    }
+  }
+}

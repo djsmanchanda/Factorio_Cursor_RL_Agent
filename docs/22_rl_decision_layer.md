@@ -10,6 +10,12 @@ quarantined under `experimental/legacy_autonomy/`. The active Nauvis builder
 remains deterministic and does not import that package. Revival requires an
 explicit architecture review and must preserve the invariants below.
 
+The second-generation training path now begins under `training/`. Its first
+offline milestone defines strict scenario and transition contracts plus a
+seeded mining-delivery curriculum. It does not yet provision Factorio surfaces,
+execute episodes, persist experience, or update a policy, and it has no
+real-base authority. See `docs/32_training_curriculum.md`.
+
 ## Division of labor (invariant-compatible)
 
 - **Deterministic planners** own all structure: layouts, geometry, ratios,
@@ -94,9 +100,9 @@ beyond them, so the reward is attributable and unbounded.
 
 ## Training mechanics (implementation plan)
 
-1. Log transitions from live cycles: (observation, catalog action, staged
-   reward, next observation) — the daemon already emits observation-shaped
-   status traces; rewards computed from measured rate deltas.
+1. Log transitions from isolated episodes: (observation, candidate catalog,
+   chosen action, staged reward, next observation). The versioned contracts now
+   exist; surface execution and durable transition storage are the next slice.
 2. Start with a deterministic baseline policy (greedy bottleneck-relief) so
    the system works before learning does; RL must beat it to earn trust.
 3. First learned policy: contextual bandit / linear over the observation

@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "training_scenario.schema.json",
+  "title": "TrainingScenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "scenario_id", "family", "seed", "curriculum",
+    "environment", "resource_patch", "fixtures", "construction_budget",
+    "objective", "constraints", "reward_weights"
+  ],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"},
+    "family": {"const": "mining_delivery"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "curriculum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "tags"],
+      "properties": {
+        "level": {"type": "integer", "minimum": 1, "maximum": 10},
+        "tags": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface_name", "force_name", "isolated_force", "autoplace_enabled", "bounds"],
+      "properties": {
+        "surface_name": {"type": "string", "pattern": "^training/[a-z0-9-]+$"},
+        "force_name": {"type": "string", "pattern": "^training-[a-z0-9-]+$"},
+        "isolated_force": {"const": true},
+        "autoplace_enabled": {"const": false},
+        "bounds": {"$ref": "#/definitions/bounds"}
+      }
+    },
+    "resource_patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "bounds", "amount_per_tile"],
+      "properties": {
+        "resource": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "bounds": {"$ref": "#/definitions/tile_bounds"},
+        "amount_per_tile": {"type": "integer", "minimum": 1}
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "entity", "position", "protected"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["power_source", "item_sink"]},
+          "entity": {"type": "string", "minLength": 1},
+          "position": {"$ref": "#/definitions/position"},
+          "protected": {"const": true}
+        }
+      }
+    },
+    "construction_budget": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "electric-mining-drill", "fast-inserter", "medium-electric-pole",
+          "splitter", "transport-belt", "underground-belt"
+        ]
+      },
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "item", "target_rate_per_second", "sustain_ticks", "destination_fixture_id"],
+      "properties": {
+        "kind": {"const": "deliver_item_rate"},
+        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "target_rate_per_second": {"type": "number", "exclusiveMinimum": 0},
+        "sustain_ticks": {"type": "integer", "minimum": 60},
+        "destination_fixture_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_episode_ticks", "allow_fixture_deconstruction", "allowed_build_area", "allowed_entities"],
+      "properties": {
+        "max_episode_ticks": {"type": "integer", "minimum": 60},
+        "allow_fixture_deconstruction": {"const": false},
+        "allowed_build_area": {"$ref": "#/definitions/bounds"},
+        "allowed_entities": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {
+            "enum": [
+              "electric-mining-drill", "fast-inserter", "medium-electric-pole",
+              "splitter", "transport-belt", "underground-belt"
+            ]
+          }
+        }
+      }
+    },
+    "reward_weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completion", "delivered_item", "elapsed_tick", "material_item",
+        "failed_placement", "extra_pole"
+      ],
+      "properties": {
+        "completion": {"type": "number", "exclusiveMinimum": 0},
+        "delivered_item": {"type": "number", "minimum": 0},
+        "elapsed_tick": {"type": "number", "maximum": 0},
+        "material_item": {"type": "number", "maximum": 0},
+        "failed_placement": {"type": "number", "maximum": 0},
+        "extra_pole": {"type": "number", "maximum": 0}
+      }
+    }
+  },
+  "definitions": {
+    "position": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"type": "number", "minimum": -512, "maximum": 512}
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x_min", "y_min", "x_max_exclusive", "y_max_exclusive"],
+      "properties": {
+        "x_min": {"type": "integer", "minimum": -512, "maximum": 511},
+        "y_min": {"type": "integer", "minimum": -512, "maximum": 511},
+        "x_max_exclusive": {"type": "integer", "minimum": -511, "maximum": 512},
+        "y_max_exclusive": {"type": "integer", "minimum": -511, "maximum": 512}
+      }
+    },
+    "tile_bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x1", "y1", "x2", "y2"],
+      "properties": {
+        "x1": {"type": "integer", "minimum": -512, "maximum": 512},
+        "y1": {"type": "integer", "minimum": -512, "maximum": 512},
+        "x2": {"type": "integer", "minimum": -512, "maximum": 512},
+        "y2": {"type": "integer", "minimum": -512, "maximum": 512}
+      }
+    }
+  }
+}

@@ -33,6 +33,13 @@ under [`experimental/legacy_autonomy/`](experimental/legacy_autonomy/README.md).
 They are unsupported, are not invoked by the dashboard or active runner, and
 must be called explicitly with `python -m experimental.legacy_autonomy.<module>`.
 
+## Training Laboratory
+
+The second-generation learning path begins under [training/](training/).
+It currently provides strict scenario/transition contracts and a deterministic
+mining-delivery curriculum; it does not yet provision live surfaces or control
+the Nauvis builder. See [docs/32_training_curriculum.md](docs/32_training_curriculum.md).
+
 Core philosophy:
 > Planning is symbolic. Execution is learned.
 
