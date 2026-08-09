@@ -199,3 +199,25 @@ def test_a_shortage_can_still_raise_a_target_within_a_run() -> None:
         priorities.sync(targets, {}, 20)
 
         assert priorities.items["electric-mining-drill"].target == 14
+
+
+def test_goal_shortage_preempts_background_reserve(monkeypatch) -> None:
+    """Scarce starter inputs must reach the mission before reserve cells."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        builder, "_advance_the_goal",
+        lambda *_args: calls.append("goal") or builder._SHORTAGE,
+    )
+    monkeypatch.setattr(
+        builder, "_serve_background_mall_task",
+        lambda *_args: pytest.fail("background reserve ran before the goal"),
+    )
+
+    result = builder._serve_ready_pass(
+        object(), object(), "nauvis", "player", None, 0, {},
+        {"transport-belt": 200}, object(), (0.0, 0.0),
+        "automation-science-pack", lambda _message: None,
+    )
+
+    assert result is builder._SHORTAGE
+    assert calls == ["goal"]

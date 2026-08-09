@@ -2159,3 +2159,9 @@ that consumed it was not.
 - What: Added live worker/autoresearch telemetry, incremental durable progress, a loopback read-only dashboard, structured bottlenecks, policy/LLM views, and expiring CLI nudges for bounded autoresearch packets.
 - Why: Long 10-20 worker experiments need visible progress and evidence-backed human steering without granting RL or the observer authority over deterministic planners, rewards, safety, deployment, or Nauvis.
 - Next: Restart only the Python training batch/autoresearch processes, run `python tools/training_observer.py serve`, and open `http://127.0.0.1:8765`; no Lua or deterministic-mod redeploy is required.
+
+## [2026-08-09] Prioritize mission inputs over background mall reserves
+- Files: orchestrator/autonomous_builder.py, tests/test_construction_stock.py
+- What: The ready loop now attempts the research goal before starting another background mall producer; a missing prerequisite still queues the normal mall shortage.
+- Why: The 17:53 run had 28 starter iron gears in the provider, but background requesters claimed the scarce stock while the gear cell was supply-starved, leaving the automation-science requester empty and ending the run.
+- Next: Restart the Python runner and rerun from the safe save; no Lua mod redeploy is required. The separate RL training path was not modified.

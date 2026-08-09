@@ -2543,7 +2543,17 @@ def _serve_ready_pass(
     background_targets: dict[str, int], priorities: PriorityList,
     reference_point: Point, goal_item: str, emit: Callable[[str], None],
 ) -> Point | object | None:
-    """Serve blocking work, start one reserve producer, or advance the goal."""
+    """Serve blocking work, advance the goal, then start one reserve producer.
+
+    Background mall requesters are deliberately not allowed to get first claim
+    on scarce intermediate stock. A bootstrap run can have a provider chest
+    with a few starter gears while several reserve cells are simultaneously
+    requesting gears; starting all those cells before the mission makes a
+    science requester wait forever even though the source chest is non-empty.
+    Trying the goal first preserves the mission's critical path. If it needs a
+    construction item, ``_advance_the_goal`` queues the normal mall shortage and
+    the blocking task is served on the next pass.
+    """
     if task is not None:
         _serve_mall_task(
             client, bridge, surface, force, task, tick, mall_targets,
@@ -2558,16 +2568,20 @@ def _serve_ready_pass(
         )
         time.sleep(5)
         return _SHORTAGE
+    emit(f"--- checking {goal_item} before background reserves ---")
+    goal_result = _advance_the_goal(
+        client, bridge, surface, force, goal_item, mall_targets,
+        reference_point, emit,
+    )
+    if goal_result is not None:
+        return goal_result
     if _serve_background_mall_task(
         client, bridge, surface, force, background_targets, mall_targets,
         reference_point, emit,
     ):
         return _SHORTAGE
-    emit(f"--- checking {goal_item} ---")
-    return _advance_the_goal(
-        client, bridge, surface, force, goal_item, mall_targets,
-        reference_point, emit,
-    )
+    return None
+
 
 def run(
     goal_item: str, *, surface: str = "nauvis", force: str = "player",
