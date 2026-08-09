@@ -1,5 +1,5 @@
 # Path: tests/test_wsl_training_worker.py
-# Purpose: Keep the WSL worker contract explicit, loopback-only, and credential non-interactive.
+# Purpose: Keep the WSL worker network and credential contract explicit.
 
 from pathlib import Path
 
@@ -21,10 +21,10 @@ def test_wsl_worker_keeps_runtime_native_and_reports_windows_visible() -> None:
     assert '$repo_root/factorio_mod/control.lua' in source
 
 
-def test_wsl_worker_is_loopback_only_and_uses_automatic_secret() -> None:
+def test_wsl_worker_exposes_only_game_udp_and_keeps_rcon_loopback() -> None:
     source = SHELL.read_text(encoding="utf-8")
 
-    assert '--bind "127.0.0.1:$GAME_PORT"' in source
+    assert '--bind "0.0.0.0:$GAME_PORT"' in source
     assert '--rcon-bind "127.0.0.1:$RCON_PORT"' in source
     assert '--rcon-port' not in source
     assert '--rcon-password "$(cat "$SECRET_PATH")"' in source

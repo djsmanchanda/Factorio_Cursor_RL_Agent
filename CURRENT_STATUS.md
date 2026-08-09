@@ -2236,3 +2236,9 @@ that consumed it was not.
 - What: Replaced the Windows training worker with a loopback-only Factorio 2.0.77 WSL headless worker and started a bridge-compatible smoke episode.
 - Why: Training now launches without Windows UAC or manual RCON password entry while keeping deterministic Nauvis isolated.
 - Next: Join `127.0.0.1:35001` from the GUI for the visual smoke check; diagnose the independent zero-delivery policy outcome after the episode ends.
+
+## [2026-08-10] WSL GUI UDP binding
+- Files: `scripts/wsl/training_worker.sh`, `tests/test_wsl_training_worker.py`, `docs/33_training_architecture.md`
+- What: Bound the isolated WSL game UDP socket to its private virtual interface while retaining loopback-only RCON.
+- Why: A Windows Factorio GUI cannot reach a WSL NAT game server bound only to WSL loopback.
+- Next: Restart the WSL training worker and join through its current WSL IP on port 35001.

@@ -129,7 +129,7 @@ start_worker() {
     --mod-directory "$DATA_ROOT/mods" \
     --start-server "$DATA_ROOT/saves/training-01.zip" \
     --server-settings "$DATA_ROOT/server-settings.json" \
-    --bind "127.0.0.1:$GAME_PORT" \
+    --bind "0.0.0.0:$GAME_PORT" \
     --rcon-bind "127.0.0.1:$RCON_PORT" \
     --rcon-password "$(cat "$SECRET_PATH")" \
     --console-log "$DATA_ROOT/logs/factorio-console.log" \
@@ -142,7 +142,7 @@ start_worker() {
   done
   grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log" \
     || die "worker did not open RCON within 20 seconds"
-  echo "started WSL training worker PID $(cat "$PID_PATH")"
+  echo "started WSL training worker PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
 }
 
 stop_worker() {
@@ -163,7 +163,7 @@ stop_worker() {
 
 status_worker() {
   if worker_running; then
-    echo "running PID $(cat "$PID_PATH") game=$GAME_PORT rcon=$RCON_PORT"
+    echo "running PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
   else
     echo "stopped"
   fi

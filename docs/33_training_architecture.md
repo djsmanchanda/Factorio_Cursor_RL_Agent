@@ -103,10 +103,11 @@ Ubuntu WSL2 distribution. Its Factorio runtime, save, mods, and logs live under
 symlink to `%LOCALAPPDATA%\Factorio-training-wsl-01\script-output`, preserving
 the Windows bridge and observatory without putting simulation data on DrvFS.
 
-The worker binds game and RCON only to `127.0.0.1` on the existing ports
-`35001` and `28001`. Bootstrap generates a local RCON secret outside Git; the
-batch helper passes its path to the runner, so no operator password entry is
-needed. RCON authentication remains enabled.
+The worker binds RCON only to `127.0.0.1:28001`. Its game UDP socket binds to
+the private WSL virtual network on port `35001`, so the Windows Factorio GUI
+can join through the current WSL IP. Bootstrap generates a local RCON secret
+outside Git; the batch helper passes its path to the runner, so no operator
+password entry is needed. RCON authentication remains enabled.
 
 ```powershell
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap
