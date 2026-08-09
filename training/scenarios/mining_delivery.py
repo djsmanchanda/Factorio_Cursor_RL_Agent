@@ -6,17 +6,18 @@ from __future__ import annotations
 import math
 import random
 
+from training.canonical import scenario_hash
 from training.contracts import validate_scenario
 
-_VERSION = "1.0.0"
+_VERSION = "1.1.0"
 _WORLD_BOUNDS = {
     "x_min": -64, "y_min": -64,
     "x_max_exclusive": 64, "y_max_exclusive": 64,
 }
 _RESOURCES = ("iron-ore", "copper-ore", "coal", "stone")
-_TARGET_RATES = (0.5, 1.0, 2.0, 3.0)
+_TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in (0.5, 1.0, 2.0, 3.0))
 _PATCH_SIZES = (12, 15, 18)
-_DRILL_RATE_PER_SECOND = 0.5
+_DRILL_RATE_PER_TICK = 0.5 / 60.0
 _POLE_WIRE_STEP = 8.0
 
 
@@ -51,8 +52,8 @@ def _route_span(patch: dict[str, int], destination: tuple[float, float]) -> int:
     )
 
 
-def _construction_budget(target_rate: float, route_span: int) -> dict[str, int]:
-    drills = math.ceil(target_rate / _DRILL_RATE_PER_SECOND) + 1
+def _construction_budget(target_rate_per_tick: float, route_span: int) -> dict[str, int]:
+    drills = math.ceil(target_rate_per_tick / _DRILL_RATE_PER_TICK) + 1
     poles = math.ceil(route_span / _POLE_WIRE_STEP) + 4
     return {
         "electric-mining-drill": drills,
@@ -71,18 +72,18 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
     rng = random.Random(seed)
     identifier = _scenario_id(seed)
     resource = rng.choice(_RESOURCES)
-    target_rate = rng.choice(_TARGET_RATES)
+    target_rate_per_tick = rng.choice(_TARGET_RATES_PER_TICK)
     patch_center, destination = _opposed_sites(rng)
     patch = _patch_bounds(patch_center, rng)
     route_span = _route_span(patch, destination)
-    budget = _construction_budget(target_rate, route_span)
+    budget = _construction_budget(target_rate_per_tick, route_span)
     scenario = {
         "version": _VERSION,
         "scenario_id": identifier,
         "family": "mining_delivery",
         "seed": seed,
         "curriculum": {
-            "level": _TARGET_RATES.index(target_rate) + 1,
+            "level": _TARGET_RATES_PER_TICK.index(target_rate_per_tick) + 1,
             "tags": ["direct-delivery", "electric-only", "mining", resource],
         },
         "environment": {
@@ -100,7 +101,7 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
         "fixtures": [
             {
                 "id": "power-source", "kind": "power_source",
-                "entity": "electric-energy-interface", "position": [0.5, 0.5],
+                "entity": "electric-energy-interface", "position": [0, 0],
                 "protected": True,
             },
             {
@@ -113,7 +114,7 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
         "objective": {
             "kind": "deliver_item_rate",
             "item": resource,
-            "target_rate_per_second": target_rate,
+            "target_rate_per_tick": target_rate_per_tick,
             "sustain_ticks": 1_800,
             "destination_fixture_id": "delivery-sink",
         },
@@ -132,6 +133,7 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
             "extra_pole": -0.1,
         },
     }
+    scenario["scenario_hash"] = scenario_hash(scenario)
     validate_scenario(scenario)
     return scenario
 

@@ -5,16 +5,18 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version", "episode_id", "scenario_id", "scenario_seed", "policy_id",
-    "started_tick", "ended_tick", "observation", "candidates",
-    "chosen_action_id", "result", "metrics", "reward", "next_observation"
+    "version", "episode_id", "scenario_id", "scenario_seed", "scenario_hash",
+    "policy_id", "policy_hash", "started_tick", "ended_tick", "observation",
+    "candidates", "chosen_action_id", "result", "metrics", "reward", "next_observation"
   ],
   "properties": {
-    "version": {"const": "1.0.0"},
+    "version": {"const": "1.1.0"},
     "episode_id": {"type": "string", "minLength": 1},
     "scenario_id": {"type": "string", "minLength": 1},
     "scenario_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "scenario_hash": {"$ref": "#/definitions/hash"},
     "policy_id": {"type": "string", "minLength": 1},
+    "policy_hash": {"$ref": "#/definitions/hash"},
     "started_tick": {"type": "integer", "minimum": 0},
     "ended_tick": {"type": "integer", "minimum": 0},
     "observation": {"$ref": "#/definitions/observation"},
@@ -27,7 +29,7 @@
         "required": ["action_id", "plan_hash", "features"],
         "properties": {
           "action_id": {"type": "string", "minLength": 1},
-          "plan_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "plan_hash": {"$ref": "#/definitions/hash"},
           "features": {
             "type": "object", "minProperties": 1,
             "additionalProperties": {"type": "number"}
@@ -50,12 +52,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "initial_rate_per_second", "final_rate_per_second", "delivered_items",
+        "initial_rate_per_tick", "final_rate_per_tick", "delivered_items",
         "material_cost", "placements_succeeded", "placements_failed"
       ],
       "properties": {
-        "initial_rate_per_second": {"type": "number", "minimum": 0},
-        "final_rate_per_second": {"type": "number", "minimum": 0},
+        "initial_rate_per_tick": {"type": "number", "minimum": 0},
+        "final_rate_per_tick": {"type": "number", "minimum": 0},
         "delivered_items": {"type": "integer", "minimum": 0},
         "material_cost": {"type": "integer", "minimum": 0},
         "placements_succeeded": {"type": "integer", "minimum": 0},
@@ -79,6 +81,7 @@
     "next_observation": {"$ref": "#/definitions/observation"}
   },
   "definitions": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "observation": {
       "type": "object",
       "minProperties": 1,
