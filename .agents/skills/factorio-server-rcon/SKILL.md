@@ -28,7 +28,7 @@ Use the narrowest interface and prove server/output identity before acting.
 | Real-base item/research goal | `tools/autonomous_run.py` | Explicit mutation authorization |
 | Existing JSON inspection | Offline tool | No live connection |
 
-Read [the authoritative runbook](../../../docs/31_factorio_mod_interaction_and_troubleshooting.md)
+Read [the authoritative runbook](../../../docs/factorio_operations.md)
 before constructing commands.
 
 ## Safe Pattern

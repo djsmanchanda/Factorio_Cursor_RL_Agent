@@ -1,6 +1,6 @@
 # Path: core/bottleneck_diagnosis.py
 # Purpose: Deterministic per-line bottleneck verdict from live measurements — the
-#   core observation feeding the future RL decision layer (see docs/22_rl_decision_layer.md).
+#   core observation feeding the future RL decision layer (see docs/rl/README.md).
 #   This module is pure diagnosis: it does not plan, build, or decide WHEN to act.
 
 from __future__ import annotations

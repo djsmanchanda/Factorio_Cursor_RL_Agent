@@ -5,7 +5,7 @@
 
 ## Live Factorio Interaction
 
-Use the [authoritative interaction runbook](../docs/31_factorio_mod_interaction_and_troubleshooting.md) for RCON preflight, shell recipes, `GameBridge`, `script-output`, registered commands, and failure diagnosis.
+Use the [authoritative interaction runbook](../docs/factorio_operations.md) for RCON preflight, shell recipes, `GameBridge`, `script-output`, registered commands, and failure diagnosis.
 
 ```powershell
 python tools\rcon_client.py --host 127.0.0.1 --port 27017 --password planner_test "/sc rcon.print(game.tick)"

@@ -9,7 +9,7 @@ from planners.fluid_routing import generate_shortest_fluid_chain_link
 
 PipeTile = tuple[int, int]
 
-# docs/23_fluid_systems.md: a continuous pipeline beyond 320x320 tiles can
+# docs/reference/factorio_mechanics.md: a continuous pipeline beyond 320x320 tiles can
 # stop flowing. This bridge has one source and one destination, so its path
 # length is bounded directly instead of inserting unplanned pumps.
 MAX_PIPE_ROUTE_LENGTH = 320

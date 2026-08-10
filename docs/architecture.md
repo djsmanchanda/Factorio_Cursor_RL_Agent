@@ -1,77 +1,50 @@
-# Path: docs/architecture.md
-# Purpose: Compact durable description of the system layers, responsibilities, and runtime flow.
+<!-- Path: docs/architecture.md | Purpose: Define the RL-first architecture and the deterministic runtime boundary. -->
 
 # Architecture
 
-The system turns high-level production or research goals into deterministic,
-authorization-gated Factorio build plans and then executes them against a
-selected surface and force.
+## Two cooperating systems
 
-## Runtime flow
+The repository deliberately keeps two runtimes:
+
+1. **RL training system — primary focus.** It observes a disposable Factorio task, proposes structural and operational actions, receives measured outcomes, and improves policies across many attempts.
+2. **Deterministic production runtime — reference and fallback.** It runs the current Nauvis factory using hand-written planners. Its mechanics are useful but incomplete; known problems in layout, transport, recovery, and scaling still require work.
+
+The RL system may reuse stable mechanics such as schemas, recipe and prototype exports, legality checks, collision surveys, build-plan execution, and measurements. Reuse must sit behind explicit interfaces; the training runtime must not call the real-base orchestrator as a hidden policy.
+
+## Shared boundary
 
 ```text
-goal -> instruction/goal schema -> observer -> metrics -> supervisor
-     -> named planner -> validated BuildPlan -> authorization -> Lua/GameBridge
-     -> snapshot/report -> next cycle
+Factorio snapshot
+      |
+      v
+normalized observation + live prototype facts
+      |
+      +----------------------+----------------------+
+      |                                             |
+      v                                             v
+learned policy                             deterministic baseline
+      |                                             |
+      +---------------- candidate plan/action ------+
+                            |
+                            v
+                 shared legality/safety validators
+                            |
+                            v
+                  isolated execution + measurement
 ```
 
-The observer and metrics layers are read-only. The supervisor generates intents
-and chooses among planner-produced actions. Planners decide structure.
-Executors perform approved actions and may optimize timing only.
-The active Nauvis implementation enters through `tools/autonomous_run.py` and
-`orchestrator/autonomous_builder.py`. The older sandbox daemons and advisory RL
-prototype are quarantined under `experimental/legacy_autonomy/`; active runtime
-modules must not import that package.
+Shared contracts describe facts and actions. They must not force the learned policy to reproduce a deterministic layout recipe.
 
-## Layers
+## Authority by artifact
 
-### Lua control layer
+- `AGENTS.md`: agent behavior and workflow.
+- `docs/system_invariants.md`: isolation, safety, and evidence boundaries.
+- `schemas/`: serialized contract shape and version.
+- `docs/rl/` and `docs/deterministic/`: design intent for each system.
+- Code and live evidence: what currently happens.
 
-The Factorio mod owns snapshots, command registration, entity/ghost placement,
-construction reports, and persistent state in `storage`. Lua does not optimize,
-compute production ratios, or make long-horizon decisions.
+The latest explicit user direction controls product intent. When it changes an older design, update the relevant documentation, schema, test, and implementation together instead of treating stale prose as immutable.
 
-### Python planning layer
+## Promotion path
 
-Python validates inputs, computes requirements and derived metrics, selects
-deterministic layout primitives, composes build plans, and enforces readiness
-and authorization gates.
-
-### Execution layer
-
-`GameBridge` transports authorized commands to the mod. The execution agent,
-heuristic, or future RL policy may move, craft, place approved entities, request
-items, and schedule work. It may not change a plan, layout, rail standard, or
-build phase.
-
-### Scale hierarchy
-
-- `LocalLayoutPlanner`: entity-level layouts inside a local block.
-- `CityPlanner`: blocks, zoning, stations, and rail corridors.
-- `PlanetPlanner`: planetary roles, imports, and exports.
-- `InterplanetarySupervisor`: global flows, latency, risk, and recovery.
-
-Constraints flow downward; observations and abstract metrics flow upward. A
-lower layer cannot override a higher-layer constraint, and a higher layer does
-not reach into entity-level details.
-
-## Real-base and sandbox surfaces
-
-The synthetic `planner-sandbox`/`planner` path is a deterministic proving
-ground. The real-base path must explicitly use the intended surface and force,
-normally `nauvis`/`player`, and must route around existing infrastructure.
-Neither path may silently be substituted for the other.
-
-## Scale transition
-
-Local layouts use grids and lines. At city scale, production becomes immutable
-blocks connected only through approved rail corridors. At planetary and space
-scale, each planet or platform is a planning node and inter-node transport is a
-supervised logistics graph. See the city, rail, block, and space documents for
-those domain contracts.
-
-## Authority
-
-`AGENTS.md` defines how agents work in this repository. `docs/20_system_invariants.md`
-defines non-negotiable behavior. Schemas define inter-layer data truth. This
-document explains structure and intent; it does not override those sources.
+A learned policy progresses through offline validation, disposable live episodes, held-out evaluation, comparison with the deterministic baseline, and an explicitly authorized production trial. Every promoted version keeps its evidence, parent checkpoint, configuration, and rollback target.

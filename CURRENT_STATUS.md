@@ -2290,3 +2290,13 @@ that consumed it was not.
 - What: Added a loopback-only View in Factorio button that moves only the configured connected observer into spectator view of a current owned `training/*` episode.
 - Why: Let human supervision inspect active training attempts without radar placement, episode contamination, or any Nauvis authority.
 - Next: Reconnect the GUI observer, use the active `training-wsl-01` button, and retain the zero-delivery result for separate policy diagnosis.
+
+## [2026-08-11] RL-first operating and documentation model
+- Files: `AGENTS.md`, `README.md`, active `docs/`, archived legacy docs, documentation links, `scripts/combine_docs.py`, `FULL_DOCUMENTATION.md`.
+- What: Replaced deterministic-only guidance with a concise two-runtime charter that allows learned structural planning, routes agents to ten small active docs, and preserves prior designs under `docs/archive/legacy-canonical/`.
+- Why: Repeated project failures were being converted into fixed recipes while runtime drift, incomplete live evidence, and stale deterministic invariants kept overriding the intended learning system.
+- Next: Design the first parameterized structural action and mutation space for mining-delivery training without granting it Nauvis authority.
+## [2026-08-11] AGENTS learning-first refinement
+- Files: `AGENTS.md`, `docs/factorio_operations.md`, `FULL_DOCUMENTATION.md`.
+- What: Elevated learn-don't-accumulate-exceptions, moved learning principles earlier, made doc routing procedural, added an evidence ladder, and moved volatile runtime details to the operations runbook.
+- Why: Keep enduring agent behavior prominent while isolating operational details that will change with the repository.

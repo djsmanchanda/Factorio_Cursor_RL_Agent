@@ -1,6 +1,6 @@
 # Path: core/baseline_policy.py
 # Purpose: Deterministic greedy bottleneck-relief baseline policy over the
-#   action catalog (docs/22_rl_decision_layer.md, "Start with a deterministic
+#   action catalog (docs/rl/README.md, "Start with a deterministic
 #   baseline policy ... RL must beat it to earn trust"). Picks WHICH catalog
 #   action to take; never plans or builds. RL later replaces/overrides this
 #   choice but must clear this bar first.

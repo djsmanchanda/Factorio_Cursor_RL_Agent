@@ -2,7 +2,7 @@
 # Purpose: Deterministic layout primitives for FLUID-using production rows
 # (chemical plants, oil refineries, fluid-recipe assemblers) plus the sandbox
 # fluid sources that feed them.
-# Connection offsets and fluid-purity rules are documented in docs/23_fluid_systems.md.
+# Connection offsets and fluid-purity rules are documented in docs/reference/factorio_mechanics.md.
 # All geometry remains deterministic planner data; cross-stage links live in fluid_routing.py.
 from __future__ import annotations
 

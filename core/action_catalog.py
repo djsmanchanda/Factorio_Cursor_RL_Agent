@@ -1,6 +1,6 @@
 # Path: core/action_catalog.py
 # Purpose: Compile per-line bottleneck diagnoses into an ACTION CATALOG of
-#   executable expansion options with predicted effects (docs/22_rl_decision_layer.md).
+#   executable expansion options with predicted effects (docs/rl/README.md).
 #   Deterministic planners/diagnosis own "what could be done"; a policy
 #   (core/baseline_policy.py now, RL later) owns "which one to do".
 #   This module is pure catalog compilation: it does not plan, build, or

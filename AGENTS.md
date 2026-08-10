@@ -1,259 +1,92 @@
-# Path: Factorio_Cursor_RL_Agent/AGENTS.md
-# Purpose: Authoritative operating charter for all agents (orchestrator + sub-agents) working in this repository.
+<!-- Path: AGENTS.md | Purpose: Concise operating charter for repository agents. -->
 
-# Factorio Cursor RL Agent — Operating Instructions
+# Factorio Cursor RL Agent
 
-This document defines **how agents must think, reason, and act** in this repository.
+## Project direction
 
-Precedence on conflict:
-1. `AGENTS.md` (this file)
-2. `docs/20_system_invariants.md`
-3. Schemas in `schemas/`
-4. All other docs
-5. Code behavior
+This repository contains two isolated but interoperable systems:
 
----
+- **RL training is the primary development focus.** It learns factory decisions through disposable Factorio episodes, measured outcomes, population selection, and bounded autoresearch. It may learn structural planning, including zoning, layouts, routing, and phased expansion.
+- **The deterministic runtime is a working reference, not a finished system.** Its semi-stable planners, schemas, validators, and execution primitives may be reused by RL, while its known production and layout problems continue to be fixed.
 
-## 1. Mission
+## Core principle: Learn, don't accumulate exceptions
 
-Build, maintain, and extend a deterministic industrial planning system for Factorio:
+When a failure repeats, first ask whether it should become a better observation, action, reward signal, curriculum step, validator, or learned policy decision—not another hand-authored rule.
 
-- Scale from local layouts → cities → planets → interplanetary logistics
-- Supervise supply chains and resolve systemic bottlenecks
-- Combine symbolic planning with RL-based execution
-- Maintain correctness, determinism, and scalability at all times
+## Authority by domain
 
-Agents are **not** generic code generators or experimenters.
+There is no single precedence list for unlike artifacts:
 
----
+- The latest explicit user instruction defines product intent. If it changes documented intent, update the affected documentation and contracts with the implementation.
+- `AGENTS.md` defines how agents work.
+- `docs/system_invariants.md` defines isolation and safety boundaries.
+- `schemas/` define serialized data shapes and versions.
+- Area documentation defines current design intent.
+- Code and live evidence describe current behavior; neither silently overrides intended behavior.
 
-## 2. Project Root Boundary (CRITICAL)
+Ask only when intent is materially ambiguous, unsafe, or requires authority beyond the repository.
 
-All work is confined to `Factorio_Cursor_RL_Agent/`.
+## Three boundaries
 
-**Allowed:** create, modify, refactor, delete files; add subdirectories, schemas, tools, tests; reorganize for clarity.
+Read [system invariants](docs/system_invariants.md). The boundaries most often violated are:
 
-**Forbidden:** modifying Factorio game files, save files, the installation or mod directories, or injecting code into the running game without explicit user approval.
+1. **Keep runtimes isolated.** Real Nauvis, disposable RL training, and `experimental/legacy_autonomy` are distinct. Never silently substitute one for another.
+2. **Learn structure in training; protect production.** RL may create zoning, layouts, and routes inside disposable training surfaces. A learned policy gains real-base authority only through explicit promotion, validation, and rollback controls.
+3. **Evidence has levels.** Unit test -> integration or replay -> deployed runtime -> observed live result. Report the highest level actually reached.
 
-If access outside the root is required → **STOP and ask the user.**
+## Learning principles
 
----
+- Separate hard safety/legality validators from soft design preferences.
+- Hard validators cover Factorio legality, collisions, resource budgets, fluid purity, and runtime isolation.
+- Soft priors and rewards should encourage zoning, direct continuous transport, short routes, low entity/time/resource cost, sufficient throughput, expansion space, and repair-before-duplicate behavior.
+- Preserve exploration with seeded randomization and diverse populations. Do not collapse training into a catalog of hand-authored layouts.
+- Promote policies only against held-out scenarios and the deterministic baseline; preserve checkpoints and rollback.
 
-## 3. Lazy Senior Dev Mode (before writing any code)
+## Documentation router
 
-Stop at the first rung that holds:
+Before implementing: identify the subsystem, read its listed documents, and ignore unrelated documents and the archive.
 
-1. Does this need to exist at all?
-2. Does the Python stdlib / Lua stdlib / an existing project module already cover it?
-3. Does an installed dependency already cover it?
-4. Can this be one line or one small function?
-5. Only then write the minimum code that works.
+| Work | Read first |
+|---|---|
+| Architecture, shared contracts, boundaries | `docs/architecture.md`, `docs/system_invariants.md` |
+| RL, curriculum, rewards, autoresearch | `docs/rl/README.md`, `docs/rl/training.md` |
+| Deterministic runtime and planners | `docs/deterministic/README.md`, `docs/deterministic/planning.md` |
+| Live Factorio, RCON, deploy/restart | `docs/factorio_operations.md` |
+| Prior designs and handoffs | `docs/archive/` only when history is needed |
 
-No speculative generalization. Implement the smallest coherent slice.
+## Working loop
 
----
+1. **Understand:** read the latest relevant log, identify the subsystem, and isolate the first hard failure. Trace observation -> decision -> plan -> execution -> outcome.
+2. **Plan:** state the smallest expected reusable fix. For RL failures, first examine observation coverage, action expressiveness, reward credit, curriculum, and evaluation.
+3. **Implement:** fix the cause without manually repairing a live base or adding a one-off coordinate/recipe workaround.
+4. **Verify:** run the narrowest useful tests, then the relevant episode or live workflow when requested and authorized.
+5. **Report:** give the important evidence and the exact lifecycle action still required.
 
-## 4. Agentic Workflow
+If progress is still being made, do not declare the system stuck merely because a timer expired. Diagnose whether it needs more time, supply, throughput, an alternate action, or a retry.
 
-### Model hierarchy
+## Coding preferences
 
-| Role | Model | Scope |
-|---|---|---|
-| **Main agent (orchestrator)** | Claude Fable 5 | Milestone planning, task decomposition, git/remotes/commits/pushes, product/privacy/legal/architecture decisions, final review gate |
-| **Heavy implementation** | Claude Opus 4.8 (medium effort) | Complex planner logic, schema design, cross-layer refactors, invariant-sensitive changes |
-| **Standard implementation & review** | Claude Sonnet 5 (high effort) | Feature implementation within one component, tests, doc updates, code review of sub-agent output |
-| **Basic CLI tasks** | Claude Sonnet 5 (low effort) / Haiku 4.5 | File moves, grep/scans, formatting, running test suites, mechanical edits |
+- Keep things simple. Channel YAGNI energy unless told otherwise.
+- Propose bold ideas when they can materially improve the work.
+- Be careful with destructive actions the user did not explicitly request.
+- Prefer focused tests that protect behavior. Avoid repetitive test slop and broad suites when a narrow test proves the change.
+- Use concise comments to explain intent or non-obvious use, not every line. Keep comments current.
+- Add a brief path/purpose comment at the start of human-authored files when the format supports comments.
+- Keep responses compact: outcome, evidence, required next action.
+- Preserve unrecognized worktree changes; assume they belong to the user or another agent.
 
-### Main agent responsibilities
+## Factorio operations
 
-- Orchestrate milestones and keep every delegated task **bounded** (clear inputs, outputs, and done-criteria).
-- Manage git: branches, remotes, commits, pushes.
-- Resolve product, privacy, legal, and architecture decisions — sub-agents escalate, never decide these.
-- Commit only after reviewer approval.
+- Follow `docs/factorio_operations.md` for current runtime paths, ports, deployment, and restart procedures.
+- Existing real infrastructure is authoritative: route around it or fail safely. Do not hide planner bugs with manual in-game fixes.
+- After every change, classify and report the required lifecycle action: restart a runner, redeploy a mod, restart Factorio, or do nothing.
+- Work outside this repository, including saves, installed mods, and servers, requires explicit user authorization.
 
-### Sub-agent rules
+## Changes, status, and git
 
-- Receive a bounded task; do not expand scope.
-- Never touch git remotes or push.
-- Escalate to the main agent on: invariant risk, schema changes, ambiguity, or anything outside the assigned task.
-- Return a short report: what changed, why, and what was validated.
-
-### Commit checkpoints
-
-- Commit after each **reviewed** milestone using Conventional Commits (`feat:`, `fix:`, `refactor:`, `perf:`, `docs:`, `test:`, `build:`, `ci:`, `chore:`, `style:`).
-- Keep commits scoped to the milestone — no drive-by changes.
-- Run the **smallest useful validation** before each commit (targeted tests, schema validation).
-- Push only from the main agent, only after the reviewed commit is clean.
-- Commit messages explain *why*, not just *what*.
-
----
-
-## 5. CURRENT_STATUS.md (mandatory)
-
-Maintain `CURRENT_STATUS.md` at the project root as an append-only log.
-
-After every milestone / meaningful change, **append** a brief entry:
-
-```text
-## [YYYY-MM-DD] <milestone or task name>
-- Files: <changed files>
-- What: <one line — what changed>
-- Why: <one line — reason>
-- Next: <optional — immediate next step, if any>
-```
-
-Keep entries very small. This file is the first thing any agent reads when resuming work after a gap, so it must always reflect reality.
-
----
-
-## 6. Documentation Awareness
-
-Before implementing any feature: identify the applicable docs, read them fully, align with their constraints.
-
-Canonical set: `README.md`, `docs/architecture.md`, `docs/planner_and_execution.md`, `docs/data_contracts_and_determinism.md`, `docs/07_instruction_language.md`, `docs/10_checklist_todo.md`, `docs/11_experiments.md`, `docs/12_future_work.md`, `docs/13_city_planning.md`, `docs/14_rail_blueprint_standard.md`, `docs/15_block_schema.md`, `docs/16_city_migration.md`, `docs/17_space_and_multiplanet_planning.md`, `docs/18_supply_chain_supervision.md`, `docs/19_external_knowledge_and_layout_search.md`, `docs/20_system_invariants.md`, `docs/21_external_game_knowledge.md`, `docs/22_rl_decision_layer.md`, `docs/23_fluid_systems.md`, `docs/30_codex_brief_realbase_autonomy.md`, and `docs/31_factorio_mod_interaction_and_troubleshooting.md`. Historical handoffs and superseded designs live under `docs/archive/` and are not canonical.
-
-On doc conflict: call it out explicitly, choose the safer path, default to invariants.
-
----
-
-## 7. System Invariants (NON-NEGOTIABLE)
-
-Obey all rules in `docs/20_system_invariants.md`. Summary:
-
-- Planning is deterministic and symbolic
-- RL never performs structural planning
-- Blocks are immutable once deployed
-- Rails are template-based only
-- Inter-block transport is rail-only
-- Stability beats optimality
-- All time is measured in Factorio ticks
-- External knowledge never overrides standards
-
-An implementation that violates an invariant is **incorrect, even if it works.**
-
----
-
-## 8. Named Planning Components (Authoritative)
-
-- **LocalLayoutPlanner** — entity-level, grid/line layouts, deterministic math
-- **CityPlanner** — block placement, rail corridors, station interfaces
-- **PlanetPlanner** — planet specialization, imports/exports, city coordination
-- **InterplanetarySupervisor** — global flow monitoring, latency/risk handling, supply chain stability
-
-Logic MUST NOT cross these boundaries.
-
----
-
-## 9. Data Contracts & Schemas
-
-All inter-layer communication conforms to versioned schemas in `schemas/`:
-
-- `snapshot.schema.json` — Lua → Planner
-- `goal.schema.json` — Instruction → Planner
-- `build_plan.schema.json` — Planner → Lua
-- `block.schema.json` — City / Planet planning
-
-Rules: schemas define truth; docs describe intent; on mismatch, schemas win; schema changes are explicit, versioned, and orchestrator-approved.
-
----
-
-## 10. How to Think
-
-- Fix root causes, never band-aids
-- Prefer deterministic solutions
-- If unsure: read more code, not less
-- If still unsure: ask the user with 2–3 clear options
-- Never guess silently
-
-On architectural conflicts, invariant violations, or schema mismatches: explain the issue, propose the safest resolution, stop if uncertainty remains.
-
----
-
-## 11. File Hygiene
-
-Every file begins with:
-
-```text
-# Path: <relative/path/to/file>
-# Purpose: <what this file does and why it exists>
-```
-
-**Size limits.** Keep functions ≤ 80 LOC. This is the hard one, because it is
-the measure that has actually predicted defects here: the prep/promotion
-collision hid inside a 283-line `ensure_produced`, and the silent-skip gate came
-from one decision spelled out in three places. A function you cannot read in one
-screen is one where two features can sit side by side without noticing each
-other.
-
-File length is a **budget, not a gate**: **under 500 recommended, under 800
-acceptable.** Past 800, justify it in `CURRENT_STATUS.md` rather than reflexively
-splitting — and never chase the number for its own sake. Splitting functions to
-meet the limit above will often *grow* a file, and that is fine. Length on its
-own says nothing — measured 2026-08-02:
-
-| File | LOC | fns | avg | max | internal calls |
-|---|---|---|---|---|---|
-| `orchestrator/autonomous_builder.py` | 1185 | 9 | 120 | 281 | 20 |
-| `orchestrator/live_base.py` | 851 | 31 | 23 | 70 | 31 |
-| `planners/belt_bridge.py` | 521 | 19 | 22 | 70 | 67 |
-
-Same rule, three verdicts. `autonomous_builder.py` is a genuine tangle — but the
-number that says so is the 281-line function, and splitting the file only
-relocates it. `live_base.py` is 31 small RCON helpers; splitting it means
-inventing categories for "ask the game a question." `belt_bridge.py` is the most
-cohesive file in the repo at 67 internal call edges; splitting it would sever a
-tight cluster and make it harder to follow.
-
-**Standing waivers** (long for structural reasons, not for tangle):
-`orchestrator/live_base.py`, `planners/belt_bridge.py`, `core/metrics.py`,
-`tools/verify_factory_invariants.py`, and `orchestrator/autonomous_builder.py`
-— the last is 1537 LOC *because* its functions were brought under 80, which
-traded one 281-line function for a longer file. That was the right trade.
-
-**Split for a seam, not for a number.** The extraction that paid off was
-`factorio_mod/logistic_sections.lua` — it made untestable Lua testable. The line
-count fell as a side effect. When a split would only move code, don't.
-
-**Before moving a function, check who monkeypatches it.** Tests here patch by
-module attribute (`autonomous_builder.bring_stage_up`). Move a callee out from
-under a patched caller and the patch silently stops applying: the test then
-exercises the real function and still passes. Retarget the patch in the same
-change, and verify each retarget by confirming the test fails without it.
-
-- Prefer clarity over cleverness
-
----
-
-## 12. Change Discipline
-
-**Unrecognized changes:** assume another agent or human authored them. Do not rewrite blindly; work around if possible; if blocking → STOP and ask.
-
-**Breadcrumbs:** clear commit messages, inline intent comments, notes when behavior changes, and a `CURRENT_STATUS.md` entry.
-
----
-
-## 13. Verification
-
-Prefer end-to-end verification, deterministic test cases, and schema validation. If verification is blocked, state exactly what is missing — never claim correctness without it.
-
----
-
-## 14. Execution Constraints by Layer
-
-- **Planning layers:** deterministic, symbolic, math-based, no RL
-- **Execution (RL / heuristic):** execution efficiency only; no layout or structural decisions; must follow approved build phases
-- **External knowledge:** data-only ingestion, validated before use, never overrides core standards
-
----
-
-## 15. Failure & Escalation
-
-If invariants are at risk, permissions are insufficient, or ambiguity cannot be safely resolved: **stop, explain clearly, ask the user.** Silent failure or blind action is unacceptable.
-
----
-
-## 16. Guiding Principle
-
-This project is not a bot. It is a hierarchical industrial planning and supervision system using Factorio as a deterministic simulation engine.
-
-Behave like a civil engineer, a logistics supervisor, a systems architect — not a heuristic-driven agent.
+- Make the smallest coherent change and avoid unrelated refactors.
+- Append one short entry to `CURRENT_STATUS.md` after a durable milestone; do not log transient attempts.
+- After a user-requested fix or feature is implemented and verified, create one scoped commit unless the user says not to commit. Do not commit plans, diagnosis-only work, or unverified changes.
+- RL commit subjects use `feat(RL ...): ...` or `fix(RL ...): ...`.
+- Only the main agent manages commits, remotes, or pushes. Delegated tasks stay bounded and return changed files plus validation.
+- If verification is blocked, state the blocker precisely and do not claim completion.

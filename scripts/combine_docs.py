@@ -1,28 +1,39 @@
 # Path: scripts/combine_docs.py
-# Purpose: Concatenate README.md and docs/ into the single FULL_DOCUMENTATION.md bundle.
+# Purpose: Build FULL_DOCUMENTATION.md from active documentation while excluding archives.
 
-import os
+from pathlib import Path
 
-def combine_markdown_files(output_file, docs_dir='docs', readme_file='README.md'):
-    combined_content = []
-    
-    # 1. Add README.md first
-    if os.path.exists(readme_file):
-        with open(readme_file, 'r', encoding='utf-8') as f:
-            combined_content.append(f"--- FILE: {readme_file} ---\n\n" + f.read())
-    
-    # 2. Add all .md files in docs/ sorted by filename
-    if os.path.exists(docs_dir):
-        files = sorted([f for f in os.listdir(docs_dir) if f.endswith('.md')])
-        for filename in files:
-            file_path = os.path.join(docs_dir, filename)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                combined_content.append(f"\n\n--- FILE: {docs_dir}/{filename} ---\n\n" + f.read())
-    
-    # 3. Write to output file
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write("\n".join(combined_content))
-    print(f"Successfully combined {len(combined_content)} files into {output_file}")
+
+def active_markdown(docs_dir: Path) -> list[Path]:
+    """Return active docs in stable path order; archived designs are intentionally omitted."""
+    return sorted(
+        path
+        for path in docs_dir.rglob("*.md")
+        if "archive" not in path.relative_to(docs_dir).parts
+    )
+
+
+def combine_markdown_files(
+    output_file: str = "FULL_DOCUMENTATION.md",
+    docs_dir: str = "docs",
+    readme_file: str = "README.md",
+) -> None:
+    sources: list[Path] = []
+    readme = Path(readme_file)
+    if readme.exists():
+        sources.append(readme)
+
+    docs = Path(docs_dir)
+    if docs.exists():
+        sources.extend(active_markdown(docs))
+
+    sections = [
+        f"--- FILE: {path.as_posix()} ---\n\n{path.read_text(encoding='utf-8').rstrip()}"
+        for path in sources
+    ]
+    Path(output_file).write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+    print(f"Successfully combined {len(sources)} files into {output_file}")
+
 
 if __name__ == "__main__":
-    combine_markdown_files('FULL_DOCUMENTATION.md')
+    combine_markdown_files()

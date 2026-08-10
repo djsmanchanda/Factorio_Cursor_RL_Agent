@@ -31,7 +31,7 @@ Classify the failure before changing anything.
 | Live state | Valid report says `ok: false` | Inspect reported surface/force/invariant |
 | Orchestrator | Inputs valid; Python traceback | Capture revision, traceback, process provenance |
 
-Use [the authoritative runbook](../../../docs/31_factorio_mod_interaction_and_troubleshooting.md)
+Use [the authoritative runbook](../../../docs/factorio_operations.md)
 for command inventory, output directories, recipes, and the full failure matrix.
 
 ## Fail-closed Sequence

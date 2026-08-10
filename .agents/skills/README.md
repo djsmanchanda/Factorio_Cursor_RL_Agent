@@ -9,4 +9,4 @@
 | [`factorio-mod-troubleshooting`](factorio-mod-troubleshooting/SKILL.md) | Diagnose registration, deployment drift, `script-output`, schemas, live state, and orchestration |
 
 Both defer detailed commands and current evidence to the
-[authoritative runbook](../../docs/31_factorio_mod_interaction_and_troubleshooting.md).
+[authoritative runbook](../../docs/factorio_operations.md).

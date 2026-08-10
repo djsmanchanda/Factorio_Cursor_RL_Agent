@@ -2,7 +2,7 @@
 # Purpose: Tests for core/action_catalog.py (catalog compilation) and
 #   core/baseline_policy.py (greedy bottleneck-relief baseline over that
 #   catalog) — the two halves of the N1 action-catalog + baseline-policy
-#   slice from docs/22_rl_decision_layer.md. Bounded to one test file per
+#   slice from docs/rl/README.md. Bounded to one test file per
 #   task scope; policy tests live here alongside catalog tests.
 
 from __future__ import annotations

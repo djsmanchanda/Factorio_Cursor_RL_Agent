@@ -3,7 +3,7 @@
 
 # Factorio Mod
 
-For the complete 19-command inventory, RCON/GameBridge usage, output directories, real-base rules, and troubleshooting, use the [authoritative interaction runbook](../docs/31_factorio_mod_interaction_and_troubleshooting.md).
+For the complete 19-command inventory, RCON/GameBridge usage, output directories, real-base rules, and troubleshooting, use the [authoritative interaction runbook](../docs/factorio_operations.md).
 
 ## Files
 - `info.json` (exception): Factorio requires strict JSON, so it cannot include comments.

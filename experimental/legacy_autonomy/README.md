@@ -18,7 +18,7 @@ tools/autonomous_run.py
 The modules here are experimental and unsupported. Active production modules
 must not import them. They may be inspected for reusable deterministic ideas,
 but revival requires an explicit architecture review against `AGENTS.md` and
-`docs/20_system_invariants.md`.
+`docs/system_invariants.md`.
 
 Legacy entry points remain available only through explicit module invocation:
 
