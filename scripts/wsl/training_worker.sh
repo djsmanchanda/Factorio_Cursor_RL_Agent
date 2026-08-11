@@ -99,19 +99,24 @@ ensure_secret() {
 
 bootstrap() {
   local archive="$1" source_save="$2" repo_root="$3" bridge_root="$4"
-  require_file "$archive"
   require_file "$source_save"
   mkdir -p "$WORKER_ROOT" "$DATA_ROOT/mods" "$DATA_ROOT/saves" "$DATA_ROOT/logs"
   if [[ ! -x "$RUNTIME_ROOT/bin/x64/factorio" ]]; then
-    local staging
-    staging="$(mktemp -d)"
-    trap 'rm -rf "$staging"' RETURN
-    tar -xJf "$archive" -C "$staging"
-    require_file "$staging/factorio/bin/x64/factorio"
+    local seed_runtime="$HOME/factorio-training-01/runtime/factorio"
     mkdir -p "$(dirname "$RUNTIME_ROOT")"
-    rm -rf "$RUNTIME_ROOT"
-    mv "$staging/factorio" "$RUNTIME_ROOT"
-    trap - RETURN
+    if [[ -x "$seed_runtime/bin/x64/factorio" ]]; then
+      cp -a "$seed_runtime" "$RUNTIME_ROOT"
+    else
+      require_file "$archive"
+      local staging
+      staging="$(mktemp -d)"
+      trap 'rm -rf "$staging"' RETURN
+      tar -xJf "$archive" -C "$staging"
+      require_file "$staging/factorio/bin/x64/factorio"
+      rm -rf "$RUNTIME_ROOT"
+      mv "$staging/factorio" "$RUNTIME_ROOT"
+      trap - RETURN
+    fi
   fi
   if [[ ! -f "$DATA_ROOT/saves/training-01.zip" ]]; then cp "$source_save" "$DATA_ROOT/saves/training-01.zip"; fi
   configure_bridge "$bridge_root"

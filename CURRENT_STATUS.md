@@ -2312,3 +2312,8 @@ that consumed it was not.
 - What: Defined producer roles for electric interfaces, solar panels, steam engines/turbines, and fusion generators; defined accumulators as networked storage; and made the worker manager provision four independent WSL instances on game ports 35001-35004 and RCON ports 28001-28004.
 - Why: All electrical producers must be supplied by a pole network, while an accumulator must charge/discharge as a power bank rather than satisfy a generation objective alone.
 - Next: Archive the invalid pre-fix evidence, deploy the training lab to the four isolated workers, then begin a fresh four-worker smoke batch.
+## [2026-08-11] Four-worker bootstrap runtime reuse
+- Files: WSL worker manager/script and worker regression tests.
+- What: Additional WSL workers now clone the verified worker-01 runtime when the original headless archive is unavailable.
+- Why: Scaling a known-good local runtime must not depend on retaining a one-time download.
+- Next: Bootstrap workers 02-04, deploy the training lab, and run the fresh four-worker smoke batch.

@@ -83,9 +83,7 @@ if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {
 
 switch ($Action) {
     "bootstrap" {
-        foreach ($path in @($Archive, $SourceSave)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Bootstrap input is missing: $path" }
-        }
+        if (-not (Test-Path -LiteralPath $SourceSave -PathType Leaf)) { throw "Bootstrap input is missing: $SourceSave" }
         for ($index = 1; $index -le $WorkerCount; $index++) {
             $bridgeRoot = WorkerBridgeRoot $index
             New-Item -ItemType Directory -Path $bridgeRoot -Force | Out-Null

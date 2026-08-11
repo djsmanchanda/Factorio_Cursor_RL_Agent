@@ -15,6 +15,8 @@ def test_wsl_worker_keeps_runtime_native_and_isolated_by_index() -> None:
     source = SHELL.read_text(encoding="utf-8")
 
     assert 'WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"' in source
+    assert 'seed_runtime="$HOME/factorio-training-01/runtime/factorio"' in source
+    assert 'cp -a "$seed_runtime" "$RUNTIME_ROOT"' in source
     assert 'GAME_PORT=$((35000 + numeric))' in source
     assert 'RCON_PORT=$((28000 + numeric))' in source
     assert 'ln -sfn "$bridge_root/script-output" "$DATA_ROOT/script-output"' in source
