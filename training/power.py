@@ -11,6 +11,13 @@ POWER_SOURCE_ENTITIES = frozenset({
     "fusion-generator",
 })
 POWER_STORAGE_ENTITIES = frozenset({"accumulator"})
+POWER_CONSUMER_ENTITIES = frozenset({
+    "electric-mining-drill",
+    "inserter",
+    "fast-inserter",
+    "stack-inserter",
+    "bulk-inserter",
+})
 
 
 def energy_role(entity_name: str) -> str | None:
@@ -19,4 +26,6 @@ def energy_role(entity_name: str) -> str | None:
         return "source"
     if entity_name in POWER_STORAGE_ENTITIES:
         return "storage"
+    if entity_name in POWER_CONSUMER_ENTITIES:
+        return "consumer"
     return None

@@ -8,7 +8,7 @@ import pytest
 from training.candidates import mining_delivery_candidates
 from training.canonical import scenario_hash
 from training.contracts import validate_scenario
-from training.power import POWER_SOURCE_ENTITIES, POWER_STORAGE_ENTITIES, energy_role
+from training.power import POWER_CONSUMER_ENTITIES, POWER_SOURCE_ENTITIES, POWER_STORAGE_ENTITIES, energy_role
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
 
@@ -38,6 +38,8 @@ def test_accumulator_is_storage_not_a_power_source() -> None:
     assert "accumulator" in POWER_STORAGE_ENTITIES
     assert energy_role("accumulator") == "storage"
     assert "accumulator" not in POWER_SOURCE_ENTITIES
+    assert "fast-inserter" in POWER_CONSUMER_ENTITIES
+    assert energy_role("fast-inserter") == "consumer"
 
 
 def test_contract_rejects_accumulator_as_a_generator() -> None:

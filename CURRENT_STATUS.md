@@ -2322,3 +2322,8 @@ that consumed it was not.
 - What: The four workers share worker-01's `chmod 0600` secret inside WSL; the Windows controller reads that private WSL path without storing or rewriting a bridge-folder password.
 - Why: Scaling training must not depend on Windows ACL mutation or expose a copied credential in the bridge output tree.
 - Next: Bootstrap and start the four workers, then launch a fresh four-worker smoke batch.
+## [2026-08-11] Training consumer-power coverage
+- Files: training power roles, mining-delivery candidate/scenario, training-lab measurement, and focused tests.
+- What: Power planning and measurement now include every current electrical consumer, including the final delivery inserter, instead of treating drill power as sufficient evidence.
+- Why: Four live episodes mined ore but delivered none because their sink inserters were outside the pole network while drill-only checks reported power healthy.
+- Next: Redeploy the training lab to the four WSL workers and rerun the fresh four-worker smoke batch before any long experiment.

@@ -10,6 +10,7 @@ from planners.belt_bridge import bridge_belt_to_chest
 from planners.plan_validation import actions, occupied_tile_indices, validate_build_plan
 from training.canonical import plan_hash
 from training.contracts import validate_scenario
+from training.power import POWER_CONSUMER_ENTITIES
 
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
 _POWER_SOURCE_COVERAGE = 3.5
@@ -151,35 +152,54 @@ def _power_actions(
     scenario: Mapping, plan_actions: list[dict], belt_y: float, xs: list[float], variant: int,
 ) -> list[dict]:
     occupied = occupied_tile_indices([("production", {"phases": [{"actions": plan_actions}]})])
-    top = [(x, belt_y - 4) for x in xs[::2]]
-    bottom = [(x, belt_y + 4) for x in reversed(xs[::2])]
-    targets = top + bottom if variant == 0 else list(reversed(bottom + top))
+    consumers = [
+        (action["position"]["x"], action["position"]["y"])
+        for action in plan_actions
+        if action.get("entity") in POWER_CONSUMER_ENTITIES
+    ]
+    if not consumers:
+        raise ValueError("candidate contains no electricity consumers to supply")
     fixture = next(item for item in scenario["fixtures"] if item["kind"] == "power_source")
     source = tuple(float(value) for value in fixture["position"])
     occupied.update(_energy_fixture_tiles(scenario))
-    anchor = _source_anchor(source, targets[0], occupied)
-    points, previous = [anchor], anchor
-    for target in targets:
+    ordered = sorted(consumers, key=lambda point: (math.dist(source, point), point))
+    if variant:
+        ordered.reverse()
+    anchor = _source_anchor(source, ordered[0], occupied)
+    points, edges = [anchor], []
+    occupied.add((math.floor(anchor[0]), math.floor(anchor[1])))
+    remaining = list(ordered)
+    while remaining:
+        target = min(
+            remaining,
+            key=lambda point: (min(math.dist(point, node) for node in points), point),
+        )
+        previous = min(points, key=lambda node: math.dist(node, target))
+        if abs(target[0] - previous[0]) <= 3.5 and abs(target[1] - previous[1]) <= 3.5:
+            remaining.remove(target)
+            continue
         distance = math.dist(previous, target)
         steps = max(1, math.ceil(distance / 6.0))
+        branch_previous = previous
         for index in range(1, steps + 1):
             ratio = index / steps
             raw = (
                 round(previous[0] + (target[0] - previous[0]) * ratio) + 0.5,
                 round(previous[1] + (target[1] - previous[1]) * ratio) + 0.5,
             )
-            points.append(_safe_pole(raw, occupied))
-        previous = target
+            pole = _safe_pole(raw, occupied)
+            if pole != branch_previous:
+                points.append(pole)
+                edges.append((branch_previous, pole))
+                occupied.add((math.floor(pole[0]), math.floor(pole[1])))
+                branch_previous = pole
+        remaining.remove(target)
     unique = list(dict.fromkeys(points))
-    if any(math.dist(left, right) > 9 for left, right in zip(unique, unique[1:])):
+    if any(math.dist(left, right) > 9 for left, right in edges):
         raise ValueError("candidate power poles exceed medium-pole wire reach")
-    drill_points = [
-        (action["position"]["x"], action["position"]["y"])
-        for action in plan_actions if action.get("entity") == "electric-mining-drill"
-    ]
-    if any(not any(abs(dx - px) <= 3.5 and abs(dy - py) <= 3.5 for px, py in unique)
-           for dx, dy in drill_points):
-        raise ValueError("candidate power poles do not supply every drill")
+    if any(not any(abs(x - px) <= 3.5 and abs(y - py) <= 3.5 for px, py in unique)
+           for x, y in consumers):
+        raise ValueError("candidate power poles do not supply every electricity consumer")
     return [_placement("medium-electric-pole", point) for point in unique]
 
 def _count_entities(plan: Mapping) -> dict[str, int]:

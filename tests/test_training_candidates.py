@@ -6,6 +6,7 @@ import math
 from planners.plan_validation import actions, validate_build_plan
 from training.candidates import mining_delivery_candidates
 from training.canonical import plan_hash
+from training.power import POWER_CONSUMER_ENTITIES
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
 
@@ -48,3 +49,22 @@ def test_candidates_anchor_the_first_pole_inside_power_source_coverage():
                 if action["entity"] == "medium-electric-pole"
             )
             assert math.dist(source["position"], (first["x"], first["y"])) <= 3.5
+
+
+def test_candidates_supply_the_delivery_inserter_as_well_as_drills():
+    for seed in range(100):
+        scenario = generate_mining_delivery_scenario(seed)
+        for candidate in mining_delivery_candidates(scenario):
+            planned = list(actions(candidate["plan"]))
+            poles = [action["position"] for action in planned if action["entity"] == "medium-electric-pole"]
+            consumers = [
+                action["position"] for action in planned
+                if action["entity"] in POWER_CONSUMER_ENTITIES
+            ]
+            assert consumers
+            for consumer in consumers:
+                assert any(
+                    abs(consumer["x"] - pole["x"]) <= 3.5
+                    and abs(consumer["y"] - pole["y"]) <= 3.5
+                    for pole in poles
+                )

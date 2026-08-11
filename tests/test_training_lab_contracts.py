@@ -183,3 +183,5 @@ def test_power_disconnects_are_structured_training_evidence() -> None:
     assert "power_connected = powered" in source
     assert "POWER_STORAGE_TYPES" in source
     assert "power storage is disconnected from the power source" in source
+    assert "POWER_CONSUMER_TYPES" in source
+    assert "electricity consumer is disconnected from the power source" in source

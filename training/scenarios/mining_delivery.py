@@ -54,7 +54,8 @@ def _route_span(patch: dict[str, int], destination: tuple[float, float]) -> int:
 
 def _construction_budget(target_rate_per_tick: float, route_span: int) -> dict[str, int]:
     drills = math.ceil(target_rate_per_tick / _DRILL_RATE_PER_TICK) + 1
-    poles = math.ceil(route_span / _POLE_WIRE_STEP) + 4
+    # A source, production cells, and a remote delivery inserter all need pole coverage.
+    poles = math.ceil(route_span / _POLE_WIRE_STEP) + 10
     return {
         "electric-mining-drill": drills,
         "fast-inserter": 4,
