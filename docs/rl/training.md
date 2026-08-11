@@ -63,6 +63,14 @@ powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCo
 powershell -File scripts\run_wsl_training_batch.ps1 --count 100 --attempts-per-scenario 20
 ```
 
+To find the safe concurrency limit on one laptop, run bounded live probes rather than assuming twenty surfaces are safe:
+
+```powershell
+powershell -File scripts\benchmark_wsl_training_slots.ps1 -MaximumSlots 20
+```
+
+The probe grows from 4 to 20 slots in steps of 4, testing one disposable episode per slot. It stops before the next level when a stage falls below its 75% completion gate, average host CPU exceeds 90%, available memory falls below 4 GiB, or wall time exceeds twice the initial stage. Ordinary candidate timeouts are reported but do not by themselves prove a laptop-capacity failure. Its database, checkpoint, and live telemetry are written beneath ignored `data/training-capacity/`, so the measurements are a local capacity gate rather than policy fitness evidence.
+
 For an already configured worker file:
 
 ```powershell

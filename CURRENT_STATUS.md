@@ -2338,3 +2338,9 @@ that consumed it was not.
 - Why: The training lab already owns multiple isolated `training/*` surfaces and samples them together, so duplicating Factorio processes and saves was unnecessary overhead.
 - Evidence: A fresh live smoke batch completed 4/4 on `training/mining-delivery-00000000` through `00000003` using only game `35001` / RCON `28001`; workers 02-04 were stopped.
 - Next: Run the longer population batch with four concurrent slots while observing UPS, report latency, and cleanup behavior.
+## [2026-08-11] One-runtime adaptive slot capacity probe
+- Files: `scripts/benchmark_wsl_training_slots.ps1`, WSL worker manager, RL docs, `.gitignore`, and focused worker tests.
+- What: Added a one-server capacity probe that configures logical slots in bounded stages up to 20, samples host CPU and available memory while real disposable episodes run, and isolates all probe evidence from the learner's policy/checkpoint/database.
+- Why: Concurrency must be measured on the laptop's actual Factorio surfaces, RCON traffic, and report cleanup rather than inferred from four independent servers or a synthetic benchmark.
+- Safety: The probe halts on low completion ratio, CPU/memory pressure, or major wall-time regression. Candidate timeouts are retained as learning evidence but are not automatically misclassified as host exhaustion.
+- Next: Resume the live capacity probe from 12 slots after the clean reset, retaining the highest healthy slot count for normal batches.

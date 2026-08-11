@@ -25,6 +25,7 @@ data/training/*.db*
 data/training/live/
 data/training/policy.json
 data/training-archive/
+data/training-capacity/
 # Local pytest scratch directories
 .pytest_cache/
 .pytest-*/

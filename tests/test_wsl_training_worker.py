@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SHELL = ROOT / "scripts" / "wsl" / "training_worker.sh"
 MANAGER = ROOT / "scripts" / "manage_wsl_training_worker.ps1"
 RUNNER = ROOT / "scripts" / "run_wsl_training_batch.ps1"
+CAPACITY = ROOT / "scripts" / "benchmark_wsl_training_slots.ps1"
 EXAMPLE = ROOT / "training-workers-wsl.example.json"
 
 
@@ -61,3 +62,17 @@ def test_wsl_worker_example_requires_local_path_materialization() -> None:
     assert '"host": "127.0.0.1"' in example
     assert '"game_port": 35001' in example
     assert 'REPLACE_WITH_LOCALAPPDATA' in example
+
+def test_capacity_probe_scales_slots_with_explicit_resource_limits() -> None:
+    source = CAPACITY.read_text(encoding="utf-8")
+
+    assert '[int]$MaximumSlots = 20' in source
+    assert '[int]$StartSlots = 4' in source
+    assert '[double]$MinimumCompletionRate = 0.75' in source
+    assert '[int]$MaximumCpuPercent = 90' in source
+    assert '[int]$MinimumAvailableMemoryMB = 4096' in source
+    assert '-Action configure -WorkerCount 1 -SlotsPerWorker $slots' in source
+    assert '--count $slots --attempts-per-scenario $AttemptsPerStage' in source
+    assert r'data\training-capacity\slots-' in source
+    assert '--database (Join-Path $CapacityDirectory "experience.db")' in source
+    assert '$record.elapsed_seconds -gt ($baselineSeconds * $MaximumSlowdown)' in source

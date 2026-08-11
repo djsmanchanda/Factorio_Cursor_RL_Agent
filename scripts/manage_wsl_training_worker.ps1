@@ -4,7 +4,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("bootstrap", "deploy", "start", "stop", "status")]
+    [ValidateSet("bootstrap", "configure", "deploy", "start", "stop", "status")]
     [string]$Action,
     [string]$Distro = "Ubuntu",
     [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.0.77.tar.xz",
@@ -90,6 +90,9 @@ switch ($Action) {
             )
 
         }
+        Write-WorkerConfig
+    }
+    "configure" {
         Write-WorkerConfig
     }
     "deploy" {
