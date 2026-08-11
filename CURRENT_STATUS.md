@@ -2349,3 +2349,8 @@ that consumed it was not.
 - What: Measured one WSL Factorio runtime with 12, 16, and 20 simultaneous `training/*` surfaces. The 20-slot stage completed 19/20 attempts (95%), averaged 28.8% host CPU, retained at least 9,984 MiB available memory, and stayed within the bounded wall-time gate.
 - Why: Confirmed that this laptop can run the RL training system at 20 logical concurrent slots without maintaining twenty Factorio servers.
 - Next: Normal training now uses 20 slots on game port 35001/RCON 28001; watch the Observatory and promote only held-out policy evidence.
+
+## [2026-08-12] RL adaptive shared-server parallelism
+- Files: training/scheduler.py, tools/run_adaptive_training_batch.py, scripts/run_wsl_adaptive_training_batch.ps1, tests/test_training_scheduler.py, docs/rl/training.md
+- What: Added staged UPS-gated concurrency for RL batches. The controller samples tick advancement, treats the conservative lower-tail equivalent of P98 UPS as the safety gate, and grows or shrinks by four slots at stage boundaries. Fixed-runner behavior is unchanged.
+- Validation: focused scheduler suite passes; Python compilation and diff checks pass. Activation requires configuring enough logical slots after the current batch completes.

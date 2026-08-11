@@ -54,6 +54,21 @@ One Factorio process can simulate multiple isolated `training/*` surfaces concur
 
 Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
+For long runs, use the adaptive controller after configuring enough logical slots:
+
+```powershell
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 32
+powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
+  --initial-slots 4 --minimum-slots 4 --maximum-slots 32 --step 4
+```
+
+The adaptive controller runs short stages, samples tick advancement over the shared
+Factorio RCON connection, and changes concurrency only at stage boundaries. It grows
+by four after two healthy windows and shrinks by four after one unhealthy window.
+The safety statistic is the lower-tail equivalent of a P98 UPS requirement: at least
+55 UPS for 98% of samples. This avoids a high-tail percentile hiding short server
+stalls. A missing or too-short UPS window is neutral and never causes a scale-up.
+
 The preferred local worker uses the Linux headless build under WSL2:
 
 ```powershell

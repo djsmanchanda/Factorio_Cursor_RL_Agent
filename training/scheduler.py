@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -127,6 +128,99 @@ class BatchMeasurement:
     @property
     def throughput(self) -> float:
         return self.completed_episodes / self.elapsed_seconds if self.elapsed_seconds > 0 else 0.0
+
+
+def percentile(values: Sequence[float], quantile: float) -> float:
+    """Return a linearly interpolated percentile for a non-empty sample set."""
+    if not values:
+        raise ValueError("percentile requires at least one sample")
+    if not 0.0 <= quantile <= 1.0 or not all(math.isfinite(float(value)) for value in values):
+        raise ValueError("percentile quantile and samples must be finite and bounded")
+    ordered = sorted(float(value) for value in values)
+    position = (len(ordered) - 1) * quantile
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+
+
+@dataclass(frozen=True)
+class UpsWindow:
+    """A measured server window used for conservative parallelism decisions."""
+
+    samples: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if not self.samples:
+            raise ValueError("an UPS window needs at least one sample")
+        if not all(math.isfinite(value) and value > 0 for value in self.samples):
+            raise ValueError("UPS samples must be finite and positive")
+
+    @property
+    def mean_ups(self) -> float:
+        return sum(self.samples) / len(self.samples)
+
+    @property
+    def safe_ups_p98(self) -> float:
+        """UPS maintained for at least 98% of the sample window.
+
+        UPS is a good-is-high metric, so the conservative equivalent of a
+        ``P98 >= 55 UPS`` requirement is the 2nd percentile of UPS values.
+        """
+        return percentile(self.samples, 0.02)
+
+    @property
+    def tick_time_p98_ms(self) -> float:
+        """The corresponding high-tail tick time, in milliseconds."""
+        return 1000.0 / self.safe_ups_p98
+
+
+@dataclass(frozen=True)
+class AdaptiveScaleState:
+    slots: int
+    healthy_windows: int = 0
+    unhealthy_windows: int = 0
+
+
+def adjust_adaptive_slots(
+    state: AdaptiveScaleState,
+    window: UpsWindow | None,
+    *,
+    minimum: int = 4,
+    maximum: int = 32,
+    step: int = 4,
+    minimum_safe_ups: float = 55.0,
+    healthy_windows_to_grow: int = 2,
+    unhealthy_windows_to_shrink: int = 1,
+) -> tuple[AdaptiveScaleState, str]:
+    """Apply four-slot hysteresis to one measured UPS window."""
+    if minimum < 1 or maximum < minimum or step < 1:
+        raise ValueError("adaptive slot bounds are invalid")
+    if not minimum <= state.slots <= maximum:
+        raise ValueError("adaptive state slots are outside its bounds")
+    if healthy_windows_to_grow < 1 or unhealthy_windows_to_shrink < 1:
+        raise ValueError("adaptive hysteresis windows must be positive")
+    if window is None:
+        return state, "no_ups_window"
+
+    healthy = state.healthy_windows
+    unhealthy = state.unhealthy_windows
+    if window.safe_ups_p98 >= minimum_safe_ups:
+        healthy += 1
+        unhealthy = 0
+    else:
+        unhealthy += 1
+        healthy = 0
+
+    if healthy >= healthy_windows_to_grow and state.slots < maximum:
+        slots = min(maximum, state.slots + step)
+        return AdaptiveScaleState(slots), "increase_safe_ups"
+    if unhealthy >= unhealthy_windows_to_shrink and state.slots > minimum:
+        slots = max(minimum, state.slots - step)
+        return AdaptiveScaleState(slots), "decrease_safe_ups"
+    return AdaptiveScaleState(state.slots, healthy, unhealthy), "hold_safe_ups"
 
 
 def next_worker_count(

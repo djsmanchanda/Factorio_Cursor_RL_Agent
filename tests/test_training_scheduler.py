@@ -8,8 +8,8 @@ import threading
 import pytest
 
 from training.scheduler import (
-    BatchMeasurement, ResourcePhaseLock, WorkerSpec, next_worker_count,
-    validate_worker_specs,
+    AdaptiveScaleState, BatchMeasurement, ResourcePhaseLock, UpsWindow, WorkerSpec,
+    adjust_adaptive_slots, next_worker_count, percentile, validate_worker_specs,
 )
 
 
@@ -72,3 +72,31 @@ def test_concurrency_only_grows_after_safe_throughput_gain() -> None:
     assert next_worker_count([first, faster], minimum=4, maximum=20) == 8
     unhealthy = BatchMeasurement(8, 200, 100, 40)
     assert next_worker_count([faster, unhealthy], minimum=4, maximum=20) == 6
+
+
+def test_ups_window_uses_conservative_lower_tail_for_p98_safety() -> None:
+    window = UpsWindow((60.0, 59.0, 58.0, 40.0, 60.0))
+    assert percentile(window.samples, 0.5) == 59.0
+    assert window.safe_ups_p98 < 55.0
+    assert window.tick_time_p98_ms > 1000.0 / 55.0
+
+
+def test_adaptive_slots_grow_in_four_slot_steps_after_two_healthy_windows() -> None:
+    state = AdaptiveScaleState(4)
+    healthy = UpsWindow((60.0, 59.0, 58.0))
+    state, reason = adjust_adaptive_slots(state, healthy)
+    assert (state.slots, reason) == (4, "hold_safe_ups")
+    state, reason = adjust_adaptive_slots(state, healthy)
+    assert (state.slots, reason) == (8, "increase_safe_ups")
+
+
+def test_adaptive_slots_shrink_by_four_on_an_unhealthy_window() -> None:
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(12), UpsWindow((54.0, 53.0, 52.0)))
+    assert (state.slots, reason) == (8, "decrease_safe_ups")
+
+
+def test_adaptive_slots_never_breach_bounds_or_scale_without_measurement() -> None:
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(4), None, maximum=8)
+    assert (state.slots, reason) == (4, "no_ups_window")
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(8), UpsWindow((60.0, 60.0, 60.0)), maximum=8)
+    assert (state.slots, reason) == (8, "hold_safe_ups")
