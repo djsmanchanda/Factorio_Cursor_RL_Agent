@@ -75,4 +75,5 @@ def test_capacity_probe_scales_slots_with_explicit_resource_limits() -> None:
     assert '--count $slots --attempts-per-scenario $AttemptsPerStage' in source
     assert r'data\training-capacity\slots-' in source
     assert '--database (Join-Path $CapacityDirectory "experience.db")' in source
+    assert '[int]$result.attempts -ne $slots' in source
     assert '$record.elapsed_seconds -gt ($baselineSeconds * $MaximumSlowdown)' in source

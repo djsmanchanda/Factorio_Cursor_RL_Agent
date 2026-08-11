@@ -75,8 +75,15 @@ for ($slots = $StartSlots; $slots -le $MaximumSlots; $slots += $Step) {
         Remove-Item -LiteralPath $stopPath -Force -ErrorAction SilentlyContinue
     }
     $watch.Stop()
-    if ($exitCode -ne 0) { throw "training probe failed at $slots slots: $output" }
-    $result = ($output | Out-String | ConvertFrom-Json)
+    try {
+        $result = ($output | Out-String | ConvertFrom-Json)
+    }
+    catch {
+        throw "training probe returned no structured result at $slots slots: $output"
+    }
+    if ($exitCode -ne 0 -and [int]$result.attempts -ne $slots) {
+        throw "training probe controller failed at $slots slots: $output"
+    }
     if ($samples.Count -eq 0) { $samples.Add([pscustomobject](Get-HostSample)) }
     $averageCpu = ($samples | Measure-Object -Property cpu_percent -Average).Average
     $minimumMemory = ($samples | Measure-Object -Property available_memory_mb -Minimum).Minimum
