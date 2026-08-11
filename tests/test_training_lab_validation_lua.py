@@ -325,6 +325,27 @@ def test_stale_live_episode_records_do_not_protect_surfaces(lua) -> None:
     assert list(lua.globals().deleted.values()) == ["training/mining-delivery-00000018"]
     assert list(lua.globals().merged.values()) == ["training-mining-delivery-00000018"]
 
+def test_orphan_training_forces_without_surfaces_are_merged(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={},
+          pending_force_merges={}, orphan_surfaces={}}}
+        merged = {}
+        game = {
+          surfaces={},
+          forces={neutral={name='neutral', valid=true},
+            ['training-mining-delivery-dead']={name='training-mining-delivery-dead', valid=true}},
+          connected_players={},
+          merge_forces=function(force, _) merged[#merged + 1] = force.name end
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    result = world.cleanup_orphan_surfaces(0)
+
+    assert list(lua.globals().merged.values()) == ["training-mining-delivery-dead"]
+    assert list(result.recycled_forces.values()) == ["training-mining-delivery-dead"]
+
+
 def test_provision_reclaims_expired_surface_ownership(lua) -> None:
     scenario = _scenario()
     surface_name = scenario["environment"]["surface_name"]

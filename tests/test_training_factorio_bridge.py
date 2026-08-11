@@ -9,7 +9,10 @@ import pytest
 
 from planners.sandbox_infrastructure import build_layout_authorization
 from training.candidates import mining_delivery_candidates
-from training.factorio_bridge import _MAX_UPLOAD_CHUNKS, _UPLOAD_CHUNK_BYTES, FactorioTrainingBridge, TrainingBridgeError
+from training.factorio_bridge import (
+    _MAX_UPLOAD_CHUNKS, _REPORT_RETENTION, _UPLOAD_CHUNK_BYTES,
+    FactorioTrainingBridge, TrainingBridgeError,
+)
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
 
@@ -93,6 +96,22 @@ class ReportRcon:
 def test_bridge_rejects_non_loopback_host(tmp_path):
     with pytest.raises(ValueError, match="loopback"):
         FactorioTrainingBridge(tmp_path, host="192.0.2.1", port=27015, password="x", rcon=ReportRcon(tmp_path))
+
+
+def test_bridge_bounds_shared_report_history(tmp_path):
+    report_dir = tmp_path / "factorio_training_lab" / "reports"
+    report_dir.mkdir(parents=True)
+    for index in range(20):
+        (report_dir / f"observation_{index:04d}.json").write_text("{}", encoding="utf-8")
+    bridge = FactorioTrainingBridge(
+        tmp_path, host="127.0.0.1", port=27015, password="x",
+        rcon=ReportRcon(tmp_path),
+    )
+    bridge._retain_reports = 5
+
+    assert bridge._prune_reports() == 15
+    assert len(list(report_dir.glob("*.json"))) == 5
+    assert _REPORT_RETENTION >= 100
 
 
 def test_bridge_binds_provision_and_recycle_reports(tmp_path):

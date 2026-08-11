@@ -20,6 +20,7 @@ _REPORT_SUBDIR = Path("factorio_training_lab") / "reports"
 _COMMAND_VERSION = "1.0.0"
 _UPLOAD_CHUNK_BYTES = 1_600
 _MAX_UPLOAD_CHUNKS = 256
+_REPORT_RETENTION = 512
 _REPORT_KINDS = {
     "training_execute": "execution",
     "training_observe": "observation",
@@ -45,6 +46,7 @@ class FactorioTrainingBridge:
         self._rcon = rcon or RconClient(host, port, password, timeout=command_timeout)
         self._poll_interval = poll_interval
         self._command_timeout = command_timeout
+        self._retain_reports = _REPORT_RETENTION
         schema_path = Path(__file__).resolve().parents[1] / "schemas" / "training_episode_report.schema.json"
         self._report_validator = Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
 
@@ -73,7 +75,37 @@ class FactorioTrainingBridge:
                 continue
         return result
 
-    def _wait_report(self, known: Mapping[Path, tuple[int, int]], predicate) -> dict:
+    def _prune_reports(self, keep: Path | None = None) -> int:
+        """Bound the shared training report directory to recent history.
+
+        All logical slots share one script-output directory. Without retention,
+        every bridge poll stats the entire lifetime of the batch and concurrent
+        slots turn report collection into an I/O bottleneck.
+        """
+        directory = self.script_output / _REPORT_SUBDIR
+        if not directory.is_dir():
+            return 0
+        candidates: list[tuple[int, str, Path]] = []
+        for item in directory.glob("*.json"):
+            try:
+                candidates.append((item.stat().st_mtime_ns, item.name, item))
+            except OSError:
+                continue
+        if len(candidates) <= self._retain_reports:
+            return 0
+        candidates.sort(reverse=True)
+        removed = 0
+        for _mtime, _name, item in candidates[self._retain_reports:]:
+            if keep is not None and item == keep:
+                continue
+            try:
+                item.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def _wait_report(self, known: Mapping[Path, tuple[int, int]], predicate) -> tuple[dict, Path]:
         deadline = time.monotonic() + self._command_timeout
         while time.monotonic() < deadline:
             for path, signature in self._files().items():
@@ -84,7 +116,7 @@ class FactorioTrainingBridge:
                 except (OSError, json.JSONDecodeError):
                     continue
                 if predicate(report):
-                    return report
+                    return report, path
             time.sleep(self._poll_interval)
         raise TrainingBridgeError("timed out waiting for a matching training report")
 
@@ -104,17 +136,19 @@ class FactorioTrainingBridge:
         request_id = uuid.uuid4().hex
         payload = {"version": _COMMAND_VERSION, "request_id": request_id, "episode_id": episode_id}
         payload.update(dict(extra or {}))
+        self._prune_reports()
         known = self._files()
         response = self._rcon.command(f"/{name} " + json.dumps(payload, separators=(",", ":")))
         if "error" in response.lower():
             raise TrainingBridgeError(response.strip())
         kind = _REPORT_KINDS.get(name, name.removeprefix("training_"))
-        report = self._wait_report(
+        report, report_path = self._wait_report(
             known,
             lambda item: item.get("request_id") == request_id
             and item.get("episode_id") == episode_id
             and (item.get("kind") != kind or final_status is None or item.get("status") == final_status),
         )
+        self._prune_reports(report_path)
         self._validate_report(report, kind)
         return report
 

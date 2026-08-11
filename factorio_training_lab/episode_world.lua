@@ -332,6 +332,48 @@ local function owned_training_surfaces(state, tick)
   return owned
 end
 
+local function owned_training_forces(state, tick)
+  local owned = {}
+  for _, episode in pairs(state.episodes) do
+    local active = episode.status == "ready"
+        or episode.status == "running"
+        or episode.status == "recycling"
+    local heartbeat = episode.last_sample_tick or episode.started_tick
+    local fresh = episode.status == "recycling"
+        or (type(heartbeat) == "number" and tick - heartbeat <= ORPHAN_GRACE_TICKS)
+    if active and fresh and type(episode.force_name) == "string" then
+      owned[episode.force_name] = true
+    end
+  end
+  for force_name, _ in pairs(state.pending_force_merges) do
+    owned[force_name] = true
+  end
+  return owned
+end
+
+local function has_surface_for_force(force_name)
+  local expected = "training/" .. string.sub(force_name, 10)
+  for _, surface in pairs(game.surfaces) do
+    if surface.name == expected then return true end
+  end
+  return false
+end
+
+local function cleanup_orphan_forces(state, tick)
+  local owned = owned_training_forces(state, tick)
+  local merged = {}
+  for name, force in pairs(game.forces) do
+    if string.sub(name, 1, 9) == "training-"
+        and not owned[name]
+        and not has_surface_for_force(name)
+        and force.valid then
+      local ok = pcall(function() game.merge_forces(force, game.forces.neutral) end)
+      if ok then merged[#merged + 1] = name end
+    end
+  end
+  return merged
+end
+
 local function recycle_orphan_surface(surface, tick, owned, immediate)
   local state = shared.ensure_storage()
   local name = surface.name
@@ -366,7 +408,8 @@ local function cleanup_orphan_surfaces(tick, immediate)
   local owned = owned_training_surfaces(state, tick)
   local candidates = {}
   local result = {
-    inspected = 0, recycled = {}, pending = {}, connected = {}, refused = {}
+    inspected = 0, recycled = {}, recycled_forces = cleanup_orphan_forces(state, tick),
+    pending = {}, connected = {}, refused = {}
   }
   for _, surface in pairs(game.surfaces) do
     if training_surface_name(surface.name) then candidates[#candidates + 1] = surface end

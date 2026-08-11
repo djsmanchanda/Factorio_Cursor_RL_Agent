@@ -2379,3 +2379,11 @@ that consumed it was not.
 - What: Raised the configurable shared-runtime slot ceiling to 80 and generated `training-workers-wsl.json` with 80 logical slots. Future adaptive runs now default to 40 initial slots, a 4-slot adjustment, and an 80-slot maximum.
 - Safety: The current batch remains on its original 40-slot configuration; no worker or server restart was performed.
 - Validation: 14 focused slot/scheduler tests passed; config verified from `training-wsl-01-slot-01` through `training-wsl-01-slot-80`.
+
+## [2026-08-12] RL report retention and orphan-force cleanup
+- Files: `training/factorio_bridge.py`, `factorio_training_lab/episode_world.lua`, and focused bridge/training-lab tests.
+- What: Bounded the shared training-report directory to the newest 512 artifacts and added training-only cleanup for orphan forces with no owned surface, while preserving active leases and pending force merges.
+- Why: 40 concurrent bridges were scanning about 35,910 old JSON reports and timing out before finding their own reports; after that was fixed, stale training forces exhausted Factorio's force budget.
+- Evidence: Moved 35,398 old reports to a recoverable archive, leaving 512 hot reports; cleanup returned `ok=true`, the worker measured 3 built-in forces and 0 training surfaces before restart, and a fresh 40-slot stage is delivering reports with no new timeout or force-limit failures. Focused RL suites pass `69 passed`.
+- Lifecycle: The WSL worker was redeployed/restarted and the GUI training-lab copy synchronized. Restart the GUI Factorio session before joining the training server.
+- Next: Observe the adaptive controller's UPS-gated scale-up carefully; one training force is allocated per active surface, so the 80-slot ceiling must not be reached without a force-budget strategy.

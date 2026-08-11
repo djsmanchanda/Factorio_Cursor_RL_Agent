@@ -93,6 +93,7 @@ def test_training_control_registers_orphan_surface_watchdog() -> None:
     assert "world.cleanup_orphan_surfaces(event.tick)" in control
     assert "ORPHAN_GRACE_TICKS = 3600" in world
     assert "game.delete_surface(surface)" in world
+    assert "cleanup_orphan_forces" in world
     assert "training_cleanup_orphans" in world
     assert "RECYCLE_STALE_TRAINING_SURFACES" in world
 
