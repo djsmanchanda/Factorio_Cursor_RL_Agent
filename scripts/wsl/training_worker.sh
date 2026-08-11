@@ -88,13 +88,14 @@ configure_bridge() {
 }
 
 ensure_secret() {
-  local bridge_root="$1"
-  if [[ ! -s "$SECRET_PATH" ]]; then
+  local seed_secret="$HOME/factorio-training-01/rcon-password"
+  if [[ "$WORKER_INDEX" != "01" && -s "$seed_secret" ]]; then
+    cp "$seed_secret" "$SECRET_PATH"
+  elif [[ ! -s "$SECRET_PATH" ]]; then
     umask 077
     od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$SECRET_PATH"
   fi
   chmod 600 "$SECRET_PATH"
-  if [[ ! -s "$bridge_root/rcon-password" ]]; then cp "$SECRET_PATH" "$bridge_root/rcon-password"; fi
 }
 
 bootstrap() {
@@ -120,7 +121,7 @@ bootstrap() {
   fi
   if [[ ! -f "$DATA_ROOT/saves/training-01.zip" ]]; then cp "$source_save" "$DATA_ROOT/saves/training-01.zip"; fi
   configure_bridge "$bridge_root"
-  ensure_secret "$bridge_root"
+  ensure_secret
   sync_mods "$repo_root"
   echo "bootstrapped WSL training worker $WORKER_INDEX at $WORKER_ROOT"
 }

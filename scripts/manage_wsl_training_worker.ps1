@@ -41,14 +41,6 @@ function Assert-TrainingPortsAvailable {
     }
 }
 
-function Protect-SecretFile {
-    param([Parameter(Mandatory)][string]$SecretPath)
-    $acl = Get-Acl -LiteralPath $SecretPath
-    $acl.SetAccessRuleProtection($true, $false)
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($identity, "Read", "Allow"))
-    Set-Acl -LiteralPath $SecretPath -AclObject $acl
-}
 
 function Invoke-Worker {
     param([Parameter(Mandatory)][int]$Index, [Parameter(Mandatory)][string]$WorkerAction, [string[]]$Arguments = @())
@@ -91,7 +83,7 @@ switch ($Action) {
                 (ConvertTo-WslPath $Archive), (ConvertTo-WslPath $SourceSave),
                 (ConvertTo-WslPath $repoRoot), (ConvertTo-WslPath $bridgeRoot)
             )
-            Protect-SecretFile (Join-Path $bridgeRoot "rcon-password")
+
         }
         Write-WorkerConfig
     }

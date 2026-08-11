@@ -2317,3 +2317,8 @@ that consumed it was not.
 - What: Additional WSL workers now clone the verified worker-01 runtime when the original headless archive is unavailable.
 - Why: Scaling a known-good local runtime must not depend on retaining a one-time download.
 - Next: Bootstrap workers 02-04, deploy the training lab, and run the fresh four-worker smoke batch.
+## [2026-08-11] WSL-private shared training RCON secret
+- Files: WSL worker manager/script, WSL batch wrapper, and worker regression tests.
+- What: The four workers share worker-01's `chmod 0600` secret inside WSL; the Windows controller reads that private WSL path without storing or rewriting a bridge-folder password.
+- Why: Scaling training must not depend on Windows ACL mutation or expose a copied credential in the bridge output tree.
+- Next: Bootstrap and start the four workers, then launch a fresh four-worker smoke batch.

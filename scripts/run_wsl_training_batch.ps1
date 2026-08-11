@@ -1,16 +1,18 @@
 # Path: scripts/run_wsl_training_batch.ps1
-# Purpose: Run the Windows training controller against the WSL worker without manual credential entry.
+# Purpose: Run the Windows training controller against WSL workers using their private shared secret.
 
 [CmdletBinding()]
 param(
     [Parameter(ValueFromRemainingArguments)]
-    [string[]]$TrainingArguments
+    [string[]]$TrainingArguments,
+    [string]$Distro = "Ubuntu"
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workerConfig = Join-Path $repoRoot "training-workers-wsl.json"
-$secretFile = "$env:LOCALAPPDATA\Factorio-training-wsl-01\rcon-password"
+$secretLinuxPath = (& wsl.exe -d $Distro -- bash -lc 'printf %s "$HOME/factorio-training-01/rcon-password"').Trim()
+$secretFile = "\\wsl$\$Distro$($secretLinuxPath.Replace('/', '\\'))"
 
 foreach ($path in @($workerConfig, $secretFile)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

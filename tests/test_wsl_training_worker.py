@@ -33,7 +33,8 @@ def test_wsl_worker_exposes_only_game_udp_and_keeps_rcon_loopback() -> None:
     assert '--rcon-port' not in source
     assert '--rcon-password "$(cat "$SECRET_PATH")"' in source
     assert 'od -An -N32 -tx1 /dev/urandom' in source
-    assert 'if [[ ! -s "$bridge_root/rcon-password" ]]' in source
+    assert 'seed_secret="$HOME/factorio-training-01/rcon-password"' in source
+    assert 'if [[ "$WORKER_INDEX" != "01" && -s "$seed_secret" ]]' in source
 
 
 def test_windows_helpers_create_four_workers_without_exposing_credentials() -> None:
@@ -44,8 +45,10 @@ def test_windows_helpers_create_four_workers_without_exposing_credentials() -> N
     assert 'return 35000 + $Index' in manager
     assert 'return 28000 + $Index' in manager
     assert '--rcon-password' not in manager
-    assert 'Protect-SecretFile' in manager
+    assert 'Protect-SecretFile' not in manager
     assert 'Assert-TrainingPortsAvailable' in manager
+    assert 'factorio-training-01/rcon-password' in runner
+    assert '\\wsl$' in runner
     assert '--rcon-secret-file $secretFile' in runner
     assert 'FACTORIO_TRAINING_RCON_PASSWORD' not in runner
 
