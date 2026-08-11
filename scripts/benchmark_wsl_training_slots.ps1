@@ -96,7 +96,6 @@ for ($slots = $StartSlots; $slots -le $MaximumSlots; $slots += $Step) {
         average_cpu_percent = [math]::Round($averageCpu, 2)
         minimum_available_memory_mb = [math]::Round($minimumMemory, 0)
     }
-    $history += [pscustomobject]$record
     $healthy = $record.completion_rate -ge $MinimumCompletionRate -and
         $record.average_cpu_percent -le $MaximumCpuPercent -and
         $record.minimum_available_memory_mb -ge $MinimumAvailableMemoryMB
