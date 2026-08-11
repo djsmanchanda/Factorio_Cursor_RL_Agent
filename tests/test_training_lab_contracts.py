@@ -61,7 +61,7 @@ def test_observation_report_is_schema_valid() -> None:
             "resource_remaining": 1_000_000,
             "built_entities": {"transport-belt": 42},
             "forbidden_entities": 0, "out_of_bounds_entities": 0,
-            "budget_overruns": 0, "fixtures_valid": True,
+            "budget_overruns": 0, "fixtures_valid": True, "power_connected": True,
         },
         "failure": {"kind": "none", "reason": ""},
     }
@@ -173,3 +173,11 @@ def test_training_force_completes_only_finite_primary_research() -> None:
     assert "INFINITE_TECH_LEVEL = 4294967295" in world
     assert "technology.level = max_level" in world
     assert "force.reset_technology_effects()" in world
+
+
+def test_power_disconnects_are_structured_training_evidence() -> None:
+    source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")
+
+    assert "local function power_state" in source
+    assert 'episode.failure_kind = "power_unconnected"' in source
+    assert "power_connected = powered" in source

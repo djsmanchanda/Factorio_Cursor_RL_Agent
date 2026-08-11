@@ -1,6 +1,8 @@
 # Path: tests/test_training_candidates.py
 # Purpose: Prove seeded training catalogs remain safe, distinct, and budget bounded.
 
+import math
+
 from planners.plan_validation import actions, validate_build_plan
 from training.candidates import mining_delivery_candidates
 from training.canonical import plan_hash
@@ -34,3 +36,15 @@ def test_candidates_only_place_budgeted_entities():
 def test_candidate_catalog_is_seed_deterministic():
     scenario = generate_mining_delivery_scenario(42)
     assert mining_delivery_candidates(scenario) == mining_delivery_candidates(scenario)
+
+
+def test_candidates_anchor_the_first_pole_inside_power_source_coverage():
+    for seed in range(100):
+        scenario = generate_mining_delivery_scenario(seed)
+        source = next(item for item in scenario["fixtures"] if item["kind"] == "power_source")
+        for candidate in mining_delivery_candidates(scenario):
+            first = next(
+                action["position"] for action in actions(candidate["plan"])
+                if action["entity"] == "medium-electric-pole"
+            )
+            assert math.dist(source["position"], (first["x"], first["y"])) <= 3.5

@@ -12,6 +12,8 @@ from training.canonical import plan_hash
 from training.contracts import validate_scenario
 
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
+_POWER_SOURCE_COVERAGE = 3.5
+_POWER_SOURCE_POLE_OFFSET = 2.5
 _MATERIAL_COST = {
     "electric-mining-drill": 60,
     "fast-inserter": 11,
@@ -118,12 +120,38 @@ def _safe_pole(point: tuple[float, float], occupied: set[tuple[int, int]]) -> tu
     return available
 
 
-def _power_actions(plan_actions: list[dict], belt_y: float, xs: list[float], variant: int) -> list[dict]:
+def _source_anchor(
+    source: tuple[float, float], target: tuple[float, float], occupied: set[tuple[int, int]],
+) -> tuple[float, float]:
+    """Place the first pole in the source fixture's supply area, toward its route."""
+    dx, dy = target[0] - source[0], target[1] - source[1]
+    if abs(dx) >= abs(dy):
+        offset = _POWER_SOURCE_POLE_OFFSET if dx >= 0 else -_POWER_SOURCE_POLE_OFFSET
+        raw = (source[0] + offset, source[1] + 0.5)
+    else:
+        offset = _POWER_SOURCE_POLE_OFFSET if dy >= 0 else -_POWER_SOURCE_POLE_OFFSET
+        raw = (source[0] + 0.5, source[1] + offset)
+    anchor = _safe_pole(raw, occupied)
+    if math.dist(source, anchor) > _POWER_SOURCE_COVERAGE:
+        raise ValueError("candidate power source is outside its first pole supply area")
+    return anchor
+
+
+def _power_actions(
+    scenario: Mapping, plan_actions: list[dict], belt_y: float, xs: list[float], variant: int,
+) -> list[dict]:
     occupied = occupied_tile_indices([("production", {"phases": [{"actions": plan_actions}]})])
     top = [(x, belt_y - 4) for x in xs[::2]]
     bottom = [(x, belt_y + 4) for x in reversed(xs[::2])]
     targets = top + bottom if variant == 0 else list(reversed(bottom + top))
-    points, previous = [], (0.0, 0.0)
+    fixture = next(item for item in scenario["fixtures"] if item["kind"] == "power_source")
+    source = tuple(float(value) for value in fixture["position"])
+    occupied.update(
+        (math.floor(source[0]) + dx, math.floor(source[1]) + dy)
+        for dx in (-1, 0) for dy in (-1, 0)
+    )
+    anchor = _source_anchor(source, targets[0], occupied)
+    points, previous = [anchor], anchor
     for target in targets:
         distance = math.dist(previous, target)
         steps = max(1, math.ceil(distance / 6.0))
@@ -136,7 +164,7 @@ def _power_actions(plan_actions: list[dict], belt_y: float, xs: list[float], var
             points.append(_safe_pole(raw, occupied))
         previous = target
     unique = list(dict.fromkeys(points))
-    if any(math.dist(left, right) > 9 for left, right in zip([(0.0, 0.0)] + unique, unique)):
+    if any(math.dist(left, right) > 9 for left, right in zip(unique, unique[1:])):
         raise ValueError("candidate power poles exceed medium-pole wire reach")
     drill_points = [
         (action["position"]["x"], action["position"]["y"])
@@ -159,7 +187,7 @@ def _count_entities(plan: Mapping) -> dict[str, int]:
 def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
     drills, belt_y, xs = _drill_positions(scenario, drill_count)
     transport = _belt_actions(scenario, drills, belt_y, xs, variant)
-    power = _power_actions(drills + transport, belt_y, xs, variant)
+    power = _power_actions(scenario, drills + transport, belt_y, xs, variant)
     plan = {
         "surface": scenario["environment"]["surface_name"],
         "force": scenario["environment"]["force_name"],

@@ -70,7 +70,7 @@
         "delivered_items", "sample_ticks", "sample_items", "rate_per_tick",
         "sustained_ticks", "resource_remaining", "built_entities",
         "forbidden_entities", "out_of_bounds_entities", "budget_overruns",
-        "fixtures_valid"
+        "fixtures_valid", "power_connected"
       ],
       "properties": {
         "delivered_items": {"type": "integer", "minimum": 0},
@@ -86,7 +86,8 @@
         "forbidden_entities": {"type": "integer", "minimum": 0},
         "out_of_bounds_entities": {"type": "integer", "minimum": 0},
         "budget_overruns": {"type": "integer", "minimum": 0},
-        "fixtures_valid": {"type": "boolean"}
+        "fixtures_valid": {"type": "boolean"},
+        "power_connected": {"type": "boolean"}
       }
     },
     "failure": {
@@ -94,7 +95,7 @@
       "additionalProperties": false,
       "required": ["kind", "reason"],
       "properties": {
-        "kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "timeout"]},
+        "kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "power_unconnected", "timeout"]},
         "reason": {"type": "string"}
       }
     },

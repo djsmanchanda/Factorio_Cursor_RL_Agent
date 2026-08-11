@@ -44,7 +44,7 @@
       "required": ["status", "failure_kind", "reason"],
       "properties": {
         "status": {"enum": ["completed", "failed", "timed_out"]},
-        "failure_kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "timeout"]},
+        "failure_kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "power_unconnected", "timeout"]},
         "reason": {"type": "string"}
       }
     },

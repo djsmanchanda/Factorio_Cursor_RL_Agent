@@ -62,7 +62,7 @@ class ReportRcon:
                     "delivered_items": 0, "sample_ticks": 0, "sample_items": 0,
                     "rate_per_tick": 0, "sustained_ticks": 0, "resource_remaining": 1,
                     "built_entities": {}, "forbidden_entities": 0, "out_of_bounds_entities": 0,
-                    "budget_overruns": 0, "fixtures_valid": True,
+                    "budget_overruns": 0, "fixtures_valid": True, "power_connected": True,
                 },
                 "failure": {"kind": "none", "reason": ""},
             })

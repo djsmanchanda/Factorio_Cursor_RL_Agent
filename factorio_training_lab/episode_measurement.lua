@@ -83,9 +83,35 @@ local function check_fixtures(surface, force, episode)
   return true
 end
 
+local function power_state(surface, force, episode)
+  local drills = surface.find_entities_filtered({ name = "electric-mining-drill", force = force })
+  if #drills == 0 then return true, "" end
+  local source = nil
+  for _, fixture in pairs(episode.fixtures) do
+    if fixture.kind == "power_source" then
+      source = fixture_entity(surface, force, fixture)
+      break
+    end
+  end
+  local network = source and source.electric_network_id
+  if not network then return false, "power source has no electric network" end
+  for _, drill in pairs(drills) do
+    if drill.electric_network_id ~= network then
+      return false, "drill is disconnected from the power source"
+    end
+  end
+  return true, ""
+end
+
 local function fail_safety(episode, reason)
   episode.status = "failed"
   episode.failure_kind = "safety"
+  episode.failure_reason = reason
+end
+
+local function fail_power(episode, reason)
+  episode.status = "failed"
+  episode.failure_kind = "power_unconnected"
   episode.failure_reason = reason
 end
 
@@ -96,6 +122,9 @@ local function sample_episode(episode, tick)
     fail_safety(episode, "protected fixture is missing or changed")
     return
   end
+  local powered, power_reason = power_state(surface, force, episode)
+  episode.power_connected = powered
+  if not powered then fail_power(episode, power_reason); return end
   local sink = fixture_entity(surface, force, episode.fixtures[episode.sink_fixture_id])
   local inventory = sink and sink.get_inventory(defines.inventory.chest) or nil
   if not inventory then fail_safety(episode, "item sink inventory is unavailable"); return end
@@ -138,6 +167,9 @@ local function observation(payload)
   if not check_fixtures(surface, force, episode) then
     fail_safety(episode, "protected fixture is missing or changed")
   end
+  local powered, power_reason = power_state(surface, force, episode)
+  episode.power_connected = powered
+  if not powered then fail_power(episode, power_reason) end
   if forbidden > 0 or outside > 0 or overruns > 0 then
     fail_safety(episode, "training entity constraint violated")
   end
@@ -157,7 +189,8 @@ local function observation(payload)
       sustained_ticks = episode.sustained_ticks,
       resource_remaining = resource_remaining(surface, episode), built_entities = counts,
       forbidden_entities = forbidden, out_of_bounds_entities = outside,
-      budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode)
+      budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode),
+      power_connected = powered,
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }
   }
@@ -184,6 +217,7 @@ end
 
 return {
   advance_sample = advance_sample,
+  power_state = power_state,
   check_fixtures = check_fixtures,
   register_commands = register_commands,
   sample_all = sample_all

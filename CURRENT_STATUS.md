@@ -2300,3 +2300,9 @@ that consumed it was not.
 - Files: `AGENTS.md`, `docs/factorio_operations.md`, `FULL_DOCUMENTATION.md`.
 - What: Elevated learn-don't-accumulate-exceptions, moved learning principles earlier, made doc routing procedural, added an evidence ladder, and moved volatile runtime details to the operations runbook.
 - Why: Keep enduring agent behavior prominent while isolating operational details that will change with the repository.
+
+## [2026-08-11] Training power-source connectivity
+- Files: `training/candidates/mining_delivery.py`, `factorio_training_lab/episode_measurement.lua`, training report schemas and focused tests.
+- What: Anchored each generated pole route inside its generator fixture's supply area and classified disconnected source/drill networks as `power_unconnected`.
+- Why: The catalog treated an energy interface like a pole wire endpoint, so every candidate timed out without electricity.
+- Next: Deploy the training mod, restart worker 01 and the batch, then verify a fresh powered episode.
