@@ -2332,3 +2332,9 @@ that consumed it was not.
 - What: Replaced the 60-tick instantaneous delivery rate with a bounded 600-tick rolling rate for sustain evaluation.
 - Why: Low-rate inserters deliver in small batches; a zero item 60-tick slice was false evidence of a throughput collapse despite sustained average delivery above target.
 - Next: Redeploy the training lab to four WSL workers and run the clean four-worker smoke batch.
+## [2026-08-11] Shared-runtime parallel training slots
+- Files: `training/scheduler.py`, WSL training manager/config example, RL training docs, focused scheduler/launcher tests.
+- What: Replaced the four-server default with four logical slots sharing one explicit WSL Factorio runtime. Each slot has unique telemetry and episode identity but shares worker 01's loopback endpoint and report directory; the scheduler validates that sharing is intentional and that separate runtimes retain unique ports and output paths.
+- Why: The training lab already owns multiple isolated `training/*` surfaces and samples them together, so duplicating Factorio processes and saves was unnecessary overhead.
+- Evidence: A fresh live smoke batch completed 4/4 on `training/mining-delivery-00000000` through `00000003` using only game `35001` / RCON `28001`; workers 02-04 were stopped.
+- Next: Run the longer population batch with four concurrent slots while observing UPS, report latency, and cleanup behavior.

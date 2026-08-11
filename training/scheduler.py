@@ -1,5 +1,5 @@
 # Path: training/scheduler.py
-# Purpose: Validate isolated workers and coordinate exclusive hardware phases.
+# Purpose: Validate isolated training slots and coordinate exclusive hardware phases.
 
 from __future__ import annotations
 
@@ -41,14 +41,30 @@ def validate_worker_specs(workers: Sequence[WorkerSpec]) -> None:
     if not workers:
         raise ValueError("at least one explicit training worker is required")
     identities = [worker.worker_id for worker in workers]
-    ports = [port for worker in workers for port in (worker.game_port, worker.rcon_port)]
-    outputs = [worker.script_output.resolve() for worker in workers]
     if len(identities) != len(set(identities)):
         raise ValueError("worker ids must be unique")
-    if len(ports) != len(set(ports)):
-        raise ValueError("all worker ports must be unique")
-    if len(outputs) != len(set(outputs)):
-        raise ValueError("worker script-output directories must be unique")
+    runtimes: dict[str, tuple[str, int, int, Path]] = {}
+    endpoints: dict[tuple[str, int, int, Path], str] = {}
+    game_ports: dict[tuple[str, int], str] = {}
+    rcon_ports: dict[tuple[str, int], str] = {}
+    outputs: dict[Path, str] = {}
+    for worker in workers:
+        output = worker.script_output.resolve()
+        endpoint = (worker.host, worker.game_port, worker.rcon_port, output)
+        prior_endpoint = runtimes.setdefault(worker.instance_id, endpoint)
+        if prior_endpoint != endpoint:
+            raise ValueError("slots sharing an instance_id must use one Factorio runtime")
+        prior_instance = endpoints.setdefault(endpoint, worker.instance_id)
+        if prior_instance != worker.instance_id:
+            raise ValueError("a Factorio runtime endpoint must use one shared instance_id")
+        for claimed, key in (
+            (game_ports, (worker.host, worker.game_port)),
+            (rcon_ports, (worker.host, worker.rcon_port)),
+            (outputs, output),
+        ):
+            owner = claimed.setdefault(key, worker.instance_id)
+            if owner != worker.instance_id:
+                raise ValueError("Factorio runtime ports and script-output must stay isolated")
 
 
 def load_worker_specs(path: Path) -> list[WorkerSpec]:

@@ -11,7 +11,9 @@ param(
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
     [ValidateRange(1, 8)]
-    [int]$WorkerCount = 4
+    [int]$WorkerCount = 1,
+    [ValidateRange(1, 32)]
+    [int]$SlotsPerWorker = 4
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,22 +53,25 @@ function Invoke-Worker {
 
 function Write-WorkerConfig {
     $output = Join-Path $repoRoot "training-workers-wsl.json"
-    $workers = for ($index = 1; $index -le $WorkerCount; $index++) {
+    $workers = foreach ($index in 1..$WorkerCount) {
         $bridgeRoot = WorkerBridgeRoot $index
-        [ordered]@{
-            worker_id = "training-wsl-$(WorkerSuffix $index)"
-            instance_id = "factorio-training-wsl-$(WorkerSuffix $index)"
-            host = "127.0.0.1"
-            game_port = GamePort $index
-            rcon_port = RconPort $index
-            script_output = (Join-Path $bridgeRoot "script-output").Replace("\", "/")
-            surface_prefix = "training/"
-            force_prefix = "training-"
+        foreach ($slot in 1..$SlotsPerWorker) {
+            [ordered]@{
+                worker_id = "training-wsl-$(WorkerSuffix $index)-slot-$(WorkerSuffix $slot)"
+                # Slots are concurrent surfaces in this one explicit Factorio process.
+                instance_id = "factorio-training-wsl-$(WorkerSuffix $index)"
+                host = "127.0.0.1"
+                game_port = GamePort $index
+                rcon_port = RconPort $index
+                script_output = (Join-Path $bridgeRoot "script-output").Replace("\", "/")
+                surface_prefix = "training/"
+                force_prefix = "training-"
+            }
         }
     }
     $payload = [ordered]@{ workers = @($workers) }
     [IO.File]::WriteAllText($output, ($payload | ConvertTo-Json -Depth 4) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-    Write-Host "Wrote ignored local worker config for $WorkerCount worker(s): $output"
+    Write-Host "Wrote ignored local worker config for $WorkerCount Factorio runtime(s) and $($workers.Count) concurrent slot(s): $output"
 }
 
 if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {

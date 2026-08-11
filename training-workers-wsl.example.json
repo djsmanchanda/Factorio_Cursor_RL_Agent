@@ -1,7 +1,7 @@
 {
   "workers": [
     {
-      "worker_id": "training-wsl-01",
+      "worker_id": "training-wsl-01-slot-01",
       "instance_id": "factorio-training-wsl-01",
       "host": "127.0.0.1",
       "game_port": 35001,

@@ -37,11 +37,13 @@ def test_wsl_worker_exposes_only_game_udp_and_keeps_rcon_loopback() -> None:
     assert 'if [[ "$WORKER_INDEX" != "01" && -s "$seed_secret" ]]' in source
 
 
-def test_windows_helpers_create_four_workers_without_exposing_credentials() -> None:
+def test_windows_helpers_create_four_slots_on_one_runtime_without_exposing_credentials() -> None:
     manager = MANAGER.read_text(encoding="utf-8")
     runner = RUNNER.read_text(encoding="utf-8")
 
-    assert '[int]$WorkerCount = 4' in manager
+    assert '[int]$WorkerCount = 1' in manager
+    assert '[int]$SlotsPerWorker = 4' in manager
+    assert 'training-wsl-$(WorkerSuffix $index)-slot-$(WorkerSuffix $slot)' in manager
     assert 'return 35000 + $Index' in manager
     assert 'return 28000 + $Index' in manager
     assert '--rcon-password' not in manager

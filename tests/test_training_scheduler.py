@@ -30,6 +30,22 @@ def test_workers_need_unique_explicit_training_boundaries(tmp_path) -> None:
         WorkerSpec("bad", "bad", "example.com", 1, 2, tmp_path / "bad", "training/", "training-")
 
 
+def test_slots_can_share_one_explicit_factorio_runtime(tmp_path) -> None:
+    first = worker(tmp_path, "slot-one", 35001, 28001)
+    second = WorkerSpec(
+        "slot-two", first.instance_id, first.host, first.game_port, first.rcon_port,
+        first.script_output, first.surface_prefix, first.force_prefix,
+    )
+    validate_worker_specs([first, second])
+
+    different_runtime = WorkerSpec(
+        "slot-three", "instance-three", first.host, first.game_port, first.rcon_port,
+        first.script_output, first.surface_prefix, first.force_prefix,
+    )
+    with pytest.raises(ValueError, match="shared instance_id"):
+        validate_worker_specs([first, different_runtime])
+
+
 def test_resource_phase_lock_allows_same_phase_and_excludes_other_phase() -> None:
     lock = ResourcePhaseLock()
     entered: list[str] = []

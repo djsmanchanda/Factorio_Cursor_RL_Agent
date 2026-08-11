@@ -48,16 +48,18 @@ Store reward components separately so the observatory and autoresearch can ident
 
 Use seeded elitist selection with diversity protection. Preserve champions, mutate several dimensions, and periodically test novel populations so a locally successful layout does not collapse exploration.
 
-## Parallel workers
+## Parallel training slots
 
-One Factorio process executes one physical episode at a time. Ten concurrent attempts require ten isolated workers with unique game ports, RCON ports, saves, and `script-output` paths. Scale worker count only while UPS, memory, report latency, and cleanup remain healthy.
+One Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The default local setup therefore uses one WSL headless runtime and four logical training slots, all sharing one game/RCON endpoint and `script-output` directory while retaining unique worker IDs, surfaces, forces, episodes, telemetry files, and report request IDs. This avoids duplicating saves and server processes.
+
+Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
 The preferred local worker uses the Linux headless build under WSL2:
 
 ```powershell
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 4
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 4
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCount 4
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 1 -SlotsPerWorker 4
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 1
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCount 1
 powershell -File scripts\run_wsl_training_batch.ps1 --count 100 --attempts-per-scenario 20
 ```
 
