@@ -2344,3 +2344,8 @@ that consumed it was not.
 - Why: Concurrency must be measured on the laptop's actual Factorio surfaces, RCON traffic, and report cleanup rather than inferred from four independent servers or a synthetic benchmark.
 - Safety: The probe halts on low completion ratio, CPU/memory pressure, or major wall-time regression. Candidate timeouts are retained as learning evidence but are not automatically misclassified as host exhaustion.
 - Next: Resume the live capacity probe from 12 slots after the clean reset, retaining the highest healthy slot count for normal batches.
+## [2026-08-11] Verified twenty-slot shared training runtime
+- Files: `CURRENT_STATUS.md` and isolated ignored capacity evidence.
+- What: Measured one WSL Factorio runtime with 12, 16, and 20 simultaneous `training/*` surfaces. The 20-slot stage completed 19/20 attempts (95%), averaged 28.8% host CPU, retained at least 9,984 MiB available memory, and stayed within the bounded wall-time gate.
+- Why: Confirmed that this laptop can run the RL training system at 20 logical concurrent slots without maintaining twenty Factorio servers.
+- Next: Normal training now uses 20 slots on game port 35001/RCON 28001; watch the Observatory and promote only held-out policy evidence.
