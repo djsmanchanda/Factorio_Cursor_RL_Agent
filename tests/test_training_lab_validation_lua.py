@@ -235,7 +235,7 @@ def test_primary_research_completes_finite_technologies_only(lua) -> None:
 
 def test_orphan_training_surfaces_recycle_after_a_grace_window(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={active={status='running', surface_name='training/mining-delivery-00000015'}}, pending_force_merges={}, orphan_surfaces={}}}
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={active={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000015'}}, pending_force_merges={}, orphan_surfaces={}}}
         deleted, merged = {}, {}
         log = function(message) last_log = message end
         orphan = {name='training/mining-delivery-0000005c', valid=true}
@@ -267,7 +267,7 @@ def test_terminal_episode_records_do_not_protect_stale_surfaces(lua) -> None:
     lua.execute("""
         storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
           done={status='timed_out', surface_name='training/mining-delivery-00000016'},
-          active={status='running', surface_name='training/mining-delivery-00000017'}
+          active={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000017'}
         }, pending_force_merges={}, orphan_surfaces={}}}
         deleted, merged = {}, {}
         log = function(_) end

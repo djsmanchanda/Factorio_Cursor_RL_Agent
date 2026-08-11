@@ -282,8 +282,7 @@ local function owned_training_surfaces(state, tick)
         or episode.status == "recycling"
     local heartbeat = episode.last_sample_tick or episode.started_tick
     local fresh = episode.status == "recycling"
-        or type(heartbeat) ~= "number"
-        or tick - heartbeat <= ORPHAN_GRACE_TICKS
+        or (type(heartbeat) == "number" and tick - heartbeat <= ORPHAN_GRACE_TICKS)
     if active and fresh and type(episode.surface_name) == "string" then
       owned[episode.surface_name] = true
     end
