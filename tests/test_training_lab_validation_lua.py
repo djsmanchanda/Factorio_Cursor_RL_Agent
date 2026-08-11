@@ -294,6 +294,37 @@ def test_terminal_episode_records_do_not_protect_stale_surfaces(lua) -> None:
     assert list(lua.globals().deleted.values()) == ["training/mining-delivery-00000016"]
     assert list(lua.globals().merged.values()) == ["training-mining-delivery-00000016"]
 
+def test_stale_live_episode_records_do_not_protect_surfaces(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
+          stale={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000018'},
+          fresh={status='running', started_tick=3500, last_sample_tick=3590, surface_name='training/mining-delivery-00000019'}
+        }, pending_force_merges={}, orphan_surfaces={}}}
+        deleted, merged = {}, {}
+        log = function(_) end
+        stale_surface = {name='training/mining-delivery-00000018', valid=true}
+        fresh_surface = {name='training/mining-delivery-00000019', valid=true}
+        game = {
+          surfaces={stale=stale_surface, fresh=fresh_surface},
+          forces={neutral={name='neutral'}, ['training-mining-delivery-00000018']={name='training-mining-delivery-00000018', valid=true}},
+          connected_players={},
+          delete_surface=function(surface)
+            deleted[#deleted + 1] = surface.name
+            surface.valid = false
+            for key, value in pairs(game.surfaces) do if value == surface then game.surfaces[key] = nil end end
+            return nil
+          end,
+          merge_forces=function(force, _) merged[#merged + 1] = force.name end
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.cleanup_orphan_surfaces(0)
+    world.cleanup_orphan_surfaces(3601, True)
+
+    assert list(lua.globals().deleted.values()) == ["training/mining-delivery-00000018"]
+    assert list(lua.globals().merged.values()) == ["training-mining-delivery-00000018"]
+
 def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
     lua.execute("""
         painted = {}

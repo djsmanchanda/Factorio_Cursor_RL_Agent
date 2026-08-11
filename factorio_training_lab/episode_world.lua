@@ -272,7 +272,7 @@ local function matching_force_name(surface_name)
   return "training-" .. string.sub(surface_name, #TRAINING_SURFACE_PREFIX + 1)
 end
 
-local function owned_training_surfaces(state)
+local function owned_training_surfaces(state, tick)
   local owned = {}
   for _, episode in pairs(state.episodes) do
     -- Terminal records remain in storage for evidence, but no longer own a
@@ -280,7 +280,11 @@ local function owned_training_surfaces(state)
     local active = episode.status == "ready"
         or episode.status == "running"
         or episode.status == "recycling"
-    if active and type(episode.surface_name) == "string" then
+    local heartbeat = episode.last_sample_tick or episode.started_tick
+    local fresh = episode.status == "recycling"
+        or type(heartbeat) ~= "number"
+        or tick - heartbeat <= ORPHAN_GRACE_TICKS
+    if active and fresh and type(episode.surface_name) == "string" then
       owned[episode.surface_name] = true
     end
   end
@@ -318,7 +322,7 @@ end
 local function cleanup_orphan_surfaces(tick, immediate)
   if type(tick) ~= "number" or tick < 0 then error("cleanup tick must be non-negative") end
   local state = shared.ensure_storage()
-  local owned = owned_training_surfaces(state)
+  local owned = owned_training_surfaces(state, tick)
   local candidates = {}
   local result = {
     inspected = 0, recycled = {}, pending = {}, connected = {}, refused = {}
