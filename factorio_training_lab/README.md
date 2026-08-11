@@ -13,6 +13,7 @@ Registered RCON-only commands:
 - `/training_provision <json>`
 - `/training_observe <json>`
 - `/training_recycle <json>`
+- `/training_cleanup_orphans <json>`
 - `/training_focus <json>` (configured connected observer only)
 - `/training_upload <json>`
 - `/training_execute <json>`
@@ -46,3 +47,6 @@ the first recycle report says `pending_force_merge` and the final report says
 seconds. If a surface is no longer registered to an episode for one minute,
 it is treated as an orphan, spectators are left untouched on that surface, and
 the surface plus its matching training force are recycled automatically.
+The Observatory also exposes an explicit stale-surface cleanup button. It only
+targets unowned `training/*` surfaces, protects active episode registrations,
+skips surfaces with connected players, and requires a confirmation token.

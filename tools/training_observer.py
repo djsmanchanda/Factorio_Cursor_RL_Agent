@@ -80,6 +80,22 @@ def _handler(
                 raise ValueError("view request values are invalid")
             return worker_id, episode_id
 
+        def _cleanup_request(self) -> str:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 1 or length > _MAX_VIEW_REQUEST_BYTES:
+                raise ValueError("invalid cleanup request length")
+            if self.headers.get_content_type() != "application/json":
+                raise ValueError("cleanup request must be JSON")
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict) or set(payload) != {"worker_id", "confirmation"}:
+                raise ValueError("cleanup request shape is invalid")
+            worker_id, confirmation = payload["worker_id"], payload["confirmation"]
+            if not isinstance(worker_id, str) or not isinstance(confirmation, str):
+                raise ValueError("cleanup request values are invalid")
+            if confirmation != "RECYCLE_STALE_TRAINING_SURFACES":
+                raise ValueError("cleanup confirmation is invalid")
+            return worker_id
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             request_id, status = uuid.uuid4().hex, 500
             try:
@@ -104,27 +120,34 @@ def _handler(
         def do_POST(self) -> None:  # noqa: N802 - controlled local observer action
             request_id, status = uuid.uuid4().hex, 500
             try:
-                if self.path != "/api/view":
-                    self._send_json(405, {"error": "dashboard is read-only"})
+                if self.path not in {"/api/view", "/api/recycle-stale"}:
+                    self._send_json(405, {"error": "dashboard action is not available"})
                     status = 405
                 elif viewer is None:
-                    self._send_json(503, {"error": "training view control is unavailable"})
+                    self._send_json(503, {"error": "training control is unavailable"})
                     status = 503
-                else:
+                elif self.path == "/api/view":
                     worker_id, episode_id = self._view_request()
                     result = viewer.focus(worker_id, episode_id)
                     self._send_json(200, {"ok": True, **result})
                     status = 200
-                _log("INFO", "observer.view_request", request_id, path=self.path, status=status)
+                    _log("INFO", "observer.view_request", request_id, path=self.path, status=status)
+                else:
+                    worker_id = self._cleanup_request()
+                    result = viewer.recycle_stale(worker_id)
+                    self._send_json(200, {"ok": True, **result})
+                    status = 200
+                    _log("WARNING", "observer.stale_cleanup", request_id, path=self.path, status=status,
+                         worker_id=worker_id, recycled=len(result.get("recycled", [])))
             except ValueError:
-                self._send_json(400, {"error": "invalid training view request"})
-                _log("WARNING", "observer.view_rejected", request_id, path=self.path, status=400)
+                self._send_json(400, {"error": "invalid training control request"})
+                _log("WARNING", "observer.control_rejected", request_id, path=self.path, status=400)
             except ObserverControlError as exc:
                 self._send_json(409, {"error": str(exc)})
-                _log("WARNING", "observer.view_failed", request_id, path=self.path, status=409)
+                _log("WARNING", "observer.control_failed", request_id, path=self.path, status=409)
             except Exception as exc:
-                _log("ERROR", "observer.view_failed", request_id, path=self.path, error=str(exc))
-                self._send_json(502, {"error": "training view request failed"})
+                _log("ERROR", "observer.control_failed", request_id, path=self.path, error=str(exc))
+                self._send_json(502, {"error": "training control request failed"})
 
         def log_message(self, _format: str, *_args) -> None:
             return

@@ -228,6 +228,23 @@ class FocusRcon:
         self.closed = True
 
 
+class CleanupRcon:
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+        self.closed = False
+
+    def command(self, command: str) -> str:
+        self.commands.append(command)
+        payload = json.loads(command.removeprefix("/training_cleanup_orphans "))
+        return json.dumps({
+            "ok": True, "status": "completed", "request_id": payload["request_id"],
+            "recycled": ["training/mining-delivery-0000005c"], "pending": [],
+            "connected": ["training/mining-delivery-00000059"], "refused": [],
+        })
+
+    def close(self) -> None:
+        self.closed = True
+
 def _viewer(rcon: FocusRcon) -> TrainingSurfaceViewer:
     worker = WorkerSpec(
         worker_id="training-01", instance_id="training-01", host="127.0.0.1",
@@ -250,6 +267,40 @@ def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
     with pytest.raises(Exception, match="unknown training worker"):
         _viewer(FocusRcon()).focus("nauvis", "episode-mining-delivery-00000001")
 
+
+def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
+    rcon = CleanupRcon()
+
+    result = _viewer(rcon).recycle_stale("training-01")
+
+    assert result["recycled"] == ["training/mining-delivery-0000005c"]
+    assert result["connected"] == ["training/mining-delivery-00000059"]
+    assert rcon.commands[0].startswith("/training_cleanup_orphans ")
+    payload = json.loads(rcon.commands[0].split(" ", 1)[1])
+    assert payload["confirmation_token"] == "RECYCLE_STALE_TRAINING_SURFACES"
+    assert rcon.closed is True
+
+def test_http_dashboard_can_request_stale_cleanup(tmp_path) -> None:
+    database, live = tmp_path / "experience.db", tmp_path / "live"
+    rcon = CleanupRcon()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(database, live, _viewer(rcon)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = Request(
+            f"{base}/api/recycle-stale", method="POST", data=json.dumps({
+                "worker_id": "training-01", "confirmation": "RECYCLE_STALE_TRAINING_SURFACES",
+            }).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=2) as response:
+            result = json.loads(response.read())
+        assert result["recycled"] == ["training/mining-delivery-0000005c"]
+        assert rcon.commands[0].startswith("/training_cleanup_orphans ")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 def test_http_dashboard_can_request_a_bounded_training_view(tmp_path) -> None:
     database, live = tmp_path / "experience.db", tmp_path / "live"

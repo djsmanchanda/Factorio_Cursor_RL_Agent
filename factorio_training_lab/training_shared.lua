@@ -25,7 +25,7 @@ local function assert_identifier(value, label)
   return value
 end
 
-local function parse_command(command)
+local function parse_command(command, require_episode)
   if command.player_index ~= nil then
     error("training commands are RCON-only")
   end
@@ -39,7 +39,7 @@ local function parse_command(command)
     error("command version must be " .. VERSION)
   end
   assert_identifier(payload.request_id, "request_id")
-  assert_identifier(payload.episode_id, "episode_id")
+  if require_episode ~= false then assert_identifier(payload.episode_id, "episode_id") end
   return payload
 end
 

@@ -282,43 +282,68 @@ local function owned_training_surfaces(state)
   return owned
 end
 
-local function recycle_orphan_surface(surface, tick, owned)
+local function recycle_orphan_surface(surface, tick, owned, immediate)
   local state = shared.ensure_storage()
   local name = surface.name
   if owned[name] then
     state.orphan_surfaces[name] = nil
-    return
+    return "owned"
   end
   local first_seen = state.orphan_surfaces[name] or tick
   state.orphan_surfaces[name] = first_seen
-  if tick - first_seen < ORPHAN_GRACE_TICKS then return end
+  if not immediate and tick - first_seen < ORPHAN_GRACE_TICKS then return "pending" end
   if players_on_surface(surface) then
     log("[factorio_training_lab] preserving orphan training surface with a connected player: " .. name)
-    return
+    return "connected"
   end
   local force = game.forces[matching_force_name(name)]
   if not game.delete_surface(surface) then
     log("[factorio_training_lab] Factorio refused orphan surface cleanup: " .. name)
-    return
+    return "refused"
   end
   state.orphan_surfaces[name] = nil
   if force and force.valid and force.name ~= "neutral" then
     game.merge_forces(force, game.forces.neutral)
   end
   log("[factorio_training_lab] recycled orphan training surface: " .. name)
+  return "recycled"
 end
 
-local function cleanup_orphan_surfaces(tick)
+local function cleanup_orphan_surfaces(tick, immediate)
   if type(tick) ~= "number" or tick < 0 then error("cleanup tick must be non-negative") end
   local state = shared.ensure_storage()
   local owned = owned_training_surfaces(state)
   local candidates = {}
+  local result = {
+    inspected = 0, recycled = {}, pending = {}, connected = {}, refused = {}
+  }
   for _, surface in pairs(game.surfaces) do
     if training_surface_name(surface.name) then candidates[#candidates + 1] = surface end
   end
   for _, surface in pairs(candidates) do
-    if surface.valid then recycle_orphan_surface(surface, tick, owned) end
+    if surface.valid then
+      result.inspected = result.inspected + 1
+      local status = recycle_orphan_surface(surface, tick, owned, immediate)
+      if status == "recycled" then result.recycled[#result.recycled + 1] = surface.name end
+      if status == "pending" then result.pending[#result.pending + 1] = surface.name end
+      if status == "connected" then result.connected[#result.connected + 1] = surface.name end
+      if status == "refused" then result.refused[#result.refused + 1] = surface.name end
+    end
   end
+  return result
+end
+
+local function cleanup_command(command)
+  local payload = shared.parse_command(command, false)
+  if payload.confirmation_token ~= "RECYCLE_STALE_TRAINING_SURFACES" then
+    error("stale-surface cleanup confirmation token is invalid")
+  end
+  local result = cleanup_orphan_surfaces(game.tick, true)
+  result.ok = true
+  result.status = "completed"
+  result.request_id = payload.request_id
+  result.tick = game.tick
+  rcon.print(helpers.table_to_json(result))
 end
 
 local function evacuate_players(surface)
@@ -444,6 +469,8 @@ local function register_commands()
     command_handler("provision", provision))
   commands.add_command("training_recycle", "Recycle one owned training episode (RCON only).",
     command_handler("recycle", recycle))
+  commands.add_command("training_cleanup_orphans", "Recycle unowned training surfaces (RCON only).",
+    cleanup_command)
   commands.add_command("training_focus", "Focus the configured observer on one training surface (RCON only).",
     focus_command)
   commands.add_command("training_view", "View one active training surface (client only).", view_episode)
@@ -452,6 +479,7 @@ end
 return {
   complete_primary_research = complete_primary_research,
   cleanup_orphan_surfaces = cleanup_orphan_surfaces,
+  cleanup_command = cleanup_command,
   complete_force_merge = complete_force_merge,
   fill_visible_floor = fill_visible_floor,
   focus_observer = focus_observer,
