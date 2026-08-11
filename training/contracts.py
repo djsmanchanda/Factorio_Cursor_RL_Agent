@@ -13,6 +13,7 @@ from jsonschema import Draft7Validator
 
 from training.canonical import scenario_hash
 from training.isolation import assert_training_identity
+from training.power import POWER_SOURCE_ENTITIES, POWER_STORAGE_ENTITIES
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SCENARIO_SCHEMA = _ROOT / "schemas" / "training_scenario.schema.json"
@@ -22,7 +23,6 @@ _MINING_PRODUCTS = frozenset({
     "iron-plate", "copper-plate", "steel-plate",
 })
 _FIXTURE_ENTITIES = {
-    "power_source": "electric-energy-interface",
     "item_sink": "infinity-chest",
 }
 
@@ -94,8 +94,14 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
         raise ValueError("fixture ids must be unique")
     if any(not _contains(world, *fixture["position"]) for fixture in fixtures.values()):
         raise ValueError("every fixture must remain inside the environment bounds")
-    if any(fixture["entity"] != _FIXTURE_ENTITIES[fixture["kind"]] for fixture in fixtures.values()):
-        raise ValueError("fixture kind must use its approved instrumentation entity")
+    for fixture in fixtures.values():
+        kind, entity = fixture["kind"], fixture["entity"]
+        if kind == "power_source" and entity not in POWER_SOURCE_ENTITIES:
+            raise ValueError("power_source fixture must use an approved electricity producer")
+        if kind == "power_storage" and entity not in POWER_STORAGE_ENTITIES:
+            raise ValueError("power_storage fixture must use an accumulator")
+        if kind in _FIXTURE_ENTITIES and entity != _FIXTURE_ENTITIES[kind]:
+            raise ValueError("fixture kind must use its approved instrumentation entity")
     destination = fixtures.get(payload["objective"]["destination_fixture_id"])
     if destination is None or destination["kind"] != "item_sink":
         raise ValueError("objective destination must identify an item_sink fixture")
@@ -104,6 +110,9 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
         raise ValueError("mining delivery scenarios require a power_source fixture")
     if any(fixture["position"] != [0, 0] for fixture in power_sources):
         raise ValueError("power_source fixture must use the integral [0, 0] centre")
+    storage = [fixture for fixture in fixtures.values() if fixture["kind"] == "power_storage"]
+    if len(storage) > 1:
+        raise ValueError("mining delivery scenarios permit at most one power_storage fixture")
     if payload["objective"]["item"] != payload["resource_patch"]["resource"]:
         raise ValueError("objective item must match the resource patch")
     budget = set(payload["construction_budget"])

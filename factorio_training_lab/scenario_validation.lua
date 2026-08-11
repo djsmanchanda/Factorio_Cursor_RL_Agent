@@ -9,6 +9,11 @@ local ALLOWED_ENTITIES = {
   ["medium-electric-pole"] = true, splitter = true,
   ["transport-belt"] = true, ["underground-belt"] = true
 }
+local POWER_SOURCE_ENTITIES = {
+  ["electric-energy-interface"] = true, ["solar-panel"] = true,
+  ["steam-engine"] = true, ["steam-turbine"] = true,
+  ["fusion-generator"] = true
+}
 
 local function is_integer(value)
   return type(value) == "number" and value == math.floor(value)
@@ -84,17 +89,18 @@ end
 
 local function validate_fixtures(scenario)
   local fixtures, ids, kinds = scenario.fixtures, {}, {}
-  if type(fixtures) ~= "table" or #fixtures ~= 2 then
-    error("mining delivery requires exactly two fixtures")
+  if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > 3 then
+    error("mining delivery requires a source, sink, and optional power storage")
   end
   for index, fixture in ipairs(fixtures) do
     local label = "fixtures[" .. index .. "]"
     if type(fixture.id) ~= "string" or fixture.id == "" or ids[fixture.id]
         or fixture.protected ~= true then error(label .. " identity is invalid") end
     validate_position(fixture.position, scenario.environment.bounds, label)
-    local expected = fixture.kind == "power_source" and "electric-energy-interface"
-      or fixture.kind == "item_sink" and "infinity-chest" or nil
-    if expected == nil or fixture.entity ~= expected or kinds[fixture.kind] then
+    local valid_source = fixture.kind == "power_source" and POWER_SOURCE_ENTITIES[fixture.entity]
+    local valid_storage = fixture.kind == "power_storage" and fixture.entity == "accumulator"
+    local valid_sink = fixture.kind == "item_sink" and fixture.entity == "infinity-chest"
+    if not (valid_source or valid_storage or valid_sink) or kinds[fixture.kind] then
       error(label .. " must be one approved unique fixture kind")
     end
     if fixture.kind == "power_source"
@@ -102,6 +108,9 @@ local function validate_fixtures(scenario)
       error("power_source must use an integral centre for its 2x2 footprint")
     end
     ids[fixture.id], kinds[fixture.kind] = fixture, true
+  end
+  if not kinds.power_source or not kinds.item_sink then
+    error("mining delivery requires one power source and one item sink")
   end
   return ids
 end

@@ -17,7 +17,7 @@ The current implementation is a starting point, not the architectural ceiling. C
 
 ## Episode contract
 
-Each episode declares a seed, isolated surface and force, fixtures, inventory budget, allowed entities, objective rate, sustain duration, time limit, and reward weights. A transition records the observation, available or generated actions, chosen action, execution report, structured outcome, next observation, and decomposed reward.
+Each episode declares a seed, isolated surface and force, fixtures, inventory budget, allowed entities, objective rate, sustain duration, time limit, and reward weights. Electricity fixtures are role-tagged: generators must join a pole network, while accumulators are storage that must charge and discharge through that same network rather than being counted as generation. A transition records the observation, available or generated actions, chosen action, execution report, structured outcome, next observation, and decomposed reward.
 
 Training evidence survives surface recycle, process restart, and save replacement.
 
@@ -55,9 +55,9 @@ One Factorio process executes one physical episode at a time. Ten concurrent att
 The preferred local worker uses the Linux headless build under WSL2:
 
 ```powershell
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action start
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action status
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 4
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 4
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCount 4
 powershell -File scripts\run_wsl_training_batch.ps1 --count 100 --attempts-per-scenario 20
 ```
 

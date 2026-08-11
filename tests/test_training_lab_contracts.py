@@ -181,3 +181,5 @@ def test_power_disconnects_are_structured_training_evidence() -> None:
     assert "local function power_state" in source
     assert 'episode.failure_kind = "power_unconnected"' in source
     assert "power_connected = powered" in source
+    assert "POWER_STORAGE_TYPES" in source
+    assert "power storage is disconnected from the power source" in source

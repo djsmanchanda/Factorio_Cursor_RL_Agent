@@ -1,5 +1,5 @@
 # Path: scripts/manage_wsl_training_worker.ps1
-# Purpose: Invoke the unprivileged WSL training worker without touching real-base Factorio.
+# Purpose: Manage isolated WSL Factorio training workers without touching the real-base runtime.
 
 [CmdletBinding()]
 param(
@@ -9,12 +9,19 @@ param(
     [string]$Distro = "Ubuntu",
     [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.0.77.tar.xz",
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
-    [string]$BridgeRoot = "$env:LOCALAPPDATA\Factorio-training-wsl-01"
+    [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
+    [ValidateRange(1, 8)]
+    [int]$WorkerCount = 4
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workerScript = Join-Path $repoRoot "scripts\wsl\training_worker.sh"
+
+function WorkerSuffix([int]$Index) { return "{0:D2}" -f $Index }
+function WorkerBridgeRoot([int]$Index) { return "$BridgeRootBase-$(WorkerSuffix $Index)" }
+function GamePort([int]$Index) { return 35000 + $Index }
+function RconPort([int]$Index) { return 28000 + $Index }
 
 function ConvertTo-WslPath {
     param([Parameter(Mandatory)][string]$WindowsPath)
@@ -22,13 +29,15 @@ function ConvertTo-WslPath {
 }
 
 function Assert-TrainingPortsAvailable {
-    foreach ($port in @(35001, 28001)) {
-        if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
-            throw "Training port $port is already in use; stop the existing worker before starting WSL."
+    for ($index = 1; $index -le $WorkerCount; $index++) {
+        foreach ($port in @((GamePort $index), (RconPort $index))) {
+            if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
+                throw "Training port $port is already in use; stop the existing WSL worker first."
+            }
         }
-    }
-    if (Get-NetUDPEndpoint -LocalPort 35001 -ErrorAction SilentlyContinue) {
-        throw "Training game port 35001 is already in use; stop the existing worker before starting WSL."
+        if (Get-NetUDPEndpoint -LocalPort (GamePort $index) -ErrorAction SilentlyContinue) {
+            throw "Training game port $(GamePort $index) is already in use; stop the existing WSL worker first."
+        }
     }
 }
 
@@ -41,61 +50,66 @@ function Protect-SecretFile {
     Set-Acl -LiteralPath $SecretPath -AclObject $acl
 }
 
+function Invoke-Worker {
+    param([Parameter(Mandatory)][int]$Index, [Parameter(Mandatory)][string]$WorkerAction, [string[]]$Arguments = @())
+    $workerScriptWsl = ConvertTo-WslPath $workerScript
+    & wsl.exe -d $Distro -- bash $workerScriptWsl $WorkerAction (WorkerSuffix $Index) @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "WSL worker $(WorkerSuffix $Index) action failed: $WorkerAction" }
+}
+
 function Write-WorkerConfig {
-    param([Parameter(Mandatory)][string]$OutputRoot)
     $output = Join-Path $repoRoot "training-workers-wsl.json"
-    $payload = [ordered]@{workers = @([ordered]@{
-        worker_id = "training-wsl-01"
-        instance_id = "factorio-training-wsl-01"
-        host = "127.0.0.1"
-        game_port = 35001
-        rcon_port = 28001
-        script_output = (Join-Path $OutputRoot "script-output").Replace("\", "/")
-        surface_prefix = "training/"
-        force_prefix = "training-"
-    })}
-    [IO.File]::WriteAllText(
-        $output, ($payload | ConvertTo-Json -Depth 4) + [Environment]::NewLine,
-        [Text.UTF8Encoding]::new($false)
-    )
-    Write-Host "Wrote ignored local worker config: $output"
+    $workers = for ($index = 1; $index -le $WorkerCount; $index++) {
+        $bridgeRoot = WorkerBridgeRoot $index
+        [ordered]@{
+            worker_id = "training-wsl-$(WorkerSuffix $index)"
+            instance_id = "factorio-training-wsl-$(WorkerSuffix $index)"
+            host = "127.0.0.1"
+            game_port = GamePort $index
+            rcon_port = RconPort $index
+            script_output = (Join-Path $bridgeRoot "script-output").Replace("\", "/")
+            surface_prefix = "training/"
+            force_prefix = "training-"
+        }
+    }
+    $payload = [ordered]@{ workers = @($workers) }
+    [IO.File]::WriteAllText($output, ($payload | ConvertTo-Json -Depth 4) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    Write-Host "Wrote ignored local worker config for $WorkerCount worker(s): $output"
 }
 
 if (-not (Test-Path -LiteralPath $workerScript -PathType Leaf)) {
     throw "WSL training worker script is missing: $workerScript"
 }
 
-$workerScriptWsl = ConvertTo-WslPath $workerScript
 switch ($Action) {
     "bootstrap" {
         foreach ($path in @($Archive, $SourceSave)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-                throw "Bootstrap input is missing: $path"
-            }
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Bootstrap input is missing: $path" }
         }
-        New-Item -ItemType Directory -Path $BridgeRoot -Force | Out-Null
-        & wsl.exe -d $Distro -- bash $workerScriptWsl bootstrap `
-            (ConvertTo-WslPath $Archive) (ConvertTo-WslPath $SourceSave) `
-            (ConvertTo-WslPath $repoRoot) (ConvertTo-WslPath $BridgeRoot)
-        if ($LASTEXITCODE -ne 0) { throw "WSL worker bootstrap failed." }
-        Protect-SecretFile (Join-Path $BridgeRoot "rcon-password")
-        Write-WorkerConfig $BridgeRoot
+        for ($index = 1; $index -le $WorkerCount; $index++) {
+            $bridgeRoot = WorkerBridgeRoot $index
+            New-Item -ItemType Directory -Path $bridgeRoot -Force | Out-Null
+            Invoke-Worker $index "bootstrap" @(
+                (ConvertTo-WslPath $Archive), (ConvertTo-WslPath $SourceSave),
+                (ConvertTo-WslPath $repoRoot), (ConvertTo-WslPath $bridgeRoot)
+            )
+            Protect-SecretFile (Join-Path $bridgeRoot "rcon-password")
+        }
+        Write-WorkerConfig
     }
     "deploy" {
-        & wsl.exe -d $Distro -- bash $workerScriptWsl deploy (ConvertTo-WslPath $repoRoot)
-        if ($LASTEXITCODE -ne 0) { throw "WSL worker deployment failed." }
+        for ($index = 1; $index -le $WorkerCount; $index++) {
+            Invoke-Worker $index "deploy" @((ConvertTo-WslPath $repoRoot))
+        }
     }
     "start" {
         Assert-TrainingPortsAvailable
-        & wsl.exe -d $Distro -- bash $workerScriptWsl start
-        if ($LASTEXITCODE -ne 0) { throw "WSL worker action failed: start" }
+        for ($index = 1; $index -le $WorkerCount; $index++) { Invoke-Worker $index "start" }
     }
     "stop" {
-        & wsl.exe -d $Distro -- bash $workerScriptWsl stop
-        if ($LASTEXITCODE -ne 0) { throw "WSL worker action failed: stop" }
+        for ($index = 1; $index -le $WorkerCount; $index++) { Invoke-Worker $index "stop" }
     }
     "status" {
-        & wsl.exe -d $Distro -- bash $workerScriptWsl status
-        if ($LASTEXITCODE -ne 0) { throw "WSL worker action failed: status" }
+        for ($index = 1; $index -le $WorkerCount; $index++) { Invoke-Worker $index "status" }
     }
 }

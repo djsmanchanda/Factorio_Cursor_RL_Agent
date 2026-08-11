@@ -52,6 +52,16 @@ def _sink_entry(source: tuple[float, float], sink: tuple[float, float]) -> str:
     return "north" if dy > 0 else "south"
 
 
+def _energy_fixture_tiles(scenario: Mapping) -> set[tuple[int, int]]:
+    """Reserve every protected generation or storage fixture from candidate structures."""
+    fixtures = [
+        _placement(fixture["entity"], tuple(fixture["position"]))
+        for fixture in scenario["fixtures"]
+        if fixture["kind"] in {"power_source", "power_storage"}
+    ]
+    return occupied_tile_indices([("energy-fixtures", {"phases": [{"actions": fixtures}]})])
+
+
 def _safe_bridge(source, sink, preferred: str, blocked: set[tuple[int, int]]) -> list[dict]:
     directions = [preferred] + [name for name in ("north", "east", "south", "west") if name != preferred]
     failures = []
@@ -81,7 +91,7 @@ def _belt_actions(
     source = (source_x, belt_y)
     entry = _sink_entry(source, sink)
     blocked = occupied_tile_indices([("drills", {"phases": [{"actions": drills}]})])
-    blocked.update({(-1, -1), (-1, 0), (0, -1), (0, 0)})
+    blocked.update(_energy_fixture_tiles(scenario))
     bridge = [{**action, "action_type": "place_entity"}
               for action in _safe_bridge(source, sink, entry, blocked)]
     direction = "east" if source_x > min(xs) else "west"
@@ -146,10 +156,7 @@ def _power_actions(
     targets = top + bottom if variant == 0 else list(reversed(bottom + top))
     fixture = next(item for item in scenario["fixtures"] if item["kind"] == "power_source")
     source = tuple(float(value) for value in fixture["position"])
-    occupied.update(
-        (math.floor(source[0]) + dx, math.floor(source[1]) + dy)
-        for dx in (-1, 0) for dy in (-1, 0)
-    )
+    occupied.update(_energy_fixture_tiles(scenario))
     anchor = _source_anchor(source, targets[0], occupied)
     points, previous = [anchor], anchor
     for target in targets:

@@ -4,6 +4,14 @@
 local shared = require("training_shared")
 local geometry = require("training_geometry")
 
+local POWER_SOURCE_TYPES = {
+  ["electric-energy-interface"] = true,
+  ["solar-panel"] = true,
+  generator = true,
+  ["fusion-generator"] = true
+}
+local POWER_STORAGE_TYPES = { accumulator = true }
+
 local function advance_sample(episode, delivered, tick)
   local sample_ticks = tick - episode.last_sample_tick
   if sample_ticks <= 0 then return episode end
@@ -83,20 +91,41 @@ local function check_fixtures(surface, force, episode)
   return true
 end
 
+local function electric_network_id(entity)
+  local network = entity and entity.electric_network_id
+  return type(network) == "number" and network >= 0 and network or nil
+end
+
+local function electricity_role(entity)
+  if POWER_STORAGE_TYPES[entity.type] or entity.name == "accumulator" then return "storage" end
+  if POWER_SOURCE_TYPES[entity.type] or POWER_SOURCE_TYPES[entity.name] then return "source" end
+  return nil
+end
+
 local function power_state(surface, force, episode)
   local drills = surface.find_entities_filtered({ name = "electric-mining-drill", force = force })
   if #drills == 0 then return true, "" end
-  local source = nil
+  local source, storage = nil, nil
   for _, fixture in pairs(episode.fixtures) do
     if fixture.kind == "power_source" then
       source = fixture_entity(surface, force, fixture)
-      break
+    elseif fixture.kind == "power_storage" then
+      storage = fixture_entity(surface, force, fixture)
     end
   end
-  local network = source and source.electric_network_id
+  if not source or electricity_role(source) ~= "source" then
+    return false, "power source fixture is not an electricity producer"
+  end
+  local network = electric_network_id(source)
   if not network then return false, "power source has no electric network" end
+  if storage then
+    if electricity_role(storage) ~= "storage" then return false, "power storage fixture is not an accumulator" end
+    if electric_network_id(storage) ~= network then
+      return false, "power storage is disconnected from the power source"
+    end
+  end
   for _, drill in pairs(drills) do
-    if drill.electric_network_id ~= network then
+    if electric_network_id(drill) ~= network then
       return false, "drill is disconnected from the power source"
     end
   end

@@ -58,7 +58,7 @@
         "required": ["id", "kind", "entity", "position", "protected"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["power_source", "item_sink"]},
+          "kind": {"enum": ["power_source", "power_storage", "item_sink"]},
           "entity": {"type": "string", "minLength": 1},
           "position": {"$ref": "#/definitions/position"},
           "protected": {"const": true}

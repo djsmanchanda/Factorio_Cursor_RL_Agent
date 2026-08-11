@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # Path: scripts/wsl/training_worker.sh
-# Purpose: Provision and manage one unprivileged, WSL-native Factorio training worker.
+# Purpose: Provision and manage one indexed, unprivileged WSL-native Factorio training worker.
 
 set -euo pipefail
 
-WORKER_ROOT="$HOME/factorio-training-01"
-RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio"
-DATA_ROOT="$WORKER_ROOT/worker"
-SECRET_PATH="$WORKER_ROOT/rcon-password"
-PID_PATH="$WORKER_ROOT/factorio.pid"
-GAME_PORT=35001
-RCON_PORT=28001
+configure_worker() {
+  local index="$1"
+  [[ "$index" =~ ^[0-9]{2}$ ]] || die "worker index must be a two-digit number"
+  local numeric=$((10#$index))
+  (( numeric >= 1 && numeric <= 8 )) || die "worker index must be between 01 and 08"
+  WORKER_INDEX="$index"
+  WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"
+  RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio"
+  DATA_ROOT="$WORKER_ROOT/worker"
+  SECRET_PATH="$WORKER_ROOT/rcon-password"
+  PID_PATH="$WORKER_ROOT/factorio.pid"
+  GAME_PORT=$((35000 + numeric))
+  RCON_PORT=$((28000 + numeric))
+}
 
 die() {
   echo "training worker: $*" >&2
@@ -36,9 +43,9 @@ write_worker_config() {
 read-data=$RUNTIME_ROOT/data
 write-data=$DATA_ROOT
 EOF
-  cat > "$DATA_ROOT/server-settings.json" <<'EOF'
+  cat > "$DATA_ROOT/server-settings.json" <<EOF
 {
-  "name": "Factorio RL WSL Training Worker 01",
+  "name": "Factorio RL WSL Training Worker $WORKER_INDEX",
   "description": "Private isolated Factorio RL training worker",
   "visibility": {"public": false, "lan": false},
   "game_password": "",
@@ -91,10 +98,7 @@ ensure_secret() {
 }
 
 bootstrap() {
-  local archive="$1"
-  local source_save="$2"
-  local repo_root="$3"
-  local bridge_root="$4"
+  local archive="$1" source_save="$2" repo_root="$3" bridge_root="$4"
   require_file "$archive"
   require_file "$source_save"
   mkdir -p "$WORKER_ROOT" "$DATA_ROOT/mods" "$DATA_ROOT/saves" "$DATA_ROOT/logs"
@@ -109,13 +113,11 @@ bootstrap() {
     mv "$staging/factorio" "$RUNTIME_ROOT"
     trap - RETURN
   fi
-  if [[ ! -f "$DATA_ROOT/saves/training-01.zip" ]]; then
-    cp "$source_save" "$DATA_ROOT/saves/training-01.zip"
-  fi
+  if [[ ! -f "$DATA_ROOT/saves/training-01.zip" ]]; then cp "$source_save" "$DATA_ROOT/saves/training-01.zip"; fi
   configure_bridge "$bridge_root"
   ensure_secret "$bridge_root"
   sync_mods "$repo_root"
-  echo "bootstrapped WSL training worker at $WORKER_ROOT"
+  echo "bootstrapped WSL training worker $WORKER_INDEX at $WORKER_ROOT"
 }
 
 start_worker() {
@@ -140,22 +142,17 @@ start_worker() {
     worker_running || die "worker exited; inspect $DATA_ROOT/logs/factorio-stderr.log"
     sleep 0.5
   done
-  grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log" \
-    || die "worker did not open RCON within 20 seconds"
-  echo "started WSL training worker PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
+  grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log" || die "worker did not open RCON within 20 seconds"
+  echo "started WSL training worker $WORKER_INDEX PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
 }
 
 stop_worker() {
-  if ! worker_running; then
-    rm -f "$PID_PATH"
-    echo "worker is already stopped"
-    return
-  fi
+  if ! worker_running; then rm -f "$PID_PATH"; echo "worker $WORKER_INDEX is already stopped"; return; fi
   local pid
   pid="$(cat "$PID_PATH")"
   kill -INT "$pid"
   for _ in $(seq 1 60); do
-    kill -0 "$pid" 2>/dev/null || { rm -f "$PID_PATH"; echo "stopped WSL training worker"; return; }
+    kill -0 "$pid" 2>/dev/null || { rm -f "$PID_PATH"; echo "stopped WSL training worker $WORKER_INDEX"; return; }
     sleep 0.5
   done
   die "worker PID $pid did not stop after SIGINT"
@@ -163,18 +160,21 @@ stop_worker() {
 
 status_worker() {
   if worker_running; then
-    echo "running PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
+    echo "running worker $WORKER_INDEX PID $(cat "$PID_PATH") game=$(hostname -I | awk '{print $1}'):$GAME_PORT rcon=127.0.0.1:$RCON_PORT"
   else
-    echo "stopped"
+    echo "worker $WORKER_INDEX is stopped"
   fi
 }
 
 action="${1:-}"
+index="${2:-}"
+shift 2 || true
+configure_worker "$index"
 case "$action" in
-  bootstrap) bootstrap "${2:?archive required}" "${3:?save required}" "${4:?repo required}" "${5:?bridge required}" ;;
-  deploy) sync_mods "${2:?repo required}" ;;
+  bootstrap) bootstrap "${1:?archive required}" "${2:?save required}" "${3:?repo required}" "${4:?bridge required}" ;;
+  deploy) sync_mods "${1:?repo required}" ;;
   start) start_worker ;;
   stop) stop_worker ;;
   status) status_worker ;;
-  *) die "usage: $0 {bootstrap|deploy|start|stop|status}" ;;
+  *) die "usage: $0 {bootstrap|deploy|start|stop|status} <worker-index> [arguments]" ;;
 esac
