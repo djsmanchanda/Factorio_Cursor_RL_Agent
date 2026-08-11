@@ -2354,3 +2354,9 @@ that consumed it was not.
 - Files: training/scheduler.py, tools/run_adaptive_training_batch.py, scripts/run_wsl_adaptive_training_batch.ps1, tests/test_training_scheduler.py, docs/rl/training.md
 - What: Added staged UPS-gated concurrency for RL batches. The controller samples tick advancement, treats the conservative lower-tail equivalent of P98 UPS as the safety gate, and grows or shrinks by four slots at stage boundaries. Fixed-runner behavior is unchanged.
 - Validation: focused scheduler suite passes; Python compilation and diff checks pass. Activation requires configuring enough logical slots after the current batch completes.
+
+## [2026-08-12] RL Observatory row cleanup and forty-slot restart
+- Files: `factorio_training_lab/episode_world.lua`, training-lab cleanup tests, and the committed Observatory controls.
+- What: The live worker cleanup now distinguishes terminal/expired-heartbeat episode records from active leases; the Observatory exposes a row-scoped `×` immediately after View. The isolated WSL worker was redeployed and the stale reset verified zero disposable surfaces before launch.
+- Evidence: `48 passed`; worker `training-wsl-01` is running on game `35001` / RCON `28001`; Observatory `127.0.0.1:8766` returns HTTP 200 with 40 configured workers; adaptive controller PID 48356 started at 40 slots with bounds 4–40 and 55 UPS P98 gate.
+- Next: Observe the fresh adaptive batch; it may shrink by four when the measured lower-tail UPS falls below the safety gate.
