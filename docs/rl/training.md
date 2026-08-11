@@ -57,9 +57,9 @@ Slots belonging to the same Factorio runtime must declare the same `instance_id`
 For long runs, use the adaptive controller after configuring enough logical slots:
 
 ```powershell
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 32
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 80
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
-  --initial-slots 4 --minimum-slots 4 --maximum-slots 32 --step 4
+  --initial-slots 40 --minimum-slots 4 --maximum-slots 80 --step 4
 ```
 
 The adaptive controller runs short stages, samples tick advancement over the shared

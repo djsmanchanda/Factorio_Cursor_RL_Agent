@@ -43,6 +43,7 @@ def test_windows_helpers_create_four_slots_on_one_runtime_without_exposing_crede
     runner = RUNNER.read_text(encoding="utf-8")
 
     assert '[int]$WorkerCount = 1' in manager
+    assert '[ValidateRange(1, 80)]' in manager
     assert '[int]$SlotsPerWorker = 4' in manager
     assert 'training-wsl-$(WorkerSuffix $index)-slot-$(WorkerSuffix $slot)' in manager
     assert 'return 35000 + $Index' in manager

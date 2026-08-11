@@ -2373,3 +2373,9 @@ that consumed it was not.
 - What: Replaced the stale GUI training-lab copy with the repository revision and documented that every Lua mod change must update server and GUI copies, followed by a GUI Factorio restart.
 - Evidence: Repository, GUI, and WSL worker copies contain 9 training-mod files; GUI and repository manifests match, including `control.lua` SHA-256 `5912fb55...`.
 - Next: Restart the GUI Factorio session, then rejoin `172.17.71.87:35001`.
+
+## [2026-08-12] RL adaptive slot-cap preparation
+- Files: `scripts/manage_wsl_training_worker.ps1`, `tools/run_adaptive_training_batch.py`, `docs/rl/training.md`, and slot-cap tests.
+- What: Raised the configurable shared-runtime slot ceiling to 80 and generated `training-workers-wsl.json` with 80 logical slots. Future adaptive runs now default to 40 initial slots, a 4-slot adjustment, and an 80-slot maximum.
+- Safety: The current batch remains on its original 40-slot configuration; no worker or server restart was performed.
+- Validation: 14 focused slot/scheduler tests passed; config verified from `training-wsl-01-slot-01` through `training-wsl-01-slot-80`.

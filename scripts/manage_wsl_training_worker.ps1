@@ -12,7 +12,7 @@ param(
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
     [ValidateRange(1, 8)]
     [int]$WorkerCount = 1,
-    [ValidateRange(1, 40)]
+    [ValidateRange(1, 80)]
     [int]$SlotsPerWorker = 4
 )
 
