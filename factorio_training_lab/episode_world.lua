@@ -297,7 +297,8 @@ local function recycle_orphan_surface(surface, tick, owned, immediate)
     return "connected"
   end
   local force = game.forces[matching_force_name(name)]
-  if not game.delete_surface(surface) then
+  local ok, deleted = pcall(game.delete_surface, surface)
+  if not ok or deleted == false then
     log("[factorio_training_lab] Factorio refused orphan surface cleanup: " .. name)
     return "refused"
   end

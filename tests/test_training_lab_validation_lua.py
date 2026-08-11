@@ -248,7 +248,7 @@ def test_orphan_training_surfaces_recycle_after_a_grace_window(lua) -> None:
             deleted[#deleted + 1] = surface.name
             surface.valid = false
             for key, value in pairs(game.surfaces) do if value == surface then game.surfaces[key] = nil end end
-            return true
+            return nil
           end,
           merge_forces=function(force, neutral) merged[#merged + 1] = force.name end
         }
