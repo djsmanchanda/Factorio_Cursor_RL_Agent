@@ -33,6 +33,7 @@ def test_wsl_worker_exposes_only_game_udp_and_keeps_rcon_loopback() -> None:
     assert '--rcon-port' not in source
     assert '--rcon-password "$(cat "$SECRET_PATH")"' in source
     assert 'od -An -N32 -tx1 /dev/urandom' in source
+    assert 'if [[ ! -s "$bridge_root/rcon-password" ]]' in source
 
 
 def test_windows_helpers_create_four_workers_without_exposing_credentials() -> None:

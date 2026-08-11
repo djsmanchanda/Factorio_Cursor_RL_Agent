@@ -94,7 +94,7 @@ ensure_secret() {
     od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$SECRET_PATH"
   fi
   chmod 600 "$SECRET_PATH"
-  cp "$SECRET_PATH" "$bridge_root/rcon-password"
+  if [[ ! -s "$bridge_root/rcon-password" ]]; then cp "$SECRET_PATH" "$bridge_root/rcon-password"; fi
 }
 
 bootstrap() {
