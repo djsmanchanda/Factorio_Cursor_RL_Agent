@@ -275,7 +275,12 @@ end
 local function owned_training_surfaces(state)
   local owned = {}
   for _, episode in pairs(state.episodes) do
-    if type(episode.surface_name) == "string" then
+    -- Terminal records remain in storage for evidence, but no longer own a
+    -- live surface. Keep only states that can still receive worker commands.
+    local active = episode.status == "ready"
+        or episode.status == "running"
+        or episode.status == "recycling"
+    if active and type(episode.surface_name) == "string" then
       owned[episode.surface_name] = true
     end
   end
