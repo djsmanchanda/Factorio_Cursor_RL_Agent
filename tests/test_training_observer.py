@@ -268,6 +268,15 @@ def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
         _viewer(FocusRcon()).focus("nauvis", "episode-mining-delivery-00000001")
 
 
+def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
+    assets = Path(__file__).resolve().parents[1] / "tools"
+    html = (assets / "training_observer.html").read_text(encoding="utf-8")
+    script = (assets / "training_observer.js").read_text(encoding="utf-8")
+    assert "cleanup-status" in html
+    assert "cleanup-worker" not in script
+    assert "'View','Remove'" in script
+    assert "cleanup-button" in script
+
 def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
     rcon = CleanupRcon()
 
