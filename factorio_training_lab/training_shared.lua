@@ -10,8 +10,10 @@ local function ensure_storage()
     report_sequence = 0,
     episodes = {},
     pending_force_merges = {},
+    orphan_surfaces = {},
     uploads = {}
   }
+  storage.training_lab.orphan_surfaces = storage.training_lab.orphan_surfaces or {}
   storage.training_lab.uploads = storage.training_lab.uploads or {}
   return storage.training_lab
 end

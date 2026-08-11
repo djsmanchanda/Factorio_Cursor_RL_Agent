@@ -233,6 +233,36 @@ def test_primary_research_completes_finite_technologies_only(lua) -> None:
     assert lua.globals().research_force.technologies.disabled.researched is False
     assert lua.globals().research_force.effects_reset is True
 
+def test_orphan_training_surfaces_recycle_after_a_grace_window(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={active={surface_name='training/mining-delivery-00000015'}}, pending_force_merges={}, orphan_surfaces={}}}
+        deleted, merged = {}, {}
+        log = function(message) last_log = message end
+        orphan = {name='training/mining-delivery-0000005c', valid=true}
+        owned = {name='training/mining-delivery-00000015', valid=true}
+        game = {
+          surfaces={orphan=orphan, owned=owned},
+          forces={neutral={name='neutral'}, ['training-mining-delivery-0000005c']={name='training-mining-delivery-0000005c', valid=true}},
+          connected_players={},
+          delete_surface=function(surface)
+            deleted[#deleted + 1] = surface.name
+            surface.valid = false
+            for key, value in pairs(game.surfaces) do if value == surface then game.surfaces[key] = nil end end
+            return true
+          end,
+          merge_forces=function(force, neutral) merged[#merged + 1] = force.name end
+        }
+    """)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.cleanup_orphan_surfaces(0)
+    assert list(lua.globals().deleted.values()) == []
+
+    world.cleanup_orphan_surfaces(3600)
+    assert list(lua.globals().deleted.values()) == ["training/mining-delivery-0000005c"]
+    assert list(lua.globals().merged.values()) == ["training-mining-delivery-0000005c"]
+
+
 def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
     lua.execute("""
         painted = {}

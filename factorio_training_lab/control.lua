@@ -20,6 +20,9 @@ end)
 
 script.on_nth_tick(60, function(event)
   measurement.sample_all(event.tick)
+  if event.tick % 600 == 0 then
+    world.cleanup_orphan_surfaces(event.tick)
+  end
 end)
 
 script.on_event(defines.events.on_forces_merged, function(event)

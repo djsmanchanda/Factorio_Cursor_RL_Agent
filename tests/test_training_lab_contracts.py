@@ -86,6 +86,15 @@ def test_report_paths_are_tick_and_sequence_qualified() -> None:
     assert 'string.format("%010d_%06d", game.tick, state.report_sequence)' in source
 
 
+def test_training_control_registers_orphan_surface_watchdog() -> None:
+    control = (LAB / "control.lua").read_text(encoding="utf-8")
+    world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
+
+    assert "world.cleanup_orphan_surfaces(event.tick)" in control
+    assert "ORPHAN_GRACE_TICKS = 3600" in world
+    assert "game.delete_surface(surface)" in world
+
+
 def test_force_recycling_waits_for_the_merge_event() -> None:
     world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
     control = (LAB / "control.lua").read_text(encoding="utf-8")

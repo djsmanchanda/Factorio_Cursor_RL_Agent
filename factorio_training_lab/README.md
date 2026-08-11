@@ -42,4 +42,7 @@ Reports are written beneath
 `script-output/factorio_training_lab/reports/`. Recycling completes
 asynchronously because Factorio removes a merged force at the end of the tick;
 the first recycle report says `pending_force_merge` and the final report says
-`completed`.
+`completed`. A mod-side watchdog scans the `training/*` namespace every ten
+seconds. If a surface is no longer registered to an episode for one minute,
+it is treated as an orphan, spectators are left untouched on that surface, and
+the surface plus its matching training force are recycled automatically.

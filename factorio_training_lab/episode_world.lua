@@ -8,6 +8,8 @@ local LAB_TILE_A = "lab-dark-1"
 local LAB_TILE_B = "lab-dark-2"
 local FLOOR_BATCH_SIZE = 1024
 local OBSERVATORY_SURFACE = "training-observatory"
+local TRAINING_SURFACE_PREFIX = "training/"
+local ORPHAN_GRACE_TICKS = 3600
 local OBSERVATORY_BOUNDS = {
   x_min = -16, y_min = -16,
   x_max_exclusive = 16, y_max_exclusive = 16
@@ -261,6 +263,64 @@ local function players_on_surface(surface)
   return false
 end
 
+local function training_surface_name(name)
+  return type(name) == "string"
+    and string.sub(name, 1, #TRAINING_SURFACE_PREFIX) == TRAINING_SURFACE_PREFIX
+end
+
+local function matching_force_name(surface_name)
+  return "training-" .. string.sub(surface_name, #TRAINING_SURFACE_PREFIX + 1)
+end
+
+local function owned_training_surfaces(state)
+  local owned = {}
+  for _, episode in pairs(state.episodes) do
+    if type(episode.surface_name) == "string" then
+      owned[episode.surface_name] = true
+    end
+  end
+  return owned
+end
+
+local function recycle_orphan_surface(surface, tick, owned)
+  local state = shared.ensure_storage()
+  local name = surface.name
+  if owned[name] then
+    state.orphan_surfaces[name] = nil
+    return
+  end
+  local first_seen = state.orphan_surfaces[name] or tick
+  state.orphan_surfaces[name] = first_seen
+  if tick - first_seen < ORPHAN_GRACE_TICKS then return end
+  if players_on_surface(surface) then
+    log("[factorio_training_lab] preserving orphan training surface with a connected player: " .. name)
+    return
+  end
+  local force = game.forces[matching_force_name(name)]
+  if not game.delete_surface(surface) then
+    log("[factorio_training_lab] Factorio refused orphan surface cleanup: " .. name)
+    return
+  end
+  state.orphan_surfaces[name] = nil
+  if force and force.valid and force.name ~= "neutral" then
+    game.merge_forces(force, game.forces.neutral)
+  end
+  log("[factorio_training_lab] recycled orphan training surface: " .. name)
+end
+
+local function cleanup_orphan_surfaces(tick)
+  if type(tick) ~= "number" or tick < 0 then error("cleanup tick must be non-negative") end
+  local state = shared.ensure_storage()
+  local owned = owned_training_surfaces(state)
+  local candidates = {}
+  for _, surface in pairs(game.surfaces) do
+    if training_surface_name(surface.name) then candidates[#candidates + 1] = surface end
+  end
+  for _, surface in pairs(candidates) do
+    if surface.valid then recycle_orphan_surface(surface, tick, owned) end
+  end
+end
+
 local function evacuate_players(surface)
   local observatory = observatory_surface()
   for _, player in pairs(game.connected_players) do
@@ -391,6 +451,7 @@ end
 
 return {
   complete_primary_research = complete_primary_research,
+  cleanup_orphan_surfaces = cleanup_orphan_surfaces,
   complete_force_merge = complete_force_merge,
   fill_visible_floor = fill_visible_floor,
   focus_observer = focus_observer,
