@@ -14,7 +14,7 @@
     "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"},
     "scenario_hash": {"$ref": "#/definitions/hash"},
     "family": {"const": "mining_delivery"},
-    "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 65535},
     "curriculum": {
       "type": "object",
       "additionalProperties": false,

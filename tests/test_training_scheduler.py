@@ -7,6 +7,9 @@ import threading
 
 import pytest
 
+from tools.run_adaptive_training_batch import _assign
+from tools.run_training_batch import _jobs
+
 from training.scheduler import (
     AdaptiveScaleState, BatchMeasurement, ResourcePhaseLock, UpsWindow, WorkerSpec,
     adjust_adaptive_slots, next_worker_count, percentile, validate_worker_specs,
@@ -45,6 +48,23 @@ def test_slots_can_share_one_explicit_factorio_runtime(tmp_path) -> None:
     with pytest.raises(ValueError, match="shared instance_id"):
         validate_worker_specs([first, different_runtime])
 
+
+def test_repeated_attempts_keep_one_scenario_on_one_shared_runtime_slot(tmp_path) -> None:
+    workers = [worker(tmp_path, f"slot-{index}", 35001 + index, 28001 + index) for index in range(3)]
+    scenarios = [{"scenario_id": "mining-delivery-0001"}, {"scenario_id": "mining-delivery-0002"}]
+    jobs = [(f"episode-{index}", scenarios[index % 2], index) for index in range(6)]
+
+    assigned = _assign(jobs, workers)
+    owners = {job[1]["scenario_id"]: worker_id for worker_id, batch in assigned.items() for job in batch}
+    assert len(owners) == 2
+    for worker_id, batch in assigned.items():
+        assert {job[1]["scenario_id"] for job in batch} <= {
+            scenario_id for scenario_id, owner in owners.items() if owner == worker_id
+        }
+
+    regular = _jobs(scenarios, attempts=3, workers=workers)
+    regular_owners = {job[1]["scenario_id"]: worker_id for worker_id, batch in regular.items() for job in batch}
+    assert regular_owners == owners
 
 def test_resource_phase_lock_allows_same_phase_and_excludes_other_phase() -> None:
     lock = ResourcePhaseLock()

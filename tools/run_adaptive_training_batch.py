@@ -112,9 +112,21 @@ def _jobs(scenarios: Sequence[dict], attempts: int) -> list[tuple]:
 
 
 def _assign(jobs: Sequence[tuple], workers) -> dict[str, list[tuple]]:
+    """Keep repeated attempts of one scenario on one slot of a shared runtime.
+
+    Scenario environments intentionally have stable names for readable Factorio
+    surfaces. Affinity prevents two attempts from provisioning the same named
+    surface concurrently while preserving parallelism across different scenarios.
+    """
     assigned = {worker.worker_id: [] for worker in workers}
-    for index, job in enumerate(jobs):
-        assigned[workers[index % len(workers)].worker_id].append(job)
+    scenario_workers: dict[str, str] = {}
+    for job in jobs:
+        scenario_id = str(job[1]["scenario_id"])
+        worker_id = scenario_workers.get(scenario_id)
+        if worker_id is None:
+            worker_id = workers[len(scenario_workers) % len(workers)].worker_id
+            scenario_workers[scenario_id] = worker_id
+        assigned[worker_id].append(job)
     return assigned
 
 

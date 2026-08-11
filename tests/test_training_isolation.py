@@ -42,7 +42,7 @@ def test_training_identity_rejects_live_mismatched_and_noncanonical_names(
 
 
 def test_training_identity_accepts_exact_paired_names() -> None:
-    assert_training_identity("training/mining-delivery-0000002a", "training-mining-delivery-0000002a")
+    assert_training_identity("training/mining-delivery-002a", "training-mining-delivery-002a")
 
 
 @pytest.mark.parametrize(

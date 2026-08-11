@@ -64,16 +64,21 @@ def test_seeded_mining_delivery_scenario_is_stable_and_valid() -> None:
     assert first == second
     validate_scenario(first)
     assert first["version"] == "1.1.0"
-    assert first["scenario_id"] == "mining-delivery-0000002a"
+    assert first["scenario_id"] == "mining-delivery-002a"
     assert first["scenario_hash"] == scenario_hash(first)
     assert first["family"] == "mining_delivery"
-    assert first["environment"]["surface_name"] == "training/mining-delivery-0000002a"
+    assert first["environment"]["surface_name"] == "training/mining-delivery-002a"
     assert first["objective"]["item"] == first["resource_patch"]["resource"]
     assert first["objective"]["destination_fixture_id"] == "delivery-sink"
     assert first["fixtures"][0]["position"] == [0, 0]
     assert "target_rate_per_second" not in first["objective"]
     assert first["objective"]["target_rate_per_tick"] > 0
 
+
+def test_scenario_ids_are_short_and_seed_range_matches_the_identity() -> None:
+    assert generate_mining_delivery_scenario(0xFFFF)["scenario_id"] == "mining-delivery-ffff"
+    with pytest.raises(ValueError, match="65535"):
+        generate_mining_delivery_scenario(0x10000)
 
 def test_curriculum_generates_one_hundred_unique_bounded_scenarios() -> None:
     scenarios = generate_mining_delivery_curriculum(count=100, start_seed=1000)

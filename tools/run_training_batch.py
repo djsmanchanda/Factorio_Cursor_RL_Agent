@@ -32,13 +32,18 @@ def _load_workers(path: Path) -> list[WorkerSpec]:
     return load_worker_specs(path)
 
 def _jobs(scenarios: list[dict], attempts: int, workers: list[WorkerSpec]) -> dict[str, list[tuple]]:
+    """Assign every attempt of a scenario to one worker for surface affinity."""
     assigned = {worker.worker_id: [] for worker in workers}
+    scenario_workers = {
+        scenario["scenario_id"]: workers[index % len(workers)].worker_id
+        for index, scenario in enumerate(scenarios)
+    }
     index = 0
     for attempt in range(attempts):
         for scenario in scenarios:
-            worker = workers[index % len(workers)]
+            worker_id = scenario_workers[scenario["scenario_id"]]
             episode_id = f"episode-{scenario['scenario_id']}-a{attempt:04d}-{uuid.uuid4().hex[:8]}"
-            assigned[worker.worker_id].append((episode_id, scenario, index))
+            assigned[worker_id].append((episode_id, scenario, index))
             index += 1
     return assigned
 

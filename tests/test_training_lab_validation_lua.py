@@ -325,6 +325,36 @@ def test_stale_live_episode_records_do_not_protect_surfaces(lua) -> None:
     assert list(lua.globals().deleted.values()) == ["training/mining-delivery-00000018"]
     assert list(lua.globals().merged.values()) == ["training-mining-delivery-00000018"]
 
+def test_provision_reclaims_expired_surface_ownership(lua) -> None:
+    scenario = _scenario()
+    surface_name = scenario["environment"]["surface_name"]
+    lua.execute("""
+        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
+          stale={episode_id='old', status='running', started_tick=0, last_sample_tick=0,
+            surface_name='training/mining-delivery-00000007', force_name='training-mining-delivery-00000007'}
+        }, pending_force_merges={}, orphan_surfaces={}, uploads={}}}
+        deleted = {}
+        stale_surface = {name='training/mining-delivery-00000007', valid=true}
+        game = {
+          tick=7200, connected_players={}, surfaces={["training/mining-delivery-00000007"] = stale_surface},
+          forces={neutral={name='neutral'}}
+        }
+        game.delete_surface = function(surface)
+          deleted[#deleted + 1] = surface.name
+          surface.valid = false
+          game.surfaces[surface.name] = nil
+          return nil
+        end
+    """)
+    scenario["environment"]["surface_name"] = "training/mining-delivery-00000007"
+    scenario["environment"]["force_name"] = "training-mining-delivery-00000007"
+    lua.globals().candidate = _to_lua(lua, scenario)
+    world = lua.eval('require("episode_world")')[0]
+
+    world.ensure_names_available(lua.globals().candidate)
+
+    assert list(lua.globals().deleted.values()) == ["training/mining-delivery-00000007"]
+
 def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
     lua.execute("""
         painted = {}

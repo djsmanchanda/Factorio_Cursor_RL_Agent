@@ -162,7 +162,7 @@ local function validate_scenario(scenario)
   if type(scenario) ~= "table" or scenario.version ~= "1.1.0"
       or scenario.family ~= "mining_delivery" or type(scenario.scenario_id) ~= "string"
       or not valid_hash(scenario.scenario_hash)
-      or not is_integer(scenario.seed) or scenario.seed < 0 then
+      or not is_integer(scenario.seed) or scenario.seed < 0 or scenario.seed > 65535 then
     error("scenario identity is invalid")
   end
   validate_environment(scenario)

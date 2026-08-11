@@ -119,7 +119,8 @@ local function complete_primary_research(force)
 end
 
 local function create_force(scenario)
-  local force = game.create_force(scenario.environment.force_name)
+  local force = game.forces[scenario.environment.force_name]
+  if not force then force = game.create_force(scenario.environment.force_name) end
   force.reset()
   complete_primary_research(force)
   return force
@@ -209,12 +210,59 @@ local function existing_result(payload, scenario)
   }
 end
 
-local function ensure_names_available(scenario)
-  if game.surfaces[scenario.environment.surface_name] then
-    error("training surface already exists without matching episode ownership")
+
+local function players_on_surface(surface)
+  for _, player in pairs(game.connected_players) do
+    if player.surface == surface then return true end
   end
-  if game.forces[scenario.environment.force_name] then
-    error("training force already exists without matching episode ownership")
+  return false
+end
+local function episode_for_surface(state, surface_name)
+  for _, episode in pairs(state.episodes) do
+    if episode.surface_name == surface_name then return episode end
+  end
+  return nil
+end
+
+local function episode_is_stale(episode, tick)
+  if episode.status == "recycling" then return false end
+  if episode.status ~= "ready" and episode.status ~= "running" then return true end
+  local heartbeat = episode.last_sample_tick or episode.started_tick
+  return type(heartbeat) ~= "number" or tick - heartbeat > ORPHAN_GRACE_TICKS
+end
+
+local function reclaim_existing_surface(surface_name, owner)
+  local surface = game.surfaces[surface_name]
+  if not surface then return end
+  if players_on_surface(surface) then
+    error("training surface is occupied by a connected observer: " .. surface_name)
+  end
+  local ok, deleted = pcall(function() return game.delete_surface(surface) end)
+  if not ok or deleted == false then
+    error("Factorio refused stale training surface cleanup: " .. surface_name)
+  end
+  local state = shared.ensure_storage()
+  if owner then
+    state.episodes[owner.episode_id] = nil
+    shared.clear_episode_uploads(owner.episode_id)
+  end
+end
+
+local function ensure_names_available(scenario)
+  local state = shared.ensure_storage()
+  local surface_name, force_name = scenario.environment.surface_name, scenario.environment.force_name
+  local owner = episode_for_surface(state, surface_name)
+  local surface = game.surfaces[surface_name]
+  if surface then
+    if owner and not episode_is_stale(owner, game.tick) then
+      error("training surface is already owned by an active episode: " .. surface_name)
+    end
+    reclaim_existing_surface(surface_name, owner)
+  end
+  -- A previous recycle can leave its force behind after the surface is gone.
+  -- create_force safely resets and reuses that isolated force.
+  if state.pending_force_merges[force_name] then
+    error("training force is still being merged: " .. force_name)
   end
 end
 
@@ -256,12 +304,6 @@ local function provision(payload)
   }
 end
 
-local function players_on_surface(surface)
-  for _, player in pairs(game.connected_players) do
-    if player.surface == surface then return true end
-  end
-  return false
-end
 
 local function training_surface_name(name)
   return type(name) == "string"
@@ -495,5 +537,6 @@ return {
   focus_observer = focus_observer,
   reveal_active_episodes = reveal_active_episodes,
   register_commands = register_commands,
-  view_episode = view_episode
+  view_episode = view_episode,
+  ensure_names_available = ensure_names_available
 }

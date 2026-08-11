@@ -2360,3 +2360,10 @@ that consumed it was not.
 - What: The live worker cleanup now distinguishes terminal/expired-heartbeat episode records from active leases; the Observatory exposes a row-scoped `×` immediately after View. The isolated WSL worker was redeployed and the stale reset verified zero disposable surfaces before launch.
 - Evidence: `48 passed`; worker `training-wsl-01` is running on game `35001` / RCON `28001`; Observatory `127.0.0.1:8766` returns HTTP 200 with 40 configured workers; adaptive controller PID 48356 started at 40 slots with bounds 4–40 and 55 UPS P98 gate.
 - Next: Observe the fresh adaptive batch; it may shrink by four when the measured lower-tail UPS falls below the safety gate.
+
+## [2026-08-12] RL surface ownership and compact scenario identities
+- Files: `factorio_training_lab/episode_world.lua`, `factorio_training_lab/scenario_validation.lua`, `training/scenarios/mining_delivery.py`, shared-batch assignment tools, schemas, and focused tests.
+- What: Reconciled stale or terminal disposable surfaces before provisioning, protected fresh active leases, serialized repeated attempts of one scenario onto one shared-runtime slot, and shortened mining-delivery identities to four hexadecimal seed characters with a 65,535 seed ceiling.
+- Why: Repeated attempts reused scenario-scoped surfaces concurrently and orphaned records were rejected as collisions; eight-character names also obscured the active surface list.
+- Validation: 72 focused tests passed. The deployed WSL worker `training-wsl-01` is running on game `35001` / RCON `28001`; a read-only check shows 40 active `training/mining-delivery-0000` through `0027` surfaces, no old eight-digit names, and no collision errors in live telemetry.
+- Next: Let the adaptive batch continue; observe stage completion and UPS before changing concurrency.

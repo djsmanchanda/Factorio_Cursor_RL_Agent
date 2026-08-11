@@ -19,10 +19,11 @@ _TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in (0.5, 1.0, 2.0, 3.0))
 _PATCH_SIZES = (12, 15, 18)
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
 _POLE_WIRE_STEP = 8.0
+_MAX_SCENARIO_SEED = 0xFFFF
 
 
 def _scenario_id(seed: int) -> str:
-    return f"mining-delivery-{seed:08x}"
+    return f"mining-delivery-{seed:04x}"
 
 
 def _opposed_sites(rng: random.Random) -> tuple[tuple[int, int], tuple[float, float]]:
@@ -68,8 +69,8 @@ def _construction_budget(target_rate_per_tick: float, route_span: int) -> dict[s
 
 def generate_mining_delivery_scenario(seed: int) -> dict:
     """Return one deterministic, schema-validated mining training episode."""
-    if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 2_147_483_647:
-        raise ValueError("seed must be an integer from 0 through 2147483647")
+    if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= _MAX_SCENARIO_SEED:
+        raise ValueError("seed must be an integer from 0 through 65535")
     rng = random.Random(seed)
     identifier = _scenario_id(seed)
     resource = rng.choice(_RESOURCES)
@@ -144,6 +145,6 @@ def generate_mining_delivery_curriculum(count: int, start_seed: int = 0) -> list
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         raise ValueError("count must be a positive integer")
     final_seed = start_seed + count - 1
-    if start_seed < 0 or final_seed > 2_147_483_647:
+    if start_seed < 0 or final_seed > _MAX_SCENARIO_SEED:
         raise ValueError("requested curriculum seeds exceed the supported range")
     return [generate_mining_delivery_scenario(seed) for seed in range(start_seed, final_seed + 1)]
