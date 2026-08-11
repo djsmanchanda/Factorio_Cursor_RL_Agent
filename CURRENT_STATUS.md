@@ -2327,3 +2327,8 @@ that consumed it was not.
 - What: Power planning and measurement now include every current electrical consumer, including the final delivery inserter, instead of treating drill power as sufficient evidence.
 - Why: Four live episodes mined ore but delivered none because their sink inserters were outside the pole network while drill-only checks reported power healthy.
 - Next: Redeploy the training lab to the four WSL workers and rerun the fresh four-worker smoke batch before any long experiment.
+## [2026-08-11] Training rolling throughput measurement
+- Files: `factorio_training_lab/episode_measurement.lua`, `episode_world.lua`, and Lua measurement tests.
+- What: Replaced the 60-tick instantaneous delivery rate with a bounded 600-tick rolling rate for sustain evaluation.
+- Why: Low-rate inserters deliver in small batches; a zero item 60-tick slice was false evidence of a throughput collapse despite sustained average delivery above target.
+- Next: Redeploy the training lab to four WSL workers and run the clean four-worker smoke batch.

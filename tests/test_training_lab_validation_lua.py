@@ -108,8 +108,12 @@ def test_tick_sampler_requires_consecutive_target_windows(lua) -> None:
     assert state.sustained_ticks == 60
     module.advance_sample(state, 0, 120)
     assert state.sustained_ticks == 0
-    module.advance_sample(state, 2, 180)
-    module.advance_sample(state, 2, 240)
+    module.advance_sample(state, 3, 180)
+    module.advance_sample(state, 3, 240)
+    module.advance_sample(state, 3, 300)
+    module.advance_sample(state, 3, 360)
+    module.advance_sample(state, 3, 420)
+    module.advance_sample(state, 3, 480)
     assert state.status == "completed"
 
 
@@ -326,3 +330,25 @@ def test_training_focus_moves_only_the_configured_connected_observer(lua) -> Non
     assert result["surface"] == "training/mining-delivery-00000001"
     assert lua.globals().observer.controller["type"] == 7
     assert lua.globals().observer.teleported_surface["name"] == "training/mining-delivery-00000001"
+
+
+def test_tick_sampler_smooths_low_rate_inserter_batches(lua) -> None:
+    lua.execute("storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
+    module = lua.eval('require("episode_measurement")')[0]
+    state = _to_lua(lua, {
+        "last_sample_tick": 0, "started_tick": 0, "sample_ticks": 0,
+        "sample_items": 0, "delivered_items": 0, "rate_per_tick": 0,
+        "sustained_ticks": 0, "status": "ready", "failure_kind": "none",
+        "failure_reason": "", "scenario": {
+            "objective": {"target_rate_per_tick": 1 / 120, "sustain_ticks": 120},
+            "constraints": {"max_episode_ticks": 600},
+        },
+    })
+
+    module.advance_sample(state, 1, 60)
+    module.advance_sample(state, 0, 120)
+    module.advance_sample(state, 1, 180)
+
+    assert state.rate_per_tick >= 1 / 120
+    assert state.sustained_ticks == 180
+    assert state.status == "completed"

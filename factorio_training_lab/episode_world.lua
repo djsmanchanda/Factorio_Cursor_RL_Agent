@@ -236,7 +236,7 @@ local function provision(payload)
     force_name = scenario.environment.force_name, scenario = scenario,
     started_tick = game.tick, last_sample_tick = game.tick, status = "ready",
     fixtures = created.fixtures, sink_fixture_id = created.sink_fixture_id,
-    delivered_items = 0, sample_items = 0, sample_ticks = 0,
+    delivered_items = 0, sample_items = 0, sample_ticks = 0, rate_samples = {},
     rate_per_tick = 0, sustained_ticks = 0,
     failure_kind = "none", failure_reason = ""
   }

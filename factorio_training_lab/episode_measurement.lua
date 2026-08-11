@@ -13,6 +13,7 @@ local POWER_SOURCE_TYPES = {
 local POWER_STORAGE_TYPES = { accumulator = true }
 local POWER_CONSUMER_TYPES = { inserter = true }
 local POWER_CONSUMER_NAMES = { ["electric-mining-drill"] = true }
+local RATE_WINDOW_TICKS = 600
 
 local function advance_sample(episode, delivered, tick)
   local sample_ticks = tick - episode.last_sample_tick
@@ -21,7 +22,19 @@ local function advance_sample(episode, delivered, tick)
   episode.sample_ticks = sample_ticks
   episode.sample_items = delivered
   episode.delivered_items = episode.delivered_items + delivered
-  episode.rate_per_tick = delivered / sample_ticks
+  episode.rate_samples = episode.rate_samples or {}
+  table.insert(episode.rate_samples, { items = delivered, ticks = sample_ticks })
+  local window_items, window_ticks = 0, 0
+  for _, sample in pairs(episode.rate_samples) do
+    window_items = window_items + sample.items
+    window_ticks = window_ticks + sample.ticks
+  end
+  while window_ticks > RATE_WINDOW_TICKS and #episode.rate_samples > 1 do
+    local expired = table.remove(episode.rate_samples, 1)
+    window_items = window_items - expired.items
+    window_ticks = window_ticks - expired.ticks
+  end
+  episode.rate_per_tick = window_items / window_ticks
   local objective = episode.scenario.objective
   if episode.rate_per_tick + 1e-9 >= objective.target_rate_per_tick then
     episode.sustained_ticks = episode.sustained_ticks + sample_ticks
