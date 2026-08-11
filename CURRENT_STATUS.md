@@ -2367,3 +2367,9 @@ that consumed it was not.
 - Why: Repeated attempts reused scenario-scoped surfaces concurrently and orphaned records were rejected as collisions; eight-character names also obscured the active surface list.
 - Validation: 72 focused tests passed. The deployed WSL worker `training-wsl-01` is running on game `35001` / RCON `28001`; a read-only check shows 40 active `training/mining-delivery-0000` through `0027` surfaces, no old eight-digit names, and no collision errors in live telemetry.
 - Next: Let the adaptive batch continue; observe stage completion and UPS before changing concurrency.
+
+## [2026-08-12] RL training GUI mod synchronization
+- Files: `%APPDATA%\Factorio\mods\factorio_training_lab`, `docs/factorio_operations.md`, `docs/rl/training.md`.
+- What: Replaced the stale GUI training-lab copy with the repository revision and documented that every Lua mod change must update server and GUI copies, followed by a GUI Factorio restart.
+- Evidence: Repository, GUI, and WSL worker copies contain 9 training-mod files; GUI and repository manifests match, including `control.lua` SHA-256 `5912fb55...`.
+- Next: Restart the GUI Factorio session, then rejoin `172.17.71.87:35001`.

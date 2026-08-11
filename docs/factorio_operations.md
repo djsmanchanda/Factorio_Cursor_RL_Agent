@@ -44,10 +44,27 @@ Stop repeated retries after the first clear operational failure. Repetition with
 |---|---|
 | Python/controller only | Restart the affected runner/controller |
 | `factorio_mod/*.lua` | Deploy deterministic mod, restart deterministic Factorio runtime, restart runner |
-| `factorio_training_lab/*.lua` | Deploy training mod, restart affected training worker, restart batch/controller if needed |
+| `factorio_training_lab/*.lua` | Deploy training mod, synchronize the GUI training-mod copy, restart the affected training worker and GUI Factorio session, then restart the batch/controller if needed |
 | Documentation/tests only | No runtime restart |
 
 Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compare hashes or timestamps when a client reports mismatched mods or the runtime behaves like old code.
+
+### Mod-copy synchronization and GUI restart
+
+Factorio does not hot-reload Lua scripts. Any changed mod script must be
+synchronized to every runtime that will load it before joining or starting a
+mission:
+
+- `factorio_training_lab/` -> the WSL training worker and
+  `%APPDATA%\Factorio\mods\factorio_training_lab` for GUI observation.
+- `factorio_mod/` -> the deterministic server copy and the matching GUI client
+  copy when the client joins that server.
+
+After synchronizing a script change, restart the affected Factorio server and
+restart the GUI Factorio session before joining. A Python runner restart alone
+is insufficient for Lua changes. The handoff must state which copies were
+updated, which hashes were checked, and that the GUI restart is still required
+or has been completed.
 
 ## Real-base rules
 

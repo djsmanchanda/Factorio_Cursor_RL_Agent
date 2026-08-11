@@ -127,5 +127,5 @@ The site may focus a connected spectator on the owned active training surface. I
 ## Lifecycle
 
 - Python-only training change: restart the affected batch, controller, or observer.
-- `factorio_training_lab/*.lua`: deploy the training mod and restart the affected training worker, then restart its controller if necessary.
+- `factorio_training_lab/*.lua`: deploy the training mod, synchronize `%APPDATA%\Factorio\mods\factorio_training_lab`, restart the affected training worker and GUI Factorio session, then restart its controller if necessary.
 - Training changes never require redeploying the deterministic mod unless shared Lua code was deliberately changed too.
