@@ -297,7 +297,7 @@ local function recycle_orphan_surface(surface, tick, owned, immediate)
     return "connected"
   end
   local force = game.forces[matching_force_name(name)]
-  local ok, deleted = pcall(game.delete_surface, surface)
+  local ok, deleted = pcall(function() return game.delete_surface(surface) end)
   if not ok or deleted == false then
     log("[factorio_training_lab] Factorio refused orphan surface cleanup: " .. name)
     return "refused"
@@ -324,11 +324,12 @@ local function cleanup_orphan_surfaces(tick, immediate)
   for _, surface in pairs(candidates) do
     if surface.valid then
       result.inspected = result.inspected + 1
+      local name = surface.name
       local status = recycle_orphan_surface(surface, tick, owned, immediate)
-      if status == "recycled" then result.recycled[#result.recycled + 1] = surface.name end
-      if status == "pending" then result.pending[#result.pending + 1] = surface.name end
-      if status == "connected" then result.connected[#result.connected + 1] = surface.name end
-      if status == "refused" then result.refused[#result.refused + 1] = surface.name end
+      if status == "recycled" then result.recycled[#result.recycled + 1] = name end
+      if status == "pending" then result.pending[#result.pending + 1] = name end
+      if status == "connected" then result.connected[#result.connected + 1] = name end
+      if status == "refused" then result.refused[#result.refused + 1] = name end
     end
   end
   return result
