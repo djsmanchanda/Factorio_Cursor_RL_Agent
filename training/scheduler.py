@@ -163,12 +163,13 @@ class UpsWindow:
         return sum(self.samples) / len(self.samples)
 
     @property
-    def safe_ups_p98(self) -> float:
-        """UPS maintained for at least 98% of the sample window.
+    def safe_ups_p95(self) -> float:
+        """UPS maintained for at least 95% of the sample window."""
+        return percentile(self.samples, 0.05)
 
-        UPS is a good-is-high metric, so the conservative equivalent of a
-        ``P98 >= 55 UPS`` requirement is the 2nd percentile of UPS values.
-        """
+    @property
+    def safe_ups_p98(self) -> float:
+        """UPS maintained for at least 98% of the sample window."""
         return percentile(self.samples, 0.02)
 
     @property
@@ -191,7 +192,9 @@ def adjust_adaptive_slots(
     minimum: int = 4,
     maximum: int = 32,
     step: int = 4,
-    minimum_safe_ups: float = 55.0,
+    minimum_safe_ups: float | None = None,
+    minimum_safe_ups_p95: float = 57.0,
+    minimum_safe_ups_p98: float = 55.0,
     healthy_windows_to_grow: int = 2,
     unhealthy_windows_to_shrink: int = 1,
 ) -> tuple[AdaptiveScaleState, str]:
@@ -202,12 +205,19 @@ def adjust_adaptive_slots(
         raise ValueError("adaptive state slots are outside its bounds")
     if healthy_windows_to_grow < 1 or unhealthy_windows_to_shrink < 1:
         raise ValueError("adaptive hysteresis windows must be positive")
+    if minimum_safe_ups is not None:
+        minimum_safe_ups_p98 = minimum_safe_ups
+    if minimum_safe_ups_p95 <= 0 or minimum_safe_ups_p98 <= 0:
+        raise ValueError("adaptive UPS thresholds must be positive")
     if window is None:
         return state, "no_ups_window"
 
     healthy = state.healthy_windows
     unhealthy = state.unhealthy_windows
-    if window.safe_ups_p98 >= minimum_safe_ups:
+    if (
+        window.safe_ups_p95 >= minimum_safe_ups_p95
+        and window.safe_ups_p98 >= minimum_safe_ups_p98
+    ):
         healthy += 1
         unhealthy = 0
     else:

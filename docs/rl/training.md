@@ -67,18 +67,23 @@ For long runs, use the adaptive controller after configuring enough logical slot
 ```powershell
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 80
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
-  --initial-slots 4 --minimum-slots 4 --maximum-slots 80 --step 4
+  --initial-slots 20 --minimum-slots 4 --maximum-slots 80 --step 4 `
+  --episodes-per-policy 100 --minimum-ups-p95 57 --minimum-ups-p98 55
 ```
 
-The adaptive controller samples tick advancement over the shared Factorio RCON
-connection every five seconds. It grows by four after two healthy stage windows. An
-unsafe live window interrupts the current disposable stage, recycles its active
-surfaces, records those attempts as `aborted` rather than fitness evidence, requeues
-fresh episode IDs, and shrinks by four immediately; it does not wait for a long
-episode timeout. The safety statistic is the lower-tail equivalent of a P98 UPS
-requirement: at least 55 UPS for 98% of samples. This avoids a high-tail percentile
-hiding short server stalls. A missing or too-short UPS window is neutral and never
-causes a scale-up.
+The adaptive controller starts at 20 logical slots, samples tick advancement over the
+shared Factorio RCON connection every five seconds, and changes capacity by four slots.
+It grows after two healthy stage windows and immediately shrinks after one unsafe
+window. A healthy window requires both lower-tail safeguards: **P95 UPS >= 57** and
+**P98 UPS >= 55**, meaning at least 95% and 98% of samples respectively meet those
+floors. An unsafe live window interrupts the disposable stage, recycles its active
+surfaces, records those attempts as `aborted` rather than fitness evidence, and
+requeues fresh episode IDs; it does not wait for a long episode timeout.
+
+Capacity stages and policy generations are deliberately separate. A policy remains
+immutable through as many capacity stages as needed to obtain 100 terminal episodes;
+only then is it updated into the next generation. Aborted capacity probes do not count
+toward that cohort or enter policy learning.
 
 Live episode measurement is intentionally every five seconds rather than once per
 second, keeping shared RCON/report-file work bounded. In the Observatory,

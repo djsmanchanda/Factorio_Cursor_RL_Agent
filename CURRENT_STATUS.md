@@ -2431,3 +2431,8 @@ that consumed it was not.
 - Decision: Adaptive collection now defaults to the four-slot floor and grows only after healthy windows. Starting at 40 is no longer treated as a safe default; it is a load test above measured capacity.
 - Validation: Focused RL controller, episode, store, observer, scheduler, and CLI suites pass `43 passed`; compilation and diff checks pass.
 - Lifecycle: Python-only. Start a fresh adaptive controller from four slots; no training-mod deployment or GUI restart is required.
+## [2026-08-12] RL 20-slot dual-percentile policy cohorts
+- Decision: Restore a 20-slot starting point, changing capacity by four slots. A stage is healthy only when lower-tail UPS meets both `P95 >= 57` and `P98 >= 55`; one unsafe window backs off immediately.
+- Fix: Decoupled capacity stages from learning. A policy now collects 100 terminal episodes across however many safe stages are required before creating the next generation. Capacity-aborted probes are recycled/requeued and are excluded from both the cohort and reward evidence.
+- Evidence: The interrupted four-slot run showed 28 transitions spread across seven policies, confirming the former four-result generation boundary was too small. Focused scheduler, controller, episode, store, observer, and CLI validation passes `45 passed`; compilation and diff checks pass.
+- Lifecycle: Python-only. Restart the isolated adaptive controller from a fresh database; no Lua deployment or GUI Factorio restart is required.

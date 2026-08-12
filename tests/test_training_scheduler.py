@@ -137,6 +137,19 @@ def test_adaptive_slots_grow_in_four_slot_steps_after_two_healthy_windows() -> N
     assert (state.slots, reason) == (8, "increase_safe_ups")
 
 
+def test_adaptive_slots_require_both_requested_p95_and_p98_thresholds() -> None:
+    p95_failure = UpsWindow(tuple([56.0] * 6 + [60.0] * 94))
+    assert p95_failure.safe_ups_p98 >= 55.0
+    assert p95_failure.safe_ups_p95 < 57.0
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), p95_failure)
+    assert (state.slots, reason) == (16, "decrease_safe_ups")
+
+    passing = UpsWindow(tuple([55.0] * 2 + [57.0] * 3 + [60.0] * 95))
+    assert passing.safe_ups_p98 >= 55.0
+    assert passing.safe_ups_p95 >= 57.0
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), passing)
+    assert (state.slots, reason) == (20, "hold_safe_ups")
+
 def test_adaptive_slots_shrink_by_four_on_an_unhealthy_window() -> None:
     state, reason = adjust_adaptive_slots(AdaptiveScaleState(12), UpsWindow((54.0, 53.0, 52.0)))
     assert (state.slots, reason) == (8, "decrease_safe_ups")
@@ -197,7 +210,8 @@ def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch,
         result = adaptive._run_stage(
             [worker_spec], stage_jobs, "secret", policy, tmp_path / "live", store,
             AdaptiveScaleState(8), minimum_slots=4, maximum_slots=8, step=4,
-            minimum_ups=55.0, healthy_windows_to_grow=2, unhealthy_windows_to_shrink=1,
+            minimum_ups_p95=57.0, minimum_ups_p98=55.0,
+            healthy_windows_to_grow=2, unhealthy_windows_to_shrink=1,
         )
         _results, completed, failed, _window, _error, interrupted, state, reason = result
         assert completed == failed == 0
@@ -208,8 +222,41 @@ def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch,
     retried = _retry_jobs(stage_jobs, interrupted)
     assert retried[0][0] != "episode-capacity"
 
-def test_adaptive_controller_defaults_to_safe_calibration_floor(monkeypatch, tmp_path) -> None:
+def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "sys.argv", ["adaptive", "--workers", str(tmp_path / "workers.json")],
     )
-    assert _parse().initial_slots == 4
+    args = _parse()
+    assert args.initial_slots == 20
+    assert args.episodes_per_policy == 100
+    assert (args.minimum_ups_p95, args.minimum_ups_p98) == (57.0, 55.0)
+
+def test_adaptive_controller_learns_only_after_a_complete_policy_cohort(monkeypatch, tmp_path) -> None:
+    worker_spec = worker(tmp_path, "slot-one", 35001, 28001)
+    cohort_sizes = []
+
+    def staged_result(_workers, stage_jobs, *_args, **_kwargs):
+        episode_id = stage_jobs[0][0]
+        return (
+            [(episode_id, {"episode_id": episode_id}, None)], 1, 0,
+            UpsWindow((60.0, 60.0, 60.0)), None, set(), None, None,
+        )
+
+    def learn(policy, results):
+        cohort_sizes.append(len(results))
+        return policy
+
+    monkeypatch.setattr(adaptive, "load_worker_specs", lambda _path: [worker_spec])
+    monkeypatch.setattr(adaptive, "_rcon_password", lambda _args: "secret")
+    monkeypatch.setattr(adaptive, "_run_stage", staged_result)
+    monkeypatch.setattr(adaptive, "_learn_policy", learn)
+    assert adaptive.main([
+        "--workers", str(tmp_path / "workers.json"), "--count", "3",
+        "--attempts-per-scenario", "1", "--initial-slots", "1",
+        "--minimum-slots", "1", "--maximum-slots", "1", "--step", "1",
+        "--episodes-per-slot", "1", "--episodes-per-policy", "3",
+        "--database", str(tmp_path / "experience.db"),
+        "--checkpoint", str(tmp_path / "policy.json"),
+        "--live-directory", str(tmp_path / "live"),
+    ]) == 0
+    assert cohort_sizes == [3]
