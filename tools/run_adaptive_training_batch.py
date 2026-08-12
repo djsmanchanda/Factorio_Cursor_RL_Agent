@@ -152,6 +152,14 @@ def _write_controller_state(directory: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def _existing_policy_parent(store: TrainingStore, policy_id: str) -> str | None:
+    """Return a checkpoint's stored parent before its restart refresh replaces it."""
+    for row in store.rows("policies"):
+        if row["policy_id"] == policy_id:
+            return row["parent_policy_id"]
+    return None
+
+
 def _retry_jobs(stage_jobs: Sequence[tuple], interrupted: set[str]) -> list[tuple]:
     """Requeue only capacity-aborted work with fresh immutable episode identity."""
     retried = []
@@ -326,7 +334,10 @@ def main(argv: list[str] | None = None) -> int:
     with TrainingStore(args.database) as store:
         for scenario in scenarios:
             store.save_scenario(scenario, "train", scenario["scenario_hash"])
-        store.save_policy(policy.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(policy))
+        store.save_policy(
+            policy.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(policy),
+            parent_policy_id=_existing_policy_parent(store, policy.policy_id),
+        )
         capacity_sampler = UpsSampler(
             workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
         )

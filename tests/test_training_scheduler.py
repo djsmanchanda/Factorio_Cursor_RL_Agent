@@ -231,6 +231,16 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert args.stability_window_seconds == 300.0
     assert args.healthy_windows_to_grow == 1
 
+def test_adaptive_restart_preserves_existing_policy_parent(tmp_path) -> None:
+    with TrainingStore(tmp_path / "experience.db") as store:
+        store.save_policy("policy-g0000-initial", "diagonal_linucb", 0, {}, {})
+        store.save_policy(
+            "policy-g0001-child", "diagonal_linucb", 1, {}, {},
+            parent_policy_id="policy-g0000-initial",
+        )
+        assert adaptive._existing_policy_parent(store, "policy-g0001-child") == "policy-g0000-initial"
+
+
 def test_adaptive_controller_learns_only_after_a_complete_policy_cohort(monkeypatch, tmp_path) -> None:
     worker_spec = worker(tmp_path, "slot-one", 35001, 28001)
     cohort_sizes = []
