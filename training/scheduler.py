@@ -193,8 +193,8 @@ def adjust_adaptive_slots(
     maximum: int = 32,
     step: int = 4,
     minimum_safe_ups: float | None = None,
-    minimum_safe_ups_p95: float = 57.0,
-    minimum_safe_ups_p98: float = 55.0,
+    minimum_safe_ups_p95: float = 50.0,
+    minimum_safe_ups_p98: float = 45.0,
     healthy_windows_to_grow: int = 1,
     unhealthy_windows_to_shrink: int = 1,
 ) -> tuple[AdaptiveScaleState, str]:

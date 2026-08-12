@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Empty, Queue
@@ -258,8 +259,8 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--step", type=int, default=4)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
-    parser.add_argument("--minimum-ups-p95", type=float, default=57.0)
-    parser.add_argument("--minimum-ups-p98", type=float, default=55.0)
+    parser.add_argument("--minimum-ups-p95", type=float, default=50.0)
+    parser.add_argument("--minimum-ups-p98", type=float, default=45.0)
     parser.add_argument("--stability-window-seconds", type=float, default=300.0)
     parser.add_argument("--minimum-ups", type=float, dest="legacy_minimum_ups")
     parser.add_argument("--healthy-windows-to-grow", type=int, default=1)
@@ -303,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     total_completed = total_failed = 0
     stage = cohort = 0
     capacity_window_started = time.monotonic()
+    ups_history: list[dict[str, object]] = []
 
     def window_metrics(window: UpsWindow | None) -> dict[str, float | None]:
         return {
@@ -310,6 +312,15 @@ def main(argv: list[str] | None = None) -> int:
             "safe_ups_p98": round(window.safe_ups_p98, 3) if window else None,
             "tick_time_p98_ms": round(window.tick_time_p98_ms, 3) if window else None,
             "mean_ups": round(window.mean_ups, 3) if window else None,
+        }
+
+    def state_payload(payload: dict) -> dict:
+        return {
+            **payload,
+            "minimum_ups_p95": args.minimum_ups_p95,
+            "minimum_ups_p98": args.minimum_ups_p98,
+            "stability_window_seconds": args.stability_window_seconds,
+            "ups_history": ups_history[-120:],
         }
 
     with TrainingStore(args.database) as store:
@@ -352,6 +363,16 @@ def main(argv: list[str] | None = None) -> int:
                     cohort_completed += completed
                     cohort_failed += failed
                     cohort_results.extend(results)
+                    if window is not None:
+                        ups_history.append({
+                            "stage": stage,
+                            "slots": len(active_workers),
+                            "mean_ups": round(window.mean_ups, 3),
+                            "safe_ups_p95": round(window.safe_ups_p95, 3),
+                            "safe_ups_p98": round(window.safe_ups_p98, 3),
+                            "tick_time_p98_ms": round(window.tick_time_p98_ms, 3),
+                            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        })
                     base_payload = {
                         "stage": stage, "policy_cohort": cohort,
                         "policy_episode_target": args.episodes_per_policy,
@@ -372,8 +393,8 @@ def main(argv: list[str] | None = None) -> int:
                             "slots": state.slots, "interrupted": len(interrupted),
                             "requeued": len(retries), "decision": backoff_reason,
                         }
-                        _write_controller_state(args.live_directory, payload)
-                        print(json.dumps(payload, sort_keys=True), flush=True)
+                        _write_controller_state(args.live_directory, state_payload(payload))
+                        print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
                         continue
                     previous_slots = state.slots
                     if time.monotonic() - capacity_window_started >= args.stability_window_seconds:
@@ -393,8 +414,8 @@ def main(argv: list[str] | None = None) -> int:
                         "decision": decision,
                         "capacity_mode": "drain_before_scale_down" if decision == "decrease_safe_ups" else "normal",
                     }
-                    _write_controller_state(args.live_directory, payload)
-                    print(json.dumps(payload, sort_keys=True), flush=True)
+                    _write_controller_state(args.live_directory, state_payload(payload))
+                    print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
                 if not cohort_results:
                     raise RuntimeError("policy cohort ended without terminal training evidence")
                 learned = _learn_policy(policy, cohort_results)
@@ -413,8 +434,8 @@ def main(argv: list[str] | None = None) -> int:
                     "slots": state.slots, "remaining_attempts": len(jobs),
                     "generation": generation, "policy_id": policy.policy_id,
                 }
-                _write_controller_state(args.live_directory, payload)
-                print(json.dumps(payload, sort_keys=True), flush=True)
+                _write_controller_state(args.live_directory, state_payload(payload))
+                print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
         finally:
             capacity_sampler.stop()
 

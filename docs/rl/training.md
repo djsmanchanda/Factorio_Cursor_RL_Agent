@@ -68,7 +68,7 @@ For long runs, use the adaptive controller after configuring enough logical slot
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 80
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
   --initial-slots 20 --minimum-slots 4 --maximum-slots 80 --step 4 `
-  --episodes-per-policy 100 --minimum-ups-p95 57 --minimum-ups-p98 55 `
+  --episodes-per-policy 100 --minimum-ups-p95 50 --minimum-ups-p98 45 `
   --stability-window-seconds 300
 ```
 
@@ -76,7 +76,7 @@ The adaptive controller starts at 20 logical slots, samples tick advancement ove
 shared Factorio RCON connection every five seconds, and changes capacity by four slots.
 Each capacity target is held for a complete five-minute rolling window. A healthy
 window opens four more gates; an unsafe window closes four gates. A healthy window
-requires both lower-tail safeguards: **P95 UPS >= 57** and **P98 UPS >= 55**, meaning
+requires both lower-tail safeguards: **P95 UPS >= 50** and **P98 UPS >= 45**, meaning
 at least 95% and 98% of samples respectively meet those floors.
 
 Capacity changes are graceful. The controller never interrupts a live episode for a

@@ -124,8 +124,8 @@ def test_concurrency_only_grows_after_safe_throughput_gain() -> None:
 def test_ups_window_uses_conservative_lower_tail_for_p98_safety() -> None:
     window = UpsWindow((60.0, 59.0, 58.0, 40.0, 60.0))
     assert percentile(window.samples, 0.5) == 59.0
-    assert window.safe_ups_p98 < 55.0
-    assert window.tick_time_p98_ms > 1000.0 / 55.0
+    assert window.safe_ups_p98 < 45.0
+    assert window.tick_time_p98_ms > 1000.0 / 45.0
 
 
 def test_adaptive_slots_grow_in_four_slot_steps_after_one_healthy_window() -> None:
@@ -136,20 +136,20 @@ def test_adaptive_slots_grow_in_four_slot_steps_after_one_healthy_window() -> No
 
 
 def test_adaptive_slots_require_both_requested_p95_and_p98_thresholds() -> None:
-    p95_failure = UpsWindow(tuple([56.0] * 6 + [60.0] * 94))
-    assert p95_failure.safe_ups_p98 >= 55.0
-    assert p95_failure.safe_ups_p95 < 57.0
+    p95_failure = UpsWindow(tuple([49.0] * 6 + [60.0] * 94))
+    assert p95_failure.safe_ups_p98 >= 45.0
+    assert p95_failure.safe_ups_p95 < 50.0
     state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), p95_failure)
     assert (state.slots, reason) == (16, "decrease_safe_ups")
 
-    passing = UpsWindow(tuple([55.0] * 2 + [57.0] * 3 + [60.0] * 95))
-    assert passing.safe_ups_p98 >= 55.0
-    assert passing.safe_ups_p95 >= 57.0
+    passing = UpsWindow(tuple([45.0] * 2 + [50.0] * 3 + [60.0] * 95))
+    assert passing.safe_ups_p98 >= 45.0
+    assert passing.safe_ups_p95 >= 50.0
     state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), passing, maximum=20)
     assert (state.slots, reason) == (20, "hold_safe_ups")
 
 def test_adaptive_slots_shrink_by_four_on_an_unhealthy_window() -> None:
-    state, reason = adjust_adaptive_slots(AdaptiveScaleState(12), UpsWindow((54.0, 53.0, 52.0)))
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(12), UpsWindow((44.0, 43.0, 42.0)))
     assert (state.slots, reason) == (8, "decrease_safe_ups")
 
 
@@ -208,7 +208,7 @@ def test_adaptive_stage_drains_without_interrupting_when_live_ups_is_unsafe(monk
         result = adaptive._run_stage(
             [worker_spec], stage_jobs, "secret", policy, tmp_path / "live", store,
             AdaptiveScaleState(8), minimum_slots=4, maximum_slots=8, step=4,
-            minimum_ups_p95=57.0, minimum_ups_p98=55.0,
+            minimum_ups_p95=50.0, minimum_ups_p98=45.0,
             healthy_windows_to_grow=2, unhealthy_windows_to_shrink=1,
         )
         _results, completed, failed, _window, _error, interrupted, state, reason = result
@@ -227,7 +227,7 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     args = _parse()
     assert args.initial_slots == 20
     assert args.episodes_per_policy == 100
-    assert (args.minimum_ups_p95, args.minimum_ups_p98) == (57.0, 55.0)
+    assert (args.minimum_ups_p95, args.minimum_ups_p98) == (50.0, 45.0)
     assert args.stability_window_seconds == 300.0
     assert args.healthy_windows_to_grow == 1
 

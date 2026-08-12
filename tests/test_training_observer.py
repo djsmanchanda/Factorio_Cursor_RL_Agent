@@ -95,6 +95,13 @@ def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> N
         "kind": "autoresearch", "phase": "requesting_model", "model": "local-model",
         "guidance_count": 1,
     })
+    (live / "adaptive-controller.json").write_text(json.dumps({
+        "phase": "adaptive_stage_finished", "stage": 4, "slots": 8,
+        "minimum_ups_p95": 50, "minimum_ups_p98": 45,
+        "ups_history": [{"stage": 3, "slots": 4, "mean_ups": 58.0,
+                         "safe_ups_p95": 52.0, "safe_ups_p98": 47.0,
+                         "tick_time_p98_ms": 21.3, "timestamp_utc": "2026-08-12T00:00:00+00:00"}],
+    }), encoding="utf-8")
     snapshot = build_training_snapshot(database, live)
     assert snapshot["database_present"] is True
     assert snapshot["summary"]["episodes"] == 1
@@ -102,6 +109,9 @@ def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> N
     assert snapshot["active_workers"] == 1
     assert snapshot["live_workers"][0]["rate_ratio"] == 0.5
     assert snapshot["autoresearch_live"]["phase"] == "requesting_model"
+    assert snapshot["adaptive_controller"]["minimum_ups_p95"] == 50
+    assert snapshot["adaptive_controller"]["minimum_ups_p98"] == 45
+    assert snapshot["adaptive_controller"]["ups_history"][0]["safe_ups_p98"] == 47.0
     assert {item["kind"] for item in snapshot["bottlenecks"]} >= {
         "timeout", "placement_failure", "no_delivery", "no_throughput_gain",
         "low_productive_capacity", "route_excess",
@@ -289,6 +299,9 @@ def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
     assert "cleanup-worker" not in script
     assert "'View','Remove'" in script
     assert "cleanup-button" in script
+    assert "ups-chart" in html
+    assert "renderUpsChart" in script
+    assert "worker limit" in script
 
 def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
     rcon = CleanupRcon()

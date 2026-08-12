@@ -2442,3 +2442,9 @@ that consumed it was not.
 - The sampler persists across stages so short episodes cannot bypass the five-minute requirement.
 - Validation: focused RL regression suite 45 passed; Python compilation and `git diff --check` passed.
 - Lifecycle: Python controller restart required; no Lua deployment or GUI Factorio restart.
+
+## [2026-08-12] RL Observatory UPS stability graph and relaxed gate thresholds
+- Added a read-only P95/P98/worker-limit history graph sourced from bounded controller-state windows, including target lines and latest slot count.
+- Lowered adaptive gates to P95 >= 50 and P98 >= 45 as requested; the five-minute drain behavior remains unchanged.
+- Validation: 29 focused scheduler and observer tests passed; Python compilation and `git diff --check` passed.
+- Lifecycle: restart the Python controller and observer to activate new thresholds and dashboard assets; no Lua deployment or Factorio GUI restart.

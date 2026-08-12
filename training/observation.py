@@ -198,6 +198,49 @@ def _autoresearch_state(payload: Mapping | None) -> dict:
     }
 
 
+def _controller_snapshot(live_directory: Path | str) -> dict:
+    """Read the controller's bounded capacity history without touching training state."""
+    path = Path(live_directory) / "adaptive-controller.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    history = []
+    for item in payload.get("ups_history", []):
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            history.append({
+                "stage": int(item["stage"]),
+                "slots": int(item["slots"]),
+                "mean_ups": float(item["mean_ups"]),
+                "safe_ups_p95": float(item["safe_ups_p95"]),
+                "safe_ups_p98": float(item["safe_ups_p98"]),
+                "tick_time_p98_ms": float(item.get("tick_time_p98_ms", 0.0)),
+                "timestamp_utc": str(item.get("timestamp_utc", "")),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return {
+        "phase": payload.get("phase"),
+        "stage": payload.get("stage"),
+        "slots": payload.get("slots"),
+        "generation": payload.get("generation"),
+        "policy_cohort": payload.get("policy_cohort"),
+        "policy_terminal_episodes": payload.get("policy_terminal_episodes"),
+        "policy_episode_target": payload.get("policy_episode_target"),
+        "mean_ups": payload.get("mean_ups"),
+        "safe_ups_p95": payload.get("safe_ups_p95"),
+        "safe_ups_p98": payload.get("safe_ups_p98"),
+        "minimum_ups_p95": payload.get("minimum_ups_p95", 50.0),
+        "minimum_ups_p98": payload.get("minimum_ups_p98", 45.0),
+        "stability_window_seconds": payload.get("stability_window_seconds", 300.0),
+        "ups_history": history[-120:],
+    }
+
+
 def _empty_durable() -> dict:
     return {
         "statuses": {}, "policies": [], "recent_episodes": [], "bottlenecks": [],
@@ -225,9 +268,10 @@ def build_training_snapshot(database: Path | str, live_directory: Path | str) ->
     research = next((item for item in live if item.get("kind") == "autoresearch"), None)
     terminal_phases = {"finished", "failed", "worker_failed"}
     return {
-        "version": "1.1.0", "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "version": "1.2.0", "generated_utc": datetime.now(timezone.utc).isoformat(),
         "database_present": database_path.is_file(), "database_error": database_error,
         "live_workers": workers, "autoresearch_live": _autoresearch_state(research),
+        "adaptive_controller": _controller_snapshot(live_directory),
         "active_workers": sum(
             worker.get("age_seconds") is not None and worker["age_seconds"] < 30
             and worker.get("phase") not in terminal_phases for worker in workers
