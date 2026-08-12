@@ -127,6 +127,28 @@ def _jobs(scenarios: Sequence[dict], attempts: int) -> list[tuple]:
     return result
 
 
+
+def _refill_jobs(scenarios: Sequence[dict], count: int, start_seed: int) -> list[tuple]:
+    """Pad the final policy cohort with fresh seeded attempts for every active slot."""
+    if count < 0 or not scenarios:
+        raise ValueError("refill count and scenarios must be valid")
+    return [
+        (
+            f"episode-{scenario['scenario_id']}-refill-{uuid.uuid4().hex[:8]}",
+            scenario,
+            start_seed + index,
+        )
+        for index in range(count)
+        for scenario in (scenarios[index % len(scenarios)],)
+    ]
+
+
+def _cohort_target(minimum: int, active_slots: int, episodes_per_slot: int) -> int:
+    """Keep every active slot fed while retaining the requested 100-episode floor."""
+    if minimum < 1 or active_slots < 1 or episodes_per_slot < 1:
+        raise ValueError("cohort sizing values must be positive")
+    return max(minimum, active_slots * episodes_per_slot)
+
 def _assign(jobs: Sequence[tuple], workers) -> dict[str, list[tuple]]:
     """Keep repeated attempts of one scenario on one slot of a shared runtime.
 
@@ -264,9 +286,9 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
-    parser.add_argument("--initial-slots", type=int, default=6)
+    parser.add_argument("--initial-slots", type=int, default=8)
     parser.add_argument("--minimum-slots", type=int, default=1)
-    parser.add_argument("--maximum-slots", type=int, default=80)
+    parser.add_argument("--maximum-slots", type=int, default=16)
     parser.add_argument("--step", type=int, default=1)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
@@ -400,8 +422,17 @@ def main(argv: list[str] | None = None) -> int:
         try:
             while jobs:
                 cohort += 1
-                cohort_jobs = jobs[:args.episodes_per_policy]
+                cohort_target = _cohort_target(
+                    args.episodes_per_policy, sum(state.slots for state in states.values()),
+                    args.episodes_per_slot,
+                )
+                cohort_jobs = jobs[:cohort_target]
                 del jobs[:len(cohort_jobs)]
+                if len(cohort_jobs) < cohort_target:
+                    cohort_jobs.extend(_refill_jobs(
+                        scenarios, cohort_target - len(cohort_jobs),
+                        args.start_seed + cohort * cohort_target,
+                    ))
                 cohort_results: list[tuple] = []
                 cohort_completed = cohort_failed = 0
                 while cohort_jobs:
@@ -471,7 +502,8 @@ def main(argv: list[str] | None = None) -> int:
                         "policy_terminal_episodes": len(cohort_results),
                         "slots": sum(state.slots for state in states.values()),
                         "previous_slots": len(active_workers),
-                        "stage_attempts": len(stage_jobs), "completed": completed,
+                        "stage_attempts": len(stage_jobs),
+                        "cohort_target": cohort_target, "completed": completed,
                         "failed": failed, "elapsed_seconds": round(elapsed, 2),
                         "remaining_attempts": len(cohort_jobs) + len(jobs),
                         "generation": generation, "policy_id": policy.policy_id,

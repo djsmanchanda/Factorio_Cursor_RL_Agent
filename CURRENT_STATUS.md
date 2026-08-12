@@ -2454,3 +2454,8 @@ that consumed it was not.
 - Each server samples its own RCON UPS window and changes capacity by one slot every five minutes; per-server evidence is exposed in the Observatory.
 - Evidence: all five servers booted on ports 35001-35005/RCON 28001-28005; first window reached 7 active slots per server with P95 56.6-57.9 and P98 54.5-57.2 UPS.
 - Lifecycle: training workers and Python controller restarted; no deterministic mod or Nauvis runtime change.
+
+## [2026-08-13] RL twenty-server capacity-filled cohorts
+- Prepared the next run for twenty isolated WSL runtimes, eight initial slots per runtime, sixteen-slot per-runtime ceiling, and two-second staggered bootstrap/deploy/start operations (320 maximum logical slots).
+- Adaptive policy cohorts now retain the 100-episode minimum while topping up to active capacity with fresh seeded attempts, preventing idle slots at cohort tails.
+- Lifecycle: current generation-9 controller was left running; restart the RL controller only when launching this next run. No Lua deployment or Factorio GUI restart is required.

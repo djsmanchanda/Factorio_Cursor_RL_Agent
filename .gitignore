@@ -38,5 +38,6 @@ data/training-capacity/
 # Local isolated worker endpoints and passwords
 training-workers.json
 training-workers-wsl.json
+training-workers-windows.json
 data/training/logs/
 data/rl-gpu-venv/

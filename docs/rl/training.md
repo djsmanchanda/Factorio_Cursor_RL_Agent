@@ -58,21 +58,21 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 
 ## Parallel training slots
 
-Each WSL Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The adaptive local setup uses five isolated headless runtimes, each starting with six active logical slots. Each runtime has its own game/RCON endpoint, save, `script-output` directory, worker IDs, surfaces, and forces. This removes the single-server simulation bottleneck while retaining shared policy and evidence storage.
+Each WSL Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The adaptive local setup uses twenty isolated headless runtimes, each starting with eight active logical slots and capped at sixteen. Each runtime has its own game/RCON endpoint, save, `script-output` directory, worker IDs, surfaces, and forces. This removes the single-server simulation bottleneck while retaining shared policy and evidence storage.
 
-Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
+Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Each policy cohort has at least the requested 100 terminal episodes and is automatically topped up to the current active-slot count, with fresh seeded refill attempts, so extra capacity is not left idle. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
 For long runs, use the adaptive controller after configuring enough logical slots:
 
 ```powershell
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 5 -SlotsPerWorker 16
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 20 -SlotsPerWorker 16 -StaggerSeconds 2
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
-  --initial-slots 6 --minimum-slots 1 --maximum-slots 16 --step 1 `
+  --initial-slots 8 --minimum-slots 1 --maximum-slots 16 --step 1 `
   --episodes-per-policy 100 --minimum-ups-p95 50 --minimum-ups-p98 45 `
   --stability-window-seconds 300
 ```
 
-The adaptive controller starts at six logical slots on each server, samples tick advancement over each server's RCON connection every five seconds, and changes that server's capacity by one slot. Each server's capacity target is held for a complete five-minute rolling window. A healthy window opens one more gate on that server; an unsafe window closes one gate. A healthy window
+The adaptive controller starts at eight logical slots on each server, samples tick advancement over each server's RCON connection every five seconds, and changes that server's capacity by one slot. Each server's capacity target is held for a complete five-minute rolling window. A healthy window opens one more gate on that server; an unsafe window closes one gate. A healthy window
 requires both lower-tail safeguards: **P95 UPS >= 50** and **P98 UPS >= 45**, meaning
 at least 95% and 98% of samples respectively meet those floors.
 
@@ -95,11 +95,32 @@ spent in the current episode.
 The preferred local worker uses the Linux headless build under WSL2:
 
 ```powershell
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 5 -SlotsPerWorker 16
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 5
-powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCount 5
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 20 -SlotsPerWorker 16 -StaggerSeconds 2
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 20 -SlotsPerWorker 16 -StaggerSeconds 2
+powershell -File scripts\manage_wsl_training_worker.ps1 -Action status -WorkerCount 20 -SlotsPerWorker 16
 powershell -File scripts\run_wsl_training_batch.ps1 --count 100 --attempts-per-scenario 20
 ```
+An optional native-Windows worker can run alongside the WSL runtimes for a
+like-for-like performance comparison. It uses a separate profile and ports
+(`35006`/`28006` by default), so configuring it does not alter or restart the
+active WSL controller. Bootstrap it only when a comparison run is planned:
+
+```powershell
+$env:FACTORIO_TRAINING_RCON_PASSWORD = "<local training password>"
+powershell -File scripts\manage_windows_training_worker.ps1 -Action bootstrap
+powershell -File scripts\manage_windows_training_worker.ps1 -Action start
+```
+
+The bootstrap command creates `training-workers-windows.json` with sixteen
+logical slots sharing one native Factorio process. Merge that generated worker
+list with the WSL worker list only when starting a new controller; do not edit
+the configuration consumed by an already-running batch. The adaptive controller
+groups the Windows instance independently and applies the same one-slot,
+five-minute UPS gates. Stop it with `-Action stop` after the comparison.
+
+The Windows and WSL servers share the host's CPU and memory. Compare per-server
+P95/P98 UPS at equal slot counts and record host utilization; a native server
+may have a higher individual ceiling while lowering the aggregate ceiling.
 
 To find the safe concurrency limit on one laptop, run bounded live probes rather than assuming twenty surfaces are safe:
 

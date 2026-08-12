@@ -9,7 +9,7 @@ from queue import Queue
 import pytest
 
 import tools.run_adaptive_training_batch as adaptive
-from tools.run_adaptive_training_batch import _assign, _parse, _retry_jobs
+from tools.run_adaptive_training_batch import _assign, _cohort_target, _parse, _refill_jobs, _retry_jobs
 from tools.run_training_batch import EpisodeQueue, _jobs
 
 from training.features import MINING_DELIVERY_FEATURES_V2
@@ -86,6 +86,20 @@ def test_repeated_attempts_keep_one_scenario_on_one_shared_runtime_slot(tmp_path
     regular = _jobs(scenarios, attempts=3, workers=workers)
     regular_owners = {job[1]["scenario_id"]: worker_id for worker_id, batch in regular.items() for job in batch}
     assert regular_owners == owners
+
+def test_cohorts_fill_active_slots_beyond_the_one_hundred_episode_floor() -> None:
+    assert _cohort_target(100, 160, 1) == 160
+    assert _cohort_target(100, 320, 1) == 320
+    assert _cohort_target(100, 80, 1) == 100
+
+
+def test_final_cohort_refill_uses_fresh_selection_seeds() -> None:
+    scenarios = [{"scenario_id": "a"}, {"scenario_id": "b"}]
+    jobs = _refill_jobs(scenarios, 5, 200)
+    assert len(jobs) == 5
+    assert [job[2] for job in jobs] == [200, 201, 202, 203, 204]
+    assert {job[1]["scenario_id"] for job in jobs} == {"a", "b"}
+    assert all("refill-" in job[0] for job in jobs)
 
 def test_shared_episode_queue_reuses_idle_slots_without_overlapping_a_scenario() -> None:
     scenario_a, scenario_b = {"scenario_id": "a"}, {"scenario_id": "b"}
@@ -268,8 +282,9 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
         "sys.argv", ["adaptive", "--workers", str(tmp_path / "workers.json")],
     )
     args = _parse()
-    assert args.initial_slots == 6
+    assert args.initial_slots == 8
     assert args.minimum_slots == 1
+    assert args.maximum_slots == 16
     assert args.step == 1
     assert args.episodes_per_policy == 100
     assert (args.minimum_ups_p95, args.minimum_ups_p98) == (50.0, 45.0)

@@ -10,10 +10,12 @@ param(
     [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.0.77.tar.xz",
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
-    [ValidateRange(1, 8)]
+    [ValidateRange(1, 20)]
     [int]$WorkerCount = 5,
     [ValidateRange(1, 80)]
-    [int]$SlotsPerWorker = 16
+    [int]$SlotsPerWorker = 16,
+    [ValidateRange(0, 60)]
+    [double]$StaggerSeconds = 2
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,7 +90,7 @@ switch ($Action) {
                 (ConvertTo-WslPath $Archive), (ConvertTo-WslPath $SourceSave),
                 (ConvertTo-WslPath $repoRoot), (ConvertTo-WslPath $bridgeRoot)
             )
-
+            if ($StaggerSeconds -gt 0 -and $index -lt $WorkerCount) { Start-Sleep -Milliseconds ([int]($StaggerSeconds * 1000)) }
         }
         Write-WorkerConfig
     }
@@ -98,11 +100,15 @@ switch ($Action) {
     "deploy" {
         for ($index = 1; $index -le $WorkerCount; $index++) {
             Invoke-Worker $index "deploy" @((ConvertTo-WslPath $repoRoot))
+            if ($StaggerSeconds -gt 0 -and $index -lt $WorkerCount) { Start-Sleep -Milliseconds ([int]($StaggerSeconds * 1000)) }
         }
     }
     "start" {
         Assert-TrainingPortsAvailable
-        for ($index = 1; $index -le $WorkerCount; $index++) { Invoke-Worker $index "start" }
+        for ($index = 1; $index -le $WorkerCount; $index++) {
+            Invoke-Worker $index "start"
+            if ($StaggerSeconds -gt 0 -and $index -lt $WorkerCount) { Start-Sleep -Milliseconds ([int]($StaggerSeconds * 1000)) }
+        }
     }
     "stop" {
         for ($index = 1; $index -le $WorkerCount; $index++) { Invoke-Worker $index "stop" }
