@@ -34,7 +34,7 @@ A controller pins its scenario and transition schemas at process start. Reposito
 7. Diagnose and repair deliberately damaged production chains.
 8. Build multi-stage intermediates, science, and demand-driven expansion.
 
-Each family should randomize geometry, resources, demand, clutter, and budgets. Train and held-out seeds remain separate.
+Each family should randomize geometry, resources, demand, clutter, fixture placement, and budgets. The mining-delivery source is an integral 2x2 producer sampled in clear space near the resource patch, not a special fixed origin. Train and held-out seeds remain separate.
 
 ## Rewards and selection
 

@@ -94,7 +94,8 @@ def test_seeded_mining_delivery_scenario_is_stable_and_valid() -> None:
     assert first["environment"]["surface_name"] == "training/mining-delivery-002a"
     assert first["objective"]["item"] == first["resource_patch"]["resource"]
     assert first["objective"]["destination_fixture_id"] == "delivery-sink"
-    assert first["fixtures"][0]["position"] == [0, 0]
+    assert first["fixtures"][0]["position"] != [0, 0]
+    assert "distributed-power-source" in first["curriculum"]["tags"]
     assert "target_rate_per_second" not in first["objective"]
     assert first["objective"]["target_rate_per_tick"] > 0
 
@@ -114,11 +115,14 @@ def test_curriculum_generates_one_hundred_unique_bounded_scenarios() -> None:
         validate_scenario(scenario)
         bounds = scenario["environment"]["bounds"]
         destination = scenario["fixtures"][1]["position"]
+        source = scenario["fixtures"][0]["position"]
         patch = scenario["resource_patch"]["bounds"]
         assert bounds["x_min"] <= destination[0] < bounds["x_max_exclusive"]
         assert bounds["y_min"] <= destination[1] < bounds["y_max_exclusive"]
         assert bounds["x_min"] <= patch["x1"] <= patch["x2"] < bounds["x_max_exclusive"]
         assert bounds["y_min"] <= patch["y1"] <= patch["y2"] < bounds["y_max_exclusive"]
+        assert bounds["x_min"] < source[0] < bounds["x_max_exclusive"] - 1
+        assert bounds["y_min"] < source[1] < bounds["y_max_exclusive"] - 1
 
 
 def test_mining_scenario_budget_contains_construction_items_only() -> None:
@@ -166,6 +170,14 @@ def test_contract_rejects_nonintegral_power_fixture() -> None:
     with pytest.raises(ValueError, match="integral"):
         validate_scenario(scenario)
 
+
+def test_contract_rejects_power_source_with_a_footprint_outside_the_world() -> None:
+    scenario = deepcopy(generate_mining_delivery_scenario(11))
+    scenario["fixtures"][0]["position"] = [-64, 0]
+    scenario["scenario_hash"] = scenario_hash(scenario)
+
+    with pytest.raises(ValueError, match="footprint"):
+        validate_scenario(scenario)
 
 def test_contract_schemas_are_pinned_for_the_controller_lifetime(monkeypatch) -> None:
     scenario = generate_mining_delivery_scenario(16)

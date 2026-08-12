@@ -118,6 +118,11 @@ local function validate_fixtures(scenario)
         and (not is_integer(fixture.position[1]) or not is_integer(fixture.position[2])) then
       error("power_source must use an integral centre for its 2x2 footprint")
     end
+    if fixture.kind == "power_source"
+        and (not contains(scenario.environment.bounds, fixture.position[1] - 1, fixture.position[2] - 1)
+          or not contains(scenario.environment.bounds, fixture.position[1] + 1, fixture.position[2] + 1)) then
+      error("power_source 2x2 footprint must remain inside the environment bounds")
+    end
     ids[fixture.id], kinds[fixture.kind] = fixture, true
   end
   if not kinds.power_source or not kinds.item_sink then

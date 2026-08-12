@@ -109,8 +109,12 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
     power_sources = [fixture for fixture in fixtures.values() if fixture["kind"] == "power_source"]
     if not power_sources:
         raise ValueError("mining delivery scenarios require a power_source fixture")
-    if any(fixture["position"] != [0, 0] for fixture in power_sources):
-        raise ValueError("power_source fixture must use the integral [0, 0] centre")
+    for fixture in power_sources:
+        x, y = fixture["position"]
+        if not isinstance(x, int) or isinstance(x, bool) or not isinstance(y, int) or isinstance(y, bool):
+            raise ValueError("power_source fixture must use an integral centre")
+        if not _contains(world, x - 1, y - 1) or not _contains(world, x + 1, y + 1):
+            raise ValueError("power_source 2x2 footprint must remain inside the environment bounds")
     storage = [fixture for fixture in fixtures.values() if fixture["kind"] == "power_storage"]
     if len(storage) > 1:
         raise ValueError("mining delivery scenarios permit at most one power_storage fixture")

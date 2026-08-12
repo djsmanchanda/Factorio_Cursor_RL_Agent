@@ -66,6 +66,17 @@ def test_validation_rejects_half_tile_power_fixture(lua) -> None:
     assert "integral centre" in message
 
 
+def test_validation_rejects_power_source_footprint_outside_the_world(lua) -> None:
+    scenario = _scenario()
+    scenario["fixtures"][0]["position"] = [-64, 0]
+    lua.globals().candidate = _to_lua(lua, scenario)
+
+    ok, message = lua.eval(
+        "(function() return pcall(function() return require('scenario_validation').validate_scenario(candidate) end) end)()"
+    )
+    assert ok is False
+    assert "footprint" in message
+
 def test_validation_rejects_real_base_identity(lua) -> None:
     scenario = _scenario()
     scenario["environment"]["surface_name"] = "nauvis"

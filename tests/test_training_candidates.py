@@ -24,6 +24,22 @@ def test_one_hundred_scenarios_compile_two_valid_candidates_each():
             assert {action["action_type"] for action in actions(candidate["plan"])} == {"place_entity"}
 
 
+def test_collection_row_never_overlaps_an_underground_bridge_endpoint():
+    scenario = generate_mining_delivery_scenario(47)
+
+    for candidate in mining_delivery_candidates(scenario):
+        placed = [
+            (action["entity"], action["position"]["x"], action["position"]["y"])
+            for action in actions(candidate["plan"])
+        ]
+        underground_positions = {
+            (x, y) for entity, x, y in placed if entity == "underground-belt"
+        }
+        transport_positions = {
+            (x, y) for entity, x, y in placed if entity == "transport-belt"
+        }
+        assert not underground_positions & transport_positions
+
 def test_candidates_only_place_budgeted_entities():
     scenario = generate_mining_delivery_scenario(7)
     for candidate in mining_delivery_candidates(scenario):

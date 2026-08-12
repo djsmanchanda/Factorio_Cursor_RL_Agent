@@ -127,7 +127,8 @@ def _belt_actions(
     ]
     occupied_positions = {
         (action["position"]["x"], action["position"]["y"])
-        for action in bridge if action.get("entity") == "transport-belt"
+        for action in bridge
+        if action.get("entity") in {"transport-belt", "underground-belt", "splitter"}
     }
     unique_row = [
         action for action in row

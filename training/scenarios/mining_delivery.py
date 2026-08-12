@@ -54,10 +54,44 @@ def _route_span(patch: dict[str, int], destination: tuple[float, float]) -> int:
     )
 
 
-def _construction_budget(target_rate_per_tick: float, route_span: int) -> dict[str, int]:
+def _power_source_position(
+    rng: random.Random, patch: dict[str, int], destination: tuple[float, float],
+) -> tuple[int, int]:
+    """Sample a clear, in-bounds generator site near the mining patch."""
+    center_x = (patch["x1"] + patch["x2"]) // 2
+    center_y = (patch["y1"] + patch["y2"]) // 2
+    candidates: list[tuple[int, int]] = []
+    for gap in (7, 10, 13):
+        for lateral in (-6, 0, 6):
+            candidates.extend((
+                (patch["x1"] - gap, center_y + lateral),
+                (patch["x2"] + gap, center_y + lateral),
+                (center_x + lateral, patch["y1"] - gap),
+                (center_x + lateral, patch["y2"] + gap),
+            ))
+    rng.shuffle(candidates)
+    for x, y in candidates:
+        source_inside = (
+            _WORLD_BOUNDS["x_min"] + 1 <= x < _WORLD_BOUNDS["x_max_exclusive"] - 1
+            and _WORLD_BOUNDS["y_min"] + 1 <= y < _WORLD_BOUNDS["y_max_exclusive"] - 1
+        )
+        clear_of_patch = (
+            x + 1 < patch["x1"] or x - 1 > patch["x2"]
+            or y + 1 < patch["y1"] or y - 1 > patch["y2"]
+        )
+        if source_inside and clear_of_patch and math.dist((x, y), destination) >= 4:
+            return x, y
+    raise ValueError("could not place an in-bounds power source away from the mining patch")
+
+
+def _construction_budget(
+    target_rate_per_tick: float, route_span: int, source: tuple[int, int], patch: dict[str, int],
+) -> dict[str, int]:
     drills = math.ceil(target_rate_per_tick / _DRILL_RATE_PER_TICK) + 1
-    # A source, production cells, and a remote delivery inserter all need pole coverage.
-    poles = math.ceil(route_span / _POLE_WIRE_STEP) + 10
+    patch_center = ((patch["x1"] + patch["x2"]) / 2, (patch["y1"] + patch["y2"]) / 2)
+    source_span = math.dist(source, patch_center)
+    # The source and remote delivery inserter both need continuous pole coverage.
+    poles = math.ceil((source_span + route_span) / _POLE_WIRE_STEP) + 10
     return {
         "electric-mining-drill": drills,
         "fast-inserter": 4,
@@ -78,8 +112,9 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
     target_rate_per_tick = rng.choice(_TARGET_RATES_PER_TICK)
     patch_center, destination = _opposed_sites(rng)
     patch = _patch_bounds(patch_center, rng)
+    power_source = _power_source_position(rng, patch, destination)
     route_span = _route_span(patch, destination)
-    budget = _construction_budget(target_rate_per_tick, route_span)
+    budget = _construction_budget(target_rate_per_tick, route_span, power_source, patch)
     scenario = {
         "version": _VERSION,
         "scenario_id": identifier,
@@ -87,7 +122,7 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
         "seed": seed,
         "curriculum": {
             "level": _TARGET_RATES_PER_TICK.index(target_rate_per_tick) + 1,
-            "tags": ["direct-delivery", "electric-only", "mining", resource],
+            "tags": ["direct-delivery", "distributed-power-source", "electric-only", "mining", resource],
         },
         "environment": {
             "surface_name": f"training/{identifier}",
@@ -104,7 +139,7 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
         "fixtures": [
             {
                 "id": "power-source", "kind": "power_source",
-                "entity": "electric-energy-interface", "position": [0, 0],
+                "entity": "electric-energy-interface", "position": list(power_source),
                 "protected": True,
             },
             {

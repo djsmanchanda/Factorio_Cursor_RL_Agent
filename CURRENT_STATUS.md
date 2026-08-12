@@ -2415,3 +2415,8 @@ that consumed it was not.
 - Why: Factorio simulation itself cannot use CUDA; RCON and filesystem work are CPU-bound. The control-plane reduction protects UPS, while batched GPU learning uses the RTX only where it can amortize kernel overhead.
 - Safety: The surrogate never controls a live episode or mutates the experience database. It is opt-in, requires an isolated CUDA PyTorch environment, and should run between Factorio collection stages rather than alongside a GPU-heavy LLM.
 - Next: Install the isolated CUDA environment, confirm `cuda_available=true`, and train/evaluate the surrogate on a clean batch before considering any candidate-ranking integration.
+## [2026-08-12] RL randomized energy-source fixtures
+- Files: mining-delivery scenario/candidate generation, Python and Lua scenario validation, focused tests, and RL training docs.
+- What: Mining-delivery episodes now seed the 2x2 power source at a clear, in-bounds position near the ore patch instead of fixing it at `[0, 0]`. Its pole budget includes source-to-production distance.
+- Fix: Candidate collection rows now reserve underground-belt endpoints as well as ordinary belt tiles, eliminating the overlap exposed when a randomized protected fixture changes a bridge route.
+- Lifecycle: Training Lua changed. Deploy the training mod to WSL, synchronize the GUI copy, restart the WSL worker and GUI Factorio session, then start a fresh Python controller with a new database/checkpoint.
