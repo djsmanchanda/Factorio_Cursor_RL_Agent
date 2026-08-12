@@ -98,6 +98,10 @@ def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> N
     (live / "adaptive-controller.json").write_text(json.dumps({
         "phase": "adaptive_stage_finished", "stage": 4, "slots": 8,
         "minimum_ups_p95": 50, "minimum_ups_p98": 45,
+        "servers": [{"instance_id": "server-01", "configured_slots": 16,
+                      "active_slots": 6, "decision": "hold_safe_ups",
+                      "mean_ups": 58.0, "safe_ups_p95": 52.0,
+                      "safe_ups_p98": 47.0, "tick_time_p98_ms": 21.3}],
         "ups_history": [{"stage": 3, "slots": 4, "mean_ups": 58.0,
                          "safe_ups_p95": 52.0, "safe_ups_p98": 47.0,
                          "tick_time_p98_ms": 21.3, "timestamp_utc": "2026-08-12T00:00:00+00:00"}],
@@ -111,6 +115,7 @@ def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> N
     assert snapshot["autoresearch_live"]["phase"] == "requesting_model"
     assert snapshot["adaptive_controller"]["minimum_ups_p95"] == 50
     assert snapshot["adaptive_controller"]["minimum_ups_p98"] == 45
+    assert snapshot["adaptive_controller"]["servers"][0]["active_slots"] == 6
     assert snapshot["adaptive_controller"]["ups_history"][0]["safe_ups_p98"] == 47.0
     assert {item["kind"] for item in snapshot["bottlenecks"]} >= {
         "timeout", "placement_failure", "no_delivery", "no_throughput_gain",

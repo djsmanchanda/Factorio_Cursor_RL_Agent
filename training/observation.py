@@ -223,6 +223,23 @@ def _controller_snapshot(live_directory: Path | str) -> dict:
             })
         except (KeyError, TypeError, ValueError):
             continue
+    servers = []
+    for item in payload.get("servers", []):
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            servers.append({
+                "instance_id": str(item["instance_id"]),
+                "configured_slots": int(item["configured_slots"]),
+                "active_slots": int(item["active_slots"]),
+                "decision": item.get("decision"),
+                "mean_ups": float(item["mean_ups"]) if item.get("mean_ups") is not None else None,
+                "safe_ups_p95": float(item["safe_ups_p95"]) if item.get("safe_ups_p95") is not None else None,
+                "safe_ups_p98": float(item["safe_ups_p98"]) if item.get("safe_ups_p98") is not None else None,
+                "tick_time_p98_ms": float(item["tick_time_p98_ms"]) if item.get("tick_time_p98_ms") is not None else None,
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
     return {
         "phase": payload.get("phase"),
         "stage": payload.get("stage"),
@@ -237,6 +254,7 @@ def _controller_snapshot(live_directory: Path | str) -> dict:
         "minimum_ups_p95": payload.get("minimum_ups_p95", 50.0),
         "minimum_ups_p98": payload.get("minimum_ups_p98", 45.0),
         "stability_window_seconds": payload.get("stability_window_seconds", 300.0),
+        "servers": servers,
         "ups_history": history[-120:],
     }
 
