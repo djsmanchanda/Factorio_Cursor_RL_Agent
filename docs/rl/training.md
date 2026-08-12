@@ -58,7 +58,7 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 
 ## Parallel training slots
 
-One Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The default local setup therefore uses one WSL headless runtime and four logical training slots, all sharing one game/RCON endpoint and `script-output` directory while retaining unique worker IDs, surfaces, forces, episodes, telemetry files, and report request IDs. This avoids duplicating saves and server processes.
+One Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The adaptive local setup starts with twenty logical training slots on one WSL headless runtime, all sharing one game/RCON endpoint and `script-output` directory while retaining unique worker IDs, surfaces, forces, episodes, telemetry files, and report request IDs. This avoids duplicating saves and server processes.
 
 Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
@@ -68,22 +68,27 @@ For long runs, use the adaptive controller after configuring enough logical slot
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 80
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
   --initial-slots 20 --minimum-slots 4 --maximum-slots 80 --step 4 `
-  --episodes-per-policy 100 --minimum-ups-p95 57 --minimum-ups-p98 55
+  --episodes-per-policy 100 --minimum-ups-p95 57 --minimum-ups-p98 55 `
+  --stability-window-seconds 300
 ```
 
 The adaptive controller starts at 20 logical slots, samples tick advancement over the
 shared Factorio RCON connection every five seconds, and changes capacity by four slots.
-It grows after two healthy stage windows and immediately shrinks after one unsafe
-window. A healthy window requires both lower-tail safeguards: **P95 UPS >= 57** and
-**P98 UPS >= 55**, meaning at least 95% and 98% of samples respectively meet those
-floors. An unsafe live window interrupts the disposable stage, recycles its active
-surfaces, records those attempts as `aborted` rather than fitness evidence, and
-requeues fresh episode IDs; it does not wait for a long episode timeout.
+Each capacity target is held for a complete five-minute rolling window. A healthy
+window opens four more gates; an unsafe window closes four gates. A healthy window
+requires both lower-tail safeguards: **P95 UPS >= 57** and **P98 UPS >= 55**, meaning
+at least 95% and 98% of samples respectively meet those floors.
+
+Capacity changes are graceful. The controller never interrupts a live episode for a
+capacity decision. When four gates are closed, the current episodes drain naturally;
+their workers are not refilled, and the next stage starts only after the live count is
+at or below the reduced target. This keeps completed episodes as valid fitness evidence
+and prevents a scale-down from creating an abort/requeue storm.
 
 Capacity stages and policy generations are deliberately separate. A policy remains
 immutable through as many capacity stages as needed to obtain 100 terminal episodes;
-only then is it updated into the next generation. Aborted capacity probes do not count
-toward that cohort or enter policy learning.
+only then is it updated into the next generation. Capacity changes never discard
+completed episodes; only terminal evidence enters policy learning.
 
 Live episode measurement is intentionally every five seconds rather than once per
 second, keeping shared RCON/report-file work bounded. In the Observatory,

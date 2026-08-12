@@ -128,11 +128,9 @@ def test_ups_window_uses_conservative_lower_tail_for_p98_safety() -> None:
     assert window.tick_time_p98_ms > 1000.0 / 55.0
 
 
-def test_adaptive_slots_grow_in_four_slot_steps_after_two_healthy_windows() -> None:
+def test_adaptive_slots_grow_in_four_slot_steps_after_one_healthy_window() -> None:
     state = AdaptiveScaleState(4)
     healthy = UpsWindow((60.0, 59.0, 58.0))
-    state, reason = adjust_adaptive_slots(state, healthy)
-    assert (state.slots, reason) == (4, "hold_safe_ups")
     state, reason = adjust_adaptive_slots(state, healthy)
     assert (state.slots, reason) == (8, "increase_safe_ups")
 
@@ -147,7 +145,7 @@ def test_adaptive_slots_require_both_requested_p95_and_p98_thresholds() -> None:
     passing = UpsWindow(tuple([55.0] * 2 + [57.0] * 3 + [60.0] * 95))
     assert passing.safe_ups_p98 >= 55.0
     assert passing.safe_ups_p95 >= 57.0
-    state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), passing)
+    state, reason = adjust_adaptive_slots(AdaptiveScaleState(20), passing, maximum=20)
     assert (state.slots, reason) == (20, "hold_safe_ups")
 
 def test_adaptive_slots_shrink_by_four_on_an_unhealthy_window() -> None:
@@ -176,7 +174,7 @@ def test_capacity_requeue_keeps_scenario_seed_and_refreshes_episode_identity() -
     assert returned_scenario is scenario
     assert seed == 3
 
-def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch, tmp_path) -> None:
+def test_adaptive_stage_drains_without_interrupting_when_live_ups_is_unsafe(monkeypatch, tmp_path) -> None:
     scenario = generate_mining_delivery_scenario(7)
     worker_spec = worker(tmp_path, "slot-one", 35001, 28001)
 
@@ -194,11 +192,11 @@ def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch,
         def stop(self):
             return None
 
-        def window(self):
+        def window(self, _duration_seconds=None):
             return UpsWindow((10.0, 10.0, 10.0))
 
-    def stopped_worker(worker_spec, _jobs, _password, _policy, _directory, _events, stop_event):
-        assert stop_event.wait(1)
+    def stopped_worker(worker_spec, _jobs, _password, _policy, _directory, events, _stop_event):
+        events.put(("result", "episode-capacity", None, "finished"))
 
     monkeypatch.setattr(adaptive, "UpsSampler", UnsafeSampler)
     monkeypatch.setattr(adaptive, "_run_worker", stopped_worker)
@@ -214,13 +212,13 @@ def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch,
             healthy_windows_to_grow=2, unhealthy_windows_to_shrink=1,
         )
         _results, completed, failed, _window, _error, interrupted, state, reason = result
-        assert completed == failed == 0
-        assert interrupted == {"episode-capacity"}
-        assert (state.slots, reason) == (4, "decrease_safe_ups")
-        assert store.rows("episodes")[0]["status"] == "aborted"
+        assert completed == 0
+        assert failed == 1
+        assert interrupted == set()
+        assert state is None
+        assert reason is None
+        assert store.rows("episodes")[0]["status"] == "failed"
         assert store.rows("transitions") == []
-    retried = _retry_jobs(stage_jobs, interrupted)
-    assert retried[0][0] != "episode-capacity"
 
 def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
@@ -230,6 +228,8 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert args.initial_slots == 20
     assert args.episodes_per_policy == 100
     assert (args.minimum_ups_p95, args.minimum_ups_p98) == (57.0, 55.0)
+    assert args.stability_window_seconds == 300.0
+    assert args.healthy_windows_to_grow == 1
 
 def test_adaptive_controller_learns_only_after_a_complete_policy_cohort(monkeypatch, tmp_path) -> None:
     worker_spec = worker(tmp_path, "slot-one", 35001, 28001)

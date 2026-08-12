@@ -2436,3 +2436,9 @@ that consumed it was not.
 - Fix: Decoupled capacity stages from learning. A policy now collects 100 terminal episodes across however many safe stages are required before creating the next generation. Capacity-aborted probes are recycled/requeued and are excluded from both the cohort and reward evidence.
 - Evidence: The interrupted four-slot run showed 28 transitions spread across seven policies, confirming the former four-result generation boundary was too small. Focused scheduler, controller, episode, store, observer, and CLI validation passes `45 passed`; compilation and diff checks pass.
 - Lifecycle: Python-only. Restart the isolated adaptive controller from a fresh database; no Lua deployment or GUI Factorio restart is required.
+## [2026-08-12] RL graceful five-minute capacity gates
+- Changed adaptive concurrency to hold each target for a five-minute rolling UPS window, then change by four slots when both P95 >= 57 and P98 >= 55 are met or missed.
+- Scale-down is now a drain: live episodes are never interrupted or requeued for capacity; the controller waits for the current stage to empty before starting at the lower target.
+- The sampler persists across stages so short episodes cannot bypass the five-minute requirement.
+- Validation: focused RL regression suite 45 passed; Python compilation and `git diff --check` passed.
+- Lifecycle: Python controller restart required; no Lua deployment or GUI Factorio restart.

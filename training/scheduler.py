@@ -195,7 +195,7 @@ def adjust_adaptive_slots(
     minimum_safe_ups: float | None = None,
     minimum_safe_ups_p95: float = 57.0,
     minimum_safe_ups_p98: float = 55.0,
-    healthy_windows_to_grow: int = 2,
+    healthy_windows_to_grow: int = 1,
     unhealthy_windows_to_shrink: int = 1,
 ) -> tuple[AdaptiveScaleState, str]:
     """Apply four-slot hysteresis to one measured UPS window."""

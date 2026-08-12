@@ -49,7 +49,7 @@ class UpsSampler:
         self.interval_seconds = interval_seconds
         self._stop = threading.Event()
         self._lock = threading.Lock()
-        self._samples: list[float] = []
+        self._samples: list[tuple[float, float]] = []
         self._error: str | None = None
         self._thread = threading.Thread(target=self._run, name="ups-sampler", daemon=True)
 
@@ -65,9 +65,16 @@ class UpsSampler:
         with self._lock:
             return len(self._samples)
 
-    def window(self) -> UpsWindow | None:
+    def window(self, duration_seconds: float | None = None) -> UpsWindow | None:
         with self._lock:
-            samples = tuple(self._samples)
+            if duration_seconds is None:
+                samples = tuple(value for _, value in self._samples)
+            else:
+                cutoff = time.monotonic() - duration_seconds
+                samples = tuple(value for timestamp, value in self._samples if timestamp >= cutoff)
+                # Do not open a gate until the full stability duration has elapsed.
+                if not self._samples or self._samples[0][0] > cutoff:
+                    return None
         return UpsWindow(samples) if len(samples) >= 3 else None
 
     @property
@@ -88,7 +95,7 @@ class UpsSampler:
                 if elapsed > 0 and current_tick >= previous_tick:
                     sample = (current_tick - previous_tick) / elapsed
                     with self._lock:
-                        self._samples.append(sample)
+                        self._samples.append((current_time, sample))
                 previous_tick, previous_time = current_tick, current_time
         except Exception as exc:  # sampling must never terminate training
             with self._lock:
@@ -160,8 +167,9 @@ def _run_stage(
     workers, stage_jobs, password, policy, live_directory, store, state: AdaptiveScaleState,
     *, minimum_slots: int, maximum_slots: int, step: int, minimum_ups_p95: float,
     minimum_ups_p98: float, healthy_windows_to_grow: int, unhealthy_windows_to_shrink: int,
+    sampler: UpsSampler | None = None, stability_window_seconds: float = 300.0,
 ):
-    """Run one stage and interrupt/requeue it if its live UPS becomes unsafe."""
+    """Run a stage without interrupting live episodes for capacity changes."""
     events = Queue()
     shared_jobs = EpisodeQueue(list(stage_jobs))
     for episode_id, scenario, seed in stage_jobs:
@@ -170,15 +178,14 @@ def _run_stage(
             status="queued",
         )
     stop_event = threading.Event()
-    sampler = UpsSampler(
-        workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
-    )
+    owns_sampler = sampler is None
+    if owns_sampler:
+        sampler = UpsSampler(
+            workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
+        )
     results, completed, failed = [], 0, 0
     expected, terminal, checked = {job[0] for job in stage_jobs}, set(), set()
     interrupted: set[str] = set()
-    backoff_state: AdaptiveScaleState | None = None
-    backoff_reason: str | None = None
-    inspected_samples = 0
 
     def persist(result: tuple) -> None:
         nonlocal completed, failed
@@ -209,24 +216,6 @@ def _run_stage(
                 for worker in workers
             }
             while len(checked) < len(futures) or not events.empty():
-                if not stop_event.is_set() and sampler.sample_count > inspected_samples:
-                    inspected_samples = sampler.sample_count
-                    window = sampler.window()
-                    if window is not None and (
-                        window.safe_ups_p95 < minimum_ups_p95
-                        or window.safe_ups_p98 < minimum_ups_p98
-                    ):
-                        candidate_state, decision = adjust_adaptive_slots(
-                            state, window, minimum=minimum_slots,
-                            maximum=maximum_slots, step=step,
-                            minimum_safe_ups_p95=minimum_ups_p95,
-                            minimum_safe_ups_p98=minimum_ups_p98,
-                            healthy_windows_to_grow=healthy_windows_to_grow,
-                            unhealthy_windows_to_shrink=unhealthy_windows_to_shrink,
-                        )
-                        if decision == "decrease_safe_ups":
-                            backoff_state, backoff_reason = candidate_state, decision
-                            stop_event.set()
                 try:
                     kind, episode_id, transition, detail = events.get(timeout=0.2)
                 except Empty:
@@ -246,17 +235,14 @@ def _run_stage(
                     abort(episode_id, str(detail or "capacity backoff"))
                 else:
                     persist((episode_id, transition, detail))
-            if stop_event.is_set():
-                for episode_id in sorted(expected.difference(terminal)):
-                    abort(episode_id, "capacity backoff before episode completion")
-            else:
-                for episode_id in sorted(expected.difference(terminal)):
-                    persist((episode_id, None, "all assigned workers exited without a terminal episode result"))
+            for episode_id in sorted(expected.difference(terminal)):
+                persist((episode_id, None, "all assigned workers exited without a terminal episode result"))
     finally:
-        sampler.stop()
+        if owns_sampler:
+            sampler.stop()
     return (
-        results, completed, failed, sampler.window(), sampler.error,
-        interrupted, backoff_state, backoff_reason,
+        results, completed, failed, sampler.window(stability_window_seconds), sampler.error,
+        interrupted, None, None,
     )
 
 
@@ -274,8 +260,9 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--episodes-per-policy", type=int, default=100)
     parser.add_argument("--minimum-ups-p95", type=float, default=57.0)
     parser.add_argument("--minimum-ups-p98", type=float, default=55.0)
+    parser.add_argument("--stability-window-seconds", type=float, default=300.0)
     parser.add_argument("--minimum-ups", type=float, dest="legacy_minimum_ups")
-    parser.add_argument("--healthy-windows-to-grow", type=int, default=2)
+    parser.add_argument("--healthy-windows-to-grow", type=int, default=1)
     parser.add_argument("--unhealthy-windows-to-shrink", type=int, default=1)
     parser.add_argument("--database", type=Path, default=Path("data/training/experience.db"))
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
@@ -291,6 +278,8 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("initial-slots must be inside the slot bounds")
     if args.step < 1 or args.episodes_per_slot < 1 or args.episodes_per_policy < 1:
         parser.error("step, episodes-per-slot, and episodes-per-policy must be positive")
+    if args.stability_window_seconds <= 0:
+        parser.error("stability-window-seconds must be positive")
     if args.legacy_minimum_ups is not None:
         args.minimum_ups_p98 = args.legacy_minimum_ups
     if args.minimum_ups_p95 <= 0 or args.minimum_ups_p98 <= 0:
@@ -313,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     state = AdaptiveScaleState(args.initial_slots)
     total_completed = total_failed = 0
     stage = cohort = 0
+    capacity_window_started = time.monotonic()
 
     def window_metrics(window: UpsWindow | None) -> dict[str, float | None]:
         return {
@@ -326,91 +316,107 @@ def main(argv: list[str] | None = None) -> int:
         for scenario in scenarios:
             store.save_scenario(scenario, "train", scenario["scenario_hash"])
         store.save_policy(policy.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(policy))
-        while jobs:
-            cohort += 1
-            cohort_jobs = jobs[:args.episodes_per_policy]
-            del jobs[:len(cohort_jobs)]
-            cohort_results: list[tuple] = []
-            cohort_completed = cohort_failed = 0
-            while cohort_jobs:
-                stage += 1
-                active_workers = workers[:state.slots]
-                stage_jobs = cohort_jobs[:state.slots * args.episodes_per_slot]
-                del cohort_jobs[:len(stage_jobs)]
-                started = time.monotonic()
-                (
-                    results, completed, failed, window, sample_error, interrupted,
-                    backoff_state, backoff_reason,
-                ) = _run_stage(
-                    active_workers, stage_jobs, password, policy, args.live_directory, store, state,
-                    minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots,
-                    step=args.step, minimum_ups_p95=args.minimum_ups_p95,
-                    minimum_ups_p98=args.minimum_ups_p98,
-                    healthy_windows_to_grow=args.healthy_windows_to_grow,
-                    unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
-                )
-                elapsed = time.monotonic() - started
-                total_completed += completed
-                total_failed += failed
-                cohort_completed += completed
-                cohort_failed += failed
-                cohort_results.extend(results)
-                base_payload = {
-                    "stage": stage, "policy_cohort": cohort,
-                    "policy_episode_target": args.episodes_per_policy,
-                    "policy_terminal_episodes": len(cohort_results),
-                    "slots": state.slots, "previous_slots": len(active_workers),
-                    "stage_attempts": len(stage_jobs), "completed": completed, "failed": failed,
-                    "elapsed_seconds": round(elapsed, 2), "sample_error": sample_error,
-                    "remaining_attempts": len(cohort_jobs) + len(jobs),
-                    "generation": generation, "policy_id": policy.policy_id,
-                    **window_metrics(window),
-                }
-                if interrupted:
-                    retries = _retry_jobs(stage_jobs, interrupted)
-                    cohort_jobs = retries + cohort_jobs
-                    state = backoff_state or state
+        capacity_sampler = UpsSampler(
+            workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
+        )
+        capacity_sampler.start()
+        try:
+            while jobs:
+                cohort += 1
+                cohort_jobs = jobs[:args.episodes_per_policy]
+                del jobs[:len(cohort_jobs)]
+                cohort_results: list[tuple] = []
+                cohort_completed = cohort_failed = 0
+                while cohort_jobs:
+                    stage += 1
+                    active_workers = workers[:state.slots]
+                    stage_jobs = cohort_jobs[:state.slots * args.episodes_per_slot]
+                    del cohort_jobs[:len(stage_jobs)]
+                    started = time.monotonic()
+                    (
+                        results, completed, failed, window, sample_error, interrupted,
+                        backoff_state, backoff_reason,
+                    ) = _run_stage(
+                        active_workers, stage_jobs, password, policy, args.live_directory, store, state,
+                        minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots,
+                        step=args.step, minimum_ups_p95=args.minimum_ups_p95,
+                        minimum_ups_p98=args.minimum_ups_p98,
+                        healthy_windows_to_grow=args.healthy_windows_to_grow,
+                        unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                        sampler=capacity_sampler,
+                        stability_window_seconds=args.stability_window_seconds,
+                    )
+                    elapsed = time.monotonic() - started
+                    total_completed += completed
+                    total_failed += failed
+                    cohort_completed += completed
+                    cohort_failed += failed
+                    cohort_results.extend(results)
+                    base_payload = {
+                        "stage": stage, "policy_cohort": cohort,
+                        "policy_episode_target": args.episodes_per_policy,
+                        "policy_terminal_episodes": len(cohort_results),
+                        "slots": state.slots, "previous_slots": len(active_workers),
+                        "stage_attempts": len(stage_jobs), "completed": completed, "failed": failed,
+                        "elapsed_seconds": round(elapsed, 2), "sample_error": sample_error,
+                        "remaining_attempts": len(cohort_jobs) + len(jobs),
+                        "generation": generation, "policy_id": policy.policy_id,
+                        **window_metrics(window),
+                    }
+                    if interrupted:
+                        retries = _retry_jobs(stage_jobs, interrupted)
+                        cohort_jobs = retries + cohort_jobs
+                        state = backoff_state or state
+                        payload = {
+                            **base_payload, "phase": "adaptive_capacity_backoff",
+                            "slots": state.slots, "interrupted": len(interrupted),
+                            "requeued": len(retries), "decision": backoff_reason,
+                        }
+                        _write_controller_state(args.live_directory, payload)
+                        print(json.dumps(payload, sort_keys=True), flush=True)
+                        continue
+                    previous_slots = state.slots
+                    if time.monotonic() - capacity_window_started >= args.stability_window_seconds:
+                        state, decision = adjust_adaptive_slots(
+                            state, window, minimum=args.minimum_slots, maximum=args.maximum_slots,
+                            step=args.step, minimum_safe_ups_p95=args.minimum_ups_p95,
+                            minimum_safe_ups_p98=args.minimum_ups_p98,
+                            healthy_windows_to_grow=args.healthy_windows_to_grow,
+                            unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                        )
+                        if state.slots != previous_slots:
+                            capacity_window_started = time.monotonic()
+                    else:
+                        decision = "hold_capacity_window"
                     payload = {
-                        **base_payload, "phase": "adaptive_capacity_backoff",
-                        "slots": state.slots, "interrupted": len(interrupted),
-                        "requeued": len(retries), "decision": backoff_reason,
+                        **base_payload, "phase": "adaptive_stage_finished", "slots": state.slots,
+                        "decision": decision,
+                        "capacity_mode": "drain_before_scale_down" if decision == "decrease_safe_ups" else "normal",
                     }
                     _write_controller_state(args.live_directory, payload)
                     print(json.dumps(payload, sort_keys=True), flush=True)
-                    continue
-                state, decision = adjust_adaptive_slots(
-                    state, window, minimum=args.minimum_slots, maximum=args.maximum_slots,
-                    step=args.step, minimum_safe_ups_p95=args.minimum_ups_p95,
-                    minimum_safe_ups_p98=args.minimum_ups_p98,
-                    healthy_windows_to_grow=args.healthy_windows_to_grow,
-                    unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                if not cohort_results:
+                    raise RuntimeError("policy cohort ended without terminal training evidence")
+                learned = _learn_policy(policy, cohort_results)
+                generation += 1
+                _checkpoint(args.checkpoint, generation, learned)
+                store.save_policy(
+                    learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
+                    parent_policy_id=policy.policy_id,
                 )
+                policy = learned
                 payload = {
-                    **base_payload, "phase": "adaptive_stage_finished", "slots": state.slots,
-                    "decision": decision,
+                    "phase": "policy_cohort_finished", "policy_cohort": cohort,
+                    "policy_episode_target": args.episodes_per_policy,
+                    "policy_terminal_episodes": len(cohort_results),
+                    "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
+                    "slots": state.slots, "remaining_attempts": len(jobs),
+                    "generation": generation, "policy_id": policy.policy_id,
                 }
                 _write_controller_state(args.live_directory, payload)
                 print(json.dumps(payload, sort_keys=True), flush=True)
-            if not cohort_results:
-                raise RuntimeError("policy cohort ended without terminal training evidence")
-            learned = _learn_policy(policy, cohort_results)
-            generation += 1
-            _checkpoint(args.checkpoint, generation, learned)
-            store.save_policy(
-                learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
-                parent_policy_id=policy.policy_id,
-            )
-            policy = learned
-            payload = {
-                "phase": "policy_cohort_finished", "policy_cohort": cohort,
-                "policy_episode_target": args.episodes_per_policy,
-                "policy_terminal_episodes": len(cohort_results),
-                "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
-                "slots": state.slots, "remaining_attempts": len(jobs),
-                "generation": generation, "policy_id": policy.policy_id,
-            }
-            _write_controller_state(args.live_directory, payload)
-            print(json.dumps(payload, sort_keys=True), flush=True)
+        finally:
+            capacity_sampler.stop()
 
     summary = {
         "attempts": total_completed + total_failed, "completed": total_completed,
