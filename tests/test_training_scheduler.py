@@ -19,7 +19,8 @@ from training.store import TrainingStore
 
 from training.scheduler import (
     AdaptiveScaleState, BatchMeasurement, ResourcePhaseLock, UpsWindow, WorkerSpec,
-    adjust_adaptive_slots, next_worker_count, percentile, validate_worker_specs,
+    active_workers_by_instance, adjust_adaptive_slots, group_workers_by_instance,
+    next_worker_count, percentile, validate_worker_specs,
 )
 
 
@@ -54,6 +55,19 @@ def test_slots_can_share_one_explicit_factorio_runtime(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="shared instance_id"):
         validate_worker_specs([first, different_runtime])
+
+
+def test_per_server_capacity_selects_independent_active_prefixes(tmp_path) -> None:
+    first = worker(tmp_path, "server-one-slot", 35001, 28001)
+    second = WorkerSpec(
+        "server-one-slot-2", first.instance_id, first.host, first.game_port,
+        first.rcon_port, first.script_output, first.surface_prefix, first.force_prefix,
+    )
+    third = worker(tmp_path, "server-two-slot", 35002, 28002)
+    grouped = group_workers_by_instance([first, second, third])
+    states = {instance: AdaptiveScaleState(1) for instance in grouped}
+    active = active_workers_by_instance(grouped, states)
+    assert [item.worker_id for item in active] == ["server-one-slot", "server-two-slot"]
 
 
 def test_repeated_attempts_keep_one_scenario_on_one_shared_runtime_slot(tmp_path) -> None:
@@ -174,6 +188,35 @@ def test_capacity_requeue_keeps_scenario_seed_and_refreshes_episode_identity() -
     assert returned_scenario is scenario
     assert seed == 3
 
+def test_per_server_gates_adjust_independently_after_five_minutes(tmp_path) -> None:
+    first = worker(tmp_path, "one", 35001, 28001)
+    second = worker(tmp_path, "two", 35002, 28002)
+    first_group = [first] + [WorkerSpec(
+        f"one-{index}", first.instance_id, first.host, first.game_port, first.rcon_port,
+        first.script_output, first.surface_prefix, first.force_prefix,
+    ) for index in range(2, 9)]
+    second_group = [second] + [WorkerSpec(
+        f"two-{index}", second.instance_id, second.host, second.game_port, second.rcon_port,
+        second.script_output, second.surface_prefix, second.force_prefix,
+    ) for index in range(2, 9)]
+    grouped = group_workers_by_instance(first_group + second_group)
+    states = {instance: AdaptiveScaleState(6) for instance in grouped}
+    windows = {
+        first.instance_id: UpsWindow((60.0, 60.0, 60.0)),
+        second.instance_id: UpsWindow((40.0, 40.0, 40.0)),
+    }
+    next_states, decisions, _ = adaptive._adjust_instance_capacity(
+        states, grouped, windows, {instance: 0.0 for instance in grouped}, now=300.0,
+        stability_window_seconds=300.0, minimum_slots=1, maximum_slots=8, step=1,
+        minimum_ups_p95=50.0, minimum_ups_p98=45.0,
+        healthy_windows_to_grow=1, unhealthy_windows_to_shrink=1,
+    )
+    assert next_states[first.instance_id].slots == 7
+    assert next_states[second.instance_id].slots == 5
+    assert decisions[first.instance_id] == "increase_safe_ups"
+    assert decisions[second.instance_id] == "decrease_safe_ups"
+
+
 def test_adaptive_stage_drains_without_interrupting_when_live_ups_is_unsafe(monkeypatch, tmp_path) -> None:
     scenario = generate_mining_delivery_scenario(7)
     worker_spec = worker(tmp_path, "slot-one", 35001, 28001)
@@ -225,7 +268,9 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
         "sys.argv", ["adaptive", "--workers", str(tmp_path / "workers.json")],
     )
     args = _parse()
-    assert args.initial_slots == 20
+    assert args.initial_slots == 6
+    assert args.minimum_slots == 1
+    assert args.step == 1
     assert args.episodes_per_policy == 100
     assert (args.minimum_ups_p95, args.minimum_ups_p98) == (50.0, 45.0)
     assert args.stability_window_seconds == 300.0

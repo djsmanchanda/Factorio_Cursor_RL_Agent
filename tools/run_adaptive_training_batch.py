@@ -33,7 +33,9 @@ from training.policies import policy_snapshot
 from training.scheduler import (
     AdaptiveScaleState,
     UpsWindow,
+    active_workers_by_instance,
     adjust_adaptive_slots,
+    group_workers_by_instance,
     load_worker_specs,
 )
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
@@ -262,10 +264,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
-    parser.add_argument("--initial-slots", type=int, default=20)
-    parser.add_argument("--minimum-slots", type=int, default=4)
+    parser.add_argument("--initial-slots", type=int, default=6)
+    parser.add_argument("--minimum-slots", type=int, default=1)
     parser.add_argument("--maximum-slots", type=int, default=80)
-    parser.add_argument("--step", type=int, default=4)
+    parser.add_argument("--step", type=int, default=1)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
     parser.add_argument("--minimum-ups-p95", type=float, default=50.0)
@@ -297,31 +299,79 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _initial_instance_states(workers_by_instance, *, initial: int, minimum: int, maximum: int):
+    """Give every Factorio server its own bounded initial slot budget."""
+    states: dict[str, AdaptiveScaleState] = {}
+    for instance_id, workers in workers_by_instance.items():
+        if len(workers) < minimum:
+            raise ValueError(
+                f"instance {instance_id} has {len(workers)} slot(s), below minimum {minimum}"
+            )
+        limit = min(maximum, len(workers))
+        states[instance_id] = AdaptiveScaleState(min(limit, max(minimum, initial)))
+    return states
+
+
+def _adjust_instance_capacity(
+    states, workers_by_instance, windows, gate_started, *, now: float,
+    stability_window_seconds: float, minimum_slots: int, maximum_slots: int, step: int,
+    minimum_ups_p95: float, minimum_ups_p98: float,
+    healthy_windows_to_grow: int, unhealthy_windows_to_shrink: int,
+):
+    """Apply independent UPS gates; one overloaded server cannot throttle another."""
+    next_states = dict(states)
+    next_gate_started = dict(gate_started)
+    decisions: dict[str, str] = {}
+    for instance_id, workers in workers_by_instance.items():
+        if now - gate_started[instance_id] < stability_window_seconds:
+            decisions[instance_id] = "hold_capacity_window"
+            continue
+        next_states[instance_id], decisions[instance_id] = adjust_adaptive_slots(
+            states[instance_id], windows.get(instance_id), minimum=minimum_slots,
+            maximum=min(maximum_slots, len(workers)), step=step,
+            minimum_safe_ups_p95=minimum_ups_p95,
+            minimum_safe_ups_p98=minimum_ups_p98,
+            healthy_windows_to_grow=healthy_windows_to_grow,
+            unhealthy_windows_to_shrink=unhealthy_windows_to_shrink,
+        )
+        if decisions[instance_id] != "no_ups_window":
+            next_gate_started[instance_id] = now
+    return next_states, decisions, next_gate_started
+
+
+def _instance_capacity_evidence(workers_by_instance, states, windows, decisions) -> list[dict]:
+    """Compact per-server evidence for the controller state and Observatory."""
+    evidence = []
+    for instance_id, workers in workers_by_instance.items():
+        window = windows.get(instance_id)
+        evidence.append({
+            "instance_id": instance_id,
+            "configured_slots": len(workers),
+            "active_slots": states[instance_id].slots,
+            "decision": decisions.get(instance_id),
+            "mean_ups": round(window.mean_ups, 3) if window else None,
+            "safe_ups_p95": round(window.safe_ups_p95, 3) if window else None,
+            "safe_ups_p98": round(window.safe_ups_p98, 3) if window else None,
+            "tick_time_p98_ms": round(window.tick_time_p98_ms, 3) if window else None,
+        })
+    return evidence
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse(argv)
     workers = load_worker_specs(args.workers)
-    if len(workers) < args.maximum_slots:
-        raise SystemExit(
-            f"adaptive batch needs at least {args.maximum_slots} configured slots; "
-            f"only {len(workers)} are available"
-        )
+    workers_by_instance = group_workers_by_instance(workers)
+    states = _initial_instance_states(
+        workers_by_instance, initial=args.initial_slots,
+        minimum=args.minimum_slots, maximum=args.maximum_slots,
+    )
     scenarios = generate_mining_delivery_curriculum(args.count, args.start_seed)
     jobs = _jobs(scenarios, args.attempts_per_scenario)
     password = _rcon_password(args)
     generation, policy = _load_policy(args.checkpoint)
-    state = AdaptiveScaleState(args.initial_slots)
     total_completed = total_failed = 0
     stage = cohort = 0
-    capacity_window_started = time.monotonic()
+    gate_started = {instance_id: time.monotonic() for instance_id in workers_by_instance}
     ups_history: list[dict[str, object]] = []
-
-    def window_metrics(window: UpsWindow | None) -> dict[str, float | None]:
-        return {
-            "safe_ups_p95": round(window.safe_ups_p95, 3) if window else None,
-            "safe_ups_p98": round(window.safe_ups_p98, 3) if window else None,
-            "tick_time_p98_ms": round(window.tick_time_p98_ms, 3) if window else None,
-            "mean_ups": round(window.mean_ups, 3) if window else None,
-        }
 
     def state_payload(payload: dict) -> dict:
         return {
@@ -339,10 +389,14 @@ def main(argv: list[str] | None = None) -> int:
             policy.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(policy),
             parent_policy_id=_existing_policy_parent(store, policy.policy_id),
         )
-        capacity_sampler = UpsSampler(
-            workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
-        )
-        capacity_sampler.start()
+        samplers = {
+            instance_id: UpsSampler(
+                group[0].host, group[0].rcon_port, password, interval_seconds=5.0,
+            )
+            for instance_id, group in workers_by_instance.items()
+        }
+        for sampler in samplers.values():
+            sampler.start()
         try:
             while jobs:
                 cohort += 1
@@ -352,21 +406,23 @@ def main(argv: list[str] | None = None) -> int:
                 cohort_completed = cohort_failed = 0
                 while cohort_jobs:
                     stage += 1
-                    active_workers = workers[:state.slots]
-                    stage_jobs = cohort_jobs[:state.slots * args.episodes_per_slot]
+                    active_workers = active_workers_by_instance(workers_by_instance, states)
+                    stage_jobs = cohort_jobs[:len(active_workers) * args.episodes_per_slot]
                     del cohort_jobs[:len(stage_jobs)]
                     started = time.monotonic()
+                    primary_sampler = next(iter(samplers.values()))
                     (
-                        results, completed, failed, window, sample_error, interrupted,
-                        backoff_state, backoff_reason,
+                        results, completed, failed, _window, _sample_error, interrupted,
+                        _backoff_state, _backoff_reason,
                     ) = _run_stage(
-                        active_workers, stage_jobs, password, policy, args.live_directory, store, state,
-                        minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots,
-                        step=args.step, minimum_ups_p95=args.minimum_ups_p95,
+                        active_workers, stage_jobs, password, policy, args.live_directory, store,
+                        states[next(iter(states))], minimum_slots=args.minimum_slots,
+                        maximum_slots=args.maximum_slots, step=args.step,
+                        minimum_ups_p95=args.minimum_ups_p95,
                         minimum_ups_p98=args.minimum_ups_p98,
                         healthy_windows_to_grow=args.healthy_windows_to_grow,
                         unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
-                        sampler=capacity_sampler,
+                        sampler=primary_sampler,
                         stability_window_seconds=args.stability_window_seconds,
                     )
                     elapsed = time.monotonic() - started
@@ -375,57 +431,67 @@ def main(argv: list[str] | None = None) -> int:
                     cohort_completed += completed
                     cohort_failed += failed
                     cohort_results.extend(results)
-                    if window is not None:
+                    windows = {
+                        instance_id: sampler.window(args.stability_window_seconds)
+                        for instance_id, sampler in samplers.items()
+                    }
+                    now = time.monotonic()
+                    states, decisions, gate_started = _adjust_instance_capacity(
+                        states, workers_by_instance, windows, gate_started, now=now,
+                        stability_window_seconds=args.stability_window_seconds,
+                        minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots,
+                        step=args.step, minimum_ups_p95=args.minimum_ups_p95,
+                        minimum_ups_p98=args.minimum_ups_p98,
+                        healthy_windows_to_grow=args.healthy_windows_to_grow,
+                        unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                    )
+                    capacity_evidence = _instance_capacity_evidence(
+                        workers_by_instance, states, windows, decisions,
+                    )
+                    valid_windows = [window for window in windows.values() if window is not None]
+                    aggregate = {
+                        "mean_ups": round(sum(window.mean_ups for window in valid_windows) / len(valid_windows), 3)
+                        if valid_windows else None,
+                        "safe_ups_p95": round(min(window.safe_ups_p95 for window in valid_windows), 3)
+                        if valid_windows else None,
+                        "safe_ups_p98": round(min(window.safe_ups_p98 for window in valid_windows), 3)
+                        if valid_windows else None,
+                    }
+                    if valid_windows:
                         ups_history.append({
                             "stage": stage,
-                            "slots": len(active_workers),
-                            "mean_ups": round(window.mean_ups, 3),
-                            "safe_ups_p95": round(window.safe_ups_p95, 3),
-                            "safe_ups_p98": round(window.safe_ups_p98, 3),
-                            "tick_time_p98_ms": round(window.tick_time_p98_ms, 3),
+                            "slots": sum(state.slots for state in states.values()),
+                            **aggregate,
+                            "servers": capacity_evidence,
                             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                         })
                     base_payload = {
                         "stage": stage, "policy_cohort": cohort,
                         "policy_episode_target": args.episodes_per_policy,
                         "policy_terminal_episodes": len(cohort_results),
-                        "slots": state.slots, "previous_slots": len(active_workers),
-                        "stage_attempts": len(stage_jobs), "completed": completed, "failed": failed,
-                        "elapsed_seconds": round(elapsed, 2), "sample_error": sample_error,
+                        "slots": sum(state.slots for state in states.values()),
+                        "previous_slots": len(active_workers),
+                        "stage_attempts": len(stage_jobs), "completed": completed,
+                        "failed": failed, "elapsed_seconds": round(elapsed, 2),
                         "remaining_attempts": len(cohort_jobs) + len(jobs),
                         "generation": generation, "policy_id": policy.policy_id,
-                        **window_metrics(window),
+                        "servers": capacity_evidence,
+                        **aggregate,
                     }
                     if interrupted:
                         retries = _retry_jobs(stage_jobs, interrupted)
                         cohort_jobs = retries + cohort_jobs
-                        state = backoff_state or state
                         payload = {
                             **base_payload, "phase": "adaptive_capacity_backoff",
-                            "slots": state.slots, "interrupted": len(interrupted),
-                            "requeued": len(retries), "decision": backoff_reason,
+                            "interrupted": len(interrupted), "requeued": len(retries),
+                            "decision": "capacity_backoff",
                         }
-                        _write_controller_state(args.live_directory, state_payload(payload))
-                        print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
-                        continue
-                    previous_slots = state.slots
-                    if time.monotonic() - capacity_window_started >= args.stability_window_seconds:
-                        state, decision = adjust_adaptive_slots(
-                            state, window, minimum=args.minimum_slots, maximum=args.maximum_slots,
-                            step=args.step, minimum_safe_ups_p95=args.minimum_ups_p95,
-                            minimum_safe_ups_p98=args.minimum_ups_p98,
-                            healthy_windows_to_grow=args.healthy_windows_to_grow,
-                            unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
-                        )
-                        if state.slots != previous_slots:
-                            capacity_window_started = time.monotonic()
                     else:
-                        decision = "hold_capacity_window"
-                    payload = {
-                        **base_payload, "phase": "adaptive_stage_finished", "slots": state.slots,
-                        "decision": decision,
-                        "capacity_mode": "drain_before_scale_down" if decision == "decrease_safe_ups" else "normal",
-                    }
+                        payload = {
+                            **base_payload, "phase": "adaptive_stage_finished",
+                            "decision": decisions,
+                            "capacity_mode": "per_server_independent_gates",
+                        }
                     _write_controller_state(args.live_directory, state_payload(payload))
                     print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
                 if not cohort_results:
@@ -443,18 +509,26 @@ def main(argv: list[str] | None = None) -> int:
                     "policy_episode_target": args.episodes_per_policy,
                     "policy_terminal_episodes": len(cohort_results),
                     "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
-                    "slots": state.slots, "remaining_attempts": len(jobs),
-                    "generation": generation, "policy_id": policy.policy_id,
+                    "slots": sum(state.slots for state in states.values()),
+                    "remaining_attempts": len(jobs), "generation": generation,
+                    "policy_id": policy.policy_id, "servers": _instance_capacity_evidence(
+                        workers_by_instance, states,
+                        {instance_id: sampler.window(args.stability_window_seconds)
+                         for instance_id, sampler in samplers.items()}, {},
+                    ),
                 }
                 _write_controller_state(args.live_directory, state_payload(payload))
                 print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
         finally:
-            capacity_sampler.stop()
+            for sampler in samplers.values():
+                sampler.stop()
 
     summary = {
         "attempts": total_completed + total_failed, "completed": total_completed,
         "failed": total_failed, "generation": generation, "policy_id": policy.policy_id,
-        "final_slots": state.slots, "stages": stage, "policy_cohorts": cohort,
+        "final_slots": sum(state.slots for state in states.values()),
+        "server_slots": {instance_id: state.slots for instance_id, state in states.items()},
+        "stages": stage, "policy_cohorts": cohort,
     }
     print(json.dumps(summary, indent=2), flush=True)
     return 0 if total_failed == 0 else 1

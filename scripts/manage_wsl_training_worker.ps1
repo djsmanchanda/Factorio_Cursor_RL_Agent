@@ -11,9 +11,9 @@ param(
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
     [ValidateRange(1, 8)]
-    [int]$WorkerCount = 1,
+    [int]$WorkerCount = 5,
     [ValidateRange(1, 80)]
-    [int]$SlotsPerWorker = 4
+    [int]$SlotsPerWorker = 16
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,7 +58,7 @@ function Write-WorkerConfig {
         foreach ($slot in 1..$SlotsPerWorker) {
             [ordered]@{
                 worker_id = "training-wsl-$(WorkerSuffix $index)-slot-$(WorkerSuffix $slot)"
-                # Slots are concurrent surfaces in this one explicit Factorio process.
+                # Slots are concurrent surfaces in this one explicit Factorio process; the controller activates a prefix per server.
                 instance_id = "factorio-training-wsl-$(WorkerSuffix $index)"
                 host = "127.0.0.1"
                 game_port = GamePort $index

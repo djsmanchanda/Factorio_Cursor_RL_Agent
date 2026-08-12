@@ -9,7 +9,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Iterator, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,30 @@ def validate_worker_specs(workers: Sequence[WorkerSpec]) -> None:
             if owner != worker.instance_id:
                 raise ValueError("Factorio runtime ports and script-output must stay isolated")
 
+
+def group_workers_by_instance(workers: Sequence[WorkerSpec]) -> dict[str, list[WorkerSpec]]:
+    """Return stable per-server slot groups after enforcing runtime isolation."""
+    validate_worker_specs(workers)
+    grouped: dict[str, list[WorkerSpec]] = {}
+    for worker in workers:
+        grouped.setdefault(worker.instance_id, []).append(worker)
+    return grouped
+
+
+def active_workers_by_instance(
+    grouped: Mapping[str, Sequence[WorkerSpec]],
+    states: Mapping[str, "AdaptiveScaleState"],
+) -> list[WorkerSpec]:
+    """Select each server's active prefix without borrowing its capacity."""
+    active: list[WorkerSpec] = []
+    for instance_id, workers in grouped.items():
+        state = states.get(instance_id)
+        if state is None:
+            raise ValueError(f"missing adaptive state for instance: {instance_id}")
+        if state.slots > len(workers):
+            raise ValueError(f"adaptive slots exceed configured workers for instance: {instance_id}")
+        active.extend(workers[:state.slots])
+    return active
 
 def load_worker_specs(path: Path) -> list[WorkerSpec]:
     try:
