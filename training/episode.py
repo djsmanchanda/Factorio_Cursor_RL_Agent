@@ -48,7 +48,7 @@ def _material_cost(candidate: Mapping) -> int:
 
 def run_episode(
     bridge, scenario: Mapping, candidates: Sequence[Mapping], policy, selection_seed: int,
-    *, episode_id: str | None = None, poll_seconds: float = 0.25,
+    *, episode_id: str | None = None, poll_seconds: float = 1.0,
     update_policy: bool = True, on_progress=None,
 ) -> dict:
     """Run one candidate and always request disposal of its training world."""
@@ -72,6 +72,8 @@ def run_episode(
         })
         report = bridge.observe(identifier)
         _progress(on_progress, "measuring", identifier, {**context, "report": report})
+        # Measurement is driven by the Factorio tick loop. A one-second
+        # cadence avoids 40 slots producing 160 competing RCON reads/second.
         while report["status"] in {"ready", "running"}:
             time.sleep(poll_seconds)
             report = bridge.observe(identifier)

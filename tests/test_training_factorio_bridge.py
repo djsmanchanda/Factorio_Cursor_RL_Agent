@@ -7,6 +7,8 @@ import json
 
 import pytest
 
+import training.factorio_bridge as factorio_bridge
+
 from planners.sandbox_infrastructure import build_layout_authorization
 from training.candidates import mining_delivery_candidates
 from training.factorio_bridge import (
@@ -189,3 +191,25 @@ def test_bridge_maps_observe_to_the_observation_report_kind(tmp_path):
     report = bridge.observe("episode-1")
 
     assert report["kind"] == "observation"
+
+def test_bridge_throttles_pruning_across_shared_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(factorio_bridge, "_NEXT_REPORT_PRUNE", {})
+    first = FactorioTrainingBridge(
+        tmp_path, host="127.0.0.1", port=27015, password="x", rcon=ReportRcon(tmp_path),
+    )
+    second = FactorioTrainingBridge(
+        tmp_path, host="127.0.0.1", port=27015, password="x", rcon=ReportRcon(tmp_path),
+    )
+    calls = []
+    monkeypatch.setattr(first, "_prune_reports", lambda keep=None: calls.append("first") or 0)
+    monkeypatch.setattr(second, "_prune_reports", lambda keep=None: calls.append("second") or 0)
+    monkeypatch.setattr(factorio_bridge.time, "monotonic", lambda: 100.0)
+
+    assert first._maybe_prune_reports() == 0
+    assert second._maybe_prune_reports() == 0
+    assert calls == ["first"]
+
+    monkeypatch.setattr(factorio_bridge.time, "monotonic", lambda: 106.0)
+    kept = tmp_path / "factorio_training_lab" / "reports" / "newest.json"
+    assert second._maybe_prune_reports(kept) == 0
+    assert calls == ["first", "second"]

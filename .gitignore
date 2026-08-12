@@ -39,3 +39,4 @@ data/training-capacity/
 training-workers.json
 training-workers-wsl.json
 data/training/logs/
+data/rl-gpu-venv/

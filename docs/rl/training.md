@@ -117,6 +117,27 @@ python tools/run_autoresearch.py --model <model-id> --policy policy.json `
   --evidence evidence.json --parent-policy-id <policy-id>
 ```
 
+## Optional CUDA learner
+
+Factorio simulation, RCON, SQLite, JSON validation, and report I/O remain CPU work. The small online LinUCB selector also stays CPU-bound because each episode ranks only a few candidates; GPU launch and transfer overhead would make it slower. The optional reward/failure surrogate instead trains a batched model from completed transition evidence between controller stages. It is advisory only: it cannot write the database, select a live plan, or promote a policy.
+
+Install its isolated Python 3.12 CUDA runtime without replacing the controller interpreter:
+
+```powershell
+powershell -File scripts\setup_rl_gpu_environment.ps1 -Action install
+powershell -File scripts\setup_rl_gpu_environment.ps1 -Action status
+```
+
+Then train an external checkpoint after at least 32 terminal transitions:
+
+```powershell
+.\data\rl-gpu-venv\Scripts\python.exe tools\train_gpu_surrogate.py `
+  --database data\training\experience.db `
+  --output data\training\surrogates\mining-v1.pt --require-cuda
+```
+
+The workstation has 8 GB VRAM, so do not run the surrogate, a local LLM, and other GPU-heavy work concurrently. Run it between Factorio collection stages and require CUDA for experiments intended to inform policy research. If CUDA is unavailable, the training controller remains unaffected.
+
 ## Observatory and guidance
 
 ```powershell

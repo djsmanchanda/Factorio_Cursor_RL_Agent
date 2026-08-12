@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -21,10 +22,13 @@ _COMMAND_VERSION = "1.1.0"
 _UPLOAD_CHUNK_BYTES = 1_600
 _MAX_UPLOAD_CHUNKS = 256
 _REPORT_RETENTION = 512
+_REPORT_PRUNE_INTERVAL_SECONDS = 5.0
 _REPORT_KINDS = {
     "training_execute": "execution",
     "training_observe": "observation",
 }
+_REPORT_PRUNE_LOCK = threading.Lock()
+_NEXT_REPORT_PRUNE: dict[Path, float] = {}
 
 
 class TrainingBridgeError(RuntimeError):
@@ -105,6 +109,16 @@ class FactorioTrainingBridge:
                 continue
         return removed
 
+    def _maybe_prune_reports(self, keep: Path | None = None) -> int:
+        """Throttle one report-directory scan across slots sharing a runtime."""
+        directory = (self.script_output / _REPORT_SUBDIR).resolve()
+        now = time.monotonic()
+        with _REPORT_PRUNE_LOCK:
+            if now < _NEXT_REPORT_PRUNE.get(directory, 0.0):
+                return 0
+            _NEXT_REPORT_PRUNE[directory] = now + _REPORT_PRUNE_INTERVAL_SECONDS
+        return self._prune_reports(keep)
+
     def _wait_report(self, known: Mapping[Path, tuple[int, int]], predicate) -> tuple[dict, Path]:
         deadline = time.monotonic() + self._command_timeout
         while time.monotonic() < deadline:
@@ -136,7 +150,7 @@ class FactorioTrainingBridge:
         request_id = uuid.uuid4().hex
         payload = {"version": _COMMAND_VERSION, "request_id": request_id, "episode_id": episode_id}
         payload.update(dict(extra or {}))
-        self._prune_reports()
+        self._maybe_prune_reports()
         known = self._files()
         response = self._rcon.command(f"/{name} " + json.dumps(payload, separators=(",", ":")))
         if "error" in response.lower():
@@ -148,7 +162,7 @@ class FactorioTrainingBridge:
             and item.get("episode_id") == episode_id
             and (item.get("kind") != kind or final_status is None or item.get("status") == final_status),
         )
-        self._prune_reports(report_path)
+        self._maybe_prune_reports(report_path)
         self._validate_report(report, kind)
         return report
 

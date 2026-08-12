@@ -116,3 +116,40 @@ def test_episode_keeps_failed_placements_as_a_negative_transition():
     assert transition["result"]["failure_kind"] == "execution"
     assert transition["metrics"]["placements_failed"] == 1
     assert transition["reward"]["failed_placements"] < 0
+
+def test_episode_uses_one_second_measurement_cadence_by_default(monkeypatch):
+    scenario = generate_mining_delivery_scenario(51)
+    sleeps = []
+
+    class PollingBridge(FakeBridge):
+        def observe(self, episode_id):
+            self.observations += 1
+            terminal = self.observations >= 4
+            return {
+                "tick": 700 if terminal else 100,
+                "status": "completed" if terminal else "ready",
+                "elapsed_ticks": 600 if terminal else 0,
+                "objective": {"target_rate_per_tick": 1 / 60},
+                "metrics": {
+                    "rate_per_tick": 1 / 60 if terminal else 0,
+                    "sustained_ticks": 600 if terminal else 0,
+                    "resource_remaining": 100_000,
+                    "delivered_items": 10 if terminal else 0,
+                    "electric_pole_count": 3, "occupied_footprint_tiles": 60,
+                    "placed_mining_drills": 3,
+                    "productive_mining_drills": 3 if terminal else 0,
+                    "productive_mining_drill_ratio": 1.0 if terminal else 0.0,
+                    "mining_drill_capacity_ticks": 1_800 if terminal else 0,
+                    "mining_drill_working_ticks": 1_800 if terminal else 0,
+                    "mining_drill_blocked_ticks": 0,
+                    "mining_drill_idle_ticks": 0,
+                },
+                "failure": {"kind": "none", "reason": ""},
+            }
+
+    monkeypatch.setattr("training.episode.time.sleep", sleeps.append)
+    run_episode(
+        PollingBridge(), scenario, mining_delivery_candidates(scenario),
+        DeterministicBaseline(), 2, episode_id="episode-poll-cadence",
+    )
+    assert sleeps == [1.0, 1.0]

@@ -2408,3 +2408,10 @@ that consumed it was not.
 - Evidence: Focused scheduler, store, batch, and observer suites pass `33 passed`; Python compilation and diff checks pass.
 - Operational state: Paused `policy-g0001-fc8c141a11b6` before restart. The server currently has zero training surfaces. Its database preserves 160 completed first-stage transitions plus 144 interrupted second-stage queue records, so do not resume it blindly; choose a clean new batch or add explicit resumable-stage recovery first.
 - Lifecycle: Python-only change. The WSL Factorio worker and GUI mod do not need redeployment; restart the Python controller only when restarting the batch.
+
+## [2026-08-12] RL GPU learner and controller CPU budget
+- Files: `training/compute.py`, `training/surrogate.py`, `tools/train_gpu_surrogate.py`, `scripts/setup_rl_gpu_environment.ps1`, bridge/episode polling, focused tests, and RL training docs.
+- What: Added an optional lazy CUDA runtime and an offline dual-head reward/failure surrogate that reads terminal transitions read-only and writes a separate checkpoint. Reduced per-slot measurement polling from 0.25 s to 1.0 s and throttle shared report-directory pruning to one scan per five seconds.
+- Why: Factorio simulation itself cannot use CUDA; RCON and filesystem work are CPU-bound. The control-plane reduction protects UPS, while batched GPU learning uses the RTX only where it can amortize kernel overhead.
+- Safety: The surrogate never controls a live episode or mutates the experience database. It is opt-in, requires an isolated CUDA PyTorch environment, and should run between Factorio collection stages rather than alongside a GPU-heavy LLM.
+- Next: Install the isolated CUDA environment, confirm `cuda_available=true`, and train/evaluate the surrogate on a clean batch before considering any candidate-ranking integration.
