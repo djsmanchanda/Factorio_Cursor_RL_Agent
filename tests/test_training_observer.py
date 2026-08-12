@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from concurrent.futures import Future
@@ -15,7 +16,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from tools.run_training_batch import _collect_results
-from tools.training_observer import _handler, main
+from tools.training_observer import _discover_training_profile, _handler, main
 from training.observer_control import TrainingSurfaceViewer
 from training.scheduler import WorkerSpec
 from training.observation import build_training_snapshot
@@ -78,6 +79,31 @@ def _populate(path) -> None:
             "model": "local-model", "context_size": 8192, "n_cpu_moe": 30,
             "elapsed_ms": 100, "prompt_tokens": 20, "completion_tokens": 5,
         })
+
+
+def test_observer_discovers_the_freshest_training_profile(tmp_path) -> None:
+    data = tmp_path / "data"
+    default_live = data / "training" / "live"
+    overnight_live = data / "training-overnight" / "live"
+    for database, live in (
+        (data / "training" / "experience.db", default_live),
+        (data / "training-overnight" / "experience.db", overnight_live),
+    ):
+        database.parent.mkdir(parents=True)
+        database.write_bytes(b"")
+        live.mkdir()
+    (default_live / "training-01.json").write_text("{}", encoding="utf-8")
+    (overnight_live / "training-01.json").write_text("{}", encoding="utf-8")
+    old = 1_700_000_000
+    new = old + 100
+    os.utime(default_live / "training-01.json", (old, old))
+    os.utime(overnight_live / "training-01.json", (new, new))
+
+    profile = _discover_training_profile(tmp_path)
+
+    assert profile.name == "training-overnight"
+    assert profile.database == data / "training-overnight" / "experience.db"
+    assert profile.live_directory == overnight_live
 
 
 def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> None:

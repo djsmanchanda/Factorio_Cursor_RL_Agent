@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +30,54 @@ _ASSET_MAP = {
 _MAX_VIEW_REQUEST_BYTES = 512
 
 
+@dataclass(frozen=True)
+class TrainingProfile:
+    """The evidence store and live telemetry directory for one training run."""
+
+    database: Path
+    live_directory: Path
+    name: str
+
+
+def _discover_training_profile(repo_root: Path = REPO_ROOT) -> TrainingProfile:
+    """Select the freshest run without overriding explicit CLI paths."""
+    data_root = repo_root / "data"
+    candidates = [data_root / "training"]
+    candidates.extend(sorted(data_root.glob("training-*")))
+    ranked: list[tuple[float, int, Path]] = []
+    for path in candidates:
+        database = path / "experience.db"
+        live_directory = path / "live"
+        if not database.is_file() or not live_directory.is_dir():
+            continue
+        evidence = [database, live_directory / "adaptive-controller.json"]
+        evidence.extend(live_directory.glob("training-*.json"))
+        mtimes = []
+        for item in evidence:
+            try:
+                mtimes.append(item.stat().st_mtime)
+            except OSError:
+                continue
+        if mtimes:
+            ranked.append((max(mtimes), 0 if path.name == "training" else 1, path))
+    path = (max(ranked, key=lambda item: (item[0], item[1]))[2]
+            if ranked else data_root / "training")
+    return TrainingProfile(path / "experience.db", path / "live", path.name)
+
+
+def _resolve_training_profile(
+    database: Path | None, live_directory: Path | None,
+) -> TrainingProfile:
+    """Resolve explicit paths, or discover the active profile when omitted."""
+    if database is None and live_directory is None:
+        return _discover_training_profile()
+    if database is None:
+        database = live_directory.parent / "experience.db"
+    if live_directory is None:
+        live_directory = database.parent / "live"
+    return TrainingProfile(database, live_directory, database.parent.name)
+
+
 def _log(level: str, message: str, request_id: str, **fields) -> None:
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(), "level": level,
@@ -45,7 +94,7 @@ def _view_state(viewer: TrainingSurfaceViewer | None, reason: str | None) -> dic
 
 
 def _handler(
-    database: Path, live_directory: Path, viewer: TrainingSurfaceViewer | None = None,
+    database: Path | None, live_directory: Path | None, viewer: TrainingSurfaceViewer | None = None,
     view_reason: str | None = None,
 ):
     class ObserverHandler(BaseHTTPRequestHandler):
@@ -100,7 +149,9 @@ def _handler(
             request_id, status = uuid.uuid4().hex, 500
             try:
                 if self.path == "/api/snapshot":
-                    snapshot = build_training_snapshot(database, live_directory)
+                    profile = _resolve_training_profile(database, live_directory)
+                    snapshot = build_training_snapshot(profile.database, profile.live_directory)
+                    snapshot["training_profile"] = {"name": profile.name}
                     snapshot["view_control"] = _view_state(viewer, view_reason)
                     self._send_json(200, snapshot)
                     status = 200
@@ -183,7 +234,8 @@ def _serve(args: argparse.Namespace) -> int:
 
 def _nudge(args: argparse.Namespace) -> int:
     guidance_id = f"guidance-{uuid.uuid4().hex}"
-    with TrainingStore(args.database) as store:
+    profile = _resolve_training_profile(args.database, args.live_directory)
+    with TrainingStore(profile.database) as store:
         store.save_guidance(
             guidance_id, args.focus, args.message, args.expires_generation,
         )
@@ -192,7 +244,8 @@ def _nudge(args: argparse.Namespace) -> int:
 
 
 def _dismiss(args: argparse.Namespace) -> int:
-    with TrainingStore(args.database) as store:
+    profile = _resolve_training_profile(args.database, args.live_directory)
+    with TrainingStore(profile.database) as store:
         store.dismiss_guidance(args.guidance_id)
     print(json.dumps({"guidance_id": args.guidance_id, "status": "dismissed"}, indent=2))
     return 0
@@ -200,8 +253,8 @@ def _dismiss(args: argparse.Namespace) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Observe and guide isolated RL training.")
-    parser.add_argument("--database", type=Path, default=Path("data/training/experience.db"))
-    parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
+    parser.add_argument("--database", type=Path)
+    parser.add_argument("--live-directory", type=Path)
     parser.add_argument("--workers", type=Path, default=REPO_ROOT / "training-workers-wsl.json")
     parser.add_argument(
         "--rcon-secret-file", type=Path,
@@ -232,8 +285,9 @@ def main(argv: list[str] | None = None) -> int:
         return _nudge(args)
     if args.command == "dismiss":
         return _dismiss(args)
+    profile = _resolve_training_profile(args.database, args.live_directory)
     print(json.dumps(
-        build_training_snapshot(args.database, args.live_directory), indent=2, allow_nan=False,
+        build_training_snapshot(profile.database, profile.live_directory), indent=2, allow_nan=False,
     ))
     return 0
 
