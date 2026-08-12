@@ -302,6 +302,7 @@ def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
     assert "ups-chart" in html
     assert "renderUpsChart" in script
     assert "worker limit" in script
+    assert "function viewButton" in script
 
 def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
     rcon = CleanupRcon()
