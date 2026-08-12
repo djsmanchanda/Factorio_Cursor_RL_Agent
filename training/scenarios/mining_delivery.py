@@ -16,7 +16,9 @@ _WORLD_BOUNDS = {
     "x_max_exclusive": 64, "y_max_exclusive": 64,
 }
 _RESOURCES = ("iron-ore", "copper-ore", "coal", "stone")
-_TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in (0.5, 1.0, 2.0, 3.0))
+_DEFAULT_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0)
+_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 10.0, 30.0)
+_TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in _DEFAULT_TARGET_RATES_PER_SECOND)
 _PATCH_SIZES = (12, 15, 18)
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
 _POLE_WIRE_STEP = 8.0
@@ -102,14 +104,20 @@ def _construction_budget(
     }
 
 
-def generate_mining_delivery_scenario(seed: int) -> dict:
+def generate_mining_delivery_scenario(
+    seed: int, target_rate_per_second: float | None = None,
+) -> dict:
     """Return one deterministic, schema-validated mining training episode."""
     if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= _MAX_SCENARIO_SEED:
         raise ValueError("seed must be an integer from 0 through 65535")
     rng = random.Random(seed)
     identifier = _scenario_id(seed)
     resource = rng.choice(_RESOURCES)
-    target_rate_per_tick = rng.choice(_TARGET_RATES_PER_TICK)
+    if target_rate_per_second is None:
+        target_rate_per_second = rng.choice(_DEFAULT_TARGET_RATES_PER_SECOND)
+    if target_rate_per_second not in _MAX_TARGET_RATES_PER_SECOND:
+        raise ValueError(f"target rate must be one of {_MAX_TARGET_RATES_PER_SECOND}")
+    target_rate_per_tick = target_rate_per_second / 60.0
     patch_center, destination = _opposed_sites(rng)
     patch = _patch_bounds(patch_center, rng)
     power_source = _power_source_position(rng, patch, destination)
@@ -121,8 +129,8 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
         "family": "mining_delivery",
         "seed": seed,
         "curriculum": {
-            "level": _TARGET_RATES_PER_TICK.index(target_rate_per_tick) + 1,
-            "tags": ["direct-delivery", "distributed-power-source", "electric-only", "mining", resource],
+            "level": _MAX_TARGET_RATES_PER_SECOND.index(target_rate_per_second) + 1,
+            "tags": ["direct-delivery", "distributed-power-source", "electric-only", "mining", resource, f"demand-{target_rate_per_second:g}-per-second"],
         },
         "environment": {
             "surface_name": f"training/{identifier}",
@@ -180,11 +188,20 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
     return scenario
 
 
-def generate_mining_delivery_curriculum(count: int, start_seed: int = 0) -> list[dict]:
+def generate_mining_delivery_curriculum(
+    count: int, start_seed: int = 0,
+    target_rates_per_second: tuple[float, ...] | None = None,
+) -> list[dict]:
     """Return `count` sequential, unique scenarios for batched training."""
     if not isinstance(count, int) or isinstance(count, bool) or count < 1:
         raise ValueError("count must be a positive integer")
     final_seed = start_seed + count - 1
     if start_seed < 0 or final_seed > _MAX_SCENARIO_SEED:
         raise ValueError("requested curriculum seeds exceed the supported range")
-    return [generate_mining_delivery_scenario(seed) for seed in range(start_seed, final_seed + 1)]
+    rates = target_rates_per_second or ()
+    if rates and any(rate not in _MAX_TARGET_RATES_PER_SECOND for rate in rates):
+        raise ValueError(f"target rates must be selected from {_MAX_TARGET_RATES_PER_SECOND}")
+    return [
+        generate_mining_delivery_scenario(seed, rates[index % len(rates)] if rates else None)
+        for index, seed in enumerate(range(start_seed, final_seed + 1))
+    ]

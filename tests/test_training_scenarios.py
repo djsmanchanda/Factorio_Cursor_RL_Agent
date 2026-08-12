@@ -125,6 +125,15 @@ def test_curriculum_generates_one_hundred_unique_bounded_scenarios() -> None:
         assert bounds["y_min"] < source[1] < bounds["y_max_exclusive"] - 1
 
 
+def test_curriculum_can_hold_fixed_three_ten_and_thirty_per_second_demand_phases() -> None:
+    for rate in (3.0, 10.0, 30.0):
+        scenarios = generate_mining_delivery_curriculum(4, 2000 + int(rate), (rate,))
+        assert {scenario["objective"]["target_rate_per_tick"] * 60 for scenario in scenarios} == {rate}
+        assert all(f"demand-{rate:g}-per-second" in scenario["curriculum"]["tags"] for scenario in scenarios)
+        for scenario in scenarios:
+            validate_scenario(scenario)
+
+
 def test_mining_scenario_budget_contains_construction_items_only() -> None:
     scenario = generate_mining_delivery_scenario(7)
     forbidden = {

@@ -92,6 +92,8 @@ second, keeping shared RCON/report-file work bounded. In the Observatory,
 **Heartbeat / elapsed** distinguishes the last telemetry update from Factorio ticks
 spent in the current episode.
 
+For an unattended overnight curriculum, `scripts/queue_overnight_training.ps1` waits for the current controller PID, then stops the old five-worker set, bootstraps and starts twenty staggered workers, and runs these phases sequentially against a separate `data/training-overnight/` store: the 100-scenario/20-attempt adaptive baseline, followed by 100-test fixed-demand probes at 3/s, 10/s, and 30/s. The high-demand probes intentionally expose the current compact mining footprint's capacity gap as reward evidence; they do not mutate the deterministic runtime.
+
 The preferred local worker uses the Linux headless build under WSL2:
 
 ```powershell

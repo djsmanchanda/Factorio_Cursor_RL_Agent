@@ -63,8 +63,10 @@ def _drill_positions(scenario: Mapping, count: int) -> tuple[list[dict], float, 
     xs = [x for x in xs if x + 1.5 <= patch["x2"] + 1]
     sites = [(x, belt_y - 2, "south") for x in xs]
     sites += [(x, belt_y + 2, "north") for x in reversed(xs)]
-    if count > len(sites):
-        raise ValueError("resource patch cannot fit the required drill candidate")
+    # High-demand stress scenarios may ask for more drills than this compact
+    # first-curriculum footprint can hold. Keep the candidate legal and let the
+    # measured shortfall become training evidence instead of aborting the batch.
+    count = min(count, len(sites))
     return [_placement("electric-mining-drill", site[:2], site[2]) for site in sites[:count]], belt_y, xs
 
 
@@ -309,7 +311,15 @@ def mining_delivery_candidates(scenario: Mapping) -> list[dict]:
     target = float(scenario["objective"]["target_rate_per_tick"])
     minimum = max(1, math.ceil(target / _DRILL_RATE_PER_TICK))
     budget = int(scenario["construction_budget"]["electric-mining-drill"])
-    counts: Iterable[int] = (minimum, min(budget, minimum + 1))
+    # Preserve two distinct alternatives even when demand exceeds the current
+    # compact footprint; the resulting throughput gap is observable and
+    # rewardable until a larger expansion curriculum is introduced.
+    available = min(budget, 8)
+    lower = min(minimum, available)
+    upper = min(available, lower + 1)
+    if upper == lower:
+        lower = max(1, upper - 1)
+    counts: Iterable[int] = (lower, upper)
     candidates = [_candidate(scenario, variant, count) for variant, count in enumerate(counts)]
     if len({candidate["plan_hash"] for candidate in candidates}) != len(candidates):
         raise ValueError("candidate catalog must contain distinct BuildPlans")

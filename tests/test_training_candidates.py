@@ -84,3 +84,12 @@ def test_candidates_supply_the_delivery_inserter_as_well_as_drills():
                     and abs(consumer["y"] - pole["y"]) <= 3.5
                     for pole in poles
                 )
+
+def test_high_demand_stress_scenarios_remain_legal_when_compact_capacity_is_exceeded():
+    for rate in (10.0, 30.0):
+        scenario = generate_mining_delivery_scenario(3000 + int(rate), rate)
+        candidates = mining_delivery_candidates(scenario)
+        assert len(candidates) == 2
+        assert all(candidate["features"]["predicted_rate_per_tick"] * 60 < rate for candidate in candidates)
+        for candidate in candidates:
+            validate_build_plan(candidate["plan"])

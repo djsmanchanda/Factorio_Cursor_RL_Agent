@@ -286,6 +286,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
+    parser.add_argument(
+        "--target-rates-per-second",
+        help="Comma-separated fixed demand rates for stress phases, e.g. 3 or 10 or 30.",
+    )
     parser.add_argument("--initial-slots", type=int, default=8)
     parser.add_argument("--minimum-slots", type=int, default=1)
     parser.add_argument("--maximum-slots", type=int, default=16)
@@ -386,7 +390,17 @@ def main(argv: list[str] | None = None) -> int:
         workers_by_instance, initial=args.initial_slots,
         minimum=args.minimum_slots, maximum=args.maximum_slots,
     )
-    scenarios = generate_mining_delivery_curriculum(args.count, args.start_seed)
+    target_rates = None
+    if args.target_rates_per_second:
+        try:
+            target_rates = tuple(float(value.strip()) for value in args.target_rates_per_second.split(","))
+        except ValueError as exc:
+            raise SystemExit("--target-rates-per-second must be comma-separated numbers") from exc
+        if not target_rates or any(rate <= 0 for rate in target_rates):
+            raise SystemExit("--target-rates-per-second must contain positive rates")
+    scenarios = generate_mining_delivery_curriculum(
+        args.count, args.start_seed, target_rates_per_second=target_rates,
+    )
     jobs = _jobs(scenarios, args.attempts_per_scenario)
     password = _rcon_password(args)
     generation, policy = _load_policy(args.checkpoint)
