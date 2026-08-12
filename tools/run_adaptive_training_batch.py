@@ -214,7 +214,8 @@ def _run_stage(
         interrupted.add(episode_id)
         terminal.add(episode_id)
 
-    sampler.start()
+    if owns_sampler:
+        sampler.start()
     try:
         with ThreadPoolExecutor(max_workers=len(workers)) as pool:
             futures = {
