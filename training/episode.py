@@ -15,6 +15,10 @@ from training.policies import policy_snapshot
 from training.rewards import reward_components
 
 
+class EpisodeCapacityInterrupted(RuntimeError):
+    """Stop a disposable episode because its shared runtime is overloaded."""
+
+
 def _progress(callback, phase: str, identifier: str, payload: Mapping) -> None:
     if callback is not None:
         callback({"phase": phase, "episode_id": identifier, **dict(payload)})
@@ -48,15 +52,20 @@ def _material_cost(candidate: Mapping) -> int:
 
 def run_episode(
     bridge, scenario: Mapping, candidates: Sequence[Mapping], policy, selection_seed: int,
-    *, episode_id: str | None = None, poll_seconds: float = 1.0,
+    *, episode_id: str | None = None, poll_seconds: float = 5.0,
+    stop_event=None,
     update_policy: bool = True, on_progress=None,
 ) -> dict:
     """Run one candidate and always request disposal of its training world."""
     identifier = episode_id or f"episode-{uuid.uuid4().hex}"
-    provision = bridge.provision(identifier, scenario)
+    provisioned = False
     context = {"scenario_id": scenario["scenario_id"], "policy_id": str(policy.policy_id)}
-    _progress(on_progress, "provisioned", identifier, {**context, "report": provision})
     try:
+        if stop_event is not None and stop_event.is_set():
+            raise EpisodeCapacityInterrupted("training capacity changed before provisioning")
+        provision = bridge.provision(identifier, scenario)
+        provisioned = True
+        _progress(on_progress, "provisioned", identifier, {**context, "report": provision})
         initial_report = bridge.observe(identifier)
         _progress(on_progress, "observed", identifier, {**context, "report": initial_report})
         initial = _observation(initial_report)
@@ -72,10 +81,14 @@ def run_episode(
         })
         report = bridge.observe(identifier)
         _progress(on_progress, "measuring", identifier, {**context, "report": report})
-        # Measurement is driven by the Factorio tick loop. A one-second
-        # cadence avoids 40 slots producing 160 competing RCON reads/second.
+        # The live game is authoritative. Five seconds bounds shared RCON and
+        # script-output work while still making a capacity interrupt prompt.
         while report["status"] in {"ready", "running"}:
-            time.sleep(poll_seconds)
+            if stop_event is not None:
+                if stop_event.wait(poll_seconds):
+                    raise EpisodeCapacityInterrupted("training capacity changed during measurement")
+            else:
+                time.sleep(poll_seconds)
             report = bridge.observe(identifier)
             _progress(on_progress, "measuring", identifier, {**context, "report": report})
         failed = int(execution.get("failed_placements", 0))
@@ -136,4 +149,5 @@ def run_episode(
         })
         return transition
     finally:
-        bridge.recycle(identifier)
+        if provisioned:
+            bridge.recycle(identifier)

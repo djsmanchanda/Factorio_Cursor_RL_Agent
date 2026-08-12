@@ -92,3 +92,18 @@ def test_store_tracks_queue_progress_and_bounded_guidance(tmp_path) -> None:
         assert store.active_guidance() == []
         with pytest.raises(ValueError, match="1000"):
             store.save_guidance("too-long", "general", "x" * 1001)
+
+
+def test_store_records_capacity_abort_without_transition(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(3)
+    with TrainingStore(tmp_path / "experience.db") as store:
+        store.save_scenario(scenario, "train", scenario["scenario_hash"])
+        store.save_policy("policy-1", "diagonal_linucb", 0, {"alpha": 1}, {})
+        store.start_episode("episode-aborted", scenario["scenario_id"], "policy-1", "worker-1", 7)
+        store.abort_episode("episode-aborted", "unsafe UPS window")
+        row = store.rows("episodes")[0]
+        assert row["status"] == "aborted"
+        assert "unsafe UPS" in row["summary_json"]
+        assert store.rows("transitions") == []
+        with pytest.raises(KeyError, match="not abortable"):
+            store.abort_episode("episode-aborted", "repeat")

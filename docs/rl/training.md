@@ -70,12 +70,20 @@ powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attem
   --initial-slots 40 --minimum-slots 4 --maximum-slots 80 --step 4
 ```
 
-The adaptive controller runs short stages, samples tick advancement over the shared
-Factorio RCON connection, and changes concurrency only at stage boundaries. It grows
-by four after two healthy windows and shrinks by four after one unhealthy window.
-The safety statistic is the lower-tail equivalent of a P98 UPS requirement: at least
-55 UPS for 98% of samples. This avoids a high-tail percentile hiding short server
-stalls. A missing or too-short UPS window is neutral and never causes a scale-up.
+The adaptive controller samples tick advancement over the shared Factorio RCON
+connection every five seconds. It grows by four after two healthy stage windows. An
+unsafe live window interrupts the current disposable stage, recycles its active
+surfaces, records those attempts as `aborted` rather than fitness evidence, requeues
+fresh episode IDs, and shrinks by four immediately; it does not wait for a long
+episode timeout. The safety statistic is the lower-tail equivalent of a P98 UPS
+requirement: at least 55 UPS for 98% of samples. This avoids a high-tail percentile
+hiding short server stalls. A missing or too-short UPS window is neutral and never
+causes a scale-up.
+
+Live episode measurement is intentionally every five seconds rather than once per
+second, keeping shared RCON/report-file work bounded. In the Observatory,
+**Heartbeat / elapsed** distinguishes the last telemetry update from Factorio ticks
+spent in the current episode.
 
 The preferred local worker uses the Linux headless build under WSL2:
 

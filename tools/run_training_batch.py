@@ -19,7 +19,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from training.candidates import mining_delivery_candidates
 from training.canonical import canonical_sha256
-from training.episode import run_episode
+from training.episode import EpisodeCapacityInterrupted, run_episode
 from training.factorio_bridge import FactorioTrainingBridge
 from training.features import MINING_DELIVERY_FEATURES_V2
 from training.policies import DiagonalLinUCB, policy_snapshot
@@ -51,7 +51,7 @@ def _jobs(scenarios: list[dict], attempts: int, workers: list[WorkerSpec]) -> di
 
 def _run_worker(
     worker: WorkerSpec, jobs, password: str, policy_payload: dict,
-    live_directory: Path, events: Queue,
+    live_directory: Path, events: Queue, stop_event: threading.Event | None = None,
 ) -> None:
     bridge = FactorioTrainingBridge(
         worker.script_output, host=worker.host, port=worker.rcon_port, password=password,
@@ -64,6 +64,8 @@ def _run_worker(
     try:
         bridge.handshake()
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
             job = jobs.claim() if isinstance(jobs, EpisodeQueue) else (jobs.pop(0) if jobs else None)
             if job is None:
                 break
@@ -77,9 +79,17 @@ def _run_worker(
                 transition = run_episode(
                     bridge, scenario, mining_delivery_candidates(scenario), policy,
                     selection_seed, episode_id=episode_id, update_policy=False,
-                    on_progress=publish,
+                    stop_event=stop_event, on_progress=publish,
                 )
                 events.put(("result", episode_id, transition, None))
+            except EpisodeCapacityInterrupted as exc:
+                publish_best_effort(telemetry, {
+                    "phase": "capacity_interrupted", "episode_id": episode_id,
+                    "scenario_id": scenario["scenario_id"], "policy_id": policy.policy_id,
+                    "error": str(exc),
+                })
+                events.put(("interrupted", episode_id, None, str(exc)))
+                return
             except Exception as exc:  # worker isolation preserves later jobs
                 error = f"{type(exc).__name__}: {exc}"
                 publish_best_effort(telemetry, {

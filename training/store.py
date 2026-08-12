@@ -150,6 +150,20 @@ class TrainingStore:
             if cursor.rowcount != 1:
                 raise KeyError(f"unknown episode: {episode_id}")
 
+    def abort_episode(self, episode_id: str, reason: str) -> None:
+        """Record capacity cancellation without converting it into fitness evidence."""
+        normalized = reason.strip()
+        if not normalized:
+            raise ValueError("aborted episode reason cannot be empty")
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE episodes SET status='aborted',summary_json=?,ended_utc=? "
+                "WHERE episode_id=? AND status IN ('queued','running')",
+                (_json({"reason": normalized}), _now(), episode_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"episode is not abortable: {episode_id}")
+
     def mark_episode_running(self, episode_id: str, worker_id: str | None = None) -> None:
         with self.connection:
             cursor = self.connection.execute(

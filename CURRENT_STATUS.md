@@ -2420,3 +2420,9 @@ that consumed it was not.
 - What: Mining-delivery episodes now seed the 2x2 power source at a clear, in-bounds position near the ore patch instead of fixing it at `[0, 0]`. Its pole budget includes source-to-production distance.
 - Fix: Candidate collection rows now reserve underground-belt endpoints as well as ordinary belt tiles, eliminating the overlap exposed when a randomized protected fixture changes a bridge route.
 - Lifecycle: Training Lua changed. Deploy the training mod to WSL, synchronize the GUI copy, restart the WSL worker and GUI Factorio session, then start a fresh Python controller with a new database/checkpoint.
+
+## [2026-08-12] RL live UPS backoff and truthful episode age
+- Cause: A 40-slot stage provisioned all episodes and then issued one observation/report per second per slot. Factorio fell to 1.67 UPS, but the adaptive controller only evaluated its safety gate after the entire 160-episode stage completed. The Observatory labelled fresh telemetry heartbeat as `Age`, obscuring that the same episodes were still running.
+- Fix: Measurement now uses a five-second cadence. An unsafe live UPS window interrupts the disposable stage, recycles active episodes, records them as `aborted` without reward/transition evidence, requeues fresh immutable episode IDs, and reduces slots by four immediately. The Observatory now labels heartbeat separately from elapsed Factorio ticks.
+- Evidence: Headless baseline was restored after the aborted overload; RCON and the worker listener are healthy. Focused controller, episode, store, observer, and CLI suites pass `42 passed`; compilation and diff checks pass.
+- Lifecycle: Python-only. Restart the adaptive controller from a fresh archived database; no training-mod redeploy or GUI Factorio restart is required for this controller change.

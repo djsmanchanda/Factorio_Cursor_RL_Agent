@@ -4,7 +4,7 @@
 import pytest
 
 from training.candidates import mining_delivery_candidates
-from training.episode import run_episode
+from training.episode import EpisodeCapacityInterrupted, run_episode
 from training.policies import DeterministicBaseline
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
@@ -117,7 +117,7 @@ def test_episode_keeps_failed_placements_as_a_negative_transition():
     assert transition["metrics"]["placements_failed"] == 1
     assert transition["reward"]["failed_placements"] < 0
 
-def test_episode_uses_one_second_measurement_cadence_by_default(monkeypatch):
+def test_episode_uses_five_second_measurement_cadence_by_default(monkeypatch):
     scenario = generate_mining_delivery_scenario(51)
     sleeps = []
 
@@ -152,4 +152,39 @@ def test_episode_uses_one_second_measurement_cadence_by_default(monkeypatch):
         PollingBridge(), scenario, mining_delivery_candidates(scenario),
         DeterministicBaseline(), 2, episode_id="episode-poll-cadence",
     )
-    assert sleeps == [1.0, 1.0]
+    assert sleeps == [5.0, 5.0]
+
+def test_episode_capacity_interrupt_recycles_a_provisioned_world():
+    scenario = generate_mining_delivery_scenario(52)
+
+    class PollingBridge(FakeBridge):
+        def observe(self, episode_id):
+            self.observations += 1
+            return {
+                "tick": 100, "status": "running", "elapsed_ticks": 0,
+                "objective": {"target_rate_per_tick": 1 / 60},
+                "metrics": {
+                    "rate_per_tick": 0, "sustained_ticks": 0, "resource_remaining": 100_000,
+                    "delivered_items": 0, "electric_pole_count": 3, "occupied_footprint_tiles": 60,
+                    "placed_mining_drills": 3, "productive_mining_drills": 0,
+                    "productive_mining_drill_ratio": 0.0, "mining_drill_capacity_ticks": 0,
+                    "mining_drill_working_ticks": 0, "mining_drill_blocked_ticks": 0,
+                    "mining_drill_idle_ticks": 0,
+                },
+                "failure": {"kind": "none", "reason": ""},
+            }
+
+    class InterruptingEvent:
+        def is_set(self):
+            return False
+
+        def wait(self, _seconds):
+            return True
+
+    bridge = PollingBridge()
+    with pytest.raises(EpisodeCapacityInterrupted, match="capacity changed"):
+        run_episode(
+            bridge, scenario, mining_delivery_candidates(scenario), DeterministicBaseline(), 2,
+            episode_id="episode-capacity", stop_event=InterruptingEvent(),
+        )
+    assert bridge.recycled == ["episode-capacity"]

@@ -11,7 +11,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 from typing import Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from tools.rcon_client import RconClient
 from tools.run_training_batch import (
-    _collect_results,
+    _finish_store,
     _checkpoint,
     _learn_policy,
     _load_policy,
@@ -59,6 +59,11 @@ class UpsSampler:
     def stop(self) -> None:
         self._stop.set()
         self._thread.join(timeout=max(2.0, self.interval_seconds * 2))
+
+    @property
+    def sample_count(self) -> int:
+        with self._lock:
+            return len(self._samples)
 
     def window(self) -> UpsWindow | None:
         with self._lock:
@@ -139,8 +144,24 @@ def _write_controller_state(directory: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
-def _run_stage(workers, stage_jobs, password, policy, live_directory, store):
-    """Keep every slot busy while never overlapping attempts on one scenario surface."""
+def _retry_jobs(stage_jobs: Sequence[tuple], interrupted: set[str]) -> list[tuple]:
+    """Requeue only capacity-aborted work with fresh immutable episode identity."""
+    retried = []
+    for episode_id, scenario, seed in stage_jobs:
+        if episode_id in interrupted:
+            retried.append((
+                f"episode-{scenario['scenario_id']}-retry-{uuid.uuid4().hex[:8]}",
+                scenario, seed,
+            ))
+    return retried
+
+
+def _run_stage(
+    workers, stage_jobs, password, policy, live_directory, store, state: AdaptiveScaleState,
+    *, minimum_slots: int, maximum_slots: int, step: int, minimum_ups: float,
+    healthy_windows_to_grow: int, unhealthy_windows_to_shrink: int,
+):
+    """Run one stage and interrupt/requeue it if its live UPS becomes unsafe."""
     events = Queue()
     shared_jobs = EpisodeQueue(list(stage_jobs))
     for episode_id, scenario, seed in stage_jobs:
@@ -148,26 +169,91 @@ def _run_stage(workers, stage_jobs, password, policy, live_directory, store):
             episode_id, scenario["scenario_id"], policy.policy_id, "unassigned", seed,
             status="queued",
         )
+    stop_event = threading.Event()
     sampler = UpsSampler(
         workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
     )
+    results, completed, failed = [], 0, 0
+    expected, terminal, checked = {job[0] for job in stage_jobs}, set(), set()
+    interrupted: set[str] = set()
+    backoff_state: AdaptiveScaleState | None = None
+    backoff_reason: str | None = None
+    monitor_state, inspected_samples = state, 0
+
+    def persist(result: tuple) -> None:
+        nonlocal completed, failed
+        episode_id = result[0]
+        if episode_id in terminal:
+            raise RuntimeError(f"duplicate terminal result: {episode_id}")
+        done, rejected = _finish_store(store, [result])
+        results.append(result)
+        terminal.add(episode_id)
+        completed += done
+        failed += rejected
+
+    def abort(episode_id: str, reason: str) -> None:
+        if episode_id in terminal:
+            return
+        store.abort_episode(episode_id, reason)
+        interrupted.add(episode_id)
+        terminal.add(episode_id)
+
     sampler.start()
     try:
         with ThreadPoolExecutor(max_workers=len(workers)) as pool:
-            future_jobs = {
+            futures = {
                 pool.submit(
                     _run_worker, worker, shared_jobs, password,
-                    policy.to_dict(), live_directory, events,
-                ): []
+                    policy.to_dict(), live_directory, events, stop_event,
+                ): worker.worker_id
                 for worker in workers
             }
-            results, completed, failed = _collect_results(
-                future_jobs, events, store,
-                expected_episode_ids=[job[0] for job in stage_jobs],
-            )
+            while len(checked) < len(futures) or not events.empty():
+                if not stop_event.is_set() and sampler.sample_count > inspected_samples:
+                    inspected_samples = sampler.sample_count
+                    window = sampler.window()
+                    if window is not None:
+                        candidate_state, decision = adjust_adaptive_slots(
+                            monitor_state, window, minimum=minimum_slots,
+                            maximum=maximum_slots, step=step, minimum_safe_ups=minimum_ups,
+                            healthy_windows_to_grow=healthy_windows_to_grow,
+                            unhealthy_windows_to_shrink=unhealthy_windows_to_shrink,
+                        )
+                        monitor_state = candidate_state
+                        if decision == "decrease_safe_ups":
+                            backoff_state, backoff_reason = candidate_state, decision
+                            stop_event.set()
+                try:
+                    kind, episode_id, transition, detail = events.get(timeout=0.2)
+                except Empty:
+                    for future in futures:
+                        if future in checked or not future.done():
+                            continue
+                        checked.add(future)
+                        worker_error = future.exception()
+                        if worker_error is not None and not stop_event.is_set():
+                            raise RuntimeError(
+                                f"worker failed: {type(worker_error).__name__}: {worker_error}"
+                            ) from worker_error
+                    continue
+                if kind == "running":
+                    store.mark_episode_running(episode_id, worker_id=detail)
+                elif kind == "interrupted":
+                    abort(episode_id, str(detail or "capacity backoff"))
+                else:
+                    persist((episode_id, transition, detail))
+            if stop_event.is_set():
+                for episode_id in sorted(expected.difference(terminal)):
+                    abort(episode_id, "capacity backoff before episode completion")
+            else:
+                for episode_id in sorted(expected.difference(terminal)):
+                    persist((episode_id, None, "all assigned workers exited without a terminal episode result"))
     finally:
         sampler.stop()
-    return results, completed, failed, sampler.window(), sampler.error
+    return (
+        results, completed, failed, sampler.window(), sampler.error,
+        interrupted, backoff_state, backoff_reason,
+    )
 
 
 def _parse(argv: list[str] | None = None) -> argparse.Namespace:
@@ -180,7 +266,7 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minimum-slots", type=int, default=4)
     parser.add_argument("--maximum-slots", type=int, default=80)
     parser.add_argument("--step", type=int, default=4)
-    parser.add_argument("--episodes-per-slot", type=int, default=4)
+    parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--minimum-ups", type=float, default=55.0)
     parser.add_argument("--healthy-windows-to-grow", type=int, default=2)
     parser.add_argument("--unhealthy-windows-to-shrink", type=int, default=1)
@@ -229,20 +315,47 @@ def main(argv: list[str] | None = None) -> int:
             stage_jobs = jobs[: state.slots * args.episodes_per_slot]
             del jobs[: len(stage_jobs)]
             started = time.monotonic()
-            results, completed, failed, window, sample_error = _run_stage(
-                active_workers, stage_jobs, password, policy, args.live_directory, store,
+            (
+                results, completed, failed, window, sample_error, interrupted,
+                backoff_state, backoff_reason,
+            ) = _run_stage(
+                active_workers, stage_jobs, password, policy, args.live_directory, store, state,
+                minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots,
+                step=args.step, minimum_ups=args.minimum_ups,
+                healthy_windows_to_grow=args.healthy_windows_to_grow,
+                unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
             )
             elapsed = time.monotonic() - started
             total_completed += completed
             total_failed += failed
-            learned = _learn_policy(policy, results)
-            generation += 1
-            _checkpoint(args.checkpoint, generation, learned)
-            store.save_policy(
-                learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
-                parent_policy_id=policy.policy_id,
-            )
-            policy = learned
+            if results:
+                learned = _learn_policy(policy, results)
+                generation += 1
+                _checkpoint(args.checkpoint, generation, learned)
+                store.save_policy(
+                    learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
+                    parent_policy_id=policy.policy_id,
+                )
+                policy = learned
+            if interrupted:
+                retries = _retry_jobs(stage_jobs, interrupted)
+                jobs = retries + jobs
+                state = backoff_state or state
+                payload = {
+                    "phase": "adaptive_capacity_backoff", "stage": stage,
+                    "slots": state.slots, "previous_slots": len(active_workers),
+                    "stage_attempts": len(stage_jobs), "completed": completed, "failed": failed,
+                    "interrupted": len(interrupted), "requeued": len(retries),
+                    "elapsed_seconds": round(elapsed, 2), "decision": backoff_reason,
+                    "safe_ups_p98": round(window.safe_ups_p98, 3) if window else None,
+                    "tick_time_p98_ms": round(window.tick_time_p98_ms, 3) if window else None,
+                    "mean_ups": round(window.mean_ups, 3) if window else None,
+                    "sample_error": sample_error, "remaining_attempts": len(jobs),
+                    "generation": generation, "policy_id": policy.policy_id,
+                }
+                _write_controller_state(args.live_directory, payload)
+                print(json.dumps(payload, sort_keys=True), flush=True)
+                continue
             next_state, decision = adjust_adaptive_slots(
                 state, window, minimum=args.minimum_slots, maximum=args.maximum_slots,
                 step=args.step, minimum_safe_ups=args.minimum_ups,
