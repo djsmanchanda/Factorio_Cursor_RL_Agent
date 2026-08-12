@@ -2448,3 +2448,9 @@ that consumed it was not.
 - Lowered adaptive gates to P95 >= 50 and P98 >= 45 as requested; the five-minute drain behavior remains unchanged.
 - Validation: 29 focused scheduler and observer tests passed; Python compilation and `git diff --check` passed.
 - Lifecycle: restart the Python controller and observer to activate new thresholds and dashboard assets; no Lua deployment or Factorio GUI restart.
+
+## [2026-08-12] RL five-server independent capacity gates
+- Changed training collection to five isolated WSL Factorio runtimes with six active slots per server, up to 16 configured slots per server.
+- Each server samples its own RCON UPS window and changes capacity by one slot every five minutes; per-server evidence is exposed in the Observatory.
+- Evidence: all five servers booted on ports 35001-35005/RCON 28001-28005; first window reached 7 active slots per server with P95 56.6-57.9 and P98 54.5-57.2 UPS.
+- Lifecycle: training workers and Python controller restarted; no deterministic mod or Nauvis runtime change.
