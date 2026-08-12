@@ -82,8 +82,9 @@ def test_store_tracks_queue_progress_and_bounded_guidance(tmp_path) -> None:
             "episode-queued", scenario["scenario_id"], "policy-1", "worker-1", 7,
             status="queued",
         )
-        store.mark_episode_running("episode-queued")
+        store.mark_episode_running("episode-queued", worker_id="training-slot-07")
         assert store.rows("episodes")[0]["status"] == "running"
+        assert store.rows("episodes")[0]["worker_id"] == "training-slot-07"
         store.save_guidance("guidance-1", "reliability", "Prefer robust candidates.", 3)
         assert store.active_guidance(generation=2)[0]["guidance_id"] == "guidance-1"
         assert store.active_guidance(generation=4) == []

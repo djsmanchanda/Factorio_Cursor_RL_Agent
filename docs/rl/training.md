@@ -60,7 +60,7 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 
 One Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The default local setup therefore uses one WSL headless runtime and four logical training slots, all sharing one game/RCON endpoint and `script-output` directory while retaining unique worker IDs, surfaces, forces, episodes, telemetry files, and report request IDs. This avoids duplicating saves and server processes.
 
-Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
+Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
 For long runs, use the adaptive controller after configuring enough logical slots:
 

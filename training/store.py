@@ -150,11 +150,12 @@ class TrainingStore:
             if cursor.rowcount != 1:
                 raise KeyError(f"unknown episode: {episode_id}")
 
-    def mark_episode_running(self, episode_id: str) -> None:
+    def mark_episode_running(self, episode_id: str, worker_id: str | None = None) -> None:
         with self.connection:
             cursor = self.connection.execute(
-                "UPDATE episodes SET status='running' WHERE episode_id=? AND status='queued'",
-                (episode_id,),
+                "UPDATE episodes SET status='running',worker_id=COALESCE(?,worker_id) "
+                "WHERE episode_id=? AND status='queued'",
+                (worker_id, episode_id),
             )
             if cursor.rowcount != 1:
                 row = self.connection.execute(

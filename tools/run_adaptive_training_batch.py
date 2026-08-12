@@ -26,6 +26,7 @@ from tools.run_training_batch import (
     _load_policy,
     _rcon_password,
     _run_worker,
+    EpisodeQueue,
 )
 from training.policies import policy_snapshot
 from training.scheduler import (
@@ -138,14 +139,15 @@ def _write_controller_state(directory: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
-def _run_stage(workers, assignments, password, policy, live_directory, store):
+def _run_stage(workers, stage_jobs, password, policy, live_directory, store):
+    """Keep every slot busy while never overlapping attempts on one scenario surface."""
     events = Queue()
-    for worker_id, jobs in assignments.items():
-        for episode_id, scenario, seed in jobs:
-            store.start_episode(
-                episode_id, scenario["scenario_id"], policy.policy_id, worker_id, seed,
-                status="queued",
-            )
+    shared_jobs = EpisodeQueue(list(stage_jobs))
+    for episode_id, scenario, seed in stage_jobs:
+        store.start_episode(
+            episode_id, scenario["scenario_id"], policy.policy_id, "unassigned", seed,
+            status="queued",
+        )
     sampler = UpsSampler(
         workers[0].host, workers[0].rcon_port, password, interval_seconds=5.0,
     )
@@ -154,12 +156,15 @@ def _run_stage(workers, assignments, password, policy, live_directory, store):
         with ThreadPoolExecutor(max_workers=len(workers)) as pool:
             future_jobs = {
                 pool.submit(
-                    _run_worker, worker, assignments[worker.worker_id], password,
+                    _run_worker, worker, shared_jobs, password,
                     policy.to_dict(), live_directory, events,
-                ): [job[0] for job in assignments[worker.worker_id]]
+                ): []
                 for worker in workers
             }
-            results, completed, failed = _collect_results(future_jobs, events, store)
+            results, completed, failed = _collect_results(
+                future_jobs, events, store,
+                expected_episode_ids=[job[0] for job in stage_jobs],
+            )
     finally:
         sampler.stop()
     return results, completed, failed, sampler.window(), sampler.error
@@ -223,10 +228,9 @@ def main(argv: list[str] | None = None) -> int:
             active_workers = workers[:state.slots]
             stage_jobs = jobs[: state.slots * args.episodes_per_slot]
             del jobs[: len(stage_jobs)]
-            assignments = _assign(stage_jobs, active_workers)
             started = time.monotonic()
             results, completed, failed, window, sample_error = _run_stage(
-                active_workers, assignments, password, policy, args.live_directory, store,
+                active_workers, stage_jobs, password, policy, args.live_directory, store,
             )
             elapsed = time.monotonic() - started
             total_completed += completed

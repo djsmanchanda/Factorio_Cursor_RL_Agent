@@ -8,7 +8,7 @@ import threading
 import pytest
 
 from tools.run_adaptive_training_batch import _assign
-from tools.run_training_batch import _jobs
+from tools.run_training_batch import EpisodeQueue, _jobs
 
 from training.scheduler import (
     AdaptiveScaleState, BatchMeasurement, ResourcePhaseLock, UpsWindow, WorkerSpec,
@@ -65,6 +65,26 @@ def test_repeated_attempts_keep_one_scenario_on_one_shared_runtime_slot(tmp_path
     regular = _jobs(scenarios, attempts=3, workers=workers)
     regular_owners = {job[1]["scenario_id"]: worker_id for worker_id, batch in regular.items() for job in batch}
     assert regular_owners == owners
+
+def test_shared_episode_queue_reuses_idle_slots_without_overlapping_a_scenario() -> None:
+    scenario_a, scenario_b = {"scenario_id": "a"}, {"scenario_id": "b"}
+    queue = EpisodeQueue([
+        ("a-1", scenario_a, 1), ("a-2", scenario_a, 2),
+        ("b-1", scenario_b, 3), ("b-2", scenario_b, 4),
+    ])
+
+    first_a = queue.claim()
+    first_b = queue.claim()
+    assert (first_a[0], first_b[0]) == ("a-1", "b-1")
+
+    queue.release("b")
+    assert queue.claim()[0] == "b-2"
+    queue.release("b")
+    queue.release("a")
+    assert queue.claim()[0] == "a-2"
+    queue.release("a")
+    assert queue.claim() is None
+
 
 def test_resource_phase_lock_allows_same_phase_and_excludes_other_phase() -> None:
     lock = ResourcePhaseLock()

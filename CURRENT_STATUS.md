@@ -2401,3 +2401,10 @@ that consumed it was not.
 - Recovery: Stopped the failed controller/Observatory and WSL worker, archived its evidence under `data/training-archive/training-20260812-160013`, deployed the matching training mod, synchronized the 9-file GUI mod copy, restarted the isolated worker, and launched a fresh adaptive batch.
 - Evidence: Focused contract suites pass `24 passed`. The new database contains scenario `1.2.0` with reward profile `mining-efficiency-v1`; Observatory `127.0.0.1:8766` reports 40 live workers, 120 queued, no terminal failures, and no schema errors. The controller starts at 40 slots and is capped at 60 until training forces can be safely reused.
 - Lifecycle: The WSL worker and Python controller already run the new code. Restart GUI Factorio before joining because its mod copy was synchronized while the GUI process remained open.
+
+## [2026-08-12] RL shared work queue for adaptive slots
+- Cause: The adaptive controller permanently assigned each scenario to one logical slot for surface safety. With variable episode durations, some slots exhausted their local lists and remained idle while other slots still held queued jobs. This produced queued work beside only a handful of live workers.
+- Fix: Replaced permanent slot ownership with a shared, scenario-locked queue in both batch runners. A completed slot claims the next unlocked scenario immediately; the same scenario remains serialized until its prior attempt has recycled. Episode records begin unassigned and capture the slot that actually starts them.
+- Evidence: Focused scheduler, store, batch, and observer suites pass `33 passed`; Python compilation and diff checks pass.
+- Operational state: Paused `policy-g0001-fc8c141a11b6` before restart. The server currently has zero training surfaces. Its database preserves 160 completed first-stage transitions plus 144 interrupted second-stage queue records, so do not resume it blindly; choose a clean new batch or add explicit resumable-stage recovery first.
+- Lifecycle: Python-only change. The WSL Factorio worker and GUI mod do not need redeployment; restart the Python controller only when restarting the batch.
