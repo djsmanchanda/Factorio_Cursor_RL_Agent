@@ -18,6 +18,8 @@ from training.power import POWER_SOURCE_ENTITIES, POWER_STORAGE_ENTITIES
 _ROOT = Path(__file__).resolve().parents[1]
 _SCENARIO_SCHEMA = _ROOT / "schemas" / "training_scenario.schema.json"
 _TRANSITION_SCHEMA = _ROOT / "schemas" / "training_transition.schema.json"
+_SCENARIO_VALIDATOR = Draft7Validator(json.loads(_SCENARIO_SCHEMA.read_text(encoding="utf-8")))
+_TRANSITION_VALIDATOR = Draft7Validator(json.loads(_TRANSITION_SCHEMA.read_text(encoding="utf-8")))
 _MINING_PRODUCTS = frozenset({
     "iron-ore", "copper-ore", "coal", "stone",
     "iron-plate", "copper-plate", "steel-plate",
@@ -38,10 +40,9 @@ def _validate_finite(value: Any, path: str = "<root>") -> None:
             _validate_finite(nested, f"{path}/{index}")
 
 
-def _validate_schema(payload: Mapping, schema_path: Path, label: str) -> None:
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+def _validate_schema(payload: Mapping, validator: Draft7Validator, label: str) -> None:
     errors = sorted(
-        Draft7Validator(schema).iter_errors(dict(payload)),
+        validator.iter_errors(dict(payload)),
         key=lambda error: list(error.path),
     )
     if not errors:
@@ -125,7 +126,7 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
 def validate_scenario(payload: Mapping) -> None:
     """Reject malformed, mutable, or semantically unsafe scenario contracts."""
     _validate_finite(payload)
-    _validate_schema(payload, _SCENARIO_SCHEMA, "TrainingScenario")
+    _validate_schema(payload, _SCENARIO_VALIDATOR, "TrainingScenario")
     _validate_scenario_semantics(payload)
 
 
@@ -151,5 +152,5 @@ def _validate_transition_semantics(payload: Mapping) -> None:
 def validate_transition(payload: Mapping) -> None:
     """Reject transition records that cannot safely train a future policy."""
     _validate_finite(payload)
-    _validate_schema(payload, _TRANSITION_SCHEMA, "TrainingTransition")
+    _validate_schema(payload, _TRANSITION_VALIDATOR, "TrainingTransition")
     _validate_transition_semantics(payload)

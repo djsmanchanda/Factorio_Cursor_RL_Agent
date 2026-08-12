@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from pathlib import Path
 
 import pytest
 
@@ -165,6 +166,17 @@ def test_contract_rejects_nonintegral_power_fixture() -> None:
     with pytest.raises(ValueError, match="integral"):
         validate_scenario(scenario)
 
+
+def test_contract_schemas_are_pinned_for_the_controller_lifetime(monkeypatch) -> None:
+    scenario = generate_mining_delivery_scenario(16)
+    transition = _valid_transition(scenario)
+
+    def reject_runtime_schema_read(*_args, **_kwargs):
+        raise AssertionError("running controllers must not reload schemas from disk")
+
+    monkeypatch.setattr(Path, "read_text", reject_runtime_schema_read)
+    validate_scenario(scenario)
+    validate_transition(transition)
 
 def test_contract_version_is_explicit_and_old_versions_fail_closed() -> None:
     scenario = deepcopy(generate_mining_delivery_scenario(11))

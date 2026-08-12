@@ -21,6 +21,8 @@ Each episode declares a seed, isolated surface and force, fixtures, inventory bu
 
 Training evidence survives surface recycle, process restart, and save replacement.
 
+A controller pins its scenario and transition schemas at process start. Repository edits therefore cannot change the contract beneath an active batch; activating a new contract requires an explicit controller restart and, when Lua changed, the matching training-mod deployment.
+
 ## Curriculum
 
 1. Mine one resource and deliver a target rate to a sink.
