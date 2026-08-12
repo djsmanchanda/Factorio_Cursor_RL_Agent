@@ -2426,3 +2426,8 @@ that consumed it was not.
 - Fix: Measurement now uses a five-second cadence. An unsafe live UPS window interrupts the disposable stage, recycles active episodes, records them as `aborted` without reward/transition evidence, requeues fresh immutable episode IDs, and reduces slots by four immediately. The Observatory now labels heartbeat separately from elapsed Factorio ticks.
 - Evidence: Headless baseline was restored after the aborted overload; RCON and the worker listener are healthy. Focused controller, episode, store, observer, and CLI suites pass `42 passed`; compilation and diff checks pass.
 - Lifecycle: Python-only. Restart the adaptive controller from a fresh archived database; no training-mod redeploy or GUI Factorio restart is required for this controller change.
+## [2026-08-12] RL safe concurrency calibration start
+- Live evidence: A 40-surface cold stage dropped the isolated headless worker to 1.67 UPS and made RCON/client interaction unreliable. After reset, the same worker sustained 60.7 UPS with no training surfaces.
+- Decision: Adaptive collection now defaults to the four-slot floor and grows only after healthy windows. Starting at 40 is no longer treated as a safe default; it is a load test above measured capacity.
+- Validation: Focused RL controller, episode, store, observer, scheduler, and CLI suites pass `43 passed`; compilation and diff checks pass.
+- Lifecycle: Python-only. Start a fresh adaptive controller from four slots; no training-mod deployment or GUI restart is required.

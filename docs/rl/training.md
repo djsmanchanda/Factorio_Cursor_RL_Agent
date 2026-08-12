@@ -67,7 +67,7 @@ For long runs, use the adaptive controller after configuring enough logical slot
 ```powershell
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action configure -WorkerCount 1 -SlotsPerWorker 80
 powershell -File scripts\run_wsl_adaptive_training_batch.ps1 --count 100 --attempts-per-scenario 20 `
-  --initial-slots 40 --minimum-slots 4 --maximum-slots 80 --step 4
+  --initial-slots 4 --minimum-slots 4 --maximum-slots 80 --step 4
 ```
 
 The adaptive controller samples tick advancement over the shared Factorio RCON

@@ -262,7 +262,7 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
-    parser.add_argument("--initial-slots", type=int, default=40)
+    parser.add_argument("--initial-slots", type=int, default=4)
     parser.add_argument("--minimum-slots", type=int, default=4)
     parser.add_argument("--maximum-slots", type=int, default=80)
     parser.add_argument("--step", type=int, default=4)

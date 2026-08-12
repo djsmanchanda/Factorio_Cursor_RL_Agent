@@ -9,7 +9,7 @@ from queue import Queue
 import pytest
 
 import tools.run_adaptive_training_batch as adaptive
-from tools.run_adaptive_training_batch import _assign, _retry_jobs
+from tools.run_adaptive_training_batch import _assign, _parse, _retry_jobs
 from tools.run_training_batch import EpisodeQueue, _jobs
 
 from training.features import MINING_DELIVERY_FEATURES_V2
@@ -207,3 +207,9 @@ def test_adaptive_stage_aborts_and_requeues_when_live_ups_is_unsafe(monkeypatch,
         assert store.rows("transitions") == []
     retried = _retry_jobs(stage_jobs, interrupted)
     assert retried[0][0] != "episode-capacity"
+
+def test_adaptive_controller_defaults_to_safe_calibration_floor(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "sys.argv", ["adaptive", "--workers", str(tmp_path / "workers.json")],
+    )
+    assert _parse().initial_slots == 4
