@@ -1,5 +1,5 @@
 # Path: training/rewards.py
-# Purpose: Compute transparent tick-based rewards while keeping safety lexicographic.
+# Purpose: Compute bounded, auditable training rewards with a separate safety gate.
 
 from __future__ import annotations
 
@@ -8,28 +8,138 @@ from collections.abc import Mapping
 
 
 def _finite(value: object, label: str) -> float:
-    number = float(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be finite") from exc
     if not math.isfinite(number):
         raise ValueError(f"{label} must be finite")
     return number
 
 
-def reward_components(scenario: Mapping, report: Mapping) -> dict[str, float]:
-    """Return auditable components; safety remains an evaluation gate, not a tradeoff."""
+def _nonnegative(value: object, label: str) -> float:
+    number = _finite(value, label)
+    if number < 0:
+        raise ValueError(f"{label} must be non-negative")
+    return number
+
+
+def _features(selected_candidate: Mapping) -> Mapping:
+    value = selected_candidate.get("features")
+    return value if isinstance(value, Mapping) else selected_candidate
+
+
+def _metric(report: Mapping, features: Mapping, name: str, default: object = 0) -> object:
+    metrics = report.get("metrics")
+    if isinstance(metrics, Mapping) and name in metrics:
+        return metrics[name]
+    if name in report:
+        return report[name]
+    return features.get(name, default)
+
+
+def _weight(weights: Mapping, name: str) -> float:
+    return _finite(weights[name], f"{name} weight")
+
+
+def reward_components(
+    scenario: Mapping,
+    terminal_report: Mapping,
+    selected_candidate: Mapping,
+    failed_placements: int | float,
+) -> dict[str, float]:
+    """Score observed output and explicit costs in their documented units.
+
+    Scenario hard limits already bound time, entities, routes, and footprint. We
+    clamp each cost to those limits so corrupt telemetry cannot dominate a
+    policy update, while ordinary values retain literal per-unit weights.
+    Safety is intentionally excluded from this scalar and remains a promotion
+    gate through :func:`safety_violation`.
+    """
     weights = scenario["reward_weights"]
-    completed = report.get("status") == "completed"
-    delivered = _finite(report.get("delivered_items", 0), "delivered_items")
-    elapsed = _finite(report.get("elapsed_ticks", 0), "elapsed_ticks")
-    materials = _finite(report.get("material_items", 0), "material_items")
-    failed = _finite(report.get("failed_placements", 0), "failed_placements")
-    extra_poles = _finite(report.get("extra_poles", 0), "extra_poles")
+    features = _features(selected_candidate)
+    objective = scenario["objective"]
+    constraints = scenario["constraints"]
+    budget = scenario.get("construction_budget") or {}
+
+    target_rate = _nonnegative(objective["target_rate_per_tick"], "target_rate_per_tick")
+    if target_rate == 0:
+        raise ValueError("target_rate_per_tick must be greater than zero")
+    rate = _nonnegative(_metric(terminal_report, features, "rate_per_tick"), "rate_per_tick")
+    elapsed = _nonnegative(terminal_report.get("elapsed_ticks", 0), "elapsed_ticks")
+    max_ticks = _nonnegative(constraints["max_episode_ticks"], "max_episode_ticks")
+    material_cost = _nonnegative(features.get("material_cost", 0), "material_cost")
+    failed = _nonnegative(failed_placements, "failed_placements")
+
+    pole_count = _nonnegative(
+        _metric(terminal_report, features, "electric_pole_count", features.get("pole_count", 0)),
+        "electric_pole_count",
+    )
+    pole_limit = _nonnegative(budget.get("medium-electric-pole", 0), "pole budget")
+    route_excess = _nonnegative(
+        _metric(terminal_report, features, "route_excess_tiles"), "route_excess_tiles"
+    )
+    route_limit = sum(
+        _nonnegative(budget.get(name, 0), f"{name} budget")
+        for name in ("transport-belt", "underground-belt", "splitter")
+    )
+    occupied_land = _nonnegative(
+        _metric(terminal_report, features, "occupied_footprint_tiles"),
+        "occupied_footprint_tiles",
+    )
+    bounds = constraints["allowed_build_area"]
+    land_limit = _nonnegative(
+        (bounds["x_max_exclusive"] - bounds["x_min"])
+        * (bounds["y_max_exclusive"] - bounds["y_min"]),
+        "available land",
+    )
+
+    placed_drills = _nonnegative(
+        _metric(terminal_report, features, "placed_mining_drills", features.get("drill_count", 0)),
+        "placed_mining_drills",
+    )
+    productive_drills = _nonnegative(
+        _metric(terminal_report, features, "productive_mining_drills"),
+        "productive_mining_drills",
+    )
+    if productive_drills > placed_drills:
+        raise ValueError("productive_mining_drills cannot exceed placed_mining_drills")
+    productive_ratio = _metric(
+        terminal_report, features, "productive_mining_drill_ratio", None
+    )
+    if productive_ratio is None:
+        productive_ratio = productive_drills / placed_drills if placed_drills else 0.0
+    productive_ratio = _nonnegative(productive_ratio, "productive_mining_drill_ratio")
+    if productive_ratio > 1:
+        raise ValueError("productive_mining_drill_ratio cannot exceed one")
+
+    capacity_ticks = _nonnegative(
+        _metric(terminal_report, features, "mining_drill_capacity_ticks"),
+        "mining_drill_capacity_ticks",
+    )
+    working_ticks = _nonnegative(
+        _metric(terminal_report, features, "mining_drill_working_ticks"),
+        "mining_drill_working_ticks",
+    )
+    if working_ticks > capacity_ticks and capacity_ticks > 0:
+        raise ValueError("mining_drill_working_ticks cannot exceed capacity ticks")
+    unproductive_ratio = (
+        1.0 - working_ticks / capacity_ticks
+        if capacity_ticks > 0 else 1.0 - productive_ratio
+    )
+
     components = {
-        "completion": _finite(weights["completion"], "completion weight") if completed else 0.0,
-        "delivered_item": delivered * _finite(weights["delivered_item"], "delivery weight"),
-        "elapsed_tick": elapsed * _finite(weights["elapsed_tick"], "elapsed weight"),
-        "material_item": materials * _finite(weights["material_item"], "material weight"),
-        "failed_placement": failed * _finite(weights["failed_placement"], "placement weight"),
-        "extra_pole": extra_poles * _finite(weights["extra_pole"], "pole weight"),
+        "completion": _weight(weights, "completion")
+        if terminal_report.get("status") == "completed" else 0.0,
+        "throughput": min(rate / target_rate, 2.0) * _weight(weights, "throughput"),
+        "elapsed_ticks": min(elapsed, max_ticks) * _weight(weights, "elapsed_tick"),
+        "materials": material_cost * _weight(weights, "material_item"),
+        "poles": min(pole_count, pole_limit) * _weight(weights, "pole"),
+        "route_excess": min(route_excess, route_limit) * _weight(weights, "route_excess"),
+        "land_usage": min(occupied_land, land_limit) * _weight(weights, "land"),
+        "unproductive_drill_capacity": unproductive_ratio
+        * _weight(weights, "unproductive_drill_capacity"),
+        "failed_placements": failed * _weight(weights, "failed_placement"),
     }
     components["total"] = sum(components.values())
     return components
@@ -37,4 +147,8 @@ def reward_components(scenario: Mapping, report: Mapping) -> dict[str, float]:
 
 def safety_violation(report: Mapping) -> bool:
     """Identify failures that can never be outweighed by ordinary reward."""
-    return report.get("failure_kind") in {"safety", "identity", "budget", "fixture"}
+    failure = report.get("failure")
+    failure_kind = failure.get("kind") if isinstance(failure, Mapping) else None
+    return (failure_kind or report.get("failure_kind")) in {
+        "safety", "identity", "budget", "fixture",
+    }

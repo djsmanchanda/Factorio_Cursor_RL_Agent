@@ -19,7 +19,7 @@ from training.scenarios.mining_delivery import (
 
 def _valid_transition(scenario: dict) -> dict:
     return {
-        "version": "1.1.0",
+        "version": "1.2.0",
         "episode_id": "episode-000001",
         "scenario_id": scenario["scenario_id"],
         "scenario_seed": scenario["seed"],
@@ -43,15 +43,32 @@ def _valid_transition(scenario: dict) -> dict:
             "material_cost": 52,
             "placements_succeeded": 48,
             "placements_failed": 0,
+            "electric_pole_count": 5,
+            "collection_belt_tiles": 10,
+            "actual_delivery_route_tiles": 32,
+            "shortest_delivery_route_tiles": 30,
+            "route_excess_tiles": 2,
+            "route_efficiency": 30.0 / 32.0,
+            "occupied_footprint_tiles": 80,
+            "placed_mining_drills": 3,
+            "productive_mining_drills": 3,
+            "productive_mining_drill_ratio": 1.0,
+            "mining_drill_capacity_ticks": 1_800,
+            "mining_drill_working_ticks": 1_800,
+            "mining_drill_blocked_ticks": 0,
+            "mining_drill_idle_ticks": 0,
         },
         "reward": {
             "completion": 10.0,
             "throughput": 1.0,
             "elapsed_ticks": -0.1,
             "materials": -0.52,
-            "infrastructure": -0.2,
+            "poles": -0.2,
+            "route_excess": -0.04,
+            "land_usage": -0.08,
+            "unproductive_drill_capacity": 0.0,
             "failed_placements": 0.0,
-            "total": 10.18,
+            "total": 10.06,
         },
         "next_observation": {"delivered_rate_per_tick": 1.0 / 60.0},
     }
@@ -63,7 +80,13 @@ def test_seeded_mining_delivery_scenario_is_stable_and_valid() -> None:
 
     assert first == second
     validate_scenario(first)
-    assert first["version"] == "1.1.0"
+    assert first["version"] == "1.2.0"
+    assert first["reward_profile"] == "mining-efficiency-v1"
+    assert set(first["reward_weights"]) == {
+        "completion", "throughput", "elapsed_tick", "material_item",
+        "failed_placement", "pole", "route_excess", "land",
+        "unproductive_drill_capacity",
+    }
     assert first["scenario_id"] == "mining-delivery-002a"
     assert first["scenario_hash"] == scenario_hash(first)
     assert first["family"] == "mining_delivery"
@@ -148,7 +171,7 @@ def test_contract_version_is_explicit_and_old_versions_fail_closed() -> None:
     scenario["version"] = "1.0.0"
     scenario["scenario_hash"] = scenario_hash(scenario)
 
-    with pytest.raises(ValueError, match="1.1.0"):
+    with pytest.raises(ValueError, match="1.2.0"):
         validate_scenario(scenario)
 def test_transition_contract_records_choice_outcome_and_reward() -> None:
     transition = _valid_transition(generate_mining_delivery_scenario(12))

@@ -12,7 +12,7 @@ from typing import Callable, Protocol
 from tools.rcon_client import RconClient
 from training.scheduler import WorkerSpec, load_worker_specs
 
-_COMMAND_VERSION = "1.0.0"
+_COMMAND_VERSION = "1.1.0"
 _FOCUS_TOKEN = "FOCUS_TRAINING_OBSERVER"
 _CLEANUP_TOKEN = "RECYCLE_STALE_TRAINING_SURFACES"
 

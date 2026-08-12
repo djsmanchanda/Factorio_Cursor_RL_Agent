@@ -81,9 +81,12 @@ class DiagonalLinUCB:
             raise ValueError("LinUCB reward state must remain finite")
 
     def _vector(self, observation: Mapping, candidate: Mapping) -> tuple[float, ...]:
-        return self.registry.vectorize(
-            policy_features(observation, candidate.get("features") or {}),
-        )
+        values = policy_features(observation, candidate.get("features") or {})
+        # A checkpoint owns its feature contract. New audit-only candidate fields
+        # must not invalidate an older immutable policy during replay or migration.
+        return self.registry.vectorize({
+            name: values[name] for name in self.registry.names if name in values
+        })
 
     def score(self, observation: Mapping, candidate: Mapping) -> float:
         vector = self._vector(observation, candidate)

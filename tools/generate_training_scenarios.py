@@ -23,7 +23,7 @@ def _write_curriculum(output_dir: Path, scenarios: list[dict]) -> dict:
         path.write_text(json.dumps(scenario, indent=2) + "\n", encoding="utf-8")
         files.append(path.name)
     manifest = {
-        "version": "1.1.0",
+        "version": "1.2.0",
         "family": "mining_delivery",
         "count": len(scenarios),
         "files": files,

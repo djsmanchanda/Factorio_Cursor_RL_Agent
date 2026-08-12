@@ -13,7 +13,7 @@ from training.store import TrainingStore
 
 def transition(scenario: dict, policy_hash: str) -> dict:
     return {
-        "version": "1.1.0", "episode_id": "episode-1",
+        "version": "1.2.0", "episode_id": "episode-1",
         "scenario_id": scenario["scenario_id"], "scenario_hash": scenario["scenario_hash"],
         "scenario_seed": scenario["seed"], "policy_id": "policy-1",
         "policy_hash": policy_hash, "started_tick": 1, "ended_tick": 61,
@@ -22,15 +22,25 @@ def transition(scenario: dict, policy_hash: str) -> dict:
                         "features": {"cost": 1}}],
         "chosen_action_id": "a",
         "result": {"status": "completed", "failure_kind": "none", "reason": "done"},
-        "metrics": {"initial_rate_per_tick": 0, "final_rate_per_tick": 1 / 60,
-                    "delivered_items": 60, "material_cost": 1,
-                    "placements_succeeded": 1, "placements_failed": 0},
-        "reward": {"completion": 10, "throughput": 1, "elapsed_ticks": -1,
-                   "materials": -1, "infrastructure": 0,
-                   "failed_placements": 0, "total": 9},
+        "metrics": {
+            "initial_rate_per_tick": 0, "final_rate_per_tick": 1 / 60,
+            "delivered_items": 60, "material_cost": 1,
+            "placements_succeeded": 1, "placements_failed": 0,
+            "electric_pole_count": 1, "collection_belt_tiles": 1,
+            "actual_delivery_route_tiles": 1, "shortest_delivery_route_tiles": 1,
+            "route_excess_tiles": 0, "route_efficiency": 1,
+            "occupied_footprint_tiles": 12, "placed_mining_drills": 1,
+            "productive_mining_drills": 1, "productive_mining_drill_ratio": 1,
+            "mining_drill_capacity_ticks": 60, "mining_drill_working_ticks": 60,
+            "mining_drill_blocked_ticks": 0, "mining_drill_idle_ticks": 0,
+        },
+        "reward": {
+            "completion": 10, "throughput": 1, "elapsed_ticks": -1,
+            "materials": -1, "poles": 0, "route_excess": 0, "land_usage": 0,
+            "unproductive_drill_capacity": 0, "failed_placements": 0, "total": 9,
+        },
         "next_observation": {"rate": 1},
     }
-
 
 def test_store_persists_complete_evidence_and_wal(tmp_path) -> None:
     scenario = generate_mining_delivery_scenario(1)

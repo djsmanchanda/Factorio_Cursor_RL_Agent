@@ -92,7 +92,7 @@ def test_validation_rejects_budget_and_allowed_entity_drift(lua) -> None:
 
 
 def test_tick_sampler_requires_consecutive_target_windows(lua) -> None:
-    lua.execute("storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
+    lua.execute("storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
     module = lua.eval('require("episode_measurement")')[0]
     state = _to_lua(lua, {
         "last_sample_tick": 0, "started_tick": 0, "sample_ticks": 0,
@@ -118,7 +118,7 @@ def test_tick_sampler_requires_consecutive_target_windows(lua) -> None:
 
 
 def test_tick_sampler_records_timeout_in_ticks(lua) -> None:
-    lua.execute("storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
+    lua.execute("storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
     module = lua.eval('require("episode_measurement")')[0]
     state = _to_lua(lua, {
         "last_sample_tick": 540, "started_tick": 0, "sample_ticks": 0,
@@ -135,9 +135,107 @@ def test_tick_sampler_records_timeout_in_ticks(lua) -> None:
     assert state.failure_kind == "timeout"
 
 
+def test_audit_accumulates_productive_drill_capacity_without_an_extra_scan(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}
+        defines = {entity_status={working=1, full_output=2, no_power=3}}
+        prototypes = {entity={
+          ['electric-mining-drill']={tile_width=3, tile_height=3, collision_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}},
+          ['medium-electric-pole']={tile_width=2, tile_height=2, collision_box={left_top={x=-1,y=-1},right_bottom={x=1,y=1}}},
+          ['transport-belt']={tile_width=1, tile_height=1, collision_box={left_top={x=-0.4,y=-0.4},right_bottom={x=0.4,y=0.4}}}
+        }}
+        training_force = {name='training-mining-delivery-00000001'}
+        drill_a = {type='mining-drill', name='electric-mining-drill', unit_number=1, status=1, position={x=2.5,y=2.5}, force=training_force}
+        drill_b = {type='mining-drill', name='electric-mining-drill', unit_number=2, status=2, position={x=6.5,y=2.5}, force=training_force}
+        drill_c = {type='mining-drill', name='electric-mining-drill', unit_number=3, status=3, position={x=10.5,y=2.5}, force=training_force}
+        pole = {type='electric-pole', name='medium-electric-pole', unit_number=4, position={x=4,y=7}, force=training_force}
+        belt = {type='transport-belt', name='transport-belt', unit_number=5, position={x=6.5,y=7.5}, force=training_force}
+        audit_surface = {scan_count=0, find_entities=function()
+          audit_surface.scan_count = audit_surface.scan_count + 1
+          return {drill_a, drill_b, drill_c, pole, belt}
+        end}
+        audit_episode = {fixtures={}, scenario={constraints={
+          allowed_entities={'electric-mining-drill','medium-electric-pole','transport-belt'},
+          allowed_build_area={x_min=0,x_max_exclusive=16,y_min=0,y_max_exclusive=16}
+        }, construction_budget={['electric-mining-drill']=3,['medium-electric-pole']=1,['transport-belt']=1}}}
+        measurement = require('episode_measurement')
+        _, _, _, _, first_metrics = measurement.audit_entities(audit_surface, training_force, audit_episode, 60)
+        drill_a.status=2; drill_b.status=1; drill_c.status=1
+        _, _, _, _, second_metrics = measurement.audit_entities(audit_surface, training_force, audit_episode, 60)
+    """)
+
+    first = lua.globals().first_metrics
+    assert first["electric_pole_count"] == 1
+    assert first["occupied_footprint_tiles"] == 32
+    assert first["placed_mining_drills"] == 3
+    assert first["productive_mining_drills"] == 1
+    assert first["productive_mining_drill_ratio"] == pytest.approx(1 / 3)
+    assert first["mining_drill_capacity_ticks"] == 180
+    assert first["mining_drill_working_ticks"] == 60
+    assert first["mining_drill_blocked_ticks"] == 60
+    assert first["mining_drill_idle_ticks"] == 60
+
+    second = lua.globals().second_metrics
+    assert second["productive_mining_drills"] == 3
+    assert second["productive_mining_drill_ratio"] == 1
+    assert second["mining_drill_capacity_ticks"] == 360
+    assert second["mining_drill_working_ticks"] == 180
+    assert second["mining_drill_blocked_ticks"] == 120
+    assert second["mining_drill_idle_ticks"] == 60
+    assert lua.globals().audit_surface["scan_count"] == 2
+
+
+def test_audit_treats_unknown_drill_status_as_idle(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}
+        defines = {entity_status={}}
+        prototypes = {entity={['electric-mining-drill']={tile_width=3, tile_height=3, collision_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}}}}
+        training_force = {name='training-mining-delivery-00000001'}
+        unknown_drill = {type='mining-drill', name='electric-mining-drill', unit_number=1, status=99, position={x=2.5,y=2.5}, force=training_force}
+        audit_surface = {find_entities=function() return {unknown_drill} end}
+        audit_episode = {fixtures={}, scenario={constraints={allowed_entities={'electric-mining-drill'},allowed_build_area={x_min=0,x_max_exclusive=8,y_min=0,y_max_exclusive=8}},construction_budget={['electric-mining-drill']=1}}}
+        _, _, _, _, unknown_metrics = require('episode_measurement').audit_entities(audit_surface, training_force, audit_episode, 60)
+    """)
+
+    metrics = lua.globals().unknown_metrics
+    assert metrics["productive_mining_drills"] == 0
+    assert metrics["mining_drill_idle_ticks"] == 60
+
+
+def test_audit_consumers_avoid_a_second_whole_force_scan(lua) -> None:
+    lua.execute("""
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}
+        defines = {entity_status={working=1}}
+        prototypes = {entity={['electric-mining-drill']={collision_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}}}}
+        training_force = {name='training-mining-delivery-00000001'}
+        source = {valid=true, type='electric-energy-interface', name='electric-energy-interface', unit_number=10, electric_network_id=7, position={x=0,y=0}, force=training_force, surface={name='training/mining-delivery-00000001'}}
+        drill = {valid=true, type='mining-drill', name='electric-mining-drill', unit_number=11, status=1, electric_network_id=7, position={x=3.5,y=3.5}, force=training_force}
+        power_surface = {
+          full_force_scans=0,
+          find_entities=function() return {source, drill} end,
+          find_entities_filtered=function(filter)
+            if filter.name then return {source} end
+            power_surface.full_force_scans = power_surface.full_force_scans + 1
+            return {drill}
+          end
+        }
+        power_episode = {
+          fixtures={source={kind='power_source', name='electric-energy-interface', unit_number=10, position={x=0,y=0}}},
+          scenario={constraints={allowed_entities={'electric-mining-drill'},allowed_build_area={x_min=0,x_max_exclusive=8,y_min=0,y_max_exclusive=8}},construction_budget={['electric-mining-drill']=1}}
+        }
+        measurement = require('episode_measurement')
+        _, _, _, _, _, audited_consumers = measurement.audit_entities(power_surface, training_force, power_episode, 60)
+        power_ok, power_reason = measurement.power_state(power_surface, training_force, power_episode, audited_consumers)
+    """)
+
+    assert lua.globals().power_ok is True
+    assert lua.globals().power_reason == ""
+    assert lua.globals().power_surface["full_force_scans"] == 0
+
+
 def test_fixture_check_uses_surface_lookup_even_when_global_lookup_is_empty(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}
         game = {get_entity_by_unit_number=function() return nil end}
         training_force = {name='training-mining-delivery-00000001'}
         fixture_entity = {
@@ -164,7 +262,7 @@ def test_chunked_plan_execution_module_loads(lua) -> None:
 
 def test_plan_execution_rejects_cumulative_budget_before_placement(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}, uploads={}}}
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}, uploads={}}}
         game = {surfaces={}, forces={}}
         prototypes = {entity={['transport-belt']={collision_box={left_top={x=-0.4,y=-0.4},right_bottom={x=0.4,y=0.4}}}}}
         existing = {type='transport-belt', name='transport-belt', unit_number=11, position={x=2,y=2}}
@@ -235,7 +333,7 @@ def test_primary_research_completes_finite_technologies_only(lua) -> None:
 
 def test_orphan_training_surfaces_recycle_after_a_grace_window(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={active={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000015'}}, pending_force_merges={}, orphan_surfaces={}}}
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={active={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000015'}}, pending_force_merges={}, orphan_surfaces={}}}
         deleted, merged = {}, {}
         log = function(message) last_log = message end
         orphan = {name='training/mining-delivery-0000005c', valid=true}
@@ -265,7 +363,7 @@ def test_orphan_training_surfaces_recycle_after_a_grace_window(lua) -> None:
 
 def test_terminal_episode_records_do_not_protect_stale_surfaces(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={
           done={status='timed_out', surface_name='training/mining-delivery-00000016'},
           active={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000017'}
         }, pending_force_merges={}, orphan_surfaces={}}}
@@ -296,7 +394,7 @@ def test_terminal_episode_records_do_not_protect_stale_surfaces(lua) -> None:
 
 def test_stale_live_episode_records_do_not_protect_surfaces(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={
           stale={status='running', started_tick=0, last_sample_tick=0, surface_name='training/mining-delivery-00000018'},
           fresh={status='running', started_tick=3500, last_sample_tick=3590, surface_name='training/mining-delivery-00000019'}
         }, pending_force_merges={}, orphan_surfaces={}}}
@@ -327,7 +425,7 @@ def test_stale_live_episode_records_do_not_protect_surfaces(lua) -> None:
 
 def test_orphan_training_forces_without_surfaces_are_merged(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={},
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={},
           pending_force_merges={}, orphan_surfaces={}}}
         merged = {}
         game = {
@@ -350,7 +448,7 @@ def test_provision_reclaims_expired_surface_ownership(lua) -> None:
     scenario = _scenario()
     surface_name = scenario["environment"]["surface_name"]
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, episodes={
           stale={episode_id='old', status='running', started_tick=0, last_sample_tick=0,
             surface_name='training/mining-delivery-00000007', force_name='training-mining-delivery-00000007'}
         }, pending_force_merges={}, orphan_surfaces={}, uploads={}}}
@@ -398,7 +496,7 @@ def test_visible_training_floor_covers_the_complete_environment(lua) -> None:
 
 def test_view_command_switches_to_spectator_before_teleport(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
           active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
         }}}}
         defines = {controllers={spectator=7}}
@@ -425,7 +523,7 @@ def test_view_command_switches_to_spectator_before_teleport(lua) -> None:
 
 def test_joined_observer_charts_every_active_training_episode(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
           active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
         }}}}
         observer = {
@@ -446,7 +544,7 @@ def test_joined_observer_charts_every_active_training_episode(lua) -> None:
 
 def test_training_focus_moves_only_the_configured_connected_observer(lua) -> None:
     lua.execute("""
-        storage = {training_lab={version='1.0.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
+        storage = {training_lab={version='1.1.0', report_sequence=0, uploads={}, pending_force_merges={}, episodes={
           active={owner='factorio_training_lab', surface_name='training/mining-delivery-00000001', scenario={environment={bounds={x_min=-64,y_min=-64,x_max_exclusive=64,y_max_exclusive=64}}}
         }}}}
         defines = {controllers={spectator=7}}
@@ -476,7 +574,7 @@ def test_training_focus_moves_only_the_configured_connected_observer(lua) -> Non
 
 
 def test_tick_sampler_smooths_low_rate_inserter_batches(lua) -> None:
-    lua.execute("storage = {training_lab={version='1.0.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
+    lua.execute("storage = {training_lab={version='1.1.0', report_sequence=0, episodes={}, pending_force_merges={}}}")
     module = lua.eval('require("episode_measurement")')[0]
     state = _to_lua(lua, {
         "last_sample_tick": 0, "started_tick": 0, "sample_ticks": 0,

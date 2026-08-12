@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-from training.features import FeatureRegistry, policy_features
+from training.features import (
+    MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2,
+    FeatureRegistry, policy_features,
+)
 from training.policies import DeterministicBaseline, DiagonalLinUCB
 
 
@@ -55,3 +58,21 @@ def test_linucb_seeded_ties_are_reproducible() -> None:
         {"action_id": "b", "features": {"value": 1, "cost": 1}},
     ]
     assert policy.select(options, {"load": 0}, 42) == policy.select(options, {"load": 0}, 42)
+
+def test_mining_efficiency_registry_exposes_route_quality() -> None:
+    names = set(MINING_DELIVERY_FEATURES_V2.names)
+    assert {
+        "candidate.collection_belt_tiles", "candidate.actual_delivery_route_tiles",
+        "candidate.shortest_delivery_route_tiles", "candidate.route_excess_tiles",
+        "candidate.route_efficiency",
+    } <= names
+
+
+def test_older_checkpoint_ignores_new_candidate_evidence() -> None:
+    policy = DiagonalLinUCB("legacy-v1", MINING_DELIVERY_FEATURES_V1)
+    candidate = candidates()[0] | {"features": {
+        **candidates()[0]["features"], "route_excess_tiles": 12,
+        "route_efficiency": 0.6,
+    }}
+
+    assert policy.score({"delivered_rate_per_tick": 0}, candidate) >= 0

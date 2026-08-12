@@ -15,6 +15,17 @@ local POWER_SOURCE_ENTITIES = {
   ["fusion-generator"] = true
 }
 
+local REWARD_WEIGHT_SIGNS = {
+  completion = "positive",
+  throughput = "nonnegative",
+  elapsed_tick = "nonpositive",
+  material_item = "nonpositive",
+  failed_placement = "nonpositive",
+  pole = "nonpositive",
+  route_excess = "nonpositive",
+  land = "nonpositive",
+  unproductive_drill_capacity = "nonpositive"
+}
 local function is_integer(value)
   return type(value) == "number" and value == math.floor(value)
 end
@@ -158,8 +169,31 @@ local function validate_objective(scenario, fixtures)
   end
 end
 
+local function validate_rewards(scenario)
+  if scenario.reward_profile ~= "mining-efficiency-v1" then
+    error("reward_profile is invalid")
+  end
+  local weights = scenario.reward_weights
+  if type(weights) ~= "table" then error("reward_weights must be an object") end
+  local count = 0
+  for name, sign in pairs(REWARD_WEIGHT_SIGNS) do
+    local value = weights[name]
+    if type(value) ~= "number" then error("reward weight is missing: " .. name) end
+    if sign == "positive" and value <= 0 then error(name .. " reward must be positive") end
+    if sign == "nonnegative" and value < 0 then error(name .. " reward must be non-negative") end
+    if sign == "nonpositive" and value > 0 then error(name .. " reward must be non-positive") end
+    count = count + 1
+  end
+  local actual = 0
+  for name, _ in pairs(weights) do
+    if REWARD_WEIGHT_SIGNS[name] == nil then error("unknown reward weight: " .. tostring(name)) end
+    actual = actual + 1
+  end
+  if actual ~= count then error("reward_weights are incomplete") end
+end
+
 local function validate_scenario(scenario)
-  if type(scenario) ~= "table" or scenario.version ~= "1.1.0"
+  if type(scenario) ~= "table" or scenario.version ~= "1.2.0"
       or scenario.family ~= "mining_delivery" or type(scenario.scenario_id) ~= "string"
       or not valid_hash(scenario.scenario_hash)
       or not is_integer(scenario.seed) or scenario.seed < 0 or scenario.seed > 65535 then
@@ -170,6 +204,7 @@ local function validate_scenario(scenario)
   local fixtures = validate_fixtures(scenario)
   validate_budget(scenario)
   validate_objective(scenario, fixtures)
+  validate_rewards(scenario)
   return scenario
 end
 

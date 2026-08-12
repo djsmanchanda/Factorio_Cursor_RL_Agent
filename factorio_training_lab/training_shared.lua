@@ -1,7 +1,7 @@
 -- Path: factorio_training_lab/training_shared.lua
 -- Purpose: Own training-lab storage, identity checks, and collision-free reports.
 
-local VERSION = "1.0.0"
+local VERSION = "1.1.0"
 local OWNER = "factorio_training_lab"
 
 local function ensure_storage()
@@ -13,6 +13,7 @@ local function ensure_storage()
     orphan_surfaces = {},
     uploads = {}
   }
+  storage.training_lab.version = VERSION
   storage.training_lab.orphan_surfaces = storage.training_lab.orphan_surfaces or {}
   storage.training_lab.uploads = storage.training_lab.uploads or {}
   return storage.training_lab

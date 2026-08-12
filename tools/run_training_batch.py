@@ -20,7 +20,7 @@ from training.candidates import mining_delivery_candidates
 from training.canonical import canonical_sha256
 from training.episode import run_episode
 from training.factorio_bridge import FactorioTrainingBridge
-from training.features import MINING_DELIVERY_FEATURES_V1
+from training.features import MINING_DELIVERY_FEATURES_V2
 from training.policies import DiagonalLinUCB, policy_snapshot
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import WorkerSpec, load_worker_specs
@@ -173,7 +173,7 @@ def _load_policy(path: Path) -> tuple[int, DiagonalLinUCB]:
     if path.is_file():
         checkpoint = json.loads(path.read_text(encoding="utf-8"))
         return int(checkpoint["generation"]), DiagonalLinUCB.from_dict(checkpoint["policy"])
-    return 0, DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V1)
+    return 0, DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V2)
 
 
 def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:

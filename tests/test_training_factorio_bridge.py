@@ -41,7 +41,7 @@ class ReportRcon:
         }.get(name, name.removeprefix("/training_"))
         report_kind = "recycle" if self.wrong_kind and kind == "provision" else kind
         report = {
-            "version": "1.0.0", "kind": report_kind, "request_id": payload["request_id"],
+            "version": "1.1.0", "kind": report_kind, "request_id": payload["request_id"],
             "episode_id": payload["episode_id"], "tick": 1, "ok": True,
             "status": "completed" if report_kind == "recycle" else "ready",
         }
@@ -66,6 +66,11 @@ class ReportRcon:
                     "rate_per_tick": 0, "sustained_ticks": 0, "resource_remaining": 1,
                     "built_entities": {}, "forbidden_entities": 0, "out_of_bounds_entities": 0,
                     "budget_overruns": 0, "fixtures_valid": True, "power_connected": True,
+                    "electric_pole_count": 0, "occupied_footprint_tiles": 0,
+                    "placed_mining_drills": 0, "productive_mining_drills": 0,
+                    "productive_mining_drill_ratio": 0,
+                    "mining_drill_capacity_ticks": 0, "mining_drill_working_ticks": 0,
+                    "mining_drill_blocked_ticks": 0, "mining_drill_idle_ticks": 0,
                 },
                 "failure": {"kind": "none", "reason": ""},
             })

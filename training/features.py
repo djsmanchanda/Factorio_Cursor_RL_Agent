@@ -82,3 +82,30 @@ MINING_DELIVERY_FEATURES_V1 = FeatureRegistry(
     ),
     scales=(1.0, 0.05, 0.05, 1_800.0, 100_000_000.0, 1.0, 0.05, 8.0, 160.0, 4.0, 24.0, 256.0),
 )
+
+MINING_DELIVERY_FEATURES_V2 = FeatureRegistry(
+    version="mining-efficiency-v1",
+    names=(
+        "bias",
+        "observation.delivered_rate_per_tick",
+        "observation.target_rate_per_tick",
+        "observation.sustained_ticks",
+        "observation.resource_remaining",
+        "candidate.predicted_completion",
+        "candidate.predicted_rate_per_tick",
+        "candidate.drill_count",
+        "candidate.collection_belt_tiles",
+        "candidate.actual_delivery_route_tiles",
+        "candidate.shortest_delivery_route_tiles",
+        "candidate.route_excess_tiles",
+        "candidate.route_efficiency",
+        "candidate.occupied_land_tiles",
+        "candidate.turn_count",
+        "candidate.pole_count",
+        "candidate.material_cost",
+    ),
+    scales=(
+        1.0, 0.05, 0.05, 1_800.0, 100_000_000.0, 1.0, 0.05, 8.0,
+        64.0, 160.0, 160.0, 80.0, 1.0, 512.0, 4.0, 24.0, 256.0,
+    ),
+)

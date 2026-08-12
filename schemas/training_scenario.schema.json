@@ -7,10 +7,10 @@
   "required": [
     "version", "scenario_id", "scenario_hash", "family", "seed", "curriculum",
     "environment", "resource_patch", "fixtures", "construction_budget",
-    "objective", "constraints", "reward_weights"
+    "objective", "constraints", "reward_profile", "reward_weights"
   ],
   "properties": {
-    "version": {"const": "1.1.0"},
+    "version": {"const": "1.2.0"},
     "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"},
     "scenario_hash": {"$ref": "#/definitions/hash"},
     "family": {"const": "mining_delivery"},
@@ -107,20 +107,28 @@
         }
       }
     },
+    "reward_profile": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*-v[1-9][0-9]*$"
+    },
     "reward_weights": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "completion", "delivered_item", "elapsed_tick", "material_item",
-        "failed_placement", "extra_pole"
+        "completion", "throughput", "elapsed_tick", "material_item",
+        "failed_placement", "pole", "route_excess", "land",
+        "unproductive_drill_capacity"
       ],
       "properties": {
         "completion": {"type": "number", "exclusiveMinimum": 0},
-        "delivered_item": {"type": "number", "minimum": 0},
+        "throughput": {"type": "number", "minimum": 0},
         "elapsed_tick": {"type": "number", "maximum": 0},
         "material_item": {"type": "number", "maximum": 0},
         "failed_placement": {"type": "number", "maximum": 0},
-        "extra_pole": {"type": "number", "maximum": 0}
+        "pole": {"type": "number", "maximum": 0},
+        "route_excess": {"type": "number", "maximum": 0},
+        "land": {"type": "number", "maximum": 0},
+        "unproductive_drill_capacity": {"type": "number", "maximum": 0}
       }
     }
   },

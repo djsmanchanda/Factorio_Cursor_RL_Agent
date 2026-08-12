@@ -57,6 +57,12 @@ def _bottleneck(payload: Mapping) -> list[str]:
     final = float(metrics.get("final_rate_per_tick", 0))
     if result.get("status") != "completed" and final <= initial:
         categories.append("no_throughput_gain")
+    placed_drills = int(metrics.get("placed_mining_drills", 0))
+    productive_ratio = float(metrics.get("productive_mining_drill_ratio", 0.0))
+    if placed_drills > 0 and productive_ratio < 0.8:
+        categories.append("low_productive_capacity")
+    if float(metrics.get("route_excess_tiles", 0.0)) > 0:
+        categories.append("route_excess")
     return categories or ["none"]
 
 
@@ -77,6 +83,23 @@ def _transition_evidence(rows: Iterable[Mapping]) -> tuple[list[dict], list[dict
             "failure_kind": (payload.get("result") or {}).get("failure_kind"),
             "chosen_action_id": payload.get("chosen_action_id"),
             "reward_total": (payload.get("reward") or {}).get("total"),
+            "reward_components": {
+                key: value for key, value in (payload.get("reward") or {}).items()
+                if key != "total"
+            },
+            "efficiency": {
+                "productive_mining_drill_ratio": (payload.get("metrics") or {}).get(
+                    "productive_mining_drill_ratio"
+                ),
+                "route_efficiency": (payload.get("metrics") or {}).get("route_efficiency"),
+                "route_excess_tiles": (payload.get("metrics") or {}).get("route_excess_tiles"),
+                "occupied_footprint_tiles": (payload.get("metrics") or {}).get(
+                    "occupied_footprint_tiles"
+                ),
+                "electric_pole_count": (payload.get("metrics") or {}).get(
+                    "electric_pole_count"
+                ),
+            },
             "elapsed_ticks": max(0, int(payload.get("ended_tick", 0)) - int(payload.get("started_tick", 0))),
             "worker_id": row.get("worker_id"), "ended_utc": row.get("ended_utc"),
         })
@@ -202,7 +225,7 @@ def build_training_snapshot(database: Path | str, live_directory: Path | str) ->
     research = next((item for item in live if item.get("kind") == "autoresearch"), None)
     terminal_phases = {"finished", "failed", "worker_failed"}
     return {
-        "version": "1.0.0", "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "version": "1.1.0", "generated_utc": datetime.now(timezone.utc).isoformat(),
         "database_present": database_path.is_file(), "database_error": database_error,
         "live_workers": workers, "autoresearch_live": _autoresearch_state(research),
         "active_workers": sum(

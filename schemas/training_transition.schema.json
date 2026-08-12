@@ -10,7 +10,7 @@
     "candidates", "chosen_action_id", "result", "metrics", "reward", "next_observation"
   ],
   "properties": {
-    "version": {"const": "1.1.0"},
+    "version": {"const": "1.2.0"},
     "episode_id": {"type": "string", "minLength": 1},
     "scenario_id": {"type": "string", "minLength": 1},
     "scenario_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
@@ -44,7 +44,7 @@
       "required": ["status", "failure_kind", "reason"],
       "properties": {
         "status": {"enum": ["completed", "failed", "timed_out"]},
-        "failure_kind": {"enum": ["none", "safety", "capability", "execution", "strategy", "power_unconnected", "timeout"]},
+        "failure_kind": {"enum": ["none", "safety", "identity", "budget", "fixture", "capability", "execution", "strategy", "power_unconnected", "timeout"]},
         "reason": {"type": "string"}
       }
     },
@@ -53,27 +53,54 @@
       "additionalProperties": false,
       "required": [
         "initial_rate_per_tick", "final_rate_per_tick", "delivered_items",
-        "material_cost", "placements_succeeded", "placements_failed"
+        "material_cost", "placements_succeeded", "placements_failed",
+        "electric_pole_count", "collection_belt_tiles", "actual_delivery_route_tiles",
+        "shortest_delivery_route_tiles", "route_excess_tiles", "route_efficiency",
+        "occupied_footprint_tiles", "placed_mining_drills",
+        "productive_mining_drills", "productive_mining_drill_ratio",
+        "mining_drill_capacity_ticks", "mining_drill_working_ticks",
+        "mining_drill_blocked_ticks", "mining_drill_idle_ticks"
       ],
       "properties": {
         "initial_rate_per_tick": {"type": "number", "minimum": 0},
         "final_rate_per_tick": {"type": "number", "minimum": 0},
         "delivered_items": {"type": "integer", "minimum": 0},
-        "material_cost": {"type": "integer", "minimum": 0},
+        "material_cost": {"type": "number", "minimum": 0},
         "placements_succeeded": {"type": "integer", "minimum": 0},
-        "placements_failed": {"type": "integer", "minimum": 0}
+        "placements_failed": {"type": "integer", "minimum": 0},
+        "electric_pole_count": {"type": "integer", "minimum": 0},
+        "collection_belt_tiles": {"type": "integer", "minimum": 0},
+        "actual_delivery_route_tiles": {"type": "integer", "minimum": 0},
+        "shortest_delivery_route_tiles": {"type": "integer", "minimum": 0},
+        "route_excess_tiles": {"type": "integer", "minimum": 0},
+        "route_efficiency": {"type": "number", "minimum": 0, "maximum": 1},
+        "occupied_footprint_tiles": {"type": "integer", "minimum": 0},
+        "placed_mining_drills": {"type": "integer", "minimum": 0},
+        "productive_mining_drills": {"type": "integer", "minimum": 0},
+        "productive_mining_drill_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "mining_drill_capacity_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_working_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_blocked_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_idle_ticks": {"type": "integer", "minimum": 0}
       }
     },
     "reward": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["completion", "throughput", "elapsed_ticks", "materials", "infrastructure", "failed_placements", "total"],
+      "required": [
+        "completion", "throughput", "elapsed_ticks", "materials", "poles",
+        "route_excess", "land_usage", "unproductive_drill_capacity",
+        "failed_placements", "total"
+      ],
       "properties": {
         "completion": {"type": "number"},
         "throughput": {"type": "number"},
         "elapsed_ticks": {"type": "number"},
         "materials": {"type": "number"},
-        "infrastructure": {"type": "number"},
+        "poles": {"type": "number"},
+        "route_excess": {"type": "number"},
+        "land_usage": {"type": "number"},
+        "unproductive_drill_capacity": {"type": "number"},
         "failed_placements": {"type": "number"},
         "total": {"type": "number"}
       }

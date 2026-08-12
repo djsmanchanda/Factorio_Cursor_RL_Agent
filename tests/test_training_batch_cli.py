@@ -6,7 +6,7 @@ import json
 import pytest
 
 from tools.run_training_batch import _checkpoint, _learn_policy, _load_policy, _parse, _rcon_password, main
-from training.features import MINING_DELIVERY_FEATURES_V1
+from training.features import MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2
 from training.policies import DiagonalLinUCB
 
 
@@ -68,3 +68,9 @@ def test_rcon_secret_file_rejects_empty_file(tmp_path):
 
     with pytest.raises(SystemExit, match="RCON secret file is empty"):
         _rcon_password(_parse(["--rcon-secret-file", str(secret)]) )
+
+def test_fresh_checkpoint_uses_mining_efficiency_features(tmp_path) -> None:
+    generation, policy = _load_policy(tmp_path / "missing-policy.json")
+
+    assert generation == 0
+    assert policy.registry == MINING_DELIVERY_FEATURES_V2

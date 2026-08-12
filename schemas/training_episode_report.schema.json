@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["version", "kind", "request_id", "episode_id", "tick", "ok", "status"],
   "properties": {
-    "version": {"const": "1.0.0"},
+    "version": {"const": "1.1.0"},
     "kind": {"enum": ["provision", "observation", "recycle", "execution"]},
     "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "episode_id": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -70,7 +70,11 @@
         "delivered_items", "sample_ticks", "sample_items", "rate_per_tick",
         "sustained_ticks", "resource_remaining", "built_entities",
         "forbidden_entities", "out_of_bounds_entities", "budget_overruns",
-        "fixtures_valid", "power_connected"
+        "fixtures_valid", "power_connected", "electric_pole_count",
+        "occupied_footprint_tiles", "placed_mining_drills",
+        "productive_mining_drills", "productive_mining_drill_ratio",
+        "mining_drill_capacity_ticks", "mining_drill_working_ticks",
+        "mining_drill_blocked_ticks", "mining_drill_idle_ticks"
       ],
       "properties": {
         "delivered_items": {"type": "integer", "minimum": 0},
@@ -87,7 +91,16 @@
         "out_of_bounds_entities": {"type": "integer", "minimum": 0},
         "budget_overruns": {"type": "integer", "minimum": 0},
         "fixtures_valid": {"type": "boolean"},
-        "power_connected": {"type": "boolean"}
+        "power_connected": {"type": "boolean"},
+        "electric_pole_count": {"type": "integer", "minimum": 0},
+        "occupied_footprint_tiles": {"type": "integer", "minimum": 0},
+        "placed_mining_drills": {"type": "integer", "minimum": 0},
+        "productive_mining_drills": {"type": "integer", "minimum": 0},
+        "productive_mining_drill_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "mining_drill_capacity_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_working_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_blocked_ticks": {"type": "integer", "minimum": 0},
+        "mining_drill_idle_ticks": {"type": "integer", "minimum": 0}
       }
     },
     "failure": {

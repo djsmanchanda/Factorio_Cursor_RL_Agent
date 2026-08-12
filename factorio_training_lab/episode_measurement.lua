@@ -14,6 +14,8 @@ local POWER_STORAGE_TYPES = { accumulator = true }
 local POWER_CONSUMER_TYPES = { inserter = true }
 local POWER_CONSUMER_NAMES = { ["electric-mining-drill"] = true }
 local RATE_WINDOW_TICKS = 600
+local FOOTPRINT_TILE_CACHE = {}
+local electricity_role
 
 local function advance_sample(episode, delivered, tick)
   local sample_ticks = tick - episode.last_sample_tick
@@ -58,11 +60,68 @@ local function fixture_units(episode)
   return units
 end
 
-local function audit_entities(surface, force, episode)
+local function footprint_tiles(name)
+  local cached = FOOTPRINT_TILE_CACHE[name]
+  if cached then return cached end
+  local prototype = prototypes.entity[name]
+  local box = prototype and (prototype.collision_box or prototype.selection_box)
+  local width, height = 1, 1
+  if box and box.left_top and box.right_bottom then
+    width = math.max(1, math.ceil(box.right_bottom.x - box.left_top.x))
+    height = math.max(1, math.ceil(box.right_bottom.y - box.left_top.y))
+  end
+  local tiles = width * height
+  FOOTPRINT_TILE_CACHE[name] = tiles
+  return tiles
+end
+
+local function drill_status(entity)
+  local statuses = defines and defines.entity_status or {}
+  local status = entity.status
+  if statuses.working ~= nil and status == statuses.working then return "working" end
+  if statuses.full_output ~= nil and status == statuses.full_output then return "blocked" end
+  return "idle"
+end
+
+local function mark_productive_drill(episode, unit_number)
+  if not unit_number then return end
+  episode.productive_drill_units = episode.productive_drill_units or {}
+  if episode.productive_drill_units[unit_number] then return end
+  episode.productive_drill_units[unit_number] = true
+  episode.productive_mining_drills = (episode.productive_mining_drills or 0) + 1
+end
+
+local function drill_efficiency(episode, placed, working, blocked, idle, sample_ticks)
+  episode.productive_drill_units = episode.productive_drill_units or {}
+  episode.mining_drill_capacity_ticks = episode.mining_drill_capacity_ticks or 0
+  episode.mining_drill_working_ticks = episode.mining_drill_working_ticks or 0
+  episode.mining_drill_blocked_ticks = episode.mining_drill_blocked_ticks or 0
+  episode.mining_drill_idle_ticks = episode.mining_drill_idle_ticks or 0
+  if sample_ticks and sample_ticks > 0 then
+    episode.mining_drill_capacity_ticks = episode.mining_drill_capacity_ticks + placed * sample_ticks
+    episode.mining_drill_working_ticks = episode.mining_drill_working_ticks + working * sample_ticks
+    episode.mining_drill_blocked_ticks = episode.mining_drill_blocked_ticks + blocked * sample_ticks
+    episode.mining_drill_idle_ticks = episode.mining_drill_idle_ticks + idle * sample_ticks
+  end
+  local productive = episode.productive_mining_drills or 0
+  return {
+    placed_mining_drills = placed,
+    productive_mining_drills = productive,
+    productive_mining_drill_ratio = placed > 0 and math.min(1, productive / placed) or 0,
+    mining_drill_capacity_ticks = episode.mining_drill_capacity_ticks,
+    mining_drill_working_ticks = episode.mining_drill_working_ticks,
+    mining_drill_blocked_ticks = episode.mining_drill_blocked_ticks,
+    mining_drill_idle_ticks = episode.mining_drill_idle_ticks,
+  }
+end
+
+local function audit_entities(surface, force, episode, sample_ticks)
   local allowed = episode.scenario.constraints.allowed_entities
   local allowed_lookup, counts, fixture_lookup = {}, {}, fixture_units(episode)
   for _, name in ipairs(allowed) do allowed_lookup[name] = true end
-  local forbidden, outside = 0, 0
+  local forbidden, outside, pole_count, occupied_tiles = 0, 0, 0, 0
+  local placed_drills, working_drills, blocked_drills, idle_drills = 0, 0, 0, 0
+  local power_consumers = {}
   for _, entity in pairs(surface.find_entities()) do
     local neutral_resource = entity.type == "resource" and entity.force.name == "neutral"
     if not neutral_resource and not fixture_lookup[entity.unit_number] then
@@ -72,13 +131,37 @@ local function audit_entities(surface, force, episode)
       if not geometry.fits(episode.scenario.constraints.allowed_build_area, name, entity.position) then
         outside = outside + 1
       end
+      if entity.type ~= "entity-ghost" then
+        occupied_tiles = occupied_tiles + footprint_tiles(name)
+        if entity.force == force and electricity_role(entity) == "consumer" then
+          power_consumers[#power_consumers + 1] = entity
+        end
+        if entity.type == "electric-pole" then pole_count = pole_count + 1 end
+        if entity.type == "mining-drill" then
+          placed_drills = placed_drills + 1
+          local status = drill_status(entity)
+          if status == "working" then
+            working_drills = working_drills + 1
+            mark_productive_drill(episode, entity.unit_number)
+          elseif status == "blocked" then
+            blocked_drills = blocked_drills + 1
+          else
+            idle_drills = idle_drills + 1
+          end
+        end
+      end
     end
   end
   local overruns = 0
   for name, count in pairs(counts) do
     if count > (episode.scenario.construction_budget[name] or 0) then overruns = overruns + 1 end
   end
-  return counts, forbidden, outside, overruns
+  local efficiency = drill_efficiency(
+    episode, placed_drills, working_drills, blocked_drills, idle_drills, sample_ticks
+  )
+  efficiency.electric_pole_count = pole_count
+  efficiency.occupied_footprint_tiles = occupied_tiles
+  return counts, forbidden, outside, overruns, efficiency, power_consumers
 end
 
 local function fixture_entity(surface, force, fixture)
@@ -111,17 +194,19 @@ local function electric_network_id(entity)
   return type(network) == "number" and network >= 0 and network or nil
 end
 
-local function electricity_role(entity)
+electricity_role = function(entity)
   if POWER_STORAGE_TYPES[entity.type] or entity.name == "accumulator" then return "storage" end
   if POWER_SOURCE_TYPES[entity.type] or POWER_SOURCE_TYPES[entity.name] then return "source" end
   if POWER_CONSUMER_TYPES[entity.type] or POWER_CONSUMER_NAMES[entity.name] then return "consumer" end
   return nil
 end
 
-local function power_state(surface, force, episode)
-  local consumers = {}
-  for _, entity in pairs(surface.find_entities_filtered({ force = force })) do
-    if electricity_role(entity) == "consumer" then consumers[#consumers + 1] = entity end
+local function power_state(surface, force, episode, consumers)
+  if consumers == nil then
+    consumers = {}
+    for _, entity in pairs(surface.find_entities_filtered({ force = force })) do
+      if electricity_role(entity) == "consumer" then consumers[#consumers + 1] = entity end
+    end
   end
   if #consumers == 0 then return true, "" end
   local source, storage = nil, nil
@@ -170,7 +255,11 @@ local function sample_episode(episode, tick)
     fail_safety(episode, "protected fixture is missing or changed")
     return
   end
-  local powered, power_reason = power_state(surface, force, episode)
+  local sample_ticks = tick - episode.last_sample_tick
+  local _, forbidden, outside, overruns, _, consumers = audit_entities(
+    surface, force, episode, sample_ticks
+  )
+  local powered, power_reason = power_state(surface, force, episode, consumers)
   episode.power_connected = powered
   if not powered then fail_power(episode, power_reason); return end
   local sink = fixture_entity(surface, force, episode.fixtures[episode.sink_fixture_id])
@@ -179,7 +268,6 @@ local function sample_episode(episode, tick)
   local item = episode.scenario.objective.item
   local delivered = inventory.get_item_count(item)
   if delivered > 0 then inventory.remove({ name = item, count = delivered }) end
-  local _, forbidden, outside, overruns = audit_entities(surface, force, episode)
   episode.forbidden_entities, episode.out_of_bounds_entities = forbidden, outside
   episode.budget_overruns = overruns
   if forbidden > 0 or outside > 0 or overruns > 0 then
@@ -211,11 +299,13 @@ local function observation(payload)
   local episode = shared.episode_for(payload.episode_id)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then error("episode surface or force is missing") end
-  local counts, forbidden, outside, overruns = audit_entities(surface, force, episode)
+  local counts, forbidden, outside, overruns, efficiency, consumers = audit_entities(
+    surface, force, episode, 0
+  )
   if not check_fixtures(surface, force, episode) then
     fail_safety(episode, "protected fixture is missing or changed")
   end
-  local powered, power_reason = power_state(surface, force, episode)
+  local powered, power_reason = power_state(surface, force, episode, consumers)
   episode.power_connected = powered
   if not powered then fail_power(episode, power_reason) end
   if forbidden > 0 or outside > 0 or overruns > 0 then
@@ -239,6 +329,15 @@ local function observation(payload)
       forbidden_entities = forbidden, out_of_bounds_entities = outside,
       budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode),
       power_connected = powered,
+      electric_pole_count = efficiency.electric_pole_count,
+      occupied_footprint_tiles = efficiency.occupied_footprint_tiles,
+      placed_mining_drills = efficiency.placed_mining_drills,
+      productive_mining_drills = efficiency.productive_mining_drills,
+      productive_mining_drill_ratio = efficiency.productive_mining_drill_ratio,
+      mining_drill_capacity_ticks = efficiency.mining_drill_capacity_ticks,
+      mining_drill_working_ticks = efficiency.mining_drill_working_ticks,
+      mining_drill_blocked_ticks = efficiency.mining_drill_blocked_ticks,
+      mining_drill_idle_ticks = efficiency.mining_drill_idle_ticks,
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }
   }
@@ -265,6 +364,7 @@ end
 
 return {
   advance_sample = advance_sample,
+  audit_entities = audit_entities,
   power_state = power_state,
   check_fixtures = check_fixtures,
   register_commands = register_commands,

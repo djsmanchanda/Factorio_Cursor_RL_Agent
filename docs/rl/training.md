@@ -46,6 +46,12 @@ Safety failures are disqualifying rather than tradeable for scalar reward. Among
 
 Store reward components separately so the observatory and autoresearch can identify why a policy changed.
 
+The first deployed profile is `mining-efficiency-v1`. Candidate geometry separates collection belts from the delivery route and records the orthogonal lower bound, actual route, excess tiles, route efficiency, poles, material cost, and occupied land. Factorio independently measures real poles, real footprint, distinct drills that worked, and cumulative working, blocked, idle, and available drill-ticks. Per-unit weights therefore have literal meanings, while scenario time, budget, and area limits cap their influence. The Observatory classifies excess routing and low productive capacity instead of showing only one scalar reward.
+
+Policy promotion remains lexicographic. Safety, completion, and sustained output come first; productive capacity, route efficiency, time, materials, footprint, and poles distinguish otherwise successful policies. Existing immutable `mining-delivery-v1` checkpoints ignore newly added audit fields, while fresh checkpoints use the richer `mining-efficiency-v1` feature registry.
+
+The next production curriculum should compare **upgrade versus expand**, not only repair versus duplicate. It should randomize assembler tier and quality, speed/productivity/efficiency modules, beacon support, inserter and belt tier, available footprint, capital budget, energy price, recipe demand, and research state. Rewards should use measured output and total lifecycle cost so an assembler-3, quality upgrade, module change, or added parallel machine wins only when its throughput, resource efficiency, energy, and land tradeoff is better on held-out scenarios. Repeatable productivity and mining research must enter observations as live modifiers; research cost and the downstream savings it creates are separate actions and reward evidence rather than hard-coded upgrade rules.
+
 Use seeded elitist selection with diversity protection. Preserve champions, mutate several dimensions, and periodically test novel populations so a locally successful layout does not collapse exploration.
 
 ## Parallel training slots

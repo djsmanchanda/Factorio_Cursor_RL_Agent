@@ -17,7 +17,7 @@ from training.contracts import validate_scenario
 from training.isolation import assert_training_identity
 
 _REPORT_SUBDIR = Path("factorio_training_lab") / "reports"
-_COMMAND_VERSION = "1.0.0"
+_COMMAND_VERSION = "1.1.0"
 _UPLOAD_CHUNK_BYTES = 1_600
 _MAX_UPLOAD_CHUNKS = 256
 _REPORT_RETENTION = 512

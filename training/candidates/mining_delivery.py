@@ -15,12 +15,34 @@ from training.power import POWER_CONSUMER_ENTITIES
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
 _POWER_SOURCE_COVERAGE = 3.5
 _POWER_SOURCE_POLE_OFFSET = 2.5
-_MATERIAL_COST = {
+MATERIAL_COST_BY_ENTITY = {
     "electric-mining-drill": 60,
     "fast-inserter": 11,
     "medium-electric-pole": 5,
     "transport-belt": 2,
+    "splitter": 20,
+    "underground-belt": 10,
 }
+
+
+def orthogonal_route_lower_bound(
+    start: tuple[float, float], destination: tuple[float, float],
+) -> int:
+    """Return the minimum orthogonal steps between two finite grid points."""
+    points = tuple(float(value) for point in (start, destination) for value in point)
+    if len(points) != 4 or any(not math.isfinite(value) for value in points):
+        raise ValueError("route endpoints must contain two finite coordinates")
+    start_x, start_y, destination_x, destination_y = points
+    return math.ceil(abs(destination_x - start_x) + abs(destination_y - start_y))
+
+
+def _belt_turn_count(route: Iterable[Mapping]) -> int:
+    directions = [
+        action.get("direction")
+        for action in route
+        if action.get("entity") == "transport-belt"
+    ]
+    return sum(left != right for left, right in zip(directions, directions[1:]))
 
 
 def _position(x: float, y: float) -> dict[str, float]:
@@ -85,7 +107,9 @@ def _safe_bridge(source, sink, preferred: str, blocked: set[tuple[int, int]]) ->
 
 def _belt_actions(
     scenario: Mapping, drills: list[dict], belt_y: float, xs: list[float], variant: int,
-) -> list[dict]:
+) -> tuple[
+    list[dict], list[dict], list[dict], tuple[float, float], tuple[float, float],
+]:
     sink_fixture = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
     sink = tuple(float(value) for value in sink_fixture["position"])
     source_x = max(xs) + 1 if sink[0] >= sum(xs) / len(xs) else min(xs) - 1
@@ -109,7 +133,7 @@ def _belt_actions(
         action for action in row
         if (action["position"]["x"], action["position"]["y"]) not in occupied_positions
     ]
-    return bridge + unique_row
+    return bridge + unique_row, bridge, unique_row, source, sink
 
 
 def _safe_pole(point: tuple[float, float], occupied: set[tuple[int, int]]) -> tuple[float, float]:
@@ -213,7 +237,9 @@ def _count_entities(plan: Mapping) -> dict[str, int]:
 
 def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
     drills, belt_y, xs = _drill_positions(scenario, drill_count)
-    transport = _belt_actions(scenario, drills, belt_y, xs, variant)
+    transport, delivery_route, collection_belts, source, sink = _belt_actions(
+        scenario, drills, belt_y, xs, variant,
+    )
     power = _power_actions(scenario, drills + transport, belt_y, xs, variant)
     plan = {
         "surface": scenario["environment"]["surface_name"],
@@ -227,7 +253,32 @@ def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
     if excess:
         raise ValueError(f"candidate exceeds construction budget: {excess}")
     route_tiles = counts.get("transport-belt", 0)
-    material_cost = sum(_MATERIAL_COST.get(name, 1) * count for name, count in counts.items())
+    actual_delivery_route_tiles = sum(
+        action.get("entity") == "transport-belt" for action in delivery_route
+    )
+    collection_belt_tiles = sum(
+        action.get("entity") == "transport-belt" for action in collection_belts
+    )
+    if route_tiles != actual_delivery_route_tiles + collection_belt_tiles:
+        raise ValueError("candidate belt accounting does not match its generated plan")
+    terminal_transfer_hops = sum(
+        str(action.get("entity", "")).endswith("inserter") for action in delivery_route
+    )
+    shortest_delivery_route_tiles = max(
+        0, orthogonal_route_lower_bound(source, sink) - terminal_transfer_hops,
+    )
+    route_excess_tiles = max(
+        0, actual_delivery_route_tiles - shortest_delivery_route_tiles,
+    )
+    route_efficiency = (
+        min(1.0, shortest_delivery_route_tiles / actual_delivery_route_tiles)
+        if actual_delivery_route_tiles else float(shortest_delivery_route_tiles == 0)
+    )
+    unknown_costs = set(counts).difference(MATERIAL_COST_BY_ENTITY)
+    if unknown_costs:
+        raise ValueError(f"candidate has no material cost facts for: {sorted(unknown_costs)}")
+    material_cost = sum(MATERIAL_COST_BY_ENTITY[name] * count for name, count in counts.items())
+    occupied_land_tiles = len(occupied_tile_indices([("candidate", plan)]))
     digest = plan_hash(plan)
     return {
         "action_id": f"mining-direct-v{variant}-{digest[7:19]}",
@@ -237,7 +288,13 @@ def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
             "predicted_rate_per_tick": drill_count * _DRILL_RATE_PER_TICK,
             "drill_count": drill_count,
             "route_tiles": route_tiles,
-            "turn_count": 1 + variant,
+            "collection_belt_tiles": collection_belt_tiles,
+            "actual_delivery_route_tiles": actual_delivery_route_tiles,
+            "shortest_delivery_route_tiles": shortest_delivery_route_tiles,
+            "route_excess_tiles": route_excess_tiles,
+            "route_efficiency": route_efficiency,
+            "occupied_land_tiles": occupied_land_tiles,
+            "turn_count": _belt_turn_count(delivery_route),
             "pole_count": counts.get("medium-electric-pole", 0),
             "material_cost": material_cost,
         },

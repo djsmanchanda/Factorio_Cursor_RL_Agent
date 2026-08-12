@@ -44,7 +44,7 @@ def test_control_registers_only_training_namespaced_commands() -> None:
 
 def test_observation_report_is_schema_valid() -> None:
     report = {
-        "version": "1.0.0", "kind": "observation",
+        "version": "1.1.0", "kind": "observation",
         "request_id": "request-1", "episode_id": "episode-1",
         "tick": 1800, "ok": True, "status": "running",
         "scenario_id": "mining-delivery-00000001",
@@ -62,6 +62,13 @@ def test_observation_report_is_schema_valid() -> None:
             "built_entities": {"transport-belt": 42},
             "forbidden_entities": 0, "out_of_bounds_entities": 0,
             "budget_overruns": 0, "fixtures_valid": True, "power_connected": True,
+            "electric_pole_count": 4, "occupied_footprint_tiles": 75,
+            "placed_mining_drills": 7, "productive_mining_drills": 3,
+            "productive_mining_drill_ratio": (3 / 7),
+            "mining_drill_capacity_ticks": 5040,
+            "mining_drill_working_ticks": 2160,
+            "mining_drill_blocked_ticks": 1440,
+            "mining_drill_idle_ticks": 1440,
         },
         "failure": {"kind": "none", "reason": ""},
     }
@@ -71,7 +78,7 @@ def test_observation_report_is_schema_valid() -> None:
 
 def test_failed_report_requires_an_error() -> None:
     report = {
-        "version": "1.0.0", "kind": "provision", "request_id": "request-1",
+        "version": "1.1.0", "kind": "provision", "request_id": "request-1",
         "episode_id": "episode-1", "tick": 0, "ok": False, "status": "failed",
     }
 
@@ -126,6 +133,19 @@ def test_audit_scans_the_entire_training_surface() -> None:
     assert "neutral_resource" in source
 
 
+def test_efficiency_metrics_share_the_existing_sixty_tick_audit() -> None:
+    source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")
+
+    assert source.count("surface.find_entities()") == 1
+    assert "tick - episode.last_sample_tick" in source
+    assert "episode.productive_drill_units" in source
+    assert 'entity.type == "mining-drill"' in source
+    assert 'entity.type == "electric-pole"' in source
+    assert "power_state(surface, force, episode, consumers)" in source
+    assert "tile_width" not in source
+    assert "tile_height" not in source
+
+
 def test_training_surfaces_use_visible_tiles_and_evict_observers_before_recycling() -> None:
     world = (LAB / "episode_world.lua").read_text(encoding="utf-8")
 
@@ -149,7 +169,7 @@ def test_fixture_audit_uses_surface_identity_not_global_unit_lookup() -> None:
 
 def test_execution_report_is_schema_valid() -> None:
     report = {
-        "version": "1.0.0", "kind": "execution", "request_id": "request-1",
+        "version": "1.1.0", "kind": "execution", "request_id": "request-1",
         "episode_id": "episode-1", "tick": 60, "ok": True, "status": "ready",
         "scenario_id": "mining-delivery-00000001",
         "surface": "training/mining-delivery-00000001",
@@ -165,7 +185,7 @@ def test_execution_report_is_schema_valid() -> None:
 
 def test_execution_report_accepts_factorio_empty_table_for_no_failures() -> None:
     report = {
-        "version": "1.0.0", "kind": "execution", "request_id": "request-1",
+        "version": "1.1.0", "kind": "execution", "request_id": "request-1",
         "episode_id": "episode-1", "tick": 60, "ok": True, "status": "ready",
         "scenario_id": "mining-delivery-00000001",
         "surface": "training/mining-delivery-00000001",

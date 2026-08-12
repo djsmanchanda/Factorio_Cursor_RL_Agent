@@ -27,14 +27,24 @@ class FitnessVector:
     mean_material_cost: float
     mean_infrastructure: float
     failed_placements: int
+    mean_productive_drill_ratio: float = 0.0
+    mean_route_efficiency: float = 0.0
+    mean_route_excess_tiles: float = 0.0
+    mean_land_tiles: float = 0.0
+    mean_pole_count: float = 0.0
 
     def rank_key(self) -> tuple:
         return (
             -self.safety_violations,
             self.completion_rate,
             self.sustained_rate_ratio,
+            self.mean_productive_drill_ratio,
+            self.mean_route_efficiency,
+            -self.mean_route_excess_tiles,
             -self.mean_completion_ticks,
             -self.mean_material_cost,
+            -self.mean_land_tiles,
+            -self.mean_pole_count,
             -self.mean_infrastructure,
             -self.failed_placements,
         )
@@ -71,6 +81,11 @@ def aggregate_fitness(episodes: Iterable[Mapping]) -> FitnessVector:
         mean_material_cost=mean("material_cost"),
         mean_infrastructure=mean("infrastructure_count"),
         failed_placements=sum(int(record.get("failed_placements", 0)) for record in records),
+        mean_productive_drill_ratio=mean("productive_mining_drill_ratio"),
+        mean_route_efficiency=mean("route_efficiency"),
+        mean_route_excess_tiles=mean("route_excess_tiles"),
+        mean_land_tiles=mean("occupied_footprint_tiles"),
+        mean_pole_count=mean("electric_pole_count"),
     )
 
 

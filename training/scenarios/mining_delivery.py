@@ -9,7 +9,8 @@ import random
 from training.canonical import scenario_hash
 from training.contracts import validate_scenario
 
-_VERSION = "1.1.0"
+_VERSION = "1.2.0"
+_REWARD_PROFILE = "mining-efficiency-v1"
 _WORLD_BOUNDS = {
     "x_min": -64, "y_min": -64,
     "x_max_exclusive": 64, "y_max_exclusive": 64,
@@ -126,13 +127,17 @@ def generate_mining_delivery_scenario(seed: int) -> dict:
             "allowed_build_area": dict(_WORLD_BOUNDS),
             "allowed_entities": sorted(budget),
         },
+        "reward_profile": _REWARD_PROFILE,
         "reward_weights": {
             "completion": 10.0,
-            "delivered_item": 0.01,
+            "throughput": 8.0,
             "elapsed_tick": -0.0001,
             "material_item": -0.01,
             "failed_placement": -1.0,
-            "extra_pole": -0.1,
+            "pole": -0.1,
+            "route_excess": -0.02,
+            "land": -0.001,
+            "unproductive_drill_capacity": -3.0,
         },
     }
     scenario["scenario_hash"] = scenario_hash(scenario)

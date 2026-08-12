@@ -26,7 +26,7 @@ from training.telemetry import WorkerTelemetry, publish_best_effort, read_live_w
 
 def _failed_transition(scenario: dict, policy_hash: str) -> dict:
     return {
-        "version": "1.1.0", "episode_id": "episode-observer",
+        "version": "1.2.0", "episode_id": "episode-observer",
         "scenario_id": scenario["scenario_id"], "scenario_seed": scenario["seed"],
         "scenario_hash": scenario["scenario_hash"], "policy_id": "policy-observer",
         "policy_hash": policy_hash, "started_tick": 10, "ended_tick": 70,
@@ -36,15 +36,26 @@ def _failed_transition(scenario: dict, policy_hash: str) -> dict:
         "chosen_action_id": "candidate-a",
         "result": {"status": "failed", "failure_kind": "timeout",
                    "reason": "target rate was not sustained"},
-        "metrics": {"initial_rate_per_tick": 0, "final_rate_per_tick": 0,
-                    "delivered_items": 0, "material_cost": 2,
-                    "placements_succeeded": 1, "placements_failed": 1},
-        "reward": {"completion": 0, "throughput": 0, "elapsed_ticks": -1,
-                   "materials": -2, "infrastructure": 0,
-                   "failed_placements": -1, "total": -4},
+        "metrics": {
+            "initial_rate_per_tick": 0, "final_rate_per_tick": 0,
+            "delivered_items": 0, "material_cost": 2,
+            "placements_succeeded": 1, "placements_failed": 1,
+            "electric_pole_count": 3, "collection_belt_tiles": 10,
+            "actual_delivery_route_tiles": 40, "shortest_delivery_route_tiles": 32,
+            "route_excess_tiles": 8, "route_efficiency": 0.7,
+            "occupied_footprint_tiles": 40, "placed_mining_drills": 4,
+            "productive_mining_drills": 2, "productive_mining_drill_ratio": 0.5,
+            "mining_drill_capacity_ticks": 240, "mining_drill_working_ticks": 120,
+            "mining_drill_blocked_ticks": 60, "mining_drill_idle_ticks": 60,
+        },
+        "reward": {
+            "completion": 0, "throughput": 0, "elapsed_ticks": -1,
+            "materials": -2, "poles": -0.1, "route_excess": -0.2,
+            "land_usage": -0.1, "unproductive_drill_capacity": -0.5,
+            "failed_placements": -1, "total": -4.9,
+        },
         "next_observation": {"rate": 0},
     }
-
 
 def _populate(path) -> None:
     scenario = generate_mining_delivery_scenario(21)
@@ -93,7 +104,9 @@ def test_snapshot_combines_durable_evidence_and_atomic_live_state(tmp_path) -> N
     assert snapshot["autoresearch_live"]["phase"] == "requesting_model"
     assert {item["kind"] for item in snapshot["bottlenecks"]} >= {
         "timeout", "placement_failure", "no_delivery", "no_throughput_gain",
+        "low_productive_capacity", "route_excess",
     }
+    assert snapshot["recent_episodes"][0]["efficiency"]["route_excess_tiles"] == 8
     assert snapshot["guidance"][0]["message"] == "Prefer direct belt candidates."
     assert snapshot["proposals"][0]["proposal_id"] == "proposal-1"
 

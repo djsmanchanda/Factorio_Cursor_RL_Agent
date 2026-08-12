@@ -31,6 +31,14 @@ class FakeBridge:
                 "rate_per_tick": 1 / 60 if terminal else 0,
                 "sustained_ticks": 600 if terminal else 0,
                 "resource_remaining": 100_000, "delivered_items": 10 if terminal else 0,
+                "electric_pole_count": 3, "occupied_footprint_tiles": 60,
+                "placed_mining_drills": 3,
+                "productive_mining_drills": 3 if terminal else 0,
+                "productive_mining_drill_ratio": 1.0 if terminal else 0.0,
+                "mining_drill_capacity_ticks": 1_800 if terminal else 0,
+                "mining_drill_working_ticks": 1_800 if terminal else 0,
+                "mining_drill_blocked_ticks": 0,
+                "mining_drill_idle_ticks": 0,
             },
             "failure": {
                 "kind": "execution" if terminal and self.failed_placements else "none",
@@ -65,6 +73,10 @@ def test_episode_emits_one_valid_transition_and_recycles():
         candidate["action_id"] for candidate in mining_delivery_candidates(scenario)
     }
     assert bridge.recycled == ["episode-test"]
+    assert transition["version"] == "1.2.0"
+    assert transition["metrics"]["productive_mining_drill_ratio"] == 1.0
+    assert transition["metrics"]["route_efficiency"] <= 1.0
+    assert "unproductive_drill_capacity" in transition["reward"]
 
 
 def test_episode_recycles_after_execution_error():

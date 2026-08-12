@@ -21,14 +21,24 @@ def test_scenario_split_is_stable() -> None:
 def test_aggregate_fitness_is_lexicographic_evidence() -> None:
     result = aggregate_fitness([
         {"status": "completed", "failure_kind": "none", "sustained_rate_ratio": 1,
-         "elapsed_ticks": 100, "material_cost": 20, "infrastructure_count": 2},
+         "elapsed_ticks": 100, "material_cost": 20, "infrastructure_count": 2,
+         "productive_mining_drill_ratio": 1, "route_efficiency": 0.9,
+         "route_excess_tiles": 2, "occupied_footprint_tiles": 30,
+         "electric_pole_count": 2},
         {"status": "failed", "failure_kind": "strategy", "sustained_rate_ratio": 0.5,
          "elapsed_ticks": 200, "material_cost": 30, "infrastructure_count": 3,
-         "failed_placements": 1},
+         "failed_placements": 1, "productive_mining_drill_ratio": 0.5,
+         "route_efficiency": 0.5, "route_excess_tiles": 10,
+         "occupied_footprint_tiles": 50, "electric_pole_count": 3},
     ])
     assert result.completion_rate == 0.5
     assert result.mean_completion_ticks == 100
     assert result.failed_placements == 1
+    assert result.mean_productive_drill_ratio == 0.75
+    assert result.mean_route_efficiency == 0.7
+    assert result.mean_route_excess_tiles == 6
+    assert result.mean_land_tiles == 40
+    assert result.mean_pole_count == 2.5
 
 
 def test_promotion_requires_safe_paired_holdout_improvement() -> None:
@@ -40,3 +50,15 @@ def test_promotion_requires_safe_paired_holdout_improvement() -> None:
     assert promotion_decision(unsafe, incumbent)[0] is False
     unpaired = EvaluationResult("new", "holdout", "different", fitness(0.9))
     assert promotion_decision(unpaired, incumbent)[0] is False
+
+def test_promotion_prefers_productive_compact_routes_after_output() -> None:
+    incumbent = EvaluationResult(
+        "old", "holdout", "same",
+        FitnessVector(20, 0, 1, 1, 1000, 50, 5, 0, 0.5, 0.6, 20, 80, 8),
+    )
+    candidate = EvaluationResult(
+        "new", "holdout", "same",
+        FitnessVector(20, 0, 1, 1, 1000, 50, 5, 0, 0.9, 0.9, 4, 40, 4),
+    )
+
+    assert promotion_decision(candidate, incumbent)[0] is True
