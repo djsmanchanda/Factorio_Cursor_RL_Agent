@@ -114,7 +114,11 @@ def _belt_actions(
 ]:
     sink_fixture = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
     sink = tuple(float(value) for value in sink_fixture["position"])
-    source_x = max(xs) + 1 if sink[0] >= sum(xs) / len(xs) else min(xs) - 1
+    # Keep the first delivery turn outside the final drill's 3x3 footprint.
+    # Starting on the outer drill tile forces the bridge router to detour
+    # around the row (or tunnel through it), which is the main source of
+    # route_excess and timeout outcomes in the training episodes.
+    source_x = max(xs) + 2 if sink[0] >= sum(xs) / len(xs) else min(xs) - 2
     source = (source_x, belt_y)
     entry = _sink_entry(source, sink)
     blocked = occupied_tile_indices([("drills", {"phases": [{"actions": drills}]})])
@@ -122,11 +126,17 @@ def _belt_actions(
     bridge = [{**action, "action_type": "place_entity"}
               for action in _safe_bridge(source, sink, entry, blocked)]
     direction = "east" if source_x > min(xs) else "west"
-    row = [
-        _placement("transport-belt", (x + 0.5, belt_y), direction)
-        for x in range(math.floor(min(xs)) - 1, math.floor(max(xs)) + 2)
-        if not math.isclose(x + 0.5, source_x)
-    ]
+    if source_x > max(xs):
+        row_start = min(xs) - 1
+        row_end = source_x - 1
+    else:
+        row_start = source_x + 1
+        row_end = max(xs) + 1
+    row = []
+    cursor = row_start
+    while cursor <= row_end:
+        row.append(_placement("transport-belt", (cursor, belt_y), direction))
+        cursor += 1
     occupied_positions = {
         (action["position"]["x"], action["position"]["y"])
         for action in bridge

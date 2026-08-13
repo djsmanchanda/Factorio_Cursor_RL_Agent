@@ -24,6 +24,37 @@ def test_one_hundred_scenarios_compile_two_valid_candidates_each():
             assert {action["action_type"] for action in actions(candidate["plan"])} == {"place_entity"}
 
 
+def test_delivery_turn_starts_beyond_final_drill_footprint():
+    for seed in (60040, 60058, 60068, 60078):
+        scenario = generate_mining_delivery_scenario(seed)
+        patch = scenario["resource_patch"]["bounds"]
+        belt_y = math.floor((patch["y1"] + patch["y2"]) / 2) + 0.5
+        sink_x = next(
+            item for item in scenario["fixtures"] if item["kind"] == "item_sink"
+        )["position"][0]
+        for candidate in mining_delivery_candidates(scenario):
+            planned = list(actions(candidate["plan"]))
+            drills = [action for action in planned if action["entity"] == "electric-mining-drill"]
+            drill_xs = sorted({action["position"]["x"] for action in drills})
+            expected_source_x = (
+                max(drill_xs) + 2
+                if sink_x >= sum(drill_xs) / len(drill_xs)
+                else min(drill_xs) - 2
+            )
+            assert any(
+                action["entity"] == "transport-belt"
+                and action["position"]["y"] == belt_y
+                and action["position"]["x"] == expected_source_x
+                for action in planned
+            )
+
+
+def test_edge_turn_regression_no_longer_adds_route_excess():
+    scenario = generate_mining_delivery_scenario(60040)
+    assert all(candidate["features"]["route_excess_tiles"] == 0
+               for candidate in mining_delivery_candidates(scenario))
+
+
 def test_collection_row_never_overlaps_an_underground_bridge_endpoint():
     scenario = generate_mining_delivery_scenario(47)
 
