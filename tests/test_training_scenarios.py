@@ -281,3 +281,18 @@ def test_cli_prints_a_deterministic_scenario_batch(capsys: pytest.CaptureFixture
 
     assert [scenario["seed"] for scenario in payload] == [11, 12, 13]
     assert payload == generate_mining_delivery_curriculum(count=3, start_seed=11)
+
+def test_staged_mining_delivery_can_train_single_sink_five_ten_thirty_upgrade_path():
+    from training.scenarios.mining_delivery import generate_staged_mining_delivery_scenario
+
+    scenario = generate_staged_mining_delivery_scenario(322, (5.0, 10.0, 30.0), sustain_ticks=600)
+
+    validate_scenario(scenario)
+    assert [round(stage["target_rate_per_tick"] * 60) for stage in scenario["objective"]["stages"]] == [5, 10, 30]
+    assert [stage["destination_fixture_ids"] for stage in scenario["objective"]["stages"]] == [
+        ["delivery-sink-a"], ["delivery-sink-a"], ["delivery-sink-a"],
+    ]
+    assert {fixture["id"] for fixture in scenario["fixtures"] if fixture["kind"] == "item_sink"} == {
+        "delivery-sink-a",
+    }
+    assert "dual-sink-final" not in scenario["curriculum"]["tags"]

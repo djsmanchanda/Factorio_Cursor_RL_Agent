@@ -17,7 +17,7 @@ _WORLD_BOUNDS = {
 }
 _RESOURCES = ("iron-ore", "copper-ore", "coal", "stone")
 _DEFAULT_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0)
-_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 10.0, 30.0, 60.0)
+_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0, 60.0)
 _TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in _DEFAULT_TARGET_RATES_PER_SECOND)
 _PATCH_SIZES = (12, 15, 18)
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
@@ -203,8 +203,10 @@ def generate_staged_mining_delivery_scenario(
     """
     if not isinstance(target_rates_per_second, tuple) or not target_rates_per_second:
         raise ValueError("target_rates_per_second must be a non-empty tuple")
-    if any(rate <= 0 or rate not in (10.0, 30.0, 60.0) for rate in target_rates_per_second):
-        raise ValueError("staged rates must be selected from (10.0, 30.0, 60.0)")
+    if any(rate <= 0 or rate not in _MAX_TARGET_RATES_PER_SECOND for rate in target_rates_per_second):
+        raise ValueError(f"staged rates must be selected from {_MAX_TARGET_RATES_PER_SECOND}")
+    if tuple(sorted(target_rates_per_second)) != target_rates_per_second:
+        raise ValueError("staged rates must be ordered from lower to higher demand")
     if sustain_ticks < 60:
         raise ValueError("sustain_ticks must be at least 60")
     scenario = generate_mining_delivery_scenario(seed, max(target_rates_per_second))
@@ -219,8 +221,10 @@ def generate_staged_mining_delivery_scenario(
     staged_bounds = {**scenario["environment"]["bounds"], "x_min": -128, "x_max_exclusive": 128}
     scenario["environment"] = {**scenario["environment"], "bounds": staged_bounds}
     scenario["constraints"] = {**scenario["constraints"], "allowed_build_area": staged_bounds}
-    # Reserve two stable mining corridors so the final stage can feed two sinks
-    # without replacing the 30/s line that already serves sink A.
+    # Reserve two stable mining corridors so a final 60/s stage can feed two
+    # sinks without replacing the established line to sink A. Lower final
+    # targets deliberately use one sink: splitting 30/s into two 15/s targets
+    # would change the task the policy is meant to learn.
     patch = dict(scenario["resource_patch"]["bounds"])
     center_x = (patch["x1"] + patch["x2"]) // 2
     center_y = (patch["y1"] + patch["y2"]) // 2
@@ -249,19 +253,21 @@ def generate_staged_mining_delivery_scenario(
     first_sink_position = [first_sink_x, math.floor(patch["y1"] + 6) + 0.5]
     second_sink_position = [second_sink_x, math.floor(patch["y1"] + 18) + 0.5]
     source_position = [center_x, patch["y1"] - 5]
+    dual_sink_final = target_rates_per_second[-1] >= 60.0
     scenario["fixtures"] = [
         {**fixture, "position": source_position}
         if fixture["kind"] == "power_source" else fixture
         for fixture in scenario["fixtures"]
         if fixture["id"] != "delivery-sink"
-    ] + [
-        {**destination, "id": "delivery-sink-a", "position": first_sink_position},
-        {**destination, "id": "delivery-sink-b", "position": second_sink_position},
-    ]
+    ] + [{**destination, "id": "delivery-sink-a", "position": first_sink_position}]
+    if dual_sink_final:
+        scenario["fixtures"].append(
+            {**destination, "id": "delivery-sink-b", "position": second_sink_position},
+        )
     stages = []
     for index, rate in enumerate(target_rates_per_second):
         destinations = ["delivery-sink-a"]
-        if index == len(target_rates_per_second) - 1 and len(target_rates_per_second) >= 3:
+        if dual_sink_final and index == len(target_rates_per_second) - 1:
             destinations.append("delivery-sink-b")
         stages.append({
             "id": f"demand-{int(rate):02d}",
@@ -281,10 +287,12 @@ def generate_staged_mining_delivery_scenario(
         **scenario["curriculum"],
         "level": min(10, 7 + len(stages)),
         "tags": sorted(set(scenario["curriculum"]["tags"]) | {
-            "staged-demand", "in-place-upgrade", "dual-sink-final",
+            "staged-demand", "in-place-upgrade",
             *[f"demand-{rate:g}-per-second" for rate in target_rates_per_second],
         }),
     }
+    if dual_sink_final:
+        scenario["curriculum"]["tags"].append("dual-sink-final")
     scenario["constraints"] = {
         **scenario["constraints"],
         "max_episode_ticks": max(int(scenario["constraints"]["max_episode_ticks"]), sustain_ticks * len(stages) + 7_200),

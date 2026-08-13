@@ -286,7 +286,11 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
-    parser.add_argument("--staged-demand", action="store_true", help="Run one persistent 10->30->60/s dual-sink demand ladder per scenario.")
+    parser.add_argument("--staged-demand", action="store_true", help="Run one persistent staged demand ladder per scenario.")
+    parser.add_argument(
+        "--staged-rates-per-second", default="10,30,60",
+        help="Comma-separated ordered staged rates, e.g. 5,10,30. A 60/s final stage uses two sinks.",
+    )
     parser.add_argument("--staged-sustain-seconds", type=float, default=30.0, help="Required stable throughput at each staged demand level.")
     parser.add_argument(
         "--target-rates-per-second",
@@ -407,11 +411,17 @@ def main(argv: list[str] | None = None) -> int:
         if not target_rates or any(rate <= 0 for rate in target_rates):
             raise SystemExit("--target-rates-per-second must contain positive rates")
     if args.staged_demand:
-        if target_rates is not None and target_rates != (10.0, 30.0, 60.0):
-            raise SystemExit("--staged-demand uses fixed rates 10,30,60")
+        if args.target_rates_per_second:
+            raise SystemExit("use --staged-rates-per-second with --staged-demand, not --target-rates-per-second")
+        try:
+            staged_rates = tuple(
+                float(value.strip()) for value in args.staged_rates_per_second.split(",")
+            )
+        except ValueError as exc:
+            raise SystemExit("--staged-rates-per-second must be comma-separated numbers") from exc
         scenarios = [
             generate_staged_mining_delivery_scenario(
-                seed, sustain_ticks=round(args.staged_sustain_seconds * 60),
+                seed, staged_rates, sustain_ticks=round(args.staged_sustain_seconds * 60),
             )
             for seed in range(args.start_seed, args.start_seed + args.count)
         ]
