@@ -201,7 +201,13 @@ def generate_mining_delivery_curriculum(
     rates = target_rates_per_second or ()
     if rates and any(rate not in _MAX_TARGET_RATES_PER_SECOND for rate in rates):
         raise ValueError(f"target rates must be selected from {_MAX_TARGET_RATES_PER_SECOND}")
+    seeds = list(range(start_seed, final_seed + 1))
+    if not rates:
+        return [generate_mining_delivery_scenario(seed) for seed in seeds]
+    # A supplied rate list is a curriculum progression, not a round-robin
+    # sampler: finish the lower-demand phase before exposing the next one.
+    phase_for_index = lambda index: min(len(rates) - 1, index * len(rates) // len(seeds))
     return [
-        generate_mining_delivery_scenario(seed, rates[index % len(rates)] if rates else None)
-        for index, seed in enumerate(range(start_seed, final_seed + 1))
+        generate_mining_delivery_scenario(seed, rates[phase_for_index(index)])
+        for index, seed in enumerate(seeds)
     ]

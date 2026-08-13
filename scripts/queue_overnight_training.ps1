@@ -61,7 +61,7 @@ $common = @(
     "--workers", $workerConfig, "--database", $database, "--checkpoint", $checkpoint,
     "--live-directory", $liveDirectory, "--initial-slots", "8", "--minimum-slots", "1",
     "--maximum-slots", "16", "--step", "1", "--episodes-per-slot", "1",
-    "--episodes-per-policy", "100", "--minimum-ups-p95", "50", "--minimum-ups-p98", "45",
+    "--episodes-per-policy", "100", "--allow-episode-failures", "--minimum-ups-p95", "50", "--minimum-ups-p98", "45",
     "--stability-window-seconds", "300"
 )
 

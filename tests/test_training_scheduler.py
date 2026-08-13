@@ -290,6 +290,7 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert (args.minimum_ups_p95, args.minimum_ups_p98) == (50.0, 45.0)
     assert args.stability_window_seconds == 300.0
     assert args.healthy_windows_to_grow == 1
+    assert args.allow_episode_failures is False
 
 def test_adaptive_restart_preserves_existing_policy_parent(tmp_path) -> None:
     with TrainingStore(tmp_path / "experience.db") as store:

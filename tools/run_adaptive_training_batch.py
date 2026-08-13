@@ -302,6 +302,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minimum-ups", type=float, dest="legacy_minimum_ups")
     parser.add_argument("--healthy-windows-to-grow", type=int, default=1)
     parser.add_argument("--unhealthy-windows-to-shrink", type=int, default=1)
+    parser.add_argument(
+        "--allow-episode-failures", action="store_true",
+        help="Treat individual episode failures as training evidence so queued phases continue.",
+    )
     parser.add_argument("--database", type=Path, default=Path("data/training/experience.db"))
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
     parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
@@ -577,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
         "stages": stage, "policy_cohorts": cohort,
     }
     print(json.dumps(summary, indent=2), flush=True)
-    return 0 if total_failed == 0 else 1
+    return 0 if args.allow_episode_failures or total_failed == 0 else 1
 
 
 if __name__ == "__main__":

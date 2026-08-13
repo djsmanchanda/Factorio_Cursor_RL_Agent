@@ -134,6 +134,11 @@ def test_curriculum_can_hold_fixed_three_ten_and_thirty_per_second_demand_phases
             validate_scenario(scenario)
 
 
+def test_curriculum_progresses_through_multi_rate_phases_in_order() -> None:
+    scenarios = generate_mining_delivery_curriculum(9, 6000, (3.0, 10.0, 30.0))
+    rates = [scenario["objective"]["target_rate_per_tick"] * 60 for scenario in scenarios]
+    assert rates == [3.0] * 3 + [10.0] * 3 + [30.0] * 3
+
 def test_mining_scenario_budget_contains_construction_items_only() -> None:
     scenario = generate_mining_delivery_scenario(7)
     forbidden = {
