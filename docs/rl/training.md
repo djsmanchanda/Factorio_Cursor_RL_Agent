@@ -62,6 +62,8 @@ Each WSL Factorio process can simulate multiple isolated `training/*` surfaces c
 
 Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Each policy cohort has at least the requested 100 terminal episodes and is automatically topped up to the current active-slot count, with fresh seeded refill attempts, so extra capacity is not left idle. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.
 
+Staged mining demand uses one persistent isolated surface per attempt. The default ladder is 10/s into sink A, then 30/s into sink A, then 60/s split across independent 30/s corridors into sinks A and B. Each stage advances only after its target is sustained for --staged-sustain-seconds; staged plans use express belts and loaders so transport does not cap the measured mining rate.
+
 For long runs, use the adaptive controller after configuring enough logical slots:
 
 ```powershell

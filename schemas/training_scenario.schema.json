@@ -71,7 +71,8 @@
       "propertyNames": {
         "enum": [
           "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
-          "splitter", "transport-belt", "underground-belt"
+          "splitter", "transport-belt", "underground-belt",
+          "express-transport-belt", "express-underground-belt", "express-loader"
         ]
       },
       "additionalProperties": {"type": "integer", "minimum": 0}
@@ -108,7 +109,8 @@
           "items": {
             "enum": [
               "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
-              "splitter", "transport-belt", "underground-belt"
+              "splitter", "transport-belt", "underground-belt",
+              "express-transport-belt", "express-underground-belt", "express-loader"
             ]
           }
         }

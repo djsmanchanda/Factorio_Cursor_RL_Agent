@@ -66,17 +66,22 @@ def _stage_candidates(scenario: Mapping, report: Mapping) -> list[Mapping]:
     objective["target_rate_per_tick"] = float(
         (report.get("objective") or {}).get("target_rate_per_tick", objective["target_rate_per_tick"])
     )
-    destinations = (report.get("objective") or {}).get("destination_fixture_ids")
+    destinations = tuple((report.get("objective") or {}).get("destination_fixture_ids") or ())
     if destinations:
         objective["destination_fixture_id"] = destinations[0]
+        objective["destination_fixture_ids"] = list(destinations)
     staged = dict(scenario)
     staged["objective"] = objective
     # Candidate validation only needs the original immutable contract; the
     # generated plans retain the original surface, force, and protected fixtures.
     if scenario.get("family") == "furnace_refining":
         return furnace_refining_candidates(staged, validate_contract=False)
-    return mining_delivery_candidates(staged, validate_contract=False)
-
+    return mining_delivery_candidates(
+        staged,
+        target_rate_per_tick=objective["target_rate_per_tick"],
+        sink_fixture_ids=destinations or None,
+        validate_contract=False,
+    )
 
 def run_episode(
     bridge, scenario: Mapping, candidates: Sequence[Mapping], policy, selection_seed: int,

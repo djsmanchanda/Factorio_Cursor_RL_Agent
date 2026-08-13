@@ -14,7 +14,10 @@ from training.candidates.mining_delivery import (
     orthogonal_route_lower_bound,
 )
 from training.canonical import scenario_hash
-from training.scenarios.mining_delivery import generate_mining_delivery_scenario
+from training.scenarios.mining_delivery import (
+    generate_mining_delivery_scenario,
+    generate_staged_mining_delivery_scenario,
+)
 
 
 def _entity_counts(plan: dict) -> dict[str, int]:
@@ -71,3 +74,44 @@ def test_candidate_efficiency_catalog_is_stable_and_budget_bounded() -> None:
     constrained["scenario_hash"] = scenario_hash(constrained)
     with pytest.raises(ValueError, match="exceeds construction budget"):
         mining_delivery_candidates(constrained)
+
+
+def test_staged_final_candidates_supply_two_independent_thirty_per_second_sinks() -> None:
+    scenario = generate_staged_mining_delivery_scenario(321, sustain_ticks=600)
+    sink_ids = ("delivery-sink-a", "delivery-sink-b")
+
+    candidates = mining_delivery_candidates(
+        scenario,
+        target_rate_per_tick=60 / 60,
+        sink_fixture_ids=sink_ids,
+    )
+
+    sink_positions = {
+        fixture["id"]: tuple(fixture["position"])
+        for fixture in scenario["fixtures"]
+        if fixture["id"] in sink_ids
+    }
+    for candidate in candidates:
+        plan_actions = actions(candidate["plan"])
+        counts = _entity_counts(candidate["plan"])
+        transfer_positions = [
+            tuple(action["position"].values())
+            for action in plan_actions
+            if action["entity"] == "express-loader"
+        ]
+        assert candidate["features"]["sink_count"] == 2
+        assert candidate["features"]["drill_count"] == 120
+        assert counts["electric-mining-drill"] == 120
+        assert counts["express-loader"] == 2
+        loaders = [action for action in plan_actions if action["entity"] == "express-loader"]
+        for loader in loaders:
+            lx, ly = loader["position"].values()
+            sx, sy = min(sink_positions.values(), key=lambda sink: abs(lx - sink[0]) + abs(ly - sink[1]))
+            expected_direction = "east" if sx > lx else "west" if sx < lx else "south" if sy > ly else "north"
+            assert loader["direction"] == expected_direction
+            assert loader["underground_type"] == "input"
+        assert counts["express-transport-belt"] > 0
+        assert all(
+            any(abs(ix - sx) + abs(iy - sy) == 1.5 for ix, iy in transfer_positions)
+            for sx, sy in sink_positions.values()
+        )

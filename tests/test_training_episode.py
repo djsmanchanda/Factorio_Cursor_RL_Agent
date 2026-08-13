@@ -4,10 +4,33 @@
 import pytest
 
 from training.candidates import mining_delivery_candidates
-from training.episode import EpisodeCapacityInterrupted, run_episode
+from training.episode import EpisodeCapacityInterrupted, _stage_candidates, run_episode
 from training.policies import DeterministicBaseline
-from training.scenarios.mining_delivery import generate_mining_delivery_scenario
+from training.scenarios.mining_delivery import (
+    generate_mining_delivery_scenario,
+    generate_staged_mining_delivery_scenario,
+)
 
+
+def test_staged_catalog_expands_to_thirty_then_two_thirty_per_second_lines():
+    scenario = generate_staged_mining_delivery_scenario(321, sustain_ticks=600)
+    stage_two = _stage_candidates(scenario, {
+        "objective": {
+            "target_rate_per_tick": 30 / 60,
+            "destination_fixture_ids": ["delivery-sink-a"],
+        },
+    })
+    stage_three = _stage_candidates(scenario, {
+        "objective": {
+            "target_rate_per_tick": 60 / 60,
+            "destination_fixture_ids": ["delivery-sink-a", "delivery-sink-b"],
+        },
+    })
+
+    assert max(candidate["features"]["drill_count"] for candidate in stage_two) == 60
+    assert all(candidate["features"]["sink_count"] == 1 for candidate in stage_two)
+    assert all(candidate["features"]["drill_count"] == 120 for candidate in stage_three)
+    assert all(candidate["features"]["sink_count"] == 2 for candidate in stage_three)
 
 class FakeBridge:
     def __init__(self, fail_execution: bool = False, failed_placements: int = 0):

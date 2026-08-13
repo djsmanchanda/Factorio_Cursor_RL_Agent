@@ -292,6 +292,20 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert args.healthy_windows_to_grow == 1
     assert args.allow_episode_failures is False
 
+def test_adaptive_controller_accepts_ten_second_staged_sustain(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "adaptive", "--workers", str(tmp_path / "workers.json"),
+            "--staged-demand", "--staged-sustain-seconds", "10",
+        ],
+    )
+
+    args = _parse()
+
+    assert args.staged_demand is True
+    assert args.staged_sustain_seconds == 10
+
 def test_adaptive_restart_preserves_existing_policy_parent(tmp_path) -> None:
     with TrainingStore(tmp_path / "experience.db") as store:
         store.save_policy("policy-g0000-initial", "diagonal_linucb", 0, {}, {})

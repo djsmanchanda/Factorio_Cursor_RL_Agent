@@ -287,6 +287,7 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
     parser.add_argument("--staged-demand", action="store_true", help="Run one persistent 10->30->60/s dual-sink demand ladder per scenario.")
+    parser.add_argument("--staged-sustain-seconds", type=float, default=30.0, help="Required stable throughput at each staged demand level.")
     parser.add_argument(
         "--target-rates-per-second",
         help="Comma-separated fixed demand rates for stress phases, e.g. 3 or 10 or 30.",
@@ -321,6 +322,8 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("initial-slots must be inside the slot bounds")
     if args.step < 1 or args.episodes_per_slot < 1 or args.episodes_per_policy < 1:
         parser.error("step, episodes-per-slot, and episodes-per-policy must be positive")
+    if args.staged_sustain_seconds < 1:
+        parser.error("staged-sustain-seconds must be at least 1")
     if args.stability_window_seconds <= 0:
         parser.error("stability-window-seconds must be positive")
     if args.legacy_minimum_ups is not None:
@@ -407,7 +410,9 @@ def main(argv: list[str] | None = None) -> int:
         if target_rates is not None and target_rates != (10.0, 30.0, 60.0):
             raise SystemExit("--staged-demand uses fixed rates 10,30,60")
         scenarios = [
-            generate_staged_mining_delivery_scenario(seed)
+            generate_staged_mining_delivery_scenario(
+                seed, sustain_ticks=round(args.staged_sustain_seconds * 60),
+            )
             for seed in range(args.start_seed, args.start_seed + args.count)
         ]
     else:

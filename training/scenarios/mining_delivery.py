@@ -219,29 +219,44 @@ def generate_staged_mining_delivery_scenario(
     staged_bounds = {**scenario["environment"]["bounds"], "x_min": -128, "x_max_exclusive": 128}
     scenario["environment"] = {**scenario["environment"], "bounds": staged_bounds}
     scenario["constraints"] = {**scenario["constraints"], "allowed_build_area": staged_bounds}
-    # Widen staged ore patches so the first two demand steps have room to scale.
+    # Reserve two stable mining corridors so the final stage can feed two sinks
+    # without replacing the 30/s line that already serves sink A.
     patch = dict(scenario["resource_patch"]["bounds"])
     center_x = (patch["x1"] + patch["x2"]) // 2
+    center_y = (patch["y1"] + patch["y2"]) // 2
     patch["x1"], patch["x2"] = center_x - 45, center_x + 44
+    patch["y1"], patch["y2"] = center_y - 12, center_y + 11
     scenario["resource_patch"] = {**scenario["resource_patch"], "bounds": patch}
     scenario["construction_budget"] = {
         **scenario["construction_budget"],
-        "transport-belt": scenario["construction_budget"]["transport-belt"] + 120,
-        "medium-electric-pole": scenario["construction_budget"]["medium-electric-pole"] + 120,
+        "express-transport-belt": scenario["construction_budget"]["transport-belt"] + 300,
+        "express-underground-belt": scenario["construction_budget"]["underground-belt"] + 20,
+        "express-loader": 2,
+        "medium-electric-pole": scenario["construction_budget"]["medium-electric-pole"] + 200,
     }
-    source_position = [patch["x1"] - 3, (patch["y1"] + patch["y2"]) // 2]
-    scenario["fixtures"] = [{**fixture, "position": source_position} if fixture["kind"] == "power_source" else fixture for fixture in scenario["fixtures"]]
-    destination = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
-    dx, dy = destination["position"]
-    bounds = scenario["environment"]["bounds"]
-    second_position = [dx, dy + 6]
-    if second_position[1] >= bounds["y_max_exclusive"]:
-        second_position = [dx, dy - 6]
-    if second_position[1] < bounds["y_min"]:
-        raise ValueError("could not place the second staged delivery sink in bounds")
-    scenario["fixtures"] = [f for f in scenario["fixtures"] if f["id"] != "delivery-sink"] + [
-        {**destination, "id": "delivery-sink-a"},
-        {**destination, "id": "delivery-sink-b", "position": second_position},
+    scenario["constraints"] = {
+        **scenario["constraints"],
+        "allowed_entities": sorted(scenario["construction_budget"]),
+    }
+    destination = next(fixture for fixture in scenario["fixtures"] if fixture["kind"] == "item_sink")
+    original_sink_x = float(destination["position"][0])
+    left_sink_x = patch["x1"] - 20.5
+    right_sink_x = patch["x2"] + 20.5
+    if original_sink_x < center_x:
+        first_sink_x, second_sink_x = left_sink_x, right_sink_x
+    else:
+        first_sink_x, second_sink_x = right_sink_x, left_sink_x
+    first_sink_position = [first_sink_x, math.floor(patch["y1"] + 6) + 0.5]
+    second_sink_position = [second_sink_x, math.floor(patch["y1"] + 18) + 0.5]
+    source_position = [center_x, patch["y1"] - 5]
+    scenario["fixtures"] = [
+        {**fixture, "position": source_position}
+        if fixture["kind"] == "power_source" else fixture
+        for fixture in scenario["fixtures"]
+        if fixture["id"] != "delivery-sink"
+    ] + [
+        {**destination, "id": "delivery-sink-a", "position": first_sink_position},
+        {**destination, "id": "delivery-sink-b", "position": second_sink_position},
     ]
     stages = []
     for index, rate in enumerate(target_rates_per_second):

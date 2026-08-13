@@ -2459,3 +2459,9 @@ that consumed it was not.
 - Prepared the next run for twenty isolated WSL runtimes, eight initial slots per runtime, sixteen-slot per-runtime ceiling, and two-second staggered bootstrap/deploy/start operations (320 maximum logical slots).
 - Adaptive policy cohorts now retain the 100-episode minimum while topping up to active capacity with fresh seeded attempts, preventing idle slots at cohort tails.
 - Lifecycle: current generation-9 controller was left running; restart the RL controller only when launching this next run. No Lua deployment or Factorio GUI restart is required.
+
+## [2026-08-13] RL 50-server staged mining scale test
+- Fixed staged candidate regeneration so 10/s -> 30/s -> 60/s upgrades are executable on one persistent surface; the final stage now uses two independent 30/s sink corridors with 120 electric drills and express belt/loader transport.
+- Contract: each stage must sustain its target for 600 ticks (10 seconds). The launched curriculum uses 500 unique scenarios per policy, four policy cohorts (2,000 attempts), 50 isolated WSL servers, and adaptive capacity from one to ten slots per server.
+- Evidence: a hard-fail live smoke completed all three stages with 1 completed / 0 failed. All 50 RCON endpoints registered `training_execute`; PID 3372 is running from `data/training-staged-scale-20260813-50x10/` with zero controller stderr and live full-fleet measurement telemetry. Focused validation passes 78 tests plus a 500-seed / 1,500-stage candidate sweep.
+- Lifecycle: the training mod was deployed and all 50 isolated WSL workers plus the Python controller were restarted. Real Nauvis and the deterministic runtime were not touched; GUI observation would require syncing the training mod copy and restarting the GUI client.

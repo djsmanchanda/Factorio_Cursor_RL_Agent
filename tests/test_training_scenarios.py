@@ -141,12 +141,15 @@ def test_curriculum_progresses_through_multi_rate_phases_in_order() -> None:
 
 def test_staged_mining_delivery_is_one_surface_with_ordered_dual_sink_final_stage():
     from training.scenarios.mining_delivery import generate_staged_mining_delivery_scenario
-    scenario = generate_staged_mining_delivery_scenario(321)
+    scenario = generate_staged_mining_delivery_scenario(321, sustain_ticks=600)
     validate_scenario(scenario)
     assert [round(stage["target_rate_per_tick"] * 60) for stage in scenario["objective"]["stages"]] == [10, 30, 60]
+    assert [stage["sustain_ticks"] for stage in scenario["objective"]["stages"]] == [600, 600, 600]
     assert scenario["objective"]["destination_fixture_id"] == "delivery-sink-a"
     assert scenario["objective"]["stages"][-1]["destination_fixture_ids"] == ["delivery-sink-a", "delivery-sink-b"]
     assert scenario["fixtures"][-2]["position"] != scenario["fixtures"][-1]["position"]
+    assert scenario["construction_budget"]["express-loader"] == 2
+    assert scenario["construction_budget"]["express-transport-belt"] > 0
     assert scenario["environment"]["surface_name"] == "training/mining-staged-0141"
 def test_mining_scenario_budget_contains_construction_items_only() -> None:
     scenario = generate_mining_delivery_scenario(7)

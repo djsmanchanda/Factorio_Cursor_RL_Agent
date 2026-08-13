@@ -7,7 +7,9 @@ local ALLOWED_RESOURCES = {
 local ALLOWED_ENTITIES = {
   ["electric-mining-drill"] = true, ["fast-inserter"] = true,
   ["medium-electric-pole"] = true, ["electric-furnace"] = true, splitter = true,
-  ["transport-belt"] = true, ["underground-belt"] = true
+  ["transport-belt"] = true, ["underground-belt"] = true,
+  ["express-transport-belt"] = true, ["express-underground-belt"] = true,
+  ["express-loader"] = true
 }
 local POWER_SOURCE_ENTITIES = {
   ["electric-energy-interface"] = true, ["solar-panel"] = true,
