@@ -59,7 +59,10 @@ def _placement(entity: str, point: tuple[float, float], direction: str | None = 
 def _drill_positions(scenario: Mapping, count: int) -> tuple[list[dict], float, list[float]]:
     patch = scenario["resource_patch"]["bounds"]
     belt_y = math.floor((patch["y1"] + patch["y2"]) / 2) + 0.5
-    xs = [patch["x1"] + 1.5 + 3 * index for index in range(4)]
+    staged = "staged-demand" in scenario.get("curriculum", {}).get("tags", [])
+    max_positions = (max(1, math.floor((patch["x2"] - patch["x1"] + 1) / 3))
+                     if staged else 4)
+    xs = [patch["x1"] + 1.5 + 3 * index for index in range(max_positions)]
     xs = [x for x in xs if x + 1.5 <= patch["x2"] + 1]
     sites = [(x, belt_y - 2, "south") for x in xs]
     sites += [(x, belt_y + 2, "north") for x in reversed(xs)]
@@ -325,7 +328,10 @@ def mining_delivery_candidates(scenario: Mapping, *, target_rate_per_tick: float
     # Preserve two distinct alternatives even when demand exceeds the current
     # compact footprint; the resulting throughput gap is observable and
     # rewardable until a larger expansion curriculum is introduced.
-    available = min(budget, 8)
+    patch = scenario["resource_patch"]["bounds"]
+    staged = "staged-demand" in scenario.get("curriculum", {}).get("tags", [])
+    patch_positions = max(1, math.floor((patch["x2"] - patch["x1"] + 1) / 3))
+    available = min(budget, patch_positions * 2 if staged else 8)
     lower = min(minimum, available)
     upper = min(available, lower + 1)
     if upper == lower:

@@ -214,6 +214,23 @@ def generate_staged_mining_delivery_scenario(
         "surface_name": f"training/{scenario['scenario_id']}",
         "force_name": f"training-{scenario['scenario_id']}",
     }
+    # Give staged episodes a larger disposable arena so 10/s and 30/s can be
+    # attempted with one coherent two-row collection corridor.
+    staged_bounds = {**scenario["environment"]["bounds"], "x_min": -128, "x_max_exclusive": 128}
+    scenario["environment"] = {**scenario["environment"], "bounds": staged_bounds}
+    scenario["constraints"] = {**scenario["constraints"], "allowed_build_area": staged_bounds}
+    # Widen staged ore patches so the first two demand steps have room to scale.
+    patch = dict(scenario["resource_patch"]["bounds"])
+    center_x = (patch["x1"] + patch["x2"]) // 2
+    patch["x1"], patch["x2"] = center_x - 45, center_x + 44
+    scenario["resource_patch"] = {**scenario["resource_patch"], "bounds": patch}
+    scenario["construction_budget"] = {
+        **scenario["construction_budget"],
+        "transport-belt": scenario["construction_budget"]["transport-belt"] + 120,
+        "medium-electric-pole": scenario["construction_budget"]["medium-electric-pole"] + 120,
+    }
+    source_position = [patch["x1"] - 3, (patch["y1"] + patch["y2"]) // 2]
+    scenario["fixtures"] = [{**fixture, "position": source_position} if fixture["kind"] == "power_source" else fixture for fixture in scenario["fixtures"]]
     destination = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
     dx, dy = destination["position"]
     bounds = scenario["environment"]["bounds"]
