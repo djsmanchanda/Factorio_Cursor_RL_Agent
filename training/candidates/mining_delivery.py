@@ -109,10 +109,11 @@ def _safe_bridge(source, sink, preferred: str, blocked: set[tuple[int, int]]) ->
 
 def _belt_actions(
     scenario: Mapping, drills: list[dict], belt_y: float, xs: list[float], variant: int,
+    sink_fixture_id: str | None = None,
 ) -> tuple[
     list[dict], list[dict], list[dict], tuple[float, float], tuple[float, float],
 ]:
-    sink_fixture = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
+    sink_fixture = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink" and (sink_fixture_id is None or f["id"] == sink_fixture_id))
     sink = tuple(float(value) for value in sink_fixture["position"])
     # Keep the first delivery turn outside the final drill's 3x3 footprint.
     # Starting on the outer drill tile forces the bridge router to detour
@@ -248,7 +249,7 @@ def _count_entities(plan: Mapping) -> dict[str, int]:
     return counts
 
 
-def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
+def _candidate(scenario: Mapping, variant: int, drill_count: int, target_rate_per_tick: float | None = None, sink_fixture_id: str | None = None) -> dict:
     drills, belt_y, xs = _drill_positions(scenario, drill_count)
     transport, delivery_route, collection_belts, source, sink = _belt_actions(
         scenario, drills, belt_y, xs, variant,
@@ -315,10 +316,10 @@ def _candidate(scenario: Mapping, variant: int, drill_count: int) -> dict:
     }
 
 
-def mining_delivery_candidates(scenario: Mapping) -> list[dict]:
+def mining_delivery_candidates(scenario: Mapping, *, target_rate_per_tick: float | None = None, sink_fixture_id: str | None = None, validate_contract: bool = True) -> list[dict]:
     """Return two safe alternatives without allowing RL to design geometry."""
     validate_scenario(scenario)
-    target = float(scenario["objective"]["target_rate_per_tick"])
+    target = float(target_rate_per_tick if target_rate_per_tick is not None else scenario["objective"]["target_rate_per_tick"])
     minimum = max(1, math.ceil(target / _DRILL_RATE_PER_TICK))
     budget = int(scenario["construction_budget"]["electric-mining-drill"])
     # Preserve two distinct alternatives even when demand exceeds the current
@@ -330,7 +331,7 @@ def mining_delivery_candidates(scenario: Mapping) -> list[dict]:
     if upper == lower:
         lower = max(1, upper - 1)
     counts: Iterable[int] = (lower, upper)
-    candidates = [_candidate(scenario, variant, count) for variant, count in enumerate(counts)]
+    candidates = [_candidate(scenario, variant, count, target, sink_fixture_id) for variant, count in enumerate(counts)]
     if len({candidate["plan_hash"] for candidate in candidates}) != len(candidates):
         raise ValueError("candidate catalog must contain distinct BuildPlans")
     return candidates

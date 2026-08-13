@@ -17,7 +17,7 @@ _WORLD_BOUNDS = {
 }
 _RESOURCES = ("iron-ore", "copper-ore", "coal", "stone")
 _DEFAULT_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0)
-_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 10.0, 30.0)
+_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 10.0, 30.0, 60.0)
 _TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in _DEFAULT_TARGET_RATES_PER_SECOND)
 _PATCH_SIZES = (12, 15, 18)
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
@@ -187,6 +187,79 @@ def generate_mining_delivery_scenario(
     validate_scenario(scenario)
     return scenario
 
+
+def generate_staged_mining_delivery_scenario(
+    seed: int,
+    target_rates_per_second: tuple[float, ...] = (10.0, 30.0, 60.0),
+    *,
+    sustain_ticks: int = 1_800,
+) -> dict:
+    """Generate one persistent factory episode with an ordered demand ladder.
+
+    The training lab keeps this factory alive while it advances
+    ``objective.stages`` after each sustained target. The final stage names two
+    sinks, so a policy must scale and route an existing line instead of getting
+    a fresh layout for every demand.
+    """
+    if not isinstance(target_rates_per_second, tuple) or not target_rates_per_second:
+        raise ValueError("target_rates_per_second must be a non-empty tuple")
+    if any(rate <= 0 or rate not in (10.0, 30.0, 60.0) for rate in target_rates_per_second):
+        raise ValueError("staged rates must be selected from (10.0, 30.0, 60.0)")
+    if sustain_ticks < 60:
+        raise ValueError("sustain_ticks must be at least 60")
+    scenario = generate_mining_delivery_scenario(seed, max(target_rates_per_second))
+    scenario = {**scenario, "scenario_id": f"mining-staged-{seed:04x}"}
+    scenario["environment"] = {
+        **scenario["environment"],
+        "surface_name": f"training/{scenario['scenario_id']}",
+        "force_name": f"training-{scenario['scenario_id']}",
+    }
+    destination = next(f for f in scenario["fixtures"] if f["kind"] == "item_sink")
+    dx, dy = destination["position"]
+    bounds = scenario["environment"]["bounds"]
+    second_position = [dx, dy + 6]
+    if second_position[1] >= bounds["y_max_exclusive"]:
+        second_position = [dx, dy - 6]
+    if second_position[1] < bounds["y_min"]:
+        raise ValueError("could not place the second staged delivery sink in bounds")
+    scenario["fixtures"] = [f for f in scenario["fixtures"] if f["id"] != "delivery-sink"] + [
+        {**destination, "id": "delivery-sink-a"},
+        {**destination, "id": "delivery-sink-b", "position": second_position},
+    ]
+    stages = []
+    for index, rate in enumerate(target_rates_per_second):
+        destinations = ["delivery-sink-a"]
+        if index == len(target_rates_per_second) - 1 and len(target_rates_per_second) >= 3:
+            destinations.append("delivery-sink-b")
+        stages.append({
+            "id": f"demand-{int(rate):02d}",
+            "target_rate_per_tick": rate / 60.0,
+            "sustain_ticks": sustain_ticks,
+            "destination_fixture_ids": destinations,
+        })
+    first = stages[0]
+    scenario["objective"] = {
+        **scenario["objective"],
+        "target_rate_per_tick": first["target_rate_per_tick"],
+        "sustain_ticks": first["sustain_ticks"],
+        "destination_fixture_id": "delivery-sink-a",
+        "stages": stages,
+    }
+    scenario["curriculum"] = {
+        **scenario["curriculum"],
+        "level": min(10, 7 + len(stages)),
+        "tags": sorted(set(scenario["curriculum"]["tags"]) | {
+            "staged-demand", "in-place-upgrade", "dual-sink-final",
+            *[f"demand-{rate:g}-per-second" for rate in target_rates_per_second],
+        }),
+    }
+    scenario["constraints"] = {
+        **scenario["constraints"],
+        "max_episode_ticks": max(int(scenario["constraints"]["max_episode_ticks"]), sustain_ticks * len(stages) + 7_200),
+    }
+    scenario["scenario_hash"] = scenario_hash(scenario)
+    validate_scenario(scenario)
+    return scenario
 
 def generate_mining_delivery_curriculum(
     count: int, start_seed: int = 0,

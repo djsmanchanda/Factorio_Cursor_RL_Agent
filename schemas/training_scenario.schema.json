@@ -85,7 +85,13 @@
         "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
         "sustain_ticks": {"type": "integer", "minimum": 60},
-        "destination_fixture_id": {"type": "string", "minLength": 1}
+        "destination_fixture_id": {"type": "string", "minLength": 1},
+        "stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"$ref": "#/definitions/demand_stage"}
+        }
       }
     },
     "constraints": {
@@ -158,6 +164,23 @@
         "y1": {"type": "integer", "minimum": -512, "maximum": 512},
         "x2": {"type": "integer", "minimum": -512, "maximum": 512},
         "y2": {"type": "integer", "minimum": -512, "maximum": 512}
+      }
+    },
+    "demand_stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target_rate_per_tick", "sustain_ticks", "destination_fixture_ids"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"},
+        "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
+        "sustain_ticks": {"type": "integer", "minimum": 60},
+        "destination_fixture_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     }
   }

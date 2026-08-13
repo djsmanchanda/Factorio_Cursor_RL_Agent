@@ -103,9 +103,47 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
             raise ValueError("power_storage fixture must use an accumulator")
         if kind in _FIXTURE_ENTITIES and entity != _FIXTURE_ENTITIES[kind]:
             raise ValueError("fixture kind must use its approved instrumentation entity")
+    objective = payload["objective"]
+    stages = objective.get("stages") or []
+    if stages:
+        if stages[0]["target_rate_per_tick"] != objective["target_rate_per_tick"]:
+            raise ValueError("objective first stage must match target_rate_per_tick")
+        seen_stage_ids: set[str] = set()
+        for stage in stages:
+            if stage["id"] in seen_stage_ids:
+                raise ValueError("objective stage ids must be unique")
+            seen_stage_ids.add(stage["id"])
+            if not stage["destination_fixture_ids"]:
+                raise ValueError("objective stages require at least one destination fixture")
+            for fixture_id in stage["destination_fixture_ids"]:
+                fixture = fixtures.get(fixture_id)
+                if fixture is None or fixture["kind"] != "item_sink":
+                    raise ValueError("objective stage destination must identify an item_sink fixture")
+        if objective["destination_fixture_id"] not in stages[0]["destination_fixture_ids"]:
+            raise ValueError("objective destination must be part of the first stage")
     destination = fixtures.get(payload["objective"]["destination_fixture_id"])
     if destination is None or destination["kind"] != "item_sink":
         raise ValueError("objective destination must identify an item_sink fixture")
+    if len(fixtures) > 4:
+        raise ValueError("mining delivery scenarios permit at most two item sinks")
+    stages = payload["objective"].get("stages")
+    if stages is not None:
+        stage_ids: set[str] = set()
+        for index, stage in enumerate(stages):
+            stage_id = stage["id"]
+            if stage_id in stage_ids:
+                raise ValueError("objective stage ids must be unique")
+            stage_ids.add(stage_id)
+            destinations = stage["destination_fixture_ids"]
+            if any(fixtures.get(fixture_id, {}).get("kind") != "item_sink" for fixture_id in destinations):
+                raise ValueError(f"objective stage {index} must identify item_sink fixtures")
+        first = stages[0]
+        if first["target_rate_per_tick"] != payload["objective"]["target_rate_per_tick"]:
+            raise ValueError("first objective stage must match target_rate_per_tick")
+        if first["sustain_ticks"] != payload["objective"]["sustain_ticks"]:
+            raise ValueError("first objective stage must match sustain_ticks")
+        if payload["objective"]["destination_fixture_id"] not in first["destination_fixture_ids"]:
+            raise ValueError("legacy destination_fixture_id must be in the first objective stage")
     power_sources = [fixture for fixture in fixtures.values() if fixture["kind"] == "power_source"]
     if not power_sources:
         raise ValueError("mining delivery scenarios require a power_source fixture")

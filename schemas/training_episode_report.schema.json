@@ -60,7 +60,11 @@
       "properties": {
         "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
-        "sustain_ticks": {"type": "integer", "minimum": 60}
+        "sustain_ticks": {"type": "integer", "minimum": 60},
+        "stage_index": {"type": "integer", "minimum": 1},
+        "stage_count": {"type": "integer", "minimum": 1},
+        "stage_id": {"type": "string", "minLength": 1},
+        "destination_fixture_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
       }
     },
     "metrics": {
@@ -78,10 +82,14 @@
       ],
       "properties": {
         "delivered_items": {"type": "integer", "minimum": 0},
+        "stage_delivered_items": {"type": "integer", "minimum": 0},
         "sample_ticks": {"type": "integer", "minimum": 0},
         "sample_items": {"type": "integer", "minimum": 0},
         "rate_per_tick": {"type": "number", "minimum": 0},
         "sustained_ticks": {"type": "integer", "minimum": 0},
+        "stage_index": {"type": "integer", "minimum": 1},
+        "stage_id": {"type": "string", "minLength": 1},
+        "sink_rate_per_tick": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
         "resource_remaining": {"type": "number", "minimum": 0},
         "built_entities": {
           "type": "object",

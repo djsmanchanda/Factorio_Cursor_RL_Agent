@@ -143,7 +143,7 @@ local function place_resources(surface, scenario)
 end
 
 local function place_fixtures(surface, force, scenario)
-  local fixture_records, sink_fixture_id = {}, nil
+  local fixture_records, sink_fixture_id, sink_fixture_ids = {}, nil, {}
   for _, fixture in ipairs(scenario.fixtures) do
     local entity = surface.create_entity({
       name = fixture.entity,
@@ -154,7 +154,8 @@ local function place_fixtures(surface, force, scenario)
     entity.minable, entity.destructible, entity.rotatable = false, false, false
     if fixture.kind == "item_sink" then
       entity.remove_unfiltered_items = false
-      sink_fixture_id = fixture.id
+      sink_fixture_id = sink_fixture_id or fixture.id
+      sink_fixture_ids[#sink_fixture_ids + 1] = fixture.id
     end
     fixture_records[fixture.id] = {
       name = fixture.entity,
@@ -163,7 +164,7 @@ local function place_fixtures(surface, force, scenario)
       position = { x = entity.position.x, y = entity.position.y }
     }
   end
-  return fixture_records, sink_fixture_id
+  return fixture_records, sink_fixture_id, sink_fixture_ids
 end
 
 local function begin_partial_cleanup(surface, force, request_id, episode_id)
@@ -183,8 +184,8 @@ local function build_episode(payload, scenario)
     surface = create_surface(scenario)
     force = create_force(scenario)
     local resource_tiles = place_resources(surface, scenario)
-    local fixtures, sink_fixture_id = place_fixtures(surface, force, scenario)
-    return { resource_tiles = resource_tiles, fixtures = fixtures, sink_fixture_id = sink_fixture_id }
+    local fixtures, sink_fixture_id, sink_fixture_ids = place_fixtures(surface, force, scenario)
+    return { resource_tiles = resource_tiles, fixtures = fixtures, sink_fixture_id = sink_fixture_id, sink_fixture_ids = sink_fixture_ids }
   end)
   if not ok then
     begin_partial_cleanup(surface, force, payload.request_id, payload.episode_id)
@@ -285,9 +286,10 @@ local function provision(payload)
     surface_name = scenario.environment.surface_name,
     force_name = scenario.environment.force_name, scenario = scenario,
     started_tick = game.tick, last_sample_tick = game.tick, status = "ready",
-    fixtures = created.fixtures, sink_fixture_id = created.sink_fixture_id,
-    delivered_items = 0, sample_items = 0, sample_ticks = 0, rate_samples = {},
-    rate_per_tick = 0, sustained_ticks = 0,
+    fixtures = created.fixtures, sink_fixture_id = created.sink_fixture_id, sink_fixture_ids = created.sink_fixture_ids,
+    delivered_items = 0, stage_delivered_items = 0, sample_items = 0, sample_ticks = 0, rate_samples = {},
+    sink_rate_samples = {}, sink_rate_per_tick = {}, rate_per_tick = 0, sustained_ticks = 0,
+    stage_index = 1, stage_id = scenario.objective.stages and scenario.objective.stages[1].id or "default",
     failure_kind = "none", failure_reason = ""
   }
   shared.ensure_storage().episodes[payload.episode_id] = episode

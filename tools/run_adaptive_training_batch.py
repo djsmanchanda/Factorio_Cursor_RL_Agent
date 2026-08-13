@@ -38,7 +38,7 @@ from training.scheduler import (
     group_workers_by_instance,
     load_worker_specs,
 )
-from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
+from training.scenarios.mining_delivery import generate_mining_delivery_curriculum, generate_staged_mining_delivery_scenario
 from training.store import TrainingStore
 
 
@@ -286,6 +286,7 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--count", type=int, default=100)
     parser.add_argument("--start-seed", type=int, default=0)
     parser.add_argument("--attempts-per-scenario", type=int, default=1)
+    parser.add_argument("--staged-demand", action="store_true", help="Run one persistent 10->30->60/s dual-sink demand ladder per scenario.")
     parser.add_argument(
         "--target-rates-per-second",
         help="Comma-separated fixed demand rates for stress phases, e.g. 3 or 10 or 30.",
@@ -402,9 +403,17 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--target-rates-per-second must be comma-separated numbers") from exc
         if not target_rates or any(rate <= 0 for rate in target_rates):
             raise SystemExit("--target-rates-per-second must contain positive rates")
-    scenarios = generate_mining_delivery_curriculum(
-        args.count, args.start_seed, target_rates_per_second=target_rates,
-    )
+    if args.staged_demand:
+        if target_rates is not None and target_rates != (10.0, 30.0, 60.0):
+            raise SystemExit("--staged-demand uses fixed rates 10,30,60")
+        scenarios = [
+            generate_staged_mining_delivery_scenario(seed)
+            for seed in range(args.start_seed, args.start_seed + args.count)
+        ]
+    else:
+        scenarios = generate_mining_delivery_curriculum(
+            args.count, args.start_seed, target_rates_per_second=target_rates,
+        )
     jobs = _jobs(scenarios, args.attempts_per_scenario)
     password = _rcon_password(args)
     generation, policy = _load_policy(args.checkpoint)

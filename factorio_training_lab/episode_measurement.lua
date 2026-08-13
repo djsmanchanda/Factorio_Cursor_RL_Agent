@@ -17,34 +17,85 @@ local RATE_WINDOW_TICKS = 600
 local FOOTPRINT_TILE_CACHE = {}
 local electricity_role
 
-local function advance_sample(episode, delivered, tick)
+local function active_stage(episode)
+  local stages = episode.scenario.objective.stages
+  if stages then
+    local index = episode.stage_index or 1
+    return stages[index], index, #stages
+  end
+  return episode.scenario.objective, 1, 1
+end
+
+local function stage_destinations(episode, stage)
+  if stage.destination_fixture_ids then return stage.destination_fixture_ids end
+  return { episode.sink_fixture_id or stage.destination_fixture_id or "__legacy_sink" }
+end
+
+local function window_rate(samples)
+  local items, ticks = 0, 0
+  for _, sample in ipairs(samples or {}) do
+    items = items + sample.items
+    ticks = ticks + sample.ticks
+  end
+  while ticks > RATE_WINDOW_TICKS and #samples > 1 do
+    local expired = table.remove(samples, 1)
+    items = items - expired.items
+    ticks = ticks - expired.ticks
+  end
+  return ticks > 0 and items / ticks or 0
+end
+
+local function reset_stage_window(episode, tick)
+  episode.last_sample_tick = tick
+  episode.sample_ticks, episode.sample_items = 0, 0
+  episode.rate_samples = {}
+  episode.sink_rate_samples = {}
+  episode.sink_rate_per_tick = {}
+  episode.rate_per_tick, episode.sustained_ticks = 0, 0
+end
+
+local function advance_sample(episode, delivered, tick, sink_deliveries)
   local sample_ticks = tick - episode.last_sample_tick
   if sample_ticks <= 0 then return episode end
+  local stage, stage_index, stage_count = active_stage(episode)
+  local destinations = stage_destinations(episode, stage)
+  sink_deliveries = sink_deliveries or {}
+  if next(sink_deliveries) == nil and destinations[1] then sink_deliveries[destinations[1]] = delivered end
+  episode.stage_index, episode.stage_id = stage_index, stage.id or "default"
   episode.last_sample_tick = tick
   episode.sample_ticks = sample_ticks
   episode.sample_items = delivered
-  episode.delivered_items = episode.delivered_items + delivered
+  episode.delivered_items = (episode.delivered_items or 0) + delivered
+  episode.stage_delivered_items = (episode.stage_delivered_items or 0) + delivered
   episode.rate_samples = episode.rate_samples or {}
   table.insert(episode.rate_samples, { items = delivered, ticks = sample_ticks })
-  local window_items, window_ticks = 0, 0
-  for _, sample in pairs(episode.rate_samples) do
-    window_items = window_items + sample.items
-    window_ticks = window_ticks + sample.ticks
+  episode.rate_per_tick = window_rate(episode.rate_samples)
+  episode.sink_rate_samples = episode.sink_rate_samples or {}
+  episode.sink_rate_per_tick = episode.sink_rate_per_tick or {}
+  local target_per_sink = stage.target_rate_per_tick / #destinations
+  local meets_target = episode.rate_per_tick + 1e-9 >= stage.target_rate_per_tick
+  for _, fixture_id in ipairs(destinations) do
+    local samples = episode.sink_rate_samples[fixture_id] or {}
+    table.insert(samples, { items = sink_deliveries[fixture_id] or 0, ticks = sample_ticks })
+    episode.sink_rate_samples[fixture_id] = samples
+    local sink_rate = window_rate(samples)
+    episode.sink_rate_per_tick[fixture_id] = sink_rate
+    if sink_rate + 1e-9 < target_per_sink then meets_target = false end
   end
-  while window_ticks > RATE_WINDOW_TICKS and #episode.rate_samples > 1 do
-    local expired = table.remove(episode.rate_samples, 1)
-    window_items = window_items - expired.items
-    window_ticks = window_ticks - expired.ticks
-  end
-  episode.rate_per_tick = window_items / window_ticks
-  local objective = episode.scenario.objective
-  if episode.rate_per_tick + 1e-9 >= objective.target_rate_per_tick then
-    episode.sustained_ticks = episode.sustained_ticks + sample_ticks
+  if meets_target then
+    episode.sustained_ticks = (episode.sustained_ticks or 0) + sample_ticks
   else
     episode.sustained_ticks = 0
   end
   episode.status = "running"
-  if episode.sustained_ticks >= objective.sustain_ticks then
+  if episode.sustained_ticks >= stage.sustain_ticks then
+    if stage_index < stage_count then
+      episode.completed_stage_count = stage_index
+      episode.stage_index = stage_index + 1
+      episode.stage_id = active_stage(episode).id or "default"
+      reset_stage_window(episode, tick)
+      return episode
+    end
     episode.status = "completed"
   elseif tick - episode.started_tick >= episode.scenario.constraints.max_episode_ticks then
     episode.status = "timed_out"
@@ -262,19 +313,24 @@ local function sample_episode(episode, tick)
   local powered, power_reason = power_state(surface, force, episode, consumers)
   episode.power_connected = powered
   if not powered then fail_power(episode, power_reason); return end
-  local sink = fixture_entity(surface, force, episode.fixtures[episode.sink_fixture_id])
-  local inventory = sink and sink.get_inventory(defines.inventory.chest) or nil
-  if not inventory then fail_safety(episode, "item sink inventory is unavailable"); return end
+  local sink_ids = episode.sink_fixture_ids or { episode.sink_fixture_id }
+  local delivered_by_sink, delivered = {}, 0
   local item = episode.scenario.objective.item
-  local delivered = inventory.get_item_count(item)
-  if delivered > 0 then inventory.remove({ name = item, count = delivered }) end
+  for _, sink_id in ipairs(sink_ids) do
+    local sink = fixture_entity(surface, force, episode.fixtures[sink_id])
+    local inventory = sink and sink.get_inventory(defines.inventory.chest) or nil
+    if not inventory then fail_safety(episode, "item sink inventory is unavailable"); return end
+    local count = inventory.get_item_count(item)
+    if count > 0 then inventory.remove({ name = item, count = count }) end
+    delivered_by_sink[sink_id], delivered = count, delivered + count
+  end
   episode.forbidden_entities, episode.out_of_bounds_entities = forbidden, outside
   episode.budget_overruns = overruns
   if forbidden > 0 or outside > 0 or overruns > 0 then
     fail_safety(episode, "training entity constraint violated")
     return
   end
-  advance_sample(episode, delivered, tick)
+  advance_sample(episode, delivered, tick, delivered_by_sink)
 end
 
 local function sample_all(tick)
@@ -311,6 +367,7 @@ local function observation(payload)
   if forbidden > 0 or outside > 0 or overruns > 0 then
     fail_safety(episode, "training entity constraint violated")
   end
+  local stage, stage_index, stage_count = active_stage(episode)
   return {
     request_id = payload.request_id, episode_id = payload.episode_id,
     ok = true, status = episode.status, scenario_id = episode.scenario_id,
@@ -318,13 +375,17 @@ local function observation(payload)
     started_tick = episode.started_tick, elapsed_ticks = game.tick - episode.started_tick,
     objective = {
       item = episode.scenario.objective.item,
-      target_rate_per_tick = episode.scenario.objective.target_rate_per_tick,
-      sustain_ticks = episode.scenario.objective.sustain_ticks
+      target_rate_per_tick = stage.target_rate_per_tick,
+      sustain_ticks = stage.sustain_ticks,
+      stage_index = stage_index, stage_count = stage_count, stage_id = stage.id or "default",
+      destination_fixture_ids = stage_destinations(episode, stage)
     },
     metrics = {
-      delivered_items = episode.delivered_items, sample_ticks = episode.sample_ticks,
+      delivered_items = episode.delivered_items, stage_delivered_items = episode.stage_delivered_items,
+      sample_ticks = episode.sample_ticks,
       sample_items = episode.sample_items, rate_per_tick = episode.rate_per_tick,
-      sustained_ticks = episode.sustained_ticks,
+      sustained_ticks = episode.sustained_ticks, stage_index = stage_index,
+      stage_id = stage.id or "default", sink_rate_per_tick = episode.sink_rate_per_tick or {},
       resource_remaining = resource_remaining(surface, episode), built_entities = counts,
       forbidden_entities = forbidden, out_of_bounds_entities = outside,
       budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode),

@@ -100,8 +100,8 @@ end
 
 local function validate_fixtures(scenario)
   local fixtures, ids, kinds = scenario.fixtures, {}, {}
-  if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > 3 then
-    error("mining delivery requires a source, sink, and optional power storage")
+  if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > 4 then
+    error("mining delivery requires a source, one or two sinks, and optional power storage")
   end
   for index, fixture in ipairs(fixtures) do
     local label = "fixtures[" .. index .. "]"
@@ -111,8 +111,9 @@ local function validate_fixtures(scenario)
     local valid_source = fixture.kind == "power_source" and POWER_SOURCE_ENTITIES[fixture.entity]
     local valid_storage = fixture.kind == "power_storage" and fixture.entity == "accumulator"
     local valid_sink = fixture.kind == "item_sink" and fixture.entity == "infinity-chest"
-    if not (valid_source or valid_storage or valid_sink) or kinds[fixture.kind] then
-      error(label .. " must be one approved unique fixture kind")
+    if not (valid_source or valid_storage or valid_sink)
+        or ((valid_source or valid_storage) and kinds[fixture.kind]) then
+      error(label .. " must be one approved fixture kind")
     end
     if fixture.kind == "power_source"
         and (not is_integer(fixture.position[1]) or not is_integer(fixture.position[2])) then
@@ -123,7 +124,8 @@ local function validate_fixtures(scenario)
           or not contains(scenario.environment.bounds, fixture.position[1] + 1, fixture.position[2] + 1)) then
       error("power_source 2x2 footprint must remain inside the environment bounds")
     end
-    ids[fixture.id], kinds[fixture.kind] = fixture, true
+    ids[fixture.id] = fixture
+    if valid_source or valid_storage or valid_sink then kinds[fixture.kind] = true end
   end
   if not kinds.power_source or not kinds.item_sink then
     error("mining delivery requires one power source and one item sink")
@@ -160,6 +162,49 @@ local function validate_objective(scenario, fixtures)
   local destination = fixtures[objective.destination_fixture_id]
   if not destination or destination.kind ~= "item_sink" then
     error("objective destination must identify the item sink")
+  end
+  local stages = objective.stages
+  if stages ~= nil then
+    if type(stages) ~= "table" or #stages < 1 or #stages > 16 then
+      error("objective stages must contain between 1 and 16 stages")
+    end
+    local stage_ids = {}
+    for index, stage in ipairs(stages) do
+      if type(stage) ~= "table" or type(stage.id) ~= "string"
+          or stage.id == "" or stage_ids[stage.id] then
+        error("objective stage " .. index .. " identity is invalid")
+      end
+      if type(stage.target_rate_per_tick) ~= "number" or stage.target_rate_per_tick <= 0
+          or not is_integer(stage.sustain_ticks) or stage.sustain_ticks < 60 then
+        error("objective stage " .. index .. " rate or sustain is invalid")
+      end
+      local destinations = stage.destination_fixture_ids
+      if type(destinations) ~= "table" or #destinations < 1 or #destinations > 8 then
+        error("objective stage " .. index .. " must have one to eight destinations")
+      end
+      local destination_ids = {}
+      for _, fixture_id in ipairs(destinations) do
+        if type(fixture_id) ~= "string" or destination_ids[fixture_id] then
+          error("objective stage " .. index .. " destination ids are invalid")
+        end
+        local fixture = fixtures[fixture_id]
+        if not fixture or fixture.kind ~= "item_sink" then
+          error("objective stage destination must identify an item sink")
+        end
+        destination_ids[fixture_id] = true
+      end
+      stage_ids[stage.id] = true
+    end
+    local first = stages[1]
+    if first.target_rate_per_tick ~= objective.target_rate_per_tick
+        or first.sustain_ticks ~= objective.sustain_ticks then
+      error("first objective stage must match the legacy objective fields")
+    end
+    local first_destinations = {}
+    for _, fixture_id in ipairs(first.destination_fixture_ids) do first_destinations[fixture_id] = true end
+    if not first_destinations[objective.destination_fixture_id] then
+      error("legacy objective destination must be in the first stage")
+    end
   end
   if type(constraints) ~= "table" or constraints.allow_fixture_deconstruction ~= false
       or not is_integer(constraints.max_episode_ticks) or constraints.max_episode_ticks < 60 then
