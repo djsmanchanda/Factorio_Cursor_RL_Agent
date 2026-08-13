@@ -1,4 +1,4 @@
-﻿<!-- Path: docs/rl/training.md | Purpose: Describe training scenarios, workers, evolution, autoresearch, and observation. -->
+ï»¿<!-- Path: docs/rl/training.md | Purpose: Describe training scenarios, workers, evolution, autoresearch, and observation. -->
 
 # Training and autoresearch
 
@@ -143,6 +143,28 @@ Generate contracts without Factorio:
 ```powershell
 python tools/generate_training_scenarios.py --count 100 --start-seed 0 --output-dir data/training/mining-delivery
 ```
+
+## Alternating ore/refinery cohorts
+
+The first two production families use a shared bounded scheduler. Family A (`ore-production`) mines ore to a sink; family B (`furnace-refining`) supplies ore from an isolated chest, smelts it in an electric furnace, and measures plate output. A cohort is assigned until its queue is empty; newly released worker slots immediately claim the next family while active episodes drain. A complete A?B pair advances the family policy index. The scheduler serializes each stable scenario surface so one surface is never provisioned concurrently.
+
+Run a bounded smoke before scaling:
+
+```powershell
+python tools\run_ab_training_batch.py --workers training-workers-wsl.json --count 1 `
+  --episodes-per-policy 1 --cycles 1 --max-workers 1 `
+  --rcon-secret-file "$env:LOCALAPPDATA\Factorio-training-wsl-01\rcon-password"
+```
+
+The production run keeps the requested 1,000 terminal attempts per family cohort and can use the configured worker roster:
+
+```powershell
+python tools\run_ab_training_batch.py --workers training-workers-wsl.json --count 100 `
+  --episodes-per-policy 1000 --cycles 3 --max-workers 1000 `
+  --rcon-secret-file "$env:LOCALAPPDATA\Factorio-training-wsl-01\rcon-password"
+```
+
+The training Lua changes in this family require deployment plus restart of the affected training workers. They do not affect the deterministic runtime.
 
 ## Bounded autoresearch
 

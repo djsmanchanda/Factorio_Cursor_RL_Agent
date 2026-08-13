@@ -152,7 +152,14 @@ local function place_fixtures(surface, force, scenario)
     })
     if not entity then error("could not place fixture " .. fixture.id) end
     entity.minable, entity.destructible, entity.rotatable = false, false, false
-    if fixture.kind == "item_sink" then
+    if fixture.kind == "item_source" then
+      local input_item = scenario.objective.input_item
+      if not input_item then error("item_source requires objective.input_item") end
+      local inventory = entity.get_inventory(defines.inventory.chest)
+      if not inventory then error("item_source inventory is unavailable") end
+      inventory.insert({ name = input_item, count = 1000000 })
+      entity.remove_unfiltered_items = false
+    elseif fixture.kind == "item_sink" then
       entity.remove_unfiltered_items = false
       sink_fixture_id = sink_fixture_id or fixture.id
       sink_fixture_ids[#sink_fixture_ids + 1] = fixture.id

@@ -12,7 +12,7 @@ local POWER_SOURCE_TYPES = {
 }
 local POWER_STORAGE_TYPES = { accumulator = true }
 local POWER_CONSUMER_TYPES = { inserter = true }
-local POWER_CONSUMER_NAMES = { ["electric-mining-drill"] = true }
+local POWER_CONSUMER_NAMES = { ["electric-mining-drill"] = true, ["electric-furnace"] = true }
 local RATE_WINDOW_TICKS = 600
 local FOOTPRINT_TILE_CACHE = {}
 local electricity_role

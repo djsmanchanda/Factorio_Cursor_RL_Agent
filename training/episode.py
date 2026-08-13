@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from planners.plan_validation import actions
 from planners.sandbox_infrastructure import build_layout_authorization
 from training.canonical import policy_hash
-from training.candidates import mining_delivery_candidates
+from training.candidates import furnace_refining_candidates, mining_delivery_candidates
 from training.contracts import validate_transition
 from training.policies import policy_snapshot
 from training.rewards import reward_components
@@ -53,6 +53,13 @@ def _material_cost(candidate: Mapping) -> int:
     return int(candidate["features"].get("material_cost", 0))
 
 
+def candidates_for_scenario(scenario: Mapping) -> list[Mapping]:
+    """Return the family-specific action catalog for one isolated episode."""
+    if scenario.get("family") == "furnace_refining":
+        return furnace_refining_candidates(scenario)
+    return mining_delivery_candidates(scenario)
+
+
 def _stage_candidates(scenario: Mapping, report: Mapping) -> list[Mapping]:
     """Build a fresh action catalog when an in-place demand stage advances."""
     objective = dict(scenario["objective"])
@@ -66,6 +73,8 @@ def _stage_candidates(scenario: Mapping, report: Mapping) -> list[Mapping]:
     staged["objective"] = objective
     # Candidate validation only needs the original immutable contract; the
     # generated plans retain the original surface, force, and protected fixtures.
+    if scenario.get("family") == "furnace_refining":
+        return furnace_refining_candidates(staged, validate_contract=False)
     return mining_delivery_candidates(staged, validate_contract=False)
 
 

@@ -98,9 +98,15 @@ class AlternatingPolicyScheduler:
         self._seed_offset = seed_offset
         self._pending: list[AlternatingJob] = []
         self._active: dict[str, AlternatingJob] = {}
+        self._active_scenarios: set[tuple[str, str]] = set()
         self._completed = 0
+        self._terminal_by_cohort: dict[tuple[str, int], int] = {}
         self._family_cohorts_started = 0
         self._load_cohort()
+
+    @property
+    def episodes_per_policy(self) -> int:
+        return self._episodes_per_policy
 
     @property
     def family(self) -> str:
@@ -171,9 +177,23 @@ class AlternatingPolicyScheduler:
         for worker_id in idle:
             if not self._pending:
                 self._advance_if_assigned()
-            job = self._pending.pop(0)
+            available_index = next(
+                (
+                    index for index, candidate in enumerate(self._pending)
+                    if (candidate.family, str(candidate.scenario["scenario_id"]))
+                    not in self._active_scenarios
+                ),
+                None,
+            )
+            if available_index is None:
+                # Every queued candidate is currently running on another
+                # worker. Leave the slot idle instead of colliding with a
+                # stable Factorio surface.
+                break
+            job = self._pending.pop(available_index)
             assigned = replace(job, worker_id=worker_id)
             self._active[worker_id] = assigned
+            self._active_scenarios.add((job.family, str(job.scenario["scenario_id"])))
             assignments.append(assigned)
         self._advance_if_assigned()
         return tuple(assignments)
@@ -191,8 +211,19 @@ class AlternatingPolicyScheduler:
             job = self._active.pop(worker_id)
         except KeyError as exc:
             raise KeyError(f"worker is not assigned: {worker_id}") from exc
+        self._active_scenarios.discard((job.family, str(job.scenario["scenario_id"])))
         self._completed += 1
+        cohort = (job.family, job.policy_index)
+        self._terminal_by_cohort[cohort] = self._terminal_by_cohort.get(cohort, 0) + 1
         return job
+
+    def terminal_count(self, family: str, policy_index: int) -> int:
+        """Return terminal evidence for one family/policy pair."""
+        return self._terminal_by_cohort.get((str(family), int(policy_index)), 0)
+
+    def cohort_complete(self, family: str, policy_index: int) -> bool:
+        """Whether the family has its full terminal-attempt budget."""
+        return self.terminal_count(family, policy_index) >= self._episodes_per_policy
 
     def status(self) -> AlternatingStatus:
         return AlternatingStatus(

@@ -13,7 +13,7 @@
     "version": {"const": "1.2.0"},
     "scenario_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,79}$"},
     "scenario_hash": {"$ref": "#/definitions/hash"},
-    "family": {"const": "mining_delivery"},
+    "family": {"enum": ["mining_delivery", "furnace_refining"]},
     "seed": {"type": "integer", "minimum": 0, "maximum": 65535},
     "curriculum": {
       "type": "object",
@@ -58,7 +58,7 @@
         "required": ["id", "kind", "entity", "position", "protected"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["power_source", "power_storage", "item_sink"]},
+          "kind": {"enum": ["power_source", "power_storage", "item_source", "item_sink"]},
           "entity": {"type": "string", "minLength": 1},
           "position": {"$ref": "#/definitions/position"},
           "protected": {"const": true}
@@ -70,7 +70,7 @@
       "minProperties": 1,
       "propertyNames": {
         "enum": [
-          "electric-mining-drill", "fast-inserter", "medium-electric-pole",
+          "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
           "splitter", "transport-belt", "underground-belt"
         ]
       },
@@ -81,8 +81,9 @@
       "additionalProperties": false,
       "required": ["kind", "item", "target_rate_per_tick", "sustain_ticks", "destination_fixture_id"],
       "properties": {
-        "kind": {"const": "deliver_item_rate"},
-        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "kind": {"enum": ["deliver_item_rate", "smelt_item_rate"]},
+        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone", "iron-plate", "copper-plate", "steel-plate"]},
+        "input_item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
         "sustain_ticks": {"type": "integer", "minimum": 60},
         "destination_fixture_id": {"type": "string", "minLength": 1},
@@ -106,7 +107,7 @@
           "type": "array", "minItems": 1, "uniqueItems": true,
           "items": {
             "enum": [
-              "electric-mining-drill", "fast-inserter", "medium-electric-pole",
+              "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
               "splitter", "transport-belt", "underground-belt"
             ]
           }

@@ -6,7 +6,7 @@ local ALLOWED_RESOURCES = {
 }
 local ALLOWED_ENTITIES = {
   ["electric-mining-drill"] = true, ["fast-inserter"] = true,
-  ["medium-electric-pole"] = true, splitter = true,
+  ["medium-electric-pole"] = true, ["electric-furnace"] = true, splitter = true,
   ["transport-belt"] = true, ["underground-belt"] = true
 }
 local POWER_SOURCE_ENTITIES = {
@@ -110,8 +110,9 @@ local function validate_fixtures(scenario)
     validate_position(fixture.position, scenario.environment.bounds, label)
     local valid_source = fixture.kind == "power_source" and POWER_SOURCE_ENTITIES[fixture.entity]
     local valid_storage = fixture.kind == "power_storage" and fixture.entity == "accumulator"
+    local valid_item_source = fixture.kind == "item_source" and fixture.entity == "infinity-chest"
     local valid_sink = fixture.kind == "item_sink" and fixture.entity == "infinity-chest"
-    if not (valid_source or valid_storage or valid_sink)
+    if not (valid_source or valid_storage or valid_item_source or valid_sink)
         or ((valid_source or valid_storage) and kinds[fixture.kind]) then
       error(label .. " must be one approved fixture kind")
     end
@@ -125,7 +126,7 @@ local function validate_fixtures(scenario)
       error("power_source 2x2 footprint must remain inside the environment bounds")
     end
     ids[fixture.id] = fixture
-    if valid_source or valid_storage or valid_sink then kinds[fixture.kind] = true end
+    if valid_source or valid_storage or valid_item_source or valid_sink then kinds[fixture.kind] = true end
   end
   if not kinds.power_source or not kinds.item_sink then
     error("mining delivery requires one power source and one item sink")
@@ -152,8 +153,11 @@ end
 
 local function validate_objective(scenario, fixtures)
   local objective, constraints = scenario.objective, scenario.constraints
-  if type(objective) ~= "table" or objective.kind ~= "deliver_item_rate"
-      or objective.item ~= scenario.resource_patch.resource
+  if type(objective) ~= "table"
+      or (scenario.family == "mining_delivery" and (objective.kind ~= "deliver_item_rate"
+          or objective.item ~= scenario.resource_patch.resource))
+      or (scenario.family == "furnace_refining" and (objective.kind ~= "smelt_item_rate"
+          or objective.input_item ~= scenario.resource_patch.resource))
       or type(objective.target_rate_per_tick) ~= "number"
       or objective.target_rate_per_tick <= 0
       or not is_integer(objective.sustain_ticks) or objective.sustain_ticks < 60 then
@@ -220,7 +224,7 @@ local function validate_objective(scenario, fixtures)
 end
 
 local function validate_rewards(scenario)
-  if scenario.reward_profile ~= "mining-efficiency-v1" then
+  if scenario.reward_profile ~= "mining-efficiency-v1" and scenario.reward_profile ~= "furnace-efficiency-v1" then
     error("reward_profile is invalid")
   end
   local weights = scenario.reward_weights
@@ -244,7 +248,8 @@ end
 
 local function validate_scenario(scenario)
   if type(scenario) ~= "table" or scenario.version ~= "1.2.0"
-      or scenario.family ~= "mining_delivery" or type(scenario.scenario_id) ~= "string"
+      or (scenario.family ~= "mining_delivery" and scenario.family ~= "furnace_refining")
+      or type(scenario.scenario_id) ~= "string"
       or not valid_hash(scenario.scenario_hash)
       or not is_integer(scenario.seed) or scenario.seed < 0 or scenario.seed > 65535 then
     error("scenario identity is invalid")

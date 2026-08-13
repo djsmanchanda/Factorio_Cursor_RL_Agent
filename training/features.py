@@ -109,3 +109,16 @@ MINING_DELIVERY_FEATURES_V2 = FeatureRegistry(
         64.0, 160.0, 160.0, 80.0, 1.0, 512.0, 4.0, 24.0, 256.0,
     ),
 )
+
+FURNACE_REFINING_FEATURES_V1 = FeatureRegistry(
+    version="furnace-efficiency-v1",
+    names=(
+        "bias", "observation.delivered_rate_per_tick", "observation.target_rate_per_tick",
+        "observation.sustained_ticks", "observation.resource_remaining",
+        "candidate.predicted_completion", "candidate.predicted_rate_per_tick",
+        "candidate.furnace_count", "candidate.inserter_count", "candidate.pole_count",
+        "candidate.material_cost", "candidate.occupied_land_tiles", "candidate.route_excess_tiles",
+        "candidate.route_efficiency",
+    ),
+    scales=(1.0, 0.05, 0.05, 1800.0, 100000000.0, 1.0, 0.05, 4.0, 8.0, 24.0, 256.0, 512.0, 80.0, 1.0),
+)

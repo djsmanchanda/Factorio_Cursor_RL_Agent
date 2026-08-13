@@ -9,9 +9,11 @@ from training.alternating import AlternatingFamily, AlternatingPolicyScheduler
 
 
 def families() -> tuple[AlternatingFamily, AlternatingFamily]:
+    ore = tuple({"scenario_id": f"ore-{index}"} for index in range(5))
+    refinery = tuple({"scenario_id": f"refinery-{index}"} for index in range(5))
     return (
-        AlternatingFamily("ore-production", ({"scenario_id": "ore-1"},)),
-        AlternatingFamily("furnace-refinery", ({"scenario_id": "refinery-1"},)),
+        AlternatingFamily("ore-production", ore),
+        AlternatingFamily("furnace-refinery", refinery),
     )
 
 
@@ -39,6 +41,8 @@ def test_next_family_uses_slots_as_soon_as_previous_queue_is_assigned() -> None:
     assert len(next_job) == 1
     assert next_job[0].family == "furnace-refinery"
     assert scheduler.status().active == 2
+    assert scheduler.terminal_count("ore-production", 0) == 1
+    assert not scheduler.cohort_complete("ore-production", 0)
 
 
 def test_policy_index_increments_after_a_full_ab_pair() -> None:
@@ -55,6 +59,14 @@ def test_duplicate_or_busy_workers_do_not_receive_two_jobs() -> None:
     assigned = scheduler.claim(["w1", "w1", "w2"])
     assert [job.worker_id for job in assigned] == ["w1", "w2"]
     assert scheduler.claim(["w1"]) == ()
+
+def test_same_surface_is_not_assigned_to_two_workers() -> None:
+    one_scenario = (
+        AlternatingFamily("ore-production", ({"scenario_id": "ore-1"},)),
+        AlternatingFamily("furnace-refinery", ({"scenario_id": "refinery-1"},)),
+    )
+    scheduler = AlternatingPolicyScheduler(one_scenario, episodes_per_policy=2)
+    assert len(scheduler.claim(["w1", "w2"])) == 1
 
 
 @pytest.mark.parametrize("bad", [0, -1])

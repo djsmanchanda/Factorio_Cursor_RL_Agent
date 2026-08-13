@@ -58,7 +58,7 @@
       "additionalProperties": false,
       "required": ["item", "target_rate_per_tick", "sustain_ticks"],
       "properties": {
-        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone", "iron-plate", "copper-plate", "steel-plate"]},
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
         "sustain_ticks": {"type": "integer", "minimum": 60},
         "stage_index": {"type": "integer", "minimum": 1},

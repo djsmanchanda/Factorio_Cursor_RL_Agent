@@ -132,7 +132,30 @@ local function plan_actions(plan, episode, surface, force)
   if #result == 0 then error("BuildPlan has no physical placement actions") end
   return result
 end
-local function place_action(surface, force, item, execution)
+local function point_distance(left, right)
+  local dx, dy = left.x - right.x, left.y - right.y
+  return math.sqrt(dx * dx + dy * dy)
+end
+
+local function connect_power_network(surface, force, episode, placed)
+  if placed.type ~= "electric-pole" then return end
+  local function connect(left, right)
+    if left and right and left.valid and right.valid and left ~= right then
+      pcall(function() left.connect_neighbour({wire = defines.wire_type.copper, target_entity = right}) end)
+    end
+  end
+  for _, other in pairs(surface.find_entities_filtered({ force = force, type = "electric-pole" })) do
+    if other ~= placed and point_distance(other.position, placed.position) <= 9.1 then connect(placed, other) end
+  end
+  for _, fixture in pairs(episode.fixtures) do
+    if fixture.kind == "power_source" then
+      local source = surface.find_entity(fixture.name, fixture.position)
+      if source and point_distance(source.position, placed.position) <= 9.1 then connect(placed, source) end
+    end
+  end
+end
+
+local function place_action(surface, force, episode, item, execution)
   local action, direction = item.action, nil
   if action.direction then
     direction = defines.direction[action.direction]
@@ -145,9 +168,12 @@ local function place_action(surface, force, item, execution)
   end
   local details = { name = action.entity, position = action.position, force = force, direction = direction }
   if action.underground_type then details.type = action.underground_type end
+  if action.recipe then details.recipe = action.recipe end
   local entity = surface.create_entity(details)
   if entity and entity.valid then
+
     execution.succeeded_placements = execution.succeeded_placements + 1
+    connect_power_network(surface, force, episode, entity)
   else
     execution.failed_placements = execution.failed_placements + 1
     table.insert(execution.placement_failures, {
@@ -169,7 +195,7 @@ local function execute_plan(payload)
     attempted_placements = 0, succeeded_placements = 0, already_present_placements = 0,
     failed_placements = 0, placement_failures = {}
   }
-  for _, item in ipairs(actions) do place_action(surface, force, item, execution) end
+  for _, item in ipairs(actions) do place_action(surface, force, episode, item, execution) end
   local ok = execution.failed_placements == 0
   local result = {
     request_id = payload.request_id, episode_id = payload.episode_id, ok = ok,

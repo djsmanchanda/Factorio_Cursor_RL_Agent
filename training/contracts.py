@@ -25,6 +25,7 @@ _MINING_PRODUCTS = frozenset({
     "iron-plate", "copper-plate", "steel-plate",
 })
 _FIXTURE_ENTITIES = {
+    "item_source": "infinity-chest",
     "item_sink": "infinity-chest",
 }
 
@@ -156,8 +157,17 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
     storage = [fixture for fixture in fixtures.values() if fixture["kind"] == "power_storage"]
     if len(storage) > 1:
         raise ValueError("mining delivery scenarios permit at most one power_storage fixture")
-    if payload["objective"]["item"] != payload["resource_patch"]["resource"]:
-        raise ValueError("objective item must match the resource patch")
+    if payload["family"] == "mining_delivery":
+        if payload["objective"]["item"] != payload["resource_patch"]["resource"]:
+            raise ValueError("objective item must match the resource patch")
+    else:
+        objective = payload["objective"]
+        if objective.get("kind") != "smelt_item_rate":
+            raise ValueError("furnace_refining objective must smelt_item_rate")
+        if objective.get("input_item") != payload["resource_patch"]["resource"]:
+            raise ValueError("furnace input_item must match the ore patch")
+        if not any(fixture["kind"] == "item_source" for fixture in payload["fixtures"]):
+            raise ValueError("furnace_refining requires an item_source fixture")
     budget = set(payload["construction_budget"])
     if budget & _MINING_PRODUCTS:
         raise ValueError("mining delivery construction budget cannot contain production items")
