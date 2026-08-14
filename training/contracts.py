@@ -190,6 +190,11 @@ def _validate_transition_semantics(payload: Mapping) -> None:
         raise ValueError("candidate action ids must be unique")
     if payload["chosen_action_id"] not in action_ids:
         raise ValueError("chosen_action_id must identify one candidate")
+    for action in payload.get("stage_action_trail", []):
+        if action["post_execution_tick"] < action["observed_tick"]:
+            raise ValueError("stage action post_execution_tick cannot precede observed_tick")
+        if action["selected_candidate"]["action_id"] not in action_ids:
+            raise ValueError("stage action candidate must identify one candidate")
     reward = payload["reward"]
     computed = sum(float(value) for name, value in reward.items() if name != "total")
     if abs(computed - float(reward["total"])) > 1e-6:

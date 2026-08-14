@@ -49,6 +49,22 @@ def _candidate_record(candidate: Mapping) -> dict:
     return {key: candidate[key] for key in ("action_id", "plan_hash", "features")}
 
 
+def _stage_action_record(
+    *, stage_index: int, pre_action_report: Mapping, candidate: Mapping,
+    execution: Mapping, post_action_report: Mapping,
+) -> dict:
+    """Preserve decision-time evidence for every in-place staged action."""
+    return {
+        "stage_index": int(stage_index),
+        "observed_tick": int(pre_action_report["tick"]),
+        "pre_action_observation": _observation(pre_action_report),
+        "selected_candidate": _candidate_record(candidate),
+        "execution": dict(execution),
+        "post_execution_tick": int(post_action_report["tick"]),
+        "post_action_observation": _observation(post_action_report),
+    }
+
+
 def _material_cost(candidate: Mapping) -> int:
     return int(candidate["features"].get("material_cost", 0))
 
@@ -97,6 +113,7 @@ def run_episode(
     chosen = None
     execution_total = {"succeeded_placements": 0, "failed_placements": 0}
     material_cost = 0
+    stage_action_trail: list[dict] = []
     try:
         if stop_event is not None and stop_event.is_set():
             raise EpisodeCapacityInterrupted("training capacity changed before provisioning")
@@ -116,10 +133,17 @@ def run_episode(
         execution_total["succeeded_placements"] += int(execution.get("succeeded_placements", 0))
         execution_total["failed_placements"] += int(execution.get("failed_placements", 0))
         material_cost += _material_cost(chosen)
+        report = bridge.observe(identifier)
+        stage_action_trail.append(_stage_action_record(
+            stage_index=int(_observation(initial_report).get("stage_index", 1)),
+            pre_action_report=initial_report,
+            candidate=chosen,
+            execution=execution,
+            post_action_report=report,
+        ))
         _progress(on_progress, "executed", identifier, {
             **context, "chosen_action_id": chosen["action_id"], "execution": execution,
         })
-        report = bridge.observe(identifier)
         _progress(on_progress, "measuring", identifier, {**context, "report": report})
         current_stage = int(_observation(report).get("stage_index", 1))
         stages = scenario.get("objective", {}).get("stages") or []
@@ -149,10 +173,22 @@ def run_episode(
                     execution_total["failed_placements"] += int(stage_execution.get("failed_placements", 0))
                     material_cost += _material_cost(stage_choice)
                     chosen = stage_choice
+                    # A stage change is the decision boundary. Observe directly
+                    # after its plan is applied rather than waiting for the next
+                    # five-second measurement cadence.
+                    post_stage_report = bridge.observe(identifier)
+                    stage_action_trail.append(_stage_action_record(
+                        stage_index=observed_stage,
+                        pre_action_report=report,
+                        candidate=stage_choice,
+                        execution=stage_execution,
+                        post_action_report=post_stage_report,
+                    ))
                     _progress(on_progress, "stage_adapted", identifier, {
                         **context, "stage_index": observed_stage,
                         "chosen_action_id": stage_choice["action_id"], "execution": stage_execution,
                     })
+                    report = post_stage_report
                 current_stage = observed_stage
             _progress(on_progress, "measuring", identifier, {**context, "report": report})
         failed = execution_total["failed_placements"]
@@ -166,6 +202,7 @@ def run_episode(
             "started_tick": int(provision["started_tick"]), "ended_tick": int(report["tick"]),
             "observation": initial, "candidates": [_candidate_record(item) for item in all_candidates],
             "chosen_action_id": chosen["action_id"], "result": _result(report),
+            "stage_action_trail": stage_action_trail,
             "metrics": {
                 "initial_rate_per_tick": initial["delivered_rate_per_tick"],
                 "final_rate_per_tick": float(live_metrics.get("rate_per_tick", 0.0)),

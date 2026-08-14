@@ -94,6 +94,35 @@ def test_attempts_below_target_are_evidence_but_do_not_train_the_next_policy():
     assert learned.b == base.b
 
 
+def test_completed_staged_trajectory_credits_each_action_without_overweighting_episode():
+    base = DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V1)
+    observation = {
+        "delivered_rate_per_tick": 0, "target_rate_per_tick": 0.01,
+        "sustained_ticks": 0, "resource_remaining": 100,
+    }
+    candidates = [
+        {"action_id": action_id, "plan_hash": "sha256:" + action_id * 64,
+         "features": {"predicted_completion": 1, "predicted_rate_per_tick": rate,
+                      "drill_count": drills, "route_tiles": 2, "turn_count": 0,
+                      "pole_count": 1, "material_cost": 1}}
+        for action_id, rate, drills in (("a", 0.01, 1), ("b", 0.02, 2))
+    ]
+    transition = {
+        "observation": observation, "candidates": candidates, "chosen_action_id": "b",
+        "reward": {"total": 6},
+        "result": {"status": "completed", "failure_kind": "none", "reason": ""},
+        "stage_action_trail": [
+            {"pre_action_observation": observation, "selected_candidate": candidates[0]},
+            {"pre_action_observation": observation, "selected_candidate": candidates[1]},
+        ],
+    }
+
+    learned = _learn_policy(base, [("episode-staged", transition, None)])
+
+    assert learned.a_diag != base.a_diag
+    assert learned.b != base.b
+    # Two actions receive 3 reward each, preserving the episode's total credit.
+    assert learned.b[0] == pytest.approx(6.0)
 def test_rcon_secret_file_overrides_environment(tmp_path, monkeypatch):
     secret = tmp_path / "rcon-password"
     secret.write_text("worker-secret\n", encoding="utf-8")

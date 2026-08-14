@@ -233,9 +233,24 @@ def _load_policy(path: Path) -> tuple[int, DiagonalLinUCB]:
 
 
 def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
+    """Learn only from complete trajectories, crediting every staged decision.
+
+    A terminal success is evidence for the sequence that built it, not only its
+    final expansion action. Failures remain excluded by ``transition_can_train_policy``.
+    """
     learned = DiagonalLinUCB.from_dict(base.to_dict())
     for _episode_id, transition, _error in sorted(results, key=lambda item: item[0]):
         if transition is None or not transition_can_train_policy(transition):
+            continue
+        trail = transition.get("stage_action_trail") or ()
+        if trail:
+            credit = float(transition["reward"]["total"]) / len(trail)
+            for action in trail:
+                learned.update(
+                    action["pre_action_observation"],
+                    action["selected_candidate"],
+                    credit,
+                )
             continue
         chosen = next(
             candidate for candidate in transition["candidates"]

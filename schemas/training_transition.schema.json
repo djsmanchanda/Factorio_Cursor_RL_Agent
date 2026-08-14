@@ -38,6 +38,40 @@
       }
     },
     "chosen_action_id": {"type": "string", "minLength": 1},
+    "stage_action_trail": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "stage_index", "observed_tick", "pre_action_observation",
+          "selected_candidate", "execution", "post_execution_tick",
+          "post_action_observation"
+        ],
+        "properties": {
+          "stage_index": {"type": "integer", "minimum": 1},
+          "observed_tick": {"type": "integer", "minimum": 0},
+          "pre_action_observation": {"$ref": "#/definitions/observation"},
+          "selected_candidate": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action_id", "plan_hash", "features"],
+            "properties": {
+              "action_id": {"type": "string", "minLength": 1},
+              "plan_hash": {"$ref": "#/definitions/hash"},
+              "features": {
+                "type": "object", "minProperties": 1,
+                "additionalProperties": {"type": "number"}
+              }
+            }
+          },
+          "execution": {"type": "object"},
+          "post_execution_tick": {"type": "integer", "minimum": 0},
+          "post_action_observation": {"$ref": "#/definitions/observation"}
+        }
+      }
+    },
     "result": {
       "type": "object",
       "additionalProperties": false,

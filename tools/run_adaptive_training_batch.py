@@ -30,6 +30,8 @@ from tools.run_training_batch import (
     _run_worker,
     EpisodeQueue,
 )
+from training.canonical import canonical_sha256
+from training.evaluation import EvaluationResult, aggregate_fitness, promotion_decision
 from training.policies import policy_snapshot
 from training.scheduler import (
     AdaptiveScaleState,
@@ -185,6 +187,65 @@ def _existing_policy_parent(store: TrainingStore, policy_id: str) -> str | None:
     return None
 
 
+def _assign_policy_identity(policy, generation: int):
+    """Freeze an in-memory candidate without replacing the active checkpoint."""
+    identity = {key: value for key, value in policy.to_dict().items() if key != "policy_id"}
+    policy.policy_id = f"policy-g{generation:04d}-{canonical_sha256(identity)[7:19]}"
+    return policy
+
+
+def _evaluation_record(transition: dict | None, error: str | None) -> dict:
+    """Translate one terminal transition into the evaluation module's neutral record."""
+    if transition is None:
+        return {"status": "failed", "failure_kind": "infrastructure", "error": error or "missing transition"}
+    result = transition["result"]
+    metrics = transition.get("metrics") or {}
+    objective = transition.get("next_observation", {})
+    target = float(objective.get("target_rate_per_tick", 0.0))
+    final_rate = float(metrics.get("final_rate_per_tick", 0.0))
+    return {
+        "status": result["status"],
+        "failure_kind": result["failure_kind"],
+        "sustained_rate_ratio": final_rate / target if target > 0 else 0.0,
+        "elapsed_ticks": max(0, int(transition.get("ended_tick", 0)) - int(transition.get("started_tick", 0))),
+        "material_cost": metrics.get("material_cost", 0),
+        "infrastructure_count": metrics.get("placements_succeeded", 0),
+        "failed_placements": metrics.get("placements_failed", 0),
+        "productive_mining_drill_ratio": metrics.get("productive_mining_drill_ratio", 0.0),
+        "route_efficiency": metrics.get("route_efficiency", 0.0),
+        "route_excess_tiles": metrics.get("route_excess_tiles", 0.0),
+        "occupied_footprint_tiles": metrics.get("occupied_footprint_tiles", 0.0),
+        "electric_pole_count": metrics.get("electric_pole_count", 0.0),
+    }
+
+
+def _heldout_evaluation(policy_id: str, results: Sequence[tuple], scenario_set_hash: str) -> EvaluationResult:
+    """Build immutable, comparable evidence from one fixed held-out scenario set."""
+    return EvaluationResult(
+        policy_id=policy_id,
+        split="holdout",
+        scenario_set_hash=scenario_set_hash,
+        fitness=aggregate_fitness(_evaluation_record(transition, error) for _id, transition, error in results),
+        frozen=True,
+    )
+
+
+def _heldout_start_seed(train_start: int, train_count: int, holdout_count: int) -> int:
+    """Reserve a deterministic seed range that cannot overlap the train cohort."""
+    if train_start >= holdout_count:
+        return 0
+    start = 0x10000 - holdout_count
+    if train_start + train_count - 1 < start:
+        return start
+    raise ValueError("training and held-out seed ranges overlap")
+
+def _evaluation_jobs(scenarios: Sequence[dict], policy_id: str, cohort: int) -> list[tuple]:
+    """Use fresh identities while keeping policy comparisons on the same fixtures."""
+    return [
+        (f"evaluation-{policy_id}-{cohort:04d}-{index:04d}-{uuid.uuid4().hex[:8]}", scenario, scenario["seed"])
+        for index, scenario in enumerate(scenarios)
+    ]
+
 def _retry_jobs(stage_jobs: Sequence[tuple], interrupted: set[str]) -> list[tuple]:
     """Requeue only capacity-aborted work with fresh immutable episode identity."""
     retried = []
@@ -303,6 +364,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--step", type=int, default=1)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
+    parser.add_argument(
+        "--champion-evaluation-episodes", type=int, default=20,
+        help="Frozen held-out episodes used to compare every candidate with the champion.",
+    )
     parser.add_argument("--minimum-ups-p95", type=float, default=50.0)
     parser.add_argument("--minimum-ups-p98", type=float, default=45.0)
     parser.add_argument("--stability-window-seconds", type=float, default=300.0)
@@ -325,8 +390,11 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("slot bounds are invalid")
     if not args.minimum_slots <= args.initial_slots <= args.maximum_slots:
         parser.error("initial-slots must be inside the slot bounds")
-    if args.step < 1 or args.episodes_per_slot < 1 or args.episodes_per_policy < 1:
-        parser.error("step, episodes-per-slot, and episodes-per-policy must be positive")
+    if (
+        args.step < 1 or args.episodes_per_slot < 1 or args.episodes_per_policy < 1
+        or args.champion_evaluation_episodes < 1
+    ):
+        parser.error("slot, cohort, and champion evaluation sizes must be positive")
     if args.staged_sustain_seconds < 1:
         parser.error("staged-sustain-seconds must be at least 1")
     if args.stability_window_seconds <= 0:
@@ -431,6 +499,21 @@ def main(argv: list[str] | None = None) -> int:
             args.count, args.start_seed, target_rates_per_second=target_rates,
         )
     jobs = _jobs(scenarios, args.attempts_per_scenario)
+    holdout_start_seed = _heldout_start_seed(args.start_seed, args.count, args.champion_evaluation_episodes)
+    if args.staged_demand:
+        holdout_scenarios = [
+            generate_staged_mining_delivery_scenario(
+                holdout_start_seed + index, staged_rates,
+                sustain_ticks=round(args.staged_sustain_seconds * 60),
+            )
+            for index in range(args.champion_evaluation_episodes)
+        ]
+    else:
+        holdout_scenarios = generate_mining_delivery_curriculum(
+            args.champion_evaluation_episodes, holdout_start_seed,
+            target_rates_per_second=target_rates,
+        )
+    holdout_hash = canonical_sha256([scenario["scenario_hash"] for scenario in holdout_scenarios])
     password = _rcon_password(args)
     generation, policy = _load_policy(args.checkpoint)
     total_completed = total_failed = 0
@@ -450,6 +533,8 @@ def main(argv: list[str] | None = None) -> int:
     with TrainingStore(args.database) as store:
         for scenario in scenarios:
             store.save_scenario(scenario, "train", scenario["scenario_hash"])
+        for scenario in holdout_scenarios:
+            store.save_scenario(scenario, "holdout", scenario["scenario_hash"])
         store.save_policy(
             policy.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(policy),
             parent_policy_id=_existing_policy_parent(store, policy.policy_id),
@@ -572,16 +657,65 @@ def main(argv: list[str] | None = None) -> int:
                 if not cohort_results:
                     raise RuntimeError("policy cohort ended without terminal training evidence")
                 learning_count = _policy_learning_count(cohort_results)
-                policy_advanced = bool(learning_count)
-                if policy_advanced:
-                    learned = _learn_policy(policy, cohort_results)
-                    generation += 1
-                    _checkpoint(args.checkpoint, generation, learned)
+                policy_advanced = False
+                promotion_reason = "cohort has no successful training evidence"
+                candidate_evaluation = incumbent_evaluation = None
+                if learning_count:
+                    candidate = _learn_policy(policy, cohort_results)
+                    if candidate is policy:
+                        candidate = type(policy).from_dict(policy.to_dict())
+                    candidate = _assign_policy_identity(candidate, generation + 1)
                     store.save_policy(
-                        learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
-                        parent_policy_id=policy.policy_id,
+                        candidate.policy_id, "diagonal_linucb", generation + 1, {},
+                        policy_snapshot(candidate), parent_policy_id=policy.policy_id,
                     )
-                    policy = learned
+                    # Run both policies on the identical frozen seeds.  This is
+                    # intentionally small: it protects the champion without turning
+                    # every cohort into another full training population.
+                    evaluation_workers = active_workers_by_instance(workers_by_instance, states)
+                    evaluation_workers = evaluation_workers[:min(len(evaluation_workers), len(holdout_scenarios))]
+                    candidate_results, *_ = _run_stage(
+                        evaluation_workers, _evaluation_jobs(holdout_scenarios, candidate.policy_id, cohort),
+                        password, candidate, args.live_directory, store, states[next(iter(states))],
+                        minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots, step=args.step,
+                        minimum_ups_p95=args.minimum_ups_p95, minimum_ups_p98=args.minimum_ups_p98,
+                        healthy_windows_to_grow=args.healthy_windows_to_grow,
+                        unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                        sampler=next(iter(samplers.values())), stability_window_seconds=args.stability_window_seconds,
+                    )
+                    incumbent_results, *_ = _run_stage(
+                        evaluation_workers, _evaluation_jobs(holdout_scenarios, policy.policy_id, cohort),
+                        password, policy, args.live_directory, store, states[next(iter(states))],
+                        minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots, step=args.step,
+                        minimum_ups_p95=args.minimum_ups_p95, minimum_ups_p98=args.minimum_ups_p98,
+                        healthy_windows_to_grow=args.healthy_windows_to_grow,
+                        unhealthy_windows_to_shrink=args.unhealthy_windows_to_shrink,
+                        sampler=next(iter(samplers.values())), stability_window_seconds=args.stability_window_seconds,
+                    )
+                    candidate_evaluation = _heldout_evaluation(candidate.policy_id, candidate_results, holdout_hash)
+                    incumbent_evaluation = _heldout_evaluation(policy.policy_id, incumbent_results, holdout_hash)
+                    candidate_evaluation_id = f"holdout-{candidate.policy_id}-{cohort:04d}"
+                    incumbent_evaluation_id = f"holdout-{policy.policy_id}-{cohort:04d}"
+                    store.save_evaluation(
+                        candidate_evaluation_id, candidate.policy_id, "holdout", holdout_hash,
+                        candidate_evaluation.fitness.to_dict(), True,
+                    )
+                    store.save_evaluation(
+                        incumbent_evaluation_id, policy.policy_id, "holdout", holdout_hash,
+                        incumbent_evaluation.fitness.to_dict(), True,
+                    )
+                    store.promote(str(holdout_scenarios[0]["family"]), policy.policy_id, incumbent_evaluation_id)
+                    policy_advanced, promotion_reason = promotion_decision(
+                        candidate_evaluation, incumbent_evaluation,
+                        minimum_episodes=len(holdout_scenarios),
+                    )
+                    if policy_advanced:
+                        generation += 1
+                        _checkpoint(args.checkpoint, generation, candidate)
+                        store.promote(
+                            str(holdout_scenarios[0]["family"]), candidate.policy_id, candidate_evaluation_id,
+                        )
+                        policy = candidate
                 payload = {
                     "phase": "policy_cohort_finished" if policy_advanced else "policy_cohort_rejected",
                     "policy_cohort": cohort,
@@ -590,6 +724,11 @@ def main(argv: list[str] | None = None) -> int:
                     "policy_learning_episodes": learning_count,
                     "policy_rejected_episodes": len(cohort_results) - learning_count,
                     "policy_advanced": policy_advanced,
+                    "promotion_reason": promotion_reason,
+                    "champion_policy_id": policy.policy_id,
+                    "candidate_policy_id": candidate_evaluation.policy_id if candidate_evaluation else None,
+                    "candidate_holdout_completion": candidate_evaluation.fitness.completion_rate if candidate_evaluation else None,
+                    "champion_holdout_completion": incumbent_evaluation.fitness.completion_rate if incumbent_evaluation else None,
                     "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
                     "slots": sum(state.slots for state in states.values()),
                     "remaining_attempts": len(jobs), "generation": generation,
