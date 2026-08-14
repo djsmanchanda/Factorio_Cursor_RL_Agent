@@ -28,6 +28,7 @@ _ASSET_MAP = {
     "/observer.css": ("training_observer.css", "text/css; charset=utf-8"),
 }
 _MAX_VIEW_REQUEST_BYTES = 512
+_MAX_GUIDANCE_REQUEST_BYTES = 1_500
 
 
 @dataclass(frozen=True)
@@ -145,6 +146,25 @@ def _handler(
                 raise ValueError("cleanup confirmation is invalid")
             return worker_id
 
+        def _guidance_request(self) -> tuple[str, str, int | None]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 1 or length > _MAX_GUIDANCE_REQUEST_BYTES:
+                raise ValueError("invalid guidance request length")
+            if self.headers.get_content_type() != "application/json":
+                raise ValueError("guidance request must be JSON")
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict) or set(payload) != {"focus", "message", "expires_generation"}:
+                raise ValueError("guidance request shape is invalid")
+            focus, message, expires_generation = payload["focus"], payload["message"], payload["expires_generation"]
+            if not isinstance(focus, str) or not isinstance(message, str):
+                raise ValueError("guidance request values are invalid")
+            if expires_generation is not None and (
+                not isinstance(expires_generation, int) or isinstance(expires_generation, bool)
+            ):
+                raise ValueError("guidance expiry must be a non-negative integer or null")
+            if expires_generation is not None and expires_generation < 0:
+                raise ValueError("guidance expiry must be a non-negative integer or null")
+            return focus, message, expires_generation
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             request_id, status = uuid.uuid4().hex, 500
             try:
@@ -171,9 +191,19 @@ def _handler(
         def do_POST(self) -> None:  # noqa: N802 - controlled local observer action
             request_id, status = uuid.uuid4().hex, 500
             try:
-                if self.path not in {"/api/view", "/api/recycle-stale"}:
+                if self.path not in {"/api/view", "/api/recycle-stale", "/api/guidance"}:
                     self._send_json(405, {"error": "dashboard action is not available"})
                     status = 405
+                elif self.path == "/api/guidance":
+                    focus, message, expires_generation = self._guidance_request()
+                    guidance_id = f"guidance-{uuid.uuid4().hex}"
+                    profile = _resolve_training_profile(database, live_directory)
+                    with TrainingStore(profile.database) as store:
+                        store.save_guidance(guidance_id, focus, message, expires_generation)
+                    self._send_json(200, {"ok": True, "guidance_id": guidance_id, "status": "active"})
+                    status = 200
+                    _log("INFO", "observer.guidance_created", request_id, path=self.path, status=status,
+                         focus=focus, expires_generation=expires_generation)
                 elif viewer is None:
                     self._send_json(503, {"error": "training control is unavailable"})
                     status = 503

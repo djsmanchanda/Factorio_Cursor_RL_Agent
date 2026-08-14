@@ -26,7 +26,7 @@
     </section>
     <section class="grid">
       <article class="panel"><div class="panel-title"><h2>Policy lineage</h2><span>immutable generations</span></div><div id="policies"></div></article>
-      <article class="panel"><div class="panel-title"><h2>Human guidance</h2><span>autoresearch only</span></div><div id="guidance"></div></article>
+      <article class="panel"><div class="panel-title"><h2>Human guidance</h2><span>autoresearch only</span></div><form id="guidance-form" class="guidance-form"><label for="guidance-focus">Focus</label><select id="guidance-focus" name="focus"><option value="general">General</option><option value="throughput">Throughput</option><option value="reliability">Reliability</option><option value="efficiency">Efficiency</option><option value="exploration">Exploration</option></select><label for="guidance-message">Instruction</label><textarea id="guidance-message" name="message" rows="3" maxlength="1000" required placeholder="Tell autoresearch what to investigate next..."></textarea><div class="guidance-form-row"><label for="guidance-expiry">Expires at generation <span>(optional)</span></label><input id="guidance-expiry" name="expires_generation" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 24"><button type="submit" class="view-button">Send guidance</button></div></form><small class="guidance-help">Guidance steers autoresearch only; it does not execute Factorio or host commands.</small><div id="guidance-status" class="view-status" role="status" aria-live="polite"></div><div id="guidance"></div></article>
     </section>
   </main>
   <footer><span id="updated">No snapshot yet</span><span>Loopback · spectator view is training-only · no Nauvis authority</span></footer>

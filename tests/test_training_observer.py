@@ -215,6 +215,31 @@ def test_http_dashboard_is_loopback_read_only(tmp_path) -> None:
         server.server_close()
         thread.join(timeout=2)
 
+def test_http_dashboard_can_submit_guidance(tmp_path) -> None:
+    database, live = tmp_path / "experience.db", tmp_path / "live"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(database, live))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = Request(
+            f"{base}/api/guidance", method="POST", data=json.dumps({
+                "focus": "throughput", "message": "Prefer direct-belt delivery.",
+                "expires_generation": 24,
+            }).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        with urlopen(request, timeout=2) as response:
+            result = json.loads(response.read())
+        assert result["status"] == "active"
+        with TrainingStore(database) as store:
+            guidance = store.active_guidance()
+        assert guidance[0]["focus"] == "throughput"
+        assert guidance[0]["message"] == "Prefer direct-belt delivery."
+        assert guidance[0]["expires_generation"] == 24
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 def test_telemetry_failure_is_best_effort() -> None:
     class BrokenPublisher:
         def publish(self, _event):
@@ -337,6 +362,8 @@ def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
     assert 'id="workers" class="scrollable-list"' in html
     assert 'id="episodes" class="scrollable-list"' in html
     assert ".scrollable-list{max-height:" in (assets / "training_observer.css").read_text(encoding="utf-8")
+    assert 'id="guidance-form"' in html
+    assert "fetch('/api/guidance'" in script
 
 def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
     rcon = CleanupRcon()
