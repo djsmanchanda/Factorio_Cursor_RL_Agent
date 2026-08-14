@@ -10,6 +10,7 @@ from planners.belt_bridge import bridge_belt_to_chest
 from planners.plan_validation import actions, occupied_tile_indices, validate_build_plan
 from training.canonical import plan_hash
 from training.contracts import validate_scenario
+from training.material_costs import MATERIAL_COST_BY_ENTITY
 from training.power import POWER_CONSUMER_ENTITIES
 
 _DRILL_RATE_PER_TICK = 0.5 / 60.0
@@ -17,17 +18,6 @@ _POWER_SOURCE_COVERAGE = 3.5
 _POWER_SOURCE_POLE_OFFSET = 2.5
 _OPPOSITE_DIRECTION = {"north": "south", "east": "west", "south": "north", "west": "east"}
 _DIRECTION_VECTOR = {"north": (0.0, -1.0), "east": (1.0, 0.0), "south": (0.0, 1.0), "west": (-1.0, 0.0)}
-MATERIAL_COST_BY_ENTITY = {
-    "electric-mining-drill": 60,
-    "fast-inserter": 11,
-    "medium-electric-pole": 5,
-    "transport-belt": 2,
-    "splitter": 20,
-    "underground-belt": 10,
-    "express-transport-belt": 9,
-    "express-underground-belt": 40,
-    "express-loader": 50,
-}
 
 
 def _is_surface_belt(entity: object) -> bool:

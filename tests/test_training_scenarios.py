@@ -82,7 +82,7 @@ def test_seeded_mining_delivery_scenario_is_stable_and_valid() -> None:
     assert first == second
     validate_scenario(first)
     assert first["version"] == "1.2.0"
-    assert first["reward_profile"] == "mining-throughput-leaky-v1"
+    assert first["reward_profile"] == "mining-throughput-cost-v1"
     assert set(first["reward_weights"]) == {
         "completion", "throughput", "elapsed_tick", "material_item",
         "failed_placement", "pole", "route_excess", "land",

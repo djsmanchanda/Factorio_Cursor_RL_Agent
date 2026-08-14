@@ -5,15 +5,18 @@ from copy import deepcopy
 
 import pytest
 
+from training.material_costs import construction_budget_material_cost
 from training.rewards import reward_components, safety_violation
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
 
-def _report(*, rate: float = 0.02, delivered: int = 60, drills: int = 3) -> dict:
+def _report(
+    *, rate: float = 0.02, delivered: int = 60, drills: int = 3, elapsed: int = 1_800,
+) -> dict:
     capacity_ticks = drills * 1_800
     return {
         "status": "completed",
-        "elapsed_ticks": 1_800,
+        "elapsed_ticks": elapsed,
         "metrics": {
             "rate_per_tick": rate,
             "delivered_items": delivered,
@@ -146,6 +149,82 @@ def test_terminal_stage_target_controls_staged_reward() -> None:
     assert reward["throughput"] == pytest.approx(
         scenario["reward_weights"]["throughput"] * (1 + 0.1 * (35 / 30 - 1)),
     )
+
+
+def test_balanced_reward_prefers_lower_cost_at_equal_output() -> None:
+    scenario = generate_mining_delivery_scenario(8)
+    target = scenario["objective"]["target_rate_per_tick"]
+    budget_cost = construction_budget_material_cost(scenario["construction_budget"])
+
+    cheaper = _reward(
+        scenario, _report(rate=target), _candidate(material_cost=int(budget_cost * 0.3)),
+    )
+    costlier = _reward(
+        scenario, _report(rate=target), _candidate(material_cost=int(budget_cost * 0.5)),
+    )
+
+    assert cheaper["materials"] > costlier["materials"]
+    assert cheaper["total"] > costlier["total"]
+
+
+def test_small_production_gain_beats_similarly_small_material_increase() -> None:
+    scenario = generate_mining_delivery_scenario(9)
+    target = scenario["objective"]["target_rate_per_tick"]
+    budget_cost = construction_budget_material_cost(scenario["construction_budget"])
+
+    baseline = _reward(
+        scenario, _report(rate=target), _candidate(material_cost=int(budget_cost * 0.40)),
+    )
+    faster = _reward(
+        scenario, _report(rate=target * 1.01),
+        _candidate(material_cost=int(budget_cost * 0.41)),
+    )
+
+    assert faster["throughput"] > baseline["throughput"]
+    assert faster["materials"] < baseline["materials"]
+    assert faster["total"] > baseline["total"]
+
+
+def test_material_saving_cannot_reward_zero_output_over_productive_work() -> None:
+    scenario = generate_mining_delivery_scenario(10)
+    target = scenario["objective"]["target_rate_per_tick"]
+    budget_cost = construction_budget_material_cost(scenario["construction_budget"])
+    empty_report = _report(rate=0)
+    empty_report["status"] = "timed_out"
+    partial_report = _report(rate=target * 0.1)
+    partial_report["status"] = "timed_out"
+
+    empty = _reward(scenario, empty_report, _candidate(material_cost=0))
+    partial = _reward(scenario, partial_report, _candidate(material_cost=int(budget_cost)))
+
+    assert partial["total"] > empty["total"]
+
+
+def test_faster_ramp_up_wins_at_equal_output_and_cost() -> None:
+    scenario = generate_mining_delivery_scenario(11)
+    target = scenario["objective"]["target_rate_per_tick"]
+    max_ticks = scenario["constraints"]["max_episode_ticks"]
+    candidate = _candidate(material_cost=100)
+
+    faster = _reward(scenario, _report(rate=target, elapsed=max_ticks // 4), candidate)
+    slower = _reward(scenario, _report(rate=target, elapsed=max_ticks // 2), candidate)
+
+    assert faster["elapsed_ticks"] > slower["elapsed_ticks"]
+    assert faster["total"] > slower["total"]
+
+
+def test_cumulative_material_cost_overrides_last_stage_candidate_cost() -> None:
+    scenario = generate_mining_delivery_scenario(12)
+    target = scenario["objective"]["target_rate_per_tick"]
+    candidate = _candidate(material_cost=10)
+
+    last_stage_only = reward_components(scenario, _report(rate=target), candidate, 0)
+    cumulative = reward_components(
+        scenario, _report(rate=target), candidate, 0, material_cost=100,
+    )
+
+    assert cumulative["materials"] < last_stage_only["materials"]
+
 
 def test_report_metrics_override_predicted_candidate_efficiency() -> None:
     scenario = _scenario(5)

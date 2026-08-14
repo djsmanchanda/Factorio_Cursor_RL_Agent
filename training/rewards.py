@@ -6,7 +6,10 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
+from training.material_costs import construction_budget_material_cost
+
 _LEAKY_THROUGHPUT_PROFILES = frozenset({"mining-throughput-leaky-v1"})
+_BALANCED_REWARD_PROFILES = frozenset({"mining-throughput-cost-v1"})
 _EXCESS_THROUGHPUT_SLOPE = 0.1
 
 
@@ -59,9 +62,35 @@ def _terminal_target_rate(scenario: Mapping, report: Mapping) -> float:
 def _throughput_component(profile: object, rate: float, target_rate: float, weight: float) -> float:
     """Reward target progress steeply and excess throughput at a tenth slope."""
     ratio = rate / target_rate
-    if profile in _LEAKY_THROUGHPUT_PROFILES:
-        return weight * (ratio if ratio <= 1.0 else 1.0 + _EXCESS_THROUGHPUT_SLOPE * (ratio - 1.0))
+    if profile in _LEAKY_THROUGHPUT_PROFILES | _BALANCED_REWARD_PROFILES:
+        return weight * (
+            ratio if ratio <= 1.0
+            else 1.0 + _EXCESS_THROUGHPUT_SLOPE * (ratio - 1.0)
+        )
     return min(ratio, 2.0) * weight
+
+
+def _material_component(
+    scenario: Mapping, material_cost: float, rate: float, target_rate: float, weight: float,
+) -> float:
+    """Make cost a bounded co-objective that only applies to useful output."""
+    if scenario.get("reward_profile") not in _BALANCED_REWARD_PROFILES:
+        return material_cost * weight
+    budget_cost = construction_budget_material_cost(scenario.get("construction_budget") or {})
+    cost_ratio = min(material_cost / budget_cost, 1.0)
+    useful_output_ratio = min(rate / target_rate, 1.0)
+    return cost_ratio * useful_output_ratio * weight
+
+
+def _elapsed_component(
+    profile: object, elapsed: float, max_ticks: float, weight: float,
+) -> float:
+    """Score ramp-up time on a bounded scenario-relative scale."""
+    if profile in _BALANCED_REWARD_PROFILES:
+        if max_ticks <= 0:
+            raise ValueError("max_episode_ticks must be greater than zero")
+        return min(elapsed / max_ticks, 1.0) * weight
+    return min(elapsed, max_ticks) * weight
 
 
 def reward_components(
@@ -69,14 +98,14 @@ def reward_components(
     terminal_report: Mapping,
     selected_candidate: Mapping,
     failed_placements: int | float,
+    *,
+    material_cost: int | float | None = None,
 ) -> dict[str, float]:
-    """Score observed output and explicit costs in their documented units.
+    """Score output, ramp-up time, and bounded construction efficiency.
 
-    Scenario hard limits already bound time, entities, routes, and footprint. We
-    clamp each cost to those limits so corrupt telemetry cannot dominate a
-    policy update, while ordinary values retain literal per-unit weights.
-    Safety is intentionally excluded from this scalar and remains a promotion
-    gate through :func:`safety_violation`.
+    Safety remains a separate promotion gate. The balanced mining profile
+    normalizes material and elapsed costs so their raw units cannot overwhelm
+    useful production, while legacy profiles retain their original semantics.
     """
     weights = scenario["reward_weights"]
     features = _features(selected_candidate)
@@ -87,7 +116,10 @@ def reward_components(
     rate = _nonnegative(_metric(terminal_report, features, "rate_per_tick"), "rate_per_tick")
     elapsed = _nonnegative(terminal_report.get("elapsed_ticks", 0), "elapsed_ticks")
     max_ticks = _nonnegative(constraints["max_episode_ticks"], "max_episode_ticks")
-    material_cost = _nonnegative(features.get("material_cost", 0), "material_cost")
+    observed_material_cost = _nonnegative(
+        features.get("material_cost", 0) if material_cost is None else material_cost,
+        "material_cost",
+    )
     failed = _nonnegative(failed_placements, "failed_placements")
 
     pole_count = _nonnegative(
@@ -153,8 +185,14 @@ def reward_components(
         "throughput": _throughput_component(
             scenario.get("reward_profile"), rate, target_rate, _weight(weights, "throughput"),
         ),
-        "elapsed_ticks": min(elapsed, max_ticks) * _weight(weights, "elapsed_tick"),
-        "materials": material_cost * _weight(weights, "material_item"),
+        "elapsed_ticks": _elapsed_component(
+            scenario.get("reward_profile"), elapsed, max_ticks,
+            _weight(weights, "elapsed_tick"),
+        ),
+        "materials": _material_component(
+            scenario, observed_material_cost, rate, target_rate,
+            _weight(weights, "material_item"),
+        ),
         "poles": min(pole_count, pole_limit) * _weight(weights, "pole"),
         "route_excess": min(route_excess, route_limit) * _weight(weights, "route_excess"),
         "land_usage": min(occupied_land, land_limit) * _weight(weights, "land"),

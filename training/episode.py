@@ -188,7 +188,9 @@ def run_episode(
                 "mining_drill_blocked_ticks": int(live_metrics.get("mining_drill_blocked_ticks", 0)),
                 "mining_drill_idle_ticks": int(live_metrics.get("mining_drill_idle_ticks", 0)),
             },
-            "reward": reward_components(scenario, report, chosen, failed),
+            "reward": reward_components(
+                scenario, report, chosen, failed, material_cost=material_cost,
+            ),
             "next_observation": _observation(report),
         }
         validate_transition(transition)
