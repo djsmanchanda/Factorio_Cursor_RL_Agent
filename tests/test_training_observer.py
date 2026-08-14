@@ -334,6 +334,9 @@ def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
     assert "renderUpsChart" in script
     assert "worker limit" in script
     assert "function viewButton" in script
+    assert 'id="workers" class="scrollable-list"' in html
+    assert 'id="episodes" class="scrollable-list"' in html
+    assert ".scrollable-list{max-height:" in (assets / "training_observer.css").read_text(encoding="utf-8")
 
 def test_observer_recycles_stale_surfaces_on_the_configured_training_worker() -> None:
     rcon = CleanupRcon()
