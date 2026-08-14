@@ -287,10 +287,26 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert args.maximum_slots == 16
     assert args.step == 1
     assert args.episodes_per_policy == 100
+    assert args.policy_rounds is None
     assert (args.minimum_ups_p95, args.minimum_ups_p98) == (50.0, 45.0)
     assert args.stability_window_seconds == 300.0
     assert args.healthy_windows_to_grow == 1
     assert args.allow_episode_failures is False
+
+def test_adaptive_controller_accepts_explicit_policy_rounds(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "adaptive", "--workers", str(tmp_path / "workers.json"),
+            "--episodes-per-policy", "24", "--policy-rounds", "3",
+        ],
+    )
+
+    args = _parse()
+
+    assert args.episodes_per_policy == 24
+    assert args.policy_rounds == 3
+
 
 def test_adaptive_controller_accepts_ten_second_staged_sustain(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(

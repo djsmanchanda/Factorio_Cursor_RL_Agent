@@ -27,10 +27,12 @@ class TrainingStartRequest:
     runner_limit: int
     initial_runners: int
     start_seed: int
+    episodes_per_policy: int = 100
+    policy_rounds: int = 1
 
     @classmethod
     def from_payload(cls, payload: Any) -> "TrainingStartRequest":
-        required = {"server_count", "runner_limit", "initial_runners", "start_seed"}
+        required = {"server_count", "runner_limit", "initial_runners", "episodes_per_policy", "policy_rounds", "start_seed"}
         if not isinstance(payload, dict) or set(payload) != required:
             raise ValueError("training start request shape is invalid")
 
@@ -45,8 +47,10 @@ class TrainingStartRequest:
         server_count = integer("server_count", 1, 50)
         runner_limit = integer("runner_limit", 1, 80)
         initial_runners = integer("initial_runners", 1, runner_limit)
+        episodes_per_policy = integer("episodes_per_policy", 1, 10_000)
+        policy_rounds = integer("policy_rounds", 1, 1_000)
         start_seed = integer("start_seed", 0, 2_147_483_647)
-        return cls(server_count, runner_limit, initial_runners, start_seed)
+        return cls(server_count, runner_limit, initial_runners, start_seed, episodes_per_policy, policy_rounds)
 
 
 class TrainingSupervisor:
@@ -84,7 +88,8 @@ class TrainingSupervisor:
                 "status": "starting", "message": "Preparing isolated training workers…",
                 "operation_id": uuid.uuid4().hex, "server_count": request.server_count,
                 "runner_limit": request.runner_limit, "initial_runners": request.initial_runners,
-                "start_seed": request.start_seed, "run_id": run_id,
+                "start_seed": request.start_seed, "episodes_per_policy": request.episodes_per_policy,
+                "policy_rounds": request.policy_rounds, "run_id": run_id,
                 "database": str(run_root / "experience.db"),
                 "live_directory": str(run_root / "live"),
                 "controller_pid": None, "started_utc": datetime.now(timezone.utc).isoformat(),
@@ -123,6 +128,8 @@ class TrainingSupervisor:
             log_handle = (run_root / "controller.log").open("a", encoding="utf-8")
             command = [
                 "-File", str(self.run_script), "--count", "100", "--start-seed", str(request.start_seed),
+                "--episodes-per-policy", str(request.episodes_per_policy),
+                "--policy-rounds", str(request.policy_rounds),
                 "--initial-slots", str(request.initial_runners), "--minimum-slots", "1",
                 "--maximum-slots", str(request.runner_limit), "--database", state["database"],
                 "--live-directory", state["live_directory"],

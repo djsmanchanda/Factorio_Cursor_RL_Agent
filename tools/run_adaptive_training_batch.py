@@ -364,6 +364,7 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--step", type=int, default=1)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
+    parser.add_argument("--policy-rounds", type=int, help="Stop after this many policy cohorts; each cohort collects episodes-per-policy terminal runs.")
     parser.add_argument(
         "--champion-evaluation-episodes", type=int, default=20,
         help="Frozen held-out episodes used to compare every candidate with the champion.",
@@ -388,6 +389,8 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("count and attempts-per-scenario must be positive")
     if args.minimum_slots < 1 or args.maximum_slots < args.minimum_slots:
         parser.error("slot bounds are invalid")
+    if args.policy_rounds is not None and args.policy_rounds < 1:
+        parser.error("policy-rounds must be positive")
     if not args.minimum_slots <= args.initial_slots <= args.maximum_slots:
         parser.error("initial-slots must be inside the slot bounds")
     if (
@@ -548,7 +551,7 @@ def main(argv: list[str] | None = None) -> int:
         for sampler in samplers.values():
             sampler.start()
         try:
-            while jobs:
+            while jobs or (args.policy_rounds is not None and cohort < args.policy_rounds):
                 cohort += 1
                 cohort_target = _cohort_target(
                     args.episodes_per_policy, sum(state.slots for state in states.values()),
