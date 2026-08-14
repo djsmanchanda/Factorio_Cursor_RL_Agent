@@ -118,6 +118,35 @@ def test_reward_faster_output_can_justify_higher_material_cost() -> None:
     assert faster_reward["total"] > slower_reward["total"]
 
 
+def test_leaky_throughput_reward_is_steep_to_target_and_ten_times_flatter_afterward() -> None:
+    scenario = deepcopy(generate_mining_delivery_scenario(4))
+    target = scenario["objective"]["target_rate_per_tick"]
+
+    below = _reward(scenario, _report(rate=target * 0.5))
+    at_target = _reward(scenario, _report(rate=target))
+    above = _reward(scenario, _report(rate=target * 1.5))
+
+    weight = scenario["reward_weights"]["throughput"]
+    assert below["throughput"] == pytest.approx(weight * 0.5)
+    assert at_target["throughput"] == pytest.approx(weight)
+    assert above["throughput"] == pytest.approx(weight * 1.05)
+    assert above["throughput"] - at_target["throughput"] == pytest.approx(
+        (at_target["throughput"] - below["throughput"]) / 10,
+    )
+
+
+def test_terminal_stage_target_controls_staged_reward() -> None:
+    scenario = deepcopy(generate_mining_delivery_scenario(5))
+    scenario["objective"]["target_rate_per_tick"] = 5 / 60
+    report = _report(rate=35 / 60)
+    report["objective"] = {"target_rate_per_tick": 30 / 60}
+
+    reward = _reward(scenario, report)
+
+    assert reward["throughput"] == pytest.approx(
+        scenario["reward_weights"]["throughput"] * (1 + 0.1 * (35 / 30 - 1)),
+    )
+
 def test_report_metrics_override_predicted_candidate_efficiency() -> None:
     scenario = _scenario(5)
     candidate = _candidate()
@@ -135,7 +164,7 @@ def test_report_metrics_override_predicted_candidate_efficiency() -> None:
     assert reward["route_excess"] < 0
 
 
-def test_reward_terms_are_bounded_by_scenario_limits() -> None:
+def test_reward_cost_terms_are_bounded_by_scenario_limits() -> None:
     scenario = _scenario(6)
     report = _report(rate=1_000_000)
     report["metrics"].update({
@@ -147,7 +176,7 @@ def test_reward_terms_are_bounded_by_scenario_limits() -> None:
 
     reward = _reward(scenario, report, _candidate(material_cost=1_000_000))
 
-    assert 0 <= reward["throughput"] <= 2 * scenario["reward_weights"]["throughput"]
+    assert reward["throughput"] > 2 * scenario["reward_weights"]["throughput"]
     pole_floor = scenario["reward_weights"]["pole"] * scenario["construction_budget"]["medium-electric-pole"]
     route_limit = sum(scenario["construction_budget"].get(name, 0) for name in (
         "transport-belt", "underground-belt", "splitter",

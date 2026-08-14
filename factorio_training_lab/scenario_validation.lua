@@ -226,7 +226,9 @@ local function validate_objective(scenario, fixtures)
 end
 
 local function validate_rewards(scenario)
-  if scenario.reward_profile ~= "mining-efficiency-v1" and scenario.reward_profile ~= "furnace-efficiency-v1" then
+  if scenario.reward_profile ~= "mining-efficiency-v1"
+      and scenario.reward_profile ~= "mining-throughput-leaky-v1"
+      and scenario.reward_profile ~= "furnace-efficiency-v1" then
     error("reward_profile is invalid")
   end
   local weights = scenario.reward_weights

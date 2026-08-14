@@ -6,6 +6,9 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
+_LEAKY_THROUGHPUT_PROFILES = frozenset({"mining-throughput-leaky-v1"})
+_EXCESS_THROUGHPUT_SLOPE = 0.1
+
 
 def _finite(value: object, label: str) -> float:
     try:
@@ -42,6 +45,25 @@ def _weight(weights: Mapping, name: str) -> float:
     return _finite(weights[name], f"{name} weight")
 
 
+def _terminal_target_rate(scenario: Mapping, report: Mapping) -> float:
+    """Use the measured terminal stage target when staged demand advanced."""
+    objective = report.get("objective")
+    if not isinstance(objective, Mapping):
+        objective = scenario["objective"]
+    target = _nonnegative(objective["target_rate_per_tick"], "target_rate_per_tick")
+    if target == 0:
+        raise ValueError("target_rate_per_tick must be greater than zero")
+    return target
+
+
+def _throughput_component(profile: object, rate: float, target_rate: float, weight: float) -> float:
+    """Reward target progress steeply and excess throughput at a tenth slope."""
+    ratio = rate / target_rate
+    if profile in _LEAKY_THROUGHPUT_PROFILES:
+        return weight * (ratio if ratio <= 1.0 else 1.0 + _EXCESS_THROUGHPUT_SLOPE * (ratio - 1.0))
+    return min(ratio, 2.0) * weight
+
+
 def reward_components(
     scenario: Mapping,
     terminal_report: Mapping,
@@ -58,13 +80,10 @@ def reward_components(
     """
     weights = scenario["reward_weights"]
     features = _features(selected_candidate)
-    objective = scenario["objective"]
     constraints = scenario["constraints"]
     budget = scenario.get("construction_budget") or {}
 
-    target_rate = _nonnegative(objective["target_rate_per_tick"], "target_rate_per_tick")
-    if target_rate == 0:
-        raise ValueError("target_rate_per_tick must be greater than zero")
+    target_rate = _terminal_target_rate(scenario, terminal_report)
     rate = _nonnegative(_metric(terminal_report, features, "rate_per_tick"), "rate_per_tick")
     elapsed = _nonnegative(terminal_report.get("elapsed_ticks", 0), "elapsed_ticks")
     max_ticks = _nonnegative(constraints["max_episode_ticks"], "max_episode_ticks")
@@ -131,7 +150,9 @@ def reward_components(
     components = {
         "completion": _weight(weights, "completion")
         if terminal_report.get("status") == "completed" else 0.0,
-        "throughput": min(rate / target_rate, 2.0) * _weight(weights, "throughput"),
+        "throughput": _throughput_component(
+            scenario.get("reward_profile"), rate, target_rate, _weight(weights, "throughput"),
+        ),
         "elapsed_ticks": min(elapsed, max_ticks) * _weight(weights, "elapsed_tick"),
         "materials": material_cost * _weight(weights, "material_item"),
         "poles": min(pole_count, pole_limit) * _weight(weights, "pole"),

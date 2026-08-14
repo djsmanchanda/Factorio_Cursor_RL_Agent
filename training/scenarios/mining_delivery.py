@@ -10,7 +10,7 @@ from training.canonical import scenario_hash
 from training.contracts import validate_scenario
 
 _VERSION = "1.2.0"
-_REWARD_PROFILE = "mining-efficiency-v1"
+_REWARD_PROFILE = "mining-throughput-leaky-v1"
 _WORLD_BOUNDS = {
     "x_min": -64, "y_min": -64,
     "x_max_exclusive": 64, "y_max_exclusive": 64,
@@ -172,14 +172,14 @@ def generate_mining_delivery_scenario(
         },
         "reward_profile": _REWARD_PROFILE,
         "reward_weights": {
-            "completion": 10.0,
-            "throughput": 8.0,
+            "completion": 20.0,
+            "throughput": 100.0,
             "elapsed_tick": -0.0001,
-            "material_item": -0.01,
+            "material_item": -0.002,
             "failed_placement": -1.0,
-            "pole": -0.1,
+            "pole": -0.02,
             "route_excess": -0.02,
-            "land": -0.001,
+            "land": -0.0002,
             "unproductive_drill_capacity": -3.0,
         },
     }
