@@ -25,6 +25,7 @@ from tools.run_training_batch import (
     _checkpoint,
     _learn_policy,
     _load_policy,
+    _policy_learning_count,
     _rcon_password,
     _run_worker,
     EpisodeQueue,
@@ -570,18 +571,25 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps(state_payload(payload), sort_keys=True), flush=True)
                 if not cohort_results:
                     raise RuntimeError("policy cohort ended without terminal training evidence")
-                learned = _learn_policy(policy, cohort_results)
-                generation += 1
-                _checkpoint(args.checkpoint, generation, learned)
-                store.save_policy(
-                    learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
-                    parent_policy_id=policy.policy_id,
-                )
-                policy = learned
+                learning_count = _policy_learning_count(cohort_results)
+                policy_advanced = bool(learning_count)
+                if policy_advanced:
+                    learned = _learn_policy(policy, cohort_results)
+                    generation += 1
+                    _checkpoint(args.checkpoint, generation, learned)
+                    store.save_policy(
+                        learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
+                        parent_policy_id=policy.policy_id,
+                    )
+                    policy = learned
                 payload = {
-                    "phase": "policy_cohort_finished", "policy_cohort": cohort,
+                    "phase": "policy_cohort_finished" if policy_advanced else "policy_cohort_rejected",
+                    "policy_cohort": cohort,
                     "policy_episode_target": args.episodes_per_policy,
                     "policy_terminal_episodes": len(cohort_results),
+                    "policy_learning_episodes": learning_count,
+                    "policy_rejected_episodes": len(cohort_results) - learning_count,
+                    "policy_advanced": policy_advanced,
                     "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
                     "slots": sum(state.slots for state in states.values()),
                     "remaining_attempts": len(jobs), "generation": generation,

@@ -5,7 +5,15 @@ import json
 
 import pytest
 
-from tools.run_training_batch import _checkpoint, _learn_policy, _load_policy, _parse, _rcon_password, main
+from tools.run_training_batch import (
+    _checkpoint,
+    _learn_policy,
+    _load_policy,
+    _parse,
+    _policy_learning_count,
+    _rcon_password,
+    main,
+)
 from training.features import MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2
 from training.policies import DiagonalLinUCB
 
@@ -42,6 +50,7 @@ def test_completed_transitions_train_a_new_generation(tmp_path):
             "sustained_ticks": 0, "resource_remaining": 100,
         },
         "candidates": [candidate], "chosen_action_id": "a", "reward": {"total": 5},
+        "result": {"status": "completed", "failure_kind": "none", "reason": ""},
     }
     learned = _learn_policy(base, [("episode-1", transition, None)])
     assert learned.a_diag != base.a_diag
@@ -53,6 +62,37 @@ def test_completed_transitions_train_a_new_generation(tmp_path):
     assert generation == 1
     assert restored.policy_id.startswith("policy-g0001-")
     assert restored.a_diag == learned.a_diag
+
+
+def test_attempts_below_target_are_evidence_but_do_not_train_the_next_policy():
+    base = DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V1)
+    candidate = {
+        "action_id": "a", "plan_hash": "sha256:" + "a" * 64,
+        "features": {
+            "predicted_completion": 1, "predicted_rate_per_tick": 0.01,
+            "drill_count": 1, "route_tiles": 2, "turn_count": 1,
+            "pole_count": 1, "material_cost": 1,
+        },
+    }
+    transition = {
+        "observation": {
+            "delivered_rate_per_tick": 0, "target_rate_per_tick": 0.01,
+            "sustained_ticks": 0, "resource_remaining": 100,
+        },
+        "candidates": [candidate], "chosen_action_id": "a", "reward": {"total": -5},
+        "result": {
+            "status": "timed_out", "failure_kind": "timeout",
+            "reason": "production target was not sustained",
+        },
+    }
+    results = [("episode-failed-target", transition, None)]
+
+    learned = _learn_policy(base, results)
+
+    assert _policy_learning_count(results) == 0
+    assert learned.a_diag == base.a_diag
+    assert learned.b == base.b
+
 
 def test_rcon_secret_file_overrides_environment(tmp_path, monkeypatch):
     secret = tmp_path / "rcon-password"

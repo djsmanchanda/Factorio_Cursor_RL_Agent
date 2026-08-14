@@ -323,7 +323,16 @@ def test_adaptive_controller_learns_only_after_a_complete_policy_cohort(monkeypa
     def staged_result(_workers, stage_jobs, *_args, **_kwargs):
         episode_id = stage_jobs[0][0]
         return (
-            [(episode_id, {"episode_id": episode_id}, None)], 1, 0,
+            [(
+                episode_id,
+                {
+                    "episode_id": episode_id,
+                    "result": {
+                        "status": "completed", "failure_kind": "none", "reason": "",
+                    },
+                },
+                None,
+            )], 1, 0,
             UpsWindow((60.0, 60.0, 60.0)), None, set(), None, None,
         )
 

@@ -19,7 +19,7 @@ from training.candidates import furnace_refining_candidates, mining_delivery_can
 from training.episode import run_episode
 from training.factorio_bridge import FactorioTrainingBridge
 from training.features import FURNACE_REFINING_FEATURES_V1, MINING_DELIVERY_FEATURES_V2
-from training.policies import DiagonalLinUCB, policy_snapshot
+from training.policies import DiagonalLinUCB, policy_snapshot, transition_can_train_policy
 from training.scenarios.furnace_refining import generate_furnace_refining_curriculum
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import load_worker_specs
@@ -144,16 +144,24 @@ def main(argv=None):
         coordinator=_Coordinator(scheduler, policies, password, args.live_directory, store, stop_event)
         coordinator.cycles=args.cycles
         coordinator.run(workers)
+        learning_counts={family: 0 for family in policies}
         for job, transition, error in coordinator.results:
             if transition is not None:
                 store.save_transition(transition)
                 store.finish_episode(job.episode_id, transition["result"]["status"], transition["started_tick"], transition["ended_tick"], {"reward": transition["reward"]["total"], "family": job.family})
-                policies[job.family].update(transition["observation"], next(c for c in transition["candidates"] if c["action_id"] == transition["chosen_action_id"]), transition["reward"]["total"])
+                if transition_can_train_policy(transition):
+                    policies[job.family].update(transition["observation"], next(c for c in transition["candidates"] if c["action_id"] == transition["chosen_action_id"]), transition["reward"]["total"])
+                    learning_counts[job.family] += 1
             else:
                 store.finish_episode(job.episode_id, "failed", 0, 0, {"error": error, "family": job.family})
     for family, filename in (("ore-production", "policy-ore.json"), ("furnace-refining", "policy-refinery.json")):
-        _checkpoint(args.checkpoint_directory / filename, generations[family] + 1, policies[family])
-    summary={"family": scheduler.family, "policy_index": scheduler.policy_index, "completed": len([r for r in coordinator.results if r[1] is not None]), "failed": len([r for r in coordinator.results if r[1] is None]), "workers": len(workers), "cycles": args.cycles}
+        if learning_counts[family]:
+            _checkpoint(args.checkpoint_directory / filename, generations[family] + 1, policies[family])
+    completed = sum(
+        transition is not None and transition_can_train_policy(transition)
+        for _job, transition, _error in coordinator.results
+    )
+    summary={"family": scheduler.family, "policy_index": scheduler.policy_index, "completed": completed, "failed": len(coordinator.results) - completed, "policy_learning_episodes": learning_counts, "workers": len(workers), "cycles": args.cycles}
     print(json.dumps(summary, indent=2)); return 0
 
 if __name__ == "__main__": raise SystemExit(main())

@@ -22,7 +22,11 @@ from training.canonical import canonical_sha256
 from training.episode import EpisodeCapacityInterrupted, run_episode
 from training.factorio_bridge import FactorioTrainingBridge
 from training.features import MINING_DELIVERY_FEATURES_V2
-from training.policies import DiagonalLinUCB, policy_snapshot
+from training.policies import (
+    DiagonalLinUCB,
+    policy_snapshot,
+    transition_can_train_policy,
+)
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import WorkerSpec, load_worker_specs
 from training.store import TrainingStore
@@ -231,7 +235,7 @@ def _load_policy(path: Path) -> tuple[int, DiagonalLinUCB]:
 def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
     learned = DiagonalLinUCB.from_dict(base.to_dict())
     for _episode_id, transition, _error in sorted(results, key=lambda item: item[0]):
-        if transition is None:
+        if transition is None or not transition_can_train_policy(transition):
             continue
         chosen = next(
             candidate for candidate in transition["candidates"]
@@ -239,6 +243,14 @@ def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
         )
         learned.update(transition["observation"], chosen, transition["reward"]["total"])
     return learned
+
+
+def _policy_learning_count(results: list[tuple]) -> int:
+    """Count successful attempts eligible to shape the next checkpoint."""
+    return sum(
+        transition is not None and transition_can_train_policy(transition)
+        for _episode_id, transition, _error in results
+    )
 
 
 def _checkpoint(path: Path, generation: int, policy: DiagonalLinUCB) -> None:
@@ -307,15 +319,23 @@ def _execute_live(args, scenarios: list[dict], password: str) -> dict:
                 future_jobs, events, store,
                 expected_episode_ids=[job[0] for job in jobs],
             )
-        learned = _learn_policy(policy, results)
-        _checkpoint(args.checkpoint, generation + 1, learned)
-        store.save_policy(
-            learned.policy_id, "diagonal_linucb", generation + 1, {}, policy_snapshot(learned),
-            parent_policy_id=policy.policy_id,
-        )
+        learning_count = _policy_learning_count(results)
+        if learning_count:
+            learned = _learn_policy(policy, results)
+            generation += 1
+            _checkpoint(args.checkpoint, generation, learned)
+            store.save_policy(
+                learned.policy_id, "diagonal_linucb", generation, {}, policy_snapshot(learned),
+                parent_policy_id=policy.policy_id,
+            )
+        else:
+            learned = policy
     return {
         "attempts": len(results), "completed": completed, "failed": failed,
-        "generation": generation + 1, "policy_id": learned.policy_id,
+        "policy_learning_episodes": learning_count,
+        "policy_rejected_episodes": len(results) - learning_count,
+        "policy_advanced": bool(learning_count),
+        "generation": generation, "policy_id": learned.policy_id,
     }
 
 

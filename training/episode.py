@@ -12,7 +12,7 @@ from planners.sandbox_infrastructure import build_layout_authorization
 from training.canonical import policy_hash
 from training.candidates import furnace_refining_candidates, mining_delivery_candidates
 from training.contracts import validate_transition
-from training.policies import policy_snapshot
+from training.policies import policy_snapshot, transition_can_train_policy
 from training.rewards import reward_components
 
 
@@ -194,7 +194,11 @@ def run_episode(
             "next_observation": _observation(report),
         }
         validate_transition(transition)
-        if update_policy and hasattr(policy, "update"):
+        if (
+            update_policy
+            and hasattr(policy, "update")
+            and transition_can_train_policy(transition)
+        ):
             policy.update(initial, chosen, transition["reward"]["total"])
         _progress(on_progress, "finished", identifier, {
             **context, "report": report, "reward_total": transition["reward"]["total"],

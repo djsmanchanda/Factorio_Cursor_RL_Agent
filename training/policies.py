@@ -18,6 +18,12 @@ def policy_snapshot(policy) -> dict:
     return {"policy_id": str(policy.policy_id), "algorithm": type(policy).__name__}
 
 
+def transition_can_train_policy(transition: Mapping) -> bool:
+    """Return whether an attempt sustained its objective and may shape a successor."""
+    result = transition.get("result") or {}
+    return result.get("status") == "completed" and result.get("failure_kind") == "none"
+
+
 def _candidate_id(candidate: Mapping) -> str:
     identifier = str(candidate.get("action_id", ""))
     if not identifier:
