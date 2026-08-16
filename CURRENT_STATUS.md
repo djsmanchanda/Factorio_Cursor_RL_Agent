@@ -2357,8 +2357,8 @@ that consumed it was not.
 
 ## [2026-08-12] RL Observatory row cleanup and forty-slot restart
 - Files: `factorio_training_lab/episode_world.lua`, training-lab cleanup tests, and the committed Observatory controls.
-- What: The live worker cleanup now distinguishes terminal/expired-heartbeat episode records from active leases; the Observatory exposes a row-scoped `×` immediately after View. The isolated WSL worker was redeployed and the stale reset verified zero disposable surfaces before launch.
-- Evidence: `48 passed`; worker `training-wsl-01` is running on game `35001` / RCON `28001`; Observatory `127.0.0.1:8766` returns HTTP 200 with 40 configured workers; adaptive controller PID 48356 started at 40 slots with bounds 4–40 and 55 UPS P98 gate.
+- What: The live worker cleanup now distinguishes terminal/expired-heartbeat episode records from active leases; the Observatory exposes a row-scoped `Ã—` immediately after View. The isolated WSL worker was redeployed and the stale reset verified zero disposable surfaces before launch.
+- Evidence: `48 passed`; worker `training-wsl-01` is running on game `35001` / RCON `28001`; Observatory `127.0.0.1:8766` returns HTTP 200 with 40 configured workers; adaptive controller PID 48356 started at 40 slots with bounds 4â€“40 and 55 UPS P98 gate.
 - Next: Observe the fresh adaptive batch; it may shrink by four when the measured lower-tail UPS falls below the safety gate.
 
 ## [2026-08-12] RL surface ownership and compact scenario identities
@@ -2465,3 +2465,9 @@ that consumed it was not.
 - Contract: each stage must sustain its target for 600 ticks (10 seconds). The launched curriculum uses 500 unique scenarios per policy, four policy cohorts (2,000 attempts), 50 isolated WSL servers, and adaptive capacity from one to ten slots per server.
 - Evidence: a hard-fail live smoke completed all three stages with 1 completed / 0 failed. All 50 RCON endpoints registered `training_execute`; PID 3372 is running from `data/training-staged-scale-20260813-50x10/` with zero controller stderr and live full-fleet measurement telemetry. Focused validation passes 78 tests plus a 500-seed / 1,500-stage candidate sweep.
 - Lifecycle: the training mod was deployed and all 50 isolated WSL workers plus the Python controller were restarted. Real Nauvis and the deterministic runtime were not touched; GUI observation would require syncing the training mod copy and restarting the GUI client.
+
+## [2026-08-18] Native Linux RL worker and Factorio 2.1.14 headless migration
+- What: Restored the Windows-port evidence bundle under ignored `data/`; added a native Linux worker manager and native Observatory adapter using direct, isolated `~/.local/share/factorio-rl/training/<index>/worker` roots. Installed the supplied Factorio 2.1.14 headless archive privately at `~/.local/share/factorio-rl/runtime/factorio-2.1.14` and made it the manager default.
+- Compatibility: Updated both project mods to declare Factorio 2.1 and replaced the now read-only `LuaEntity.minable` fixture assignment with `minable_flag`.
+- Evidence: Focused native worker/Observatory tests pass (18). One private worker started headless build 87180 with its bundled read-data, registered the training commands, provisioned `training/mining-delivery-0002` at tick 108121, wrote parseable reports, and recycled the disposable force successfully. Real Nauvis/player was not opened or mutated.
+- Lifecycle: the private training worker is running on game `35001` and loopback RCON `28001`; no deterministic deployment or restart is required.

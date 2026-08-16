@@ -113,6 +113,18 @@ def test_supervisor_starts_configured_workers_and_controller(monkeypatch, tmp_pa
     assert "--policy-rounds" in popen_commands[0]
     assert popen_commands[0][popen_commands[0].index("--policy-rounds") + 1] == "3"
 
+
+def test_linux_supervisor_uses_direct_worker_manager_and_runner(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(observatory_control.sys, "platform", "linux")
+    supervisor = observatory_control.TrainingSupervisor(tmp_path)
+
+    assert supervisor.worker_config.name == "training-workers-linux.json"
+    assert supervisor.manage_script.name == "manage_linux_training_worker.sh"
+    command = supervisor._runner_command(["--count", "1"])
+    assert command[0] == observatory_control.sys.executable
+    assert "--workers" in command
+    assert command[command.index("--workers") + 1].endswith("training-workers-linux.json")
+
 def test_training_control_endpoints_forward_only_validated_requests() -> None:
     control = FakeTrainingControl()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(None, None, control=control))

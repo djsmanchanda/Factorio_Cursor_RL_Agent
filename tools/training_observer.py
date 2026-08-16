@@ -325,10 +325,15 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Observe and guide isolated RL training.")
     parser.add_argument("--database", type=Path)
     parser.add_argument("--live-directory", type=Path)
-    parser.add_argument("--workers", type=Path, default=REPO_ROOT / "training-workers-wsl.json")
+    native_linux = sys.platform.startswith("linux")
+    parser.add_argument(
+        "--workers", type=Path,
+        default=REPO_ROOT / ("training-workers-linux.json" if native_linux else "training-workers-wsl.json"),
+    )
     parser.add_argument(
         "--rcon-secret-file", type=Path,
-        default=Path(os.environ.get("LOCALAPPDATA", ".")) / "Factorio-training-wsl-01" / "rcon-password",
+        default=(Path.home() / ".local" / "share" / "factorio-rl" / "training" / "01" / "worker" / "rcon-password")
+        if native_linux else Path(os.environ.get("LOCALAPPDATA", ".")) / "Factorio-training-wsl-01" / "rcon-password",
     )
     parser.add_argument("--observer-player", default="main")
     commands = parser.add_subparsers(dest="command", required=True)

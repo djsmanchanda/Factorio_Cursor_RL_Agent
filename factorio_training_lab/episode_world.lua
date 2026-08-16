@@ -151,7 +151,9 @@ local function place_fixtures(surface, force, scenario)
       force = force
     })
     if not entity then error("could not place fixture " .. fixture.id) end
-    entity.minable, entity.destructible, entity.rotatable = false, false, false
+    -- Factorio 2.1 exposes the computed minable state as read-only; this is the
+    -- script-controlled guard that keeps episode fixtures protected.
+    entity.minable_flag, entity.destructible, entity.rotatable = false, false, false
     if fixture.kind == "item_source" then
       local input_item = scenario.objective.input_item
       if not input_item then error("item_source requires objective.input_item") end

@@ -58,6 +58,32 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 
 ## Parallel training slots
 
+### Native Linux workers
+
+On native Linux, workers use the private headless runtime at
+`~/.local/share/factorio-rl/runtime/factorio-2.1.14` with its matching
+read-data root and isolated writable roots. They do not use `wsl.exe`, Windows
+bridge directories, or a real-base save. Start with one disposable worker and
+one logical slot; increase capacity only after the documented five-minute UPS
+gate passes.
+
+```bash
+scripts/manage_linux_training_worker.sh bootstrap --worker-count 1 --slots-per-worker 1
+scripts/manage_linux_training_worker.sh status --worker-count 1 --slots-per-worker 1
+scripts/manage_linux_training_worker.sh start --worker-count 1 --slots-per-worker 1
+python tools/run_adaptive_training_batch.py \
+  --workers training-workers-linux.json \
+  --rcon-secret-file "$HOME/.local/share/factorio-rl/training/01/worker/rcon-password" \
+  --count 1 --episodes-per-policy 1 --policy-rounds 1 --initial-slots 1 --minimum-slots 1 --maximum-slots 1
+```
+
+`bootstrap` creates a fresh worker-local save unless `--source-save` names an
+explicit disposable seed. It writes `training-workers-linux.json` with direct
+server-owned `script-output` paths. `deploy` requires stopped workers; changes
+to the training Lua mod then require `deploy`, worker restart, and controller
+restart. Use `--runtime-root`, `--factorio-bin`, and `--read-data` only for an
+intentional, separately validated Factorio version.
+
 Each WSL Factorio process can simulate multiple isolated `training/*` surfaces concurrently. The adaptive local setup uses twenty isolated headless runtimes, each starting with eight active logical slots and capped at sixteen. Each runtime has its own game/RCON endpoint, save, `script-output` directory, worker IDs, surfaces, and forces. This removes the single-server simulation bottleneck while retaining shared policy and evidence storage.
 
 Slots belonging to the same Factorio runtime must declare the same `instance_id` and identical endpoint details. Different runtime instances must keep unique ports and `script-output` paths. A stage uses one shared queue: scenario identity serializes access to its stable surface, but never permanently owns a slot. A slot that finishes immediately claims another unlocked scenario. Each policy cohort has at least the requested 100 terminal episodes and is automatically topped up to the current active-slot count, with fresh seeded refill attempts, so extra capacity is not left idle. Scale slots only while UPS, memory, report latency, and cleanup remain healthy.

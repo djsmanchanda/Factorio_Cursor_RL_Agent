@@ -1,0 +1,14 @@
+{
+  "workers": [
+    {
+      "worker_id": "training-linux-01-slot-01",
+      "instance_id": "factorio-training-linux-01",
+      "host": "127.0.0.1",
+      "game_port": 35001,
+      "rcon_port": 28001,
+      "script_output": "REPLACE_WITH_HOME/.local/share/factorio-rl/training/01/worker/script-output",
+      "surface_prefix": "training/",
+      "force_prefix": "training-"
+    }
+  ]
+}

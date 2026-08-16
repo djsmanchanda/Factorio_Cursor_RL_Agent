@@ -21,6 +21,7 @@ Thumbs.db
 runs/
 
 # Local RL training evidence and checkpoints
+data/
 data/training/*.db*
 data/training/live/
 data/training/policy.json
@@ -39,5 +40,6 @@ data/training-capacity/
 training-workers.json
 training-workers-wsl.json
 training-workers-windows.json
+training-workers-linux.json
 data/training/logs/
 data/rl-gpu-venv/
