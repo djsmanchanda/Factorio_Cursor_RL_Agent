@@ -9,6 +9,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass
@@ -59,9 +60,14 @@ class TrainingSupervisor:
     def __init__(self, repo_root: Path, state_file: Path | None = None):
         self.repo_root = repo_root.resolve()
         self.state_file = state_file or self.repo_root / "data" / "observatory-training-control.json"
-        self.worker_config = self.repo_root / "training-workers-wsl.json"
-        self.manage_script = self.repo_root / "scripts" / "manage_wsl_training_worker.ps1"
-        self.run_script = self.repo_root / "scripts" / "run_wsl_adaptive_training_batch.ps1"
+        self.native_linux = sys.platform.startswith("linux")
+        self.worker_config = self.repo_root / (
+            "training-workers-linux.json" if self.native_linux else "training-workers-wsl.json"
+        )
+        self.manage_script = self.repo_root / "scripts" / (
+            "manage_linux_training_worker.sh" if self.native_linux else "manage_wsl_training_worker.ps1"
+        )
+        self.run_script = self.repo_root / "tools" / "run_adaptive_training_batch.py"
         self._lock = threading.RLock()
         self._process: subprocess.Popen | None = None
         self._operation: threading.Thread | None = None
@@ -127,7 +133,7 @@ class TrainingSupervisor:
             run_root.mkdir(parents=True, exist_ok=True)
             log_handle = (run_root / "controller.log").open("a", encoding="utf-8")
             command = [
-                "-File", str(self.run_script), "--count", "100", "--start-seed", str(request.start_seed),
+                "--count", "100", "--start-seed", str(request.start_seed),
                 "--episodes-per-policy", str(request.episodes_per_policy),
                 "--policy-rounds", str(request.policy_rounds),
                 "--initial-slots", str(request.initial_runners), "--minimum-slots", "1",
@@ -135,7 +141,7 @@ class TrainingSupervisor:
                 "--live-directory", state["live_directory"],
             ]
             process = subprocess.Popen(
-                [self._powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", *command],
+                self._runner_command(command),
                 cwd=self.repo_root, stdout=log_handle, stderr=subprocess.STDOUT,
                 creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             )
@@ -178,10 +184,28 @@ class TrainingSupervisor:
                 self._write_state({**self._read_state(), "status": "error", "message": str(exc)})
 
     def _run_manage(self, action: str, server_count: int, runner_limit: int) -> None:
+        if self.native_linux:
+            result = subprocess.run(
+                ["bash", str(self.manage_script), action, "--worker-count", str(server_count),
+                 "--slots-per-worker", str(runner_limit), "--stagger-seconds", "2"],
+                cwd=self.repo_root, capture_output=True, text=True, timeout=1800,
+            )
+            if result.returncode:
+                output = (result.stdout + "\n" + result.stderr).strip()[-2_000:]
+                raise TrainingControlError(output or f"native worker manager exited with code {result.returncode}")
+            return
         args = ["-File", str(self.manage_script), "-Action", action,
                 "-WorkerCount", str(server_count), "-SlotsPerWorker", str(runner_limit),
                 "-StaggerSeconds", "2"]
         self._run_powershell(args, timeout=1800)
+
+    def _runner_command(self, arguments: list[str]) -> list[str]:
+        if self.native_linux:
+            secret = Path.home() / ".local" / "share" / "factorio-rl" / "training" / "01" / "worker" / "rcon-password"
+            return [sys.executable, str(self.run_script), "--workers", str(self.worker_config),
+                    "--rcon-secret-file", str(secret), *arguments]
+        return [self._powershell(), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(self.repo_root / "scripts" / "run_wsl_adaptive_training_batch.ps1"), *arguments]
 
     def _run_powershell(self, args: list[str], timeout: float) -> None:
         result = subprocess.run(

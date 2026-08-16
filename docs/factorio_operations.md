@@ -23,7 +23,7 @@ Never infer the server or port from a default. Confirm the process, listening ga
 - Use `tools/rcon_client.py` for direct commands and connectivity checks.
 - Use `GameBridge` only for commands that write a report file; wait for a new parseable file in that server's `script-output` directory.
 - Use `tools/autonomous_run.py` for the requested real-base mission.
-- Use `tools/run_training_batch.py` or the WSL wrapper for training episodes.
+- Use `tools/run_training_batch.py` or the native Linux worker manager for training episodes.
 
 Raw console Lua and build commands can mutate state. Start diagnosis with read-only exports.
 
@@ -48,6 +48,16 @@ Stop repeated retries after the first clear operational failure. Repetition with
 | Documentation/tests only | No runtime restart |
 
 Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compare hashes or timestamps when a client reports mismatched mods or the runtime behaves like old code.
+
+### Native Linux training workers
+
+`scripts/manage_linux_training_worker.sh` creates only disposable worker state
+below `~/.local/share/factorio-rl/training/<index>/worker`. It uses a separate
+Factorio `write-data` root plus the private headless runtime at
+`~/.local/share/factorio-rl/runtime/factorio-2.1.14`, local RCON port,
+worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
+Its default ports are game
+`35000 + index` and RCON `28000 + index`; RCON remains loopback-only.
 
 ### Mod-copy synchronization and GUI restart
 
