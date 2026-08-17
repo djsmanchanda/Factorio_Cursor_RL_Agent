@@ -42,3 +42,11 @@ Fix these when they block the real runtime or when the fix produces a reusable p
 ## Real-base rule
 
 Observe the live factory, identify the planner decision that caused the failure, fix the code and focused tests, deploy deliberately when Lua changed, then rerun from the requested save. Never manually repair the base to conceal a planner defect.
+
+## Planned Factorio 2.1 science integration
+
+[Science telemetry and research control plan](science_control_plan.md) stages
+lab-inventory/status observation, deterministic diagnosis and research
+ranking, and a disposable-only lab-circuit experiment.  The Python planner
+retains research-selection authority until a separately authorized and tested
+controller is promoted.

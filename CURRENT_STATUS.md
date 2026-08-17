@@ -2471,3 +2471,10 @@ that consumed it was not.
 - Compatibility: Updated both project mods to declare Factorio 2.1 and replaced the now read-only `LuaEntity.minable` fixture assignment with `minable_flag`.
 - Evidence: Focused native worker/Observatory tests pass (18). One private worker started headless build 87180 with its bundled read-data, registered the training commands, provisioned `training/mining-delivery-0002` at tick 108121, wrote parseable reports, and recycled the disposable force successfully. Real Nauvis/player was not opened or mutated.
 - Lifecycle: the private training worker is running on game `35001` and loopback RCON `28001`; no deterministic deployment or restart is required.
+
+## [2026-08-18] Deterministic Factorio 2.1 science-control implementation plan
+- Files: `docs/deterministic/science_control_plan.md`, deterministic and schema documentation.
+- What: Defined a staged science telemetry contract, pure diagnosis/ranking layer, disposable-only lab-circuit experiment, and later 2.1 integration backlog.
+- Why: Keep deterministic research selection auditable while adding the lab status and inventory feedback needed to diagnose science throughput.
+- Evidence: Documentation review only; no Lua, deterministic server, or Nauvis/player state changed.
+- Next: Implement Phase 1 `ScienceStatus` v1 as a read-only mod report, schema, bridge method, and focused disposable-runtime validation.
