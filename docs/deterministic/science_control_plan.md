@@ -58,10 +58,14 @@ the deterministic mod is deployed or that Nauvis/player was observed.
 - [ ] Disposable Factorio 2.1.14 runtime validation.
 - [ ] Explicitly authorized real-base read-only observation.
 
-### Phase 2 — pending integration
+### Phase 2 — completed in the repository
 
-- [ ] Pure ScienceStatus diagnosis, replay fixtures, and finite candidate
+- [x] Pure ScienceStatus diagnosis, replay fixtures, and finite candidate
   ranking.
+- [x] Deterministic diagnosis precedence, finite allow-list enforcement, and
+  report-identity audit tests.
+- [ ] An authorized `research select` actuator; the existing explicit
+  `research <technology>` actuator remains unchanged.
 
 ### Phase 3 — deferred experiment
 
@@ -173,6 +177,11 @@ serialized by Lua as hidden policy.
 Phase 2 consumes saved `ScienceStatus` reports; it does not add a new game
 mutation.
 
+Implementation status: the pure diagnosis and allow-list-bounded ranking
+modules, replay fixtures, and focused tests are complete.  They are not wired
+to a new actuator; a proposed selection remains advisory until a separately
+authorized execution contract is implemented.
+
 ### Diagnosis
 
 Implement a pure `orchestrator/science_diagnosis.py` function that returns a
@@ -213,11 +222,11 @@ selected report identities.
 
 ### Acceptance evidence
 
-- Pure tests cover every diagnosis, report-tick ordering, and deterministic
+- [x] Pure tests cover every diagnosis, report-tick ordering, and deterministic
   tie-breaking.
-- Replay fixtures cover a science shortage, a power fault, a stalled research
+- [x] Replay fixtures cover a science shortage, a power fault, a stalled research
   window, and a progressing research window.
-- Candidate-ranking tests prove it cannot select disabled, completed,
+- [x] Candidate-ranking tests prove it cannot select disabled, completed,
   unobserved, or out-of-allow-list technologies.
 
 ## Phase 3 — disposable lab-circuit controller experiment

@@ -2484,3 +2484,9 @@ that consumed it was not.
 - What: Added a strict, read-only force/surface-scoped lab and research report plus bridge collection and offline inspector.
 - Evidence: Lua syntax validation and focused schema/bridge/inspector/Lua-stub tests passed. The behavioral Lua checks remain skipped when optional `lupa` is unavailable.
 - Lifecycle: Lua source is not deployed. Deploy the deterministic mod and restart its Factorio runtime and Python runner before any runtime validation; no Nauvis/player state changed.
+
+## [2026-08-18] Deterministic science diagnosis and selection advisory
+- Files: `orchestrator/science_diagnosis.py`, `orchestrator/research_scheduler.py`, and ScienceStatus replay fixtures/tests.
+- What: Added pure diagnosis for supply, power, progress, and capacity observations plus deterministic, finite allow-list research ranking.
+- Evidence: Focused diagnosis/ranking replay tests passed; modules neither open RCON nor mutate a game.
+- Lifecycle: Restart a Python consumer only when it is deliberately wired to use this advisory output. There is no new research actuator, deterministic deployment, or Nauvis/player state change.

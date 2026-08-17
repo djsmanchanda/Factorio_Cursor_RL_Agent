@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0.0",
+  "ok": true,
+  "tick": 100,
+  "surface": "nauvis",
+  "force": "player",
+  "research": {
+    "current": "automation",
+    "progress": 0.2,
+    "queue": [],
+    "current_science_packs": {"automation-science-pack": 1},
+    "current_research_unit_count": 10
+  },
+  "labs": {
+    "total": 2,
+    "working": 1,
+    "status_counts": {"no_power": 1, "working": 1},
+    "input_inventory": {"automation-science-pack": 6},
+    "entries": [
+      {
+        "unit_number": 101,
+        "position": {"x": 10.5, "y": 2.5},
+        "status": "working",
+        "input_inventory": {"automation-science-pack": 3}
+      },
+      {
+        "unit_number": 102,
+        "position": {"x": 13.5, "y": 2.5},
+        "status": "no_power",
+        "input_inventory": {"automation-science-pack": 3}
+      }
+    ]
+  }
+}
