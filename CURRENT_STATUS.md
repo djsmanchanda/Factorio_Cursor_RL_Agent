@@ -2478,3 +2478,9 @@ that consumed it was not.
 - Why: Keep deterministic research selection auditable while adding the lab status and inventory feedback needed to diagnose science throughput.
 - Evidence: Documentation review only; no Lua, deterministic server, or Nauvis/player state changed.
 - Next: Implement Phase 1 `ScienceStatus` v1 as a read-only mod report, schema, bridge method, and focused disposable-runtime validation.
+
+## [2026-08-18] Deterministic ScienceStatus v1 repository implementation
+- Files: `factorio_mod/science_telemetry.lua`, `factorio_mod/control.lua`, `schemas/science_status.schema.json`, `orchestrator/game_bridge.py`, `tools/science_status.py`, and focused tests.
+- What: Added a strict, read-only force/surface-scoped lab and research report plus bridge collection and offline inspector.
+- Evidence: Lua syntax validation and focused schema/bridge/inspector/Lua-stub tests passed. The behavioral Lua checks remain skipped when optional `lupa` is unavailable.
+- Lifecycle: Lua source is not deployed. Deploy the deterministic mod and restart its Factorio runtime and Python runner before any runtime validation; no Nauvis/player state changed.
