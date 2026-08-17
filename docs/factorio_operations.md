@@ -59,6 +59,20 @@ worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
 Its default ports are game
 `35000 + index` and RCON `28000 + index`; RCON remains loopback-only.
 
+### Native Linux deterministic server
+
+`scripts/manage_linux_deterministic_server.sh` owns the isolated deterministic
+root at `~/.local/share/factorio-rl/deterministic`, using the private
+`factorio-2.1.14` runtime.  Its `bootstrap` action requires an explicit source
+save and copies it once to the isolated root; it never writes to
+`~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
+`34199/27017`, and the RCON secret is a mode-600 file under the server root.
+
+Run `deploy` only while stopped, then `start`.  Lua changes require this
+deployment and a deterministic Factorio restart; Python consumers require a
+separate restart.  Sync a matching GUI mod copy and restart the GUI client
+before joining this server.
+
 ### Mod-copy synchronization and GUI restart
 
 Factorio does not hot-reload Lua scripts. Any changed mod script must be

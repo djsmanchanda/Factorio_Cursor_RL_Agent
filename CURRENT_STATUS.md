@@ -2490,3 +2490,9 @@ that consumed it was not.
 - What: Added pure diagnosis for supply, power, progress, and capacity observations plus deterministic, finite allow-list research ranking.
 - Evidence: Focused diagnosis/ranking replay tests passed; modules neither open RCON nor mutate a game.
 - Lifecycle: Restart a Python consumer only when it is deliberately wired to use this advisory output. There is no new research actuator, deterministic deployment, or Nauvis/player state change.
+
+## [2026-08-18] Native Linux deterministic server manager
+- Files: `scripts/manage_linux_deterministic_server.sh`, operations documentation, and focused manager tests.
+- What: Added a lifecycle manager that copies a selected source save once into an isolated deterministic root, deploys only the repository mod copy, uses a local mode-600 RCON secret, and keeps both game and RCON loopback-bound.
+- Evidence: Shell syntax and focused manager/worker regression tests passed. The source save and server root have not yet been opened by this repository change.
+- Lifecycle: Bootstrap the isolated root with an explicit source save, then start it. Lua is current in the manager's deployment source; starting loads it into the new server process.
