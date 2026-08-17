@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "science_status.schema.json",
+  "title": "ScienceStatus",
+  "description": "Read-only, force- and surface-scoped research and lab telemetry.",
+  "oneOf": [
+    {"$ref": "#/definitions/success"},
+    {"$ref": "#/definitions/failure"}
+  ],
+  "definitions": {
+    "identity": {
+      "type": "object",
+      "required": ["schema_version", "ok", "tick", "surface", "force"],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "ok": {"type": "boolean"},
+        "tick": {"type": "integer", "minimum": 0},
+        "surface": {"type": "string"},
+        "force": {"type": "string"}
+      }
+    },
+    "item_counts": {
+      "type": "object",
+      "propertyNames": {"type": "string", "minLength": 1},
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number"},
+        "y": {"type": "number"}
+      }
+    },
+    "lab_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_number", "position", "status", "input_inventory"],
+      "properties": {
+        "unit_number": {"type": "integer", "minimum": 1},
+        "position": {"$ref": "#/definitions/position"},
+        "status": {"type": "string", "minLength": 1},
+        "input_inventory": {"$ref": "#/definitions/item_counts"}
+      }
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "progress",
+        "queue",
+        "current_science_packs",
+        "current_research_unit_count"
+      ],
+      "properties": {
+        "current": {"type": ["string", "null"], "minLength": 1},
+        "progress": {"type": "number", "minimum": 0, "maximum": 1},
+        "queue": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "current_science_packs": {"$ref": "#/definitions/item_counts"},
+        "current_research_unit_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "labs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "working", "status_counts", "input_inventory", "entries"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "working": {"type": "integer", "minimum": 0},
+        "status_counts": {"$ref": "#/definitions/item_counts"},
+        "input_inventory": {"$ref": "#/definitions/item_counts"},
+        "entries": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/lab_entry"}
+        }
+      }
+    },
+    "success": {
+      "allOf": [
+        {"$ref": "#/definitions/identity"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "ok", "tick", "surface", "force", "research", "labs"],
+          "properties": {
+            "schema_version": {"const": "1.0.0"},
+            "ok": {"const": true},
+            "tick": {"type": "integer", "minimum": 0},
+            "surface": {"type": "string", "minLength": 1},
+            "force": {"type": "string", "minLength": 1},
+            "research": {"$ref": "#/definitions/research"},
+            "labs": {"$ref": "#/definitions/labs"}
+          }
+        }
+      ]
+    },
+    "failure": {
+      "allOf": [
+        {"$ref": "#/definitions/identity"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "ok", "tick", "surface", "force", "error"],
+          "properties": {
+            "schema_version": {"const": "1.0.0"},
+            "ok": {"const": false},
+            "tick": {"type": "integer", "minimum": 0},
+            "surface": {"type": "string"},
+            "force": {"type": "string"},
+            "error": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    }
+  }
+}

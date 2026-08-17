@@ -20,6 +20,7 @@ WATER_SEED_REPORT_SUBDIR = Path("factorio_mod") / "water_seed_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
 LIVE_EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "live_execution_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
+SCIENCE_REPORT_SUBDIR = Path("factorio_mod") / "science_reports"
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 
@@ -266,6 +267,15 @@ class GameBridge:
         if payload:
             command += " " + json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
+
+    def science_status(self, surface: str, force: str, timeout: float = 60.0) -> Path:
+        """Collect read-only research and lab telemetry for one existing target."""
+        if not isinstance(surface, str) or not surface:
+            raise ValueError("surface must be a non-empty string")
+        if not isinstance(force, str) or not force:
+            raise ValueError("force must be a non-empty string")
+        body = json.dumps({"surface": surface, "force": force}, separators=(",", ":"))
+        return self._run_and_collect(f"/science_status {body}", SCIENCE_REPORT_SUBDIR, timeout)
 
 
 def load_json(path: Path) -> dict:

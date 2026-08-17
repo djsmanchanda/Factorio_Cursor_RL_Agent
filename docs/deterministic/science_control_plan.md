@@ -44,6 +44,30 @@ research selection.  It is a new source of local lab state and a potential
 bounded in-game actuator.  The decision, authorization, and audit trail stay
 outside the circuit network.
 
+## Completion tracker
+
+Checked items have repository-level evidence only.  They do not indicate that
+the deterministic mod is deployed or that Nauvis/player was observed.
+
+### Phase 1 — completed in the repository
+
+- [x] Strict `ScienceStatus` v1 schema, read-only Lua report command, bridge
+  collection method, and report inspector.
+- [x] Focused schema, bridge, inspector, and Lua-stub regression tests.
+- [x] Lua syntax validation and focused Python test suite.
+- [ ] Disposable Factorio 2.1.14 runtime validation.
+- [ ] Explicitly authorized real-base read-only observation.
+
+### Phase 2 — pending integration
+
+- [ ] Pure ScienceStatus diagnosis, replay fixtures, and finite candidate
+  ranking.
+
+### Phase 3 — deferred experiment
+
+- [ ] Disposable lab-circuit controller behavior matrix and authorization
+  contract.
+
 ## Invariants and non-goals
 
 - The report command is read-only: it must not create a force, change research,
@@ -112,34 +136,35 @@ serialized by Lua as hidden policy.
 
 ### Deliverables
 
-1. Add `factorio_mod/science_telemetry.lua` and register it from
+1. [x] Add `factorio_mod/science_telemetry.lua` and register it from
    `factorio_mod/control.lua`.
-2. Add `/science_status` with required JSON `{surface, force}` and write
+2. [x] Add `/science_status` with required JSON `{surface, force}` and write
    `factorio_mod/science_reports/science_status_<tick>.json`.
-3. For labs owned by that force on that surface, collect:
+3. [x] For labs owned by that force on that surface, collect:
    - `unit_number`, position, symbolic entity status, and `lab_input`
      inventory;
    - total/working/status-count aggregates and aggregate science-pack
      inventory;
    - force research name, progress, queue, current research ingredients, and
      current research-unit count.
-4. Add `GameBridge.science_status(surface, force)` using the existing
+4. [x] Add `GameBridge.science_status(surface, force)` using the existing
    new-report collection behavior.  It must validate inputs before opening an
    RCON connection where practical.
-5. Add `schemas/science_status.schema.json`, a focused Python schema test,
+5. [x] Add `schemas/science_status.schema.json`, a focused Python schema test,
    bridge command construction test, and Lua regression coverage for sorting,
    empty collections, invalid targets, and read-only behavior.
-6. Add a small `tools/science_status.py` inspector that validates one saved
+6. [x] Add a small `tools/science_status.py` inspector that validates one saved
    report and prints the report identity plus aggregate state.  It must not
    call an actuator.
 
 ### Acceptance evidence
 
-- Unit/schema tests prove strict contract validation and deterministic order.
-- A disposable Factorio 2.1.14 fixture proves the command registers, reports
+- [x] Unit/schema tests prove strict contract validation and deterministic
+  order.
+- [ ] A disposable Factorio 2.1.14 fixture proves the command registers, reports
   a working lab and a deliberately starved or unpowered lab, and leaves force
   research, lab inventories, and control behavior unchanged.
-- A real-base observation is optional and requires explicit authorization.  If
+- [ ] A real-base observation is optional and requires explicit authorization.  If
   authorized, it is read-only and reports the exact server, surface, force,
   mod revision, report path, and tick.
 
