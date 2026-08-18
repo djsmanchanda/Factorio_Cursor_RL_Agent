@@ -17,6 +17,7 @@ Options:
   --factorio-bin PATH    Native Factorio executable (defaults below --runtime-root).
   --read-data PATH       Factorio read-data root (defaults below --runtime-root).
   --source-save PATH     Copy this disposable seed save during bootstrap.
+  --gui-mods PATH        Linux GUI Factorio mods directory (default: ~/.factorio/mods).
 
 Without --source-save, bootstrap creates a fresh worker-local save. It never reads
 or modifies ~/.factorio/saves, the deterministic runtime, or historical data/ evidence.
@@ -34,6 +35,10 @@ require_positive_integer() {
 
 ACTION="${1:-}"
 [[ -n "$ACTION" ]] || { usage >&2; exit 2; }
+if [[ "$ACTION" == "-h" || "$ACTION" == "--help" ]]; then
+  usage
+  exit 0
+fi
 shift || true
 
 WORKER_COUNT=1
@@ -44,6 +49,7 @@ RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
+GUI_MODS_PATH="$HOME/.factorio/mods"
 
 while (($#)); do
   case "$1" in
@@ -55,6 +61,7 @@ while (($#)); do
     --factorio-bin) FACTORIO_BIN="${2:?missing --factorio-bin value}"; shift 2 ;;
     --read-data) READ_DATA="${2:?missing --read-data value}"; shift 2 ;;
     --source-save) SOURCE_SAVE="${2:?missing --source-save value}"; shift 2 ;;
+    --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -184,6 +191,10 @@ sync_mods() {
   write_worker_files
 }
 
+sync_gui_mods() {
+  "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"
+}
+
 ensure_secret() {
   local seed_secret="$(worker_root 1)/rcon-password"
   if [[ ! -s "$SECRET_PATH" ]]; then
@@ -291,6 +302,7 @@ case "$ACTION" in
       bootstrap_worker "$index"
       if (( index < WORKER_COUNT )); then sleep "$STAGGER_SECONDS"; fi
     done
+    sync_gui_mods
     write_worker_config
     ;;
   deploy)
@@ -300,6 +312,7 @@ case "$ACTION" in
       sync_mods
       if (( index < WORKER_COUNT )); then sleep "$STAGGER_SECONDS"; fi
     done
+    sync_gui_mods
     ;;
   start)
     for ((index = 1; index <= WORKER_COUNT; index++)); do

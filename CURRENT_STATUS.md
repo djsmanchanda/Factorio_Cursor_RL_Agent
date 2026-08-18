@@ -2534,3 +2534,10 @@ that consumed it was not.
 - Runtime: The loopback control center was restarted with the native deterministic configuration after the GUI-address change.
 - Evidence: Read-only `GET /api/status` returns `game_address="127.0.0.1:34199"`, `game=true`, and `rcon=true`; the served dashboard header contains `CONNECT IN FACTORIO` with that address and has no stderr output.
 - Lifecycle: Enter `127.0.0.1:34199` in Factorio's multiplayer connect dialog. No mod deployment, save reset, Factorio restart, or runner action was performed.
+
+## [2026-08-19] Unified Linux Factorio mod synchronization
+- Files: shared GUI mod-sync script, deterministic and training managers, operations runbook, and focused tests.
+- What: Both `factorio_cursor_rl_agent` and `factorio_training_lab` are now synchronized and enabled on the Linux GUI profile, deterministic server, and native RL workers. The GUI mod list is updated atomically while unrelated mods remain intact.
+- Safety: The deterministic and RL runtimes remain isolated by their distinct roots, saves, ports, and explicit surface/force commands; loading the training-lab mod does not by itself create or mutate any training surface.
+- Evidence: Shell syntax, manager help, whitespace, and 19 focused synchronization/manager/dashboard tests passed.
+- Lifecycle: Stop, redeploy, and restart each live isolated server; then restart the GUI Factorio client before connecting.

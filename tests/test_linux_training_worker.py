@@ -52,6 +52,8 @@ def test_linux_worker_keeps_rcon_loopback_and_generates_a_local_secret() -> None
     assert ': > "$DATA_ROOT/logs/factorio-console.log"' in source
     assert 'grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log"' in source
     assert 'rm -rf "$MODS_PATH/factorio_training_lab" "$MODS_PATH/factorio_cursor_rl_agent"' in source
+    assert 'GUI_MODS_PATH="$HOME/.factorio/mods"' in source
+    assert 'scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"' in source
 
 
 def test_linux_worker_example_requires_local_path_materialization() -> None:

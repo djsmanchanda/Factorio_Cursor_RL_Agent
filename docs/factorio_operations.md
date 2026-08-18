@@ -43,8 +43,7 @@ Stop repeated retries after the first clear operational failure. Repetition with
 | Changed files | Required action |
 |---|---|
 | Python/controller only | Restart the affected runner/controller |
-| `factorio_mod/*.lua` | Deploy deterministic mod, restart deterministic Factorio runtime, restart runner |
-| `factorio_training_lab/*.lua` | Deploy training mod, synchronize the GUI training-mod copy, restart the affected training worker and GUI Factorio session, then restart the batch/controller if needed |
+| `factorio_mod/*.lua` or `factorio_training_lab/*.lua` | Synchronize both project mods to the GUI and each affected server, then restart the affected Factorio runtime and its Python consumer |
 | Documentation/tests only | No runtime restart |
 
 Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compare hashes or timestamps when a client reports mismatched mods or the runtime behaves like old code.
@@ -68,12 +67,14 @@ save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
 
-Run `deploy` only while stopped, then `start`. It copies the current
-deterministic mod both into the isolated server and the configured Linux GUI
-mods directory (default `~/.factorio/mods`) and enables it in the GUI
-`mod-list.json` without disturbing other entries. Lua changes require this
-deployment and a deterministic Factorio restart. Restart the GUI client before
-joining this server.
+Run `deploy` only while stopped, then `start`. It copies both project mods
+(`factorio_cursor_rl_agent` and `factorio_training_lab`) into the isolated
+server and configured Linux GUI mods directory (default `~/.factorio/mods`),
+enabling both in the GUI `mod-list.json` without disturbing other entries. Lua
+changes require this deployment and a deterministic Factorio restart. Restart
+the GUI client before joining this server. Loading the training-lab mod does
+not create a training surface or alter Nauvis; training remains isolated by its
+separate worker roots, saves, ports, and explicit commands.
 
 ### Native deterministic control center
 
@@ -99,7 +100,7 @@ a bounded Linux command—never PowerShell:
 |---|---|
 | Restart Python runner | `manage_linux_deterministic_runner.sh restart` |
 | Stop Python runner | `manage_linux_deterministic_runner.sh stop` |
-| Redeploy mod | `manage_linux_deterministic_server.sh deploy` (server plus GUI copy) |
+| Redeploy mod | `manage_linux_deterministic_server.sh deploy` (both project mods to server plus GUI copy) |
 | Restart server | `manage_linux_deterministic_server.sh stop`, then `start` |
 | Full refresh | runner `stop`, server `stop`, server `deploy`, server `start`, runner `restart` |
 | Restore | runner `stop`, server `stop`, server `reset --source-save …`, server `start` |
@@ -115,10 +116,10 @@ Factorio does not hot-reload Lua scripts. Any changed mod script must be
 synchronized to every runtime that will load it before joining or starting a
 mission:
 
-- `factorio_training_lab/` -> the WSL training worker and
-  `%APPDATA%\Factorio\mods\factorio_training_lab` for GUI observation.
-- `factorio_mod/` -> the deterministic server copy and the matching GUI client
-  copy when the client joins that server.
+- Both `factorio_training_lab/` and `factorio_mod/` -> every participating
+  native training worker, the deterministic server, and the matching GUI
+  profile. The Linux managers use `scripts/sync_linux_gui_mods.sh` for the GUI
+  copy while preserving unrelated GUI mods.
 
 After synchronizing a script change, restart the affected Factorio server and
 restart the GUI Factorio session before joining. A Python runner restart alone
