@@ -2519,3 +2519,8 @@ that consumed it was not.
 - What: The native dashboard now checks Factorio's game endpoint as a UDP listener while retaining a TCP reachability check for RCON. This corrects the false offline indicator for the loopback game port.
 - Evidence: Deterministic Factorio is listening on UDP `127.0.0.1:34199` and TCP RCON `127.0.0.1:27017`; 30 focused dashboard/server/runner/research tests passed.
 - Lifecycle: Restart the Python control center once to load the corrected status code. No Factorio restart, save reset, mod deployment, or runner launch is required.
+
+## [2026-08-18] Native deterministic control center running
+- Runtime: `tools/dashboard_server.py` is running through `uv` on loopback `127.0.0.1:9137` with the isolated deterministic server root, Linux server manager, Linux runner manager, and GUI-mod destination configured.
+- Evidence: An unauthenticated read-only `GET /api/status` returned `game=true`, `rcon=true`, `runner=false`; the dashboard is listening on TCP `127.0.0.1:9137` and has no stderr output.
+- Lifecycle: No Factorio or runner action was executed during this validation. Dashboard buttons are ready for explicitly selected lifecycle actions; deploy/reset/full refresh remain state-changing operations.
