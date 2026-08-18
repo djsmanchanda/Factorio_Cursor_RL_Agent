@@ -39,6 +39,25 @@ def test_finished_managed_runner_falls_back_to_pid_record(monkeypatch) -> None:
     assert manager._runner is None
 
 
+def test_native_status_uses_udp_for_factorio_game_port(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(
+        game_port=34199,
+        rcon_port=27017,
+        server_manager=Path("/native/manage-server"),
+        technology="mining-productivity-4",
+    )
+    manager._active = None
+    manager._last_action = None
+    manager._last_result = "idle"
+    manager._started_at = None
+    manager._runner_pids = lambda: []
+    manager._port_open = lambda port: port == 27017
+    manager._udp_port_bound = lambda port: port == 34199
+
+    assert manager.status()["server"] == {"game": True, "rcon": True}
+
+
 def test_restart_server_uses_visible_elevation_path(monkeypatch) -> None:
     manager = object.__new__(OperationManager)
     manager._stop_runner = lambda: None

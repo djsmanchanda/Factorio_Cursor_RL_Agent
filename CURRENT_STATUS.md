@@ -2513,3 +2513,9 @@ that consumed it was not.
 - What: Every dashboard lifecycle action now dispatches bounded Linux commands: runner start/stop, server restart, isolated-save reset with backup, and mod deployment to both the isolated server and `~/.factorio/mods`. The GUI `mod-list.json` is updated atomically without removing other enabled mods; deployment still leaves the GUI client for the user to restart.
 - Evidence: Shell syntax, manager help, whitespace, and 29 focused dashboard/server/runner/research tests passed. Linux runner PID records now validate process identity using `/proc` start time, protecting stop/status actions from PID reuse.
 - Lifecycle: Restart the Python control center with both `--server-manager` and `--runner-manager` options to activate the mappings. These changes do not deploy a mod, reset a save, or launch a runner on their own.
+
+## [2026-08-18] Native dashboard UDP game-status correction
+- Files: dashboard runtime/status test and this status log.
+- What: The native dashboard now checks Factorio's game endpoint as a UDP listener while retaining a TCP reachability check for RCON. This corrects the false offline indicator for the loopback game port.
+- Evidence: Deterministic Factorio is listening on UDP `127.0.0.1:34199` and TCP RCON `127.0.0.1:27017`; 30 focused dashboard/server/runner/research tests passed.
+- Lifecycle: Restart the Python control center once to load the corrected status code. No Factorio restart, save reset, mod deployment, or runner launch is required.

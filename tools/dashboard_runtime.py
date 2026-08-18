@@ -97,7 +97,7 @@ class OperationManager:
         runner_pids = self._runner_pids()
         return {
             "server": {
-                "game": self._port_open(self.config.game_port),
+                "game": self._game_port_open(self.config.game_port),
                 "rcon": self._port_open(self.config.rcon_port),
             },
             "runner": {"running": bool(runner_pids), "pids": runner_pids},
@@ -431,6 +431,23 @@ class OperationManager:
                 return True
         except OSError:
             return False
+
+    def _game_port_open(self, port: int) -> bool:
+        if self._uses_native_server_manager:
+            return self._udp_port_bound(port)
+        return self._port_open(port)
+
+    @staticmethod
+    def _udp_port_bound(port: int) -> bool:
+        """Factorio game traffic is UDP; RCON is intentionally checked over TCP."""
+        try:
+            result = subprocess.run(
+                ["ss", "-lunH", f"sport = :{port}"],
+                text=True, capture_output=True, timeout=1,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return result.returncode == 0 and bool(result.stdout.strip())
 
     def _wait_for_port(self, port: int, wanted: bool, timeout: int) -> None:
         deadline = time.monotonic() + timeout
