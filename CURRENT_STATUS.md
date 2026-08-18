@@ -2524,3 +2524,8 @@ that consumed it was not.
 - Runtime: `tools/dashboard_server.py` is running through `uv` on loopback `127.0.0.1:9137` with the isolated deterministic server root, Linux server manager, Linux runner manager, and GUI-mod destination configured.
 - Evidence: An unauthenticated read-only `GET /api/status` returned `game=true`, `rcon=true`, `runner=false`; the dashboard is listening on TCP `127.0.0.1:9137` and has no stderr output.
 - Lifecycle: No Factorio or runner action was executed during this validation. Dashboard buttons are ready for explicitly selected lifecycle actions; deploy/reset/full refresh remain state-changing operations.
+
+## [2026-08-18] Dashboard Factorio GUI address
+- Files: dashboard status payload, header display, styling, and focused test.
+- What: The control center now shows the configured Factorio multiplayer address, `127.0.0.1:34199`, in its header for direct entry in the Factorio GUI. The address is supplied by the live dashboard configuration rather than copied into the page.
+- Evidence: Focused dashboard tests passed (9). The Python control center must be restarted once to serve the expanded status payload; no Factorio state changes are involved.

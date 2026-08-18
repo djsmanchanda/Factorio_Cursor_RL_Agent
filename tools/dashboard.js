@@ -6,6 +6,7 @@ const output = document.querySelector('#log-output');
 const follow = document.querySelector('#follow-log');
 const actionMessage = document.querySelector('#action-message');
 const operationState = document.querySelector('#operation-state');
+const gameAddress = document.querySelector('#game-address');
 const priorityBody = document.querySelector('#priority-body');
 const priorityCount = document.querySelector('#priority-count');
 const priorityTabs = [...document.querySelectorAll('[data-priority-tab]')];
@@ -32,6 +33,8 @@ async function refreshStatus() {
   try {
     const response = await fetch('/api/status', {cache: 'no-store'});
     const state = await response.json();
+    gameAddress.textContent = state.server.game_address;
+    gameAddress.title = `Factorio multiplayer address: ${state.server.game_address}`;
     setOnline('#game-status', state.server.game);
     setOnline('#rcon-status', state.server.rcon);
     setOnline('#runner-status', state.runner.running, `PID: ${state.runner.pids.join(', ') || 'none'}`);

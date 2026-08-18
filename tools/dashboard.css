@@ -40,6 +40,10 @@ h2 { margin-bottom: 0; font-size: 1.45rem; }
 .eyebrow { margin-bottom: 9px; color: var(--orange); font: 700 .73rem/1.2 ui-monospace, monospace; letter-spacing: .15em; }
 .subtitle, .action-message, footer { color: var(--muted); }
 .status-cluster { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.connection-cluster { display: grid; justify-items: end; gap: 12px; }
+.game-address { margin: 0; color: var(--muted); font: .72rem/1.2 ui-monospace, monospace; text-align: right; }
+.game-address span { display: block; margin-bottom: 5px; color: var(--orange); font-weight: 700; letter-spacing: .08em; }
+.game-address code { font-size: 1rem; }
 .status {
   min-width: 88px;
   padding: 9px 12px;
@@ -110,6 +114,8 @@ code { color: #efaa6c; }
 @media (max-width: 980px) {
   header { align-items: flex-start; flex-direction: column; padding: 34px 0 24px; }
   .status-cluster { justify-content: flex-start; }
+  .connection-cluster { justify-items: start; }
+  .game-address { text-align: left; }
   main { grid-template-columns: 1fr; }
   .controls, .priority-panel, .console-panel { grid-column: 1; grid-row: auto; }
   pre { height: 480px; }
