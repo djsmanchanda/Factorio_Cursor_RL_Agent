@@ -2496,3 +2496,8 @@ that consumed it was not.
 - What: Added a lifecycle manager that copies a selected source save once into an isolated deterministic root, deploys only the repository mod copy, uses a local mode-600 RCON secret, and keeps both game and RCON loopback-bound.
 - Evidence: Shell syntax and focused manager/worker regression tests passed. The source save and server root have not yet been opened by this repository change.
 - Lifecycle: Bootstrap the isolated root with an explicit source save, then start it. Lua is current in the manager's deployment source; starting loads it into the new server process.
+
+## [2026-08-18] Deterministic server started on native Linux
+- Runtime: isolated `~/.local/share/factorio-rl/deterministic` root with a hash-verified copy of `~/.factorio/saves/mod_playground.zip`; original save was not modified.
+- Evidence: Factorio 2.1.14 build 87180 loaded the repository `factorio_cursor_rl_agent` mod, migrated only the copied 2.0.77 save, and opened game/RCON on loopback `34199/27017`. Read-only RCON returned tick `147087`; `/help science_status` registered; a `nauvis`/`player` ScienceStatus report at tick `147091` validated with zero current research and zero labs.
+- Lifecycle: server PID `161496` is running. No Python runner is started. Stop it with `scripts/manage_linux_deterministic_server.sh stop` before any future mod deployment; synchronize/restart a GUI mod copy before joining.
