@@ -2529,3 +2529,8 @@ that consumed it was not.
 - Files: dashboard status payload, header display, styling, and focused test.
 - What: The control center now shows the configured Factorio multiplayer address, `127.0.0.1:34199`, in its header for direct entry in the Factorio GUI. The address is supplied by the live dashboard configuration rather than copied into the page.
 - Evidence: Focused dashboard tests passed (9). The Python control center must be restarted once to serve the expanded status payload; no Factorio state changes are involved.
+
+## [2026-08-18] Dashboard GUI-address display live
+- Runtime: The loopback control center was restarted with the native deterministic configuration after the GUI-address change.
+- Evidence: Read-only `GET /api/status` returns `game_address="127.0.0.1:34199"`, `game=true`, and `rcon=true`; the served dashboard header contains `CONNECT IN FACTORIO` with that address and has no stderr output.
+- Lifecycle: Enter `127.0.0.1:34199` in Factorio's multiplayer connect dialog. No mod deployment, save reset, Factorio restart, or runner action was performed.
