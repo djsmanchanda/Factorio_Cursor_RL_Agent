@@ -35,6 +35,8 @@ class DashboardConfig:
     game_port: int = 34199
     rcon_port: int = 27017
     server_manager: Path | None = None
+    runner_manager: Path | None = None
+    gui_mods: Path | None = None
 
     @property
     def script_output(self) -> Path:
@@ -187,6 +189,9 @@ class OperationManager:
         ])
 
     def _restart_runner(self) -> None:
+        if self._uses_native_runner_manager:
+            self._run_native_runner_manager("restart")
+            return
         if not self._port_open(self.config.rcon_port):
             raise OperationError("RCON is offline; start the server first.")
         self._stop_runner()
@@ -208,6 +213,10 @@ class OperationManager:
         self._write(f"Runner started as PID {self._runner.pid}")
 
     def _stop_runner(self) -> None:
+        if self._uses_native_runner_manager:
+            self._run_native_runner_manager("stop")
+            self._runner = None
+            return
         pids = self._runner_pids()
         if not pids:
             self._write("Runner is already stopped")
@@ -242,6 +251,11 @@ class OperationManager:
     def _restore_save(self) -> None:
         self._stop_runner()
         self._stop_server()
+        if self._uses_native_server_manager:
+            self._run_native_server_manager("reset", source_save=self.config.source_save)
+            self._launch_server()
+            self._wait_for_port(self.config.rcon_port, True, 90)
+            return
         if not self.config.source_save.is_file():
             raise OperationError(f"Starting save not found: {self.config.source_save}")
         self.config.server_save.parent.mkdir(parents=True, exist_ok=True)
@@ -318,15 +332,41 @@ class OperationManager:
     def _uses_native_server_manager(self) -> bool:
         return getattr(self.config, "server_manager", None) is not None
 
-    def _run_native_server_manager(self, action: str) -> None:
+    @property
+    def _uses_native_runner_manager(self) -> bool:
+        return getattr(self.config, "runner_manager", None) is not None
+
+    def _run_native_server_manager(
+        self, action: str, *, source_save: Path | None = None,
+    ) -> None:
         manager = Path(self.config.server_manager)
         if not manager.is_file() or not os.access(manager, os.X_OK):
             raise OperationError(f"Native server manager is unavailable or not executable: {manager}")
-        self._run_checked([
+        command = [
             str(manager), action,
             "--root", str(self.config.server_data),
             "--game-port", str(self.config.game_port),
             "--rcon-port", str(self.config.rcon_port),
+        ]
+        gui_mods = getattr(self.config, "gui_mods", None)
+        if action == "deploy" and gui_mods is not None:
+            command.extend(["--gui-mods", str(gui_mods)])
+        if action == "reset":
+            if source_save is None:
+                raise OperationError("Native save reset requires a configured source save.")
+            command.extend(["--source-save", str(source_save)])
+        self._run_checked(command)
+
+    def _run_native_runner_manager(self, action: str) -> None:
+        manager = Path(self.config.runner_manager)
+        if not manager.is_file() or not os.access(manager, os.X_OK):
+            raise OperationError(f"Native runner manager is unavailable or not executable: {manager}")
+        self._run_checked([
+            str(manager), action,
+            "--root", str(self.config.server_data),
+            "--rcon-port", str(self.config.rcon_port),
+            "--technology", self.config.technology,
+            "--python", sys.executable,
         ])
 
     def _run_visible_elevated_script(self, script: Path, *arguments: str) -> None:

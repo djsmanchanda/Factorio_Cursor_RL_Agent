@@ -80,7 +80,6 @@ def test_moves_legacy_runner_files_to_archive(dashboard_tmp_path: Path) -> None:
     assert not errors.exists()
 
 
-@pytest.mark.skipif(os.name != "nt", reason="dashboard runner tracking is Windows-specific")
 def test_runner_pid_record_tracks_current_process(dashboard_tmp_path: Path) -> None:
     path = dashboard_tmp_path / "autonomous-run.pid"
 

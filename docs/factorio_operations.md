@@ -68,20 +68,46 @@ save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
 
-Run `deploy` only while stopped, then `start`.  Lua changes require this
-deployment and a deterministic Factorio restart; Python consumers require a
-separate restart.  Sync a matching GUI mod copy and restart the GUI client
-before joining this server.
+Run `deploy` only while stopped, then `start`. It copies the current
+deterministic mod both into the isolated server and the configured Linux GUI
+mods directory (default `~/.factorio/mods`) and enables it in the GUI
+`mod-list.json` without disturbing other entries. Lua changes require this
+deployment and a deterministic Factorio restart. Restart the GUI client before
+joining this server.
 
 ### Native deterministic control center
 
 The control center is `tools/dashboard_server.py`; it is a Python server and
-does not need Node.js or npm.  Start it against the native deterministic root
-with `--server-data ~/.local/share/factorio-rl/deterministic`,
-`--rcon-secret-file ~/.local/share/factorio-rl/deterministic/rcon-password`,
-and `--server-manager scripts/manage_linux_deterministic_server.sh`.  It binds
-only to `127.0.0.1:9137`.  With that manager, deploy/start/stop controls use
-the Linux lifecycle script rather than Windows PowerShell.
+does not need Node.js or npm. It binds only to `127.0.0.1:9137`. Start it with
+the isolated server root and both native managers:
+
+```bash
+uv run --with-requirements requirements.txt python tools/dashboard_server.py \
+  --port 9137 \
+  --server-data ~/.local/share/factorio-rl/deterministic \
+  --source-save ~/.factorio/saves/mod_playground.zip \
+  --rcon-secret-file ~/.local/share/factorio-rl/deterministic/rcon-password \
+  --server-manager scripts/manage_linux_deterministic_server.sh \
+  --runner-manager scripts/manage_linux_deterministic_runner.sh \
+  --gui-mods ~/.factorio/mods
+```
+
+When those managers are configured, every dashboard lifecycle control invokes
+a bounded Linux command—never PowerShell:
+
+| Dashboard control | Native command sequence |
+|---|---|
+| Restart Python runner | `manage_linux_deterministic_runner.sh restart` |
+| Stop Python runner | `manage_linux_deterministic_runner.sh stop` |
+| Redeploy mod | `manage_linux_deterministic_server.sh deploy` (server plus GUI copy) |
+| Restart server | `manage_linux_deterministic_server.sh stop`, then `start` |
+| Full refresh | runner `stop`, server `stop`, server `deploy`, server `start`, runner `restart` |
+| Restore | runner `stop`, server `stop`, server `reset --source-save …`, server `start` |
+
+The reset action backs up only the isolated copied save before restoring the
+configured source save; it never changes `~/.factorio/saves`. GUI deployment
+does not close a running GUI client, so restart that client yourself before it
+joins after a Lua change.
 
 ### Mod-copy synchronization and GUI restart
 

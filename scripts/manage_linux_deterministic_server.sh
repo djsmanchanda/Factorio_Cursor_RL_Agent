@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: manage_linux_deterministic_server.sh {bootstrap|deploy|start|stop|status} [options]
+usage: manage_linux_deterministic_server.sh {bootstrap|deploy|reset|start|stop|status} [options]
 
 Options:
   --root PATH           Dedicated server state (default: ~/.local/share/factorio-rl/deterministic).
@@ -14,13 +14,16 @@ Options:
   --factorio-bin PATH   Factorio executable (defaults below --runtime-root).
   --read-data PATH      Factorio read-data directory (defaults below --runtime-root).
   --source-save PATH    Required for bootstrap; copied once into the dedicated root.
+  --gui-mods PATH       Linux GUI Factorio mods directory (default: ~/.factorio/mods).
   --game-port PORT      Game port (default: 34199).
   --rcon-port PORT      Loopback RCON port (default: 27017).
 
 bootstrap copies --source-save only when the dedicated save does not already
 exist. It never modifies the source save or the normal ~/.factorio profile.
-deploy replaces only the isolated deterministic mod copy and requires a stopped
-server. start requires a completed bootstrap.
+reset backs up the isolated save before replacing it from --source-save.
+deploy replaces the isolated server mod and matching Linux GUI mod copy; it
+requires a stopped server. It never restarts the GUI client. start requires a
+completed bootstrap.
 EOF
 }
 
@@ -36,6 +39,10 @@ require_port() {
 
 ACTION="${1:-}"
 [[ -n "$ACTION" ]] || { usage >&2; exit 2; }
+if [[ "$ACTION" == "-h" || "$ACTION" == "--help" ]]; then
+  usage
+  exit 0
+fi
 shift || true
 
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
@@ -43,6 +50,7 @@ RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
+GUI_MODS_PATH="$HOME/.factorio/mods"
 GAME_PORT=34199
 RCON_PORT=27017
 
@@ -53,6 +61,7 @@ while (($#)); do
     --factorio-bin) FACTORIO_BIN="${2:?missing --factorio-bin value}"; shift 2 ;;
     --read-data) READ_DATA="${2:?missing --read-data value}"; shift 2 ;;
     --source-save) SOURCE_SAVE="${2:?missing --source-save value}"; shift 2 ;;
+    --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -61,7 +70,7 @@ while (($#)); do
 done
 
 case "$ACTION" in
-  bootstrap|deploy|start|stop|status) ;;
+  bootstrap|deploy|reset|start|stop|status) ;;
   *) usage >&2; exit 2 ;;
 esac
 
@@ -134,10 +143,55 @@ sync_mod() {
   assert_stopped
   [[ -f "$REPO_ROOT/factorio_mod/control.lua" ]] || die "deterministic mod is missing"
   [[ -f "$REPO_ROOT/factorio_mod/info.json" ]] || die "deterministic mod metadata is missing"
-  mkdir -p "$MODS_PATH"
-  rm -rf "$MODS_PATH/factorio_cursor_rl_agent"
-  cp -a "$REPO_ROOT/factorio_mod" "$MODS_PATH/factorio_cursor_rl_agent"
+  [[ "$(realpath -m "$GUI_MODS_PATH")" != "$(realpath -m "$MODS_PATH")" ]] \
+    || die "GUI mods directory must not be the isolated server mods directory"
+  sync_mod_copy "$MODS_PATH"
+  sync_mod_copy "$GUI_MODS_PATH"
+  enable_gui_mod
   write_server_files
+}
+
+sync_mod_copy() {
+  local target_root="$1"
+  [[ "$target_root" != "/" ]] || die "refusing to deploy a mod directly under /"
+  mkdir -p "$target_root"
+  rm -rf "$target_root/factorio_cursor_rl_agent"
+  cp -a "$REPO_ROOT/factorio_mod" "$target_root/factorio_cursor_rl_agent"
+}
+
+enable_gui_mod() {
+  local gui_mod_list="$GUI_MODS_PATH/mod-list.json"
+  python3 - "$gui_mod_list" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+if path.exists():
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"native Linux deterministic server: invalid GUI mod list: {path}: {exc}")
+else:
+    payload = {"mods": []}
+if not isinstance(payload, dict):
+    raise SystemExit(f"native Linux deterministic server: invalid GUI mod list shape: {path}")
+mods = payload.get("mods")
+if not isinstance(mods, list):
+    raise SystemExit(f"native Linux deterministic server: invalid GUI mod list shape: {path}")
+found = False
+for mod in mods:
+    if not isinstance(mod, dict) or not isinstance(mod.get("name"), str):
+        raise SystemExit(f"native Linux deterministic server: invalid GUI mod list entry: {path}")
+    if mod["name"] == "factorio_cursor_rl_agent":
+        mod["enabled"] = True
+        found = True
+if not found:
+    mods.append({"name": "factorio_cursor_rl_agent", "enabled": True})
+temporary = path.with_name(path.name + ".tmp")
+temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+temporary.replace(path)
+PY
 }
 
 ensure_secret() {
@@ -161,6 +215,26 @@ bootstrap() {
   sync_mod
   ensure_secret
   echo "bootstrapped isolated deterministic server at $DATA_ROOT using copied save $SAVE_PATH"
+}
+
+reset_save() {
+  [[ -n "$SOURCE_SAVE" ]] || die "reset requires --source-save"
+  [[ -f "$SOURCE_SAVE" ]] || die "source save is missing: $SOURCE_SAVE"
+  assert_stopped
+  mkdir -p "$DATA_ROOT/saves/backups"
+  if [[ -f "$SAVE_PATH" ]]; then
+    local backup="$DATA_ROOT/saves/backups/mod_playground-$(date +%Y%m%d-%H%M%S).zip"
+    cp -p "$SAVE_PATH" "$backup"
+    echo "backed up isolated deterministic save to $backup"
+  fi
+  local temporary="$SAVE_PATH.reset.$$"
+  cp -p "$SOURCE_SAVE" "$temporary"
+  cmp -s "$SOURCE_SAVE" "$temporary" || {
+    rm -f "$temporary"
+    die "reset copy does not match source save"
+  }
+  mv "$temporary" "$SAVE_PATH"
+  echo "reset isolated deterministic save from $SOURCE_SAVE"
 }
 
 port_available() {
@@ -238,8 +312,9 @@ case "$ACTION" in
   deploy)
     [[ -d "$DATA_ROOT" ]] || die "server is not bootstrapped"
     sync_mod
-    echo "deployed deterministic mod to $MODS_PATH/factorio_cursor_rl_agent"
+    echo "deployed deterministic mod to $MODS_PATH/factorio_cursor_rl_agent and $GUI_MODS_PATH/factorio_cursor_rl_agent"
     ;;
+  reset) reset_save ;;
   start) start_server ;;
   stop) stop_server ;;
   status) status_server ;;

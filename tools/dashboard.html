@@ -35,27 +35,27 @@
       <div class="action-grid">
         <button data-action="restart_runner">
           <strong>Restart Python runner</strong>
-          <span>Run mining-productivity-4 with the fixed Nauvis settings.</span>
+          <span>Run the fixed Nauvis research target through the Linux runner manager.</span>
         </button>
         <button data-action="deploy_mod">
           <strong>Redeploy mod</strong>
-          <span>Update both normal and dedicated-server mod copies.</span>
+          <span>Synchronize the isolated server and Linux GUI mod copies.</span>
         </button>
         <button data-action="restart_server" class="warn">
           <strong>Restart server</strong>
-          <span>Stop the runner, quit through RCON, then request elevated launch.</span>
+          <span>Stop the runner and launch the isolated Linux deterministic server.</span>
         </button>
         <button data-action="full_refresh" class="warn">
           <strong>Full refresh</strong>
-          <span>Stop, redeploy, restart server, then restart the runner.</span>
+          <span>Stop, deploy to server and GUI, restart Factorio, then restart the runner.</span>
         </button>
         <button data-action="restore_save" class="danger">
           <strong>RESTORE</strong>
-          <span>Backup the current save, restore mod_playground.zip, then start server.</span>
+          <span>Back up the isolated save, restore the source save, then start the Linux server.</span>
         </button>
         <button data-action="stop_runner" class="quiet">
           <strong>Stop Python runner</strong>
-          <span>Stop only autonomous_run.py; leave Factorio running.</span>
+          <span>Stop only the managed Linux runner; leave Factorio running.</span>
         </button>
       </div>
       <p id="action-message" class="action-message">No dashboard action has run yet.</p>
