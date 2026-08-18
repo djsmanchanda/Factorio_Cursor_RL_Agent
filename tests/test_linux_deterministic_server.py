@@ -41,12 +41,11 @@ def test_linux_deterministic_server_deploys_stopped_server_and_gui_mod_copies() 
     assert 'assert_stopped' in source
     assert 'GUI_MODS_PATH="$HOME/.factorio/mods"' in source
     assert '--gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;' in source
-    assert 'rm -rf "$target_root/factorio_cursor_rl_agent"' in source
-    assert 'cp -a "$REPO_ROOT/factorio_mod" "$target_root/factorio_cursor_rl_agent"' in source
-    assert 'enable_gui_mod' in source
-    assert '"name": "factorio_cursor_rl_agent", "enabled": True' in source
+    assert 'sync_mod_copy "$MODS_PATH" factorio_cursor_rl_agent factorio_mod' in source
+    assert 'sync_mod_copy "$MODS_PATH" factorio_training_lab factorio_training_lab' in source
+    assert 'scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"' in source
     assert '"factorio_cursor_rl_agent","enabled":true' in source
-    assert '"factorio_training_lab","enabled":true' not in source
+    assert '"factorio_training_lab","enabled":true' in source
 
 
 def test_linux_deterministic_server_reset_only_replaces_the_isolated_copy() -> None:

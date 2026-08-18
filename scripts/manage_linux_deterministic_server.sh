@@ -21,9 +21,9 @@ Options:
 bootstrap copies --source-save only when the dedicated save does not already
 exist. It never modifies the source save or the normal ~/.factorio profile.
 reset backs up the isolated save before replacing it from --source-save.
-deploy replaces the isolated server mod and matching Linux GUI mod copy; it
-requires a stopped server. It never restarts the GUI client. start requires a
-completed bootstrap.
+deploy replaces both project mods on the isolated server and matching Linux GUI
+profile; it requires a stopped server. It never restarts the GUI client. start
+requires a completed bootstrap.
 EOF
 }
 
@@ -134,7 +134,8 @@ EOF
   {"name":"quality","enabled":true},
   {"name":"recycler","enabled":true},
   {"name":"space-age","enabled":true},
-  {"name":"factorio_cursor_rl_agent","enabled":true}
+  {"name":"factorio_cursor_rl_agent","enabled":true},
+  {"name":"factorio_training_lab","enabled":true}
 ]}
 EOF
 }
@@ -143,55 +144,22 @@ sync_mod() {
   assert_stopped
   [[ -f "$REPO_ROOT/factorio_mod/control.lua" ]] || die "deterministic mod is missing"
   [[ -f "$REPO_ROOT/factorio_mod/info.json" ]] || die "deterministic mod metadata is missing"
+  [[ -f "$REPO_ROOT/factorio_training_lab/control.lua" ]] || die "training mod is missing"
+  [[ -f "$REPO_ROOT/factorio_training_lab/info.json" ]] || die "training mod metadata is missing"
   [[ "$(realpath -m "$GUI_MODS_PATH")" != "$(realpath -m "$MODS_PATH")" ]] \
     || die "GUI mods directory must not be the isolated server mods directory"
-  sync_mod_copy "$MODS_PATH"
-  sync_mod_copy "$GUI_MODS_PATH"
-  enable_gui_mod
+  sync_mod_copy "$MODS_PATH" factorio_cursor_rl_agent factorio_mod
+  sync_mod_copy "$MODS_PATH" factorio_training_lab factorio_training_lab
+  "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"
   write_server_files
 }
 
 sync_mod_copy() {
-  local target_root="$1"
+  local target_root="$1" mod_name="$2" source_name="$3"
   [[ "$target_root" != "/" ]] || die "refusing to deploy a mod directly under /"
   mkdir -p "$target_root"
-  rm -rf "$target_root/factorio_cursor_rl_agent"
-  cp -a "$REPO_ROOT/factorio_mod" "$target_root/factorio_cursor_rl_agent"
-}
-
-enable_gui_mod() {
-  local gui_mod_list="$GUI_MODS_PATH/mod-list.json"
-  python3 - "$gui_mod_list" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-if path.exists():
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"native Linux deterministic server: invalid GUI mod list: {path}: {exc}")
-else:
-    payload = {"mods": []}
-if not isinstance(payload, dict):
-    raise SystemExit(f"native Linux deterministic server: invalid GUI mod list shape: {path}")
-mods = payload.get("mods")
-if not isinstance(mods, list):
-    raise SystemExit(f"native Linux deterministic server: invalid GUI mod list shape: {path}")
-found = False
-for mod in mods:
-    if not isinstance(mod, dict) or not isinstance(mod.get("name"), str):
-        raise SystemExit(f"native Linux deterministic server: invalid GUI mod list entry: {path}")
-    if mod["name"] == "factorio_cursor_rl_agent":
-        mod["enabled"] = True
-        found = True
-if not found:
-    mods.append({"name": "factorio_cursor_rl_agent", "enabled": True})
-temporary = path.with_name(path.name + ".tmp")
-temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-temporary.replace(path)
-PY
+  rm -rf "$target_root/$mod_name"
+  cp -a "$REPO_ROOT/$source_name" "$target_root/$mod_name"
 }
 
 ensure_secret() {
@@ -312,7 +280,7 @@ case "$ACTION" in
   deploy)
     [[ -d "$DATA_ROOT" ]] || die "server is not bootstrapped"
     sync_mod
-    echo "deployed deterministic mod to $MODS_PATH/factorio_cursor_rl_agent and $GUI_MODS_PATH/factorio_cursor_rl_agent"
+    echo "deployed both project mods to $MODS_PATH and $GUI_MODS_PATH"
     ;;
   reset) reset_save ;;
   start) start_server ;;
