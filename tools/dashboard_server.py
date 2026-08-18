@@ -168,7 +168,15 @@ def main() -> int:
     parser.add_argument("--rcon-secret-file", type=Path, help="Local RCON secret file; overrides --rcon-password.")
     parser.add_argument(
         "--server-manager", type=Path,
-        help="Native executable lifecycle manager for deploy/start/stop actions.",
+        help="Native executable lifecycle manager for deploy/reset/start/stop actions.",
+    )
+    parser.add_argument(
+        "--runner-manager", type=Path,
+        help="Native executable lifecycle manager for deterministic runner actions.",
+    )
+    parser.add_argument(
+        "--gui-mods", type=Path, default=Path.home() / ".factorio" / "mods",
+        help="Linux GUI Factorio mods directory synchronized by native deploy.",
     )
     parser.add_argument("--technology", default="mining-productivity-4")
     args = parser.parse_args()
@@ -184,6 +192,8 @@ def main() -> int:
         rcon_password=rcon_password,
         technology=args.technology,
         server_manager=args.server_manager,
+        runner_manager=args.runner_manager,
+        gui_mods=args.gui_mods,
     )
     DashboardHandler.runs_dir = args.runs_dir
     DashboardHandler.manager = OperationManager(config)

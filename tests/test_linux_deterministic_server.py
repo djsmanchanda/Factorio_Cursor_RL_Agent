@@ -35,11 +35,27 @@ def test_linux_deterministic_server_keeps_game_and_rcon_loopback_with_local_secr
     assert 'grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log"' in source
 
 
-def test_linux_deterministic_server_deploys_only_a_stopped_isolated_mod_copy() -> None:
+def test_linux_deterministic_server_deploys_stopped_server_and_gui_mod_copies() -> None:
     source = MANAGER.read_text(encoding="utf-8")
 
     assert 'assert_stopped' in source
-    assert 'rm -rf "$MODS_PATH/factorio_cursor_rl_agent"' in source
-    assert 'cp -a "$REPO_ROOT/factorio_mod" "$MODS_PATH/factorio_cursor_rl_agent"' in source
+    assert 'GUI_MODS_PATH="$HOME/.factorio/mods"' in source
+    assert '--gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;' in source
+    assert 'rm -rf "$target_root/factorio_cursor_rl_agent"' in source
+    assert 'cp -a "$REPO_ROOT/factorio_mod" "$target_root/factorio_cursor_rl_agent"' in source
+    assert 'enable_gui_mod' in source
+    assert '"name": "factorio_cursor_rl_agent", "enabled": True' in source
     assert '"factorio_cursor_rl_agent","enabled":true' in source
     assert '"factorio_training_lab","enabled":true' not in source
+
+
+def test_linux_deterministic_server_reset_only_replaces_the_isolated_copy() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert 'bootstrap|deploy|reset|start|stop|status' in source
+    assert 'reset requires --source-save' in source
+    assert 'mkdir -p "$DATA_ROOT/saves/backups"' in source
+    assert 'cp -p "$SAVE_PATH" "$backup"' in source
+    assert 'cp -p "$SOURCE_SAVE" "$temporary"' in source
+    assert 'cmp -s "$SOURCE_SAVE" "$temporary"' in source
+    assert 'rm -f "$SOURCE_SAVE"' not in source

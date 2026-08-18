@@ -2507,3 +2507,9 @@ that consumed it was not.
 - What: Added a native-manager option so dashboard deploy/start/stop actions target the isolated Linux server rather than Windows PowerShell; the dashboard can read the local RCON secret from a file.
 - Evidence: Focused dashboard and deterministic-manager tests passed (9). The control center is ready to start on loopback port `9137` with the isolated deterministic root.
 - Lifecycle: Start or restart the Python dashboard process after this change. It does not restart Factorio or begin an autonomous runner.
+
+## [2026-08-18] Complete Linux deterministic control-center lifecycle
+- Files: native deterministic server/runner managers, dashboard runtime/server/assets, process tracking, operations documentation, and focused tests.
+- What: Every dashboard lifecycle action now dispatches bounded Linux commands: runner start/stop, server restart, isolated-save reset with backup, and mod deployment to both the isolated server and `~/.factorio/mods`. The GUI `mod-list.json` is updated atomically without removing other enabled mods; deployment still leaves the GUI client for the user to restart.
+- Evidence: Shell syntax, manager help, whitespace, and 29 focused dashboard/server/runner/research tests passed. Linux runner PID records now validate process identity using `/proc` start time, protecting stop/status actions from PID reuse.
+- Lifecycle: Restart the Python control center with both `--server-manager` and `--runner-manager` options to activate the mappings. These changes do not deploy a mod, reset a save, or launch a runner on their own.

@@ -47,7 +47,12 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--force", default="player")
     parser.add_argument("--rcon-host", default="127.0.0.1")
     parser.add_argument("--rcon-port", type=int, default=27017)
-    parser.add_argument("--rcon-password", required=True)
+    credentials = parser.add_mutually_exclusive_group(required=True)
+    credentials.add_argument("--rcon-password")
+    credentials.add_argument(
+        "--rcon-secret-file", type=Path,
+        help="Read the local RCON password from this protected file.",
+    )
     parser.add_argument("--script-output", required=True, type=Path)
     parser.add_argument("--reference-point", type=float, nargs=2, metavar=("X", "Y"), default=(0.0, 0.0))
     parser.add_argument("--max-iterations", type=int, default=20)
@@ -131,6 +136,16 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
         bridge.close()
 
 
+def _load_rcon_secret(path: Path) -> str:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise ValueError(f"RCON secret file is unavailable: {path}") from error
+    if not value:
+        raise ValueError(f"RCON secret file is empty: {path}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a real-base production or research target.")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -149,6 +164,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "production-increase goals are unsupported: declare a real-base rate measurement and capacity policy first"
         )
+    if args.rcon_secret_file is not None:
+        try:
+            args.rcon_password = _load_rcon_secret(args.rcon_secret_file)
+        except ValueError as error:
+            parser.error(str(error))
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
     pid_path = log_path.with_name("autonomous-run.pid")

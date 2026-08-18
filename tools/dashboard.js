@@ -140,14 +140,14 @@ async function refreshPriorities() {
 async function runAction(action) {
   let confirmation = '';
   if (action === 'restore_save') {
-    if (!confirm('Back up the current dedicated save, restore the original mod_playground.zip, and restart the server?')) return;
+    if (!confirm('Back up the isolated deterministic save, restore the configured source save, and restart the Linux server?')) return;
     confirmation = 'RESTORE';
   } else if (action === 'full_refresh') {
-    if (!confirm('Stop the runner and server, redeploy the mod, restart the server, then restart the runner?')) return;
+    if (!confirm('Stop the runner and server, redeploy the mod to the server and GUI, restart Factorio, then restart the runner?')) return;
   } else if (action === 'restart_server') {
-    if (!confirm('Stop the runner and restart the dedicated server?')) return;
+    if (!confirm('Stop the runner and restart the isolated Linux deterministic server?')) return;
   } else if (action === 'deploy_mod') {
-    if (!confirm('Replace both deployed mod copies with the current repository Lua code?')) return;
+    if (!confirm('Replace the isolated server and Linux GUI mod copies with the current repository Lua code? Restart the GUI client before joining.')) return;
   }
   try {
     const response = await fetch(`/api/actions/${action}`, {
