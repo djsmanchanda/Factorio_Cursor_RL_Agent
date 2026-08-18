@@ -2501,3 +2501,9 @@ that consumed it was not.
 - Runtime: isolated `~/.local/share/factorio-rl/deterministic` root with a hash-verified copy of `~/.factorio/saves/mod_playground.zip`; original save was not modified.
 - Evidence: Factorio 2.1.14 build 87180 loaded the repository `factorio_cursor_rl_agent` mod, migrated only the copied 2.0.77 save, and opened game/RCON on loopback `34199/27017`. Read-only RCON returned tick `147087`; `/help science_status` registered; a `nauvis`/`player` ScienceStatus report at tick `147091` validated with zero current research and zero labs.
 - Lifecycle: server PID `161496` is running. No Python runner is started. Stop it with `scripts/manage_linux_deterministic_server.sh stop` before any future mod deployment; synchronize/restart a GUI mod copy before joining.
+
+## [2026-08-18] Native deterministic control center
+- Files: dashboard runtime/server, operations documentation, and focused tests.
+- What: Added a native-manager option so dashboard deploy/start/stop actions target the isolated Linux server rather than Windows PowerShell; the dashboard can read the local RCON secret from a file.
+- Evidence: Focused dashboard and deterministic-manager tests passed (9). The control center is ready to start on loopback port `9137` with the isolated deterministic root.
+- Lifecycle: Start or restart the Python dashboard process after this change. It does not restart Factorio or begin an autonomous runner.

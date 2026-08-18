@@ -53,3 +53,31 @@ def test_restart_server_uses_visible_elevation_path(monkeypatch) -> None:
 
     assert launched == [True]
     assert waited == [(27017, True, 90)]
+
+
+def test_native_manager_dispatches_deploy_and_start_without_powershell(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(
+        server_manager=Path("/native/manage-server"),
+        server_data=Path("/native/deterministic"),
+        game_port=34199,
+        rcon_port=27017,
+    )
+    commands: list[list[str]] = []
+    manager._run_checked = lambda command: commands.append(command)
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(dashboard_runtime.os, "access", lambda *_args: True)
+
+    manager._deploy_mod()
+    manager._launch_server(visible_admin_shell=True)
+
+    assert commands == [
+        [
+            "/native/manage-server", "deploy", "--root", "/native/deterministic",
+            "--game-port", "34199", "--rcon-port", "27017",
+        ],
+        [
+            "/native/manage-server", "start", "--root", "/native/deterministic",
+            "--game-port", "34199", "--rcon-port", "27017",
+        ],
+    ]

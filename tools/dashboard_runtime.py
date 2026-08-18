@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import filecmp
 import json
+import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -32,6 +34,7 @@ class DashboardConfig:
     technology: str = "mining-productivity-4"
     game_port: int = 34199
     rcon_port: int = 27017
+    server_manager: Path | None = None
 
     @property
     def script_output(self) -> Path:
@@ -174,6 +177,9 @@ class OperationManager:
             handle.write(f"{stamp} {message}\n")
 
     def _deploy_mod(self) -> None:
+        if self._uses_native_server_manager:
+            self._run_native_server_manager("deploy")
+            return
         self._run_checked([
             "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
             "-File", str(REPO_ROOT / "scripts" / "deploy_mod.ps1"),
@@ -206,11 +212,18 @@ class OperationManager:
         if not pids:
             self._write("Runner is already stopped")
             return
-        for pid in pids:
-            subprocess.run(
-                ["taskkill.exe", "/PID", str(pid), "/T", "/F"], check=False,
-                capture_output=True, text=True,
-            )
+        if self._uses_native_server_manager:
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+        else:
+            for pid in pids:
+                subprocess.run(
+                    ["taskkill.exe", "/PID", str(pid), "/T", "/F"], check=False,
+                    capture_output=True, text=True,
+                )
         self._runner = None
         for pid in pids:
             clear_runner_pid(self.config.runner_pid_file, pid)
@@ -271,6 +284,11 @@ class OperationManager:
                 self._write("Server stopped through RCON")
             except (OSError, TimeoutError, RconError, OperationError) as error:
                 self._write(f"Graceful shutdown did not finish: {error}")
+        if self._uses_native_server_manager:
+            self._run_native_server_manager("stop")
+            self._wait_for_port(self.config.rcon_port, False, 15)
+            self._write("Native deterministic server stopped")
+            return
         # Always clean up the exact configured process and launcher. A closed
         # RCON port does not prove that either one has exited.
         self._run_elevated_script(
@@ -282,6 +300,9 @@ class OperationManager:
         self._write("Dedicated server process and launcher shell stopped")
 
     def _launch_server(self, *, visible_admin_shell: bool = False) -> None:
+        if self._uses_native_server_manager:
+            self._run_native_server_manager("start")
+            return
         launcher = REPO_ROOT / "scripts" / "launch_dedicated_server.ps1"
         self._write("Requesting elevated server launch; accept the Windows UAC prompt")
         if visible_admin_shell:
@@ -292,6 +313,21 @@ class OperationManager:
         self._run_elevated_script(
             launcher, "-ServerData", str(self.config.server_data),
         )
+
+    @property
+    def _uses_native_server_manager(self) -> bool:
+        return getattr(self.config, "server_manager", None) is not None
+
+    def _run_native_server_manager(self, action: str) -> None:
+        manager = Path(self.config.server_manager)
+        if not manager.is_file() or not os.access(manager, os.X_OK):
+            raise OperationError(f"Native server manager is unavailable or not executable: {manager}")
+        self._run_checked([
+            str(manager), action,
+            "--root", str(self.config.server_data),
+            "--game-port", str(self.config.game_port),
+            "--rcon-port", str(self.config.rcon_port),
+        ])
 
     def _run_visible_elevated_script(self, script: Path, *arguments: str) -> None:
         values = [

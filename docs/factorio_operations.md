@@ -73,6 +73,16 @@ deployment and a deterministic Factorio restart; Python consumers require a
 separate restart.  Sync a matching GUI mod copy and restart the GUI client
 before joining this server.
 
+### Native deterministic control center
+
+The control center is `tools/dashboard_server.py`; it is a Python server and
+does not need Node.js or npm.  Start it against the native deterministic root
+with `--server-data ~/.local/share/factorio-rl/deterministic`,
+`--rcon-secret-file ~/.local/share/factorio-rl/deterministic/rcon-password`,
+and `--server-manager scripts/manage_linux_deterministic_server.sh`.  It binds
+only to `127.0.0.1:9137`.  With that manager, deploy/start/stop controls use
+the Linux lifecycle script rather than Windows PowerShell.
+
 ### Mod-copy synchronization and GUI restart
 
 Factorio does not hot-reload Lua scripts. Any changed mod script must be

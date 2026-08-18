@@ -63,6 +63,18 @@ def build_expansion_state(runs_dir: Path) -> dict:
     }
 
 
+def _rcon_password(secret_file: Path | None, password: str) -> str:
+    if secret_file is None:
+        return password
+    try:
+        value = secret_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ValueError(f"RCON secret file is unavailable: {secret_file}") from exc
+    if not value:
+        raise ValueError(f"RCON secret file is empty: {secret_file}")
+    return value
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     runs_dir = REPO_ROOT / "runs"
     manager: OperationManager
@@ -153,14 +165,25 @@ def main() -> int:
     parser.add_argument("--server-data", type=Path, default=local_app_data / "Factorio-server")
     parser.add_argument("--source-save", type=Path, default=roaming / "Factorio" / "saves" / "mod_playground.zip")
     parser.add_argument("--rcon-password", default="planner_test")
+    parser.add_argument("--rcon-secret-file", type=Path, help="Local RCON secret file; overrides --rcon-password.")
+    parser.add_argument(
+        "--server-manager", type=Path,
+        help="Native executable lifecycle manager for deploy/start/stop actions.",
+    )
     parser.add_argument("--technology", default="mining-productivity-4")
     args = parser.parse_args()
+
+    try:
+        rcon_password = _rcon_password(args.rcon_secret_file, args.rcon_password)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     config = DashboardConfig(
         server_data=args.server_data,
         source_save=args.source_save,
-        rcon_password=args.rcon_password,
+        rcon_password=rcon_password,
         technology=args.technology,
+        server_manager=args.server_manager,
     )
     DashboardHandler.runs_dir = args.runs_dir
     DashboardHandler.manager = OperationManager(config)
