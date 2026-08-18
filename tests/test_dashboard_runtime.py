@@ -55,7 +55,13 @@ def test_native_status_uses_udp_for_factorio_game_port(monkeypatch) -> None:
     manager._port_open = lambda port: port == 27017
     manager._udp_port_bound = lambda port: port == 34199
 
-    assert manager.status()["server"] == {"game": True, "rcon": True}
+    assert manager.status()["server"] == {
+        "host": "127.0.0.1",
+        "game_port": 34199,
+        "game_address": "127.0.0.1:34199",
+        "game": True,
+        "rcon": True,
+    }
 
 
 def test_restart_server_uses_visible_elevation_path(monkeypatch) -> None:

@@ -97,6 +97,9 @@ class OperationManager:
         runner_pids = self._runner_pids()
         return {
             "server": {
+                "host": "127.0.0.1",
+                "game_port": self.config.game_port,
+                "game_address": f"127.0.0.1:{self.config.game_port}",
                 "game": self._game_port_open(self.config.game_port),
                 "rcon": self._port_open(self.config.rcon_port),
             },
