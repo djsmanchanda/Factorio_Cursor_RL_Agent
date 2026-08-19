@@ -516,10 +516,10 @@ def plan_local_extraction(
             client, surface, (existing.output[0], existing.shared_belt_y),
             row_drill_count, expansion_step
         )
-        if row_state == "partial" and not existing.pending:
-            raise ValueError(
-                f"Adjacent {ore} mining row is partially built; refusing to miscount capacity"
-            )
+        # A partially built row is recoverable: ghosts and powered/service
+        # gaps must reach the normal remediation path instead of aborting the
+        # run before coverage and power can finish the row. Count only the
+        # observed row here; the next expansion pass will re-survey capacity.
         drill_count = row_drill_count * (
             2 if existing.pending or row_state == "complete" else 1
         )
