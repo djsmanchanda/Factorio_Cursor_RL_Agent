@@ -44,6 +44,21 @@ local function export_force(command)
   return force
 end
 
+local function primary_recipe_category(recipe)
+  -- Factorio 2.1 exposes categories (plural) on LuaRecipe; the old singular
+  -- LuaRecipe.category field raises and aborts the whole server command.
+  local categories = recipe.categories
+  if (not categories) and recipe.prototype then
+    categories = recipe.prototype.categories
+  end
+  local sorted = {}
+  for _, category in pairs(categories or {}) do
+    table.insert(sorted, category)
+  end
+  table.sort(sorted)
+  return sorted[1] or "crafting"
+end
+
 commands.add_command("export_recipe_catalog", "Export all recipes with unlock state; optional existing force name.", function(command)
   local force = export_force(command)
   local recipes = {}
@@ -65,7 +80,7 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
     for _, reason in ipairs(product_reasons) do table.insert(reasons, reason) end
     local ticks = math.max(1, math.floor((recipe.energy or 0.5) * 60 + 0.5))
     local entry = {
-      name = name, enabled = recipe.enabled, category = recipe.category or "crafting",
+      name = name, enabled = recipe.enabled, category = primary_recipe_category(recipe),
       energy_ticks = ticks, ingredients = ingredients, products = products,
       supported = #reasons == 0,
     }

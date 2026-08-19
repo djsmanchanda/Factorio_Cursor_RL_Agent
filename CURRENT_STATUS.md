@@ -2551,3 +2551,10 @@ that consumed it was not.
 - Runtime: Restarted the isolated deterministic server on game/RCON `34199`/`27017`, RL worker 01 on `35001`/`28001`, and the loopback dashboard on `9137`.
 - Evidence: Listener checks confirm all five endpoints; `GET /api/status` reports deterministic `game=true` and `rcon=true`. The dashboard has no stderr output and no autonomous runner is active.
 - Lifecycle: Connect the GUI to `127.0.0.1:34199`; start a runner only through the control center when a deliberate mission is desired.
+
+## [2026-08-21] Linux-only Factorio 2.1 recipe catalog fix
+- Files: `factorio_mod/recipe_catalog.lua` and its focused compatibility test.
+- Cause: Factorio 2.1 removed the singular runtime `LuaRecipe.category` field. The unguarded access at line 68 raised `LuaRecipe doesn't contain key category`, transitioned the deterministic server to `Failed`, and closed RCON during the research runner's catalog export.
+- Fix: Export a deterministic primary category from Factorio 2.1's plural `LuaRecipe.categories`, with a prototype-category fallback. Only the Linux deterministic server's deployed `recipe_catalog.lua` was updated; GUI, Windows, and RL worker copies were left unchanged.
+- Evidence: `luac` validation plus 62 focused catalog/research tests passed (1 optional skip). A live read-only `GameBridge.export_recipe_catalog(force="player")` generated and schema-validated 651 recipes/16 machines at tick `316428`; RCON remained healthy.
+- Lifecycle: The Linux deterministic server is running with the fix. The failed research runner was not retried automatically; retry it deliberately from the control center when ready.
