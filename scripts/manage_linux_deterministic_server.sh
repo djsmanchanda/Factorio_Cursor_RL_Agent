@@ -222,7 +222,10 @@ start_server() {
   : > "$DATA_ROOT/factorio-current.log"
   : > "$DATA_ROOT/logs/factorio-console.log"
   mkfifo "$STDIN_PATH"
-  tail -f /dev/null > "$STDIN_PATH" &
+  # Keep the FIFO open without inheriting dashboard subprocess stderr.  The
+  # manager is invoked with captured pipes; an inherited descriptor would keep
+  # callers blocked until the keeper is stopped, even after Factorio is ready.
+  tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &
   echo $! > "$STDIN_KEEPER_PID_PATH"
   setsid "$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
     --start-server "$SAVE_PATH" --server-settings "$SERVER_SETTINGS" \

@@ -116,6 +116,22 @@ def test_native_manager_dispatches_server_lifecycle_without_powershell(monkeypat
     ]
 
 
+def test_native_server_manager_commands_get_extended_timeout(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(server_manager=Path("/native/manage-server"))
+    seen: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen.update(kwargs)
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+
+    monkeypatch.setattr(dashboard_runtime.subprocess, "run", fake_run)
+    manager._run_checked(["/native/manage-server", "start"])
+
+    assert seen["timeout"] == 300
+
+
 def test_native_runner_manager_dispatches_start_and_stop_without_windows_tools(monkeypatch) -> None:
     manager = object.__new__(OperationManager)
     manager.config = SimpleNamespace(

@@ -31,7 +31,7 @@ def test_linux_deterministic_server_keeps_game_and_rcon_loopback_with_local_secr
     assert 'od -An -N32 -tx1 /dev/urandom' in source
     assert 'chmod 600 "$SECRET_PATH"' in source
     assert 'mkfifo "$STDIN_PATH"' in source
-    assert 'tail -f /dev/null > "$STDIN_PATH" &' in source
+    assert 'tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &' in source
     assert 'grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log"' in source
 
 

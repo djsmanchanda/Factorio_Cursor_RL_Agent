@@ -6,6 +6,11 @@
 Append-only. Newest entries at the bottom. Entries before 2026-07-18 are
 backfilled from git history because this file did not exist yet.
 
+## [2026-08-21] Linux dashboard lifecycle timeout fix
+- Files: scripts/manage_linux_deterministic_server.sh, scripts/manage_linux_training_worker.sh, tools/dashboard_runtime.py, focused Linux/dashboard tests
+- What: Redirected the FIFO keeper's inherited stderr so captured dashboard subprocesses can exit after Factorio reaches RCON readiness; native server lifecycle commands now allow up to five minutes for slow save migration.
+- Evidence: Focused suite passes (17 tests); deterministic server remains running on 127.0.0.1:34199 with RCON tick probe returning 165864.
+
 ## [2026-01-28] Foundation (backfilled)
 - Files: docs/00–20, schemas/, agent.md, README.md, factorio_mod/, planners/, core/metrics.py, tools/
 - What: Docs suite, invariants, ~40 JSON schemas, snapshot export mod, metrics + supervisor bot policy.

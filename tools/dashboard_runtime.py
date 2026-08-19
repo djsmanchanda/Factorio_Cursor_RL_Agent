@@ -400,7 +400,18 @@ class OperationManager:
         )
         self._run_checked(["powershell.exe", "-NoProfile", "-Command", command])
     def _run_checked(self, command: list[str]) -> None:
-        completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=120)
+        # Native Factorio startup/reset can legitimately exceed the normal
+        # command timeout while a large save is migrated.  Keep this separate
+        # from runner and dashboard commands so Linux lifecycle actions do not
+        # report a false failure while the server continues booting.
+        is_native_server_command = (
+            self._uses_native_server_manager
+            and self.config.server_manager is not None
+            and command
+            and Path(command[0]) == Path(self.config.server_manager)
+        )
+        timeout = 300 if is_native_server_command else 120
+        completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=timeout)
         if completed.stdout.strip():
             self._write(completed.stdout.strip())
         if completed.stderr.strip():

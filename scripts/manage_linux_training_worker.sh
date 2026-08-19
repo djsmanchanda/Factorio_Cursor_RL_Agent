@@ -245,7 +245,7 @@ start_worker() {
   : > "$DATA_ROOT/factorio-current.log"
   : > "$DATA_ROOT/logs/factorio-console.log"
   mkfifo "$STDIN_PATH"
-  tail -f /dev/null > "$STDIN_PATH" &
+  tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &
   echo $! > "$STDIN_KEEPER_PID_PATH"
   setsid "$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
     --start-server "$SAVE_PATH" --server-settings "$SERVER_SETTINGS" \

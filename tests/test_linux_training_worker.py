@@ -46,7 +46,7 @@ def test_linux_worker_keeps_rcon_loopback_and_generates_a_local_secret() -> None
     assert 'chmod 600 "$SECRET_PATH"' in source
     assert 'mkdir -p "$MODS_PATH"' in source
     assert 'mkfifo "$STDIN_PATH"' in source
-    assert 'tail -f /dev/null > "$STDIN_PATH" &' in source
+    assert 'tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &' in source
     assert 'stop_stdin_keeper' in source
     assert ': > "$DATA_ROOT/factorio-current.log"' in source
     assert ': > "$DATA_ROOT/logs/factorio-console.log"' in source
