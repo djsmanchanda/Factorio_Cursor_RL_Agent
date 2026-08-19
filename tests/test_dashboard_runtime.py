@@ -94,7 +94,7 @@ def test_native_manager_dispatches_server_lifecycle_without_powershell(monkeypat
     monkeypatch.setattr(Path, "is_file", lambda _path: True)
     monkeypatch.setattr(dashboard_runtime.os, "access", lambda *_args: True)
 
-    manager._deploy_mod()
+    manager._run_native_server_manager("deploy")
     manager._run_native_server_manager("reset", source_save=Path("/source/mod_playground.zip"))
     manager._launch_server(visible_admin_shell=True)
 
@@ -113,6 +113,32 @@ def test_native_manager_dispatches_server_lifecycle_without_powershell(monkeypat
             "/native/manage-server", "start", "--root", "/native/deterministic",
             "--game-port", "34199", "--rcon-port", "27017",
         ],
+    ]
+
+
+def test_native_deploy_stops_and_restarts_running_server_and_runner(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(
+        server_manager=Path("/native/manage-server"),
+        server_data=Path("/native/deterministic"),
+        game_port=34199,
+        rcon_port=27017,
+        gui_mods=Path("/native/gui-mods"),
+    )
+    events: list[object] = []
+    manager._runner_pids = lambda: [1234]
+    manager._stop_runner = lambda: events.append("stop-runner")
+    manager._stop_server = lambda: events.append("stop-server")
+    manager._launch_server = lambda: events.append("start-server")
+    manager._wait_for_port = lambda *args: events.append(("wait", args))
+    manager._restart_runner = lambda: events.append("restart-runner")
+    manager._run_native_server_manager = lambda action, **_kwargs: events.append(action)
+
+    manager._deploy_mod()
+
+    assert events == [
+        "stop-runner", "stop-server", "deploy", "start-server",
+        ("wait", (27017, True, 90)), "restart-runner",
     ]
 
 
