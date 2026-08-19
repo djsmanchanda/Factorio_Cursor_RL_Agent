@@ -183,7 +183,18 @@ class OperationManager:
 
     def _deploy_mod(self) -> None:
         if self._uses_native_server_manager:
+            # Linux deployment is a lifecycle operation: the native manager
+            # deliberately refuses to replace a loaded mod while Factorio is
+            # running. Preserve whether the runner was active and restore it
+            # after the server has loaded the new copies.
+            runner_was_running = bool(self._runner_pids())
+            self._stop_runner()
+            self._stop_server()
             self._run_native_server_manager("deploy")
+            self._launch_server()
+            self._wait_for_port(self.config.rcon_port, True, 90)
+            if runner_was_running:
+                self._restart_runner()
             return
         self._run_checked([
             "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -281,7 +292,10 @@ class OperationManager:
     def _full_refresh(self) -> None:
         self._stop_runner()
         self._stop_server()
-        self._deploy_mod()
+        if self._uses_native_server_manager:
+            self._run_native_server_manager("deploy")
+        else:
+            self._deploy_mod()
         self._launch_server()
         self._wait_for_port(self.config.rcon_port, True, 90)
         self._restart_runner()

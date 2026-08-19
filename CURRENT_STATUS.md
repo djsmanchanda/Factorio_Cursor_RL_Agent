@@ -11,6 +11,10 @@ backfilled from git history because this file did not exist yet.
 - What: Redirected the FIFO keeper's inherited stderr so captured dashboard subprocesses can exit after Factorio reaches RCON readiness; native server lifecycle commands now allow up to five minutes for slow save migration.
 - Evidence: Focused suite passes (17 tests); deterministic server remains running on 127.0.0.1:34199 with RCON tick probe returning 165864.
 
+## [2026-08-21] Linux dashboard deploy lifecycle fix
+- Files: tools/dashboard_runtime.py, tests/test_dashboard_runtime.py
+- What: Native Linux `deploy_mod` now stops the runner/server before deployment, starts Factorio after synchronizing both mod copies, and restores the runner if it was active. Full refresh avoids duplicating that lifecycle.
+
 ## [2026-01-28] Foundation (backfilled)
 - Files: docs/00–20, schemas/, agent.md, README.md, factorio_mod/, planners/, core/metrics.py, tools/
 - What: Docs suite, invariants, ~40 JSON schemas, snapshot export mod, metrics + supervisor bot policy.
