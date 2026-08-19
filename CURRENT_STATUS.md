@@ -2567,3 +2567,9 @@ that consumed it was not.
 - Fix: Export a deterministic primary category from Factorio 2.1's plural `LuaRecipe.categories`, with a prototype-category fallback. Only the Linux deterministic server's deployed `recipe_catalog.lua` was updated; GUI, Windows, and RL worker copies were left unchanged.
 - Evidence: `luac` validation plus 62 focused catalog/research tests passed (1 optional skip). A live read-only `GameBridge.export_recipe_catalog(force="player")` generated and schema-validated 651 recipes/16 machines at tick `316428`; RCON remained healthy.
 - Lifecycle: The Linux deterministic server is running with the fix. The failed research runner was not retried automatically; retry it deliberately from the control center when ready.
+
+## [2026-08-21] Recover blocked refinery tails and partial mining rows
+- Files: orchestrator/autonomous_builder.py, orchestrator/stage_extraction.py, focused extraction/cohesion tests.
+- Cause: A refinery extension collided with infrastructure added after the original block, while a partially built adjacent mine row was rejected before coverage/power remediation could run.
+- Fix: On that specific collision, preserve the owned refinery and open the already-selected clear managed site; partial rows now continue through normal service/reconciliation and are counted conservatively until the next survey.
+- Evidence: Focused planner regression suite passes (57 tests). Live Nauvis/player was not retried or mutated after diagnosis.

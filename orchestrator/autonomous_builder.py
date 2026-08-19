@@ -958,10 +958,24 @@ def build_mining_stage(
         )
     foundation = None
     if cohesive_target is not None:
-        foundation = _assert_atomic_plate_expansion_affordable(
-            client, surface, force, recipe, extraction, existing_smelter,
-            cohesive_target, emit,
-        )
+        try:
+            foundation = _assert_atomic_plate_expansion_affordable(
+                client, surface, force, recipe, extraction, existing_smelter,
+                cohesive_target, emit,
+            )
+        except StuckError as error:
+            # A managed tail can become permanently blocked by infrastructure
+            # placed after the original refinery. Keep that base intact and
+            # use the already surveyed clear origin for a new managed block;
+            # do not keep retrying the same collision or move entities by hand.
+            if "refinery extension intersects real infrastructure" not in str(error):
+                raise
+            emit(
+                f"SMELTER RECOVERY: existing {recipe} extension is blocked; "
+                "opening a new managed refinery at the selected clear site"
+            )
+            existing_smelter, cohesive_target = None, None
+            unmanaged_refinery = True
     if expand:
         _log_mining_expansion(extraction, emit)
     emit(

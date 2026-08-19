@@ -271,6 +271,41 @@ def test_unmanaged_refinery_expansion_opens_basic_replacement(monkeypatch) -> No
     assert output == (31.0, 41.0)
     assert calls == [("refinery", True), ("mine",), ("refinery", False)]
 
+
+def test_blocked_refinery_tail_falls_back_to_new_managed_site(monkeypatch) -> None:
+    calls = []
+    extraction = SimpleNamespace(
+        build_plan=None, drill_count=6, furnace_count=6,
+        mining_productivity_bonus=0.0, ore_output=(10.0, 20.0),
+        smelter_flow_direction="east", system_drill_count_before=6,
+        system_drill_target=12, ore="iron-ore", smelter_origin=(30.0, 30.0),
+    )
+    state = _state()
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 12))
+    monkeypatch.setattr(
+        builder, "_assert_atomic_plate_expansion_affordable",
+        lambda *_a: (_ for _ in ()).throw(
+            StuckError("iron-plate refinery extension intersects real infrastructure at [(1, 2)]")
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_build_initial_plate_smelter",
+        lambda *_a, **kwargs: calls.append(("refinery", kwargs.get("preflight_only", False)))
+        or (31.0, 41.0),
+    )
+    monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append(("mine",)))
+
+    output = builder.build_mining_stage(
+        object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
+        lambda _message: None, expand=True,
+    )
+
+    assert output == (31.0, 41.0)
+    assert calls == [("refinery", True), ("mine",), ("refinery", False)]
+
 def test_mining_expansion_rejects_full_bill_before_submitting_mine(monkeypatch) -> None:
     extraction = SimpleNamespace(build_plan={"phases": []})
     state = _state()

@@ -457,6 +457,24 @@ def test_planner_resumes_matching_mine_ghosts_instead_of_duplicating(
     assert planned.ore_output == pending.output
     assert planned.drill_count == 4
 
+
+def test_planner_services_non_pending_partial_mine_row(monkeypatch) -> None:
+    existing = ResourceMine((18.5, 20.5), 2, pending=False)
+    _patch_and_rates(monkeypatch, existing=existing)
+    monkeypatch.setattr(
+        "orchestrator.stage_extraction.adjacent_mine_row_state",
+        lambda *_args: "partial",
+    )
+    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+
+    planned = plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
+        belt_type="fast-transport-belt", inserter_type="fast-inserter",
+    )
+
+    assert planned.drill_count == 2
+    assert planned.ore_output == existing.output
+
 def test_planner_refuses_duplicate_pending_smelter(monkeypatch) -> None:
     existing = ResourceMine((18.5, 20.5), 2)
     _patch_and_rates(monkeypatch, existing=existing)
