@@ -2541,3 +2541,8 @@ that consumed it was not.
 - Safety: The deterministic and RL runtimes remain isolated by their distinct roots, saves, ports, and explicit surface/force commands; loading the training-lab mod does not by itself create or mutate any training surface.
 - Evidence: Shell syntax, manager help, whitespace, and 19 focused synchronization/manager/dashboard tests passed.
 - Lifecycle: Stop, redeploy, and restart each live isolated server; then restart the GUI Factorio client before connecting.
+
+## [2026-08-19] Matching two-mod set deployed live
+- Runtime: Stopped and restarted the isolated deterministic server (`34199`/`27017`) and native RL worker 01 (`35001`/`28001`) after deploying both project mods; the original normal-profile save was not modified.
+- Evidence: Repository-to-server-to-GUI directory comparisons were exact for both mods. Both server logs show `factorio_cursor_rl_agent` control checksum `43958595` and `factorio_training_lab` control checksum `807751437`; all three mod lists enable both names. The deterministic dashboard reports `game=true`, `rcon=true`.
+- Lifecycle: Restart the Factorio GUI client, then connect it to `127.0.0.1:34199`. No autonomous runner was started.
