@@ -2546,3 +2546,8 @@ that consumed it was not.
 - Runtime: Stopped and restarted the isolated deterministic server (`34199`/`27017`) and native RL worker 01 (`35001`/`28001`) after deploying both project mods; the original normal-profile save was not modified.
 - Evidence: Repository-to-server-to-GUI directory comparisons were exact for both mods. Both server logs show `factorio_cursor_rl_agent` control checksum `43958595` and `factorio_training_lab` control checksum `807751437`; all three mod lists enable both names. The deterministic dashboard reports `game=true`, `rcon=true`.
 - Lifecycle: Restart the Factorio GUI client, then connect it to `127.0.0.1:34199`. No autonomous runner was started.
+
+## [2026-08-21] Native Factorio services restarted
+- Runtime: Restarted the isolated deterministic server on game/RCON `34199`/`27017`, RL worker 01 on `35001`/`28001`, and the loopback dashboard on `9137`.
+- Evidence: Listener checks confirm all five endpoints; `GET /api/status` reports deterministic `game=true` and `rcon=true`. The dashboard has no stderr output and no autonomous runner is active.
+- Lifecycle: Connect the GUI to `127.0.0.1:34199`; start a runner only through the control center when a deliberate mission is desired.
