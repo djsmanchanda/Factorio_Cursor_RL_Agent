@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Deterministic research queue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "surface", "force", "items", "updated_at", "last_error"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "surface": {"type": "string", "minLength": 1},
+    "force": {"type": "string", "minLength": 1},
+    "items": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["technology", "status"],
+        "properties": {
+          "technology": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+          "status": {"enum": ["pending", "running", "completed", "failed"]},
+          "error": {"type": "string"}
+        }
+      }
+    },
+    "updated_at": {"type": "string", "minLength": 1},
+    "last_error": {"type": ["string", "null"]}
+  }
+}

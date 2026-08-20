@@ -60,6 +60,15 @@ h2 { margin-bottom: 0; font-size: 1.45rem; }
 main { display: grid; grid-template-columns: minmax(350px, .72fr) minmax(540px, 1.6fr); gap: 18px; padding: 18px 0; }
 .controls { grid-column: 1; }
 .priority-panel { grid-column: 1; }
+.research-panel { grid-column: 2; }
+.research-help { color: var(--muted); margin: 0 0 12px; }
+.research-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.research-form input { flex: 1 1 260px; min-width: 0; }
+.research-queue { margin-top: 12px; font: .75rem/1.4 ui-monospace, monospace; color: var(--muted); }
+.research-queue span { display: inline-block; margin: 3px 5px 0 0; padding: 3px 7px; border: 1px solid var(--line); }
+.research-queue .running { color: var(--yellow); border-color: var(--yellow); }
+.research-queue .completed { color: var(--green); }
+.research-queue .failed { color: #ef7373; border-color: #ef7373; }
 .console-panel { grid-column: 2; grid-row: 1 / span 2; }
 .panel { border: 1px solid var(--line); background: linear-gradient(145deg, var(--panel), #161512); box-shadow: 0 16px 40px #0005; }
 .panel-heading { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; border-bottom: 1px solid var(--line); }

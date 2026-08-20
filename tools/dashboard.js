@@ -11,6 +11,13 @@ const priorityBody = document.querySelector('#priority-body');
 const priorityCount = document.querySelector('#priority-count');
 const priorityTabs = [...document.querySelectorAll('[data-priority-tab]')];
 const actionButtons = [...document.querySelectorAll('[data-action]')];
+const researchInput = document.querySelector('#research-technologies');
+const researchSet = document.querySelector('#research-set');
+const researchAppend = document.querySelector('#research-append');
+const researchMessage = document.querySelector('#research-message');
+const researchQueueCount = document.querySelector('#research-queue-count');
+const researchQueue = document.querySelector('#research-queue');
+const researchButtons = [researchSet, researchAppend];
 const titles = {
   runner: 'Autonomous runner',
   control: 'Dashboard actions',
@@ -41,7 +48,7 @@ async function refreshStatus() {
     const busy = Boolean(state.operation.active);
     operationState.textContent = busy ? `RUNNING · ${state.operation.active}` : 'READY';
     operationState.classList.toggle('busy', busy);
-    actionButtons.forEach(button => { button.disabled = busy; });
+    [...actionButtons, ...researchButtons].forEach(button => { button.disabled = busy; });
     actionMessage.textContent = state.operation.last_result;
   } catch (error) {
     operationState.textContent = 'DASHBOARD API OFFLINE';
@@ -140,6 +147,52 @@ async function refreshPriorities() {
   }
 }
 
+async function refreshResearchQueue() {
+  try {
+    const response = await fetch('/api/research', {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Research queue request failed');
+    const items = data.items || [];
+    const pending = items.filter(item => item.status !== 'completed').length;
+    researchQueueCount.textContent = pending ? `${pending} PENDING` : 'NO QUEUE';
+    researchQueue.replaceChildren();
+    items.forEach(item => {
+      const badge = document.createElement('span');
+      badge.className = item.status;
+      badge.textContent = `${item.technology} · ${item.status}`;
+      researchQueue.append(badge);
+    });
+  } catch (error) {
+    researchMessage.textContent = error.message;
+  }
+}
+
+async function submitResearch(mode) {
+  const technologies = researchInput.value.split(',').map(value => value.trim()).filter(Boolean);
+  if (!technologies.length) {
+    researchMessage.textContent = 'Enter at least one technology ID.';
+    return;
+  }
+  const prompt = mode === 'replace'
+    ? 'Replace the current research queue and start the first target? This restarts the Linux runner and changes the deterministic Nauvis base.'
+    : 'Append these technologies and restart the Linux runner to continue the deterministic Nauvis research queue?';
+  if (!confirm(prompt)) return;
+  try {
+    const response = await fetch('/api/research', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Action-Token': token},
+      body: JSON.stringify({technologies, mode}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Research queue request failed');
+    researchMessage.textContent = `${mode === 'replace' ? 'Target set' : 'Research queued'}; runner restart accepted.`;
+    researchInput.value = '';
+    await refreshResearchQueue();
+  } catch (error) {
+    researchMessage.textContent = error.message;
+  }
+}
+
 async function runAction(action) {
   let confirmation = '';
   if (action === 'restore_save') {
@@ -168,6 +221,8 @@ async function runAction(action) {
 }
 
 actionButtons.forEach(button => button.addEventListener('click', () => runAction(button.dataset.action)));
+researchSet.addEventListener('click', () => submitResearch('replace'));
+researchAppend.addEventListener('click', () => submitResearch('append'));
 priorityTabs.forEach(button => button.addEventListener('click', () => {
   selectedPriorityTab = button.dataset.priorityTab;
   priorityTabs.forEach(tab => {
@@ -201,3 +256,5 @@ refreshPriorities();
 setInterval(refreshStatus, 1500);
 setInterval(refreshLog, 800);
 setInterval(refreshPriorities, 1500);
+setInterval(refreshResearchQueue, 1500);
+refreshResearchQueue();

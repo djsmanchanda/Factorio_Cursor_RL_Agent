@@ -64,6 +64,24 @@
       <p id="action-message" class="action-message">No dashboard action has run yet.</p>
     </section>
 
+    <section class="panel research-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">RESEARCH CONTROL</p>
+          <h2>Set or queue research</h2>
+        </div>
+        <p id="research-queue-count" class="operation-state">No queue</p>
+      </div>
+      <p class="research-help">Enter technology IDs separated by commas. The Linux runner prepares each technology's science packs and advances the queue in order. Applying a queue restarts the Linux deterministic runner and changes the Nauvis/player base.</p>
+      <div class="research-form">
+        <input id="research-technologies" type="text" placeholder="automation, logistics, mining-productivity-4" autocomplete="off">
+        <button id="research-set" class="warn">Set target</button>
+        <button id="research-append">Queue after current</button>
+      </div>
+      <p id="research-message" class="action-message">Research queue is read from the deterministic server state.</p>
+      <div id="research-queue" class="research-queue"></div>
+    </section>
+
     <section class="panel priority-panel">
       <div class="panel-heading">
         <div>

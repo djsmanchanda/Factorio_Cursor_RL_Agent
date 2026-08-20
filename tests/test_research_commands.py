@@ -236,3 +236,29 @@ def test_set_research_failure_is_reported_after_pack_preparation(monkeypatch) ->
 
     assert produced == ["automation-science-pack"]
     assert bridge.set_calls == [("player", "automation")]
+
+
+def test_research_queue_processes_pending_items_in_order_and_skips_completed(tmp_path, monkeypatch) -> None:
+    from argparse import Namespace
+    from orchestrator.research_queue import load_queue, new_queue, update_item, write_queue
+    from tools.autonomous_run import _research_queue
+
+    queue_file = tmp_path / "research-queue.json"
+    write_queue(queue_file, new_queue(["automation", "logistics", "chemical-science-pack"]))
+    update_item(queue_file, "automation", "completed")
+    calls: list[str] = []
+
+    def fake_research(args, _emit):
+        calls.append(args.technology)
+        return 0
+
+    import tools.autonomous_run as autonomous_run
+    monkeypatch.setattr(autonomous_run, "_research", fake_research)
+    args = Namespace(
+        queue_file=queue_file, surface="nauvis", force="player", technology="unused",
+    )
+
+    assert _research_queue(args, _ignore_emit) == 0
+    assert calls == ["logistics", "chemical-science-pack"]
+    payload = load_queue(queue_file)
+    assert all(item["status"] == "completed" for item in payload["items"])

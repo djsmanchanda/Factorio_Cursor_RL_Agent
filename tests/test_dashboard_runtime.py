@@ -2,6 +2,7 @@
 # Purpose: Verify dashboard polling uses the validated runner PID record instead of WMI.
 
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 from tools import dashboard_runtime
@@ -186,6 +187,53 @@ def test_native_runner_manager_dispatches_start_and_stop_without_windows_tools(m
             "--python", dashboard_runtime.sys.executable,
         ],
     ]
+
+
+def test_native_runner_manager_can_dispatch_a_persisted_queue(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(
+        runner_manager=Path("/native/manage-runner"),
+        server_data=Path("/native/deterministic"),
+        rcon_port=27017,
+        technology="mining-productivity-4",
+    )
+    commands: list[list[str]] = []
+    manager._run_checked = lambda command: commands.append(command)
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(dashboard_runtime.os, "access", lambda *_args: True)
+
+    manager._run_native_runner_manager("start", queue_file=Path("/native/research-queue.json"))
+
+    assert commands == [[
+        "/native/manage-runner", "start", "--root", "/native/deterministic",
+        "--rcon-port", "27017", "--technology", "mining-productivity-4",
+        "--python", dashboard_runtime.sys.executable,
+        "--queue-file", "/native/research-queue.json",
+    ]]
+
+
+def test_research_queue_action_stops_runner_and_starts_queue_mode() -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(research_queue_file=Path("/native/research-queue.json"))
+    manager._lock = threading.Lock()
+    assert manager._lock.acquire(blocking=False)
+    manager._active = "set_research"
+    manager._started_at = "now"
+    manager._last_action = None
+    manager._last_result = "idle"
+    manager._write = lambda _message: None
+    events: list[object] = []
+    manager._stop_runner = lambda: events.append("stop-runner")
+    manager._run_native_runner_manager = lambda action, **kwargs: events.append((action, kwargs))
+    queue = {"items": [{"technology": "automation"}]}
+
+    manager._run_research_queue_action("set_research", queue)
+
+    assert events == [
+        "stop-runner", ("start", {"queue_file": Path("/native/research-queue.json")})
+    ]
+    assert manager._last_result == "set_research accepted"
+    assert manager._active is None
 
 
 def test_native_restore_uses_manager_reset_then_starts_server() -> None:
