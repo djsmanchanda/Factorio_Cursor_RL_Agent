@@ -268,6 +268,16 @@ class GameBridge:
             command += " " + json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
 
+    def research_options(
+        self, timeout: float = 60.0, *, force: str | None = None,
+    ) -> Path:
+        """List currently open research targets for an existing force."""
+        payload = {"force": force} if force is not None else {}
+        command = "/research_options"
+        if payload:
+            command += " " + json.dumps(payload, separators=(",", ":"))
+        return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
+
     def science_status(self, surface: str, force: str, timeout: float = 60.0) -> Path:
         """Collect read-only research and lab telemetry for one existing target."""
         if not isinstance(surface, str) or not surface:

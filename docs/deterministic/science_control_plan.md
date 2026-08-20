@@ -224,6 +224,12 @@ an autonomous ranker, and it does not infer a technology from telemetry.  A
 future `research select` mode must require an explicit execution authorization
 carrying the candidate allow-list and the selected report identities.
 
+The queue console now gets its picker from the live `/research_options` report.
+It exposes only enabled/open technologies, plus a successor repeatable level
+when the preceding level is already running or queued. A second live
+`/research_status` validation prevents a locked level from being written to the
+queue, even if the UI is stale.
+
 ### Acceptance evidence
 
 - [x] Pure tests cover every diagnosis, report-tick ordering, and deterministic

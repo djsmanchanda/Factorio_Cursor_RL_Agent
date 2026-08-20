@@ -5,6 +5,8 @@ from pathlib import Path
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from tools import dashboard_runtime
 from tools.dashboard_runtime import OperationManager
 
@@ -234,6 +236,40 @@ def test_research_queue_action_stops_runner_and_starts_queue_mode() -> None:
     ]
     assert manager._last_result == "set_research accepted"
     assert manager._active is None
+
+
+class _FakeLiveResearchBridge:
+    def __init__(self, reports: dict[str | None, dict]) -> None:
+        self.reports = reports
+        self.closed = False
+
+    def research_status(self, *, force: str, technology: str | None = None):
+        return self.reports[technology]
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_future_repeatable_target_requires_predecessor_in_queue(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    bridge = _FakeLiveResearchBridge({
+        "mining-productivity-5": {"ok": True, "technology": {
+            "enabled": True, "state": "future", "current_level": 3,
+            "requested_level": 5, "target_completed": False,
+        }},
+    })
+    monkeypatch.setattr(manager, "_research_bridge", lambda: bridge)
+    monkeypatch.setattr(dashboard_runtime, "load_json", lambda value: value)
+
+    with pytest.raises(dashboard_runtime.OperationError, match="mining-productivity-4"):
+        manager._validate_live_research_targets(
+            ["mining-productivity-5"], ["mining-productivity-5"], set(),
+        )
+
+    manager._validate_live_research_targets(
+        ["mining-productivity-5"], ["mining-productivity-4", "mining-productivity-5"], {"mining-productivity-4"},
+    )
+    assert bridge.closed
 
 
 def test_native_restore_uses_manager_reset_then_starts_server() -> None:

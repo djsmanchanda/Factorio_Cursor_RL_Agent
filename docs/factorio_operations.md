@@ -114,6 +114,15 @@ preflight the technology, build or repair its science-pack production, then
 call the mod's `/set_research` command.  Invalid, disabled, already-completed,
 or prerequisite-ineligible targets fail closed and remain visible in the queue.
 
+The technology picker is populated from the live force through the mod's
+`/research_options` report. Locked technologies are not selectable. The next
+repeatable level is selectable immediately, while a later level is exposed
+only when each preceding level is already running or queued. For example,
+`mining-productivity-5` can be appended while `mining-productivity-4` is
+running, but cannot replace that active target by itself. This validation is
+performed again against live `/research_status` before the queue file is
+written.
+
 This is an explicit queue, not autonomous technology-tree search.  The
 deterministic runtime still does not maintain one authoritative production
 manifest containing every item, measured rate, capacity, target, and expansion
