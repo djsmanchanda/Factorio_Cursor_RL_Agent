@@ -2573,3 +2573,9 @@ that consumed it was not.
 - Cause: A refinery extension collided with infrastructure added after the original block, while a partially built adjacent mine row was rejected before coverage/power remediation could run.
 - Fix: On that specific collision, preserve the owned refinery and open the already-selected clear managed site; partial rows now continue through normal service/reconciliation and are counted conservatively until the next survey.
 - Evidence: Focused planner regression suite passes (57 tests). Live Nauvis/player was not retried or mutated after diagnosis.
+
+## [2026-08-21] ScienceStatus disposable validation started
+- Runtime: Native Factorio 2.1.14 worker 01 only (`35001`/`28001`), with a temporary isolated science fixture; deterministic Nauvis/player was not used.
+- Evidence: `/help science_status` registered and `GameBridge.science_status` produced a schema-valid report at tick `956646` with two sorted labs, aggregate `automation-science-pack=100`, and an explicit `no_power` lab. The report path belonged to the worker's server-owned `script-output`.
+- Remaining acceptance gap: the temporary training force had no eligible active research target, so the powered lab reported `no_research_in_progress` rather than `working`. Build a disposable research-enabled fixture before marking Phase 1 runtime acceptance complete.
+- Lifecycle: Worker 01 was stopped after validation; deterministic server and control center remain untouched.
