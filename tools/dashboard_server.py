@@ -113,6 +113,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except OperationError as exc:
                 self._json(500, {"error": str(exc)})
             return
+        if request.path == "/api/research":
+            try:
+                self._json(200, self.manager.research_queue())
+            except OperationError as exc:
+                self._json(500, {"error": str(exc)})
+            return
         if request.path == "/api/logs":
             query = parse_qs(request.query)
             name = query.get("name", ["runner"])[0]
@@ -137,6 +143,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         request = urlsplit(self.path)
         prefix = "/api/actions/"
         if not request.path.startswith(prefix):
+            if request.path == "/api/research":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    if length > 4096:
+                        raise OperationError("Request body is too large.")
+                    payload = json.loads(self.rfile.read(length) or b"{}")
+                    if not isinstance(payload, dict):
+                        raise OperationError("Request body must be an object.")
+                    technologies = payload.get("technologies")
+                    mode = payload.get("mode", "replace")
+                    if not isinstance(technologies, list):
+                        raise OperationError("technologies must be an array")
+                    self.manager.queue_research(technologies, mode=mode)
+                    self._json(202, {"accepted": True, "mode": mode, "technologies": technologies})
+                except (json.JSONDecodeError, OperationError) as exc:
+                    self._json(409, {"error": str(exc)})
+                return
             self._json(404, {"error": "Unknown endpoint."})
             return
         try:

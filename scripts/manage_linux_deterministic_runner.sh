@@ -13,6 +13,7 @@ Options:
   --python PATH       Python interpreter for autonomous_run.py (default: python3).
   --rcon-port PORT    Loopback RCON port (default: 27017).
   --technology NAME   Research target (default: mining-productivity-4).
+  --queue-file PATH   Process this persisted research queue instead of one target.
 
 The runner reads the RCON secret from the isolated server root. It does not
 write to the normal Factorio profile or expose the secret in its command line.
@@ -41,6 +42,7 @@ STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
 PYTHON_BIN="python3"
 RCON_PORT=27017
 TECHNOLOGY="mining-productivity-4"
+QUEUE_FILE=""
 
 while (($#)); do
   case "$1" in
@@ -48,6 +50,7 @@ while (($#)); do
     --python) PYTHON_BIN="${2:?missing --python value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
+    --queue-file) QUEUE_FILE="${2:?missing --queue-file value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -96,8 +99,13 @@ start_runner() {
   mkdir -p "$STATE_ROOT/logs"
   (
     cd "$REPO_ROOT"
+    if [[ -n "$QUEUE_FILE" ]]; then
+      queue_args=(research-queue --queue-file "$QUEUE_FILE")
+    else
+      queue_args=(research "$TECHNOLOGY")
+    fi
     exec setsid "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
-      research "$TECHNOLOGY" --surface nauvis --force player \
+      "${queue_args[@]}" --surface nauvis --force player \
       --rcon-host 127.0.0.1 --rcon-port "$RCON_PORT" \
       --rcon-secret-file "$SECRET_PATH" --script-output "$SCRIPT_OUTPUT" \
       --reference-point 3 -1 --max-iterations 100 --log-file "$LOG_PATH" \
@@ -107,7 +115,11 @@ start_runner() {
     local started
     started="$(runner_pid)"
     if [[ -n "$started" ]]; then
-      echo "started native Linux deterministic runner PID $started technology=$TECHNOLOGY"
+      if [[ -n "$QUEUE_FILE" ]]; then
+        echo "started native Linux deterministic runner PID $started queue=$QUEUE_FILE"
+      else
+        echo "started native Linux deterministic runner PID $started technology=$TECHNOLOGY"
+      fi
       return
     fi
     sleep 0.1

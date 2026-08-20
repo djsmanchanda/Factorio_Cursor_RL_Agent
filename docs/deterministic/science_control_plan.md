@@ -216,9 +216,13 @@ into an unbounded autonomous search or conceal a fixed priority list in the
 ranker.
 
 `tools/autonomous_run.py research <technology>` remains the sole real-base
-actuator in this phase.  A future `research select` mode must require an
-explicit execution authorization carrying the candidate allow-list and the
-selected report identities.
+actuator in this phase.  The Linux deterministic control center now also
+accepts an explicit, persisted `research-queue` of caller-supplied technology
+IDs; it processes that list in order, reusing the same science-pack readiness
+and `/set_research` actuator for each item.  This queue is durable intent, not
+an autonomous ranker, and it does not infer a technology from telemetry.  A
+future `research select` mode must require an explicit execution authorization
+carrying the candidate allow-list and the selected report identities.
 
 ### Acceptance evidence
 

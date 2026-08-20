@@ -26,3 +26,11 @@ def test_linux_deterministic_runner_exposes_only_bounded_actions() -> None:
     assert 'start|stop|restart|status) ;;' in source
     assert 'kill -TERM "$current"' in source
     assert 'setsid "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py"' in source
+
+
+def test_linux_deterministic_runner_supports_persisted_research_queue() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert '--queue-file PATH' in source
+    assert 'queue_args=(research-queue --queue-file "$QUEUE_FILE")' in source
+    assert '"${queue_args[@]}" --surface nauvis --force player' in source

@@ -105,6 +105,25 @@ a bounded Linux command—never PowerShell:
 | Full refresh | runner `stop`, server `stop`, server `deploy`, server `start`, runner `restart` |
 | Restore | runner `stop`, server `stop`, server `reset --source-save …`, server `start` |
 
+The dashboard's **Research control** writes an ordered queue to
+`<server-data>/logs/research-queue.json`.  **Set target** replaces that queue;
+**Queue after current** appends unique technologies while preserving completed
+and failed item state.  Both actions stop the current Linux runner and start it
+in `research-queue` mode.  Each item reuses the existing research workflow:
+preflight the technology, build or repair its science-pack production, then
+call the mod's `/set_research` command.  Invalid, disabled, already-completed,
+or prerequisite-ineligible targets fail closed and remain visible in the queue.
+
+This is an explicit queue, not autonomous technology-tree search.  The
+deterministic runtime still does not maintain one authoritative production
+manifest containing every item, measured rate, capacity, target, and expansion
+location.  It reconstructs live requirements from Factorio reports, recipe
+catalogs, snapshots, and planner state on each run; `autonomous-priorities.json`
+is an operational priority snapshot, while the research queue is durable user
+intent.  A future production-memory slice should add measured rate windows,
+capacity targets, and owned production corridors before enabling automatic
+rate-increase decisions.
+
 The reset action backs up only the isolated copied save before restoring the
 configured source save; it never changes `~/.factorio/saves`. GUI deployment
 does not close a running GUI client, so restart that client yourself before it

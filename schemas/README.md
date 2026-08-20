@@ -12,6 +12,7 @@ Documentation for each schema is maintained in this README.
 
 - `snapshot.schema.json` - Lua to Planner snapshot contract; planner-owned bounded surfaces include versioned resource and water observations
 - `science_status.schema.json` - Lua to deterministic science observer contract for one force's research state and lab input/status telemetry
+- `research_queue.schema.json` - persisted Linux deterministic runner intent and per-technology progress contract
 - `build_plan.schema.json` — Planner → Lua build plan contract
 - `goal.schema.json` — Instruction → Planner goal contract
 - `block.schema.json` — City/Planet block contract

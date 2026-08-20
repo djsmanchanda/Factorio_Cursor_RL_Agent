@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.rcon_client import RconClient, RconError
+from orchestrator.research_queue import ResearchQueueError, load_queue, merge_queue
 from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
@@ -53,6 +54,10 @@ class DashboardConfig:
     @property
     def priority_file(self) -> Path:
         return self.server_data / "logs" / "autonomous-priorities.json"
+
+    @property
+    def research_queue_file(self) -> Path:
+        return self.server_data / "logs" / "research-queue.json"
 
     @property
     def server_save(self) -> Path:
@@ -159,6 +164,58 @@ class OperationManager:
             item.setdefault("status", "ready")
             item.setdefault("reason", "")
         return payload
+
+    def research_queue(self) -> dict:
+        path = self.config.research_queue_file
+        if not path.exists():
+            return {
+                "schema_version": "1.0.0", "surface": "nauvis", "force": "player",
+                "items": [], "updated_at": None, "last_error": None,
+            }
+        try:
+            return load_queue(path)
+        except ResearchQueueError as error:
+            raise OperationError(str(error)) from error
+
+    def queue_research(self, technologies: list[str], *, mode: str = "replace") -> None:
+        """Persist a queue and restart the native runner in queue mode."""
+        if not self._uses_native_runner_manager:
+            raise OperationError("Research queue controls are currently Linux-only.")
+        try:
+            queue = merge_queue(self.config.research_queue_file, technologies, mode=mode)
+        except ResearchQueueError as error:
+            raise OperationError(str(error)) from error
+        if not self._lock.acquire(blocking=False):
+            raise OperationError(f"Another action is already running: {self._active}")
+        action = "set_research" if mode == "replace" else "queue_research"
+        self._active = action
+        self._started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        threading.Thread(
+            target=self._run_research_queue_action,
+            args=(action, queue),
+            daemon=True,
+        ).start()
+
+    def _run_research_queue_action(self, action: str, queue: dict) -> None:
+        try:
+            self._write(
+                f"START {action}: "
+                + ",".join(item["technology"] for item in queue["items"])
+            )
+            self._stop_runner()
+            self._run_native_runner_manager(
+                "start", queue_file=self.config.research_queue_file,
+            )
+            result = f"{action} accepted"
+            self._write(f"OK {result}")
+        except Exception as exc:
+            result = f"{action} failed: {type(exc).__name__}: {exc}"
+            self._write(f"ERROR {result}")
+        finally:
+            self._last_action = action
+            self._last_result = result
+            self._active = None
+            self._lock.release()
 
     def _run_action(self, action: str) -> None:
         try:
@@ -374,17 +431,20 @@ class OperationManager:
             command.extend(["--source-save", str(source_save)])
         self._run_checked(command)
 
-    def _run_native_runner_manager(self, action: str) -> None:
+    def _run_native_runner_manager(self, action: str, *, queue_file: Path | None = None) -> None:
         manager = Path(self.config.runner_manager)
         if not manager.is_file() or not os.access(manager, os.X_OK):
             raise OperationError(f"Native runner manager is unavailable or not executable: {manager}")
-        self._run_checked([
+        command = [
             str(manager), action,
             "--root", str(self.config.server_data),
             "--rcon-port", str(self.config.rcon_port),
             "--technology", self.config.technology,
             "--python", sys.executable,
-        ])
+        ]
+        if queue_file is not None:
+            command.extend(["--queue-file", str(queue_file)])
+        self._run_checked(command)
 
     def _run_visible_elevated_script(self, script: Path, *arguments: str) -> None:
         values = [

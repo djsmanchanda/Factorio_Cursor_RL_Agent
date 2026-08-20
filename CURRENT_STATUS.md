@@ -2579,3 +2579,10 @@ that consumed it was not.
 - Evidence: `/help science_status` registered and `GameBridge.science_status` produced a schema-valid report at tick `956646` with two sorted labs, aggregate `automation-science-pack=100`, and an explicit `no_power` lab. The report path belonged to the worker's server-owned `script-output`.
 - Remaining acceptance gap: the temporary training force had no eligible active research target, so the powered lab reported `no_research_in_progress` rather than `working`. Build a disposable research-enabled fixture before marking Phase 1 runtime acceptance complete.
 - Lifecycle: Worker 01 was stopped after validation; deterministic server and control center remain untouched.
+
+## [2026-08-21] Linux deterministic research queue control
+- Files: `orchestrator/research_queue.py`, `tools/autonomous_run.py`, native runner/dashboard controls, queue schema, focused tests, and operations documentation.
+- What: The operation console can replace or append an explicit ordered technology queue. The Linux runner persists item state, prepares each target's science packs through the existing planner, calls `/set_research`, skips completed items, and records failures without silently changing the RL runtime.
+- Persistent-memory boundary: The queue is durable user intent. The mod and planner still do not maintain a single canonical manifest of every product, measured rate, capacity, target, and expansion location; live reports/catalogs/snapshots and current priority files are reconstructed operational state. Automatic production-rate increases remain intentionally unsupported until measured rate windows and capacity policy are implemented.
+- Evidence: Focused queue, research, dashboard, runner, and server tests pass (36); Python compile, shell syntax, and whitespace checks pass. No Factorio or Lua lifecycle action was required for this Python/controller-only slice.
+- Lifecycle: Restart the loopback dashboard on `9137` to load the new controls. Queue submission is state-changing: it restarts the Linux deterministic runner and may build science-pack production on Nauvis/player.

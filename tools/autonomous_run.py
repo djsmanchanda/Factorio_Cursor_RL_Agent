@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+from copy import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -16,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator.autonomous_builder import StuckError, run
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
 
@@ -136,6 +138,35 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
         bridge.close()
 
 
+def _research_queue(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
+    """Process the persisted queue in order, stopping at the first failure."""
+    try:
+        queue = load_queue(args.queue_file)
+    except ResearchQueueError as error:
+        raise StuckError(str(error)) from error
+    if queue["surface"] != args.surface or queue["force"] != args.force:
+        raise StuckError(
+            "research queue target does not match the runner scope: "
+            f"{queue['surface']}/{queue['force']} != {args.surface}/{args.force}"
+        )
+    for item in queue["items"]:
+        if item["status"] == "completed":
+            continue
+        technology = item["technology"]
+        update_item(args.queue_file, technology, "running")
+        current = copy(args)
+        current.technology = technology
+        try:
+            _research(current, emit)
+        except Exception as error:
+            update_item(args.queue_file, technology, "failed", error=str(error))
+            raise
+        update_item(args.queue_file, technology, "completed")
+        emit(f"RESEARCH QUEUE ITEM COMPLETE: {technology}")
+    emit("RESEARCH QUEUE COMPLETE")
+    return 0
+
+
 def _load_rcon_secret(path: Path) -> str:
     try:
         value = path.read_text(encoding="utf-8").strip()
@@ -155,6 +186,11 @@ def main(argv: list[str] | None = None) -> int:
     research = subcommands.add_parser("research", help="Produce a technology's science packs, then queue it.")
     research.add_argument("technology")
     _add_connection_arguments(research)
+    research_queue = subcommands.add_parser(
+        "research-queue", help="Process an ordered persisted research queue.",
+    )
+    research_queue.add_argument("--queue-file", required=True, type=Path)
+    _add_connection_arguments(research_queue)
     increase = subcommands.add_parser("increase", help="Rejected until a real-base rate policy exists.")
     increase.add_argument("item")
     increase.add_argument("rate", type=float)
@@ -176,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         logger = _RunLogger(log_path)
         logger.emit(
             f"RUN START: command={args.command} "
-            f"target={getattr(args, 'item', getattr(args, 'technology', 'unknown'))} "
+            f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
             f"surface={args.surface} force={args.force} log={log_path}"
         )
         if archived is not None:
@@ -188,6 +224,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "produce":
                 _run_item(args, args.item, logger.emit)
                 return 0
+            if args.command == "research-queue":
+                return _research_queue(args, logger.emit)
             return _research(args, logger.emit)
         except StuckError as error:
             logger.emit(f"STUCK: {error}")
