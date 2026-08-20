@@ -167,8 +167,36 @@ async function refreshResearchQueue() {
   }
 }
 
+async function refreshResearchOptions() {
+  try {
+    const response = await fetch('/api/research/options', {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Research options request failed');
+    const selected = new Set([...researchInput.selectedOptions].map(option => option.value));
+    researchInput.replaceChildren();
+    (data.options || []).forEach(item => {
+      const option = document.createElement('option');
+      option.value = item.technology;
+      option.textContent = `${item.technology} · ${item.state}`;
+      option.title = `Science packs: ${Object.keys(item.science_packs || {}).join(', ') || 'none'}`;
+      option.selected = selected.has(item.technology);
+      researchInput.append(option);
+    });
+    if (!data.options || !data.options.length) {
+      const option = document.createElement('option');
+      option.textContent = 'No open research targets';
+      option.disabled = true;
+      researchInput.append(option);
+    }
+    const active = data.current_target || data.current_research;
+    if (active) researchMessage.textContent = `Active target: ${active}. Select a successor to queue it.`;
+  } catch (error) {
+    researchMessage.textContent = error.message;
+  }
+}
+
 async function submitResearch(mode) {
-  const technologies = researchInput.value.split(',').map(value => value.trim()).filter(Boolean);
+  const technologies = [...researchInput.selectedOptions].map(option => option.value);
   if (!technologies.length) {
     researchMessage.textContent = 'Enter at least one technology ID.';
     return;
@@ -186,7 +214,7 @@ async function submitResearch(mode) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Research queue request failed');
     researchMessage.textContent = `${mode === 'replace' ? 'Target set' : 'Research queued'}; runner restart accepted.`;
-    researchInput.value = '';
+    [...researchInput.options].forEach(option => { option.selected = false; });
     await refreshResearchQueue();
   } catch (error) {
     researchMessage.textContent = error.message;
@@ -257,4 +285,6 @@ setInterval(refreshStatus, 1500);
 setInterval(refreshLog, 800);
 setInterval(refreshPriorities, 1500);
 setInterval(refreshResearchQueue, 1500);
+setInterval(refreshResearchOptions, 3000);
 refreshResearchQueue();
+refreshResearchOptions();

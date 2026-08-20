@@ -2586,3 +2586,10 @@ that consumed it was not.
 - Persistent-memory boundary: The queue is durable user intent. The mod and planner still do not maintain a single canonical manifest of every product, measured rate, capacity, target, and expansion location; live reports/catalogs/snapshots and current priority files are reconstructed operational state. Automatic production-rate increases remain intentionally unsupported until measured rate windows and capacity policy are implemented.
 - Evidence: Focused queue, research, dashboard, runner, and server tests pass (36); Python compile, shell syntax, and whitespace checks pass. No Factorio or Lua lifecycle action was required for this Python/controller-only slice.
 - Lifecycle: Restart the loopback dashboard on `9137` to load the new controls. Queue submission is state-changing: it restarts the Linux deterministic runner and may build science-pack production on Nauvis/player.
+
+## [2026-08-21] Live-open research picker and repeatable prerequisite gating
+- Files: `factorio_mod/research.lua`, `orchestrator/game_bridge.py`, dashboard research API/UI, live-target validation, and focused tests.
+- What: The operation console now discovers enabled/open targets from the live force. Immediate repeatable levels are open; later levels become selectable only when every preceding level is already running or queued. Thus `mining-productivity-5` can be appended while `mining-productivity-4` is active, but cannot replace that active target alone.
+- Safety: Queue requests are checked again against live `/research_status` before persistence. Locked, completed, unknown, and prerequisite-ineligible targets fail closed.
+- Evidence: `luac` validation, compile/whitespace checks, and 42 focused tests pass. Lua changes are repository-only until the deterministic server is explicitly redeployed/restarted.
+- Lifecycle: Deploy the updated `factorio_mod` to the deterministic server and restart Factorio before using the live picker; then restart the dashboard to load the Python/UI changes. No live deployment was performed in this slice.

@@ -72,13 +72,13 @@
         </div>
         <p id="research-queue-count" class="operation-state">No queue</p>
       </div>
-      <p class="research-help">Enter technology IDs separated by commas. The Linux runner prepares each technology's science packs and advances the queue in order. Applying a queue restarts the Linux deterministic runner and changes the Nauvis/player base.</p>
+      <p class="research-help">Select one or more open technologies. A later repeatable level appears only after every earlier level is complete or already running/queued. The Linux runner prepares science packs and advances the queue in order.</p>
       <div class="research-form">
-        <input id="research-technologies" type="text" placeholder="automation, logistics, mining-productivity-4" autocomplete="off">
+        <select id="research-technologies" multiple size="7" aria-label="Open research technologies"></select>
         <button id="research-set" class="warn">Set target</button>
         <button id="research-append">Queue after current</button>
       </div>
-      <p id="research-message" class="action-message">Research queue is read from the deterministic server state.</p>
+      <p id="research-message" class="action-message">Open targets are read from the deterministic server.</p>
       <div id="research-queue" class="research-queue"></div>
     </section>
 

@@ -26,6 +26,23 @@ def _technology(value: Any) -> str:
     return value
 
 
+def validate_technology_list(technologies: Any) -> list[str]:
+    """Validate a caller-supplied ordered list before any live RCON query."""
+    if not isinstance(technologies, list) or not technologies:
+        raise ResearchQueueError("research queue must contain at least one technology")
+    if len(technologies) > MAX_QUEUE_ITEMS:
+        raise ResearchQueueError(f"research queue cannot exceed {MAX_QUEUE_ITEMS} items")
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in technologies:
+        technology = _technology(value)
+        if technology in seen:
+            raise ResearchQueueError(f"research queue contains a duplicate: {technology}")
+        seen.add(technology)
+        result.append(technology)
+    return result
+
+
 def _timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -33,17 +50,10 @@ def _timestamp() -> str:
 def new_queue(technologies: list[str], *, surface: str = "nauvis", force: str = "player") -> dict:
     if not isinstance(surface, str) or not surface or not isinstance(force, str) or not force:
         raise ResearchQueueError("surface and force must be non-empty strings")
-    if not isinstance(technologies, list) or not technologies:
-        raise ResearchQueueError("research queue must contain at least one technology")
-    if len(technologies) > MAX_QUEUE_ITEMS:
-        raise ResearchQueueError(f"research queue cannot exceed {MAX_QUEUE_ITEMS} items")
+    technologies = validate_technology_list(technologies)
     items: list[dict[str, Any]] = []
-    seen: set[str] = set()
     for value in technologies:
         technology = _technology(value)
-        if technology in seen:
-            raise ResearchQueueError(f"research queue contains a duplicate: {technology}")
-        seen.add(technology)
         items.append({"technology": technology, "status": "pending"})
     return {
         "schema_version": SCHEMA_VERSION,
@@ -156,8 +166,7 @@ def merge_queue(path: Path, technologies: list[str], *, mode: str) -> dict:
     if mode == "replace" or not Path(path).exists():
         return write_queue(path, new_queue(technologies))
     current = load_queue(path)
-    if not isinstance(technologies, list) or not technologies:
-        raise ResearchQueueError("research queue must contain at least one technology")
+    technologies = validate_technology_list(technologies)
     if len(current["items"]) + len(technologies) > MAX_QUEUE_ITEMS:
         raise ResearchQueueError(f"research queue cannot exceed {MAX_QUEUE_ITEMS} items")
     existing = {item["technology"] for item in current["items"]}

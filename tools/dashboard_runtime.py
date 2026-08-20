@@ -6,6 +6,7 @@ from __future__ import annotations
 import filecmp
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -22,7 +23,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.rcon_client import RconClient, RconError
-from orchestrator.research_queue import ResearchQueueError, load_queue, merge_queue
+from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.research_queue import (
+    ResearchQueueError, load_queue, merge_queue, validate_technology_list,
+)
 from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
@@ -177,12 +181,123 @@ class OperationManager:
         except ResearchQueueError as error:
             raise OperationError(str(error)) from error
 
+    def _research_bridge(self) -> GameBridge:
+        return GameBridge(
+            script_output=self.config.script_output,
+            host="127.0.0.1",
+            port=self.config.rcon_port,
+            password=self.config.rcon_password,
+            command_timeout=30.0,
+        )
+
+    def research_options(self) -> dict:
+        """Return the live force's open targets for the Linux console."""
+        bridge = self._research_bridge()
+        try:
+            report = load_json(bridge.research_options(force="player"))
+        except Exception as error:
+            raise OperationError(f"Cannot read live research options: {error}") from error
+        finally:
+            bridge.close()
+        if not report.get("ok"):
+            raise OperationError(report.get("error", "Research options report failed"))
+        return report
+
+    @staticmethod
+    def _level_parts(technology: str) -> tuple[str, int] | None:
+        match = re.fullmatch(r"(.+)-(\d+)", technology)
+        return (match.group(1), int(match.group(2))) if match else None
+
+    def _validate_live_research_targets(
+        self, technologies: list[str], candidate: list[str], active: set[str],
+    ) -> None:
+        bridge = self._research_bridge()
+        try:
+            for technology_name in technologies:
+                report = load_json(
+                    bridge.research_status(force="player", technology=technology_name)
+                )
+                if not report.get("ok"):
+                    raise OperationError(
+                        f"{technology_name} is not selectable: {report.get('error', report)}"
+                    )
+                technology = report.get("technology") or {}
+                state = technology.get("state")
+                if technology.get("target_completed") or state == "completed":
+                    raise OperationError(f"{technology_name} is already researched")
+                if not technology.get("enabled", False):
+                    raise OperationError(f"{technology_name} is locked; its prerequisites are not open")
+                if state != "future":
+                    continue
+                parts = self._level_parts(technology_name)
+                current_level = technology.get("current_level")
+                requested_level = technology.get("requested_level")
+                if not parts or not isinstance(current_level, int) or not isinstance(requested_level, int):
+                    raise OperationError(f"{technology_name} is not open yet")
+                if requested_level <= current_level + 1:
+                    continue
+                stem, _ = parts
+                index = candidate.index(technology_name)
+                missing = [
+                    f"{stem}-{level}"
+                    for level in range(current_level + 1, requested_level)
+                    if f"{stem}-{level}" not in active
+                    and f"{stem}-{level}" not in candidate[:index]
+                ]
+                if missing:
+                    raise OperationError(
+                        f"{technology_name} is locked until {', '.join(missing)} is running or queued first"
+                    )
+        finally:
+            bridge.close()
+
     def queue_research(self, technologies: list[str], *, mode: str = "replace") -> None:
         """Persist a queue and restart the native runner in queue mode."""
         if not self._uses_native_runner_manager:
             raise OperationError("Research queue controls are currently Linux-only.")
         try:
-            queue = merge_queue(self.config.research_queue_file, technologies, mode=mode)
+            technologies = validate_technology_list(technologies)
+            queue_path = self.config.research_queue_file
+            existing = load_queue(queue_path) if queue_path.exists() else None
+            bridge = self._research_bridge()
+            try:
+                scope = load_json(bridge.research_status(force="player"))
+                if not scope.get("ok"):
+                    raise OperationError(scope.get("error", "Research status report failed"))
+                active = set(scope.get("research_queue") or [])
+                if scope.get("current_research"):
+                    active.add(scope["current_research"])
+                remembered = scope.get("current_target")
+                prefix: list[str] = []
+                if mode == "append" and (existing is None or not existing["items"]):
+                    if remembered:
+                        prefix.append(remembered)
+                    elif scope.get("current_research"):
+                        fallback = getattr(self.config, "technology", None)
+                        current_parts = self._level_parts(scope["current_research"])
+                        fallback_parts = self._level_parts(fallback) if isinstance(fallback, str) else None
+                        if (
+                            current_parts and fallback_parts
+                            and current_parts[0] == fallback_parts[0]
+                            and fallback_parts[1] > current_parts[1]
+                        ):
+                            prefix.append(fallback)
+                        else:
+                            prefix.append(scope["current_research"])
+                    prefix.extend(scope.get("research_queue") or [])
+                    prefix = list(dict.fromkeys(prefix))
+                merge_input = prefix + technologies
+                candidate = (
+                    [item["technology"] for item in existing["items"]]
+                    + technologies
+                    if mode == "append" and existing is not None
+                    else merge_input
+                )
+                validation_active = active if mode == "append" else set()
+                self._validate_live_research_targets(technologies, candidate, validation_active)
+                queue = merge_queue(queue_path, merge_input, mode=mode)
+            finally:
+                bridge.close()
         except ResearchQueueError as error:
             raise OperationError(str(error)) from error
         if not self._lock.acquire(blocking=False):

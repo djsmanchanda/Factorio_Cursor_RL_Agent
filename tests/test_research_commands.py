@@ -51,6 +51,16 @@ def test_research_status_preserves_legacy_planner_command_when_unscoped() -> Non
     assert calls == [("/research_status", RESEARCH_REPORT_SUBDIR, 60.0)]
 
 
+def test_research_options_sends_existing_force() -> None:
+    bridge, calls = _recording_bridge()
+
+    bridge.research_options(force="player")
+
+    assert calls == [
+        ('/research_options {"force":"player"}', RESEARCH_REPORT_SUBDIR, 60.0)
+    ]
+
+
 def test_increase_command_fails_before_opening_a_game_connection() -> None:
     from tools.autonomous_run import main
 
@@ -168,6 +178,30 @@ def test_repeatable_prior_level_is_goal_met_without_production_or_set(monkeypatc
     assert _research(_research_args("mining-productivity-3"), _ignore_emit) == 0
     assert produced == []
     assert bridge.set_calls == []
+
+
+def test_repeatable_next_level_is_open_and_can_be_started(monkeypatch) -> None:
+    from tools.autonomous_run import _research
+
+    technology = {
+        "name": "mining-productivity-3",
+        "researched": True,
+        "enabled": True,
+        "science_packs": {"automation-science-pack": 1},
+        "requested_level": 4,
+        "current_level": 3,
+        "target_completed": False,
+        "state": "available",
+    }
+    bridge = _FakeResearchBridge(
+        [{"ok": True, "technology": technology}, {"ok": True, "current_research": "mining-productivity-3"}]
+    )
+    produced: list[str] = []
+    _install_fake_research_bridge(monkeypatch, bridge, produced)
+
+    assert _research(_research_args("mining-productivity-4"), _ignore_emit) == 0
+    assert produced == ["automation-science-pack"]
+    assert bridge.set_calls == [("player", "mining-productivity-4")]
 
 
 def test_repeatable_future_level_fails_before_production_or_set(monkeypatch) -> None:
