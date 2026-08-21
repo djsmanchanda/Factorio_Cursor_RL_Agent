@@ -8,7 +8,7 @@ configure_worker() {
   local index="$1"
   [[ "$index" =~ ^[0-9]{2}$ ]] || die "worker index must be a two-digit number"
   local numeric=$((10#$index))
-  (( numeric >= 1 && numeric <= 50 )) || die "worker index must be between 01 and 50"
+  (( numeric >= 1 && numeric <= 20 )) || die "worker index must be between 01 and 20"
   WORKER_INDEX="$index"
   WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"
   RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio"
