@@ -296,7 +296,12 @@ local function build_research_options(force_name)
       if prototype.max_level > prototype.level and technology.level < prototype.max_level then
         local stem = split_requested_name(technology.name)
         if stem then
-          add_option(technology, stem .. "-" .. (technology.level + 1), "available")
+          if not technology.researched then
+            local state = queued_or_current(force, technology.name) and "running" or "available"
+            add_option(technology, stem .. "-" .. technology.level, state)
+          else
+            add_option(technology, stem .. "-" .. (technology.level + 1), "available")
+          end
         end
       elseif not technology.researched then
         add_option(technology, technology.name, "available")
