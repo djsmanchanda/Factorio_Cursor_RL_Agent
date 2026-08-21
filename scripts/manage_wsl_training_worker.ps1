@@ -10,7 +10,7 @@ param(
     [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.0.77.tar.xz",
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
-    [ValidateRange(1, 50)]
+    [ValidateRange(1, 20)]
     [int]$WorkerCount = 5,
     [ValidateRange(1, 80)]
     [int]$SlotsPerWorker = 16,

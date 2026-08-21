@@ -2599,3 +2599,8 @@ that consumed it was not.
 - Fix: The picker now shows the unresearched current level, and Python queue validation requires that level to be active or queued before accepting its successor. The unrelated runner attempt ended at `16:17:20` after a transport-belt production stall; no manual recovery was performed.
 - Evidence: `luac`, compile/whitespace checks, and 38 focused picker/queue tests pass. Fix commit: `efac56c`.
 - Lifecycle: Redeploy the deterministic Lua mod and restart Factorio before the corrected picker is live. The dashboard has been reloaded; no queue clearing or server restart was performed.
+
+## [2026-08-21] Restore PR validation contracts
+- Files: `tools/build_processing_units.py`, `scripts/wsl/training_worker.sh`, `scripts/manage_wsl_training_worker.ps1`
+- What: Restored the explicit topology-policy wording expected by the processing CLI contract and bounded indexed WSL workers to the documented `01`–`20` range.
+- Evidence: Full Python suite passes (`1613 passed, 30 skipped`); focused CI regression tests pass (`8 passed`); shell syntax and whitespace checks pass.
