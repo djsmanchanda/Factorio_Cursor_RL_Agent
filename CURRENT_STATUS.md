@@ -2604,3 +2604,7 @@ that consumed it was not.
 - Files: `tools/build_processing_units.py`, `scripts/wsl/training_worker.sh`, `scripts/manage_wsl_training_worker.ps1`
 - What: Restored the explicit topology-policy wording expected by the processing CLI contract and bounded indexed WSL workers to the documented `01`–`20` range.
 - Evidence: Full Python suite passes (`1613 passed, 30 skipped`); focused CI regression tests pass (`8 passed`); shell syntax and whitespace checks pass.
+
+## [2026-08-21] Align stale CI assertions with current RL worker contracts
+- The latest RL parallelism commit intentionally expanded WSL worker capacity from 20 to 50; CI assertions now verify that current contract instead of narrowing the runtime back to 20.
+- The electronics CLI assertion now checks the argparse choice set semantically, avoiding a Python-version-specific rendering of the same valid choices.

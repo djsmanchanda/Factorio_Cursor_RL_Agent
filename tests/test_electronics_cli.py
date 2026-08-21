@@ -83,7 +83,9 @@ def test_processing_cli_requires_world_spec_and_explicit_live_credentials() -> N
     )
     assert bad_topology.returncode == 2
     assert "invalid choice: 'bogus'" in bad_topology.stderr
-    assert "refuse, reconcile, reset" in bad_topology.stderr
+    assert "choose from" in bad_topology.stderr
+    for mode in ("refuse", "reconcile", "reset"):
+        assert mode in bad_topology.stderr
 
 def test_legacy_mining_builders_require_explicit_existing_resource_acknowledgement() -> None:
     line = _run(
