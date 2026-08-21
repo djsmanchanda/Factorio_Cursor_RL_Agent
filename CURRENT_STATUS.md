@@ -2593,3 +2593,9 @@ that consumed it was not.
 - Safety: Queue requests are checked again against live `/research_status` before persistence. Locked, completed, unknown, and prerequisite-ineligible targets fail closed.
 - Evidence: `luac` validation, compile/whitespace checks, and 42 focused tests pass. Lua changes are repository-only until the deterministic server is explicitly redeployed/restarted.
 - Lifecycle: Deploy the updated `factorio_mod` to the deterministic server and restart Factorio before using the live picker; then restart the dashboard to load the Python/UI changes. No live deployment was performed in this slice.
+
+## [2026-08-21] Keep an unresearched repeatable level selectable
+- Cause: Factorio reports the unresearched current repeatable target as `technology.level=4`, `researched=false`, `state=current`; the picker interpreted that level as already complete and exposed level 5. Live evidence at tick `152019` also showed no active research, while the persisted queue contained a stale `mining-productivity-5` item.
+- Fix: The picker now shows the unresearched current level, and Python queue validation requires that level to be active or queued before accepting its successor. The unrelated runner attempt ended at `16:17:20` after a transport-belt production stall; no manual recovery was performed.
+- Evidence: `luac`, compile/whitespace checks, and 38 focused picker/queue tests pass. Fix commit: `efac56c`.
+- Lifecycle: Redeploy the deterministic Lua mod and restart Factorio before the corrected picker is live. The dashboard has been reloaded; no queue clearing or server restart was performed.
