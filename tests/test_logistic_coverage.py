@@ -108,6 +108,49 @@ def test_chain_never_places_a_roboport_on_top_of_the_chest() -> None:
     assert (40.0, 0.0) not in chain
 
 
+# --- chain spacing: the live waste of 2026-08-21 ---------------------------
+# Ports at (45,-1), (47,-5), (49,-9) each sat a few tiles from their
+# predecessor, stacking supply areas on top of each other, because every hop
+# was capped at "just past where coverage begins". A port that barely extends
+# reach costs a full roboport's worth of power and robots for nothing.
+
+@pytest.mark.parametrize(
+    "target,radius,square",
+    [((101.0, -21.0), _ROBOPORT_CONSTRUCTION_RADIUS, False),
+     ((84.5, -41.5), _ROBOPORT_CONSTRUCTION_RADIUS, False),
+     ((39.5, 31.5), _ROBOPORT_LOGISTIC_RADIUS, True)],
+)
+def test_one_needed_port_is_pushed_toward_the_gap_not_clustered(
+    target: tuple[float, float], radius: float, square: bool,
+) -> None:
+    """A gap just past one roboport's radius warrants ONE useful port, not a
+    cluster beside the existing network edge."""
+    source = (45.0, -1.0)
+    total = math.dist(source, target)
+    assert service_distance(source, target, square=square) > radius
+    chain = roboport_chain(source, target, radius)
+    assert len(chain) == 1
+    # The port travels most of the way to the gap instead of hugging `source`.
+    assert math.dist(source, chain[0]) >= min(30.0, total - radius)
+
+
+@pytest.mark.parametrize("target", [(100.0, 0.0), (200.0, -80.0), (-140.0, 95.0)])
+def test_chain_ports_are_spread_along_the_route(target: tuple[float, float]) -> None:
+    """Consecutive ports sit near one link apart -- never several ports inside
+    one another's supply area."""
+    source = (0.0, 0.0)
+    chain = roboport_chain(source, target, _ROBOPORT_CONSTRUCTION_RADIUS)
+    previous = source
+    for hop in chain:
+        gap = math.dist(previous, hop)
+        assert gap <= _ROBOPORT_LINK_DISTANCE
+        assert gap >= _ROBOPORT_LINK_DISTANCE - 12 or hop is chain[-1], (
+            "an interior hop wasted a port by sitting on its predecessor"
+        )
+        previous = hop
+    assert math.dist(chain[-1], target) <= _ROBOPORT_CONSTRUCTION_RADIUS
+
+
 def test_chain_relocates_a_roboport_off_a_stage_footprint(monkeypatch) -> None:
     ideal = (17.0, 0.0)
     monkeypatch.setattr(

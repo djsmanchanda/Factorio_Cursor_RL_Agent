@@ -611,22 +611,32 @@ def roboport_chain(source: Point, target: Point, radius: float) -> list[Point]:
     """Roboport positions from `source` (an existing roboport) that end with
     `target` inside `radius`, each hop within link distance of the previous.
 
-    The chain deliberately stops `radius` short of `target` instead of walking
-    onto it: a logistic chest IS the target, and the coverage that must reach
-    it is served just as well from the near edge of the supply area. Distances
-    along the chain are Euclidean, which is >= the Chebyshev distance the
-    square service area actually uses -- so a chain that satisfies this
-    satisfies the real area too.
+    Every port is pushed as far along the route toward `target` as its link to
+    the previous port allows, and only the LAST hop is shortened -- to just
+    past the point where `target` enters coverage. Capping every hop that way
+    instead put each new port a few tiles from its predecessor whenever the
+    gap barely exceeded the radius, stacking full supply areas on top of each
+    other for no reach (observed live: ports at (45,-1), (47,-5), (49,-9)).
+    Distances along the chain are Euclidean, which is >= the Chebyshev
+    distance the square service area actually uses -- so remaining Euclidean
+    distance <= radius guarantees square coverage too. A port never stands ON
+    the target: a logistic chest IS the target.
     """
     total = math.dist(source, target)
     if total == 0 or total <= radius:
         return []
+    # How far along the route the last port must sit for `target` to be inside
+    # its service area.
     reach = total - radius + _COVERAGE_MARGIN
     step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
+    cap = total - _COVERAGE_MARGIN  # never stand on the chest itself
+    hops = max(1, math.ceil(reach / step))
     unit = ((target[0] - source[0]) / total, (target[1] - source[1]) / total)
+    travels = [min(step * hop, cap) for hop in range(1, hops)]
+    travels.append(max(reach, min(step * hops, cap)))
     return [
         (float(round(source[0] + unit[0] * travel)), float(round(source[1] + unit[1] * travel)))
-        for travel in (min(step * hop, reach) for hop in range(1, math.ceil(reach / step) + 1))
+        for travel in travels
     ]
 
 
