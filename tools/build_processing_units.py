@@ -41,11 +41,7 @@ def main() -> int:
     parser.add_argument("--spidertron-batteries", type=int, default=2)
     parser.add_argument("--spidertron-bots", type=int, default=50)
     parser.add_argument(
-        "--existing-topology",
-        choices=["refuse", "reconcile", "reset"],
-        metavar="refuse, reconcile, reset",
-        default="refuse",
-        help="How to handle an existing topology: refuse, reconcile, or reset.",
+        "--existing-topology", choices=["refuse", "reconcile", "reset"], default="refuse"
     )
     args = parser.parse_args()
     if not args.plan_only and (not args.script_output or not args.rcon_password):

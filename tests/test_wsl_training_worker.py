@@ -18,7 +18,7 @@ def test_wsl_worker_keeps_runtime_native_and_isolated_by_index() -> None:
     assert 'WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"' in source
     assert 'seed_runtime="$HOME/factorio-training-01/runtime/factorio"' in source
     assert 'cp -a "$seed_runtime" "$RUNTIME_ROOT"' in source
-    assert 'worker index must be between 01 and 20' in source
+    assert 'worker index must be between 01 and 50' in source
     assert 'GAME_PORT=$((35000 + numeric))' in source
     assert 'RCON_PORT=$((28000 + numeric))' in source
     assert 'ln -sfn "$bridge_root/script-output" "$DATA_ROOT/script-output"' in source
@@ -44,7 +44,7 @@ def test_windows_helpers_create_five_runtimes_with_adaptive_slots_without_exposi
     runner = RUNNER.read_text(encoding="utf-8")
 
     assert '[int]$WorkerCount = 5' in manager
-    assert '[ValidateRange(1, 20)]' in manager
+    assert '[ValidateRange(1, 50)]' in manager
     assert '[ValidateRange(1, 80)]' in manager
     assert '[int]$SlotsPerWorker = 16' in manager
     assert '[double]$StaggerSeconds = 2' in manager
