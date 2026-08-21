@@ -66,6 +66,18 @@ _ROBOPORT_SERVICE_AREAS = {
 # Slack subtracted from a chain's final hop so tile rounding can never land it
 # a fraction outside the service radius it was placed to satisfy.
 _COVERAGE_MARGIN = 2.0
+# Roboport placement is batched. A fresh roboport lands at ~50% of its 100 MJ
+# buffer (live-verified) and draws up to ~2.1 MW while topping up, so placing a
+# whole long chain at once stacks a multi-megawatt transient on a small grid and
+# starves production for minutes. Early grids grow in waves of this many ports;
+# once the network can generate the threshold below, batching stops mattering.
+_ROBOPORT_WAVE = 3
+_ROBOPORT_WAVE_GENERATION_KW = 100_000.0
+# A wave must reach roughly full buffer before the next one lands; past the
+# bound the wait gives up rather than stalling the build (low_power remediation
+# still applies downstream).
+_ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
+_ROBOPORT_CHARGE_WAIT_SECONDS = 180.0
 # Avoid laying the same emergency power bridge repeatedly while a newly
 # connected roboport is still charging and reports low_power.
 _REPAIRED_ROBOPORT_POWER: set[Point] = set()
@@ -170,14 +182,23 @@ def assert_affordable(
 def _submit(
     client: RconClient, bridge: GameBridge, surface: str, plan: dict, name: str,
     emit: Callable[[str], None], *, max_retries: int = 2,
+    stage_coverage: Callable[[], None] | None = None,
 ) -> dict:
     """Submit a plan; if a tile is blocked, clear it ONLY when it's obviously
     safe map clutter (a tree, a rock -- never anything a force built) and
     retry. A collision with anything else means this exact placement is
     genuinely occupied -- raise so the caller picks a different spot instead
-    of bulldozing real infrastructure."""
+    of bulldozing real infrastructure.
+
+    `stage_coverage` runs after the material check passes and before any ghost
+    is submitted. Coverage roboports are service infrastructure for THIS plan;
+    staging them before affordability is how a chain of ports got strung across
+    the map for an oil cell whose landfill bill then failed -- the plan never
+    submitted and the grid kept the scars."""
     clear_plan_clutter(client, surface, plan, emit)
     assert_affordable(client, surface, plan.get("force", "player"), plan, name, emit)
+    if stage_coverage is not None:
+        stage_coverage()
     authorization = build_layout_authorization([(name, plan)])
     for attempt in range(max_retries + 1):
         report = load_json(bridge.build_layout(authorization, plan))
@@ -626,6 +647,38 @@ def _repair_existing_roboport_power(
             )
         _REPAIRED_ROBOPORT_POWER.add(position)
 
+def _await_roboport_charge(
+    client: RconClient, surface: str, force: str,
+    near: Point, positions: Sequence[Point], emit: Callable[[str], None],
+) -> None:
+    """Let one roboport wave top up its buffers before the next one lands.
+
+    Each fresh port draws up to ~2.1 MW while charging from ~50%. Landing a
+    whole chain at once turned that into a multi-megawatt transient that
+    browned out a 10 MW early grid and stalled production for minutes; waves
+    of a few ports give the grid time to charge them. A grid that can generate
+    the threshold capacity absorbs any chain and skips the wait entirely."""
+    generation = live_base.network_generation_kw(client, surface, force, near)
+    if generation is not None and generation >= _ROBOPORT_WAVE_GENERATION_KW:
+        return
+    deadline = time.monotonic() + _ROBOPORT_CHARGE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        energies = [
+            live_base.roboport_energy(client, surface, force, position)
+            for position in positions
+        ]
+        if all(
+            energy is not None and energy >= _ROBOPORT_CHARGE_TARGET_J
+            for energy in energies
+        ):
+            return
+        time.sleep(2.0)
+    emit(
+        "  roboport charge wait timed out; continuing -- low_power "
+        "remediation still applies downstream"
+    )
+
+
 def extend_roboport_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_position: Point, emit: Callable[[str], None], *,
@@ -668,35 +721,39 @@ def extend_roboport_coverage(
             f"{target_position} is outside {purpose} coverage of the roboport at "
             f"{nearest} but no chain position could be derived; investigate directly"
         )
-    actions = [
-        {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
-        for x, y in placed
-    ]
-    plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
-    _submit(client, bridge, surface, plan, "roboport_bridge", emit)
-    # A roboport with no power provides NO coverage of either kind, so chaining
-    # one out without connecting it just moves the stall. Observed live: a
-    # bridged roboport sat at no_power and its ghosts never built.
-    #
-    # The status has to be read AFTER the roboport actually exists. Checking
-    # straight after submitting the plan read the status of a ghost, which is
-    # None rather than "no_power", so the guard passed vacuously and left an
-    # unpowered roboport serving nothing.
-    for position in placed:
-        status = _await_built_status(client, surface, position)
-        if status is None:
-            raise StuckError(
-                f"bridged roboport at {position} was never built; it would provide no "
-                f"{purpose} coverage"
-            )
-        if status in {"no_power", "low_power"}:
-            emit(f"  bridged roboport at {position} is {status} -- connecting it")
-            if not extend_power(client, bridge, surface, force, position, emit):
+    for wave_start in range(0, len(placed), _ROBOPORT_WAVE):
+        wave = placed[wave_start:wave_start + _ROBOPORT_WAVE]
+        actions = [
+            {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
+            for x, y in wave
+        ]
+        plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
+        _submit(client, bridge, surface, plan, "roboport_bridge", emit)
+        # A roboport with no power provides NO coverage of either kind, so chaining
+        # one out without connecting it just moves the stall. Observed live: a
+        # bridged roboport sat at no_power and its ghosts never built.
+        #
+        # The status has to be read AFTER the roboport actually exists. Checking
+        # straight after submitting the plan read the status of a ghost, which is
+        # None rather than "no_power", so the guard passed vacuously and left an
+        # unpowered roboport serving nothing.
+        for position in wave:
+            status = _await_built_status(client, surface, position)
+            if status is None:
                 raise StuckError(
-                    f"roboport at {position} cannot be powered; it would provide no "
+                    f"bridged roboport at {position} was never built; it would provide no "
                     f"{purpose} coverage"
                 )
-            _REPAIRED_ROBOPORT_POWER.add(position)
+            if status in {"no_power", "low_power"}:
+                emit(f"  bridged roboport at {position} is {status} -- connecting it")
+                if not extend_power(client, bridge, surface, force, position, emit):
+                    raise StuckError(
+                        f"roboport at {position} cannot be powered; it would provide no "
+                        f"{purpose} coverage"
+                    )
+                _REPAIRED_ROBOPORT_POWER.add(position)
+        if wave_start + _ROBOPORT_WAVE < len(placed):
+            _await_roboport_charge(client, surface, force, nearest, wave, emit)
     return True
 
 

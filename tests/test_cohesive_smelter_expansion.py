@@ -396,7 +396,7 @@ def test_basic_refinery_growth_preserves_bootstrap_variant(monkeypatch) -> None:
     )
     monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
-    monkeypatch.setattr(builder, "_submit", lambda *_a: None)
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: None)
     monkeypatch.setattr(builder, "_bring_modular_refinery_up", lambda *_a, **_k: None)
 
     builder._extend_plate_smelter(
@@ -417,7 +417,7 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "extend_power", lambda *_a: calls.append("power") or True,
     )
-    monkeypatch.setattr(builder, "_submit", lambda *_a: calls.append("submit"))
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: calls.append("submit"))
     monkeypatch.setattr(
         builder, "_bring_modular_refinery_up", lambda *_a, **_k: calls.append("bring"),
     )
@@ -496,7 +496,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
     monkeypatch.setattr(
-        builder, "_submit", lambda *_a: captured.update(plan=_a[3]),
+        builder, "_submit", lambda *_a, **_k: captured.update(plan=_a[3]),
     )
     monkeypatch.setattr(builder, "_bring_modular_refinery_up", lambda *_a, **_k: None)
 

@@ -10,6 +10,11 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 RESERVED_PAIR_COLUMNS = 10
+# A smelter site may drift this far from its mine's output
+# (find_clear_area max_radius 60 plus footprint), so a pending system within
+# this reach of the observed output belongs to THAT mine. Beyond it a ghost is
+# some other system's business.
+_PENDING_SMELTER_RADIUS = 96
 
 def _sc(client: RconClient, lua: str) -> str:
     return client.command("/sc " + lua).strip()
@@ -58,46 +63,38 @@ def mining_productivity_bonus(
 def pending_plate_smelter(
     client: RconClient, surface: str, force: str, ore: str, near: Point,
 ) -> bool:
-    """Whether an UNBUILT deterministic furnace row requests this ore.
+    """Whether an UNBUILT managed furnace system is still constructing near
+    `near`.
 
-    Completeness is judged purely on whether the row is still ghosts. A furnace
-    is deliberately NOT judged on its recipe: unlike an assembling machine it has
-    no settable recipe and auto-selects one from the first ore inserted, so
-    `get_recipe()` is nil for every furnace that has not been fed yet.
+    The test is deliberately coarse: any electric-furnace GHOST within
+    _PENDING_SMELTER_RADIUS of the mine's output means the system serving that
+    mine is mid-construction, so more demand must wait rather than open a
+    duplicate system. The previous detector walked HORIZONTAL furnace rows and
+    their chest positions, but the modular Start/Repeat/End templates lay
+    furnaces out in vertical columns -- observed live at the landfill refinery
+    (54.5/-101.5..-107.5) -- so it never recognized a pending modular system,
+    the runner opened a second one, and its survey collided with the first
+    system's own ore bridge.
 
-    Treating that nil as "still pending" deadlocked the runner outright. A fully
-    built, powered furnace row that had never received ore was reported pending
-    forever, plan_local_extraction refused to continue, and the run aborted
-    before reaching the remediation that would have fixed the starved feed --
-    so the condition causing the refusal could never clear. Observed live: three
-    built copper-plate furnaces, zero ghosts remaining, every run exiting
-    immediately on "refusing to submit a duplicate line".
+    A furnace is deliberately NOT judged on its recipe: unlike an assembling
+    machine it has no settable recipe and auto-selects one from the first ore
+    inserted, so `get_recipe()` is nil for every furnace that has not been fed
+    yet. A fully built, powered row that had never received ore must stay
+    NOT-pending (that starvation has its own remediation path); only ghosts
+    mean construction is still in flight.
+
+    `ore` is kept for call-site stability; ghost proximity alone answers the
+    duplicate question.
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local area={{" + str(near[0] - 320) + "," + str(near[1] - 320) + "},{"
-        + str(near[0] + 320) + "," + str(near[1] + 320) + "}};"
-        "local machines=s.find_entities_filtered{name='electric-furnace',force=f,area=area};"
+        "local area={{" + str(near[0] - _PENDING_SMELTER_RADIUS) + ","
+        + str(near[1] - _PENDING_SMELTER_RADIUS) + "},{"
+        + str(near[0] + _PENDING_SMELTER_RADIUS) + ","
+        + str(near[1] + _PENDING_SMELTER_RADIUS) + "}};"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f,area=area}) do "
-        "if g.ghost_name=='electric-furnace' then table.insert(machines,g) end end;"
-        "local function has_machine(x,y) for _,e in pairs(machines) do if "
-        "math.abs(e.position.x-x)<0.1 and math.abs(e.position.y-y)<0.1 then return true end end "
-        "return false end;local function find_at(x,y) return "
-        "s.find_entities_filtered{force=f,position={x,y},radius=0.2} end;"
-        "local function output_at(x,y) for _,e in pairs(find_at(x,y)) do "
-        "local n=e.type=='entity-ghost' and e.ghost_name or e.name;if "
-        "n=='passive-provider-chest' or n=='steel-chest' then return true end end return false end;"
-        "local function requests(x,y) for _,e in pairs(find_at(x,y)) do local ok,name=pcall(function() "
-        "local sec=e.get_logistic_sections();local slot=sec.sections[1] and sec.sections[1].get_slot(1);"
-        "return slot and slot.value and (slot.value.name or slot.value) end);"
-        "if ok and name=='" + ore + "' then return true end end return false end;"
-        "for _,e in pairs(machines) do local x,y=e.position.x,e.position.y;"
-        "if not has_machine(x-3,y) then local n=1;local pending=e.type=='entity-ghost';"
-        "while has_machine(x+3*n,y) do for _,m in pairs(machines) do if "
-        "math.abs(m.position.x-(x+3*n))<0.1 and math.abs(m.position.y-y)<0.1 then "
-        "if m.type=='entity-ghost' then pending=true end end end;n=n+1 end;"
-        "if pending and requests(x-3,y-5) and output_at(x+3*n,y+3) then "
-        "rcon.print('1');return end end end;rcon.print('0')"
+        "if g.ghost_name=='electric-furnace' then rcon.print('1') return end end;"
+        "rcon.print('0')"
     )
     return _sc(client, lua) == "1"
 def _parse_entities(raw: str) -> list[ExtractionEntity]:

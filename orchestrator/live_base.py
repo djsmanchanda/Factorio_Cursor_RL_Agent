@@ -746,6 +746,56 @@ def roboports_needing_power(
             result.append(((float(x), float(y)), status))
     return result
 
+def roboport_positions(client: RconClient, surface: str, force: str) -> list[Point]:
+    """Every built roboport position for the force, in one round trip."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "out[#out+1]=string.format('%.2f %.2f',e.position.x,e.position.y) end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    if not raw:
+        return []
+    return [tuple(float(v) for v in record.split()) for record in raw.split(";")]
+
+
+def network_generation_kw(
+    client: RconClient, surface: str, force: str, near: Point,
+) -> float | None:
+    """Combined prototype generation capacity (kW) of the electric network
+    nearest `near`, or None when no roboport defines that network.
+
+    Generators only: accumulators store rather than generate, so they are
+    excluded -- a charged battery bank must not license a placement burst the
+    grid cannot sustain. Values are prototype maxima, which is exactly the
+    quantity a charging burst competes against. Verified live on 2.1.14:
+    LuaEntityPrototype.get_max_energy_production() returns kilowatts.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local best=nil;local bd=1e18;"
+        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e end end;"
+        "if not best then rcon.print('NONE') return end;"
+        "local ok,net=pcall(function() return best.electric_network_id end);"
+        "if not ok or net==nil then rcon.print('NONE') return end;"
+        "local total=0;"
+        "for _,g in pairs(s.find_entities_filtered{force=f,type={'generator','solar-panel',"
+        "'electric-energy-interface','fusion-generator','burner-generator'}}) do "
+        "local okid,id=pcall(function() return g.electric_network_id end);"
+        "if okid and id==net then "
+        "local okp,p=pcall(function() return g.prototype.get_max_energy_production() end);"
+        "if okp and type(p)=='number' then total=total+p end end end;"
+        "rcon.print(string.format('%.1f',total))"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    return float(raw)
+
+
 def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) -> Point | None:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
@@ -761,6 +811,30 @@ def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) 
         return None
     x, y = raw.split()
     return (float(x), float(y))
+
+
+def roboport_energy(
+    client: RconClient, surface: str, force: str, near: Point,
+) -> float | None:
+    """Internal buffer energy (J) of the roboport at `near`, or None if absent.
+
+    A fresh roboport lands at roughly half its 100 MJ buffer (live-verified)
+    and draws megawatts while charging its internal batteries -- the transient
+    that stacks into a production-killing spike when whole chains land at once.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "if math.abs(e.position.x-" + str(near[0]) + ")<0.5 and "
+        "math.abs(e.position.y-" + str(near[1]) + ")<0.5 then "
+        "local ok,v=pcall(function() return e.energy end);"
+        "if ok and type(v)=='number' then rcon.print(string.format('%.1f',v)) return end end end;"
+        "rcon.print('NONE')"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    return float(raw)
 
 
 def nearest_container(

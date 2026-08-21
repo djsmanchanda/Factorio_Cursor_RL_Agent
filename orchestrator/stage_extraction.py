@@ -29,6 +29,14 @@ RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 
 
+class PendingSystemDeferred(ValueError):
+    """A plate system for this ore is still constructing; demand must wait.
+
+    Subclasses ValueError because a pending system is a bounded planning
+    refusal, but lets callers distinguish WAIT for it (construction clears
+    itself in minutes) from treat-as-stuck."""
+
+
 @dataclass(frozen=True)
 class LocalExtractionPlan:
     ore: str
@@ -479,7 +487,7 @@ def plan_local_extraction(
     if observed is not None and extraction_state.pending_plate_smelter(
         client, surface, force, ore, observed.output
     ):
-        raise ValueError(
+        raise PendingSystemDeferred(
             f"A pending off-ore smelter already exists near {observed.output}; "
             "refusing to submit a duplicate line"
         )

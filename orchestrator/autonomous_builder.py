@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from orchestrator import extraction_state, live_base
+from orchestrator import extraction_state, live_base, stage_extraction
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
@@ -62,6 +62,7 @@ from orchestrator.stage_services import (
     _DEFAULT_BELT,
     _DEFAULT_INSERTER,
     _LOGISTIC_CHEST_ENTITIES,
+    _ROBOPORT_SERVICE_AREAS,
     _STAGE_CHEST_REACH,
     _diagnose_machines,
     _logistic_chest_positions,
@@ -71,6 +72,7 @@ from orchestrator.stage_services import (
     ensure_logistic_coverage,
     extend_power,
     extend_roboport_coverage,
+    service_distance,
     validate_builder_target,
 )
 from orchestrator.stage_transport import (
@@ -334,8 +336,12 @@ def _place_new_mine(
         raise StuckError(f"mining plan for {extraction.ore} has no power anchor")
     substation_position = power_positions[0]
     plan["surface"], plan["force"] = surface, force
-    _ensure_plan_construction_coverage(client, bridge, surface, force, plan, emit)
-    _submit(client, bridge, surface, plan, f"mining_{extraction.ore}", emit)
+    _submit(
+        client, bridge, surface, plan, f"mining_{extraction.ore}", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, plan, emit,
+        ),
+    )
     stage_xs = [x for x, _y in machine_positions] + [extraction.ore_output[0]]
     stage_ys = [y for _x, y in machine_positions] + [extraction.ore_output[1]]
     area = (
@@ -502,8 +508,12 @@ def _place_plate_expansion_foundation(
         for action in phase["actions"]
     ]
     emit(f"SMELTER FOUNDATION: placing landfill on {len(tiles)} water tile(s) before {recipe}")
-    _ensure_plan_construction_coverage(client, bridge, surface, force, foundation, emit)
-    _submit(client, bridge, surface, foundation, f"{recipe}_smelter_foundation", emit)
+    _submit(
+        client, bridge, surface, foundation, f"{recipe}_smelter_foundation", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, foundation, emit,
+        ),
+    )
     positions = {(int(tile["x"]), int(tile["y"])) for tile in tiles}
     remaining = _wait_for_ghosts(
         client, surface, force, _tile_bounds(positions),
@@ -845,12 +855,17 @@ def _build_initial_plate_smelter(
             ) for action_phase in staged["phases"]
         ],
     }
-    _ensure_plan_construction_coverage(
-        client, bridge, surface, force, coverage_plan, emit,
-    )
     if preflight_only:
+        # A dry run must not mutate the world: coverage roboports are real
+        # infrastructure, and staging them for a plan that is never submitted
+        # is exactly the wasted-chain failure this ordering exists to prevent.
         return provider
-    _submit(client, bridge, surface, plan, f"modular_{recipe}_refinery", emit)
+    _submit(
+        client, bridge, surface, plan, f"modular_{recipe}_refinery", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, coverage_plan, emit,
+        ),
+    )
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, plan,
         FURNACES_PER_MODULE,
@@ -895,6 +910,14 @@ def build_mining_stage(
                 client, surface, force,
             ).get(_DEFAULT_BELT, 0),
         )
+    except stage_extraction.PendingSystemDeferred as error:
+        # The system serving this demand is still being built -- bots need
+        # minutes, not another system. Ending the run here is how the landfill
+        # mission died: the second survey under-counted a half-built mine,
+        # opened a duplicate system, and its preflight collided with the
+        # first system's own ore bridge.
+        emit(f"PLATE SYSTEM PENDING: {error}")
+        raise ProductionPrerequisiteDeferred(str(error)) from error
     except ValueError as error:
         raise StuckError(str(error)) from error
     bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
@@ -1167,35 +1190,65 @@ def _conversion_feed_plan(
 
 def _ensure_plan_construction_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    plan: dict, emit: Callable[[str], None],
+    plan: dict, emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> None:
-    """Extend construction coverage to the complete submitted footprint."""
+    """Extend construction coverage to every action position the plan places.
+
+    Coverage is demanded for POSITIONS, not for the four corners of their
+    bounding box: a pipe route spanning 350 tiles put two of its box corners
+    on empty map with no action anywhere near them, and eleven roboports plus
+    their power chains were strung out to serve nothing. Positions already
+    inside an existing port's service area are skipped locally; only genuinely
+    uncovered positions chain new ports."""
     if not hasattr(client, "command"):
         return
-    positions = [
+    # Keep chained 4x4 roboports off every footprint the plan is about to
+    # reserve; a roboport centre can be clear while still covering a pending
+    # pole or machine ghost, and the executor's centre-only check would accept
+    # the overlap and leave an unbuildable ghost behind.
+    if reserved_tiles is None:
+        reserved_tiles = planned_footprint_tiles(plan)
+    positions = sorted({
         (action["position"]["x"], action["position"]["y"])
         for phase in plan.get("phases", [])
         for action in phase.get("actions", [])
         if "position" in action
-    ]
+    })
     if not positions:
         return
-    # Coverage infrastructure is placed before this plan is submitted. Keep
-    # its 4x4 roboports off every footprint the plan is about to reserve; a
-    # roboport centre can be clear while still covering a pending pole or
-    # machine ghost. The executor's centre-only check would otherwise accept
-    # the overlap and leave an unbuildable ghost behind.
-    reserved_tiles = planned_footprint_tiles(plan)
-    xs, ys = zip(*positions)
-    targets = {
-        (min(xs), min(ys)), (min(xs), max(ys)),
-        (max(xs), min(ys)), (max(xs), max(ys)),
-    }
-    for target in sorted(targets):
-        extend_roboport_coverage(
+    radius, square = _ROBOPORT_SERVICE_AREAS["construction"]
+    ports = live_base.roboport_positions(client, surface, force)
+
+    def uncovered(targets: list[Point]) -> list[Point]:
+        return [
+            target for target in targets
+            if all(
+                service_distance(port, target, square=square) > radius
+                for port in ports
+            )
+        ]
+
+    pending = uncovered(positions)
+    for _ in range(64):
+        if not pending:
+            return
+        target = pending[0]
+        acted = extend_roboport_coverage(
             client, bridge, surface, force, target, emit,
             reserved_tiles=reserved_tiles,
         )
+        ports = live_base.roboport_positions(client, surface, force)
+        pending = uncovered(pending)
+        if pending and pending[0] == target and not acted:
+            raise StuckError(
+                f"{target} needs construction coverage but the surface has no "
+                "roboport to chain from"
+            )
+    raise StuckError(
+        "construction coverage did not converge after 64 chain attempts; "
+        "investigate the coverage survey"
+    )
 
 
 def _prepare_replacement_services(
@@ -1437,9 +1490,13 @@ def build_conversion_stage(
         if action["entity"] == "substation"
     )
     plan["surface"], plan["force"] = surface, force
-    _ensure_plan_construction_coverage(client, bridge, surface, force, plan, emit)
     try:
-        _submit(client, bridge, surface, plan, f"conversion_{recipe}", emit)
+        _submit(
+            client, bridge, surface, plan, f"conversion_{recipe}", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, plan, emit,
+            ),
+        )
     except StuckError:
         _recover_partial_conversion_power(
             client, bridge, surface, force, recipe, substation_position, emit,
@@ -1663,14 +1720,18 @@ def _serve_healthy_line(
         upgrade_bootstrap and item in {"iron-plate", "copper-plate"}
         and requester and requester["name"] == "requester-chest"
     ):
-        extraction = plan_local_extraction(
-            client, surface, force, item, reference_point, 3,
-            belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
-            reuse_existing=True,
-            belt_stock=live_base.available_items(
-                client, surface, force,
-            ).get(_DEFAULT_BELT, 0),
-        )
+        try:
+            extraction = plan_local_extraction(
+                client, surface, force, item, reference_point, 3,
+                belt_type=_DEFAULT_BELT, inserter_type=_DEFAULT_INSERTER,
+                reuse_existing=True,
+                belt_stock=live_base.available_items(
+                    client, surface, force,
+                ).get(_DEFAULT_BELT, 0),
+            )
+        except stage_extraction.PendingSystemDeferred as error:
+            emit(f"PLATE SYSTEM PENDING: {error}")
+            raise ProductionPrerequisiteDeferred(str(error)) from error
         emit(f"  BOOTSTRAP UPGRADE: replacing requester-fed {item} with belt transport")
         build_conversion_stage(
             client, bridge, surface, force, item,

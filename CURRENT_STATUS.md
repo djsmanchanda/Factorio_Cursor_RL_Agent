@@ -2608,3 +2608,16 @@ that consumed it was not.
 ## [2026-08-21] Align stale CI assertions with current RL worker contracts
 - The latest RL parallelism commit intentionally expanded WSL worker capacity from 20 to 50; CI assertions now verify that current contract instead of narrowing the runtime back to 20.
 - The electronics CLI assertion now checks the argparse choice set semantically, avoiding a Python-version-specific rendering of the same valid choices.
+
+## [2026-08-21] Console layout: priorities under Frequent actions
+- Files: tools/dashboard.css
+- What: Explicit grid rows pin Construction priorities directly below Frequent actions in column 1, the console keeps column 2 rows 1-2, research lands below it, and panels hug their content instead of stretching.
+- Why: The console panel's row span auto-pushed research to row 3 and left priorities stranded mid-page under a large gap.
+- Evidence: Full suite passes (1674 passed, 1 skipped with lupa present); the restarted console serves the new grid at 127.0.0.1:9137.
+- Lifecycle: Dashboard process restarted; no Factorio, mod, or runner action required.
+
+## [2026-08-21] Coverage chains serve plans, and pending systems defer
+- Files: orchestrator/{autonomous_builder,stage_services,stage_chemical,live_base,stage_extraction,extraction_state}.py, focused tests
+- What: Four changes from one failed run. (1) Plan coverage now targets every uncovered ACTION POSITION instead of bounding-box corners -- a 350-tile pipe route had chained eleven roboports and their power poles to two corners where nothing existed. (2) Coverage infrastructure stages only AFTER the material check passes (`_submit` gained a `stage_coverage` hook), so a plan that fails affordability never leaves service infrastructure behind; preflight-only dry runs no longer mutate the world at all. (3) Roboport chains land in waves of three while the network generates under 100 MW (live-probed `get_max_energy_production`, kW), each wave charging to ~95 MJ before the next lands; big grids skip the wait. (4) A pending plate system is now any furnace ghost within 96 tiles of its mine's output -- the old horizontal-row walk never matched the modular templates' vertical furnace columns, so the runner opened a duplicate landfill system whose preflight collided with the first system's own ore bridge and ended the run; that condition now raises `PendingSystemDeferred`, which defers the mission ("PLATE SYSTEM PENDING") instead of killing it.
+- Evidence: Live probes on 2.1.14 confirmed roboport buffer 100 MJ, placed-at-~50%, vertical furnace columns at the landfill refinery, and zero remaining ghosts (bots finished the abandoned system). Focused suites pass (102); full suite 1674 passed, 1 skipped.
+- Lifecycle: Python/controller only -- restart the runner before the next mission; no mod redeploy or Factorio restart is required.

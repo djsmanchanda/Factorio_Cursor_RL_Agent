@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator import autonomous_builder, extraction_state, live_base, resource_patches
+from orchestrator import autonomous_builder, extraction_state, live_base, resource_patches, stage_extraction
 from orchestrator.extraction_state import (
     ExtractionEntity,
     ResourceMine,
@@ -306,25 +306,63 @@ def test_extraction_state_reconciles_pending_direct_mine_records() -> None:
     ) == ResourceMine((15.5, 20.5), 1, pending=True)
 
 
-def test_pending_smelter_probe_is_ore_and_pending_specific() -> None:
-    completed_iron = _StateRcon(["0"])
-    pending_copper = _StateRcon(["1"])
+def test_pending_smelter_probe_is_ghost_and_radius_specific() -> None:
+    completed = _StateRcon(["0"])
+    pending = _StateRcon(["1"])
 
     assert not extraction_state.pending_plate_smelter(
-        completed_iron, "nauvis", "player", "copper-ore", (0.0, 0.0)
+        completed, "nauvis", "player", "copper-ore", (0.0, 0.0)
     )
     assert extraction_state.pending_plate_smelter(
-        pending_copper, "nauvis", "player", "copper-ore", (0.0, 0.0)
+        pending, "nauvis", "player", "copper-ore", (0.0, 0.0)
     )
-    assert "name=='copper-ore'" in completed_iron.commands[0]
     # Completeness is ghost-ness and nothing else. A furnace has no settable
     # recipe -- it auto-selects one from the first ore inserted -- so probing
     # get_recipe() reported every row that had not been fed yet as pending
     # forever, and plan_local_extraction refused to continue before reaching the
     # remediation that would have unstarved it. Asserting the probe is ABSENT is
     # the regression guard against reintroducing that deadlock.
-    assert "type=='entity-ghost'" in completed_iron.commands[0]
-    assert "get_recipe" not in completed_iron.commands[0]
+    assert "entity-ghost'" in completed.commands[0]
+    assert "get_recipe" not in completed.commands[0]
+    # The modular templates lay furnaces out in vertical columns, so the old
+    # horizontal row walk never matched a pending modular system and the runner
+    # opened a duplicate one. The probe is now row-shape-blind: any furnace
+    # ghost within the pending radius of the mine's output counts.
+    assert "ghost_name=='electric-furnace'" in completed.commands[0]
+    assert str(extraction_state._PENDING_SMELTER_RADIUS) in completed.commands[0]
+
+
+def test_a_pending_system_defers_the_mission_instead_of_ending_it(monkeypatch) -> None:
+    """The 2026-08-21 landfill failure: a pending system was treated as stuck,
+    the run ended, and the duplicate it opened died on its own preflight."""
+    monkeypatch.setattr(live_base, "available_items", lambda *_args: {})
+
+    def pending(*_args, **_kwargs):
+        raise stage_extraction.PendingSystemDeferred(
+            "A pending off-ore smelter already exists near (1.0, 2.0); "
+            "refusing to submit a duplicate line"
+        )
+
+    monkeypatch.setattr(autonomous_builder, "plan_local_extraction", pending)
+    with pytest.raises(autonomous_builder.ProductionPrerequisiteDeferred):
+        autonomous_builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+
+def test_plan_local_extraction_reports_a_pending_system_as_deferred(monkeypatch) -> None:
+    _patch_and_rates(monkeypatch, existing=ResourceMine(
+        output=(49.5, -65.5), drill_count=3,
+    ))
+    monkeypatch.setattr(
+        extraction_state, "pending_plate_smelter", lambda *_args: True,
+    )
+    with pytest.raises(stage_extraction.PendingSystemDeferred):
+        plan_local_extraction(
+            None, "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+            belt_type="transport-belt", inserter_type="inserter",
+        )
 
 def _patch_and_rates(monkeypatch, *, existing: ResourceMine | None = None) -> None:
     monkeypatch.setattr(
@@ -527,7 +565,7 @@ def test_real_builder_submits_ore_then_calls_modular_refinery(
     )
     monkeypatch.setattr(
         autonomous_builder, "_submit",
-        lambda _client, _bridge, _surface, plan, _name, _emit: submitted.append(plan),
+        lambda _client, _bridge, _surface, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: [])

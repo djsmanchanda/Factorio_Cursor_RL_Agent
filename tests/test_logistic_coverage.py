@@ -152,6 +152,78 @@ def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
     )
     assert powered
 
+
+# --- wave batching: a charging roboport is a multi-megawatt load ----------
+
+def test_charge_wait_is_skipped_when_the_grid_can_generate_the_threshold(monkeypatch) -> None:
+    from orchestrator import stage_services
+
+    monkeypatch.setattr(
+        live_base, "network_generation_kw", lambda *_a: stage_services._ROBOPORT_WAVE_GENERATION_KW,
+    )
+    slept: list[float] = []
+    monkeypatch.setattr(stage_services.time, "sleep", slept.append)
+    stage_services._await_roboport_charge(
+        None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)], lambda _m: None,
+    )
+    assert slept == []
+
+
+def test_charge_wait_polls_until_every_port_in_the_wave_is_charged(monkeypatch) -> None:
+    from orchestrator import stage_services
+
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 10_000.0)
+    readings = iter([50_000_000.0, 95_000_000.0])
+    monkeypatch.setattr(
+        live_base, "roboport_energy", lambda *_a: next(readings),
+    )
+    polls: list[float] = []
+    monkeypatch.setattr(stage_services.time, "sleep", polls.append)
+    stage_services._await_roboport_charge(
+        None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)], lambda _m: None,
+    )
+    assert len(polls) == 1
+
+
+def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
+    """Placing nine ports at once stacks ~9 MW of charge demand on the grid;
+    waves of three let each batch top up before the next lands."""
+    from orchestrator import stage_services
+
+    submitted_waves: list[int] = []
+    waits: list[int] = []
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
+    monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "orchestrator.stage_services._submit",
+        lambda _c, _b, _s, plan, _name, _emit, **_k:
+            submitted_waves.append(len(plan["phases"][0]["actions"])) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        "orchestrator.stage_services._await_built_status", lambda *_a: "working",
+    )
+    monkeypatch.setattr(
+        "orchestrator.stage_services._await_roboport_charge",
+        lambda _c, _s, _f, _near, wave, _emit: waits.append(len(wave)),
+    )
+
+    assert extend_roboport_coverage(
+        None, None, "nauvis", "player", (400.0, 0.0), lambda _m: None,
+    )
+
+    assert sum(submitted_waves) >= 4
+    assert max(submitted_waves) == stage_services._ROBOPORT_WAVE
+    assert waits == submitted_waves[:-1]
+
+
+def test_network_generation_query_sums_generators_on_one_network() -> None:
+    client = _FakeRcon("42000.0")
+    assert live_base.network_generation_kw(client, "nauvis", "player", (3.0, -1.0)) == 42000.0
+    # Accumulators store rather than generate; they must not license a burst.
+    assert "accumulator" not in client.commands[0]
+    assert "get_max_energy_production" in client.commands[0]
+
+
 # --- plan-time chest discovery -------------------------------------------
 
 def test_logistic_chest_positions_finds_feeds_and_output_but_not_plain_chests() -> None:

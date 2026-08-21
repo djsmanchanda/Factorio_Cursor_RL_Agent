@@ -13,6 +13,8 @@ if str(REPO_ROOT) not in sys.path:
 from orchestrator import live_base, stage_chemical
 from orchestrator.stage_services import _ghost_materials
 
+Point = tuple[float, float]
+
 
 def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:
     link = {"phases": [{"name": "fluid_link_water", "actions": [
@@ -31,13 +33,20 @@ def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:
     assert _ghost_materials(foundation) == {"landfill": 1}
 
 
-def test_chemical_coverage_reaches_all_plan_corners(monkeypatch) -> None:
-    covered = []
+def test_chemical_coverage_targets_uncovered_positions_not_box_corners(monkeypatch) -> None:
+    chained: list[Point] = []
+    ports: list[list[Point]] = [[]]
     monkeypatch.setattr(
-        stage_chemical,
-        "extend_roboport_coverage",
-        lambda _client, _bridge, _surface, _force, target, _emit: covered.append(target),
+        stage_chemical.live_base, "roboport_positions",
+        lambda *_args: list(ports[0]),
     )
+
+    def fake_extend(_client, _bridge, _surface, _force, target, _emit):
+        chained.append(target)
+        ports[0].append((target[0], target[1] - 10))
+        return True
+
+    monkeypatch.setattr(stage_chemical, "extend_roboport_coverage", fake_extend)
     plan = {"phases": [{"name": "route", "actions": [
         {"action_type": "place_tile_ghost", "tile": "landfill", "position": {"x": -5, "y": 3}},
         {"action_type": "place_ghost", "entity": "pipe", "position": {"x": 12.5, "y": 18.5}},
@@ -47,7 +56,10 @@ def test_chemical_coverage_reaches_all_plan_corners(monkeypatch) -> None:
         type("Client", (), {"command": object()})(), object(), "nauvis", "player", plan, lambda _line: None,
     )
 
-    assert covered == [(-5, 3), (-5, 18.5), (12.5, 3), (12.5, 18.5)]
+    # One chain covers both actions, so the second needs no port of its own --
+    # and the two bounding-box corners (-5, 18.5) / (12.5, 3) are demanded by
+    # nobody: they were how roboports got strung across empty map.
+    assert chained == [(-5.0, 3)]
 
 
 def test_occupied_tiles_can_leave_water_for_fluid_routing() -> None:

@@ -13,8 +13,9 @@ from orchestrator.stage_extraction import (
     choose_mining_origin, direct_mine_plan, existing_mine_service_geometry,
 )
 from orchestrator.stage_services import (
-    StuckError, _diagnose_machines, _logistic_chest_positions, _submit,
-    _wait_for_ghosts, extend_roboport_coverage,
+    StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
+    _logistic_chest_positions, _submit,
+    _wait_for_ghosts, extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
     _publish_output_chest, _swap_infinity_chests, ensure_ingredient_transport,
@@ -67,21 +68,52 @@ def _ensure_plan_construction_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     plan: dict, emit: Callable[[str], None],
 ) -> None:
-    """Cover the complete chemical footprint before any construction ghost lands."""
+    """Cover every action position the chemical plan places.
+
+    Positions are covered directly rather than through their bounding-box
+    corners: the oil cell's pipe routes span hundreds of tiles, so two box
+    corners routinely land on empty map with no action near them and chained a
+    roboport chain out to nothing."""
     if not hasattr(client, "command"):
         return
-    positions = [
+    positions = sorted({
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
-    ]
+        if "position" in action
+    })
     if not positions:
         return
-    xs, ys = zip(*positions)
-    for target in sorted({
-        (min(xs), min(ys)), (min(xs), max(ys)),
-        (max(xs), min(ys)), (max(xs), max(ys)),
-    }):
-        extend_roboport_coverage(client, bridge, surface, force, target, emit)
+    radius, square = _ROBOPORT_SERVICE_AREAS["construction"]
+    ports = live_base.roboport_positions(client, surface, force)
+
+    def uncovered(targets: list[Point]) -> list[Point]:
+        return [
+            target for target in targets
+            if all(
+                service_distance(port, target, square=square) > radius
+                for port in ports
+            )
+        ]
+
+    pending = uncovered(positions)
+    for _ in range(64):
+        if not pending:
+            return
+        target = pending[0]
+        acted = extend_roboport_coverage(
+            client, bridge, surface, force, target, emit,
+        )
+        ports = live_base.roboport_positions(client, surface, force)
+        pending = uncovered(pending)
+        if pending and pending[0] == target and not acted:
+            raise StuckError(
+                f"{target} needs construction coverage but the surface has no "
+                "roboport to chain from"
+            )
+    raise StuckError(
+        "chemical construction coverage did not converge after 64 chain "
+        "attempts; investigate the coverage survey"
+    )
 
 
 def _submit_oil_cell_plans(
@@ -93,13 +125,21 @@ def _submit_oil_cell_plans(
     if landfill is None:
         combined = _merge(*plans, *links)
         combined["surface"], combined["force"] = surface, force
-        _ensure_plan_construction_coverage(client, bridge, surface, force, combined, emit)
-        _submit(client, bridge, surface, combined, "chemical_oil_cell", emit)
+        _submit(
+            client, bridge, surface, combined, "chemical_oil_cell", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, combined, emit,
+            ),
+        )
         return
     foundation = _merge(*plans, landfill)
     foundation["surface"], foundation["force"] = surface, force
-    _ensure_plan_construction_coverage(client, bridge, surface, force, foundation, emit)
-    _submit(client, bridge, surface, foundation, "chemical_oil_cell_foundation", emit)
+    _submit(
+        client, bridge, surface, foundation, "chemical_oil_cell_foundation", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, foundation, emit,
+        ),
+    )
     remaining = _wait_for_ghosts(
         client, surface, force, _area(landfill), include_entity_ghosts=False,
     )
@@ -109,8 +149,12 @@ def _submit_oil_cell_plans(
             "refusing to place pipe ghosts on water before the landfill is built"
         )
     fluid_links["surface"], fluid_links["force"] = surface, force
-    _ensure_plan_construction_coverage(client, bridge, surface, force, fluid_links, emit)
-    _submit(client, bridge, surface, fluid_links, "chemical_oil_cell_fluid_links", emit)
+    _submit(
+        client, bridge, surface, fluid_links, "chemical_oil_cell_fluid_links", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, fluid_links, emit,
+        ),
+    )
 
 
 def _positions(plan: dict, entity: str) -> list[Point]:
