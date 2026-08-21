@@ -461,9 +461,25 @@ def _planned_removal_tiles(plan: dict) -> set[tuple[int, int]]:
     return removed
 
 
+def _planned_entity_positions(*plans: dict) -> set[tuple[str, float, float]]:
+    """(entity, centre) identity of every entity a plan places.
+
+    Collision surveys report live bounding boxes, which can cover tiles the
+    declared footprint constants never claim -- so ownership is decided by
+    matching the occupant's exact planned centre, never by tile arithmetic."""
+    return {
+        (action["entity"], action["position"]["x"], action["position"]["y"])
+        for plan in plans
+        for phase in plan.get("phases", [])
+        for action in phase.get("actions", [])
+        if "entity" in action and "position" in action
+    }
+
+
 def _plate_expansion_foundation(
     client: RconClient, surface: str, recipe: str, smelter_delta: dict,
     *, allowed_tiles: set[tuple[int, int]] | None = None,
+    own_action_positions: set[tuple[str, float, float]] | None = None,
 ) -> dict | None:
     """Survey a refinery extension before mining and stage needed landfill."""
     if not hasattr(client, "command"):
@@ -472,12 +488,17 @@ def _plate_expansion_foundation(
     if not footprint:
         return None
     minimum, maximum = _tile_bounds(footprint)
-    occupied = live_base.occupied_tiles(
-        client, surface, minimum, maximum, include_water=False,
-    )
+    owners = live_base.occupied_tile_owners(client, surface, minimum, maximum)
     replacement_tiles = _planned_removal_tiles(smelter_delta)
+    excused = replacement_tiles | (allowed_tiles or set())
+    # Entities this system itself planned -- the sibling mine submitted seconds
+    # earlier, or a partial application of this same bill -- occupy ground via
+    # their live bounding boxes long before their declared footprints do.
+    # They are construction in flight, not a conflict.
+    own = own_action_positions or set()
     collision = sorted(
-        footprint & (occupied - replacement_tiles - (allowed_tiles or set()))
+        tile for tile in (footprint & set(owners)) - excused
+        if owners[tile] not in own
     )
     if collision:
         raise StuckError(
@@ -663,6 +684,10 @@ def _assert_atomic_plate_expansion_affordable(
         raise StuckError(str(error)) from error
     foundation = _plate_expansion_foundation(
         client, surface, recipe, smelter_delta,
+        own_action_positions=_planned_entity_positions(
+            smelter_delta,
+            *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
+        ),
     )
     plans = [smelter_delta]
     if foundation is not None:
@@ -795,6 +820,13 @@ def _prepare_initial_refinery(
     }
     foundation = _plate_expansion_foundation(
         client, surface, recipe, plan, allowed_tiles=ore_interface_tiles,
+        # The mine is submitted as part of THIS system seconds before the
+        # refinery lands; its power scaffold occupies ground by live bounding
+        # box and must read as construction in flight, not as a conflict.
+        own_action_positions=_planned_entity_positions(
+            plan,
+            *( [build_plan] if build_plan is not None else [] ),
+        ),
     )
     bill_route = route_actions
     build_plan = getattr(extraction, "build_plan", None)
@@ -1018,10 +1050,20 @@ def build_mining_stage(
             client, bridge, surface, force, recipe, foundation, emit,
         )
     if cohesive_target is None:
-        _build_initial_plate_smelter(
-            client, bridge, surface, force, recipe, extraction, ore_output,
-            reference_point, emit, preflight_only=True,
-        )
+        try:
+            _build_initial_plate_smelter(
+                client, bridge, surface, force, recipe, extraction, ore_output,
+                reference_point, emit, preflight_only=True,
+            )
+        except StuckError as error:
+            # Genuinely foreign infrastructure at the surveyed site is not a
+            # material shortage: queuing its bill as a mall demand livelocked
+            # the whole run on transport-belt the base could never afford.
+            # Defer instead -- prep retries when demand rises, and the stall
+            # report names the exact tiles.
+            if "intersects real infrastructure" not in str(error):
+                raise
+            raise ProductionPrerequisiteDeferred(str(error)) from error
     _submit_mining_plan(
         client, bridge, surface, force, extraction, ore_output, emit,
     )
@@ -1031,10 +1073,15 @@ def build_mining_stage(
             cohesive_target, ore_output, emit,
         )
     else:
-        provider = _build_initial_plate_smelter(
-            client, bridge, surface, force, recipe, extraction, ore_output,
-            reference_point, emit,
-        )
+        try:
+            provider = _build_initial_plate_smelter(
+                client, bridge, surface, force, recipe, extraction, ore_output,
+                reference_point, emit,
+            )
+        except StuckError as error:
+            if "intersects real infrastructure" not in str(error):
+                raise
+            raise ProductionPrerequisiteDeferred(str(error)) from error
     try:
         retire_depleted_mines(
             client, bridge, surface, force, ore, reference_point, emit,
@@ -2532,6 +2579,22 @@ def _pass_signature(
     )
 
 
+def _livelock_step(
+    signature_changed: bool, construction_progressed: bool,
+    unchanged_passes: int,
+) -> int:
+    """Next no-progress pass count for the livelock guard.
+
+    A falling pending-ghost count means bots built something since the last
+    pass -- that is patience, not a livelock. Only a repeated decision
+    signature with NO ground progress may accumulate toward the bound; the
+    research-queue run of 2026-08-21 died while copper was mid-construction
+    because only the decision layer was ever consulted."""
+    if construction_progressed:
+        return 0
+    return 0 if signature_changed else unchanged_passes + 1
+
+
 def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> None:
     """Stop once repeating has stopped telling us anything new."""
     if unchanged_passes < _MAX_UNCHANGED_PASSES:
@@ -2683,6 +2746,7 @@ def run(
         deferred_plate_targets: dict[str, int] = {}
         pending_plate_materials: dict[str, dict[str, int]] = {}
         last_signature: tuple | None = None
+        last_ghost_count: int | None = None
         unchanged_passes = 0
         iteration = 0
         while iteration < max_iterations:
@@ -2693,10 +2757,14 @@ def run(
                 task, mall_targets, prepped, background_targets,
                 deferred_plate_targets, pending_plate_materials,
             )
-            unchanged_passes = (
-                unchanged_passes + 1 if signature == last_signature else 0
+            ghosts_now = live_base.pending_ghost_count(client, surface, force)
+            unchanged_passes = _livelock_step(
+                signature != last_signature,
+                last_ghost_count is not None and ghosts_now < last_ghost_count,
+                unchanged_passes,
             )
             last_signature = signature
+            last_ghost_count = ghosts_now
             _refuse_to_spin(unchanged_passes, signature, goal_item)
             # PREP BEFORE MALL WORK. These standing cells refill the
             # intermediates used by exact shortages and background reserves.

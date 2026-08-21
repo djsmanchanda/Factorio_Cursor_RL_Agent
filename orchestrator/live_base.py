@@ -837,6 +837,64 @@ def roboport_energy(
     return float(raw)
 
 
+def occupied_tile_owners(
+    client: RconClient, surface: str, min_point: Point, max_point: Point,
+    *, include_resources: bool = False,
+) -> dict[tuple[int, int], tuple[str, float, float]]:
+    """Same survey as occupied_tiles (clutter/water excluded) but recording
+    WHICH entity occupies each tile: name plus exact centre position.
+
+    Tile arithmetic against declared footprint constants cannot classify a
+    collision reliably -- a live bounding box can cover tiles the declared
+    footprint never claims -- but an entity we PLANNED is identifiable by its
+    exact centre no matter how wide its box surveys as."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        "if " + ("" if include_resources else "e.type~='resource' and ")
+        + "e.type~='character' and "
+        "not (e.force and e.force.name=='neutral' and "
+        "(e.type=='tree' or e.type=='simple-entity')) then "
+        "local b=e.bounding_box;"
+        "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
+        "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
+        "out[#out+1]=x..','..y..' '..e.name..' '..string.format('%.3f %.3f',"
+        "e.position.x,e.position.y) end end end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    owners: dict[tuple[int, int], tuple[str, float, float]] = {}
+    for record in raw.split(";"):
+        if not record:
+            continue
+        tile, _, rest = record.partition(" ")
+        name, _, centre = rest.partition(" ")
+        cx, cy = centre.split()
+        owners[(int(tile.split(",")[0]), int(tile.split(",")[1]))] = (
+            name, float(cx), float(cy),
+        )
+    return owners
+
+
+def pending_ghost_count(
+    client: RconClient, surface: str, force: str,
+) -> int:
+    """Entity + tile ghosts outstanding for the force, whole surface.
+
+    One cheap query used as a construction-progress signal: a falling count
+    means bots are visibly building, so a repeated decision signature is
+    patience rather than a livelock."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local n=s.count_entities_filtered{type='entity-ghost',force=f}"
+        "+s.count_entities_filtered{type='tile-ghost',force=f};"
+        "rcon.print(n)"
+    )
+    return int(_sc(client, lua))
+
+
 def nearest_container(
     client: RconClient, surface: str, force: str, near: Point,
     names: Sequence[str] = ("passive-provider-chest", "steel-chest"),

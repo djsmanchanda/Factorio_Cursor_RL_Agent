@@ -17,6 +17,7 @@ from orchestrator import autonomous_builder  # noqa: E402
 from orchestrator.autonomous_builder import (  # noqa: E402
     _MAX_UNCHANGED_PASSES,
     _heaviest_source,
+    _livelock_step,
     _pass_signature,
     _refuse_to_spin,
 )
@@ -114,3 +115,15 @@ def test_a_line_sites_beside_its_heaviest_input_not_its_first() -> None:
 def test_an_unknown_source_leaves_the_callers_reference() -> None:
     assert _heaviest_source("copper-cable", {}, 6) is None
     assert "or reference_point" in _SOURCE
+
+
+def test_bots_building_resets_the_livelock_bound() -> None:
+    """A falling ghost count is construction, not a spin: the research-queue
+    run of 2026-08-21 died while copper was mid-construction."""
+    assert _livelock_step(False, True, 11) == 0
+    assert _livelock_step(True, True, 11) == 0
+
+
+def test_a_repeated_signature_with_no_ground_progress_accumulates() -> None:
+    assert _livelock_step(False, False, 3) == 4
+    assert _livelock_step(True, False, 3) == 0

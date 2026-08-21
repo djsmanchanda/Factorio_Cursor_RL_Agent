@@ -111,11 +111,57 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
         "position": {"x": 1.5, "y": 1.5},
     }]}]}
     client = SimpleNamespace(command=lambda _command: "")
-    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: {(0, 0)})
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {(0, 0): ("medium-electric-pole", 50.5, 50.5)})
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     with pytest.raises(StuckError, match="intersects real infrastructure"):
         builder._plate_expansion_foundation(client, "nauvis", "iron-plate", plan)
+
+
+def test_own_sibling_mine_scaffold_does_not_collide_with_the_refinery(monkeypatch) -> None:
+    """The 2026-08-21 iron failure: the mine submitted seconds earlier held a
+    substation whose live bounding box covered ore-route tiles the declared
+    footprint never claimed. Ownership is decided by planned centre."""
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {
+        (11, 5): ("substation", 10.0, 4.0),
+        (11, 6): ("substation", 10.0, 4.0),
+    })
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    assert builder._plate_expansion_foundation(
+        client, "nauvis", "iron-plate", plan,
+        own_action_positions={("substation", 10.0, 4.0)},
+    ) is None
+
+
+def test_a_blocked_initial_site_defers_instead_of_queuing_a_phantom_bill(monkeypatch) -> None:
+    extraction = SimpleNamespace(
+        build_plan=None, expansion_positions=(), row_drill_count=0,
+        expansion_step=-1, mine_origin=(10.0, 20.0), drill_count=2,
+        furnace_count=6, mining_productivity_bonus=0.0,
+        smelter_origin=(85.0, 82.0), ore_output=(12.5, -1.5),
+        smelter_flow_direction="east", ore="iron-ore",
+        system_drill_count_before=2, system_drill_target=2,
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+
+    def blocked(*_args, **_kwargs):
+        raise StuckError(
+            "iron-plate refinery extension intersects real infrastructure at [(11, 5)]"
+        )
+
+    monkeypatch.setattr(builder, "_build_initial_plate_smelter", blocked)
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (0.0, 0.0), lambda _message: None,
+        )
 
 
 def test_authorized_ore_interface_tiles_do_not_collide_with_refinery(monkeypatch) -> None:
@@ -125,7 +171,7 @@ def test_authorized_ore_interface_tiles_do_not_collide_with_refinery(monkeypatch
         "position": {"x": 0.5, "y": 0.5},
     }]}]}
     client = SimpleNamespace(command=lambda _command: "")
-    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: {(0, 0)})
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {(0, 0): ("transport-belt", 0.5, 0.5)})
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     assert builder._plate_expansion_foundation(
@@ -141,7 +187,7 @@ def test_replacement_tiles_do_not_collide_with_the_owned_end(monkeypatch) -> Non
          "position": {"x": 0.5, "y": 0.5}, "direction": "south"},
     ]}]}
     client = SimpleNamespace(command=lambda _command: "")
-    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: {(0, 0)})
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {(0, 0): ("transport-belt", 0.5, 0.5)})
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     assert builder._plate_expansion_foundation(
@@ -155,7 +201,7 @@ def test_plate_expansion_preflight_stages_landfill_for_water(monkeypatch) -> Non
         "position": {"x": 1.5, "y": 1.5},
     }]}]}
     client = SimpleNamespace(command=lambda _command: "")
-    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {})
     monkeypatch.setattr(
         builder.live_base, "water_tiles", lambda *_a: {(0, 0), (2, 2), (9, 9)},
     )
@@ -221,7 +267,7 @@ def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:
         builder, "generate_managed_refinery_extension_plan", lambda *_a, **_k: delta,
     )
     monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
-    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a: None)
+    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "assert_affordable",
         lambda *_a: captured.update(plan=_a[3], name=_a[4]),
