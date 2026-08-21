@@ -15,6 +15,7 @@ def test_research_mod_registers_open_options_and_remembers_explicit_target() -> 
     assert 'current_target = remembered' in source
     assert '"queued-next"' in source
     assert 'local active_technology = active and force.technologies[active.name]' in source
+    assert 'if not technology.researched then' in source
 
 
 def test_research_mod_allows_only_the_immediate_repeatable_level() -> None:

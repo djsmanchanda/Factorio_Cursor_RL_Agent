@@ -227,20 +227,25 @@ class OperationManager:
                     raise OperationError(f"{technology_name} is already researched")
                 if not technology.get("enabled", False):
                     raise OperationError(f"{technology_name} is locked; its prerequisites are not open")
-                if state != "future":
-                    continue
                 parts = self._level_parts(technology_name)
                 current_level = technology.get("current_level")
                 requested_level = technology.get("requested_level")
+                if state != "future" and not (
+                    state == "available"
+                    and not technology.get("researched", False)
+                    and isinstance(current_level, int)
+                    and isinstance(requested_level, int)
+                    and requested_level > current_level
+                ):
+                    continue
                 if not parts or not isinstance(current_level, int) or not isinstance(requested_level, int):
                     raise OperationError(f"{technology_name} is not open yet")
-                if requested_level <= current_level + 1:
-                    continue
                 stem, _ = parts
                 index = candidate.index(technology_name)
+                first_required = current_level if not technology.get("researched", False) else current_level + 1
                 missing = [
                     f"{stem}-{level}"
-                    for level in range(current_level + 1, requested_level)
+                    for level in range(first_required, requested_level)
                     if f"{stem}-{level}" not in active
                     and f"{stem}-{level}" not in candidate[:index]
                 ]

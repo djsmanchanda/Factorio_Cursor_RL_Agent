@@ -254,7 +254,7 @@ def test_future_repeatable_target_requires_predecessor_in_queue(monkeypatch) -> 
     manager = object.__new__(OperationManager)
     bridge = _FakeLiveResearchBridge({
         "mining-productivity-5": {"ok": True, "technology": {
-            "enabled": True, "state": "future", "current_level": 3,
+            "enabled": True, "researched": True, "state": "future", "current_level": 3,
             "requested_level": 5, "target_completed": False,
         }},
     })
@@ -270,6 +270,27 @@ def test_future_repeatable_target_requires_predecessor_in_queue(monkeypatch) -> 
         ["mining-productivity-5"], ["mining-productivity-4", "mining-productivity-5"], {"mining-productivity-4"},
     )
     assert bridge.closed
+
+
+def test_unresearched_next_repeatable_level_requires_current_level_to_be_active(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    bridge = _FakeLiveResearchBridge({
+        "mining-productivity-5": {"ok": True, "technology": {
+            "enabled": True, "researched": False, "state": "available",
+            "current_level": 4, "requested_level": 5, "target_completed": False,
+        }},
+    })
+    monkeypatch.setattr(manager, "_research_bridge", lambda: bridge)
+    monkeypatch.setattr(dashboard_runtime, "load_json", lambda value: value)
+
+    with pytest.raises(dashboard_runtime.OperationError, match="mining-productivity-4"):
+        manager._validate_live_research_targets(
+            ["mining-productivity-5"], ["mining-productivity-5"], set(),
+        )
+
+    manager._validate_live_research_targets(
+        ["mining-productivity-5"], ["mining-productivity-4", "mining-productivity-5"], {"mining-productivity-4"},
+    )
 
 
 def test_native_restore_uses_manager_reset_then_starts_server() -> None:
