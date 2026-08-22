@@ -323,7 +323,14 @@ def smelter_count_for_drills(
         * ELECTRIC_DRILL_ITEMS_PER_SECOND
         * (1.0 + mining_productivity_bonus)
     )
-    return max(1, math.ceil(ore_rate / furnace_input_rate))
+    # Physical ceiling: every current smelt consumes at least as fast as a
+    # drill produces, so a D-drill mine can never legitimately feed more than
+    # D furnaces. Catalog-learned recipes (e.g. 'landfill') sometimes arrive
+    # with optimistic numbers -- without this cap their rounding built 24
+    # stone furnaces on a six-drill patch (live run 15).
+    # Ceiling tolerates force-productivity gains (~1.5x) while still blocking
+    # catalog-spec inflation (the 24-furnace run was a 4x on six drills).
+    return max(1, min(math.ceil(ore_rate / furnace_input_rate), drill_count * 2))
 
 
 def planned_smelter_count_for_drills(
