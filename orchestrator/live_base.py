@@ -359,6 +359,34 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     return result
 
 
+def chest_stored_items(
+    client: RconClient, surface: str, position: Point,
+) -> int:
+    """Total items held by the requester-chest at `position`.
+
+    Returns -1 when the position does not hold a requester-chest. Live run 33
+    (2026-08-23): an engine-unit cell's middle feed chest had lost its whole
+    request group -- zero items delivered forever while its machines starved
+    behind a 'healthy, just supply-starved' verdict. A labelled-but-empty
+    feed is degradation, not patience; the 2.1.14 request-slot API does not
+    exist on this build, so held content is the observable."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local e=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
+        "radius=0.4,limit=1}[1];"
+        "if not e or e.name~='requester-chest' then rcon.print('-1') return end;"
+        "local inv=e.get_inventory(defines.inventory.chest);"
+        "local total=0;"
+        "for _,st in pairs(inv.get_contents()) do total=total+(st.count or 0) end;"
+        "rcon.print(total)"
+    )
+    raw = _sc(client, lua)
+    try:
+        return int(raw)
+    except ValueError:
+        return -1
+
+
 
 def entity_signatures_at(
     client: RconClient, surface: str, force: str, positions: Sequence[Point],
@@ -760,8 +788,14 @@ def roboport_positions(client: RconClient, surface: str, force: str) -> list[Poi
     return [tuple(float(v) for v in record.split()) for record in raw.split(";")]
 
 
-def network_generation_kw(
+_GENERATOR_TYPES = (
+    "'generator','electric-energy-interface','fusion-generator','burner-generator'"
+)
+
+
+def _network_generation_kw_impl(
     client: RconClient, surface: str, force: str, near: Point,
+    *, include_solar: bool,
 ) -> float | None:
     """Combined generation capacity (kW) of the electric network nearest
     `near`, or None when no roboport defines that network.
@@ -776,6 +810,7 @@ def network_generation_kw(
     one EEI reported prototype 8_333_333_333 kW vs entity 166.7 kW, which
     silently gated off every solar top-up and browned out the whole base.
     """
+    types = _GENERATOR_TYPES + (",'solar-panel'" if include_solar else "")
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
@@ -786,8 +821,7 @@ def network_generation_kw(
         "local ok,net=pcall(function() return best.electric_network_id end);"
         "if not ok or net==nil then rcon.print('NONE') return end;"
         "local total=0;"
-        "for _,g in pairs(s.find_entities_filtered{force=f,type={'generator','solar-panel',"
-        "'electric-energy-interface','fusion-generator','burner-generator'}}) do "
+        "for _,g in pairs(s.find_entities_filtered{force=f,type={" + types + "}}) do "
         "local okid,id=pcall(function() return g.electric_network_id end);"
         "if okid and id==net then "
         "local kw=nil;"
@@ -804,6 +838,31 @@ def network_generation_kw(
     if raw == "NONE":
         return None
     return float(raw)
+
+
+def network_generation_kw(
+    client: RconClient, surface: str, force: str, near: Point,
+) -> float | None:
+    """Nameplate generation including solar. See network_firm_generation_kw
+    before using this to license night-time-sensitive decisions."""
+    return _network_generation_kw_impl(
+        client, surface, force, near, include_solar=True,
+    )
+
+
+def network_firm_generation_kw(
+    client: RconClient, surface: str, force: str, near: Point,
+) -> float | None:
+    """Generation capacity (kW) EXCLUDING solar panels on the nearest network.
+
+    Live evidence 2026-08-23: one modded solar panel reports a 1000 kW
+    nameplate while producing nothing after dusk -- with zero accumulators
+    the whole base still collapsed to its 166.7 kW interface every night.
+    Night-survivable capacity is FIRM capacity; licensing placement bursts
+    against daylight nameplate browns out after sundown."""
+    return _network_generation_kw_impl(
+        client, surface, force, near, include_solar=False,
+    )
 
 
 def drill_drop_belt_tile(

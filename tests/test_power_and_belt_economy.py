@@ -177,7 +177,7 @@ def test_visibly_filling_blueprints_extend_remediation(monkeypatch) -> None:
 
 def test_lean_network_gets_stocked_solar(monkeypatch) -> None:
     monkeypatch.setattr(
-        builder.live_base, "network_generation_kw", lambda *_a: 720.0,
+        builder.live_base, "network_firm_generation_kw", lambda *_a: 720.0,
     )
     monkeypatch.setattr(
         builder.live_base, "available_items",
@@ -205,6 +205,12 @@ def test_lean_network_gets_stocked_solar(monkeypatch) -> None:
 
 
 def test_healthy_network_skips_the_top_up(monkeypatch) -> None:
+    """Firm capacity is the gate: live run 36 browned out nightly on a
+    1000 kW solar NAMEPLATE with zero accumulators -- daylight-only numbers
+    must not read as healthy."""
+    monkeypatch.setattr(
+        builder.live_base, "network_firm_generation_kw", lambda *_a: 5000.0,
+    )
     monkeypatch.setattr(
         builder.live_base, "network_generation_kw", lambda *_a: 5000.0,
     )
@@ -219,7 +225,7 @@ def test_healthy_network_skips_the_top_up(monkeypatch) -> None:
 
 def test_no_solar_stock_reports_and_skips(monkeypatch) -> None:
     monkeypatch.setattr(
-        builder.live_base, "network_generation_kw", lambda *_a: 500.0,
+        builder.live_base, "network_firm_generation_kw", lambda *_a: 500.0,
     )
     monkeypatch.setattr(
         builder.live_base, "available_items", lambda *_a: {},
@@ -324,3 +330,15 @@ def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
 
     assert removed == [(5.5, 22.5)]
     assert submitted == ["rebuild_stale_ghost"]
+
+
+def test_run_loop_checks_generation_proactively(monkeypatch) -> None:
+    """Live run 36 (2026-08-23): every solar top-up trigger was a power-bridge
+    event, and no bridge came while the grid browned out -- the run burned its
+    iteration budget in the dark. The main loop must re-check the grid on a
+    bounded interval instead of only after bridges."""
+    import inspect
+
+    source = inspect.getsource(builder.run)
+    assert "_top_up_solar_generation" in source
+    assert "_GENERATION_CHECK_INTERVAL_TICKS" in source

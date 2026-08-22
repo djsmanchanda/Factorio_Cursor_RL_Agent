@@ -30,7 +30,11 @@ from orchestrator.baseline_production import (
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
-from orchestrator.mall_builder import build_compact_mall_stage, rebuild_incomplete_mall_cell
+from orchestrator.mall_builder import (
+    build_compact_mall_stage,
+    mall_cell_needs_rebuild,
+    rebuild_incomplete_mall_cell,
+)
 from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
 )
@@ -1587,6 +1591,7 @@ _ESSENTIAL_FAST_BELT_MIN = 40
 # starvation before its first science pack. The starter kit ships solar
 # panels for exactly this; spend them beside whatever grid we just touched.
 _MIN_NETWORK_GENERATION_KW = 1000.0
+_GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 _SOLAR_TOPUP_PANELS = 8
 _SOLAR_TOPUP_ACCUMULATORS = 3
 
@@ -1599,8 +1604,18 @@ def _top_up_solar_generation(
 
     Called after each successful power bridge: that is the moment we know the
     network matters and have a powered anchor to build beside."""
-    generation = live_base.network_generation_kw(client, surface, force, near)
-    if generation is None or generation >= _MIN_NETWORK_GENERATION_KW:
+    generation = live_base.network_firm_generation_kw(client, surface, force, near)
+    if generation is None:
+        return False
+    if generation < _MIN_NETWORK_GENERATION_KW:
+        emit(
+            f"  SOLAR TOP-UP: network at {near} has only {generation:.0f} kW of "
+            "firm (non-solar) generation -- panels produce nothing after dusk"
+        )
+    else:
+        # Firm capacity already covers the policy floor; daylight-only
+        # nameplate must not mask that (live run 36 browned out nightly on a
+        # 1000 kW panel nameplate with zero accumulators).
         return False
     stock = live_base.available_items(client, surface, force)
     panels = min(int(stock.get("solar-panel", 0)), _SOLAR_TOPUP_PANELS)
@@ -1617,6 +1632,21 @@ def _top_up_solar_generation(
          ("accumulator", accumulators)],
         near,
     )
+    if len(spots) <= 1:
+        # The mission's birthplace is usually saturated by now (live run 37:
+        # one clear tile beside the starter grid). Arrays belong beside ANY
+        # powered anchor -- prefer the nearest roboports, which sit on the
+        # networks everything else joined.
+        for port in live_base.roboport_positions(client, surface, force)[:3]:
+            spots = live_base.chained_clear_spots(
+                client, surface,
+                [("medium-electric-pole", 1), ("solar-panel", panels),
+                 ("accumulator", accumulators)],
+                port,
+            )
+            if len(spots) > 1:
+                near = port
+                break
     actions = [
         {"action_type": "place_entity", "entity": name,
          "position": {"x": x, "y": y}}
@@ -2590,6 +2620,16 @@ def _repair_stalled_line(
     if statuses and all(
         status == "item_ingredient_shortage" for status in statuses.values()
     ) and not _mineable(item):
+        # A declared feed chest that is missing or has lost its request group
+        # can never recover by waiting: regenerate the cell's own plan first.
+        if mall_cell_needs_rebuild(
+            client, surface, item,
+            existing.machine_positions[0], reference_point,
+        ) and rebuild_incomplete_mall_cell(
+            client, bridge, surface, force, item,
+            existing.machine_positions[0], reference_point, emit,
+        ):
+            return None
         # Paired mall cells intentionally use a six-tile machine spacing and
         # requester/provider side-taps. They are valid compact topology, not
         # the three-tile deterministic belt line reconstructed by
@@ -3750,6 +3790,7 @@ def run(
         last_signature: tuple | None = None
         last_ghost_count: int | None = None
         last_items_total: int | None = None
+        last_generation_check_tick = -_GENERATION_CHECK_INTERVAL_TICKS
         unchanged_passes = 0
         iteration = 0
         while iteration < max_iterations:
@@ -3781,6 +3822,19 @@ def run(
             last_ghost_count = ghosts_now
             last_items_total = items_now
             _refuse_to_spin(unchanged_passes, signature, goal_item)
+            # Generation is mission infrastructure, not a side effect of
+            # bridges: live run 36 (2026-08-23) burned its whole iteration
+            # budget waiting through brownouts while every top-up trigger was
+            # a bridge event that never came. Re-check the grid periodically;
+            # _top_up_solar_generation self-gates on threshold and stock.
+            if tick - last_generation_check_tick >= _GENERATION_CHECK_INTERVAL_TICKS:
+                last_generation_check_tick = tick
+                if (
+                    _top_up_solar_generation(
+                        client, bridge, surface, force, reference_point, emit,
+                    )
+                ):
+                    continue
             # PREP BEFORE MALL WORK. These standing cells refill the
             # intermediates used by exact shortages and background reserves.
             # A blocked prep pass hands control back so the mall can build the

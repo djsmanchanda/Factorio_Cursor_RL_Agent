@@ -29,9 +29,12 @@ STARTER_MALL_TARGETS = (
     ("assembling-machine-1", 6),
     # Power starvation ended every observed run before its second science
     # pack; once the starter's own panels are placed the mall keeps the array
-    # growing. Accumulators stay out of the reserve until a fluid-capable cell
-    # exists -- their recipe needs batteries.
+    # growing. Accumulators joined the reserve after live runs 26-36 (2026-08-22/23)
+    # showed nights collapsing a 1000 kW panel nameplate to zero output with no
+    # buffer -- their battery prerequisite resolves through ensure_produced once
+    # the oil cell's sulfur line is up.
     ("solar-panel", 8),
+    ("accumulator", 8),
 )
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,

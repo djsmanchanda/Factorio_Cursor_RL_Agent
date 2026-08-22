@@ -143,3 +143,81 @@ def test_incomplete_mall_cell_rebuilds_in_place_not_on_a_fresh_slot() -> None:
         and (a["position"]["x"], a["position"]["y"]) == machine
     ]
     assert placed_machines, "the rebuilt plan must target the existing machine tile"
+
+
+def test_degraded_empty_feed_chest_triggers_rebuild_not_wait(monkeypatch) -> None:
+    """Live run 33 (2026-08-23): an engine-unit cell's middle requester-chest
+    had lost its request group -- zero items delivered forever -- so the cell
+    starved behind a 'supply-starved, keep waiting' verdict. A labelled but
+    empty feed chest is degradation and routes to the in-place rebuild."""
+    from orchestrator import live_base
+    from orchestrator.mall_builder import (
+        _slot_position,
+        locate_mall_cell,
+        mall_cell_needs_rebuild,
+    )
+
+    origin, side = (67, 53), "left"
+    machine = _slot_position(origin, side)
+    assert locate_mall_cell(machine, (35.0, 21.0)) == (origin, side)
+
+    replies = iter([0])  # first declared feed chest holds nothing
+    monkeypatch.setattr(
+        live_base, "chest_stored_items",
+        lambda *_a, **_k: next(replies, 7),
+    )
+    kwargs = dict(
+        surface="nauvis", recipe="engine-unit",
+        machine_position=machine, reference_point=(35.0, 21.0),
+    )
+    assert mall_cell_needs_rebuild(object(), **kwargs)
+
+    # Fully-labelled chests mean the cell is healthy: keep waiting normally.
+    monkeypatch.setattr(
+        live_base, "chest_stored_items", lambda *_a, **_k: 7,
+    )
+    assert not mall_cell_needs_rebuild(object(), **kwargs)
+
+    # Machines outside any declared half are somebody else's problem.
+    assert not mall_cell_needs_rebuild(
+        object(), surface="nauvis", recipe="engine-unit",
+        machine_position=(machine[0] + 0.3, machine[1]),
+        reference_point=(35.0, 21.0),
+    )
+
+
+def test_chest_content_query_reads_held_items() -> None:
+    from orchestrator import live_base
+
+    class _Client:
+        def __init__(self):
+            self.commands = []
+
+        def command(self, text):
+            self.commands.append(text)
+            return "3"
+
+    client = _Client()
+    assert live_base.chest_stored_items(client, "nauvis", (1.5, 2.5)) == 3
+    lua = client.commands[0]
+    assert "get_contents" in lua
+    assert "requester-chest" in lua
+
+
+
+def test_chest_content_query_reads_held_items() -> None:
+    from orchestrator import live_base
+
+    class _Client:
+        def __init__(self):
+            self.commands = []
+
+        def command(self, text):
+            self.commands.append(text)
+            return "3"
+
+    client = _Client()
+    assert live_base.chest_stored_items(client, "nauvis", (1.5, 2.5)) == 3
+    lua = client.commands[0]
+    assert "get_contents" in lua
+    assert "requester-chest" in lua

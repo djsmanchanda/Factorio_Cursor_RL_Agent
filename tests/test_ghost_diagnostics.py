@@ -297,6 +297,9 @@ def test_missing_feed_on_a_mall_cell_rebuilds_instead_of_dying(monkeypatch) -> N
     monkeypatch.setattr(
         builder, "bring_stage_up", lambda *_a, **_k: None,
     )
+    monkeypatch.setattr(
+        builder, "mall_cell_needs_rebuild", lambda *_a, **_k: False,
+    )
     rebuilt: list[str] = []
     monkeypatch.setattr(
         builder, "rebuild_incomplete_mall_cell",

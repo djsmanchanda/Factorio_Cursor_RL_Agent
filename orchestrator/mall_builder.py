@@ -145,6 +145,39 @@ def locate_mall_cell(
     return None
 
 
+def mall_cell_needs_rebuild(
+    client: RconClient, surface: str, recipe: str, machine_position: Point,
+    reference_point: Point,
+) -> bool:
+    """Whether a declared cell half is degraded enough to regenerate.
+
+    Degraded means a declared feed chest is missing entirely or has lost its
+    request group (live run 33: an engine-unit cell's middle chest requested
+    nothing, so its machines starved behind a 'supply-starved, wait' verdict
+    that could never recover). Pure presence checks only; False outside the
+    mall district."""
+    located = locate_mall_cell(machine_position, reference_point)
+    if located is None:
+        return False
+    origin, side = located
+    spec = LINE_RECIPES[recipe]
+    plan = generate_paired_mall_layout(
+        recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin,
+        side, product_amount=spec.get("product_amount", 1),
+        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+    )
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("entity") == "requester-chest":
+                position = action["position"]
+                held = live_base.chest_stored_items(
+                    client, surface, (position["x"], position["y"]),
+                )
+                if held <= 0:
+                    return True
+    return False
+
+
 def rebuild_incomplete_mall_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, machine_position: Point, reference_point: Point,
