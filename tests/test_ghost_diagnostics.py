@@ -138,3 +138,100 @@ def test_material_remedy_waits_when_network_reserves_stock(monkeypatch) -> None:
 
     assert acted
     assert any("temporarily unavailable" in message for message in messages)
+
+def test_logistic_coverage_remedy_waits_out_the_roboport_charge(monkeypatch) -> None:
+    """A just-connected roboport needs tens of seconds to charge before its
+    logistic area exists; rounds that re-check instantly are six ways of doing
+    nothing (live run of 2026-08-22 00:52 burned all six in ~2s and died)."""
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a: False)
+    polls = iter([None, None, 4])
+    slept: list[float] = []
+    monkeypatch.setattr(
+        builder.time, "sleep", lambda seconds: slept.append(seconds),
+    )
+    monkeypatch.setattr(
+        live_base, "logistic_network_ids",
+        lambda _c, _s, positions: {positions[0]: next(polls)},
+    )
+    # Keep the bound effectively unbounded for this scenario.
+    monkeypatch.setattr(builder, "_LOGISTIC_CHARGE_WAIT_SECONDS", 90.0)
+    monkeypatch.setattr(builder.time, "monotonic", lambda: 0.0)
+
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "logistic bootstrap for copper-plate",
+        "logistic_coverage", "1 chest(s) outside every logistic area",
+        (77.5, -39.5), (77.5, -39.5), [], [(77.5, -39.5)], None,
+        lambda _message: None,
+    )
+
+    assert acted
+    assert slept == [3.0, 3.0]
+
+def test_logistic_coverage_remedy_reports_an_honest_noop_at_the_bound(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a: False)
+    monkeypatch.setattr(
+        live_base, "logistic_network_ids",
+        lambda _c, _s, positions: {positions[0]: None},
+    )
+    ticks = iter(range(0, 400, 3))
+
+    class FakeTime:
+        @staticmethod
+        def monotonic() -> float:
+            return float(next(ticks))
+
+        @staticmethod
+        def sleep(_seconds: float) -> None:
+            pass
+
+    monkeypatch.setattr(builder, "time", FakeTime)
+
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "logistic bootstrap for copper-plate",
+        "logistic_coverage", "1 chest(s) outside every logistic area",
+        (77.5, -39.5), (77.5, -39.5), [], [(77.5, -39.5)], None,
+        lambda _message: None,
+    )
+
+    assert not acted
+
+
+def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> None:
+    """A substation built by another stage between our survey and our bots'
+    arrival is construction in flight, not a wall -- replan once on fresh
+    ground (live run of 2026-08-22 02:46 ended the mission on this)."""
+    from orchestrator import stage_services as ss
+
+    surveys = {"n": 0}
+
+    def fake_occupied(*_a, **_k):
+        surveys["n"] += 1
+        return set() if surveys["n"] == 1 else {(48, -70)}
+
+    submits: list[str] = []
+
+    def fake_submit(_c, _b, _s, plan, name, _emit):
+        submits.append(name)
+        if len(submits) == 1:
+            raise ss.StuckError(
+                "power_bridge: blocked by real infrastructure "
+                "[{'position': {'x': 48, 'y': -70}, "
+                "'reason': 'exact_position_occupied_by_different_entity'}]"
+            )
+
+    monkeypatch.setattr(ss, "_submit", fake_submit)
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((50.0, -5.0), "substation"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", fake_occupied)
+
+    acted = ss.extend_power(
+        object(), object(), "nauvis", "player", (45.0, -66.0),
+        lambda _m: None,
+    )
+
+    assert acted
+    assert submits.count("power_bridge") == 2

@@ -208,7 +208,43 @@ def _submit(
             return report
         cleared_any = False
         blocking = []
+        adopted_belt_positions: set[tuple[float, float]] = set()
+        action_at: dict[tuple[float, float], dict] = {}
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                pos = action.get("position") or {}
+                action_at[(pos.get("x"), pos.get("y"))] = action
+
+        def _is_belt(name: str) -> bool:
+            # The whole belt LINE family joins as one corridor: transport,
+            # underground, and their tiered variants.
+            return "transport-belt" in name or "underground-belt" in name
+
+        def is_own_belt_join(failure: dict) -> bool:
+            """A belt action colliding with OUR OWN standing belt of any tier
+            or kind: the standing belt IS the corridor -- adopt it, don't
+            overwrite."""
+            if failure.get("reason") not in (
+                "direction_mismatch",
+                "exact_position_occupied_by_different_entity",
+            ):
+                return False
+            position = (failure["position"]["x"], failure["position"]["y"])
+            action = action_at.get(position, {})
+            if not _is_belt(action.get("entity", "")):
+                return False
+            occupant = live_base.entity_at(client, surface, position)
+            return (
+                occupant is not None
+                and occupant.get("force") == plan.get("force", "player")
+                and _is_belt(occupant.get("name", ""))
+            )
+
         for failure in report.get("placement_failures", []):
+            if is_own_belt_join(failure):
+                position = (failure["position"]["x"], failure["position"]["y"])
+                adopted_belt_positions.add(position)
+                continue
             if failure.get("reason") != "exact_position_occupied_by_different_entity":
                 blocking.append(failure)
                 continue
@@ -220,6 +256,29 @@ def _submit(
                 cleared_any = True
             else:
                 blocking.append({**failure, "occupant": occupant})
+        if adopted_belt_positions:
+            removed = 0
+            for phase in plan["phases"]:
+                kept = []
+                for action in phase["actions"]:
+                    pos = action.get("position") or {}
+                    key = (pos.get("x"), pos.get("y"))
+                    if (
+                        ("transport-belt" in action.get("entity", "")
+                         or "underground-belt" in action.get("entity", ""))
+                        and (key[0], key[1]) in adopted_belt_positions
+                    ):
+                        removed += 1
+                        continue
+                    kept.append(action)
+                phase["actions"] = kept
+            if removed:
+                emit(
+                    f"  {name}: adopting {removed} existing belt tile(s) as "
+                    "the join instead of overwriting them"
+                )
+                authorization = build_layout_authorization([(name, plan)])
+                continue
         if blocking:
             raise StuckError(
                 f"{name}: blocked by real infrastructure, not map clutter -- needs a "
@@ -510,7 +569,8 @@ def _hookup_pole_position(
 
 def extend_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    near_position: Point, emit: Callable[[str], None],
+    near_position: Point, emit: Callable[[str], None], *,
+    _retried: bool = False,
 ) -> bool:
     """Connect `near_position` to a network that actually generates power.
 
@@ -520,6 +580,11 @@ def extend_power(
     on a pole whose supply area covers it. Returns True if anything was built,
     False when there is nothing this can do (no powered network exists, or
     `near_position` is already on one).
+
+    A hop can lose its tile between the collision survey and the bots' arrival:
+    a concurrent build's own substation ghost lands exactly there (live,
+    2026-08-22 02:46). That is infrastructure-in-flight, not a wall -- replan
+    once on fresh ground instead of ending the run.
     """
     own_network = live_base.pole_network_id(client, surface, near_position)
     target = live_base.nearest_powered_pole(
@@ -591,7 +656,33 @@ def extend_power(
         for x, y in hops
     ]
     plan = {"phases": [{"name": "power_bridge", "actions": actions}], "surface": surface, "force": force}
-    _submit(client, bridge, surface, plan, "power_bridge", emit)
+    try:
+        _submit(client, bridge, surface, plan, "power_bridge", emit)
+    except StuckError as error:
+        if (
+            _retried
+            or "occupied_by_different_entity" not in str(error)
+        ):
+            raise
+        emit(
+            "  power_bridge raced a concurrent build for a hop tile -- "
+            "resurveying and retrying once"
+        )
+        return extend_power(
+            client, bridge, surface, force, near_position, emit,
+            _retried=True,
+        )
+    # Connectivity is not capacity: every run has browned out as stages
+    # stacked onto the starter array. Top the network's generation up from
+    # stocked solar while we are already holding its powered anchor.
+    from orchestrator.autonomous_builder import _top_up_solar_generation
+
+    try:
+        _top_up_solar_generation(
+            client, bridge, surface, force, target_position, emit,
+        )
+    except Exception as error:  # generation top-up is opportunistic
+        emit(f"  SOLAR TOP-UP skipped: {error}")
     return True
 
 

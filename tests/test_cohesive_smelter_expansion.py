@@ -115,7 +115,7 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     with pytest.raises(StuckError, match="intersects real infrastructure"):
-        builder._plate_expansion_foundation(client, "nauvis", "iron-plate", plan)
+        builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
 
 
 def test_own_sibling_mine_scaffold_does_not_collide_with_the_refinery(monkeypatch) -> None:
@@ -134,7 +134,7 @@ def test_own_sibling_mine_scaffold_does_not_collide_with_the_refinery(monkeypatc
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     assert builder._plate_expansion_foundation(
-        client, "nauvis", "iron-plate", plan,
+        client, "nauvis", "player", "iron-plate", plan,
         own_action_positions={("substation", 10.0, 4.0)},
     ) is None
 
@@ -175,7 +175,7 @@ def test_authorized_ore_interface_tiles_do_not_collide_with_refinery(monkeypatch
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     assert builder._plate_expansion_foundation(
-        client, "nauvis", "copper-plate", plan, allowed_tiles={(0, 0)},
+        client, "nauvis", "player", "copper-plate", plan, allowed_tiles={(0, 0)},
     ) is None
 
 
@@ -191,7 +191,7 @@ def test_replacement_tiles_do_not_collide_with_the_owned_end(monkeypatch) -> Non
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     assert builder._plate_expansion_foundation(
-        client, "nauvis", "iron-plate", plan,
+        client, "nauvis", "player", "iron-plate", plan,
     ) is None
 
 
@@ -207,7 +207,7 @@ def test_plate_expansion_preflight_stages_landfill_for_water(monkeypatch) -> Non
     )
 
     foundation = builder._plate_expansion_foundation(
-        client, "nauvis", "iron-plate", plan,
+        client, "nauvis", "player", "iron-plate", plan,
     )
 
     assert foundation is not None

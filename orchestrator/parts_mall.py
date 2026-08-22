@@ -27,6 +27,11 @@ STARTER_MALL_TARGETS = (
     ("underground-belt", 20),
     ("inserter", 20),
     ("assembling-machine-1", 6),
+    # Power starvation ended every observed run before its second science
+    # pack; once the starter's own panels are placed the mall keeps the array
+    # growing. Accumulators stay out of the reserve until a fluid-capable cell
+    # exists -- their recipe needs batteries.
+    ("solar-panel", 8),
 )
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,

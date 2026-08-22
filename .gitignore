@@ -43,3 +43,4 @@ training-workers-windows.json
 training-workers-linux.json
 data/training/logs/
 data/rl-gpu-venv/
+:memory:.ses

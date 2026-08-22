@@ -796,6 +796,73 @@ def network_generation_kw(
     return float(raw)
 
 
+def drill_drop_belt_tile(
+    client: RconClient, surface: str, ore_output: Point,
+) -> Point:
+    """The belt tile beside a drill drop column nearest `ore_output`.
+
+    The output tile can be the UPSTREAM tail of the mine belt -- on eastbound
+    rows nothing ever passes it, and an intake there waits for source items
+    forever (live run 8: 86 frozen ore east of a starving intake). A tile
+    beside a drill's drop column receives ore by construction. Raises
+    ValueError when no drill/belt pairing exists near the row."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local ox,oy=" + str(ore_output[0]) + "," + str(ore_output[1]) + ";"
+        "local best=nil;local bd=1e18;"
+        "for _,d in pairs(s.find_entities_filtered{type='mining-drill'}) do "
+        "if math.abs(d.position.y-oy)<=1.5 then "
+        "for _,b in pairs(s.find_entities_filtered{type='transport-belt',"
+        "area={{d.position.x-1,oy-0.5},{d.position.x+1,oy+0.5}}}) do "
+        "local dist=math.abs(b.position.x-ox);"
+        "if dist<bd then bd=dist;best=b.position end end end end;"
+        "if not best then rcon.print('NONE') return end;"
+        "rcon.print(best.x..' '..best.y)"
+    )
+    raw = _sc(client, lua)
+    parts = raw.split()
+    if len(parts) != 2:
+        raise ValueError(f"no drill drop column near the {surface} belt row")
+    return (float(parts[0]), float(parts[1]))
+
+
+def chained_clear_spots(
+    client: RconClient, surface: str,
+    placements: Sequence[tuple[str, int]], start: Point,
+    *, step_radius: float = 6.0,
+) -> list[tuple[str, float, float]]:
+    """Non-colliding centres for a compact cluster of prototypes.
+
+    Each unit is placed within `step_radius` of the previous one, so the
+    cluster stays contiguous -- solar arrays must sit inside their own supply
+    pole's area, not scattered around it. Returns (name, x, y) triples; fewer
+    than requested when the terrain runs out."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local cur={" + str(start[0]) + "," + str(start[1]) + "};"
+        "local out={};"
+        "local wanted={"
+        + ",".join(
+            "{'" + name + "'," + str(count) + "}"
+            for name, count in placements
+        )
+        + "};"
+        "for _,w in ipairs(wanted) do "
+        "for i=1,w[2] do "
+        "local p=s.find_non_colliding_position(w[1],cur," + str(step_radius) + ",0.5);"
+        "if p then out[#out+1]=w[1]..' '..p.x..' '..p.y;cur={p.x,p.y} end "
+        "end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    spots: list[tuple[str, float, float]] = []
+    for entry in raw.split(";"):
+        parts = entry.split()
+        if len(parts) == 3:
+            spots.append((parts[0], float(parts[1]), float(parts[2])))
+    return spots
+
+
 def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) -> Point | None:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
@@ -1222,3 +1289,220 @@ def poles_in_area(
         name, x, y = record.rsplit(" ", 2)
         found.append((name, (float(x), float(y))))
     return found
+
+
+def bootstrap_cell_origins(
+    client: RconClient, surface: str, force: str, ore: str,
+) -> list[Point]:
+    """Origins of standing compact bootstrap cells requesting exactly `ore`.
+
+    A cell's furnaces carry no recipe until first craft, so machine surveys
+    cannot see them -- its REQUESTER is the identity: first logistic-section
+    slot requesting exactly `ore` x50 is the cell's signature."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local out={};"
+        "for _,c in pairs(s.find_entities_filtered{name='requester-chest'}) do "
+        "local ok=false;"
+        "pcall(function() local sec=c.get_logistic_sections().sections[1];"
+        "local sl=sec and sec.get_slot(1);"
+        "if sl and sl.value and sl.value.name=='" + ore + "' "
+        "and sl.min==50 then ok=true end end);"
+        "if ok then out[#out+1]=c.position.x..' '..c.position.y end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    origins: list[Point] = []
+    for entry in filter(None, raw.split(";")):
+        parts = entry.split()
+        if len(parts) == 2:
+            origins.append((float(parts[0]), float(parts[1])))
+    return origins
+
+
+def intake_candidate_tiles(
+    client: RconClient, surface: str, ore_output: Point,
+) -> list[Point]:
+    """Belt tiles PROVEN to hold or receive ore, best first, ends as fallback.
+
+    Ground truth over geometry: a tile qualifies when a drill drops onto it,
+    or its lanes hold items right now. Everything else -- upstream tails,
+    west-of-drop edges on eastbound rows -- waited forever with 'no source
+    items' beside frozen ore (live runs 8-10). Both entity kinds are
+    snapshotted to plain numbers before any second query."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local ox,oy=" + str(ore_output[0]) + "," + str(ore_output[1]) + ";"
+        "local offs={[0]={0,-2},[4]={2,0},[8]={0,2},[12]={-2,0}};"
+        "local tiles={};local drops={};local drills={};"
+        "local minx,maxx=nil,nil;"
+        "for _,d in pairs(s.find_entities_filtered{type='mining-drill'}) do "
+        "if math.abs(d.position.y-oy)<=3 then "
+        "local dd={x=d.position.x,y=d.position.y,dir=d.direction};"
+        "drills[#drills+1]=dd;"
+        "local off=offs[dd.dir] or {0,2};"
+        "drops[math.floor(dd.x+off[1])..'_'..math.floor(dd.y+off[2])]=true end end;"
+        "for _,b in pairs(s.find_entities_filtered{type='transport-belt'}) do "
+        "if math.abs(b.position.y-oy)<0.6 and math.abs(b.position.x-ox)<=40 then "
+        "local n=0;"
+        "for _,li in ipairs({b.get_transport_line(1),b.get_transport_line(2)}) do "
+        "for _,c in pairs(li.get_contents()) do n=n+c.count end end;"
+        "local key=math.floor(b.position.x)..'_'..math.floor(b.position.y);"
+        "tiles[#tiles+1]={x=b.position.x,y=b.position.y,n=n,"
+        "drop=not not drops[key],key=key};"
+        "if not minx or b.position.x<minx then minx=b.position.x end "
+        "if not maxx or b.position.x>maxx then maxx=b.position.x end end end;"
+        "local out={};local seen={};"
+        "for _,t in ipairs(tiles) do "
+        "if (t.drop or t.n>0) and not seen[t.key] then seen[t.key]=true;"
+        "out[#out+1]=t.x..' '..t.y end end;"
+        "for _,t in ipairs(tiles) do "
+        "if (t.x==minx or t.x==maxx) and not seen[t.key] then seen[t.key]=true;"
+        "out[#out+1]=t.x..' '..t.y end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    tiles_out: list[Point] = []
+    seen: set[tuple[float, float]] = set()
+    for entry in filter(None, raw.split(";")):
+        parts = entry.split()
+        if len(parts) == 2:
+            key = (float(parts[0]), float(parts[1]))
+            if key not in seen:
+                seen.add(key)
+                tiles_out.append(key)
+    return tiles_out
+
+
+def blocked_drill_drop_tile(
+    client: RconClient, surface: str, near: Point, *, radius: float = 40.0,
+) -> Point | None:
+    """An empty drop tile of an ore-blocked drill near `near`, if any.
+
+    A drill reporting waiting-for-space stares at a drop tile where this
+    blueprint laid no belt -- exactly the tile a logistic intake needs. A
+    provider chest placed there turns the blocked drill into the mine's ore
+    interface with zero demolition."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['player'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local offs={[0]={0,-2},[4]={2,0},[8]={0,2},[12]={-2,0}};"
+        "for _,d in pairs(s.find_entities_filtered{type='mining-drill',force=f}) do "
+        "if math.abs(d.position.x-nx)<=radius and math.abs(d.position.y-ny)<=radius then "
+        "local ok,st=pcall(function() return d.status end);"
+        "if ok and st==defines.entity_status.waiting_for_space_in_destination then "
+        "local off=offs[d.direction] or {0,2};"
+        "local tx,ty=d.position.x+off[1],d.position.y+off[2];"
+        "local e=s.find_entities_filtered{position={tx,ty}}[1];"
+        "local b=s.find_entities_filtered{position={tx,ty},type='transport-belt'}[1];"
+        "if not e and not b then rcon.print(tx..' '..ty) return end "
+        "end end end;"
+        "rcon.print('NONE')"
+    )
+    raw = _sc(client, lua)
+    parts = raw.split()
+    if len(parts) == 2:
+        return (float(parts[0]), float(parts[1]))
+    return None
+
+
+def chest_has_items(
+    client: RconClient, surface: str, position: Point,
+) -> bool:
+    """Whether the chest at `position` holds anything at all."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local e=s.find_entities_filtered{position={"
+        + str(position[0]) + "," + str(position[1]) + "},radius=0.4,limit=1}[1];"
+        "if not e then rcon.print('EMPTY') return end;"
+        "local ok=false;"
+        "pcall(function() local i=e.get_inventory(defines.inventory.chest);"
+        "for k=1,#i do local st=i[k] if st and st.valid_for_read then ok=true end end end);"
+        "rcon.print(ok and 'FULL' or 'EMPTY')"
+    )
+    raw = _sc(client, lua)
+    return raw.strip() == "FULL"
+
+
+def network_item_count(
+    client: RconClient, surface: str, force: str, near: Point, item: str,
+) -> int | None:
+    """Units of `item` inside the logistic network covering `near` (None: none)."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local n=s.find_logistic_network_by_position({"
+        + str(near[0]) + "," + str(near[1]) + "},f);"
+        "if not n then rcon.print('NONE') return end;"
+        "rcon.print(tostring(n.get_item_count('" + item + "')))"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    try:
+        return int(float(raw))
+    except ValueError:
+        return None
+
+
+def transfer_stock(
+    client: RconClient, surface: str, item: str, count: int, to_position: Point,
+) -> int:
+    """Relocate up to `count` of `item` from our containers INTO the chest at
+    `to_position`. Conservation-honest: units are removed at the source in
+    the same Lua transaction that inserts them at the destination. Returns
+    the number actually moved."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['player'];"
+        "local dst=s.find_entities_filtered{position={"
+        + str(to_position[0]) + "," + str(to_position[1]) + "},radius=0.4,"
+        "type='logistic-container',limit=1}[1];"
+        "if not dst then rcon.print('NODST') return end;"
+        "local remaining=" + str(count) + ";"
+        "for _,c in pairs(s.find_entities_filtered{type='container',force=f}) do "
+        "if remaining<=0 then break end;"
+        "if c.unit_number~=dst.unit_number then "
+        "pcall(function() local i=c.get_inventory(defines.inventory.chest);"
+        "local n=i.get_item_count('" + item + "');"
+        "if n>0 then local take=math.min(n,remaining);"
+        "local got=i.remove({name='" + item + "',count=take});"
+        "if got>0 then dst.insert({name='" + item + "',count=got});"
+        "remaining=remaining-got end end end) end end;"
+        "rcon.print(tostring(" + str(count) + "-remaining))"
+    )
+    raw = _sc(client, lua)
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
+
+
+def requester_requesting(
+    client: RconClient, surface: str, item: str, near: Point,
+    *, radius: float = 30.0,
+) -> Point | None:
+    """A requester chest whose first section slot asks for `item`, nearest
+    `near` -- the identity of the mall cell producing from it."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['player'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local best=nil;local bd=1e18;"
+        "for _,c in pairs(s.find_entities_filtered{name='requester-chest',force=f}) do "
+        "local d=(c.position.x-nx)^2+(c.position.y-ny)^2;"
+        "if d<bd then "
+        "local ok,matched=pcall(function() "
+        "local secs=c.get_logistic_sections();"
+        "for _,sec in pairs(secs.sections) do "
+        "local sl=sec.get_slot(1);"
+        "if sl and sl.value and sl.value.name=='" + item + "' then return true end "
+        "end return false end);"
+        "if ok and matched then best=c.position;bd=d end end end;"
+        "if best then rcon.print(best.x..' '..best.y) else rcon.print('NONE') end"
+    )
+    raw = _sc(client, lua)
+    parts = raw.split()
+    if len(parts) == 2:
+        return (float(parts[0]), float(parts[1]))
+    return None

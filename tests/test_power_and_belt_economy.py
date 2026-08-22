@@ -1,0 +1,328 @@
+# Path: tests/test_power_and_belt_economy.py
+# Purpose: User standards of 2026-08-22 -- belts go to the active blueprint
+# before belt-consuming cells, stocked fast tiers substitute for scarce regular
+# ones, a visibly-filling blueprint earns patience, and lean grids get solar.
+
+from types import SimpleNamespace
+
+import pytest
+
+from orchestrator import autonomous_builder as builder
+
+
+def _plan(belt: str = "transport-belt", count: int = 3) -> dict:
+    return {"phases": [{"name": "p", "actions": [
+        {"action_type": "place_ghost", "entity": belt, "position": {"x": i, "y": 0}}
+        for i in range(count)
+    ]}]}
+
+
+# --- belt reserve floor ------------------------------------------------------
+
+def test_underground_cell_defers_while_blueprint_holds_the_reserve(monkeypatch) -> None:
+    # The live runner learns this recipe from the force catalog; mirror that
+    # shape here.
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "underground-belt",
+        {"ingredients": ["iron-plate", "transport-belt"],
+         "amounts": [4, 2], "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 10},
+    )
+    reason = builder._belt_starved_consumer(
+        object(), "nauvis", "player", "underground-belt",
+    )
+    assert reason is not None and "transport-belt" in reason
+
+
+def test_belt_consumer_resumes_once_stock_recovers(monkeypatch) -> None:
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "underground-belt",
+        {"ingredients": ["iron-plate", "transport-belt"],
+         "amounts": [4, 2], "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 200},
+    )
+    assert builder._belt_starved_consumer(
+        object(), "nauvis", "player", "underground-belt",
+    ) is None
+
+
+def test_belt_cell_itself_is_never_gated_by_the_reserve(monkeypatch) -> None:
+    """The producer of belts must not be deferred on belts."""
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 0},
+    )
+    assert builder._belt_starved_consumer(
+        object(), "nauvis", "player", "transport-belt",
+    ) is None
+
+
+def test_mall_task_defers_a_belt_starved_consumer(monkeypatch) -> None:
+    deferred = []
+
+    class FakePriorities:
+        def describe(self, task, tick):
+            return task.item
+
+        def defer(self, item, tick, reason):
+            deferred.append((item, reason))
+
+    monkeypatch.setattr(
+        builder, "_belt_starved_consumer",
+        lambda *_a: "its recipe consumes transport-belt and only 10 remain",
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 1)
+    ensure_calls: list = []
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: ensure_calls.append("served") or (True, None),
+    )
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player",
+        SimpleNamespace(item="underground-belt", target=20), 1,
+        {}, FakePriorities(), (3.0, -1.0), lambda _m: None,
+    )
+
+    assert deferred and deferred[0][0] == "underground-belt"
+    assert not ensure_calls
+
+
+# --- fast tier substitution --------------------------------------------------
+
+def test_regular_belts_substitute_to_stocked_fast_tiers() -> None:
+    plan = _plan("transport-belt", 3)
+    swapped = builder._prefer_stocked_belt_tiers(
+        plan, {"fast-transport-belt": 100},
+    )
+    assert swapped == 3
+    actions = plan["phases"][0]["actions"]
+    assert all(a["entity"] == "fast-transport-belt" for a in actions)
+
+
+def test_partial_fast_coverage_upgrades_what_it_can() -> None:
+    """Bidirectional economy: cover actions with stocked surplus where it
+    exists -- a buildable mixed-tier plan beats an unaffordable pure one."""
+    plan = _plan("transport-belt", 5)
+    swapped = builder._prefer_stocked_belt_tiers(
+        plan, {"fast-transport-belt": 4},
+    )
+    assert swapped == 4
+    tiers = [a["entity"] for a in plan["phases"][0]["actions"]]
+    assert tiers.count("fast-transport-belt") == 4
+    assert tiers.count("transport-belt") == 1
+
+
+def test_fast_shortfall_downgrades_to_covering_regular() -> None:
+    """Run 11: the landfill blueprint demanded 16 fast belts the gate would
+    not produce, while regular belts sat plentiful -- the plan follows
+    inventory, not the reverse."""
+    plan = _plan("fast-transport-belt", 16)
+    swapped = builder._prefer_stocked_belt_tiers(
+        plan, {"transport-belt": 86, "fast-transport-belt": 9},
+    )
+    assert swapped == 7
+    tiers = [a["entity"] for a in plan["phases"][0]["actions"]]
+    assert tiers.count("transport-belt") == 7
+    assert tiers.count("fast-transport-belt") == 9
+
+
+def test_plans_without_belts_are_untouched() -> None:
+    plan = {"phases": [{"name": "p", "actions": [
+        {"action_type": "place_entity", "entity": "electric-mining-drill",
+         "position": {"x": 0, "y": 0}},
+    ]}]}
+    assert builder._prefer_stocked_belt_tiers(plan, {}) == 0
+
+
+# --- patience while a blueprint fills ----------------------------------------
+
+def test_visibly_filling_blueprints_extend_remediation_once(monkeypatch) -> None:
+    """The landfill run died at '6 rounds (180s)' while bots were mid-build;
+    a falling ghost count is progress and earns one extension."""
+    ghosts = iter([12, 8])  # start probe, then falling at the boundary
+
+    monkeypatch.setattr(
+        builder, "extend_roboport_coverage", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "pending_ghost_count",
+        lambda *_a, **_k: next(ghosts, 8),
+    )
+    monkeypatch.setattr(
+        builder, "_wait_for_ghosts", lambda *_a, **_k: 5,
+    )
+    monkeypatch.setattr(
+        builder, "_diagnose_blockage",
+        lambda *_a, **_k: ("ghost needs material", "materials:x"),
+    )
+    monkeypatch.setattr(builder, "_apply_remedy", lambda *_a: True)
+
+    with pytest.raises(builder.StuckError, match="after 4 rounds"):
+        builder.bring_stage_up(
+            object(), object(), "nauvis", "player", "landfill system",
+            (0.0, 0.0), ((-10, -10), (10, 10)), (0.0, 0.0),
+            [], lambda _m: None,
+            rounds=2, interval=0.0,
+        )
+
+# --- solar top-up ------------------------------------------------------------
+
+def test_lean_network_gets_stocked_solar(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "network_generation_kw", lambda *_a: 720.0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"solar-panel": 3, "accumulator": 2},
+    )
+    spots = [("medium-electric-pole", 0.0, 0.0)] + [
+        ("solar-panel", float(i), 2.0) for i in range(3)
+    ] + [("accumulator", 6.0, 2.0), ("accumulator", 8.0, 2.0)]
+    monkeypatch.setattr(
+        builder.live_base, "chained_clear_spots", lambda *_a, **_k: spots,
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e: submitted.append(name),
+    )
+
+    acted = builder._top_up_solar_generation(
+        object(), object(), "nauvis", "player", (40.0, -60.0),
+        lambda _m: None,
+    )
+
+    assert acted
+    assert submitted == ["solar_top_up"]
+
+
+def test_healthy_network_skips_the_top_up(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "network_generation_kw", lambda *_a: 5000.0,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a: pytest.fail("healthy grids must not be built upon"),
+    )
+    assert builder._top_up_solar_generation(
+        object(), object(), "nauvis", "player", (0.0, 0.0), lambda _m: None,
+    ) is False
+
+
+def test_no_solar_stock_reports_and_skips(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "network_generation_kw", lambda *_a: 500.0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {},
+    )
+    messages: list[str] = []
+    assert builder._top_up_solar_generation(
+        object(), object(), "nauvis", "player", (0.0, 0.0),
+        messages.append,
+    ) is False
+    assert any("no solar-panel" in m for m in messages)
+
+
+def test_underground_actions_adopt_the_own_corridor(monkeypatch) -> None:
+    """Run 12: the bridge's underground-belt pairs hit the mine's own regular
+    belts -- same corridor, different family member; adoption applies."""
+    from types import SimpleNamespace
+
+    import orchestrator.stage_services as ss
+
+    plan = {"phases": [{
+        "actions": [
+            {"action_type": "place_ghost", "entity": "underground-belt",
+             "position": {"x": 51.5, "y": -104.5}},
+        ],
+    }], "force": "player"}
+    reports = iter([{
+        "ok": False,
+        "failed_placements": 1,
+        "placement_failures": [{
+            "reason": "exact_position_occupied_by_different_entity",
+            "position": {"x": 51.5, "y": -104.5},
+        }],
+    }, {"ok": True, "succeeded_placements": 0, "placed_ghosts": 0,
+        "placed_entities": 0}])
+    built = []
+
+    class FakeBridge:
+        def build_layout(self, authorization, plan_dict):
+            built.append(plan_dict)
+            return next(reports)
+
+    monkeypatch.setattr(ss, "load_json", lambda r: r)
+    monkeypatch.setattr(ss, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(ss, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(ss, "build_layout_authorization", lambda *_a: object())
+    monkeypatch.setattr(
+        ss.live_base, "entity_at",
+        lambda _c, _s, pos: {"name": "transport-belt", "force": "player"}
+        if (pos[0], pos[1]) == (51.5, -104.5) else None,
+    )
+
+    ss._submit(object(), FakeBridge(), "nauvis", plan, "landfill bridge",
+               lambda _m: None)
+
+    assert built[-1]["phases"][0]["actions"] == []
+
+
+def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
+    """Run 13's end: a single pole ghost sat unbuilt for 360s while every
+    check looked healthy -- diagnosis had no name for it, so the stage died.
+    One remove-and-resubmit cycle is the honest remedy."""
+    waits = iter([1, 1, 0])
+    monkeypatch.setattr(
+        builder, "_wait_for_ghosts", lambda *_a, **_k: next(waits),
+    )
+    monkeypatch.setattr(builder, "extend_roboport_coverage",
+                        lambda *_a, **_k: False)
+    monkeypatch.setattr(builder, "ensure_logistic_coverage",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr(builder.live_base, "pending_ghost_count",
+                        lambda *_a, **_k: 1)
+
+    def fake_diagnose(*_a, **_k):
+        # None means 'no blockage found -- bots still working'
+        return None
+
+    monkeypatch.setattr(builder, "_diagnose_blockage", fake_diagnose)
+    monkeypatch.setattr(
+        builder.live_base, "ghost_blockages",
+        lambda *_a, **_k: [{
+            "position": (5.5, 22.5), "entity": "medium-electric-pole",
+            "reason": "pending",
+        }],
+    )
+    removed: list = []
+    monkeypatch.setattr(
+        builder.live_base, "remove_entity_at",
+        lambda _c, _s, pos: removed.append(pos) or True,
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e: submitted.append(name),
+    )
+
+    builder.bring_stage_up(
+        object(), object(), "nauvis", "player", "steel-plate conversion",
+        (5.5, 29.5), ((-10, -10), (20, 40)), (0.0, 0.0),
+        [(5.5, 30.5)], lambda _m: None,
+        rounds=2, interval=0.0,
+    )
+
+    assert removed == [(5.5, 22.5)]
+    assert submitted == ["rebuild_stale_ghost"]
