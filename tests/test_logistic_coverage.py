@@ -267,6 +267,58 @@ def test_network_generation_query_sums_generators_on_one_network() -> None:
     assert "get_max_energy_production" in client.commands[0]
 
 
+def test_network_generation_trusts_entity_output_over_interface_prototype() -> None:
+    """Live 2026-08-22: the save's electric-energy-interface reported prototype
+    8_333_333_333 kW while the entity actually produced 166.7 kW -- the lie
+    gated off every solar top-up and browned out the whole base. The query
+    must read script-set output from the ENTITY for that type only."""
+    client = _FakeRcon("166.7")
+    assert live_base.network_generation_kw(client, "nauvis", "player", (3.0, -1.0)) == pytest.approx(166.7)
+    lua = client.commands[0]
+    assert "electric-energy-interface" in lua
+    assert "power_production" in lua
+    # Normal generators keep the proven nameplate path.
+    assert "g.type=='electric-energy-interface'" in lua
+
+
+def test_chained_clear_spots_probes_distinct_positions() -> None:
+    """Live 2026-08-22: find_non_colliding_position returns the cursor tile
+    itself whenever that tile is clear, so an eight-panel array collapsed onto
+    ONE planned tile (mod report attempted=9 placed=2 already=7 ok=true) and
+    the grid stayed starved at 167 kW. The generated Lua must skip spots it
+    has already claimed before searching again."""
+    client = _FakeRcon("")
+    live_base.chained_clear_spots(
+        client, "nauvis",
+        [("medium-electric-pole", 1), ("solar-panel", 8)],
+        (38.5, 47.5),
+    )
+    lua = client.commands[0]
+    assert "used[spot_key(p.x,p.y)]" in lua
+    assert "find_non_colliding_position" in lua
+
+
+def test_unpowered_entity_scan_ignores_generation_sources() -> None:
+    """Live runs 26-27 (2026-08-22): a night-dark solar panel reads no_power,
+    so the stranded-support scan classified it as a wiring defect and every
+    remediation round waited for a generator to 'charge' -- two STUCK endings
+    on the same blockage. Sources must never enter this scan."""
+    client = _FakeRcon("")
+    live_base.unpowered_entities(client, "nauvis", ((30.0, 40.0), (50.0, 60.0)))
+    lua = client.commands[0]
+    assert "solar-panel" in lua
+    assert "not gens[e.type]" in lua
+    assert "electric-energy-interface" in lua
+
+
+def test_roboport_energy_treats_a_bad_reply_as_no_reading() -> None:
+    """Live run 29 (2026-08-22): one charge poll arrived truncated at the
+    server and float() raised, killing the mission from an advisory poll. A
+    bad sample must read as unavailable so the wait loop just repolls."""
+    client = _FakeRcon("Cannot execute command. Error: [string \"...\"]:1: ')' expected near <eof>")
+    assert live_base.roboport_energy(client, "nauvis", "player", (1.0, 1.0)) is None
+
+
 # --- plan-time chest discovery -------------------------------------------
 
 def test_logistic_chest_positions_finds_feeds_and_output_but_not_plain_chests() -> None:

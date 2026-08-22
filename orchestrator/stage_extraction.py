@@ -138,13 +138,24 @@ def choose_mining_origin(
     area_is_clear: Callable[[Point, Point], bool],
     footprint_has_resource: Callable[[list[Point]], bool],
     reserved_pair_columns: int = 0,
+    max_area_probes: int = 150,
 ) -> tuple[Point, int] | None:
-    """Choose a complete paired row; never shrink below requested capacity."""
+    """Choose a complete paired row; never shrink below requested capacity.
+
+    Probing is bounded: candidate origins span the whole patch box, and each
+    costs two live RCON surveys. Live run 28 (2026-08-22) spent ~4 minutes
+    silently probing 2226 candidates on a patch already saturated by our own
+    drill rows before failing -- exhaustion must surface in seconds.
+    """
+    probes = 0
     for origin in candidate_mining_origins(
         preferred, patch_min, patch_max, machine_count
     ):
         ox, oy = origin
         total_columns = machine_count + reserved_pair_columns
+        probes += 1
+        if probes > max_area_probes:
+            return None
         if not area_is_clear(
             (ox - 6, oy - 5), (ox + total_columns * 3 + 4, oy + 7)
         ):
@@ -227,7 +238,12 @@ def _new_direct_mine(
         row_drill_count * 3 + 10, 12,
     )
     if preferred_box is None:
-        raise ValueError(f"No clear staging area found near the {ore} patch at {nearest_tile}")
+        # Geography, not a bug: standing infrastructure owns every staging
+        # strip. Defer (PendingSystemDeferred) so background gates such as the
+        # fast-belt capacity ladder pause instead of killing the run.
+        raise PendingSystemDeferred(
+            f"No clear staging area found near the {ore} patch at {nearest_tile}"
+        )
     preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
     area_is_clear = lambda lower, upper: live_base.area_clear(
         client, surface, lower, upper
@@ -240,9 +256,10 @@ def _new_direct_mine(
         area_is_clear, footprint_has_resource, 0,
     )
     if selected is None:
-        raise ValueError(
+        raise PendingSystemDeferred(
             f"No clear position near the {ore} patch at {nearest_tile} "
-            "puts every drill on ore"
+            "puts every drill on ore -- the patch is saturated by standing "
+            "infrastructure; expansion defers instead of bulldozing it"
         )
     selected_origin, row_drill_count = selected
     origin = (int(selected_origin[0]), int(selected_origin[1]))

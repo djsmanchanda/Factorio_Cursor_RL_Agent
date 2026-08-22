@@ -717,3 +717,37 @@ def test_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatch) ->
     )
 
     assert captured["logistic_chest_positions"] == []
+
+
+def test_choose_mining_origin_probing_is_bounded(monkeypatch) -> None:
+    """Live run 28 (2026-08-22): a patch saturated by our own drill rows made
+    the origin scan probe 2226 staging boxes over ~4 silent RCON minutes
+    before dying. Exhaustion must surface after a bounded budget."""
+    probes = 0
+
+    def never_clear(*_args):
+        nonlocal probes
+        probes += 1
+        return False
+
+    picked = stage_extraction.choose_mining_origin(
+        (12.5, -1.5), (17.5, -26.5), (47.5, 23.5), 4,
+        never_clear, lambda _centres: True,
+    )
+
+    assert picked is None
+    assert probes <= 151
+
+
+def test_saturated_patch_defers_instead_of_killing_the_run(monkeypatch) -> None:
+    """A patch whose strips are all owned by standing infrastructure is
+    geography, not a bug: the fast-belt capacity gate must pause on
+    PendingSystemDeferred instead of crashing the whole mission."""
+    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: None)
+
+    with pytest.raises(stage_extraction.PendingSystemDeferred):
+        stage_extraction._new_direct_mine(
+            object(), "nauvis", "iron-ore", (17.5, 3.5),
+            (17.5, -26.5), (47.5, 23.5), 3,
+            "fast-transport-belt", "fast-inserter", 40,
+        )

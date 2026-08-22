@@ -235,3 +235,111 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
 
     assert acted
     assert submits.count("power_bridge") == 2
+
+
+def test_remediation_extends_repeatedly_while_local_ghosts_fall(monkeypatch) -> None:
+    """Live run 30 (2026-08-22): a ~250-tile oil pipeline built at cross-base
+    robot-flight speed fell 15 -> 10 ghosts across two extensions and was
+    killed anyway -- the old loop granted exactly one extension and judged
+    progress by the WHOLE-SURFACE ghost count. Extensions must repeat while
+    THIS stage's pending ghosts keep falling."""
+    monkeypatch.setattr(builder, "extend_roboport_coverage", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_diagnose_blockage", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_apply_remedy", lambda *_a, **_k: False)
+    readings = iter([4, 3, 3, 2, 2, 2])
+    monkeypatch.setattr(
+        builder, "_wait_for_ghosts",
+        lambda *_a, **_k: next(readings),
+    )
+    emitted: list[str] = []
+
+    with pytest.raises(builder.StuckError) as stuck:
+        builder.bring_stage_up(
+            None, None, "nauvis", "player", "pipeline",
+            (0.0, 0.0), ((0.0, 0.0), (9.0, 9.0)), (0.0, 0.0), [],
+            emitted.append, rounds=2, interval=0.0,
+        )
+
+    extensions = [e for e in emitted if "extending remediation" in e]
+    assert len(extensions) == 2
+    # The verdict must tell the truth about bot progress instead of claiming
+    # nothing was built.
+    assert "area ghosts 2 -> 2" in str(stuck.value)
+
+
+def test_missing_feed_on_a_mall_cell_rebuilds_instead_of_dying(monkeypatch) -> None:
+    """Live run 32 (2026-08-22): the strict transport repair raised
+    'expected requester-chest ... found nothing' for a half-built paired cell
+    and killed the mission. When the machine belongs to a declared mall half,
+    the repair path must regenerate that cell in place and re-survey."""
+    from orchestrator.mall_builder import _slot_position
+
+    origin, side = (67, 53), "left"
+    machine = _slot_position(origin, side)
+    monkeypatch.setattr(
+        builder, "extend_roboport_coverage", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "nearest_pole_on_other_network",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_statuses",
+        lambda *_a, **_k: {tuple(machine)[:2]: "item_ingredient_shortage"},
+    )
+    monkeypatch.setattr(
+        builder, "_existing_stage_chests", lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(
+        builder, "bring_stage_up", lambda *_a, **_k: None,
+    )
+    rebuilt: list[str] = []
+    monkeypatch.setattr(
+        builder, "rebuild_incomplete_mall_cell",
+        lambda _c, _b, _s, _f, recipe, position, _ref, emit, **_k:
+            rebuilt.append((recipe, position)) or True,
+    )
+    raised = False
+
+    def raising_repair(*_a, **_k):
+        nonlocal raised
+        raised = True
+        raise builder.StuckError(
+            "existing advanced-circuit feed for copper-cable expected "
+            "requester-chest at (44.5, 50.5), found nothing"
+        )
+
+    monkeypatch.setattr(builder, "repair_existing_ingredient_transport", raising_repair)
+
+    class _Existing:
+        machine_count = 1
+        working_count = 0
+        machine_positions = [machine]
+        output_position = machine
+
+    plan = builder._LinePlan(
+        existing=_Existing(),
+        spec={"ingredients": [], "amounts": []},
+        production_target=1,
+        mall_storage_limit=0,
+        fill_provider=False,
+        demand=0.0,
+        saturated=False,
+        promoted_count=None,
+        promote_to_line=False,
+        at_size=True,
+    )
+
+    result = builder._repair_stalled_line(
+        None, None, "nauvis", "player", "advanced-circuit",
+        (35.0, 21.0), lambda _m: None, plan,
+        mall_provider=None, upgrade_bootstrap=True,
+    )
+
+    assert raised, "the strict repair must have run before the fallback"
+    assert rebuilt == [("advanced-circuit", machine)]
+    assert result is None

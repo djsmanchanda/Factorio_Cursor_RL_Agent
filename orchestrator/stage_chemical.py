@@ -265,7 +265,16 @@ def _existing_outputs(
     if len(result) == 2:
         return result
     if any(present):
-        raise StuckError("partial oil cell exists but is not healthy; repair it before adding another")
+        # Repair-before-duplicate: a half-built cell is construction in
+        # flight, and killing the run (the old StuckError) guaranteed it
+        # never finished. Deferring keeps the mission alive; bots converge,
+        # and the next pass finds both outputs healthy or services the cell.
+        from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+        raise ProductionPrerequisiteDeferred(
+            "partial oil cell exists but is not healthy; waiting for it to "
+            "finish before adding another"
+        )
     return None
 
 

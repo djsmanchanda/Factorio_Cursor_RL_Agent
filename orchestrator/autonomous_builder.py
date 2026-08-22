@@ -30,7 +30,7 @@ from orchestrator.baseline_production import (
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
-from orchestrator.mall_builder import build_compact_mall_stage
+from orchestrator.mall_builder import build_compact_mall_stage, rebuild_incomplete_mall_cell
 from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
 )
@@ -392,29 +392,34 @@ def bring_stage_up(
     extend_roboport_coverage(client, bridge, surface, force, origin, emit)
     ensure_logistic_coverage(client, bridge, surface, force, logistic_chest_positions, emit)
     description, remedy, acted_ever = "no blockage recorded", "none", False
-    ghosts_start = live_base.pending_ghost_count(client, surface, force)
-    extended = False
+    extensions = 0
     rebuilt_stale = False
     total_rounds = rounds
     attempt = 0
+    local_baseline: int | None = None
     while True:
         if attempt >= total_rounds:
             # A blueprint the bots are VISIBLY filling does not deserve a
             # timeout: production falls while a stage is half-built, so
-            # patience here is progress elsewhere too. Extend once when the
-            # ghost count fell across the rounds just spent.
-            ghosts_end = live_base.pending_ghost_count(client, surface, force)
+            # patience here is progress elsewhere too. Progress is judged on
+            # THIS STAGE'S pending ghosts, not the whole surface: live run 30
+            # (2026-08-22) built an oil pipeline whose pipes sat ~250 tiles
+            # away, so every placement flew a cross-base round trip and the
+            # area count fell 15 -> 10 across two extensions -- real, slow,
+            # converging work that a single-extension limit killed anyway.
+            # Extensions repeat while the local count keeps falling, capped so
+            # a genuinely stalled stage still surfaces.
             if (
-                not extended
-                and ghosts_start is not None and ghosts_end is not None
-                and ghosts_end < ghosts_start
+                local_baseline is not None and remaining is not None
+                and remaining < local_baseline and extensions < 4
             ):
-                extended = True
+                extensions += 1
                 emit(
-                    f"  [{name}] bots are visibly winning ({ghosts_start} -> "
-                    f"{ghosts_end} pending ghost(s)) -- extending remediation once"
+                    f"  [{name}] bots are visibly winning ({local_baseline} -> "
+                    f"{remaining} pending ghost(s)) -- extending remediation "
+                    f"({extensions}/4)"
                 )
-                ghosts_start = ghosts_end
+                local_baseline = remaining
                 total_rounds += rounds
                 continue
             # A LONE unresolved ghost with no named cause is the stale-ghost
@@ -435,6 +440,8 @@ def bring_stage_up(
         remaining = _wait_for_ghosts(
             client, surface, force, area, timeout_seconds=interval,
         )
+        if local_baseline is None:
+            local_baseline = remaining
         issue = _diagnose_blockage(
             client, surface, force, origin, substation_position, machine_positions,
             logistic_chest_positions, area,
@@ -455,15 +462,20 @@ def bring_stage_up(
             area, emit,
         )
         acted_ever |= bool(acted)
+    progress = (
+        f", area ghosts {local_baseline} -> {remaining}"
+        if local_baseline is not None else ""
+    )
     if not acted_ever:
         raise StuckError(
-            f"{name}: {description}, and not one of the {total_rounds} remediation rounds "
-            f"built anything -- the remedy '{remedy}' cannot address this fault, so the "
-            f"{total_rounds * interval:.0f}s were spent re-running a no-op"
+            f"{name}: {description}{progress}, and no remediation round could act "
+            f"across {total_rounds} rounds ({total_rounds * interval:.0f}s) -- "
+            f"the remedy '{remedy}' cannot address this fault"
         )
     raise StuckError(
         f"{name} still blocked after {total_rounds} rounds "
-        f"({total_rounds * interval:.0f}s of remediation attempts); last issue: {description}"
+        f"({total_rounds * interval:.0f}s of remediation attempts); "
+        f"last issue: {description}{progress}"
     )
 
 
@@ -2600,16 +2612,48 @@ def _repair_stalled_line(
                 "keeping its current transport while bootstrap production catches up"
             )
             return chest or existing.output_position
-        repaired = repair_existing_ingredient_transport(
-            client, bridge, surface, force, item, existing.machine_positions,
-            lambda ingredient: ensure_produced(
-                client, bridge, surface, force, ingredient, reference_point, emit,
-                upgrade_bootstrap=upgrade_bootstrap,
-            ),
-            emit,
-        )
+        try:
+            repaired = repair_existing_ingredient_transport(
+                client, bridge, surface, force, item, existing.machine_positions,
+                lambda ingredient: ensure_produced(
+                    client, bridge, surface, force, ingredient, reference_point, emit,
+                    upgrade_bootstrap=upgrade_bootstrap,
+                ),
+                emit,
+            )
+        except StuckError as error:
+            # A paired mall cell whose feed infrastructure was never built is
+            # incomplete CONSTRUCTION, not unrepairable geometry: live run 32
+            # died because its advanced-circuit assembler had no requester
+            # chest at all. Regenerate that cell's own declared plan in place
+            # (idempotent) and let the next pass re-survey; anything outside a
+            # declared cell half still fails exactly as before.
+            if rebuild_incomplete_mall_cell(
+                client, bridge, surface, force, item,
+                existing.machine_positions[0], reference_point, emit,
+            ):
+                return None
+            raise
         if repaired:
             return None
+    idle = {
+        position: status
+        for position, status in (statuses or {}).items()
+        if status != "working"
+    }
+    if idle:
+        # Live run 2026-08-22 22:02: two science assemblers sat at low_power
+        # while this function returned silently, burning 116 passes in ~50s.
+        # Name the residual cause so the next pass is a decision, not a mystery.
+        sample = "; ".join(
+            f"{status}@({position[0]:.0f},{position[1]:.0f})"
+            for position, status in sorted(idle.items())[:3]
+        )
+        emit(
+            f"  REPAIR DIAGNOSIS: {item} still has {len(idle)} non-working "
+            f"machine(s) after remediation: {sample}"
+        )
+        time.sleep(5)  # let power/logistics remediation land before resurvey
     return None
 
 

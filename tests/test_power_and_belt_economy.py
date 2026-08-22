@@ -143,31 +143,29 @@ def test_plans_without_belts_are_untouched() -> None:
 
 # --- patience while a blueprint fills ----------------------------------------
 
-def test_visibly_filling_blueprints_extend_remediation_once(monkeypatch) -> None:
+def test_visibly_filling_blueprints_extend_remediation(monkeypatch) -> None:
     """The landfill run died at '6 rounds (180s)' while bots were mid-build;
-    a falling ghost count is progress and earns one extension."""
-    ghosts = iter([12, 8])  # start probe, then falling at the boundary
-
+    a falling ghost count is progress. Live run 30 (2026-08-22) then showed
+    one extension is not enough for a ~250-tile pipeline built at cross-base
+    flight speed, so extensions now repeat while local ghosts keep falling."""
     monkeypatch.setattr(
         builder, "extend_roboport_coverage", lambda *_a, **_k: False,
     )
     monkeypatch.setattr(
         builder, "ensure_logistic_coverage", lambda *_a, **_k: None,
     )
+    monkeypatch.setattr(builder, "_apply_remedy", lambda *_a: True)
+    ghosts = iter([5, 4])
     monkeypatch.setattr(
-        builder.live_base, "pending_ghost_count",
-        lambda *_a, **_k: next(ghosts, 8),
-    )
-    monkeypatch.setattr(
-        builder, "_wait_for_ghosts", lambda *_a, **_k: 5,
+        builder, "_wait_for_ghosts",
+        lambda *_a, **_k: next(ghosts, 4),
     )
     monkeypatch.setattr(
         builder, "_diagnose_blockage",
         lambda *_a, **_k: ("ghost needs material", "materials:x"),
     )
-    monkeypatch.setattr(builder, "_apply_remedy", lambda *_a: True)
 
-    with pytest.raises(builder.StuckError, match="after 4 rounds"):
+    with pytest.raises(builder.StuckError):
         builder.bring_stage_up(
             object(), object(), "nauvis", "player", "landfill system",
             (0.0, 0.0), ((-10, -10), (10, 10)), (0.0, 0.0),

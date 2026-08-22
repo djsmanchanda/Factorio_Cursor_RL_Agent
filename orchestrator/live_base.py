@@ -763,14 +763,18 @@ def roboport_positions(client: RconClient, surface: str, force: str) -> list[Poi
 def network_generation_kw(
     client: RconClient, surface: str, force: str, near: Point,
 ) -> float | None:
-    """Combined prototype generation capacity (kW) of the electric network
-    nearest `near`, or None when no roboport defines that network.
+    """Combined generation capacity (kW) of the electric network nearest
+    `near`, or None when no roboport defines that network.
 
     Generators only: accumulators store rather than generate, so they are
     excluded -- a charged battery bank must not license a placement burst the
-    grid cannot sustain. Values are prototype maxima, which is exactly the
-    quantity a charging burst competes against. Verified live on 2.1.14:
-    LuaEntityPrototype.get_max_energy_production() returns kilowatts.
+    grid cannot sustain. Prototype maxima are the nameplate quantity a charging
+    burst competes against (verified live on 2.1.14:
+    LuaEntityPrototype.get_max_energy_production() returns kilowatts), EXCEPT
+    for script-configured sources: an electric-energy-interface's real output
+    lives on the entity (power_production, watts). Live evidence 2026-08-22:
+    one EEI reported prototype 8_333_333_333 kW vs entity 166.7 kW, which
+    silently gated off every solar top-up and browned out the whole base.
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
@@ -786,8 +790,14 @@ def network_generation_kw(
         "'electric-energy-interface','fusion-generator','burner-generator'}}) do "
         "local okid,id=pcall(function() return g.electric_network_id end);"
         "if okid and id==net then "
+        "local kw=nil;"
+        "if g.type=='electric-energy-interface' then "
+        "local okw,w=pcall(function() return g.power_production end);"
+        "if okw and type(w)=='number' then kw=w/1000 end end;"
+        "if kw==nil then "
         "local okp,p=pcall(function() return g.prototype.get_max_energy_production() end);"
-        "if okp and type(p)=='number' then total=total+p end end end;"
+        "if okp and type(p)=='number' then kw=p end end;"
+        "if kw then total=total+kw end end end;"
         "rcon.print(string.format('%.1f',total))"
     )
     raw = _sc(client, lua)
@@ -836,11 +846,21 @@ def chained_clear_spots(
     Each unit is placed within `step_radius` of the previous one, so the
     cluster stays contiguous -- solar arrays must sit inside their own supply
     pole's area, not scattered around it. Returns (name, x, y) triples; fewer
-    than requested when the terrain runs out."""
+    than requested when the terrain runs out.
+
+    Spots must also be DISTINCT: live run 2026-08-22 22:27 showed
+    find_non_colliding_position returning the cursor tile itself whenever that
+    tile is still clear, so an eight-panel array collapsed onto one tile (mod
+    report attempted=9 placed=2 already_present=7 ok=true) and the base kept
+    running on its starved grid. Probed duplicates now walk the cursor off the
+    taken tile before the next search.
+    """
     lua = (
         "local s=game.surfaces['" + surface + "'];"
         "local cur={" + str(start[0]) + "," + str(start[1]) + "};"
         "local out={};"
+        "local used={};"
+        "local function spot_key(x,y) return string.format('%.2f|%.2f',x,y) end;"
         "local wanted={"
         + ",".join(
             "{'" + name + "'," + str(count) + "}"
@@ -850,7 +870,13 @@ def chained_clear_spots(
         "for _,w in ipairs(wanted) do "
         "for i=1,w[2] do "
         "local p=s.find_non_colliding_position(w[1],cur," + str(step_radius) + ",0.5);"
-        "if p then out[#out+1]=w[1]..' '..p.x..' '..p.y;cur={p.x,p.y} end "
+        "local probes=0;"
+        "while p and used[spot_key(p.x,p.y)] and probes<8 do "
+        "probes=probes+1;"
+        "cur={cur[1]+2.0*math.cos(probes),cur[2]+2.0*math.sin(probes)};"
+        "p=s.find_non_colliding_position(w[1],cur," + str(step_radius) + ",0.5);"
+        "end;"
+        "if p then used[spot_key(p.x,p.y)]=true;out[#out+1]=w[1]..' '..p.x..' '..p.y;cur={p.x,p.y} end "
         "end end;"
         "rcon.print(table.concat(out,';'))"
     )
@@ -888,6 +914,11 @@ def roboport_energy(
     A fresh roboport lands at roughly half its 100 MJ buffer (live-verified)
     and draws megawatts while charging its internal batteries -- the transient
     that stacks into a production-killing spike when whole chains land at once.
+
+    An unparseable reply also reads None: live run 29 lost the whole mission
+    when one poll arrived truncated at the server and float() raised. The
+    reading is advisory charge telemetry; a skipped sample just delays the
+    next poll.
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
@@ -901,7 +932,10 @@ def roboport_energy(
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
-    return float(raw)
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def occupied_tile_owners(
@@ -1116,19 +1150,28 @@ def logistic_robot_speed(client: RconClient, force: str) -> float:
 def unpowered_entities(
     client: RconClient, surface: str, area: tuple[Point, Point],
 ) -> list[Point]:
-    """Every entity inside `area` that reads no_power, nearest-first by name.
+    """Every non-generator entity inside `area` reading no_power, nearest-first.
 
     A stage's health cannot be judged from its machines alone. An inserter that
     moves the product is not a "machine", so a mining row whose pole supply area
     reaches the drills but stops one tile short of the output row reports every
     drill as fine while the output inserter sits dead and the belt backs up.
+
+    Generation sources are excluded: a solar panel after dusk also reads
+    no_power, and live runs 26-27 (2026-08-22) then classified it as an
+    unpowered support entity and waited out every round for a generator to
+    "charge". An idle source is physics, not a wiring defect; a genuinely
+    starved grid is the generation-capacity observation's business.
     """
     (min_x, min_y), (max_x, max_y) = area
     lua = (
         "local s=game.surfaces['" + surface + "'];local out={};"
+        "local gens={['solar-panel']=true,['generator']=true,['accumulator']=true,"
+        "['reactor']=true,['electric-energy-interface']=true,"
+        "['fusion-generator']=true,['burner-generator']=true};"
         "for _,e in pairs(s.find_entities_filtered{area={{" + str(min_x) + "," + str(min_y) + "},"
         "{" + str(max_x) + "," + str(max_y) + "}}}) do "
-        "if e.status==defines.entity_status.no_power then "
+        "if e.status==defines.entity_status.no_power and not gens[e.type] then "
         "out[#out+1]=string.format('%s %.1f %.1f',e.name,e.position.x,e.position.y) end end;"
         "rcon.print(table.concat(out,';'))"
     )

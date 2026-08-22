@@ -10,6 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import pytest
+
 from orchestrator import live_base, stage_chemical
 from orchestrator.stage_services import _ghost_materials
 
@@ -75,3 +77,69 @@ def test_occupied_tiles_can_leave_water_for_fluid_routing() -> None:
 
     assert "find_tiles_filtered" not in client.command_text
     assert "find_entities_filtered" in client.command_text
+
+
+def test_partial_oil_cell_defers_instead_of_killing_the_run(monkeypatch) -> None:
+    """Live run 31 (2026-08-22): the guard that refuses a SECOND oil cell
+    while one is half-built raised StuckError and ended the whole mission --
+    guaranteeing the partial cell could never converge. Refusing to duplicate
+    is right; killing the mission is not. It must defer instead."""
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    class _Line:
+        machine_positions = [(1.0, 1.0), (4.0, 1.0)]
+        working_count = 0
+
+    monkeypatch.setattr(
+        stage_chemical.live_base, "find_line",
+        lambda *_a, **_k: _Line(),
+    )
+    monkeypatch.setattr(
+        stage_chemical.live_base, "nearest_container",
+        lambda *_a, **_k: None,
+    )
+
+    with pytest.raises(ProductionPrerequisiteDeferred):
+        stage_chemical._existing_outputs(object(), "nauvis", "player")
+
+
+def test_incomplete_mall_cell_rebuilds_in_place_not_on_a_fresh_slot() -> None:
+    """Live run 32 (2026-08-22): an advanced-circuit cell existed as assembler
+    only; strict line repair refused the geometry and killed the run. The
+    rebuild must regenerate the cell's OWN plan at its own (origin, side)."""
+    from orchestrator.mall_builder import (
+        _slot_position,
+        locate_mall_cell,
+        rebuild_incomplete_mall_cell,
+    )
+
+    origin, side = (67, 53), "right"
+    machine = _slot_position(origin, side)
+    located = locate_mall_cell(machine, (35.0, 21.0))
+    assert located == (origin, side)
+    # A machine outside every declared half is not a mall cell.
+    assert locate_mall_cell((machine[0] + 0.3, machine[1]), (35.0, 21.0)) is None
+
+    submitted: list[tuple[str, dict]] = []
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(
+        "orchestrator.mall_builder._submit",
+        lambda _c, _b, _s, plan, name, _e, **_k:
+            submitted.append((name, plan)) or {"ok": True},
+    )
+    try:
+        assert rebuild_incomplete_mall_cell(
+            object(), object(), "nauvis", "player",
+            "advanced-circuit", machine, (35.0, 21.0), lambda _m: None,
+        )
+    finally:
+        monkey.undo()
+    name, plan = submitted[0]
+    assert name == "repaired_mall_advanced-circuit"
+    actions = [a for phase in plan["phases"] for a in phase["actions"]]
+    placed_machines = [
+        a for a in actions
+        if a["entity"] == "assembling-machine-2"
+        and (a["position"]["x"], a["position"]["y"]) == machine
+    ]
+    assert placed_machines, "the rebuilt plan must target the existing machine tile"

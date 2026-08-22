@@ -129,6 +129,56 @@ def _choose_slot(
             return origin, "left"
     return None
 
+def locate_mall_cell(
+    machine_position: Point, reference_point: Point,
+) -> tuple[tuple[int, int], str] | None:
+    """Inverse of slot allocation: which declared cell half holds this machine.
+
+    The district is deterministic from `reference_point` (row-major, fixed
+    pitch), so a machine either sits on exactly one declared slot or outside
+    the mall entirely."""
+    target = (float(machine_position[0]), float(machine_position[1]))
+    for origin in _cell_origins(reference_point):
+        for side in ("left", "right"):
+            if _slot_position(origin, side) == target:
+                return origin, side
+    return None
+
+
+def rebuild_incomplete_mall_cell(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, machine_position: Point, reference_point: Point,
+    emit: Callable[[str], None], *, stock_target: int = 1,
+) -> bool:
+    """Regenerate a half-built paired cell's declared plan IN PLACE.
+
+    Live run 32 (2026-08-22): an advanced-circuit cell came up with its
+    assembler but none of its feed infrastructure; the strict line repair
+    refused that geometry and killed the run. The paired-cell plan is
+    deterministic from (origin, side) and the executor is idempotent, so
+    resubmitting it at the cell's own origin places only what is missing
+    instead of duplicating the cell on a fresh slot. Returns False when the
+    machine does not belong to any declared mall cell.
+    """
+    located = locate_mall_cell(machine_position, reference_point)
+    if located is None:
+        return False
+    origin, side = located
+    spec = LINE_RECIPES[recipe]
+    plan = generate_paired_mall_layout(
+        recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin,
+        side, stock_target=stock_target,
+        product_amount=spec.get("product_amount", 1),
+        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+    )
+    plan["surface"], plan["force"] = surface, force
+    emit(
+        f"rebuilding incomplete mall cell for {recipe} at {origin} ({side})"
+    )
+    _submit(client, bridge, surface, plan, f"repaired_mall_{recipe}", emit)
+    return True
+
+
 def build_compact_mall_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,
