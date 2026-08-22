@@ -50,3 +50,7 @@ lab-inventory/status observation, deterministic diagnosis and research
 ranking, and a disposable-only lab-circuit experiment.  The Python planner
 retains research-selection authority until a separately authorized and tested
 controller is promoted.
+
+For long live-debugging campaigns, use the restart-safe
+[OpenCode campaign prompt](opencode_campaign_prompt.md) and its bounded
+last-ten-runs journal.

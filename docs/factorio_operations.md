@@ -138,6 +138,12 @@ configured source save; it never changes `~/.factorio/saves`. GUI deployment
 does not close a running GUI client, so restart that client yourself before it
 joins after a Lua change.
 
+For an explicitly authorized clean campaign cycle that requires all lifecycle
+steps, `scripts/manage_linux_deterministic_campaign.sh cycle` combines runner
+stop, server stop, deployment, isolated-save reset, server start, and runner
+start into one bounded command. Use its `--dry-run` option to inspect the exact
+resolved sequence. Do not use the full cycle for Python-only changes.
+
 ### Mod-copy synchronization and GUI restart
 
 Factorio does not hot-reload Lua scripts. Any changed mod script must be

@@ -3,6 +3,11 @@
 
 # Tools
 
+`python -m tools.deterministic_run_journal` reconstructs up to the latest ten
+deterministic autonomous runs from the live and archived logs, compares live
+milestones with the previous run for the same target, and preserves brief
+change/lesson notes for crash-safe campaign continuity.
+
 ## Live Factorio Interaction
 
 Use the [authoritative interaction runbook](../docs/factorio_operations.md) for RCON preflight, shell recipes, `GameBridge`, `script-output`, registered commands, and failure diagnosis.
