@@ -143,7 +143,7 @@ local function place_resources(surface, scenario)
 end
 
 local function place_obstacles(surface, scenario)
-  local count = 0
+  local units = {}
   for _, obstacle in ipairs(scenario.obstacles or {}) do
     local bounds = obstacle.bounds
     for x = bounds.x1, bounds.x2 do
@@ -155,11 +155,11 @@ local function place_obstacles(surface, scenario)
         })
         if not entity then error("could not place obstacle " .. obstacle.id .. " at " .. x .. "," .. y) end
         entity.minable_flag, entity.destructible, entity.rotatable = false, false, false
-        count = count + 1
+        units[entity.unit_number] = true
       end
     end
   end
-  return count
+  return units
 end
 
 local function place_fixtures(surface, force, scenario)
@@ -213,11 +213,11 @@ local function build_episode(payload, scenario)
     surface = create_surface(scenario)
     force = create_force(scenario)
     local resource_tiles = place_resources(surface, scenario)
-    local obstacle_entities = place_obstacles(surface, scenario)
+    local obstacle_units = place_obstacles(surface, scenario)
     local fixtures, sink_fixture_id, sink_fixture_ids = place_fixtures(surface, force, scenario)
     return {
       resource_tiles = resource_tiles,
-      obstacle_entities = obstacle_entities,
+      obstacle_units = obstacle_units,
       fixtures = fixtures,
       sink_fixture_id = sink_fixture_id,
       sink_fixture_ids = sink_fixture_ids
@@ -322,7 +322,8 @@ local function provision(payload)
     surface_name = scenario.environment.surface_name,
     force_name = scenario.environment.force_name, scenario = scenario,
     started_tick = game.tick, last_sample_tick = game.tick, status = "ready",
-    fixtures = created.fixtures, sink_fixture_id = created.sink_fixture_id, sink_fixture_ids = created.sink_fixture_ids,
+    fixtures = created.fixtures, obstacle_units = created.obstacle_units,
+    sink_fixture_id = created.sink_fixture_id, sink_fixture_ids = created.sink_fixture_ids,
     delivered_items = 0, stage_delivered_items = 0, sample_items = 0, sample_ticks = 0, rate_samples = {},
     sink_rate_samples = {}, sink_rate_per_tick = {}, rate_per_tick = 0, sustained_ticks = 0,
     stage_index = 1, stage_id = scenario.objective.stages and scenario.objective.stages[1].id or "default",

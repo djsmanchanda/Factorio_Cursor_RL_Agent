@@ -108,6 +108,7 @@ end
 local function fixture_units(episode)
   local units = {}
   for _, fixture in pairs(episode.fixtures) do units[fixture.unit_number] = true end
+  for unit_number in pairs(episode.obstacle_units or {}) do units[unit_number] = true end
   return units
 end
 
