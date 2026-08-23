@@ -409,6 +409,9 @@ def test_coal_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatc
         stage_chemical.resource_patches, "nearest_viable_patch",
         lambda *_a, **_k: resource_patches.ResourcePatch((10, 10), (0, 0), (20, 20), 500_000),
     )
+    monkeypatch.setattr(
+        stage_chemical, "_coal_compatible_mining_origins", lambda *_a: [(10, 10)],
+    )
     monkeypatch.setattr(stage_chemical, "choose_mining_origin", lambda *_a, **_k: ((10, 10), 2))
     monkeypatch.setattr(stage_chemical, "direct_mine_plan", lambda *_a, **_k: ({"phases": []}, (7.5, 12.5)))
     monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
@@ -736,7 +739,68 @@ def test_choose_mining_origin_probing_is_bounded(monkeypatch) -> None:
     )
 
     assert picked is None
-    assert probes <= 151
+    assert probes <= 301
+
+
+def test_choose_mining_origin_honors_bulk_resource_prefilter() -> None:
+    clear_calls: list[tuple] = []
+
+    def clear(minimum, maximum):
+        clear_calls.append((minimum, maximum))
+        return True
+
+    picked = stage_extraction.choose_mining_origin(
+        (0.0, 0.0), (-1.0, -1.0), (6.0, 2.0), 2,
+        clear, lambda _centres: True,
+        allowed_origins={(0.0, 0.0)},
+    )
+
+    assert picked == ((0.0, 0.0), 2)
+    assert len(clear_calls) == 1
+
+
+def test_coal_candidates_are_prefiltered_by_one_bulk_survey(monkeypatch) -> None:
+    from orchestrator import stage_chemical
+
+    coal_tiles = {(1, -2), (1, 3)}
+    monkeypatch.setattr(
+        resource_patches, "resource_tiles",
+        lambda *_args, **_kwargs: coal_tiles,
+    )
+
+    origins = stage_chemical._coal_compatible_mining_origins(
+        object(), "nauvis", (-5.0, -5.0), (5.0, 5.0), (0.0, 0.0),
+    )
+
+    assert (0.0, 0.0) in origins
+    assert (4.0, 0.0) not in origins
+
+
+def test_coal_exhaustion_reports_patch_and_candidate_evidence(monkeypatch) -> None:
+    from orchestrator import stage_chemical
+
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a: 0)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        stage_chemical.resource_patches, "nearest_viable_patch",
+        lambda *_a, **_k: resource_patches.ResourcePatch(
+            (10, 10), (0, 0), (20, 20), 123456,
+        ),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_coal_compatible_mining_origins", lambda *_a: [],
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("empty prefilter must not invoke live siting")
+
+    with pytest.raises(stage_chemical.StuckError, match="ore_compatible_candidates=0"):
+        stage_chemical.ensure_coal_mine(
+            object(), object(), "nauvis", "player", (0, 0),
+            forbidden, lambda _message: None,
+        )
 
 
 def test_saturated_patch_defers_instead_of_killing_the_run(monkeypatch) -> None:

@@ -138,7 +138,8 @@ def choose_mining_origin(
     area_is_clear: Callable[[Point, Point], bool],
     footprint_has_resource: Callable[[list[Point]], bool],
     reserved_pair_columns: int = 0,
-    max_area_probes: int = 150,
+    allowed_origins: set[Point] | None = None,
+    max_area_probes: int = 300,
 ) -> tuple[Point, int] | None:
     """Choose a complete paired row; never shrink below requested capacity.
 
@@ -151,6 +152,8 @@ def choose_mining_origin(
     for origin in candidate_mining_origins(
         preferred, patch_min, patch_max, machine_count
     ):
+        if allowed_origins is not None and origin not in allowed_origins:
+            continue
         ox, oy = origin
         total_columns = machine_count + reserved_pair_columns
         probes += 1

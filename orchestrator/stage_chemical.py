@@ -10,7 +10,8 @@ from orchestrator import chemical_survey, extraction_state, live_base, resource_
 from orchestrator.game_bridge import GameBridge
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.stage_extraction import (
-    choose_mining_origin, direct_mine_plan, existing_mine_service_geometry,
+    candidate_mining_origins, choose_mining_origin, direct_mine_plan,
+    existing_mine_service_geometry,
 )
 from orchestrator.stage_services import (
     StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
@@ -201,6 +202,39 @@ def _planned_hard_tiles(*plans: dict) -> set[tuple[int, int]]:
     return hard
 
 
+def _drill_footprint_tiles(centre: Point) -> set[tuple[int, int]]:
+    """Tile indices checked by the drill's positive 'do I have ore?' probe."""
+    x, y = centre
+    return {
+        (tile_x, tile_y)
+        for tile_x in range(math.floor(x - 1.5), math.ceil(x + 1.5) + 1)
+        for tile_y in range(math.floor(y - 1.5), math.ceil(y + 1.5) + 1)
+    }
+
+
+def _coal_compatible_mining_origins(
+    client: RconClient, surface: str, patch_min: Point, patch_max: Point,
+    preferred: Point,
+) -> list[Point]:
+    """One bulk survey removes origins whose two drills cannot reach coal."""
+    candidates = candidate_mining_origins(preferred, patch_min, patch_max, 2)
+    coal_tiles = resource_patches.resource_tiles(
+        client, surface,
+        (patch_min[0] - 3, patch_min[1] - 3),
+        (patch_max[0] + 4, patch_max[1] + 4),
+    )
+    return [
+        origin for origin in candidates
+        if all(
+            _drill_footprint_tiles(centre) & coal_tiles
+            for centre in (
+                (origin[0] + 1.5, origin[1] - 1.5),
+                (origin[0] + 1.5, origin[1] + 2.5),
+            )
+        )
+    ]
+
+
 def ensure_coal_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage, emit: Callable[[str], None],
@@ -218,15 +252,24 @@ def ensure_coal_mine(
     if found is None:
         raise StuckError("No coal patch found within the local 400-tile search")
     _nearest, patch_min, patch_max = found.nearest, found.minimum, found.maximum
+    ore_compatible = _coal_compatible_mining_origins(
+        client, surface, patch_min, patch_max, reference,
+    )
     chosen = choose_mining_origin(
         reference, patch_min, patch_max, 2,
         lambda lo, hi: live_base.area_clear(client, surface, lo, hi),
         lambda drills: live_base.drill_footprints_have_resource(
             client, surface, "coal", drills,
         ),
+        allowed_origins=set(ore_compatible),
     )
     if chosen is None:
-        raise StuckError("No clear two-drill coal extraction site found")
+        raise StuckError(
+            "No clear two-drill coal extraction site found: "
+            f"amount={found.amount}, patch=({patch_min[0]},{patch_min[1]}).."
+            f"({patch_max[0]},{patch_max[1]}), "
+            f"ore_compatible_candidates={len(ore_compatible)}"
+        )
     origin, count = chosen
     plan, output = direct_mine_plan(
         origin, count, belt_type="transport-belt", inserter_type="fast-inserter",
