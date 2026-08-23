@@ -115,7 +115,9 @@ tree_hash() {
   local root="$1"
   (
     cd "$root"
-    find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
+    # LC_ALL=C pins byte-order sorting; tools/autonomous_run.py:_directory_hash
+    # replicates this exact contract when re-verifying episode manifests.
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
   )
 }
 

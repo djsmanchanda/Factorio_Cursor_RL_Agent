@@ -221,10 +221,14 @@ def test_directory_hash_matches_coreutils_tree_contract(tmp_path: Path) -> None:
     (root / "b.txt").write_bytes(b"second")
     (root / "a.txt").write_bytes(b"first")
     (root / "nested" / "c.txt").write_bytes(b"third")
+    # Locale collation ignores punctuation, so these two names reorder
+    # between C-byte order and UTF-8 collation; they guard the contract.
+    (root / "data-updates.lua").write_bytes(b"updates")
+    (root / "data.lua").write_bytes(b"data")
     expected = subprocess.check_output(
         [
             "bash", "-lc",
-            "cd \"$1\" && find . -type f -print0 | sort -z | "
+            "cd \"$1\" && find . -type f -print0 | LC_ALL=C sort -z | "
             "xargs -0 sha256sum | sha256sum | awk '{print $1}'",
             "bash", str(root),
         ],
@@ -240,6 +244,29 @@ def test_deployed_mod_drift_fails_closed(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload))
     with pytest.raises(StuckError, match="deployed mod hash differs"):
         _validate_episode_manifest(path)
+
+
+def test_verified_manifest_returns_episode_identity_for_managed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hashes = {
+        "factorio_cursor_rl_agent": "a" * 64,
+        "factorio_training_lab": "b" * 64,
+    }
+    path = _manifest(tmp_path, isolated_hash="0" * 64)
+    payload = json.loads(path.read_text())
+
+    payload["deployed_factorio_mod_sha256"] = hashes["factorio_cursor_rl_agent"]
+    payload["deployed_factorio_training_lab_sha256"] = hashes[
+        "factorio_training_lab"
+    ]
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(
+        "tools.autonomous_run._directory_hash", lambda root: hashes[root.name],
+    )
+
+    assert _validate_episode_manifest(path) == payload["episode_id"]
+    assert _validate_episode_manifest(None) is None
 
 
 def test_changed_source_save_fails_closed(tmp_path: Path) -> None:
