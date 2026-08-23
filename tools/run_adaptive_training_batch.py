@@ -230,6 +230,28 @@ def _heldout_evaluation(policy_id: str, results: Sequence[tuple], scenario_set_h
     )
 
 
+def _heldout_action_trace(results: Sequence[tuple]) -> tuple[tuple[int, tuple[str, ...]], ...]:
+    """Return comparable scenario-seeded action choices from a frozen evaluation."""
+    traces = []
+    for index, (_episode_id, transition, _error) in enumerate(results):
+        if transition is None:
+            continue
+        trail = transition.get("stage_action_trail") or ()
+        action_ids = tuple(
+            str(action["selected_candidate"]["action_id"])
+            for action in trail
+        ) or (str(transition.get("chosen_action_id", "<missing-action>")),)
+        traces.append((int(transition.get("scenario_seed", index)), action_ids))
+    return tuple(sorted(traces))
+
+
+def _greedy_evaluation_policy(policy):
+    """Evaluate learned preference without injecting training exploration."""
+    evaluated = type(policy).from_dict(policy.to_dict())
+    evaluated.exploration_rate = 0.0
+    return evaluated
+
+
 def _heldout_start_seed(train_start: int, train_count: int, holdout_count: int) -> int:
     """Reserve a deterministic seed range that cannot overlap the train cohort."""
     if train_start >= holdout_count:
@@ -364,6 +386,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--step", type=int, default=1)
     parser.add_argument("--episodes-per-slot", type=int, default=1)
     parser.add_argument("--episodes-per-policy", type=int, default=100)
+    parser.add_argument(
+        "--exploration-rate", type=float, default=0.0,
+        help="Seeded epsilon exploration used while collecting training cohorts; holdout gates remain greedy.",
+    )
     parser.add_argument("--policy-rounds", type=int, help="Stop after this many policy cohorts; each cohort collects episodes-per-policy terminal runs.")
     parser.add_argument(
         "--champion-evaluation-episodes", type=int, default=20,
@@ -402,6 +428,8 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("staged-sustain-seconds must be at least 1")
     if args.stability_window_seconds <= 0:
         parser.error("stability-window-seconds must be positive")
+    if not 0 <= args.exploration_rate <= 1:
+        parser.error("exploration-rate must be between 0 and 1")
     if args.legacy_minimum_ups is not None:
         args.minimum_ups_p98 = args.legacy_minimum_ups
     if args.minimum_ups_p95 <= 0 or args.minimum_ups_p98 <= 0:
@@ -519,6 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     holdout_hash = canonical_sha256([scenario["scenario_hash"] for scenario in holdout_scenarios])
     password = _rcon_password(args)
     generation, policy = _load_policy(args.checkpoint)
+    policy.exploration_rate = args.exploration_rate
     total_completed = total_failed = 0
     stage = cohort = 0
     gate_started = {instance_id: time.monotonic() for instance_id in workers_by_instance}
@@ -679,7 +708,8 @@ def main(argv: list[str] | None = None) -> int:
                     evaluation_workers = evaluation_workers[:min(len(evaluation_workers), len(holdout_scenarios))]
                     candidate_results, *_ = _run_stage(
                         evaluation_workers, _evaluation_jobs(holdout_scenarios, candidate.policy_id, cohort),
-                        password, candidate, args.live_directory, store, states[next(iter(states))],
+                        password, _greedy_evaluation_policy(candidate), args.live_directory, store,
+                        states[next(iter(states))],
                         minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots, step=args.step,
                         minimum_ups_p95=args.minimum_ups_p95, minimum_ups_p98=args.minimum_ups_p98,
                         healthy_windows_to_grow=args.healthy_windows_to_grow,
@@ -688,7 +718,8 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     incumbent_results, *_ = _run_stage(
                         evaluation_workers, _evaluation_jobs(holdout_scenarios, policy.policy_id, cohort),
-                        password, policy, args.live_directory, store, states[next(iter(states))],
+                        password, _greedy_evaluation_policy(policy), args.live_directory, store,
+                        states[next(iter(states))],
                         minimum_slots=args.minimum_slots, maximum_slots=args.maximum_slots, step=args.step,
                         minimum_ups_p95=args.minimum_ups_p95, minimum_ups_p98=args.minimum_ups_p98,
                         healthy_windows_to_grow=args.healthy_windows_to_grow,
@@ -708,9 +739,14 @@ def main(argv: list[str] | None = None) -> int:
                         incumbent_evaluation.fitness.to_dict(), True,
                     )
                     store.promote(str(holdout_scenarios[0]["family"]), policy.policy_id, incumbent_evaluation_id)
+                    behaviorally_distinct = (
+                        _heldout_action_trace(candidate_results)
+                        != _heldout_action_trace(incumbent_results)
+                    )
                     policy_advanced, promotion_reason = promotion_decision(
                         candidate_evaluation, incumbent_evaluation,
                         minimum_episodes=len(holdout_scenarios),
+                        behaviorally_distinct=behaviorally_distinct,
                     )
                     if policy_advanced:
                         generation += 1
@@ -732,6 +768,8 @@ def main(argv: list[str] | None = None) -> int:
                     "candidate_policy_id": candidate_evaluation.policy_id if candidate_evaluation else None,
                     "candidate_holdout_completion": candidate_evaluation.fitness.completion_rate if candidate_evaluation else None,
                     "champion_holdout_completion": incumbent_evaluation.fitness.completion_rate if incumbent_evaluation else None,
+                    "heldout_action_traces_distinct": behaviorally_distinct if candidate_evaluation else None,
+                    "training_exploration_rate": policy.exploration_rate,
                     "cohort_completed": cohort_completed, "cohort_failed": cohort_failed,
                     "slots": sum(state.slots for state in states.values()),
                     "remaining_attempts": len(jobs), "generation": generation,

@@ -59,6 +59,19 @@ def test_linucb_seeded_ties_are_reproducible() -> None:
     ]
     assert policy.select(options, {"load": 0}, 42) == policy.select(options, {"load": 0}, 42)
 
+
+def test_linucb_seeded_exploration_visits_multiple_candidates_and_round_trips() -> None:
+    policy = DiagonalLinUCB("exploring-v1", REGISTRY, exploration_rate=1.0)
+    options = [
+        {"action_id": "a", "features": {"value": 1, "cost": 1}},
+        {"action_id": "b", "features": {"value": 4, "cost": 10}},
+    ]
+    selected = [policy.select(options, {"load": 0}, seed)["action_id"] for seed in range(20)]
+
+    assert set(selected) == {"a", "b"}
+    assert selected == [policy.select(options, {"load": 0}, seed)["action_id"] for seed in range(20)]
+    assert DiagonalLinUCB.from_dict(policy.to_dict()).exploration_rate == 1.0
+
 def test_mining_efficiency_registry_exposes_route_quality() -> None:
     names = set(MINING_DELIVERY_FEATURES_V2.names)
     assert {

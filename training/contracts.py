@@ -175,11 +175,46 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
         raise ValueError("allowed entities must exactly match the construction budget")
 
 
+def _validate_obstacles(payload: Mapping, world: Mapping) -> None:
+    obstacles = payload.get("obstacles") or ()
+    obstacle_ids: set[str] = set()
+    patch = payload["resource_patch"]["bounds"]
+    fixtures = payload["fixtures"]
+    for obstacle in obstacles:
+        identifier = str(obstacle["id"])
+        if identifier in obstacle_ids:
+            raise ValueError("obstacle ids must be unique")
+        obstacle_ids.add(identifier)
+        bounds = obstacle["bounds"]
+        if bounds["x1"] > bounds["x2"] or bounds["y1"] > bounds["y2"]:
+            raise ValueError("obstacle bounds must be ordered")
+        if any(not _contains(world, x, y) for x, y in (
+            (bounds["x1"], bounds["y1"]), (bounds["x2"], bounds["y2"]),
+        )):
+            raise ValueError("obstacles must remain inside the environment bounds")
+        area = (bounds["x2"] - bounds["x1"] + 1) * (bounds["y2"] - bounds["y1"] + 1)
+        if area > 512:
+            raise ValueError("one obstacle field may cover at most 512 tiles")
+        overlaps_patch = not (
+            bounds["x2"] < patch["x1"] or bounds["x1"] > patch["x2"]
+            or bounds["y2"] < patch["y1"] or bounds["y1"] > patch["y2"]
+        )
+        if overlaps_patch:
+            raise ValueError("obstacles may not cover the resource patch")
+        if any(
+            bounds["x1"] <= fixture["position"][0] <= bounds["x2"] + 1
+            and bounds["y1"] <= fixture["position"][1] <= bounds["y2"] + 1
+            for fixture in fixtures
+        ):
+            raise ValueError("obstacles may not cover protected fixtures")
+
+
 def validate_scenario(payload: Mapping) -> None:
     """Reject malformed, mutable, or semantically unsafe scenario contracts."""
     _validate_finite(payload)
     _validate_schema(payload, _SCENARIO_VALIDATOR, "TrainingScenario")
     _validate_scenario_semantics(payload)
+    _validate_obstacles(payload, payload["environment"]["bounds"])
 
 
 def _validate_transition_semantics(payload: Mapping) -> None:

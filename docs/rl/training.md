@@ -90,6 +90,13 @@ Slots belonging to the same Factorio runtime must declare the same `instance_id`
 
 Staged mining demand uses one persistent isolated surface per attempt. The default ladder is 10/s into sink A, then 30/s into sink A, then 60/s split across independent 30/s corridors into sinks A and B. Each stage advances only after its target is sustained for --staged-sustain-seconds; staged plans use express belts and loaders so transport does not cap the measured mining rate.
 
+Obstacle-detour staged scenarios place protected wall fields between the mining
+corridor and sink. Candidate belts and power avoid those immutable tiles, so a
+successful route must make justified turns around the obstruction. Long runs
+may enable seeded epsilon exploration with `--exploration-rate`; held-out gates
+remain greedy and reject a successor when its action trace is identical to the
+incumbent, preventing timing jitter from masquerading as policy improvement.
+
 For long runs, use the adaptive controller after configuring enough logical slots:
 
 ```powershell

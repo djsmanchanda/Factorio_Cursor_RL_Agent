@@ -250,7 +250,7 @@ def generate_staged_mining_delivery_scenario(
         first_sink_x, second_sink_x = left_sink_x, right_sink_x
     else:
         first_sink_x, second_sink_x = right_sink_x, left_sink_x
-    first_sink_position = [first_sink_x, math.floor(patch["y1"] + 6) + 0.5]
+    first_sink_position = [first_sink_x, math.floor(patch["y1"] + 14) + 0.5]
     second_sink_position = [second_sink_x, math.floor(patch["y1"] + 18) + 0.5]
     source_position = [center_x, patch["y1"] - 5]
     dual_sink_final = target_rates_per_second[-1] >= 60.0
@@ -264,6 +264,23 @@ def generate_staged_mining_delivery_scenario(
         scenario["fixtures"].append(
             {**destination, "id": "delivery-sink-b", "position": second_sink_position},
         )
+    # A wide protected wall field blocks both shortest L-shaped approaches.
+    # Express underground belts cannot span its ten-tile thickness, so the
+    # policy must choose a legal multi-turn route around it.
+    if first_sink_x > center_x:
+        obstacle_x1, obstacle_x2 = patch["x2"] + 5, patch["x2"] + 14
+    else:
+        obstacle_x1, obstacle_x2 = patch["x1"] - 14, patch["x1"] - 5
+    first_belt_y = patch["y1"] + 6
+    scenario["obstacles"] = [{
+        "id": "delivery-wall-a",
+        "entity": "stone-wall",
+        "bounds": {
+            "x1": obstacle_x1, "y1": first_belt_y - 2,
+            "x2": obstacle_x2, "y2": math.floor(first_sink_position[1]) + 2,
+        },
+        "protected": True,
+    }]
     stages = []
     for index, rate in enumerate(target_rates_per_second):
         destinations = ["delivery-sink-a"]
@@ -287,7 +304,7 @@ def generate_staged_mining_delivery_scenario(
         **scenario["curriculum"],
         "level": min(10, 7 + len(stages)),
         "tags": sorted(set(scenario["curriculum"]["tags"]) | {
-            "staged-demand", "in-place-upgrade",
+            "staged-demand", "in-place-upgrade", "obstacle-detour",
             *[f"demand-{rate:g}-per-second" for rate in target_rates_per_second],
         }),
     }

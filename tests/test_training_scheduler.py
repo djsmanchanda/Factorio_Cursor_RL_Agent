@@ -292,6 +292,7 @@ def test_adaptive_controller_defaults_to_requested_twenty_slot_start(monkeypatch
     assert args.stability_window_seconds == 300.0
     assert args.healthy_windows_to_grow == 1
     assert args.allow_episode_failures is False
+    assert args.exploration_rate == 0.0
 
 def test_adaptive_controller_accepts_explicit_policy_rounds(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
@@ -306,6 +307,18 @@ def test_adaptive_controller_accepts_explicit_policy_rounds(monkeypatch, tmp_pat
 
     assert args.episodes_per_policy == 24
     assert args.policy_rounds == 3
+
+
+def test_adaptive_controller_accepts_bounded_seeded_exploration(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "adaptive", "--workers", str(tmp_path / "workers.json"),
+            "--exploration-rate", "0.2",
+        ],
+    )
+
+    assert _parse().exploration_rate == 0.2
 
 
 def test_adaptive_controller_accepts_ten_second_staged_sustain(monkeypatch, tmp_path) -> None:

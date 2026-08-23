@@ -95,6 +95,7 @@ def promotion_decision(
     *,
     minimum_episodes: int = 20,
     prior_family_regressions: int = 0,
+    behaviorally_distinct: bool = True,
 ) -> tuple[bool, str]:
     """Promote only a frozen, safe, paired holdout improvement."""
     if candidate.split != "holdout" or not candidate.frozen:
@@ -105,6 +106,8 @@ def promotion_decision(
         return False, "candidate has safety violations"
     if prior_family_regressions:
         return False, "candidate regresses an earlier curriculum family"
+    if incumbent is not None and not behaviorally_distinct:
+        return False, "candidate and incumbent selected identical held-out action traces"
     if incumbent is None:
         return True, "first safe holdout champion"
     if candidate.scenario_set_hash != incumbent.scenario_set_hash:

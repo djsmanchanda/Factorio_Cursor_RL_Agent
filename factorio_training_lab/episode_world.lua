@@ -142,6 +142,26 @@ local function place_resources(surface, scenario)
   return count
 end
 
+local function place_obstacles(surface, scenario)
+  local count = 0
+  for _, obstacle in ipairs(scenario.obstacles or {}) do
+    local bounds = obstacle.bounds
+    for x = bounds.x1, bounds.x2 do
+      for y = bounds.y1, bounds.y2 do
+        local entity = surface.create_entity({
+          name = obstacle.entity,
+          position = { x = x + 0.5, y = y + 0.5 },
+          force = game.forces.neutral
+        })
+        if not entity then error("could not place obstacle " .. obstacle.id .. " at " .. x .. "," .. y) end
+        entity.minable_flag, entity.destructible, entity.rotatable = false, false, false
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
 local function place_fixtures(surface, force, scenario)
   local fixture_records, sink_fixture_id, sink_fixture_ids = {}, nil, {}
   for _, fixture in ipairs(scenario.fixtures) do
@@ -193,8 +213,15 @@ local function build_episode(payload, scenario)
     surface = create_surface(scenario)
     force = create_force(scenario)
     local resource_tiles = place_resources(surface, scenario)
+    local obstacle_entities = place_obstacles(surface, scenario)
     local fixtures, sink_fixture_id, sink_fixture_ids = place_fixtures(surface, force, scenario)
-    return { resource_tiles = resource_tiles, fixtures = fixtures, sink_fixture_id = sink_fixture_id, sink_fixture_ids = sink_fixture_ids }
+    return {
+      resource_tiles = resource_tiles,
+      obstacle_entities = obstacle_entities,
+      fixtures = fixtures,
+      sink_fixture_id = sink_fixture_id,
+      sink_fixture_ids = sink_fixture_ids
+    }
   end)
   if not ok then
     begin_partial_cleanup(surface, force, payload.request_id, payload.episode_id)

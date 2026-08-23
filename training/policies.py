@@ -64,6 +64,7 @@ class DiagonalLinUCB:
     registry: FeatureRegistry
     alpha: float = 1.0
     regularization: float = 1.0
+    exploration_rate: float = 0.0
     a_diag: list[float] | None = None
     b: list[float] | None = None
 
@@ -71,7 +72,9 @@ class DiagonalLinUCB:
         if (
             not self.policy_id or not math.isfinite(self.alpha)
             or not math.isfinite(self.regularization)
+            or not math.isfinite(self.exploration_rate)
             or self.alpha < 0 or self.regularization <= 0
+            or not 0 <= self.exploration_rate <= 1
         ):
             raise ValueError("invalid LinUCB identity or hyperparameters")
         width = len(self.registry.names)
@@ -103,13 +106,17 @@ class DiagonalLinUCB:
     def select(self, candidates: Sequence[Mapping], observation: Mapping, seed: int) -> Mapping:
         if not candidates:
             raise ValueError("cannot select from an empty candidate catalog")
+        rng = random.Random(seed)
+        ordered = sorted(candidates, key=_candidate_id)
+        if self.exploration_rate and rng.random() < self.exploration_rate:
+            return rng.choice(ordered)
         scored = [(self.score(observation, candidate), candidate) for candidate in candidates]
         best = max(score for score, _candidate in scored)
         tied = sorted(
             (candidate for score, candidate in scored if math.isclose(score, best, abs_tol=1e-12)),
             key=_candidate_id,
         )
-        return random.Random(seed).choice(tied)
+        return rng.choice(tied)
 
     def update(self, observation: Mapping, candidate: Mapping, reward: float) -> None:
         vector = self._vector(observation, candidate)
@@ -119,25 +126,27 @@ class DiagonalLinUCB:
 
     def to_dict(self) -> dict:
         return {
-            "version": "1.0.0",
+            "version": "1.1.0",
             "algorithm": "diagonal_linucb",
             "policy_id": self.policy_id,
             "registry": self.registry.to_dict(),
             "alpha": self.alpha,
             "regularization": self.regularization,
+            "exploration_rate": self.exploration_rate,
             "a_diag": list(self.a_diag),
             "b": list(self.b),
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping) -> "DiagonalLinUCB":
-        if payload.get("version") != "1.0.0" or payload.get("algorithm") != "diagonal_linucb":
+        if payload.get("version") not in {"1.0.0", "1.1.0"} or payload.get("algorithm") != "diagonal_linucb":
             raise ValueError("unsupported LinUCB checkpoint")
         return cls(
             policy_id=str(payload["policy_id"]),
             registry=FeatureRegistry.from_dict(payload["registry"]),
             alpha=float(payload["alpha"]),
             regularization=float(payload["regularization"]),
+            exploration_rate=float(payload.get("exploration_rate", 0.0)),
             a_diag=[float(value) for value in payload["a_diag"]],
             b=[float(value) for value in payload["b"]],
         )

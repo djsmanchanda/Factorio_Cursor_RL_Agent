@@ -51,6 +51,12 @@ def test_promotion_requires_safe_paired_holdout_improvement() -> None:
     unpaired = EvaluationResult("new", "holdout", "different", fitness(0.9))
     assert promotion_decision(unpaired, incumbent)[0] is False
 
+    promoted, reason = promotion_decision(
+        candidate, incumbent, behaviorally_distinct=False,
+    )
+    assert promoted is False
+    assert "identical held-out action traces" in reason
+
 def test_promotion_prefers_productive_compact_routes_after_output() -> None:
     incumbent = EvaluationResult(
         "old", "holdout", "same",

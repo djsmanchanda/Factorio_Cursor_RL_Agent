@@ -49,6 +49,21 @@
         "amount_per_tile": {"type": "integer", "minimum": 1}
       }
     },
+    "obstacles": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "entity", "bounds", "protected"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "entity": {"const": "stone-wall"},
+          "bounds": {"$ref": "#/definitions/tile_bounds"},
+          "protected": {"const": true}
+        }
+      }
+    },
     "fixtures": {
       "type": "array",
       "minItems": 2,

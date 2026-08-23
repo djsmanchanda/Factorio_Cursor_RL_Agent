@@ -101,6 +101,16 @@ def _energy_fixture_tiles(scenario: Mapping) -> set[tuple[int, int]]:
     return occupied_tile_indices([("energy-fixtures", {"phases": [{"actions": fixtures}]})])
 
 
+def _obstacle_tiles(scenario: Mapping) -> set[tuple[int, int]]:
+    """Return every immutable scenario obstacle tile reserved from candidates."""
+    return {
+        (x, y)
+        for obstacle in scenario.get("obstacles", ())
+        for x in range(obstacle["bounds"]["x1"], obstacle["bounds"]["x2"] + 1)
+        for y in range(obstacle["bounds"]["y1"], obstacle["bounds"]["y2"] + 1)
+    }
+
+
 def _safe_bridge(
     source, sink, preferred: str, blocked: set[tuple[int, int]],
     *, belt_type: str = "transport-belt", transfer_type: str = "fast-inserter",
@@ -163,6 +173,7 @@ def _belt_actions(
     reserved = list(drills) + list(reserved_actions)
     blocked = occupied_tile_indices([("reserved", {"phases": [{"actions": reserved}]})])
     blocked.update(_energy_fixture_tiles(scenario))
+    blocked.update(_obstacle_tiles(scenario))
     bridge = [{**action, "action_type": "place_entity"}
               for action in _safe_bridge(
                   source, sink, entry, blocked,
@@ -233,6 +244,7 @@ def _power_actions(
     scenario: Mapping, plan_actions: list[dict], belt_y: float, xs: list[float], variant: int,
 ) -> list[dict]:
     occupied = occupied_tile_indices([("production", {"phases": [{"actions": plan_actions}]})])
+    occupied.update(_obstacle_tiles(scenario))
     consumers = [
         (action["position"]["x"], action["position"]["y"])
         for action in plan_actions

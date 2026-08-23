@@ -156,3 +156,26 @@ def test_staged_drill_prefixes_fill_both_sides_of_collection_belt_evenly():
                 assert abs(facing_counts["north"] - facing_counts["south"]) <= 1
                 assert set(drills_per_x.values()) <= {1, 2}
                 assert sum(count == 1 for count in drills_per_x.values()) <= 1
+
+
+def test_staged_routes_turn_around_protected_obstacle_fields():
+    for seed in range(100):
+        scenario = generate_staged_mining_delivery_scenario(seed, (5.0, 15.0, 30.0))
+        obstacle_tiles = {
+            (x, y)
+            for obstacle in scenario["obstacles"]
+            for x in range(obstacle["bounds"]["x1"], obstacle["bounds"]["x2"] + 1)
+            for y in range(obstacle["bounds"]["y1"], obstacle["bounds"]["y2"] + 1)
+        }
+        for stage in scenario["objective"]["stages"]:
+            for candidate in mining_delivery_candidates(
+                scenario,
+                target_rate_per_tick=stage["target_rate_per_tick"],
+                sink_fixture_ids=tuple(stage["destination_fixture_ids"]),
+            ):
+                assert candidate["features"]["turn_count"] >= 3
+                assert candidate["features"]["route_excess_tiles"] > 0
+                assert not {
+                    (math.floor(action["position"]["x"]), math.floor(action["position"]["y"]))
+                    for action in actions(candidate["plan"])
+                } & obstacle_tiles

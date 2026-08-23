@@ -15,6 +15,7 @@ from training.contracts import validate_scenario, validate_transition
 from training.scenarios.mining_delivery import (
     generate_mining_delivery_curriculum,
     generate_mining_delivery_scenario,
+    generate_staged_mining_delivery_scenario,
 )
 
 
@@ -290,8 +291,6 @@ def test_cli_prints_a_deterministic_scenario_batch(capsys: pytest.CaptureFixture
     assert payload == generate_mining_delivery_curriculum(count=3, start_seed=11)
 
 def test_staged_mining_delivery_can_train_single_sink_five_ten_thirty_upgrade_path():
-    from training.scenarios.mining_delivery import generate_staged_mining_delivery_scenario
-
     scenario = generate_staged_mining_delivery_scenario(322, (5.0, 10.0, 30.0), sustain_ticks=600)
 
     validate_scenario(scenario)
@@ -303,3 +302,22 @@ def test_staged_mining_delivery_can_train_single_sink_five_ten_thirty_upgrade_pa
         "delivery-sink-a",
     }
     assert "dual-sink-final" not in scenario["curriculum"]["tags"]
+    assert "obstacle-detour" in scenario["curriculum"]["tags"]
+    assert scenario["obstacles"]
+
+
+def test_staged_obstacles_are_seeded_protected_and_clear_of_patch_and_fixtures():
+    for seed in range(100):
+        scenario = generate_staged_mining_delivery_scenario(seed, (5.0, 15.0, 30.0))
+        obstacle = scenario["obstacles"][0]
+        bounds = obstacle["bounds"]
+        patch = scenario["resource_patch"]["bounds"]
+
+        assert obstacle["entity"] == "stone-wall"
+        assert obstacle["protected"] is True
+        assert bounds["x2"] - bounds["x1"] + 1 == 10
+        assert bounds["x2"] < patch["x1"] or bounds["x1"] > patch["x2"]
+        assert all(not (
+            bounds["x1"] <= fixture["position"][0] <= bounds["x2"] + 1
+            and bounds["y1"] <= fixture["position"][1] <= bounds["y2"] + 1
+        ) for fixture in scenario["fixtures"])

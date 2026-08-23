@@ -100,6 +100,39 @@ local function validate_position(position, world, label)
   end
 end
 
+local function validate_obstacles(scenario)
+  local obstacles, ids = scenario.obstacles or {}, {}
+  if type(obstacles) ~= "table" or #obstacles > 8 then
+    error("obstacles must contain at most eight protected fields")
+  end
+  local world, patch = scenario.environment.bounds, scenario.resource_patch.bounds
+  for index, obstacle in ipairs(obstacles) do
+    local label, bounds = "obstacles[" .. index .. "]", obstacle.bounds
+    if type(obstacle.id) ~= "string" or obstacle.id == "" or ids[obstacle.id]
+        or obstacle.entity ~= "stone-wall" or obstacle.protected ~= true
+        or type(bounds) ~= "table" or not is_integer(bounds.x1) or not is_integer(bounds.y1)
+        or not is_integer(bounds.x2) or not is_integer(bounds.y2)
+        or bounds.x1 > bounds.x2 or bounds.y1 > bounds.y2 then
+      error(label .. " is invalid")
+    end
+    if not contains(world, bounds.x1, bounds.y1) or not contains(world, bounds.x2, bounds.y2) then
+      error(label .. " must remain inside the environment")
+    end
+    local area = (bounds.x2 - bounds.x1 + 1) * (bounds.y2 - bounds.y1 + 1)
+    if area > 512 then error(label .. " is too large") end
+    local overlaps_patch = not (bounds.x2 < patch.x1 or bounds.x1 > patch.x2
+      or bounds.y2 < patch.y1 or bounds.y1 > patch.y2)
+    if overlaps_patch then error(label .. " may not cover the resource patch") end
+    for _, fixture in ipairs(scenario.fixtures) do
+      local x, y = fixture.position[1], fixture.position[2]
+      if x >= bounds.x1 and x <= bounds.x2 + 1 and y >= bounds.y1 and y <= bounds.y2 + 1 then
+        error(label .. " may not cover a protected fixture")
+      end
+    end
+    ids[obstacle.id] = true
+  end
+end
+
 local function validate_fixtures(scenario)
   local fixtures, ids, kinds = scenario.fixtures, {}, {}
   if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > 4 then
@@ -261,6 +294,7 @@ local function validate_scenario(scenario)
   end
   validate_environment(scenario)
   validate_patch(scenario)
+  validate_obstacles(scenario)
   local fixtures = validate_fixtures(scenario)
   validate_budget(scenario)
   validate_objective(scenario, fixtures)
