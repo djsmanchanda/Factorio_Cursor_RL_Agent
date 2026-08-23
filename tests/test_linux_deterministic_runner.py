@@ -26,20 +26,24 @@ def test_linux_deterministic_runner_exposes_only_bounded_actions() -> None:
     assert 'usage: manage_linux_deterministic_runner.sh {start|stop|restart|status}' in source
     assert 'start|stop|restart|status) ;;' in source
     assert 'kill -TERM "$current"' in source
-    assert 'nohup "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py"' in source
+    assert '"$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py"' in source
 
 
 def test_linux_deterministic_runner_survives_manager_exit() -> None:
     source = MANAGER.read_text(encoding="utf-8")
-    assert "exec nohup" in source
+    assert 'RUNNER_UNIT="factorio-rl-deterministic-runner-${RCON_PORT}.service"' in source
+    assert "systemd-run --user --quiet" in source
+    assert '--unit="$RUNNER_UNIT" --collect' in source
+    assert 'systemctl --user stop "$RUNNER_UNIT"' in source
+    assert "service_active" in source
 
 
 def test_linux_deterministic_runner_supports_persisted_research_queue() -> None:
     source = MANAGER.read_text(encoding="utf-8")
 
     assert '--queue-file PATH' in source
-    assert 'queue_args=(research-queue --queue-file "$QUEUE_FILE")' in source
-    assert '"${queue_args[@]}" --surface nauvis --force player' in source
+    assert 'runner_args=(research-queue --queue-file "$QUEUE_FILE")' in source
+    assert '"${runner_args[@]}" --surface nauvis --force player' in source
 
 
 def test_runner_logs_trapped_signal_terminations() -> None:

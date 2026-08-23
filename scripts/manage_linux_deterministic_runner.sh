@@ -19,6 +19,8 @@ Options:
 
 The runner reads the RCON secret from the isolated server root. It does not
 write to the normal Factorio profile or expose the secret in its command line.
+The runner runs as a transient user-systemd service so a short-lived launcher
+or terminal cannot reap it.
 EOF
 }
 
@@ -72,6 +74,7 @@ SCRIPT_OUTPUT="$STATE_ROOT/script-output"
 LOG_PATH="$STATE_ROOT/logs/autonomous-run.log"
 PID_PATH="$STATE_ROOT/logs/autonomous-run.pid"
 CONSOLE_LOG="$STATE_ROOT/logs/autonomous-run-console.log"
+RUNNER_UNIT="factorio-rl-deterministic-runner-${RCON_PORT}.service"
 
 cd "$REPO_ROOT"
 
@@ -92,6 +95,17 @@ rcon_available() {
   ss -ltnH "sport = :$RCON_PORT" | grep -q .
 }
 
+service_active() {
+  systemctl --user is-active --quiet "$RUNNER_UNIT"
+}
+
+service_pid() {
+  local value
+  value="$(systemctl --user show --property=MainPID --value "$RUNNER_UNIT")"
+  [[ "$value" =~ ^[0-9]+$ && "$value" -ne 0 ]] && { printf '%s\n' "$value"; return 0; }
+  return 1
+}
+
 start_runner() {
   [[ -x "$(command -v "$PYTHON_BIN")" ]] || die "Python interpreter is unavailable: $PYTHON_BIN"
   [[ -s "$SECRET_PATH" ]] || die "RCON secret is missing: $SECRET_PATH"
@@ -100,26 +114,38 @@ start_runner() {
   local existing
   existing="$(runner_pid)"
   [[ -z "$existing" ]] || die "runner is already running (PID $existing)"
+  if service_active; then
+    existing="$(service_pid || true)"
+    [[ -z "$existing" ]] || die "runner service is already running (PID $existing)"
+    die "runner service is already active without a main PID"
+  fi
   mkdir -p "$STATE_ROOT/logs"
-  (
-    cd "$REPO_ROOT"
-    if [[ -n "$QUEUE_FILE" ]]; then
-      queue_args=(research-queue --queue-file "$QUEUE_FILE")
-    else
-      queue_args=(research "$TECHNOLOGY")
-    fi
-    local manifest_args=()
-    if [[ -n "$EPISODE_MANIFEST" ]]; then
-      manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
-    fi
-    exec nohup "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
-      "${queue_args[@]}" --surface nauvis --force player \
+  : > "$CONSOLE_LOG"
+  systemctl --user reset-failed "$RUNNER_UNIT" 2>/dev/null || true
+  local runner_args=()
+  if [[ -n "$QUEUE_FILE" ]]; then
+    runner_args=(research-queue --queue-file "$QUEUE_FILE")
+  else
+    runner_args=(research "$TECHNOLOGY")
+  fi
+  local manifest_args=()
+  if [[ -n "$EPISODE_MANIFEST" ]]; then
+    manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
+  fi
+  systemd-run --user --quiet \
+    --unit="$RUNNER_UNIT" --collect \
+    --description="Factorio RL deterministic runner on RCON port $RCON_PORT" \
+    --working-directory="$REPO_ROOT" \
+    --setenv=PYTHONUNBUFFERED=1 \
+    --property="StandardOutput=append:$CONSOLE_LOG" \
+    --property="StandardError=append:$CONSOLE_LOG" \
+    "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
+    "${runner_args[@]}" --surface nauvis --force player \
       --rcon-host 127.0.0.1 --rcon-port "$RCON_PORT" \
       --rcon-secret-file "$SECRET_PATH" --script-output "$SCRIPT_OUTPUT" \
       "${manifest_args[@]}" \
       --reference-point 3 -1 --max-iterations 100 --log-file "$LOG_PATH" \
-      > "$CONSOLE_LOG" 2>&1 < /dev/null
-  ) &
+      </dev/null
   for _ in $(seq 1 20); do
     local started
     started="$(runner_pid)"
@@ -138,6 +164,23 @@ start_runner() {
 
 stop_runner() {
   local current
+  if service_active; then
+    systemctl --user stop "$RUNNER_UNIT"
+    for _ in $(seq 1 100); do
+      service_active || break
+      sleep 0.1
+    done
+    if service_active; then
+      die "runner service did not stop after SIGTERM"
+    fi
+    systemctl --user reset-failed "$RUNNER_UNIT" 2>/dev/null || true
+    current="$(runner_pid || true)"
+    if [[ -n "$current" ]]; then
+      die "runner service stopped but PID $current is still published"
+    fi
+    echo "stopped native Linux deterministic runner service"
+    return
+  fi
   current="$(runner_pid)"
   if [[ -z "$current" ]]; then
     echo "native Linux deterministic runner is already stopped"
@@ -156,6 +199,15 @@ stop_runner() {
 
 status_runner() {
   local current
+  if service_active; then
+    current="$(service_pid || true)"
+    if [[ -n "$current" ]]; then
+      echo "running native Linux deterministic runner service $RUNNER_UNIT PID $current technology=$TECHNOLOGY"
+    else
+      echo "activating native Linux deterministic runner service $RUNNER_UNIT technology=$TECHNOLOGY"
+    fi
+    return
+  fi
   current="$(runner_pid)"
   if [[ -n "$current" ]]; then
     echo "running native Linux deterministic runner PID $current technology=$TECHNOLOGY"
