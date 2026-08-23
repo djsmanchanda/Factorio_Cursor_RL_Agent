@@ -17,7 +17,7 @@ _WORLD_BOUNDS = {
 }
 _RESOURCES = ("iron-ore", "copper-ore", "coal", "stone")
 _DEFAULT_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0)
-_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0, 60.0)
+_MAX_TARGET_RATES_PER_SECOND = (0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0)
 _TARGET_RATES_PER_TICK = tuple(rate / 60.0 for rate in _DEFAULT_TARGET_RATES_PER_SECOND)
 _PATCH_SIZES = (12, 15, 18)
 _DRILL_RATE_PER_TICK = 0.5 / 60.0

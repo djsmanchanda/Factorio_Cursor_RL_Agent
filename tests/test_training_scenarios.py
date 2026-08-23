@@ -139,6 +139,13 @@ def test_curriculum_progresses_through_multi_rate_phases_in_order() -> None:
     rates = [scenario["objective"]["target_rate_per_tick"] * 60 for scenario in scenarios]
     assert rates == [3.0] * 3 + [10.0] * 3 + [30.0] * 3
 
+
+def test_curriculum_accepts_requested_five_fifteen_and_thirty_per_second_phases() -> None:
+    scenarios = generate_mining_delivery_curriculum(9, 7000, (5.0, 15.0, 30.0))
+    rates = [scenario["objective"]["target_rate_per_tick"] * 60 for scenario in scenarios]
+    assert rates == [5.0] * 3 + [15.0] * 3 + [30.0] * 3
+
+
 def test_staged_mining_delivery_is_one_surface_with_ordered_dual_sink_final_stage():
     from training.scenarios.mining_delivery import generate_staged_mining_delivery_scenario
     scenario = generate_staged_mining_delivery_scenario(321, sustain_ticks=600)
