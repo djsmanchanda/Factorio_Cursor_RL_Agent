@@ -73,8 +73,14 @@ def _drill_positions(
                      if staged else 4)
     xs = [patch["x1"] + 1.5 + 3 * index for index in range(max_positions)]
     xs = [x for x in xs if x + 1.5 <= patch["x2"] + 1]
-    sites = [(x, belt_y - 2, "south") for x in xs]
-    sites += [(x, belt_y + 2, "north") for x in reversed(xs)]
+    # Grow each collection line as opposing drill pairs.  Keeping the two rows
+    # in separate prefixes made every bounded candidate fill one belt lane long
+    # before it began using the other side.
+    sites = [
+        site
+        for x in xs
+        for site in ((x, belt_y - 2, "south"), (x, belt_y + 2, "north"))
+    ]
     count = min(count, len(sites))
     return [_placement("electric-mining-drill", site[:2], site[2]) for site in sites[:count]], belt_y, xs
 

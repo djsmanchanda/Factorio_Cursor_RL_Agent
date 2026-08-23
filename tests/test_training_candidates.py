@@ -7,7 +7,10 @@ from planners.plan_validation import actions, validate_build_plan
 from training.candidates import mining_delivery_candidates
 from training.canonical import plan_hash
 from training.power import POWER_CONSUMER_ENTITIES
-from training.scenarios.mining_delivery import generate_mining_delivery_scenario
+from training.scenarios.mining_delivery import (
+    generate_mining_delivery_scenario,
+    generate_staged_mining_delivery_scenario,
+)
 
 
 def test_one_hundred_scenarios_compile_two_valid_candidates_each():
@@ -124,3 +127,32 @@ def test_high_demand_stress_scenarios_remain_legal_when_compact_capacity_is_exce
         assert all(candidate["features"]["predicted_rate_per_tick"] * 60 < rate for candidate in candidates)
         for candidate in candidates:
             validate_build_plan(candidate["plan"])
+
+
+def test_staged_drill_prefixes_fill_both_sides_of_collection_belt_evenly():
+    for seed in range(100):
+        scenario = generate_staged_mining_delivery_scenario(seed, (5.0, 15.0, 30.0))
+
+        for stage in scenario["objective"]["stages"]:
+            candidates = mining_delivery_candidates(
+                scenario,
+                target_rate_per_tick=stage["target_rate_per_tick"],
+                sink_fixture_ids=tuple(stage["destination_fixture_ids"]),
+            )
+            for candidate in candidates:
+                drills = [
+                    action for action in actions(candidate["plan"])
+                    if action["entity"] == "electric-mining-drill"
+                ]
+                facing_counts = {
+                    direction: sum(drill["direction"] == direction for drill in drills)
+                    for direction in ("north", "south")
+                }
+                drills_per_x = {}
+                for drill in drills:
+                    x = drill["position"]["x"]
+                    drills_per_x[x] = drills_per_x.get(x, 0) + 1
+
+                assert abs(facing_counts["north"] - facing_counts["south"]) <= 1
+                assert set(drills_per_x.values()) <= {1, 2}
+                assert sum(count == 1 for count in drills_per_x.values()) <= 1
