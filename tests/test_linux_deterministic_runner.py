@@ -48,3 +48,10 @@ def test_runner_logs_trapped_signal_terminations() -> None:
     assert 'signal.signal(_signal_number, _raise_termination_signal)' in source
     assert 'getattr(signal, "SIGTERM", None)' in source
     assert 'getattr(signal, "SIGHUP", None)' in source
+
+
+def test_runner_emits_liveness_heartbeats() -> None:
+    source = RUNNER.read_text(encoding="utf-8")
+    assert "RUN HEARTBEAT pid=" in source
+    assert "heartbeat_stop.wait(10.0)" in source
+    assert "libc.prctl(1, signal.SIGTERM)" in source

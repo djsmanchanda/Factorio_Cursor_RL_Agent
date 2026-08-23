@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
 import signal
 import subprocess
 import sys
+import threading
 import traceback
 from copy import copy
 from datetime import datetime
@@ -320,6 +322,16 @@ def main(argv: list[str] | None = None) -> int:
     termination_reason = "completed"
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
+        heartbeat_stop = threading.Event()
+
+        def _emit_heartbeat() -> None:
+            while not heartbeat_stop.wait(10.0):
+                logger.emit(f"RUN HEARTBEAT pid={os.getpid()} ppid={os.getppid()}")
+
+        heartbeat_thread = threading.Thread(
+            target=_emit_heartbeat, name="runner-heartbeat", daemon=True,
+        )
+        heartbeat_thread.start()
         logger.emit(
             f"RUN START: command={args.command} "
             f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
@@ -351,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
             termination_reason = f"{type(error).__name__}: {error}"
             return 1
         finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1.0)
             _patch_episode_manifest(
                 getattr(args, "episode_manifest", None),
                 ended_at=datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -370,4 +384,8 @@ if __name__ == "__main__":
     ):
         if _signal_number is not None:
             signal.signal(_signal_number, _raise_termination_signal)
+    libc = ctypes.CDLL(None)
+    # If a lifecycle supervisor kills this Python process, turn the parent
+    # death into SIGTERM so the existing signal trap can record RUN END.
+    libc.prctl(1, signal.SIGTERM)
     raise SystemExit(main())
