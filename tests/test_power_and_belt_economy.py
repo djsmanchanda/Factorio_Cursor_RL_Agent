@@ -191,7 +191,9 @@ def test_healthy_network_skips_the_top_up(monkeypatch, tmp_path) -> None:
         lambda *_a: {"solar-panel": 20, "accumulator": 10, "substation": 5},
     )
     import orchestrator.power_district as power
-    monkeypatch.setattr(power, "network_peak_consumption_kw", lambda *_a: 1000.0)
+    monkeypatch.setattr(
+            power, "network_peak_consumption_kw", lambda *_a, **_k: 1000.0,
+        )
     monkeypatch.setattr(power, "_has_built", lambda *_a: True)
     monkeypatch.setattr(builder.live_base, "area_entity_records", lambda *_a, **_k: [])
     monkeypatch.setattr(
@@ -225,7 +227,9 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
     monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: set())
     monkeypatch.setattr(builder.live_base, "deconstruction_tiles", lambda *_a: set())
     import orchestrator.power_district as power
-    monkeypatch.setattr(power, "network_peak_consumption_kw", lambda *_a: 1000.0)
+    monkeypatch.setattr(
+            power, "network_peak_consumption_kw", lambda *_a, **_k: 1000.0,
+        )
     monkeypatch.setattr(power, "_has_built", lambda *_a: False)
     messages: list[str] = []
     monkeypatch.setattr(

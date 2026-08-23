@@ -13,6 +13,7 @@ from typing import Callable, Mapping, Sequence
 
 from planners.infrastructure_geometry import boxes_overlap, footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS
+from orchestrator.live_base import TelemetryError
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -25,8 +26,6 @@ NIGHT_SECONDS = 41.67
 SAFETY_MARGIN = 1.25
 CLEARANCE_TILES = 2
 MAX_CANDIDATES_PER_PASS = 64
-
-
 @dataclass(frozen=True)
 class UnitTemplate:
     name: str
@@ -334,6 +333,17 @@ def required_units(
     solar_generation_kw: float, storage_mj: float,
     peak_load_kw: float,
 ) -> int:
+    arguments = {
+        "firm_generation_kw": firm_generation_kw,
+        "solar_generation_kw": solar_generation_kw,
+        "storage_mj": storage_mj,
+        "peak_load_kw": peak_load_kw,
+    }
+    for name, value in arguments.items():
+        if not math.isfinite(value):
+            raise TelemetryError(f"power-sizing {name} must be finite, got {value}")
+        if value < 0:
+            raise ValueError(f"power-sizing {name} must be non-negative, got {value}")
     metrics = usable_metrics(
         firm_generation_kw, solar_generation_kw, storage_mj, peak_load_kw,
     )
@@ -342,11 +352,29 @@ def required_units(
     recharge_gap = max(0.0, metrics["recharge_target_kw"] - metrics["recharge_surplus_kw"])
     gaps = []
     if generation_gap:
-        gaps.append(generation_gap / template.generation_kw)
+        divisor = template.generation_kw
+        if not math.isfinite(divisor) or divisor <= 0:
+            raise ValueError(
+                "power template generation capacity must be finite and positive "
+                f"for a generation gap, got {divisor}"
+            )
+        gaps.append(generation_gap / divisor)
     if storage_gap:
-        gaps.append(storage_gap / template.storage_mj)
+        divisor = template.storage_mj
+        if not math.isfinite(divisor) or divisor <= 0:
+            raise ValueError(
+                "power template storage capacity must be finite and positive "
+                f"for a storage gap, got {divisor}"
+            )
+        gaps.append(storage_gap / divisor)
     if recharge_gap:
-        gaps.append(recharge_gap / (template.generation_kw * 0.7))
+        divisor = template.generation_kw * 0.7
+        if not math.isfinite(divisor) or divisor <= 0:
+            raise ValueError(
+                "power template recharge capacity must be finite and positive "
+                f"for a recharge gap, got {divisor}"
+            )
+        gaps.append(recharge_gap / divisor)
     return math.ceil(max(gaps, default=0.0) - 1e-9)
 
 
@@ -443,6 +471,7 @@ def append_plan_reservation(
 
 def network_peak_consumption_kw(
     client: RconClient, surface: str, force: str, near: Point,
+    *, emit: Emit | None = None,
 ) -> float | None:
     """Conservative connected prototype demand on the roboport's network."""
     lua = (
@@ -457,23 +486,67 @@ def network_peak_consumption_kw(
         "local total=0;"
         "for _,e in pairs(s.find_entities_filtered{force=f}) do "
         "local okid,id=pcall(function() return e.electric_network_id end);"
-        "if okid and id==net then "
+        "if okid and id==net then local interface_valid=false "
+        "if e.type=='electric-energy-interface' then "
+        "local oki,i=pcall(function() return e.power_usage end);"
+        "if oki and type(i)=='number' and i==i and i~=math.huge and i~=-math.huge "
+        "then total=total+i/1000; local interface_valid=true "
+        "elseif oki and type(i)=='number' then "
+        "rcon.print('INVALID|'..e.type..'|'..e.name..'|'..e.position.x..','"
+        "..e.position.y..'|power_usage|'..tostring(i)) return;"
+        "else interface_valid=false end;"
+        "else local passive=false;"
+        "for _,kind in ipairs({'accumulator','burner-generator',"
+        "'electric-pole','fusion-generator','generator','solar-panel'}) do "
+        "if e.type==kind then passive=true end end;"
+        "if not passive then "
         "local kw=nil;"
         "local oku,u=pcall(function() return e.prototype.get_max_energy_usage() end);"
-        "if oku and type(u)=='number' then kw=u end;"
+        "if oku and type(u)=='number' and u==u and u~=math.huge and u~=-math.huge "
+        "then kw=u elseif oku and type(u)=='number' then "
+        "rcon.print('INVALID|'..e.type..'|'..e.name..'|'..e.position.x..','"
+        "..e.position.y..'|get_max_energy_usage|'..tostring(u)) return end;"
         "if kw==nil then "
         "local okp,p=pcall(function() return e.prototype.energy_usage end);"
-        "if okp and type(p)=='number' then kw=p end end;"
-        "if kw then total=total+kw end end end;"
-        "rcon.print(string.format('%.1f',total))"
+        "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge "
+        "then kw=p elseif okp and type(p)=='number' then "
+        "rcon.print('INVALID|'..e.type..'|'..e.name..'|'..e.position.x..','"
+        "..e.position.y..'|energy_usage|'..tostring(p)) return end end;"
+        "if kw==nil then "
+        "local oki,i=pcall(function() return e.power_usage end);"
+        "if oki and type(i)=='number' and i==i and i~=math.huge and i~=-math.huge "
+        "then kw=i/1000 elseif oki and type(i)=='number' then "
+        "rcon.print('INVALID|'..e.type..'|'..e.name..'|'..e.position.x..','"
+        "..e.position.y..'|power_usage|'..tostring(i)) return end end;"
+        "if kw==nil then rcon.print('INVALID|'..e.type..'|'..e.name..'|'"
+        "..e.position.x..','..e.position.y..'|consumer_demand|unavailable') return end;"
+        "total=total+kw end end end end;"
+        "rcon.print('OK|'..tostring(total))"
     )
     raw = client.command("/sc " + lua).strip()
     if raw == "NONE":
+        if emit:
+            emit("  POWER DISTRICT skipped: no roboport electric network was available")
+        return None
+    if raw.startswith("INVALID|"):
+        detail = raw.removeprefix("INVALID|")
+        if emit:
+            emit(f"  POWER DISTRICT skipped: invalid consumer telemetry: {detail}")
         return None
     try:
-        return float(raw)
-    except ValueError:
+        label, encoded = raw.split("|", 1)
+        if label != "OK":
+            raise ValueError(raw)
+        value = float(encoded)
+    except (ValueError, TypeError):
+        if emit:
+            emit(f"  POWER DISTRICT skipped: malformed consumer telemetry: {raw!r}")
         return None
+    if not math.isfinite(value) or value < 0:
+        if emit:
+            emit(f"  POWER DISTRICT skipped: invalid consumer demand: {value}")
+        return None
+    return value
 
 
 def ensure_power_capacity(
@@ -484,12 +557,18 @@ def ensure_power_capacity(
     """Build at most one validated template unit per call; stop when sizing converges."""
     from orchestrator import live_base
 
-    firm = live_base.network_firm_generation_kw(client, surface, force, near)
-    total_generation = live_base.network_generation_kw(client, surface, force, near)
-    peak = network_peak_consumption_kw(client, surface, force, near)
-    storage_mj = live_base.network_accumulator_storage_mj(
-        client, surface, force, near,
-    )
+    try:
+        firm = live_base.network_firm_generation_kw(client, surface, force, near)
+        total_generation = live_base.network_generation_kw(client, surface, force, near)
+        peak = network_peak_consumption_kw(
+            client, surface, force, near, emit=emit,
+        )
+        storage_mj = live_base.network_accumulator_storage_mj(
+            client, surface, force, near,
+        )
+    except TelemetryError as exc:
+        emit(f"  POWER DISTRICT skipped: invalid telemetry: {exc}")
+        return False
     if firm is None or total_generation is None or peak is None or storage_mj is None:
         emit("  POWER DISTRICT skipped: electric network survey was unavailable")
         return False
@@ -506,13 +585,23 @@ def ensure_power_capacity(
         state = {"version": 1, "origin": list(origin), "template": template.name,
                  "next_index": 0, "blocked_indices": {}, "active_index": None}
     next_index = int(state.get("next_index", 0))
-    desired = required_units(
-        template,
-        firm_generation_kw=firm,
-        solar_generation_kw=solar,
-        storage_mj=storage_mj,
-        peak_load_kw=max(peak, 100.0),
-    )
+    try:
+        measured_required = required_units(
+            template,
+            firm_generation_kw=firm,
+            solar_generation_kw=solar,
+            storage_mj=storage_mj,
+            peak_load_kw=max(peak, 100.0),
+        )
+    except (TelemetryError, ValueError) as exc:
+        emit(f"  POWER DISTRICT skipped: {exc}")
+        return False
+    desired = min(measured_required, max_units)
+    if measured_required > max_units:
+        emit(
+            f"POWER DISTRICT policy cap: measured={measured_required}, "
+            f"max_units={max_units}; expanding one unit at a time"
+        )
     if desired <= 0:
         metrics = usable_metrics(firm, solar, storage_mj, peak)
         emit(

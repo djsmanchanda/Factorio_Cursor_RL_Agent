@@ -859,6 +859,10 @@ _GENERATOR_TYPES = (
 )
 
 
+class TelemetryError(RuntimeError):
+    """A live survey returned an unusable numeric value."""
+
+
 def _network_generation_kw_impl(
     client: RconClient, surface: str, force: str, near: Point,
     *, include_solar: bool,
@@ -893,17 +897,33 @@ def _network_generation_kw_impl(
         "local kw=nil;"
         "if g.type=='electric-energy-interface' then "
         "local okw,w=pcall(function() return g.power_production end);"
-        "if okw and type(w)=='number' then kw=w/1000 end end;"
+        "if okw and type(w)=='number' and w==w and w~=math.huge and w~=-math.huge "
+        "then kw=w/1000 elseif okw and type(w)=='number' then "
+        "rcon.print('INVALID|'..g.type..'|'..g.name..'|'..g.position.x..','"
+        "..g.position.y..'|power_production|'..tostring(w)) return end end;"
         "if kw==nil then "
         "local okp,p=pcall(function() return g.prototype.get_max_energy_production() end);"
-        "if okp and type(p)=='number' then kw=p end end;"
-        "if kw then total=total+kw end end end;"
-        "rcon.print(string.format('%.1f',total))"
+        "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge "
+        "then kw=p elseif okp and type(p)=='number' then "
+        "rcon.print('INVALID|'..g.type..'|'..g.name..'|'..g.position.x..','"
+        "..g.position.y..'|get_max_energy_production|'..tostring(p)) return end end;"
+        "if kw==nil then rcon.print('INVALID|'..g.type..'|'..g.name..'|'"
+        "..g.position.x..','..g.position.y..'|generation|unavailable') return end;"
+        "total=total+kw end end;"
+        "rcon.print(tostring(math.floor(total*10+0.5)/10))"
     )
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
-    return float(raw)
+    if raw.startswith("INVALID|"):
+        raise TelemetryError(f"non-finite or unavailable generation survey: {raw}")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise TelemetryError(f"malformed generation survey: {raw!r}") from exc
+    if not math.isfinite(value) or value < 0:
+        raise TelemetryError(f"invalid generation survey value: {value}")
+    return value
 
 
 def network_generation_kw(
@@ -950,20 +970,31 @@ def network_accumulator_storage_mj(
         "if okid and id==net then "
         "local joules=nil;"
         "local okb,b=pcall(function() return a.prototype.buffer_capacity end);"
-        "if okb and type(b)=='number' then joules=b end;"
+        "if okb and type(b)=='number' and b==b and b~=math.huge and b~=-math.huge "
+        "then joules=b elseif okb and type(b)=='number' then "
+        "rcon.print('INVALID|'..a.type..'|'..a.name..'|'..a.position.x..','"
+        "..a.position.y..'|buffer_capacity|'..tostring(b)) return end;"
         "if joules==nil then "
         "local oke,e=pcall(function() return a.electric_buffer_size end);"
-        "if oke and type(e)=='number' then joules=e end end;"
-        "if joules then mj=mj+joules/1000000 end end end;"
-        "rcon.print(string.format('%.3f',mj))"
+        "if oke and type(e)=='number' and e==e and e~=math.huge and e~=-math.huge "
+        "then joules=e elseif oke and type(e)=='number' then "
+        "rcon.print('INVALID|'..a.type..'|'..a.name..'|'..a.position.x..','"
+        "..a.position.y..'|electric_buffer_size|'..tostring(e)) return end end;"
+        "if joules==nil then rcon.print('INVALID|'..a.type..'|'..a.name..'|'"
+        "..a.position.x..','..a.position.y..'|storage|unavailable') return end;"
+        "mj=mj+joules/1000000 end end;"
+        "rcon.print(tostring(math.floor(mj*1000+0.5)/1000))"
     )
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
     try:
-        return float(raw)
-    except ValueError:
-        return None
+        value = float(raw)
+    except ValueError as exc:
+        raise TelemetryError(f"malformed accumulator-storage survey: {raw!r}") from exc
+    if not math.isfinite(value) or value < 0:
+        raise TelemetryError(f"invalid accumulator-storage value: {value}")
+    return value
 
 
 def drill_drop_belt_tile(

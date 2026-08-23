@@ -1,6 +1,7 @@
 # Path: tests/test_power_district.py
 # Purpose: Prove deterministic rectangular power geometry, reconciliation, and sizing.
 
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ import pytest
 
 from orchestrator import autonomous_builder as builder
 from orchestrator import live_base
+from orchestrator.live_base import TelemetryError
 from orchestrator.power_district import (
     EARLY_MEDIUM_UNIT,
     LARGER_SUBSTATION_UNIT,
@@ -18,7 +20,9 @@ from orchestrator.power_district import (
     district_origin,
     ensure_power_capacity,
     load_state,
+    network_peak_consumption_kw,
     required_units,
+    UnitTemplate,
     unit_bounds,
     unit_tiles,
     validate_candidate,
@@ -197,6 +201,122 @@ def _converged_metrics():
                           4 * LARGER_SUBSTATION_UNIT.storage_mj, 500.0)
 
 
+class _ScriptedRcon:
+    def __init__(self, response: str):
+        self.response = response
+        self.commands: list[str] = []
+
+    def command(self, text: str) -> str:
+        self.commands.append(text)
+        return self.response
+
+
+def test_source_only_interface_does_not_count_infinite_prototype_demand() -> None:
+    client = _ScriptedRcon("OK|0")
+    messages: list[str] = []
+    assert network_peak_consumption_kw(
+        client, "nauvis", "player", (3, -1), emit=messages.append,
+    ) == 0.0
+    lua = client.commands[0]
+    assert "e.type=='electric-energy-interface'" in lua
+    assert "e.power_usage" in lua
+    assert "i~=math.huge" in lua
+    assert "i~=-math.huge" in lua
+    assert "i==i" in lua
+    assert messages == []
+
+
+def test_finite_interface_consumes_entity_value_not_prototype_maximum() -> None:
+    client = _ScriptedRcon("OK|250000")
+    assert network_peak_consumption_kw(
+        client, "nauvis", "player", (3, -1),
+    ) == pytest.approx(250000)
+    lua = client.commands[0]
+    assert "total=total+i/1000" in lua
+    assert "get_max_energy_usage" in lua
+
+
+def test_passive_electric_entities_are_excluded_from_consumer_demand() -> None:
+    client = _ScriptedRcon("OK|42")
+    network_peak_consumption_kw(client, "nauvis", "player", (3, -1))
+    lua = client.commands[0]
+    for entity_type in (
+        "accumulator", "burner-generator", "electric-pole",
+        "fusion-generator", "generator", "solar-panel",
+    ):
+        assert f"'{entity_type}'" in lua
+    # Substations are electric poles; the starter interface is handled above.
+    assert "e.type=='substation'" not in lua
+
+
+@pytest.mark.parametrize("value", ["inf", "-inf", "nan"])
+def test_nonfinite_lua_telemetry_is_named_and_rejected(value: str) -> None:
+    detail = f"electric-energy-interface|electric-energy-interface|0,0|power_usage|{value}"
+    client = _ScriptedRcon(f"INVALID|{detail}")
+    messages: list[str] = []
+    assert network_peak_consumption_kw(
+        client, "nauvis", "player", (3, -1), emit=messages.append,
+    ) is None
+    assert len(messages) == 1
+    assert value in messages[0]
+    assert detail in messages[0]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("firm_generation_kw", math.inf),
+        ("firm_generation_kw", -math.inf),
+        ("firm_generation_kw", math.nan),
+        ("solar_generation_kw", math.inf),
+        ("solar_generation_kw", -math.inf),
+        ("solar_generation_kw", math.nan),
+        ("storage_mj", math.inf),
+        ("storage_mj", -math.inf),
+        ("storage_mj", math.nan),
+        ("peak_load_kw", math.inf),
+        ("peak_load_kw", -math.inf),
+        ("peak_load_kw", math.nan),
+    ],
+)
+def test_required_units_rejects_every_nonfinite_input(field: str, value: float) -> None:
+    kwargs = {
+        "firm_generation_kw": 167.0,
+        "solar_generation_kw": 0.0,
+        "storage_mj": 0.0,
+        "peak_load_kw": 500.0,
+    }
+    kwargs[field] = value
+    with pytest.raises(TelemetryError, match=field):
+        required_units(LARGER_SUBSTATION_UNIT, **kwargs)
+
+
+@pytest.mark.parametrize("capacity", ["generation_kw", "storage_mj"])
+def test_zero_template_capacity_fails_closed_on_matching_gap(capacity: str) -> None:
+    template_kwargs = {
+        "name": "empty",
+        "width": 1,
+        "height": 1,
+        "stride_x": 1,
+        "stride_y": 1,
+        "placements": (),
+        "connection_points": ((0.0, 0.0),),
+    }
+    template = UnitTemplate(**template_kwargs)
+    kwargs = {
+        "firm_generation_kw": 0.0,
+        "solar_generation_kw": 0.0,
+        "storage_mj": 0.0,
+        "peak_load_kw": 500.0,
+    }
+    # Isolate the requested divisor: a generation gap must have no supply,
+    # while a storage gap needs enough daytime solar to avoid that divisor.
+    if capacity != "generation_kw":
+        kwargs["solar_generation_kw"] = 1000.0
+    with pytest.raises(ValueError, match=capacity.removesuffix("_kw").removesuffix("_mj")):
+        required_units(template, **kwargs)
+
+
 def test_one_atomic_unit_is_submitted_then_convergence_stops(
     monkeypatch, tmp_path: Path,
 ) -> None:
@@ -235,7 +355,7 @@ def test_one_atomic_unit_is_submitted_then_convergence_stops(
     monkeypatch.patch_note = None
     import orchestrator.power_district as power
     monkeypatch.setattr(
-        power, "network_peak_consumption_kw", lambda *_a: 500.0,
+        power, "network_peak_consumption_kw", lambda *_a, **_k: 500.0,
     )
 
     def submit(_client, _bridge, _surface, plan, name, _emit):
@@ -277,3 +397,95 @@ def test_one_atomic_unit_is_submitted_then_convergence_stops(
     )
     assert acted_again is False
     assert len(submissions) == 1
+
+
+def test_invalid_consumer_telemetry_fails_cleanly_before_submission(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    script_output = tmp_path / "script-output"
+    submitted: list[dict] = []
+    messages: list[str] = []
+    monkeypatch.setattr(live_base, "network_firm_generation_kw", lambda *_a: 167.0)
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 647.0)
+    monkeypatch.setattr(live_base, "network_accumulator_storage_mj", lambda *_a: 0.0)
+
+    import orchestrator.power_district as power
+    monkeypatch.setattr(
+        power,
+        "network_peak_consumption_kw",
+        lambda *_a, **_k: (_ for _ in ()).throw(TelemetryError("consumer demand is nan")),
+    )
+
+    acted = ensure_power_capacity(
+        client=object(),
+        bridge=SimpleNamespace(script_output=script_output),
+        surface="nauvis",
+        force="player",
+        near=(0.0, 0.0),
+        script_output=script_output,
+        emit=messages.append,
+        submit=lambda *_a: submitted.append({}),
+    )
+    assert acted is False
+    assert submitted == []
+    assert load_state(script_output) == {}
+    assert any("consumer demand is nan" in message for message in messages)
+
+
+def test_extremely_large_finite_demand_is_bounded_by_explicit_policy(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    origin = district_origin((0.0, 0.0), True)
+    script_output = tmp_path / "script-output"
+    surveys = iter([[], _expected_records(0, origin)])
+    submissions: list[tuple[str, dict]] = []
+    messages: list[str] = []
+    monkeypatch.setattr(live_base, "network_firm_generation_kw", lambda *_a: 0.0)
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 0.0)
+    monkeypatch.setattr(live_base, "network_accumulator_storage_mj", lambda *_a: 0.0)
+    monkeypatch.setattr(live_base, "available_items", lambda *_a: {
+        "solar-panel": 20, "accumulator": 10, "substation": 5,
+        "medium-electric-pole": 10,
+    })
+    monkeypatch.setattr(
+        live_base, "area_entity_records", lambda *_a, **_k: next(surveys),
+    )
+    monkeypatch.setattr(live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(live_base, "deconstruction_tiles", lambda *_a: set())
+
+    import orchestrator.power_district as power
+    monkeypatch.setattr(power, "network_peak_consumption_kw", lambda *_a, **_k: 1e300)
+
+    def submit(_client, _bridge, _surface, plan, name, _emit):
+        submissions.append((name, plan))
+        return {"ok": True}
+
+    acted = ensure_power_capacity(
+        client=object(),
+        bridge=SimpleNamespace(script_output=script_output),
+        surface="nauvis",
+        force="player",
+        near=(0.0, 0.0),
+        script_output=script_output,
+        emit=messages.append,
+        submit=submit,
+        max_units=3,
+    )
+    assert acted is True
+    assert [name for name, _plan in submissions] == ["power_unit_0"]
+    state = load_state(script_output)
+    assert state["next_index"] == 1
+    assert state["active_index"] is None
+    assert any("policy cap" in message and "max_units=3" in message for message in messages)
+
+
+def test_normal_finite_cold_start_has_a_finite_unit_count() -> None:
+    count = required_units(
+        EARLY_MEDIUM_UNIT,
+        firm_generation_kw=167.0,
+        solar_generation_kw=0.0,
+        storage_mj=0.0,
+        peak_load_kw=500.0,
+    )
+    assert math.isfinite(count)
+    assert count >= 1
