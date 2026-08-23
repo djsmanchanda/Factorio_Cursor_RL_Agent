@@ -112,7 +112,7 @@ start_runner() {
     if [[ -n "$EPISODE_MANIFEST" ]]; then
       manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
     fi
-    exec setsid "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
+    exec nohup "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
       "${queue_args[@]}" --surface nauvis --force player \
       --rcon-host 127.0.0.1 --rcon-port "$RCON_PORT" \
       --rcon-secret-file "$SECRET_PATH" --script-output "$SCRIPT_OUTPUT" \
