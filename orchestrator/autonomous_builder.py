@@ -3101,33 +3101,41 @@ def _deliver_cell_ingredients(
             )
             if local is not None and local >= amount * 2:
                 continue
-            spots = live_base.chained_clear_spots(
-                client, surface,
-                [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
-                chest,
+            provider = live_base.nearest_container(
+                client, surface, force, chest,
+                names=("passive-provider-chest",),
             )
-            spot = next(
-                (s for s in spots if s[0] == "passive-provider-chest"), None,
-            )
-            if spot is None:
-                continue
-            plan = {"phases": [{
-                "name": f"deliver_{ingredient}",
-                "actions": [
-                    {"action_type": "place_entity",
-                     "entity": "passive-provider-chest",
-                     "position": {"x": spot[1], "y": spot[2]}},
-                    {"action_type": "place_entity",
-                     "entity": "medium-electric-pole",
-                     "position": {"x": spot[1] + 2.0, "y": spot[2]}},
-                ],
-            }]}
-            plan["surface"], plan["force"] = surface, force
-            _submit(client, bridge, surface, plan,
-                    f"deliver_{ingredient}", emit)
+            if provider is not None and math.dist(provider, chest) <= 10.0:
+                destination = provider
+            else:
+                spots = live_base.chained_clear_spots(
+                    client, surface,
+                    [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
+                    chest,
+                )
+                spot = next(
+                    (s for s in spots if s[0] == "passive-provider-chest"), None,
+                )
+                if spot is None:
+                    continue
+                destination = (spot[1], spot[2])
+                plan = {"phases": [{
+                    "name": f"deliver_{ingredient}",
+                    "actions": [
+                        {"action_type": "place_entity",
+                         "entity": "passive-provider-chest",
+                         "position": {"x": destination[0], "y": destination[1]}},
+                        {"action_type": "place_entity",
+                         "entity": "medium-electric-pole",
+                         "position": {"x": destination[0] + 2.0, "y": destination[1]}},
+                    ],
+                }]}
+                plan["surface"], plan["force"] = surface, force
+                _submit(client, bridge, surface, plan,
+                        f"deliver_{ingredient}", emit)
             moved = live_base.transfer_stock(
                 client, surface, ingredient,
-                max(amount * 4, 20), (spot[1], spot[2]),
+                max(amount * 4, 20), destination,
             )
             moved_total += moved
             emit(

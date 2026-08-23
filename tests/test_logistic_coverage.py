@@ -8,7 +8,8 @@ import math
 import pytest
 
 from orchestrator import live_base
-from orchestrator.autonomous_builder import _diagnose_blockage
+from orchestrator import autonomous_builder as builder
+from orchestrator.autonomous_builder import _deliver_cell_ingredients, _diagnose_blockage
 from orchestrator.roboport_placement import clear_chain_positions
 from planners.infrastructure_geometry import footprint_tile_indices
 from orchestrator.stage_services import (
@@ -34,6 +35,78 @@ class _FakeRcon:
     def command(self, text: str) -> str:
         self.commands.append(text)
         return self.reply
+
+
+def test_transfer_stock_uses_mall_providers_and_storage_as_sources() -> None:
+    client = _FakeRcon("12")
+    moved = live_base.transfer_stock(
+        client, "nauvis", "iron-plate", 20, (4.0, 5.0),
+    )
+
+    assert moved == 12
+    lua = client.commands[0]
+    assert "type={'container','logistic-container'}" in lua
+    assert "c.prototype.logistic_mode" in lua
+    assert "mode=='passive-provider'" in lua
+    assert "mode=='storage'" in lua
+
+
+def test_cell_delivery_reuses_a_nearby_provider_without_a_new_plan(monkeypatch) -> None:
+    submitted: list[str] = []
+    transfers: list[tuple[str, int, tuple[float, float]]] = []
+
+    def fake_requester(_client, _surface, _item, _near):
+        return (10.0, 10.0)
+
+    def fake_count(*_args):
+        return 0
+
+    def fake_provider(*_args, **_kwargs):
+        return (13.0, 10.0)
+
+    def fake_transfer(_client, _surface, item, count, destination):
+        transfers.append((item, count, destination))
+        return count
+
+    monkeypatch.setattr(builder.live_base, "requester_requesting", fake_requester)
+    monkeypatch.setattr(builder.live_base, "network_item_count", fake_count)
+    monkeypatch.setattr(builder.live_base, "nearest_container", fake_provider)
+    monkeypatch.setattr(builder.live_base, "transfer_stock", fake_transfer)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_args, **_kwargs: submitted.append("submitted"),
+    )
+
+    assert _deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "inserter", (0.0, 0.0),
+        lambda _message: None,
+    ) is True
+    assert submitted == []
+    assert transfers
+
+
+def test_cell_delivery_does_not_submit_when_an_existing_transfer_is_empty(
+    monkeypatch,
+) -> None:
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        builder.live_base, "requester_requesting", lambda *_a: (0.0, 0.0),
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "nearest_container", lambda *_a, **_k: (3.0, 0.0),
+    )
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_args, **_kwargs: submitted.append("submitted"),
+    )
+
+    assert _deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "inserter", (0.0, 0.0),
+        lambda _message: None,
+    ) is False
+    assert submitted == []
 
 
 def _chest(x: float, y: float, entity: str = "requester-chest") -> dict:
