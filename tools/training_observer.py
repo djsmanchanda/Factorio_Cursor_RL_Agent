@@ -95,6 +95,19 @@ def _view_state(viewer: TrainingSurfaceViewer | None, reason: str | None) -> dic
     return {"enabled": viewer is not None, "reason": reason, "worker_ids": worker_ids}
 
 
+def _attach_game_endpoints(snapshot: dict, viewer: TrainingSurfaceViewer | None) -> None:
+    """Expose each isolated worker's loopback Factorio join address to the UI."""
+    if viewer is None:
+        return
+    for worker in snapshot.get("live_workers", []):
+        spec = viewer.workers.get(str(worker.get("worker_id", "")))
+        if spec is None:
+            continue
+        worker["game_host"] = spec.host
+        worker["game_port"] = spec.game_port
+        worker["game_address"] = f"{spec.host}:{spec.game_port}"
+
+
 def _handler(
     database: Path | None, live_directory: Path | None, viewer: TrainingSurfaceViewer | None = None,
     view_reason: str | None = None,
@@ -183,6 +196,7 @@ def _handler(
                 if self.path == "/api/snapshot":
                     profile = _resolve_training_profile(database, live_directory)
                     snapshot = build_training_snapshot(profile.database, profile.live_directory)
+                    _attach_game_endpoints(snapshot, viewer)
                     snapshot["training_profile"] = {"name": profile.name}
                     snapshot["view_control"] = _view_state(viewer, view_reason)
                     snapshot["training_control"] = control.snapshot() if control is not None else {

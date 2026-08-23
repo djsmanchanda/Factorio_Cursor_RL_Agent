@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from tools.run_training_batch import _collect_results
-from tools.training_observer import _discover_training_profile, _handler, main
+from tools.training_observer import _attach_game_endpoints, _discover_training_profile, _handler, main
 from training.observer_control import TrainingSurfaceViewer
 from training.scheduler import WorkerSpec
 from training.observation import build_training_snapshot
@@ -335,6 +335,16 @@ def _viewer(rcon: FocusRcon) -> TrainingSurfaceViewer:
     )
 
 
+def test_observer_snapshot_exposes_factorio_gui_join_address() -> None:
+    snapshot = {"live_workers": [{"worker_id": "training-01"}]}
+
+    _attach_game_endpoints(snapshot, _viewer(FocusRcon()))
+
+    assert snapshot["live_workers"][0]["game_host"] == "127.0.0.1"
+    assert snapshot["live_workers"][0]["game_port"] == 35001
+    assert snapshot["live_workers"][0]["game_address"] == "127.0.0.1:35001"
+
+
 def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
     rcon = FocusRcon()
 
@@ -353,7 +363,8 @@ def test_dashboard_cleanup_is_row_scoped_after_view() -> None:
     script = (assets / "training_observer.js").read_text(encoding="utf-8")
     assert "cleanup-status" in html
     assert "cleanup-worker" not in script
-    assert "'View','Remove'" in script
+    assert "'Server','Phase'" in script
+    assert "game_address" in script
     assert "cleanup-button" in script
     assert "ups-chart" in html
     assert "renderUpsChart" in script
