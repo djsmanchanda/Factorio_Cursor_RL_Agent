@@ -5,6 +5,7 @@ import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import subprocess
 
 import pytest
 
@@ -205,11 +206,22 @@ def _manifest(tmp_path: Path, *, isolated_hash: str) -> Path:
         "isolated_save": str(isolated),
         "isolated_save_sha256": hashlib.sha256(isolated.read_bytes()).hexdigest(),
         "baseline_world_fingerprint": f"sha256:{hashlib.sha256(isolated.read_bytes()).hexdigest()}",
-        "repository_revision": "test-revision",
+        "repository_revision": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True,
+        ).strip(),
         "deployed_factorio_mod_sha256": _directory_hash(REPO_ROOT / "factorio_mod"),
         "deployed_factorio_training_lab_sha256": _directory_hash(REPO_ROOT / "factorio_training_lab"),
     }), encoding="utf-8")
     return path
+
+
+def test_deployed_mod_drift_fails_closed(tmp_path: Path) -> None:
+    path = _manifest(tmp_path, isolated_hash="0" * 64)
+    payload = json.loads(path.read_text())
+    payload["deployed_factorio_mod_sha256"] = "0" * 64
+    path.write_text(json.dumps(payload))
+    with pytest.raises(StuckError, match="deployed mod hash differs"):
+        _validate_episode_manifest(path)
 
 
 def test_changed_source_save_fails_closed(tmp_path: Path) -> None:

@@ -105,8 +105,14 @@ def _validate_episode_manifest(path: Path | None) -> None:
     if revision != manifest["repository_revision"]:
         raise StuckError("runner repository revision differs from the episode manifest")
     deployed_hashes = {
-        "deployed_factorio_mod_sha256": REPO_ROOT / "factorio_mod",
-        "deployed_factorio_training_lab_sha256": REPO_ROOT / "factorio_training_lab",
+        "deployed_factorio_mod_sha256": (
+            Path(manifest["isolated_save"]).parent.parent
+            / "mods" / "factorio_cursor_rl_agent"
+        ),
+        "deployed_factorio_training_lab_sha256": (
+            Path(manifest["isolated_save"]).parent.parent
+            / "mods" / "factorio_training_lab"
+        ),
     }
     for field, root in deployed_hashes.items():
         if _directory_hash(root) != manifest[field]:

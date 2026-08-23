@@ -241,8 +241,8 @@ write_episode_manifest() {
   local source_hash copy_hash deterministic_hash training_hash revision dirty created temporary
   source_hash="$(sha256_file "$SOURCE_SAVE")"
   copy_hash="$(sha256_file "$SAVE_PATH")"
-  deterministic_hash="$(tree_hash "$REPO_ROOT/factorio_mod")"
-  training_hash="$(tree_hash "$REPO_ROOT/factorio_training_lab")"
+  deterministic_hash="$(tree_hash "$MODS_PATH/factorio_cursor_rl_agent")"
+  training_hash="$(tree_hash "$MODS_PATH/factorio_training_lab")"
   revision="$(repository_revision)"
   dirty="$(dirty_file_count)"
   created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

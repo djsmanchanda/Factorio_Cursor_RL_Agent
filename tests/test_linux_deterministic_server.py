@@ -65,8 +65,8 @@ def test_linux_deterministic_server_reset_only_replaces_the_isolated_copy() -> N
     assert '"episode_id": "$EPISODE_ID"' in source
     assert '"source_save_sha256": "$source_hash"' in source
     assert '"baseline_world_fingerprint": "sha256:$copy_hash"' in source
-    assert '"deployed_factorio_mod_sha256": "$deterministic_hash"' in source
-    assert '"deployed_factorio_training_lab_sha256": "$training_hash"' in source
+    assert 'deterministic_hash="$(tree_hash "$MODS_PATH/factorio_cursor_rl_agent")"' in source
+    assert 'training_hash="$(tree_hash "$MODS_PATH/factorio_training_lab")"' in source
     assert '"initial_game_tick": null' in source
     assert 'deterministic-power-state.json' in source
     assert 'autonomous-priorities.json' in source
