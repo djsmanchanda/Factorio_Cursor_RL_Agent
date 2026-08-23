@@ -106,3 +106,5 @@ def test_reset_writes_a_verified_episode_manifest(tmp_path: Path) -> None:
     assert manifest["baseline_world_fingerprint"].startswith("sha256:")
     assert len(manifest["deployed_factorio_mod_sha256"]) == 64
     assert 'rm -f "$SOURCE_SAVE"' not in MANAGER.read_text(encoding="utf-8")
+    manager_source = MANAGER.read_text(encoding="utf-8")
+    assert 'sync_mod\n  mkdir -p "$DATA_ROOT/saves/backups"' in manager_source

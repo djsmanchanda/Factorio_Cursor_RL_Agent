@@ -285,6 +285,7 @@ reset_save() {
   [[ -n "$SOURCE_SAVE" ]] || die "reset requires --source-save"
   [[ -f "$SOURCE_SAVE" ]] || die "source save is missing: $SOURCE_SAVE"
   assert_stopped
+  sync_mod
   mkdir -p "$DATA_ROOT/saves/backups"
   if [[ -f "$SAVE_PATH" ]]; then
     local backup="$DATA_ROOT/saves/backups/mod_playground-$(date +%Y%m%d-%H%M%S).zip"
