@@ -77,7 +77,13 @@ class TrainingSurfaceViewer:
         except json.JSONDecodeError as exc:
             raise ObserverControlError("training worker returned an invalid view response") from exc
         if not isinstance(result, dict) or result.get("ok") is not True:
-            raise ObserverControlError(str(result.get("error", "training view request failed")))
+            error = str(result.get("error", "training view request failed"))
+            if "configured observer is not connected" in error:
+                raise ObserverControlError(
+                    f"Connect Factorio as {self.observer_name} to "
+                    f"{worker.host}:{worker.game_port}, then retry View in Factorio",
+                )
+            raise ObserverControlError(error)
         if result.get("episode_id") != episode_id:
             raise ObserverControlError("training worker returned a mismatched episode")
         surface = result.get("surface")

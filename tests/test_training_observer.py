@@ -294,10 +294,13 @@ class FocusRcon:
     def __init__(self) -> None:
         self.commands: list[str] = []
         self.closed = False
+        self.focus_error: str | None = None
 
     def command(self, command: str) -> str:
         self.commands.append(command)
         payload = json.loads(command.removeprefix("/training_focus "))
+        if self.focus_error is not None:
+            return json.dumps({"ok": False, "error": self.focus_error})
         return json.dumps({
             "ok": True, "episode_id": payload["episode_id"],
             "surface": "training/mining-delivery-00000001", "observer_name": "main",
@@ -343,6 +346,18 @@ def test_observer_snapshot_exposes_factorio_gui_join_address() -> None:
     assert snapshot["live_workers"][0]["game_host"] == "127.0.0.1"
     assert snapshot["live_workers"][0]["game_port"] == 35001
     assert snapshot["live_workers"][0]["game_address"] == "127.0.0.1:35001"
+
+
+def test_observer_focus_names_the_required_gui_connection() -> None:
+    rcon = FocusRcon()
+    rcon.focus_error = "configured observer is not connected: main"
+    viewer = _viewer(rcon)
+
+    with pytest.raises(
+        Exception,
+        match=r"Connect Factorio as main to 127\.0\.0\.1:35001, then retry",
+    ):
+        viewer.focus("training-01", "episode-mining-delivery-00000001")
 
 
 def test_observer_viewer_targets_only_the_configured_training_worker() -> None:

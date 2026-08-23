@@ -92,7 +92,12 @@ def _log(level: str, message: str, request_id: str, **fields) -> None:
 
 def _view_state(viewer: TrainingSurfaceViewer | None, reason: str | None) -> dict[str, object]:
     worker_ids = sorted(viewer.workers) if viewer is not None else []
-    return {"enabled": viewer is not None, "reason": reason, "worker_ids": worker_ids}
+    return {
+        "enabled": viewer is not None,
+        "reason": reason,
+        "worker_ids": worker_ids,
+        "observer_name": viewer.observer_name if viewer is not None else None,
+    }
 
 
 def _attach_game_endpoints(snapshot: dict, viewer: TrainingSurfaceViewer | None) -> None:
