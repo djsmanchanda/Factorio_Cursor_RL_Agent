@@ -15,6 +15,13 @@ from training.scheduler import WorkerSpec, load_worker_specs
 _COMMAND_VERSION = "1.1.0"
 _FOCUS_TOKEN = "FOCUS_TRAINING_OBSERVER"
 _CLEANUP_TOKEN = "RECYCLE_STALE_TRAINING_SURFACES"
+_CONNECTED_PLAYERS_COMMAND = (
+    "/sc local ok,result=pcall(function() local names={} "
+    "for _,player in pairs(game.connected_players) do names[#names+1]=player.name end "
+    "table.sort(names) return names end) "
+    "if ok then rcon.print(helpers.table_to_json(result)) "
+    "else rcon.print(helpers.table_to_json({error=tostring(result)})) end"
+)
 
 
 class ObserverControlError(RuntimeError):
@@ -58,17 +65,40 @@ class TrainingSurfaceViewer:
             raise ObserverControlError("configured worker is not training-only")
         return worker
 
+    @staticmethod
+    def _connected_player_names(client: RconConnection) -> list[str]:
+        response = client.command(_CONNECTED_PLAYERS_COMMAND)
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError as exc:
+            raise ObserverControlError("training worker returned invalid connected-player data") from exc
+        # Factorio serializes an empty Lua array-like table as an empty object.
+        if result == {}:
+            return []
+        if not isinstance(result, list) or any(
+            not isinstance(name, str) or not name or len(name) > 128 for name in result
+        ):
+            raise ObserverControlError("training worker returned invalid connected-player data")
+        return sorted(set(result))
+
     def focus(self, worker_id: str, episode_id: str) -> dict[str, str]:
         worker = self._worker(worker_id)
         if not isinstance(episode_id, str) or not episode_id or len(episode_id) > 128:
             raise ObserverControlError("invalid training episode")
-        payload = {
-            "version": _COMMAND_VERSION, "request_id": uuid.uuid4().hex,
-            "episode_id": episode_id, "observer_name": self.observer_name,
-            "confirmation_token": _FOCUS_TOKEN,
-        }
         client = self.rcon_factory(worker.host, worker.rcon_port, self.password, timeout=15.0)
         try:
+            connected = self._connected_player_names(client)
+            if not connected:
+                raise ObserverControlError(
+                    f"Connect any Factorio player to {worker.host}:{worker.game_port}, "
+                    "then retry View in Factorio",
+                )
+            observer_name = self.observer_name if self.observer_name in connected else connected[0]
+            payload = {
+                "version": _COMMAND_VERSION, "request_id": uuid.uuid4().hex,
+                "episode_id": episode_id, "observer_name": observer_name,
+                "confirmation_token": _FOCUS_TOKEN,
+            }
             response = client.command("/training_focus " + json.dumps(payload, separators=(",", ":")))
         finally:
             client.close()
@@ -80,7 +110,7 @@ class TrainingSurfaceViewer:
             error = str(result.get("error", "training view request failed"))
             if "configured observer is not connected" in error:
                 raise ObserverControlError(
-                    f"Connect Factorio as {self.observer_name} to "
+                    f"Connect any Factorio player to "
                     f"{worker.host}:{worker.game_port}, then retry View in Factorio",
                 )
             raise ObserverControlError(error)
@@ -90,7 +120,7 @@ class TrainingSurfaceViewer:
         if not isinstance(surface, str) or not surface.startswith(worker.surface_prefix):
             raise ObserverControlError("training worker returned a non-training surface")
         observer_name = result.get("observer_name")
-        if observer_name != self.observer_name:
+        if observer_name != payload["observer_name"]:
             raise ObserverControlError("training worker focused an unexpected observer")
         return {"episode_id": episode_id, "surface": surface, "observer_name": observer_name}
 

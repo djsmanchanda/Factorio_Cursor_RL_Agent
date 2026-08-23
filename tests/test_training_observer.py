@@ -295,15 +295,19 @@ class FocusRcon:
         self.commands: list[str] = []
         self.closed = False
         self.focus_error: str | None = None
+        self.connected_players = ["main"]
 
     def command(self, command: str) -> str:
         self.commands.append(command)
+        if command.startswith("/sc "):
+            return json.dumps(self.connected_players)
         payload = json.loads(command.removeprefix("/training_focus "))
         if self.focus_error is not None:
             return json.dumps({"ok": False, "error": self.focus_error})
         return json.dumps({
             "ok": True, "episode_id": payload["episode_id"],
-            "surface": "training/mining-delivery-00000001", "observer_name": "main",
+            "surface": "training/mining-delivery-00000001",
+            "observer_name": payload["observer_name"],
         })
 
     def close(self) -> None:
@@ -355,9 +359,28 @@ def test_observer_focus_names_the_required_gui_connection() -> None:
 
     with pytest.raises(
         Exception,
-        match=r"Connect Factorio as main to 127\.0\.0\.1:35001, then retry",
+        match=r"Connect any Factorio player to 127\.0\.0\.1:35001, then retry",
     ):
         viewer.focus("training-01", "episode-mining-delivery-00000001")
+
+
+def test_observer_focus_uses_any_connected_player_on_the_target_server() -> None:
+    rcon = FocusRcon()
+    rcon.connected_players = ["LeonidasUIP"]
+
+    result = _viewer(rcon).focus("training-01", "episode-mining-delivery-00000001")
+
+    payload = json.loads(rcon.commands[1].removeprefix("/training_focus "))
+    assert payload["observer_name"] == "LeonidasUIP"
+    assert result["observer_name"] == "LeonidasUIP"
+
+
+def test_observer_focus_requires_a_player_connected_to_the_target_server() -> None:
+    rcon = FocusRcon()
+    rcon.connected_players = []
+
+    with pytest.raises(Exception, match=r"Connect any Factorio player to 127\.0\.0\.1:35001"):
+        _viewer(rcon).focus("training-01", "episode-mining-delivery-00000001")
 
 
 def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
@@ -367,7 +390,8 @@ def test_observer_viewer_targets_only_the_configured_training_worker() -> None:
 
     assert result["surface"] == "training/mining-delivery-00000001"
     assert rcon.closed is True
-    assert rcon.commands[0].startswith("/training_focus ")
+    assert rcon.commands[0].startswith("/sc ")
+    assert rcon.commands[1].startswith("/training_focus ")
     with pytest.raises(Exception, match="unknown training worker"):
         _viewer(FocusRcon()).focus("nauvis", "episode-mining-delivery-00000001")
 
