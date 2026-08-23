@@ -4,6 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
+import subprocess
 import sys
 import traceback
 from copy import copy
@@ -44,6 +48,88 @@ class _RunLogger:
         self._file.close()
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _directory_hash(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _validate_episode_manifest(path: Path | None) -> None:
+    """Refuse to attach a controller to an unverified or changed baseline."""
+    if path is None:
+        return
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise StuckError(f"episode manifest is unreadable: {path}: {error}") from error
+    required = {
+        "episode_id", "source_save", "source_save_sha256",
+        "isolated_save", "isolated_save_sha256",
+        "baseline_world_fingerprint", "repository_revision",
+        "deployed_factorio_mod_sha256",
+        "deployed_factorio_training_lab_sha256",
+    }
+    missing = sorted(required - set(manifest))
+    if missing:
+        raise StuckError(f"episode manifest is incomplete: {', '.join(missing)}")
+    source = Path(manifest["source_save"])
+    isolated = Path(manifest["isolated_save"])
+    if not source.is_file() or not isolated.is_file():
+        raise StuckError("episode source or isolated save is missing")
+    source_hash = _sha256(source)
+    isolated_hash = _sha256(isolated)
+    if source_hash != manifest["source_save_sha256"]:
+        raise StuckError("source-save SHA-256 changed after episode creation")
+    if isolated_hash != manifest["isolated_save_sha256"]:
+        raise StuckError("isolated save does not match the episode baseline")
+    expected = manifest["baseline_world_fingerprint"]
+    if expected != f"sha256:{isolated_hash}":
+        raise StuckError("episode baseline fingerprint does not match the restored save")
+    try:
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise StuckError(f"repository revision could not be verified: {error}") from error
+    if revision != manifest["repository_revision"]:
+        raise StuckError("runner repository revision differs from the episode manifest")
+    deployed_hashes = {
+        "deployed_factorio_mod_sha256": REPO_ROOT / "factorio_mod",
+        "deployed_factorio_training_lab_sha256": REPO_ROOT / "factorio_training_lab",
+    }
+    for field, root in deployed_hashes.items():
+        if _directory_hash(root) != manifest[field]:
+            raise StuckError(
+                f"deployed mod hash differs from the episode manifest: {field}"
+            )
+
+
+def _patch_episode_manifest(path: Path | None, **fields: object) -> None:
+    if path is None or not path.is_file():
+        return
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    manifest.update(fields)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--surface", default="nauvis")
     parser.add_argument("--force", default="player")
@@ -61,6 +147,10 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--log-file", type=Path,
         help="Append mission output here (default: <server-data>/logs/autonomous-run.log)",
+    )
+    parser.add_argument(
+        "--episode-manifest", type=Path,
+        help="Verified episode identity required for managed deterministic campaigns.",
     )
 
 
@@ -95,6 +185,16 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
         status = load_json(bridge.research_status(force=args.force, technology=args.technology))
         if not status.get("ok"):
             raise StuckError(f"Research preflight failed: {status.get('error', status)}")
+        tick = status.get("tick")
+        _patch_episode_manifest(
+            getattr(args, "episode_manifest", None),
+            baseline_verified=True,
+            initial_game_tick=int(tick) if isinstance(tick, int) else None,
+        )
+        emit(
+            "EPISODE BASELINE VERIFIED: initial game tick="
+            f"{tick if tick is not None else 'unknown'}"
+        )
         technology = status.get("technology")
         if not technology:
             raise StuckError(f"Research preflight returned no state for {args.technology!r}")
@@ -205,15 +305,21 @@ def main(argv: list[str] | None = None) -> int:
             args.rcon_password = _load_rcon_secret(args.rcon_secret_file)
         except ValueError as error:
             parser.error(str(error))
+    _validate_episode_manifest(getattr(args, "episode_manifest", None))
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
     pid_path = log_path.with_name("autonomous-run.pid")
+    termination_reason = "completed"
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
         logger.emit(
             f"RUN START: command={args.command} "
             f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
             f"surface={args.surface} force={args.force} log={log_path}"
+        )
+        _patch_episode_manifest(
+            getattr(args, "episode_manifest", None),
+            started_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
         if archived is not None:
             logger.emit(
@@ -229,12 +335,19 @@ def main(argv: list[str] | None = None) -> int:
             return _research(args, logger.emit)
         except StuckError as error:
             logger.emit(f"STUCK: {error}")
+            termination_reason = str(error)
             return 2
         except Exception as error:
             logger.emit(f"ERROR: {type(error).__name__}: {error}")
             logger.exception()
+            termination_reason = f"{type(error).__name__}: {error}"
             return 1
         finally:
+            _patch_episode_manifest(
+                getattr(args, "episode_manifest", None),
+                ended_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                termination_reason=termination_reason,
+            )
             logger.emit("RUN END")
             logger.close()
 

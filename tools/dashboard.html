@@ -36,9 +36,9 @@
         <p id="operation-state" class="operation-state">Ready</p>
       </div>
       <div class="action-grid">
-        <button data-action="restart_runner">
-          <strong>Restart Python runner</strong>
-          <span>Run the fixed Nauvis research target through the Linux runner manager.</span>
+        <button data-action="resume_runner">
+          <strong>Restart controller on current world</strong>
+          <span>Resume this episode without restoring or resetting Factorio state.</span>
         </button>
         <button data-action="deploy_mod">
           <strong>Redeploy mod</strong>
@@ -48,13 +48,13 @@
           <strong>Restart server</strong>
           <span>Stop the runner and launch the isolated Linux deterministic server.</span>
         </button>
-        <button data-action="full_refresh" class="warn">
-          <strong>Full refresh</strong>
-          <span>Stop, deploy to server and GUI, restart Factorio, then restart the runner.</span>
+        <button data-action="deploy_mod" class="warn">
+          <strong>Redeploy mod</strong>
+          <span>Synchronize the isolated server and Linux GUI mod copies while stopped.</span>
         </button>
-        <button data-action="restore_save" class="danger">
-          <strong>RESTORE</strong>
-          <span>Back up the isolated save, restore the source save, then start the Linux server.</span>
+        <button data-action="fresh_campaign" class="danger">
+          <strong>Start fresh campaign</strong>
+          <span>Stop, deploy, restore and verify the immutable source save, then start a new episode.</span>
         </button>
         <button data-action="stop_runner" class="quiet">
           <strong>Stop Python runner</strong>

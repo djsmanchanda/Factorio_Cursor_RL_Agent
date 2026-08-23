@@ -67,7 +67,7 @@ save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
 
-Run `deploy` only while stopped, then `start`. It copies both project mods
+Run `deploy-if-required` only while stopped, then `start`. It compares and, when changed, copies both project mods
 (`factorio_cursor_rl_agent` and `factorio_training_lab`) into the isolated
 server and configured Linux GUI mods directory (default `~/.factorio/mods`),
 enabling both in the GUI `mod-list.json` without disturbing other entries. Lua
@@ -80,7 +80,7 @@ separate worker roots, saves, ports, and explicit commands.
 
 The control center is `tools/dashboard_server.py`; it is a Python server and
 does not need Node.js or npm. It binds only to `127.0.0.1:9137`. Start it with
-the isolated server root and both native managers:
+the isolated server root and all native managers:
 
 ```bash
 uv run --with-requirements requirements.txt python tools/dashboard_server.py \
@@ -90,6 +90,8 @@ uv run --with-requirements requirements.txt python tools/dashboard_server.py \
   --rcon-secret-file ~/.local/share/factorio-rl/deterministic/rcon-password \
   --server-manager scripts/manage_linux_deterministic_server.sh \
   --runner-manager scripts/manage_linux_deterministic_runner.sh \
+  --campaign-manager scripts/manage_linux_deterministic_campaign.sh \
+  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.14 \
   --gui-mods ~/.factorio/mods
 ```
 
@@ -98,12 +100,11 @@ a bounded Linux command—never PowerShell:
 
 | Dashboard control | Native command sequence |
 |---|---|
-| Restart Python runner | `manage_linux_deterministic_runner.sh restart` |
+| Restart controller on current world | `manage_linux_deterministic_runner.sh restart` (preserves the world) |
 | Stop Python runner | `manage_linux_deterministic_runner.sh stop` |
 | Redeploy mod | `manage_linux_deterministic_server.sh deploy` (both project mods to server plus GUI copy) |
 | Restart server | `manage_linux_deterministic_server.sh stop`, then `start` |
-| Full refresh | runner `stop`, server `stop`, server `deploy`, server `start`, runner `restart` |
-| Restore | runner `stop`, server `stop`, server `reset --source-save …`, server `start` |
+| Start fresh campaign | campaign manager `fresh`: runner stop, server stop, changed-mod deployment, verified reset, server start, manifest-gated controller start |
 
 The dashboard's **Research control** writes an ordered queue to
 `<server-data>/logs/research-queue.json`.  **Set target** replaces that queue;
@@ -133,16 +134,19 @@ intent.  A future production-memory slice should add measured rate windows,
 capacity targets, and owned production corridors before enabling automatic
 rate-increase decisions.
 
-The reset action backs up only the isolated copied save before restoring the
-configured source save; it never changes `~/.factorio/saves`. GUI deployment
-does not close a running GUI client, so restart that client yourself before it
-joins after a Lua change.
+A fresh episode writes an immutable-source manifest containing the source and
+isolated SHA-256 hashes, baseline fingerprint, repository revision, dirty-file
+count, episode ID, target, and lifecycle timestamps. The managed runner refuses
+to start when either save hash or the repository revision differs from that
+manifest. Reset backs up and replaces only the isolated copied save; it never
+changes `~/.factorio/saves`. GUI deployment does not close a running GUI
+client, so restart that client yourself before it joins after a Lua change.
 
-For an explicitly authorized clean campaign cycle that requires all lifecycle
-steps, `scripts/manage_linux_deterministic_campaign.sh cycle` combines runner
-stop, server stop, deployment, isolated-save reset, server start, and runner
-start into one bounded command. Use its `--dry-run` option to inspect the exact
-resolved sequence. Do not use the full cycle for Python-only changes.
+For an explicitly authorized fresh deterministic campaign,
+`scripts/manage_linux_deterministic_campaign.sh fresh` performs the atomic
+lifecycle in one bounded command. `cycle` is a compatibility alias. Use
+`--dry-run` to inspect the exact resolved sequence. Never use a controller
+restart as a substitute for a fresh episode.
 
 ### Mod-copy synchronization and GUI restart
 

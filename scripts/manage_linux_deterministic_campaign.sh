@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: manage_linux_deterministic_campaign.sh {cycle|stop|status} [options]
+usage: manage_linux_deterministic_campaign.sh {fresh|cycle|stop|status} [options]
 
 Options:
   --source-save PATH   Required for cycle; replaces only the isolated copied save.
@@ -19,9 +19,11 @@ Options:
   --rcon-port PORT     Loopback RCON port (default: 27017).
   --dry-run            Print the exact bounded sequence without executing it.
 
-cycle performs one explicit sequence:
+fresh performs one explicit, verified episode sequence:
   runner stop -> server stop -> deploy -> reset isolated save -> server start
   -> runner start
+
+cycle is retained as a compatibility alias for fresh.
 
 It never modifies the supplied source save. Deployment still updates the
 configured Linux GUI mod copy, but does not restart a GUI client.
@@ -48,6 +50,7 @@ GUI_MODS_PATH="$HOME/.factorio/mods"
 PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 SOURCE_SAVE=""
 TECHNOLOGY="mining-productivity-4"
+EPISODE_ID="episode-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
 GAME_PORT=34199
 RCON_PORT=27017
 DRY_RUN=false
@@ -60,6 +63,7 @@ while (($#)); do
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --python) PYTHON_BIN="${2:?missing --python value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
+    --episode-id) EPISODE_ID="${2:?missing --episode-id value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -69,7 +73,7 @@ while (($#)); do
 done
 
 case "$ACTION" in
-  cycle|stop|status) ;;
+  fresh|cycle|stop|status) ;;
   *) usage >&2; exit 2 ;;
 esac
 
@@ -102,16 +106,18 @@ execute() {
 }
 
 case "$ACTION" in
-  cycle)
-    [[ -n "$SOURCE_SAVE" ]] || die "cycle requires --source-save"
+  fresh|cycle)
+    [[ -n "$SOURCE_SAVE" ]] || die "fresh requires --source-save"
     [[ -f "$SOURCE_SAVE" ]] || die "source save is missing: $SOURCE_SAVE"
     execute "$RUNNER_MANAGER" stop "${RUNNER_OPTIONS[@]}"
     execute "$SERVER_MANAGER" stop "${SERVER_OPTIONS[@]}"
-    execute "$SERVER_MANAGER" deploy "${SERVER_OPTIONS[@]}"
+    execute "$SERVER_MANAGER" deploy-if-required "${SERVER_OPTIONS[@]}"
     execute "$SERVER_MANAGER" reset \
-      "${SERVER_OPTIONS[@]}" --source-save "$SOURCE_SAVE"
+      "${SERVER_OPTIONS[@]}" --source-save "$SOURCE_SAVE" \
+      --episode-id "$EPISODE_ID" --technology "$TECHNOLOGY"
     execute "$SERVER_MANAGER" start "${SERVER_OPTIONS[@]}"
-    execute "$RUNNER_MANAGER" start "${RUNNER_OPTIONS[@]}"
+    execute "$RUNNER_MANAGER" start "${RUNNER_OPTIONS[@]}" \
+      --episode-manifest "$STATE_ROOT/episode/current.json"
     ;;
   stop)
     execute "$RUNNER_MANAGER" stop "${RUNNER_OPTIONS[@]}"

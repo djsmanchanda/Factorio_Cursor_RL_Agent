@@ -1,6 +1,9 @@
 # Path: tests/test_linux_deterministic_server.py
 # Purpose: Pin the native deterministic-server isolation, copied-save, and loopback-RCON contracts.
 
+import hashlib
+import json
+import subprocess
 from pathlib import Path
 
 
@@ -51,10 +54,55 @@ def test_linux_deterministic_server_deploys_stopped_server_and_gui_mod_copies() 
 def test_linux_deterministic_server_reset_only_replaces_the_isolated_copy() -> None:
     source = MANAGER.read_text(encoding="utf-8")
 
-    assert 'bootstrap|deploy|reset|start|stop|status' in source
+    assert 'bootstrap|deploy|deploy-if-required|reset|start|stop|status' in source
     assert 'reset requires --source-save' in source
     assert 'mkdir -p "$DATA_ROOT/saves/backups"' in source
     assert 'cp -p "$SAVE_PATH" "$backup"' in source
     assert 'cp -p "$SOURCE_SAVE" "$temporary"' in source
     assert 'cmp -s "$SOURCE_SAVE" "$temporary"' in source
+    assert 'sha256_file "$SOURCE_SAVE")" != "$(sha256_file "$temporary")' in source
+    assert 'write_episode_manifest' in source
+    assert '"episode_id": "$EPISODE_ID"' in source
+    assert '"source_save_sha256": "$source_hash"' in source
+    assert '"baseline_world_fingerprint": "sha256:$copy_hash"' in source
+    assert '"deployed_factorio_mod_sha256": "$deterministic_hash"' in source
+    assert '"deployed_factorio_training_lab_sha256": "$training_hash"' in source
+    assert '"initial_game_tick": null' in source
+    assert 'deterministic-power-state.json' in source
+    assert 'autonomous-priorities.json' in source
     assert 'rm -f "$SOURCE_SAVE"' not in source
+
+
+def test_linux_deterministic_server_deploys_only_changed_project_mods() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert 'deploy-if-required' in source
+    assert 'diff -qr "$REPO_ROOT/factorio_mod" "$MODS_PATH/factorio_cursor_rl_agent"' in source
+    assert 'diff -qr "$REPO_ROOT/factorio_training_lab" "$MODS_PATH/factorio_training_lab"' in source
+
+
+def test_reset_writes_a_verified_episode_manifest(tmp_path: Path) -> None:
+    source = tmp_path / "source.zip"
+    source.write_bytes(b"immutable-source")
+    root = tmp_path / "state"
+
+    result = subprocess.run([
+        "bash", str(MANAGER), "reset",
+        "--root", str(root),
+        "--runtime-root", str(tmp_path / "runtime"),
+        "--gui-mods", str(tmp_path / "gui-mods"),
+        "--source-save", str(source),
+        "--episode-id", "episode-test",
+        "--technology", "mining-productivity-4",
+    ], check=True, capture_output=True, text=True)
+
+    assert "reset isolated deterministic save" in result.stdout
+    copied = root / "saves" / "mod_playground.zip"
+    manifest = json.loads((root / "episode" / "current.json").read_text())
+    assert manifest["episode_id"] == "episode-test"
+    assert manifest["target_technology"] == "mining-productivity-4"
+    assert manifest["source_save_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert manifest["isolated_save_sha256"] == hashlib.sha256(copied.read_bytes()).hexdigest()
+    assert manifest["baseline_world_fingerprint"].startswith("sha256:")
+    assert len(manifest["deployed_factorio_mod_sha256"]) == 64
+    assert 'rm -f "$SOURCE_SAVE"' not in MANAGER.read_text(encoding="utf-8")

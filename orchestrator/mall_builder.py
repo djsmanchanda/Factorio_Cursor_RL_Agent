@@ -151,11 +151,10 @@ def mall_cell_needs_rebuild(
 ) -> bool:
     """Whether a declared cell half is degraded enough to regenerate.
 
-    Degraded means a declared feed chest is missing entirely or has lost its
-    request group (live run 33: an engine-unit cell's middle chest requested
-    nothing, so its machines starved behind a 'supply-starved, wait' verdict
-    that could never recover). Pure presence checks only; False outside the
-    mall district."""
+    Degraded means the declared feed chest is missing. An existing but empty
+    chest is normally upstream starvation, not structural damage; rebuilding
+    it cannot create supply and only produces zero-action churn.
+    Pure presence checks only; False outside the mall district."""
     located = locate_mall_cell(machine_position, reference_point)
     if located is None:
         return False
@@ -173,7 +172,7 @@ def mall_cell_needs_rebuild(
                 held = live_base.chest_stored_items(
                     client, surface, (position["x"], position["y"]),
                 )
-                if held <= 0:
+                if held < 0:
                     return True
     return False
 

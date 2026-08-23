@@ -14,6 +14,8 @@ Options:
   --rcon-port PORT    Loopback RCON port (default: 27017).
   --technology NAME   Research target (default: mining-productivity-4).
   --queue-file PATH   Process this persisted research queue instead of one target.
+  --episode-manifest PATH
+                      Fail closed unless the runner matches this fresh episode.
 
 The runner reads the RCON secret from the isolated server root. It does not
 write to the normal Factorio profile or expose the secret in its command line.
@@ -43,6 +45,7 @@ PYTHON_BIN="python3"
 RCON_PORT=27017
 TECHNOLOGY="mining-productivity-4"
 QUEUE_FILE=""
+EPISODE_MANIFEST=""
 
 while (($#)); do
   case "$1" in
@@ -51,6 +54,7 @@ while (($#)); do
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
     --queue-file) QUEUE_FILE="${2:?missing --queue-file value}"; shift 2 ;;
+    --episode-manifest) EPISODE_MANIFEST="${2:?missing --episode-manifest value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -104,10 +108,15 @@ start_runner() {
     else
       queue_args=(research "$TECHNOLOGY")
     fi
+    local manifest_args=()
+    if [[ -n "$EPISODE_MANIFEST" ]]; then
+      manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
+    fi
     exec setsid "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
       "${queue_args[@]}" --surface nauvis --force player \
       --rcon-host 127.0.0.1 --rcon-port "$RCON_PORT" \
       --rcon-secret-file "$SECRET_PATH" --script-output "$SCRIPT_OUTPUT" \
+      "${manifest_args[@]}" \
       --reference-point 3 -1 --max-iterations 100 --log-file "$LOG_PATH" \
       > "$CONSOLE_LOG" 2>&1 < /dev/null
   ) &

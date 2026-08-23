@@ -721,6 +721,72 @@ def ghost_blockages(
     return records
 
 
+def area_entity_records(
+    client: RconClient, surface: str, force: str,
+    min_point: Point, max_point: Point,
+) -> list[dict[str, object]]:
+    """Return bounded placement evidence, including ghosts and tile ghosts."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        "if e.type~='character' and e.type~='resource' then "
+        "local ghost='';local tile='';"
+        "if e.type=='entity-ghost' then ghost=e.ghost_name or '' end;"
+        "if e.type=='tile-ghost' then tile=e.ghost_name or '' end;"
+        "local decon=false;local okd,d=pcall(function() return e.to_be_deconstructed() end);"
+        "if okd then decon=d and true or false end;"
+        "out[#out+1]=table.concat({e.name,e.type,(e.force and e.force.name or 'neutral'),"
+        "string.format('%.3f',e.position.x),string.format('%.3f',e.position.y),"
+        "ghost,tile,tostring(decon)},'|') end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    records: list[dict[str, object]] = []
+    for raw in _sc(client, lua).split(";"):
+        if not raw:
+            continue
+        fields = raw.split("|", 7)
+        if len(fields) != 8:
+            continue
+        records.append({
+            "name": fields[0],
+            "type": fields[1],
+            "force": fields[2],
+            "position": (float(fields[3]), float(fields[4])),
+            "ghost_name": fields[5] or None,
+            "tile_name": fields[6] or None,
+            "deconstructed": fields[7].lower() == "true",
+            "is_ghost": fields[1] in {"entity-ghost", "tile-ghost"},
+        })
+    return records
+
+
+def deconstruction_tiles(
+    client: RconClient, surface: str, min_point: Point, max_point: Point,
+) -> set[tuple[int, int]]:
+    """Tiles covered by an entity with a pending deconstruction order."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        "local ok,d=pcall(function() return e.to_be_deconstructed() end);"
+        "if ok and d then local b=e.bounding_box;"
+        "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
+        "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
+        "out[#out+1]=x..','..y end end end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    tiles: set[tuple[int, int]] = set()
+    for pair in _sc(client, lua).split(";"):
+        if not pair:
+            continue
+        x, _, y = pair.partition(",")
+        tiles.add((int(x), int(y)))
+    return tiles
+
+
 def available_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
     """Everything the force is holding in containers on this surface.
 
@@ -863,6 +929,41 @@ def network_firm_generation_kw(
     return _network_generation_kw_impl(
         client, surface, force, near, include_solar=False,
     )
+
+
+def network_accumulator_storage_mj(
+    client: RconClient, surface: str, force: str, near: Point,
+) -> float | None:
+    """Maximum accumulator energy on the nearest roboport's electric network."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local best,bd=nil,1e18;"
+        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e end end;"
+        "if not best then rcon.print('NONE') return end;"
+        "local ok,net=pcall(function() return best.electric_network_id end);"
+        "if not ok or net==nil then rcon.print('NONE') return end;"
+        "local mj=0;"
+        "for _,a in pairs(s.find_entities_filtered{name='accumulator',force=f}) do "
+        "local okid,id=pcall(function() return a.electric_network_id end);"
+        "if okid and id==net then "
+        "local joules=nil;"
+        "local okb,b=pcall(function() return a.prototype.buffer_capacity end);"
+        "if okb and type(b)=='number' then joules=b end;"
+        "if joules==nil then "
+        "local oke,e=pcall(function() return a.electric_buffer_size end);"
+        "if oke and type(e)=='number' then joules=e end end;"
+        "if joules then mj=mj+joules/1000000 end end end;"
+        "rcon.print(string.format('%.3f',mj))"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 def drill_drop_belt_tile(

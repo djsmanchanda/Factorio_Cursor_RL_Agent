@@ -223,11 +223,11 @@ async function submitResearch(mode) {
 
 async function runAction(action) {
   let confirmation = '';
-  if (action === 'restore_save') {
-    if (!confirm('Back up the isolated deterministic save, restore the configured source save, and restart the Linux server?')) return;
-    confirmation = 'RESTORE';
-  } else if (action === 'full_refresh') {
-    if (!confirm('Stop the runner and server, redeploy the mod to the server and GUI, restart Factorio, then restart the runner?')) return;
+  if (action === 'fresh_campaign') {
+    if (!confirm('Stop the current episode, verify the immutable source save, restore it, and start a new deterministic campaign?')) return;
+    confirmation = 'START_FRESH_CAMPAIGN';
+  } else if (action === 'resume_runner') {
+    if (!confirm('Restart the controller on the CURRENT world without restoring the source save?')) return;
   } else if (action === 'restart_server') {
     if (!confirm('Stop the runner and restart the isolated Linux deterministic server?')) return;
   } else if (action === 'deploy_mod') {

@@ -204,6 +204,15 @@ def main() -> int:
         help="Native executable lifecycle manager for deterministic runner actions.",
     )
     parser.add_argument(
+        "--campaign-manager", type=Path,
+        help="Native executable campaign manager for atomic fresh episodes.",
+    )
+    parser.add_argument(
+        "--runtime-root", type=Path,
+        default=Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.14",
+    )
+    parser.add_argument("--python-bin", type=Path, default=sys.executable)
+    parser.add_argument(
         "--gui-mods", type=Path, default=Path.home() / ".factorio" / "mods",
         help="Linux GUI Factorio mods directory synchronized by native deploy.",
     )
@@ -222,6 +231,9 @@ def main() -> int:
         technology=args.technology,
         server_manager=args.server_manager,
         runner_manager=args.runner_manager,
+        campaign_manager=args.campaign_manager,
+        runtime_root=args.runtime_root,
+        python_bin=args.python_bin,
         gui_mods=args.gui_mods,
     )
     DashboardHandler.runs_dir = args.runs_dir

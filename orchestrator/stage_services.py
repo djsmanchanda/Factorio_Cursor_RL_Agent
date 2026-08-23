@@ -10,10 +10,12 @@ from collections.abc import Mapping, Sequence
 from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
+from orchestrator.controller_budget import consume_plan_submission, consume_wait
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
+from orchestrator.power_district import append_plan_reservation
 from orchestrator.roboport_placement import clear_chain_positions
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
@@ -195,16 +197,27 @@ def _submit(
     staging them before affordability is how a chain of ports got strung across
     the map for an oil cell whose landfill bill then failed -- the plan never
     submitted and the grid kept the scars."""
+    if not any(phase.get("actions") for phase in plan.get("phases", [])):
+        raise StuckError(f"{name}: proposed zero actions")
+    consume_plan_submission(name)
     clear_plan_clutter(client, surface, plan, emit)
     assert_affordable(client, surface, plan.get("force", "player"), plan, name, emit)
     if stage_coverage is not None:
         stage_coverage()
     authorization = build_layout_authorization([(name, plan)])
     for attempt in range(max_retries + 1):
+        consume_plan_submission(f"{name}#retry{attempt}")
         report = load_json(bridge.build_layout(authorization, plan))
+        if report.get("attempted_placements") == 0:
+            raise StuckError(
+                f"{name}: execution attempted zero placements; refusing silent churn"
+            )
         if report.get("ok"):
             emit(f"{name}: placed {report['succeeded_placements']} actions "
                  f"({report['placed_ghosts']} ghosts, {report['placed_entities']} entities)")
+            script_output = getattr(bridge, "script_output", None)
+            if script_output:
+                append_plan_reservation(script_output, name, plan)
             return report
         cleared_any = False
         blocking = []
@@ -322,9 +335,11 @@ def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[P
     )
     deadline = time.monotonic() + timeout_seconds
     remaining = int(client.command("/sc " + lua).strip())
+    consume_wait("ghost_construction")
     started = time.monotonic()
     last_change = time.monotonic()
     while remaining and time.monotonic() < deadline:
+        consume_wait("ghost_construction_poll")
         time.sleep(poll_seconds)
         current = int(client.command("/sc " + lua).strip())
         if current != remaining:
@@ -441,6 +456,7 @@ def _await_built_status(
         status = live_base.entity_status_name(client, surface, position)
         if status is not None or time.monotonic() >= deadline:
             return status
+        consume_wait(f"ghost_build@{position}")
         time.sleep(poll_seconds)
 
 

@@ -145,11 +145,10 @@ def test_incomplete_mall_cell_rebuilds_in_place_not_on_a_fresh_slot() -> None:
     assert placed_machines, "the rebuilt plan must target the existing machine tile"
 
 
-def test_degraded_empty_feed_chest_triggers_rebuild_not_wait(monkeypatch) -> None:
-    """Live run 33 (2026-08-23): an engine-unit cell's middle requester-chest
-    had lost its request group -- zero items delivered forever -- so the cell
-    starved behind a 'supply-starved, keep waiting' verdict. A labelled but
-    empty feed chest is degradation and routes to the in-place rebuild."""
+def test_present_empty_feed_chest_waits_instead_of_structural_rebuild(monkeypatch) -> None:
+    """An existing empty chest normally means upstream starvation. Rebuilding
+    the complete cell cannot create supply and only produces zero-action churn;
+    a missing chest remains the structural rebuild case."""
     from orchestrator import live_base
     from orchestrator.mall_builder import (
         _slot_position,
@@ -161,7 +160,7 @@ def test_degraded_empty_feed_chest_triggers_rebuild_not_wait(monkeypatch) -> Non
     machine = _slot_position(origin, side)
     assert locate_mall_cell(machine, (35.0, 21.0)) == (origin, side)
 
-    replies = iter([0])  # first declared feed chest holds nothing
+    replies = iter([-1])  # missing declared feed chest
     monkeypatch.setattr(
         live_base, "chest_stored_items",
         lambda *_a, **_k: next(replies, 7),
@@ -171,6 +170,12 @@ def test_degraded_empty_feed_chest_triggers_rebuild_not_wait(monkeypatch) -> Non
         machine_position=machine, reference_point=(35.0, 21.0),
     )
     assert mall_cell_needs_rebuild(object(), **kwargs)
+
+    # A present but empty chest is a supply wait, not structural damage.
+    monkeypatch.setattr(
+        live_base, "chest_stored_items", lambda *_a, **_k: 0,
+    )
+    assert not mall_cell_needs_rebuild(object(), **kwargs)
 
     # Fully-labelled chests mean the cell is healthy: keep waiting normally.
     monkeypatch.setattr(

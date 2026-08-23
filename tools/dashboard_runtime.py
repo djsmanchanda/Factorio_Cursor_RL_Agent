@@ -39,6 +39,9 @@ class DashboardConfig:
     technology: str = "mining-productivity-4"
     game_port: int = 34199
     rcon_port: int = 27017
+    runtime_root: Path | None = None
+    python_bin: Path | None = None
+    campaign_manager: Path | None = None
     server_manager: Path | None = None
     runner_manager: Path | None = None
     gui_mods: Path | None = None
@@ -74,8 +77,8 @@ class OperationError(RuntimeError):
 
 class OperationManager:
     ACTIONS = {
-        "deploy_mod", "restart_runner", "stop_runner", "restart_server",
-        "restore_save", "full_refresh",
+        "deploy_mod", "restart_server", "stop_runner",
+        "fresh_campaign", "resume_runner",
     }
 
     def __init__(self, config: DashboardConfig):
@@ -466,6 +469,17 @@ class OperationManager:
         self._launch_server(visible_admin_shell=True)
         self._wait_for_port(self.config.rcon_port, True, 90)
 
+    def _resume_runner(self) -> None:
+        """Restart the controller while explicitly preserving the current world."""
+        self._restart_runner()
+
+    def _fresh_campaign(self) -> None:
+        """Run the atomic stop/deploy/reset/start sequence with a new episode ID."""
+        if getattr(self.config, "campaign_manager", None):
+            self._run_native_campaign_manager("fresh")
+            return
+        raise OperationError("Fresh deterministic campaigns require the native Linux managers.")
+
     def _full_refresh(self) -> None:
         self._stop_runner()
         self._stop_server()
@@ -566,6 +580,24 @@ class OperationManager:
             command.extend(["--queue-file", str(queue_file)])
         self._run_checked(command)
 
+    def _run_native_campaign_manager(self, action: str) -> None:
+        manager = Path(self.config.campaign_manager)
+        if not manager.is_file() or not os.access(manager, os.X_OK):
+            raise OperationError(f"Native campaign manager is unavailable or not executable: {manager}")
+        command = [
+            str(manager), action,
+            "--source-save", str(self.config.source_save),
+            "--root", str(self.config.server_data),
+            "--runtime-root", str(getattr(self.config, "runtime_root", None)
+                                  or Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.14"),
+            "--gui-mods", str(self.config.gui_mods),
+            "--python", str(getattr(self.config, "python_bin", None) or sys.executable),
+            "--technology", self.config.technology,
+            "--game-port", str(self.config.game_port),
+            "--rcon-port", str(self.config.rcon_port),
+        ]
+        self._run_checked(command)
+
     def _run_visible_elevated_script(self, script: Path, *arguments: str) -> None:
         values = [
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -604,7 +636,11 @@ class OperationManager:
             and command
             and Path(command[0]) == Path(self.config.server_manager)
         )
-        timeout = 300 if is_native_server_command else 120
+        is_native_campaign_command = (
+            command and getattr(self.config, "campaign_manager", None) is not None
+            and Path(command[0]) == Path(self.config.campaign_manager)
+        )
+        timeout = 300 if is_native_server_command or is_native_campaign_command else 120
         completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=timeout)
         if completed.stdout.strip():
             self._write(completed.stdout.strip())

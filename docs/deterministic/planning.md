@@ -23,3 +23,17 @@ These names describe intended responsibilities, not permission to build speculat
 - Base capacity on rates and live game facts, not machine counts alone.
 
 These are also useful RL priors and reward features. They are not a catalog the learned policy must copy.
+
+## Deterministic power districts
+
+Solar expansion uses fixed rectangular templates rather than opportunistic
+clear-spot chains. A candidate unit has a complete footprint, clearance box,
+poles or substations, accumulator bank, connection points, and adjacency
+offset. The controller classifies each lattice cell, rejects a candidate as a
+whole on any live entity, ghost, terrain, deconstruction order, reservation, or
+pending-plan conflict, and builds at most one fully funded unit before
+remeasuring. Power plans are tagged atomic, so the executor performs a
+whole-footprint preflight before its first placement and refuses the complete
+unit on any blocked coordinate. Sizing compares usable solar plus firm
+generation and measured connected accumulator storage with bounded peak demand,
+including night energy and recharge surplus; it stops when that metric converges.

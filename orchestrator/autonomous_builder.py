@@ -28,6 +28,10 @@ from orchestrator.baseline_production import (
     smelter_count_for_draw,
 )
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.controller_budget import (
+    begin_run_budget, consume_diagnosis, consume_remediation, consume_wait,
+    end_run_budget,
+)
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
 from orchestrator.mall_builder import (
@@ -43,6 +47,7 @@ from orchestrator.intermediate_scaling import (
     live_intermediate_demand, promoted_line_belt_type, promoted_line_machine_count,
 )
 from orchestrator.priority_list import PriorityList
+from orchestrator.power_district import ensure_power_capacity
 from orchestrator.extraction_transport import (
     planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
 )
@@ -425,6 +430,7 @@ def bring_stage_up(
                 )
                 local_baseline = remaining
                 total_rounds += rounds
+                consume_remediation(f"{name}#extension{extensions}")
                 continue
             # A LONE unresolved ghost with no named cause is the stale-ghost
             # signature: rebuild it once before giving up on the whole stage.
@@ -438,9 +444,11 @@ def bring_stage_up(
                     client, bridge, surface, force, area, emit,
                 ):
                     total_rounds += rounds
+                    consume_remediation(f"{name}#stale_ghost")
                     continue
             break
         attempt += 1
+        consume_remediation(f"{name}#round{attempt}")
         remaining = _wait_for_ghosts(
             client, surface, force, area, timeout_seconds=interval,
         )
@@ -450,6 +458,7 @@ def bring_stage_up(
             client, surface, force, origin, substation_position, machine_positions,
             logistic_chest_positions, area,
         )
+        consume_diagnosis(f"{name}#round{attempt}")
         if remaining == 0 and issue is None:
             if attempt > 1:
                 emit(f"  [{name}] RESOLVED after {attempt} round(s)")
@@ -1586,89 +1595,19 @@ def _essential_belt_type(
 _ESSENTIAL_FAST_BELT_MIN = 40
 
 
-# A network under ~1 MW of prototype generation browns out the moment a new
-# stage stacks demand on it -- every observed run lost throughput to power
-# starvation before its first science pack. The starter kit ships solar
-# panels for exactly this; spend them beside whatever grid we just touched.
-_MIN_NETWORK_GENERATION_KW = 1000.0
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
-_SOLAR_TOPUP_PANELS = 8
-_SOLAR_TOPUP_ACCUMULATORS = 3
 
 
 def _top_up_solar_generation(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near: Point, emit: Callable[[str], None],
 ) -> bool:
-    """Grow generation, not just connectivity, when a grid runs lean.
-
-    Called after each successful power bridge: that is the moment we know the
-    network matters and have a powered anchor to build beside."""
-    generation = live_base.network_firm_generation_kw(client, surface, force, near)
-    if generation is None:
-        return False
-    if generation < _MIN_NETWORK_GENERATION_KW:
-        emit(
-            f"  SOLAR TOP-UP: network at {near} has only {generation:.0f} kW of "
-            "firm (non-solar) generation -- panels produce nothing after dusk"
-        )
-    else:
-        # Firm capacity already covers the policy floor; daylight-only
-        # nameplate must not mask that (live run 36 browned out nightly on a
-        # 1000 kW panel nameplate with zero accumulators).
-        return False
-    stock = live_base.available_items(client, surface, force)
-    panels = min(int(stock.get("solar-panel", 0)), _SOLAR_TOPUP_PANELS)
-    accumulators = min(int(stock.get("accumulator", 0)), _SOLAR_TOPUP_ACCUMULATORS)
-    if panels == 0 and accumulators == 0:
-        emit(
-            f"  SOLAR TOP-UP skipped: network at {near} generates only "
-            f"{generation:.0f} kW but no solar-panel/accumulator stock exists"
-        )
-        return False
-    spots = live_base.chained_clear_spots(
-        client, surface,
-        [("medium-electric-pole", 1), ("solar-panel", panels),
-         ("accumulator", accumulators)],
-        near,
+    """Build one validated rectangular power unit when sizing has not converged."""
+    script_output = getattr(bridge, "script_output", Path(""))
+    return ensure_power_capacity(
+        client=client, bridge=bridge, surface=surface, force=force,
+        near=near, script_output=script_output, emit=emit, submit=_submit,
     )
-    if len(spots) <= 1:
-        # The mission's birthplace is usually saturated by now (live run 37:
-        # one clear tile beside the starter grid). Arrays belong beside ANY
-        # powered anchor -- prefer the nearest roboports, which sit on the
-        # networks everything else joined.
-        for port in live_base.roboport_positions(client, surface, force)[:3]:
-            spots = live_base.chained_clear_spots(
-                client, surface,
-                [("medium-electric-pole", 1), ("solar-panel", panels),
-                 ("accumulator", accumulators)],
-                port,
-            )
-            if len(spots) > 1:
-                near = port
-                break
-    actions = [
-        {"action_type": "place_entity", "entity": name,
-         "position": {"x": x, "y": y}}
-        for name, x, y in spots
-    ]
-    if len(actions) <= 1:  # pole alone is not an array
-        return False
-    plan = {
-        "phases": [{
-            "name": f"solar_top_up_{int(near[0])}_{int(near[1])}",
-            "actions": actions,
-        }],
-        "surface": surface, "force": force,
-    }
-    _submit(client, bridge, surface, plan, "solar_top_up", emit)
-    placed_panels = sum(1 for name, _x, _y in spots if name == "solar-panel")
-    emit(
-        f"SOLAR TOP-UP: network at {near} generates {generation:.0f} kW -- "
-        f"placing {placed_panels} panel(s) and "
-        f"{max(0, len(spots) - 1 - placed_panels)} accumulator(s)"
-    )
-    return True
 
 
 def _mine_logistic_intake(
@@ -2604,6 +2543,26 @@ def _repair_stalled_line(
     xs = [p[0] for p in existing.machine_positions]
     ys = [p[1] for p in existing.machine_positions]
     area = ((min(xs) - 15, min(ys) - 15), (max(xs) + 15, max(ys) + 15))
+    pre_statuses = live_base.entity_statuses(
+        client, surface, existing.machine_positions,
+    )
+    if pre_statuses and all(
+        status in {"working", "full_output", "disabled_by_control_behavior"}
+        for status in pre_statuses.values()
+    ):
+        kinds = sorted(set(pre_statuses.values()))
+        emit(
+            f"  REPAIR CLASSIFICATION: {item} is not structurally broken "
+            f"({', '.join(kinds)}); waiting for supply/output demand"
+        )
+        return (
+            mall_provider
+            or live_base.nearest_container(
+                client, surface, force, existing.machine_positions[-1],
+                names=("passive-provider-chest",),
+            )
+            or existing.output_position
+        )
     substation = live_base.nearest_pole_on_other_network(
         client, surface, force, existing.machine_positions[0], -1,
     )
@@ -2693,7 +2652,8 @@ def _repair_stalled_line(
             f"  REPAIR DIAGNOSIS: {item} still has {len(idle)} non-working "
             f"machine(s) after remediation: {sample}"
         )
-        time.sleep(5)  # let power/logistics remediation land before resurvey
+        consume_wait(f"{item}#repair_settle")
+        time.sleep(5)
     return None
 
 
@@ -3746,6 +3706,7 @@ def _serve_ready_pass(
             "PRIORITY WAIT: all unfinished construction tasks are deferred; "
             f"next review in {wait_ticks or 60} ticks"
         )
+        consume_wait("priority_defer")
         time.sleep(5)
         return _SHORTAGE
     emit(f"--- checking {goal_item} before background reserves ---")
@@ -3779,6 +3740,7 @@ def run(
         script_output=Path(script_output), host=rcon_host, port=rcon_port,
         password=rcon_password, command_timeout=30.0,
     )
+    budget = begin_run_budget(max_iterations)
     try:
         mall_targets, background_targets, priorities = _open_the_run(
             client, bridge, surface, force, goal_item, mission_items,
@@ -3793,7 +3755,8 @@ def run(
         last_generation_check_tick = -_GENERATION_CHECK_INTERVAL_TICKS
         unchanged_passes = 0
         iteration = 0
-        while iteration < max_iterations:
+        while budget.passes < max_iterations:
+            budget.begin_pass()
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities,
             )
@@ -3802,13 +3765,15 @@ def run(
                 deferred_plate_targets, pending_plate_materials,
             )
             ghosts_now = live_base.pending_ghost_count(client, surface, force)
+            target_stock_now = live_base.available_items(client, surface, force)
+            relevant_mission_items = mission_items or (goal_item,)
             items_now = sum(
-                live_base.available_items(client, surface, force).values(),
+                int(target_stock_now.get(item, 0))
+                for item in relevant_mission_items
             )
-            # A growing item pool means the factory is crafting toward the
-            # goal even when no decision changed: slow plate/belt/inserter
-            # accumulation behind a bootstrap gate is patience, not a spin
-            # (user direction 2026-08-22 -- wait longer when supply moves).
+            # Only growth in the target's own stock counts as progress. A
+            # growing total inventory can belong to unrelated mall work and
+            # must not mask a blocked research target.
             stock_grew = (
                 last_items_total is not None and items_now > last_items_total
             )
@@ -3893,5 +3858,6 @@ def run(
                 return {"ok": True, "iterations": iteration, "output_position": position}
         raise StuckError(f"Did not reach a working {goal_item} line within {max_iterations} iterations")
     finally:
+        end_run_budget()
         client.close()
         bridge.close()

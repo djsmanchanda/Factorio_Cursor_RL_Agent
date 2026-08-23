@@ -61,6 +61,27 @@ local function exact_position_occupants(surface, force, position)
   return exact
 end
 
+local function atomic_placement_blocked(surface, force, action)
+  local position = action.position
+  if find_exact_entity(surface, force, action.entity, position) ~= nil then
+    return false
+  end
+  if find_exact_ghost(surface, force, action.entity, position) ~= nil then
+    return false
+  end
+  local check_type = defines.build_check_type.manual
+    or defines.build_check_type.ghost_revive
+  local ok, can_place = pcall(function()
+    return surface.can_place_entity({
+      name = action.entity,
+      position = { position.x, position.y },
+      force = force,
+      build_check_type = check_type
+    })
+  end)
+  return not ok or can_place ~= true
+end
+
 local function recipe_name(entity)
   local ok, recipe = pcall(function() return entity.get_recipe() end)
   if not ok then return nil, "recipe_read_failed" end
@@ -457,6 +478,25 @@ local function execute_build_plan(authorization, build_plan)
       position = { x = action.position.x, y = action.position.y },
       reason = reason
     })
+  end
+
+  if build_plan.atomic == true then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_entity" or action.action_type == "place_ghost" then
+          counts.attempted_placements = counts.attempted_placements + 1
+          if atomic_placement_blocked(surface, force, action) then
+            record_failure(phase, action, "atomic_footprint_blocked")
+          end
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_placements = #placement_failures
+      counts.placement_failures = placement_failures
+      counts.error = "atomic_footprint_blocked"
+      return counts
+    end
   end
 
   for _, phase in ipairs(build_plan.phases) do

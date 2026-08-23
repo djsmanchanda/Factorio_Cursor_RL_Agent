@@ -6,7 +6,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-usage: manage_linux_deterministic_server.sh {bootstrap|deploy|reset|start|stop|status} [options]
+usage: manage_linux_deterministic_server.sh {bootstrap|deploy|deploy-if-required|reset|start|stop|status} [options]
 
 Options:
   --root PATH           Dedicated server state (default: ~/.local/share/factorio-rl/deterministic).
@@ -14,6 +14,8 @@ Options:
   --factorio-bin PATH   Factorio executable (defaults below --runtime-root).
   --read-data PATH      Factorio read-data directory (defaults below --runtime-root).
   --source-save PATH    Required for bootstrap; copied once into the dedicated root.
+  --episode-id ID       Episode identity written by reset (default: timestamp).
+  --technology NAME     Research target recorded in the episode manifest.
   --gui-mods PATH       Linux GUI Factorio mods directory (default: ~/.factorio/mods).
   --game-port PORT      Game port (default: 34199).
   --rcon-port PORT      Loopback RCON port (default: 27017).
@@ -50,6 +52,8 @@ RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
+EPISODE_ID=""
+TECHNOLOGY=""
 GUI_MODS_PATH="$HOME/.factorio/mods"
 GAME_PORT=34199
 RCON_PORT=27017
@@ -61,6 +65,8 @@ while (($#)); do
     --factorio-bin) FACTORIO_BIN="${2:?missing --factorio-bin value}"; shift 2 ;;
     --read-data) READ_DATA="${2:?missing --read-data value}"; shift 2 ;;
     --source-save) SOURCE_SAVE="${2:?missing --source-save value}"; shift 2 ;;
+    --episode-id) EPISODE_ID="${2:?missing --episode-id value}"; shift 2 ;;
+    --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
@@ -70,7 +76,7 @@ while (($#)); do
 done
 
 case "$ACTION" in
-  bootstrap|deploy|reset|start|stop|status) ;;
+  bootstrap|deploy|deploy-if-required|reset|start|stop|status) ;;
   *) usage >&2; exit 2 ;;
 esac
 
@@ -90,6 +96,28 @@ STDIN_PATH="$DATA_ROOT/factorio.stdin"
 STDIN_KEEPER_PID_PATH="$DATA_ROOT/factorio-stdin-keeper.pid"
 CONFIG_PATH="$DATA_ROOT/config.ini"
 SERVER_SETTINGS="$DATA_ROOT/server-settings.json"
+EPISODE_DIR="$DATA_ROOT/episode"
+EPISODE_MANIFEST="$EPISODE_DIR/current.json"
+
+sha256_file() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+repository_revision() {
+  git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown
+}
+
+dirty_file_count() {
+  git -C "$REPO_ROOT" status --porcelain --untracked-files=normal 2>/dev/null | wc -l | tr -d ' '
+}
+
+tree_hash() {
+  local root="$1"
+  (
+    cd "$root"
+    find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}'
+  )
+}
 
 server_running() {
   [[ -f "$PID_PATH" ]] && kill -0 "$(<"$PID_PATH")" 2>/dev/null
@@ -162,6 +190,30 @@ sync_mod_copy() {
   cp -a "$REPO_ROOT/$source_name" "$target_root/$mod_name"
 }
 
+deploy_if_required() {
+  assert_stopped
+  if [[ -d "$MODS_PATH/factorio_cursor_rl_agent" ]] \
+    && diff -qr "$REPO_ROOT/factorio_mod" "$MODS_PATH/factorio_cursor_rl_agent" >/dev/null 2>&1 \
+    && [[ -d "$MODS_PATH/factorio_training_lab" ]] \
+    && diff -qr "$REPO_ROOT/factorio_training_lab" "$MODS_PATH/factorio_training_lab" >/dev/null 2>&1; then
+    echo "server project mod copies already match"
+    sync_mod_copy_check_gui
+    return
+  fi
+  sync_mod
+  echo "changed project mods deployed to $MODS_PATH and $GUI_MODS_PATH"
+}
+
+sync_mod_copy_check_gui() {
+  if [[ (-e "$GUI_MODS_PATH/factorio_cursor_rl_agent" && ! -d "$GUI_MODS_PATH/factorio_cursor_rl_agent") \
+    || (-e "$GUI_MODS_PATH/factorio_training_lab" && ! -d "$GUI_MODS_PATH/factorio_training_lab") ]] \
+    || ! diff -qr "$REPO_ROOT/factorio_mod" "$GUI_MODS_PATH/factorio_cursor_rl_agent" >/dev/null 2>&1 \
+    || ! diff -qr "$REPO_ROOT/factorio_training_lab" "$GUI_MODS_PATH/factorio_training_lab" >/dev/null 2>&1; then
+    sync_mod
+    echo "changed GUI project mod copies deployed to $GUI_MODS_PATH"
+  fi
+}
+
 ensure_secret() {
   if [[ ! -s "$SECRET_PATH" ]]; then
     umask 077
@@ -185,6 +237,50 @@ bootstrap() {
   echo "bootstrapped isolated deterministic server at $DATA_ROOT using copied save $SAVE_PATH"
 }
 
+write_episode_manifest() {
+  local source_hash copy_hash deterministic_hash training_hash revision dirty created temporary
+  source_hash="$(sha256_file "$SOURCE_SAVE")"
+  copy_hash="$(sha256_file "$SAVE_PATH")"
+  deterministic_hash="$(tree_hash "$REPO_ROOT/factorio_mod")"
+  training_hash="$(tree_hash "$REPO_ROOT/factorio_training_lab")"
+  revision="$(repository_revision)"
+  dirty="$(dirty_file_count)"
+  created="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [[ -n "$EPISODE_ID" ]] || EPISODE_ID="episode-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+  mkdir -p "$EPISODE_DIR"
+  temporary="$EPISODE_MANIFEST.tmp.$$"
+  cat > "$temporary" <<EOF
+{
+  "schema_version": "1.0.0",
+  "episode_id": "$EPISODE_ID",
+  "target_technology": "$TECHNOLOGY",
+  "surface": "nauvis",
+  "force": "player",
+  "source_save": "$(realpath "$SOURCE_SAVE")",
+  "source_save_sha256": "$source_hash",
+  "isolated_save": "$SAVE_PATH",
+  "isolated_save_sha256": "$copy_hash",
+  "baseline_world_fingerprint": "sha256:$copy_hash",
+  "deployed_factorio_mod_sha256": "$deterministic_hash",
+  "deployed_factorio_training_lab_sha256": "$training_hash",
+  "baseline_verified": false,
+  "initial_game_tick": null,
+  "repository_revision": "$revision",
+  "dirty_worktree_file_count": $dirty,
+  "created_at": "$created",
+  "started_at": null,
+  "ended_at": null,
+  "termination_reason": null
+}
+EOF
+  mv "$temporary" "$EPISODE_MANIFEST"
+  rm -f \
+    "$DATA_ROOT/logs/deterministic-power-state.json" \
+    "$DATA_ROOT/logs/deterministic-plan-reservations.jsonl" \
+    "$DATA_ROOT/logs/deterministic-plan-reservations.json" \
+    "$DATA_ROOT/logs/autonomous-priorities.json"
+}
+
 reset_save() {
   [[ -n "$SOURCE_SAVE" ]] || die "reset requires --source-save"
   [[ -f "$SOURCE_SAVE" ]] || die "source save is missing: $SOURCE_SAVE"
@@ -201,7 +297,12 @@ reset_save() {
     rm -f "$temporary"
     die "reset copy does not match source save"
   }
+  if [[ "$(sha256_file "$SOURCE_SAVE")" != "$(sha256_file "$temporary")" ]]; then
+    rm -f "$temporary"
+    die "reset SHA-256 does not match source save"
+  fi
   mv "$temporary" "$SAVE_PATH"
+  write_episode_manifest
   echo "reset isolated deterministic save from $SOURCE_SAVE"
 }
 
@@ -284,7 +385,8 @@ case "$ACTION" in
     [[ -d "$DATA_ROOT" ]] || die "server is not bootstrapped"
     sync_mod
     echo "deployed both project mods to $MODS_PATH and $GUI_MODS_PATH"
-    ;;
+  ;;
+  deploy-if-required) deploy_if_required ;;
   reset) reset_save ;;
   start) start_server ;;
   stop) stop_server ;;

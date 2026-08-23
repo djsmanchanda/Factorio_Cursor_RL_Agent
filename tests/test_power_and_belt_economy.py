@@ -173,41 +173,10 @@ def test_visibly_filling_blueprints_extend_remediation(monkeypatch) -> None:
             rounds=2, interval=0.0,
         )
 
-# --- solar top-up ------------------------------------------------------------
+# --- deterministic power district --------------------------------------------
 
-def test_lean_network_gets_stocked_solar(monkeypatch) -> None:
-    monkeypatch.setattr(
-        builder.live_base, "network_firm_generation_kw", lambda *_a: 720.0,
-    )
-    monkeypatch.setattr(
-        builder.live_base, "available_items",
-        lambda *_a: {"solar-panel": 3, "accumulator": 2},
-    )
-    spots = [("medium-electric-pole", 0.0, 0.0)] + [
-        ("solar-panel", float(i), 2.0) for i in range(3)
-    ] + [("accumulator", 6.0, 2.0), ("accumulator", 8.0, 2.0)]
-    monkeypatch.setattr(
-        builder.live_base, "chained_clear_spots", lambda *_a, **_k: spots,
-    )
-    submitted: list[str] = []
-    monkeypatch.setattr(
-        builder, "_submit",
-        lambda _c, _b, _s, plan, name, _e: submitted.append(name),
-    )
-
-    acted = builder._top_up_solar_generation(
-        object(), object(), "nauvis", "player", (40.0, -60.0),
-        lambda _m: None,
-    )
-
-    assert acted
-    assert submitted == ["solar_top_up"]
-
-
-def test_healthy_network_skips_the_top_up(monkeypatch) -> None:
-    """Firm capacity is the gate: live run 36 browned out nightly on a
-    1000 kW solar NAMEPLATE with zero accumulators -- daylight-only numbers
-    must not read as healthy."""
+def test_healthy_network_skips_the_top_up(monkeypatch, tmp_path) -> None:
+    """A converged usable-capacity calculation is the gate."""
     monkeypatch.setattr(
         builder.live_base, "network_firm_generation_kw", lambda *_a: 5000.0,
     )
@@ -215,27 +184,60 @@ def test_healthy_network_skips_the_top_up(monkeypatch) -> None:
         builder.live_base, "network_generation_kw", lambda *_a: 5000.0,
     )
     monkeypatch.setattr(
+        builder.live_base, "network_accumulator_storage_mj", lambda *_a: 0.0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"solar-panel": 20, "accumulator": 10, "substation": 5},
+    )
+    import orchestrator.power_district as power
+    monkeypatch.setattr(power, "network_peak_consumption_kw", lambda *_a: 1000.0)
+    monkeypatch.setattr(power, "_has_built", lambda *_a: True)
+    monkeypatch.setattr(builder.live_base, "area_entity_records", lambda *_a, **_k: [])
+    monkeypatch.setattr(
         builder, "_submit",
         lambda *_a: pytest.fail("healthy grids must not be built upon"),
     )
     assert builder._top_up_solar_generation(
-        object(), object(), "nauvis", "player", (0.0, 0.0), lambda _m: None,
+        object(), SimpleNamespace(script_output=tmp_path), "nauvis",
+        "player", (0.0, 0.0), lambda _m: None,
     ) is False
 
 
-def test_no_solar_stock_reports_and_skips(monkeypatch) -> None:
+def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
+    monkeypatch, tmp_path,
+) -> None:
     monkeypatch.setattr(
         builder.live_base, "network_firm_generation_kw", lambda *_a: 500.0,
     )
     monkeypatch.setattr(
         builder.live_base, "available_items", lambda *_a: {},
     )
+    monkeypatch.setattr(
+        builder.live_base, "network_generation_kw", lambda *_a: 650.0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "network_accumulator_storage_mj", lambda *_a: 0.0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "area_entity_records", lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(builder.live_base, "deconstruction_tiles", lambda *_a: set())
+    import orchestrator.power_district as power
+    monkeypatch.setattr(power, "network_peak_consumption_kw", lambda *_a: 1000.0)
+    monkeypatch.setattr(power, "_has_built", lambda *_a: False)
     messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a: pytest.fail("partial or unfunded power units are forbidden"),
+    )
     assert builder._top_up_solar_generation(
-        object(), object(), "nauvis", "player", (0.0, 0.0),
+        object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
+        (0.0, 0.0),
         messages.append,
     ) is False
-    assert any("no solar-panel" in m for m in messages)
+    assert any("full unit materials" in message for message in messages)
 
 
 def test_underground_actions_adopt_the_own_corridor(monkeypatch) -> None:

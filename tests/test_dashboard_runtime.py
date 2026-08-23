@@ -316,3 +316,53 @@ def test_native_restore_uses_manager_reset_then_starts_server() -> None:
         "start-server",
         ("wait", (27017, True, 90)),
     ]
+
+
+def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None:
+    assert dashboard_runtime.OperationManager.ACTIONS == {
+        "deploy_mod", "restart_server", "stop_runner",
+        "fresh_campaign", "resume_runner",
+    }
+    html = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.html").read_text()
+    javascript = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.js").read_text()
+    assert 'data-action="fresh_campaign"' in html
+    assert 'Start fresh campaign' in html
+    assert 'data-action="resume_runner"' in html
+    assert 'current world' in html.lower()
+    assert 'without restoring the source save' in javascript
+    assert 'START_FRESH_CAMPAIGN' in javascript
+    assert 'data-action="restore_save"' not in html
+    assert 'data-action="full_refresh"' not in html
+
+
+def test_fresh_campaign_invokes_atomic_native_campaign_manager(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(
+        source_save=Path("/source/mod_playground.zip"),
+        server_data=Path("/native/deterministic"),
+        runtime_root=Path("/native/runtime"),
+        gui_mods=Path("/native/gui-mods"),
+        python_bin=Path("/native/python"),
+        technology="mining-productivity-4",
+        game_port=34199,
+        rcon_port=27017,
+        campaign_manager=Path("/native/manage-campaign"),
+    )
+    commands: list[list[str]] = []
+    manager._run_checked = lambda command: commands.append(command)
+    monkeypatch.setattr(Path, "is_file", lambda _path: True)
+    monkeypatch.setattr(dashboard_runtime.os, "access", lambda *_args: True)
+
+    manager._fresh_campaign()
+
+    assert commands == [[
+        "/native/manage-campaign", "fresh",
+        "--source-save", "/source/mod_playground.zip",
+        "--root", "/native/deterministic",
+        "--runtime-root", "/native/runtime",
+        "--gui-mods", "/native/gui-mods",
+        "--python", "/native/python",
+        "--technology", "mining-productivity-4",
+        "--game-port", "34199",
+        "--rcon-port", "27017",
+    ]]
