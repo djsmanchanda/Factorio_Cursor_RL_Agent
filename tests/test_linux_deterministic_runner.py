@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANAGER = ROOT / "scripts" / "manage_linux_deterministic_runner.sh"
+RUNNER = ROOT / "tools" / "autonomous_run.py"
 
 
 def test_linux_deterministic_runner_uses_a_secret_file_and_pid_record() -> None:
@@ -34,3 +35,11 @@ def test_linux_deterministic_runner_supports_persisted_research_queue() -> None:
     assert '--queue-file PATH' in source
     assert 'queue_args=(research-queue --queue-file "$QUEUE_FILE")' in source
     assert '"${queue_args[@]}" --surface nauvis --force player' in source
+
+
+def test_runner_logs_trapped_signal_terminations() -> None:
+    source = RUNNER.read_text(encoding="utf-8")
+    assert "_raise_termination_signal" in source
+    assert 'signal.signal(_signal_number, _raise_termination_signal)' in source
+    assert 'getattr(signal, "SIGTERM", None)' in source
+    assert 'getattr(signal, "SIGHUP", None)' in source

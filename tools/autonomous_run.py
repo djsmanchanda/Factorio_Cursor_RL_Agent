@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import traceback
@@ -360,4 +361,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    def _raise_termination_signal(signum: int, _frame: object) -> None:
+        raise RuntimeError(f"runner terminated by signal {signum}")
+
+    for _signal_number in (
+        getattr(signal, "SIGINT", None), getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+    ):
+        if _signal_number is not None:
+            signal.signal(_signal_number, _raise_termination_signal)
     raise SystemExit(main())

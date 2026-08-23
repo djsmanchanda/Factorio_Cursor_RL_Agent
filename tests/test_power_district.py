@@ -227,12 +227,14 @@ def test_source_only_interface_does_not_count_infinite_prototype_demand() -> Non
 
 
 def test_finite_interface_consumes_entity_value_not_prototype_maximum() -> None:
-    client = _ScriptedRcon("OK|250000")
+    client = _ScriptedRcon("OK|250")
     assert network_peak_consumption_kw(
         client, "nauvis", "player", (3, -1),
-    ) == pytest.approx(250000)
+    ) == pytest.approx(250)
     lua = client.commands[0]
     assert "total=total+i/1000" in lua
+    assert "kw=u/1000" in lua
+    assert "kw=p/1000" in lua
     assert "get_max_energy_usage" in lua
 
 
