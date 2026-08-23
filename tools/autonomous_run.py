@@ -59,9 +59,10 @@ def _sha256(path: Path) -> str:
 def _directory_hash(root: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        digest.update(str(path.relative_to(root)).encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
+        file_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        # Match the manager's GNU coreutils tree contract:
+        # sha256sum lines are themselves fed to a final sha256sum.
+        digest.update(f"{file_digest}  ./{path.relative_to(root)}\n".encode("utf-8"))
     return digest.hexdigest()
 
 

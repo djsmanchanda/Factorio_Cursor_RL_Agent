@@ -215,6 +215,24 @@ def _manifest(tmp_path: Path, *, isolated_hash: str) -> Path:
     return path
 
 
+def test_directory_hash_matches_coreutils_tree_contract(tmp_path: Path) -> None:
+    root = tmp_path / "mod"
+    (root / "nested").mkdir(parents=True)
+    (root / "b.txt").write_bytes(b"second")
+    (root / "a.txt").write_bytes(b"first")
+    (root / "nested" / "c.txt").write_bytes(b"third")
+    expected = subprocess.check_output(
+        [
+            "bash", "-lc",
+            "cd \"$1\" && find . -type f -print0 | sort -z | "
+            "xargs -0 sha256sum | sha256sum | awk '{print $1}'",
+            "bash", str(root),
+        ],
+        text=True,
+    ).strip()
+    assert _directory_hash(root) == expected
+
+
 def test_deployed_mod_drift_fails_closed(tmp_path: Path) -> None:
     path = _manifest(tmp_path, isolated_hash="0" * 64)
     payload = json.loads(path.read_text())
