@@ -661,9 +661,10 @@ def test_intake_candidates_treat_ghost_corridor_belts_as_row_ends() -> None:
     lua = client.commands[0]
     assert "type='entity-ghost'" in lua
     assert "string.sub(gn,-14)=='transport-belt'" in lua
-    # Eastbound rows (dir 2) jam at their east end; westbound at the west.
-    assert "if minx_dir==2 then emit_end(maxx) " in lua
-    assert "elseif minx_dir==6 then emit_end(minx) " in lua
+    # Factorio 2.x directions are 16-valued: east=4, west=12 (matching the
+    # drill drop-offset tables). Eastbound rows jam at their east end.
+    assert "if minx_dir==4 then emit_end(maxx) " in lua
+    assert "elseif minx_dir==12 then emit_end(minx) " in lua
 
 
 def test_pending_smelter_is_repaired_instead_of_duplicate_mining(monkeypatch) -> None:
