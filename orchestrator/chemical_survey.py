@@ -15,8 +15,8 @@ def nearest_offshore_pump_site(
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
     lua = (
         "local s=game.surfaces['" + surface + "'];local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
-        "local specs={{'north',0,-1,0.5,-0.5,0,-4},{'east',1,0,1.5,0.5,4,0},"
-        "{'south',0,1,0.5,1.5,0,4},{'west',-1,0,-0.5,0.5,-4,0}};"
+        "local specs={{'north',0,-1,0.5,-0.5,0,-2},{'east',1,0,1.5,0.5,2,0},"
+        "{'south',0,1,0.5,1.5,0,2},{'west',-1,0,-0.5,0.5,-2,0}};"
         "local best=nil;local bd=1e18;"
         "for _,t in pairs(s.find_tiles_filtered{name={'water','deepwater'},area={{" +
         str(min_x) + "," + str(min_y) + "},{" + str(max_x) + "," + str(max_y) + "}}}) do "
@@ -24,6 +24,10 @@ def nearest_offshore_pump_site(
         "local n=s.get_tile(x+p[2],y+p[3]).name;"
         "if n~='water' and n~='deepwater' then local px,py=x+p[4],y+p[5];"
         "local ox,oy=x+p[6],y+p[7];local clear=true;"
+        "local qx,qy=-p[3],p[2];for side=-1,1 do "
+        "local wn=s.get_tile(x+qx*side,y+qy*side).name;"
+        "local ln=s.get_tile(x+p[2]+qx*side,y+p[3]+qy*side).name;"
+        "if (wn~='water' and wn~='deepwater') or ln=='water' or ln=='deepwater' then clear=false end end;"
         "for step=1,4 do local tx=x+p[2]*step;local ty=y+p[3]*step;"
         "local tn=s.get_tile(tx,ty).name;if tn=='water' or tn=='deepwater' then clear=false end end;"
         "local dir=defines.direction[p[1]];if clear and s.can_place_entity{name='offshore-pump',"

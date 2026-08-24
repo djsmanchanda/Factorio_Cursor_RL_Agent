@@ -9,8 +9,16 @@ from planners.infrastructure import POLE_SPECS
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from planners.recipe_data import BELT_TIERS
 
-# Only the live-probed west-facing pumpjack connector is encoded here. Offshore
-# pump geometry stays survey-supplied until its land-side pipe tile is captured.
+_DIRECTION_VECTORS = {
+    "north": (0, -1), "east": (1, 0),
+    "south": (0, 1), "west": (-1, 0),
+}
+
+# Rotations of the live-probed west-facing connector offset (-1, +1).
+_PUMPJACK_OUTPUT_OFFSETS = {
+    "north": (-1, -1), "east": (1, -1),
+    "south": (1, 1), "west": (-1, 1),
+}
 
 ROW_POLE = "medium-electric-pole"
 
@@ -36,17 +44,21 @@ _UNDERGROUND_REACH = {
 
 
 def verified_pumpjack_output_tile(site: dict) -> tuple[int, int] | None:
-    """Return the only verified pumpjack output tile, or None for unknown directions.
-
-    A working west-facing pumpjack at (18.5, -43.5) exposed its output at
-    (17.5, -42.5). Pipe actions use tile centres, so that connector is tile
-    (17, -43). Translating that one observed orientation is safe; other
-    directions remain deliberately unmodelled rather than guessed.
-    """
-    if site.get("direction", "north") != "west":
+    """Return the rotated pumpjack connector tile for a cardinal direction."""
+    offset = _PUMPJACK_OUTPUT_OFFSETS.get(site.get("direction", "north"))
+    if offset is None:
         return None
     x, y = site["position"]
-    return floor(x - 1), floor(y + 1)
+    return floor(x + offset[0]), floor(y + offset[1])
+
+
+def verified_offshore_pump_output_tile(site: dict) -> tuple[int, int] | None:
+    """Return the pipe tile immediately landward of a legal offshore pump."""
+    vector = _DIRECTION_VECTORS.get(site.get("direction", "north"))
+    if vector is None:
+        return None
+    x, y = site["position"]
+    return floor(x + vector[0]), floor(y + vector[1])
 
 
 def _row_pole_positions(
@@ -494,9 +506,17 @@ def _fluid_resource_plan(
     if entity == "pumpjack":
         for site in sites:
             verified_output = verified_pumpjack_output_tile(site)
-            if verified_output is not None and tuple(site["output"]) != verified_output:
+            if verified_output is None or tuple(site["output"]) != verified_output:
                 raise ValueError(
-                    "West-facing pumpjack output must match its live-verified connector tile "
+                    "Pumpjack output must match its rotated connector tile "
+                    f"{verified_output}, got {tuple(site['output'])}"
+                )
+    elif entity == "offshore-pump":
+        for site in sites:
+            verified_output = verified_offshore_pump_output_tile(site)
+            if verified_output is None or tuple(site["output"]) != verified_output:
+                raise ValueError(
+                    "Offshore-pump output must be the adjacent land-side tile "
                     f"{verified_output}, got {tuple(site['output'])}"
                 )
     entities = [
@@ -511,16 +531,19 @@ def _fluid_resource_plan(
         for x, y in pipe_tiles
     ]
     anchor = tuple(sites[0]["position"])
-    # A north-facing offshore pump is supplied from the land side, never from
-    # the lake terrain it draws from. The retained row pole and managed
-    # replacement substation therefore move north of the shoreline.
-    power_anchor = (anchor[0] - 3, anchor[1] - 3) if entity == "offshore-pump" else (anchor[0] - 3, anchor[1] + 3)
-    plan = {"phases": [
-        {"name": f"{kind}_power", "actions": _power_scaffold(
+    if entity == "offshore-pump":
+        # Base-game offshore pumps use void energy. A local substation is not
+        # only wasteful; it can box in the one legal land-side pipe exit.
+        power_actions = []
+    else:
+        power_anchor = (anchor[0] - 3, anchor[1] + 3)
+        power_actions = _power_scaffold(
             power_anchor, entity,
             max(site["position"][0] for site in sites),
-            include_row_poles=entity not in {"offshore-pump", "pumpjack"},
-        )},
+            include_row_poles=entity not in {"pumpjack"},
+        )
+    plan = {"phases": [
+        {"name": f"{kind}_power", "actions": power_actions},
         {"name": f"{kind}_source", "actions": entities + pipes},
     ]}
     validate_build_plan(plan)

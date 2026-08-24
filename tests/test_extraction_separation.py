@@ -683,6 +683,40 @@ def test_real_builder_submits_ore_then_calls_modular_refinery(
     }
 
 
+def test_new_mine_relocates_poles_off_collector_before_submission(
+    monkeypatch,
+) -> None:
+    calls = []
+    mine_plan, ore_output = direct_mine_plan(
+        (10.0, 20.0), 3,
+        belt_type="fast-transport-belt", inserter_type="fast-inserter",
+    )
+    extraction = LocalExtractionPlan(
+        ore="iron-ore", mine_origin=(10.0, 20.0), drill_count=6,
+        furnace_count=6, mining_productivity_bonus=0.0,
+        smelter_origin=(85.0, 82.0), ore_output=ore_output,
+        build_plan=mine_plan,
+    )
+    client = type("Client", (), {"command": lambda *_a: ""})()
+    monkeypatch.setattr(
+        autonomous_builder, "relocate_blocking_poles",
+        lambda *_a: calls.append("relocate") or 1,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_submit",
+        lambda *_a, **_k: calls.append("submit"),
+    )
+    monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: [])
+
+    autonomous_builder._place_new_mine(
+        client, object(), "nauvis", "player", extraction, lambda _message: None,
+    )
+
+    assert calls[0] == "relocate"
+    assert calls[-1] == "submit"
+
+
 def test_over_limit_route_rejects_before_smelter_submission(monkeypatch) -> None:
     submitted = []
     monkeypatch.setattr(

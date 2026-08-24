@@ -370,6 +370,18 @@ def buildable_batch_prefix(
     return tuple(buildable)
 
 
+def complete_six_drill_prefix(positions: tuple[Point, ...]) -> tuple[Point, ...]:
+    """Keep only complete six-drill modules from a buildable corridor.
+
+    A two- or four-drill tail cannot advance a 6 -> 12 -> 24 capacity phase.
+    Building it anyway created the observed 24 -> 26 mine while the refinery
+    remained at six furnaces.  The remainder stays reserved for a later full
+    module or the planner tries a parallel band.
+    """
+    complete = len(positions) - (len(positions) % 6)
+    return positions[:complete]
+
+
 def smelter_count_for_drills(
     recipe: str, drill_count: int, mining_productivity_bonus: float,
 ) -> int:
@@ -639,7 +651,9 @@ def plan_local_extraction(
             extraction_capacity.phase_batch_positions(active, requested)
             if active is not None else ()
         )
-        positions = buildable_batch_prefix(client, surface, ore, positions)
+        positions = complete_six_drill_prefix(
+            buildable_batch_prefix(client, surface, ore, positions),
+        )
         if positions:
             drill_xs = sorted({x for x, _y in positions})
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
@@ -667,8 +681,10 @@ def plan_local_extraction(
             parallel_positions = extraction_capacity.parallel_phase_batch_positions(
                 parallel_source, requested,
             )
-            parallel_positions = buildable_batch_prefix(
-                client, surface, ore, parallel_positions,
+            parallel_positions = complete_six_drill_prefix(
+                buildable_batch_prefix(
+                    client, surface, ore, parallel_positions,
+                ),
             )
             if parallel_positions:
                 drill_xs = sorted({x for x, _y in parallel_positions})

@@ -259,6 +259,10 @@ def _fluid_routes(
     world: ElectronicsWorldSpec, hard_tiles: set[tuple[int, int]],
     tunnelable_tiles: set[tuple[int, int]],
 ):
+    direction_vectors = {
+        "north": (0, -1), "east": (1, 0),
+        "south": (0, 1), "west": (-1, 0),
+    }
     stage_segments = []
 
     for name, recipe, count, origin in [
@@ -269,7 +273,12 @@ def _fluid_routes(
     crude_resource = resource_fluid_segment("crude-oil", list(world.crude_pipe_tiles))
     stage_segments.append(crude_resource)
     crude_output = tuple(world.pumpjack_sites[0]["output"])
-    crude_from = (crude_output[0] - 1, crude_output[1])
+    crude_direction = world.pumpjack_sites[0].get("direction", "north")
+    crude_vector = direction_vectors[crude_direction]
+    crude_from = (
+        crude_output[0] + crude_vector[0],
+        crude_output[1] + crude_vector[1],
+    )
     crude_to = header_attachment("basic-oil-processing", "crude-oil", 2, 40, -30)["attach"]
     crude_plan = generate_shortest_fluid_chain_link(
         crude_from, [crude_to], "crude-oil", stage_segments, hard_tiles=hard_tiles,
@@ -302,7 +311,12 @@ def _fluid_routes(
     if include_processing:
         all_segments.append(resource_fluid_segment("water", list(world.water_pipe_tiles)))
         water_output = tuple(world.offshore_pump_sites[0]["output"])
-        water_from = (water_output[0] - 1, water_output[1])
+        water_direction = world.offshore_pump_sites[0].get("direction", "north")
+        water_vector = direction_vectors[water_direction]
+        water_from = (
+            water_output[0] + water_vector[0],
+            water_output[1] + water_vector[1],
+        )
         water_to = [
             header_attachment("sulfur", "water", 2, 90, 108)["attach"],
             header_attachment("sulfuric-acid", "water", 2, 150, 171)["attach"],

@@ -180,7 +180,8 @@ def test_a_fluid_source_may_still_share_ground_with_its_own_pipe() -> None:
     from planners.plan_validation import is_verified_pumpjack_attachment
 
     assert is_verified_pumpjack_attachment(
-        {"entity": "offshore-pump", "position": {"x": 5.5, "y": 30.5}},
+        {"entity": "offshore-pump", "position": {"x": 5.5, "y": 30.5},
+         "direction": "east"},
         {"entity": "pipe", "position": {"x": 6.5, "y": 30.5}},
     )
 

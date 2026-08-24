@@ -18,6 +18,51 @@ from orchestrator.stage_services import _ghost_materials
 Point = tuple[float, float]
 
 
+def test_pumpjack_faces_the_local_oil_cell() -> None:
+    east = stage_chemical._pumpjack_site_nearest((-286.5, -98.5), (-220.0, -98.0))
+    north = stage_chemical._pumpjack_site_nearest((-286.5, -98.5), (-286.0, -160.0))
+
+    assert east["direction"] == "east"
+    assert east["output"] == (-286, -100)
+    assert north["direction"] == "north"
+    assert north["output"] == (-288, -100)
+
+
+def test_oil_cell_search_is_anchored_to_crude_not_the_base(monkeypatch) -> None:
+    captured = {}
+
+    def find_clear(_client, _surface, near, width, height, **kwargs):
+        captured.update(near=near, width=width, height=height, kwargs=kwargs)
+        return (-250.0, -120.0)
+
+    monkeypatch.setattr(stage_chemical.live_base, "find_clear_area", find_clear)
+
+    result = stage_chemical._find_oil_cell_site(
+        object(), "nauvis", (-286.5, -98.5),
+    )
+
+    assert result == (-250.0, -120.0)
+    assert captured["near"] == (-286.5, -98.5)
+    assert captured["kwargs"]["max_radius"] == 80.0
+
+
+def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:
+    class Client:
+        command_text = ""
+
+        def command(self, text: str) -> str:
+            self.command_text = text
+            return "NONE"
+
+    client = Client()
+    assert stage_chemical.chemical_survey.nearest_offshore_pump_site(
+        client, "nauvis", (0.0, 0.0),
+    ) is None
+
+    assert "for side=-1,1" in client.command_text
+    assert "{'east',1,0,1.5,0.5,2,0}" in client.command_text
+
+
 def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:
     link = {"phases": [{"name": "fluid_link_water", "actions": [
         {"action_type": "place_tile_ghost", "tile": "landfill", "position": {"x": 8, "y": 4}},

@@ -48,6 +48,9 @@ def test_mining_expansion_validates_modular_ownership_before_drills() -> None:
     assert build_source.index("_assert_atomic_plate_expansion_affordable(") < (
         build_source.index("_submit_mining_plan(")
     )
+    assert build_source.index("_extend_plate_smelter(") < build_source.index(
+        "_submit_mining_plan("
+    )
 
 
 def test_cohesive_target_merges_starved_furnaces_and_rounds_modules(monkeypatch) -> None:

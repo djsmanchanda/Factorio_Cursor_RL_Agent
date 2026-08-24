@@ -97,6 +97,18 @@ def test_a_blocked_column_truncates_the_batch(survey) -> None:
     assert _prefix(positions) == positions[:4]
 
 
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [(0, 0), (2, 0), (4, 0), (6, 6), (8, 6), (12, 12)],
+)
+def test_capacity_phases_keep_only_complete_six_drill_modules(
+    count: int, expected: int,
+) -> None:
+    positions = tuple((float(index), 0.5) for index in range(count))
+
+    assert len(stage_extraction.complete_six_drill_prefix(positions)) == expected
+
+
 def test_either_half_of_a_column_truncates_it(survey) -> None:
     """Half a column is a drill with no partner and a belt paved past it."""
     positions = _corridor(4)

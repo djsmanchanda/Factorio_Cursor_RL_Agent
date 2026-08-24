@@ -30,7 +30,10 @@ from planners.fluid_routing import (
 from planners.infrastructure import strip_local_power
 from planners.infrastructure_geometry import footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS
-from planners.resource_layouts import generate_offshore_pump_source, generate_pumpjack_source
+from planners.resource_layouts import (
+    generate_offshore_pump_source, generate_pumpjack_source,
+    verified_pumpjack_output_tile,
+)
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -40,6 +43,45 @@ EnsureItem = Callable[[str], Point | None]
 
 def _merge(*plans: dict) -> dict:
     return {"phases": [phase for plan in plans for phase in plan["phases"]]}
+
+
+def _pumpjack_site_nearest(oil_position: Point, target: Point) -> dict:
+    """Rotate a pumpjack so its real connector is closest to the local cell."""
+    sites = []
+    directions = ("north", "east", "south", "west")
+    vectors = {
+        "north": (0, -1), "east": (1, 0),
+        "south": (0, 1), "west": (-1, 0),
+    }
+    for direction in directions:
+        site = {
+            "position": oil_position, "resource": "crude-oil",
+            "direction": direction,
+        }
+        site["output"] = verified_pumpjack_output_tile(site)
+        sites.append(site)
+    return min(
+        sites,
+        key=lambda site: (
+            -(
+                vectors[site["direction"]][0] * (target[0] - oil_position[0])
+                + vectors[site["direction"]][1] * (target[1] - oil_position[1])
+            ),
+            abs(site["output"][0] - target[0])
+            + abs(site["output"][1] - target[1]),
+            directions.index(site["direction"]),
+        ),
+    )
+
+
+def _find_oil_cell_site(
+    client: RconClient, surface: str, oil_position: Point,
+) -> Point | None:
+    """Reserve the chemical district around crude oil, not around the base."""
+    return live_base.find_clear_area(
+        client, surface, oil_position, 42, 34, max_radius=80.0,
+        avoid_resources=True, resource_clearance=5,
+    )
 
 
 def _separate_landfill_ghosts(*plans: dict) -> tuple[dict | None, dict]:
@@ -179,7 +221,13 @@ def _area(plan: dict, margin: float = 12) -> tuple[Point, Point]:
 
 
 def _substation(plan: dict) -> Point:
-    return _positions(plan, "substation")[0]
+    substations = _positions(plan, "substation")
+    if substations:
+        return substations[0]
+    pumps = _positions(plan, "offshore-pump")
+    if pumps:
+        return pumps[0]
+    raise StuckError("chemical stage has no power or source service anchor")
 
 
 def _provider(plan: dict) -> Point:
@@ -360,22 +408,24 @@ def ensure_oil_cell(
     if coal is None:
         return None
     oil = live_base.nearest_resource(client, surface, "crude-oil", reference)
-    water = chemical_survey.nearest_offshore_pump_site(client, surface, reference)
     if oil is None:
         raise StuckError("No crude-oil patch found within the local 400-tile search")
-    if water is None:
-        raise StuckError("No buildable shoreline found within the local 400-tile search")
     oil_pos = oil[0]
-    oil_site = {
-        "position": oil_pos, "output": (math.floor(oil_pos[0] - 1), math.floor(oil_pos[1] + 1)),
-        "resource": "crude-oil", "direction": "west",
-    }
-    cell = live_base.find_clear_area(
-        client, surface, reference, 42, 34, avoid_resources=True, resource_clearance=5,
-    )
+    cell = _find_oil_cell_site(client, surface, oil_pos)
     if cell is None:
-        raise StuckError("No ore-free 42x34 area found for the oil cell")
+        raise StuckError("No ore-free 42x34 area found near the crude-oil source")
     ox, oy = round(cell[0]), round(cell[1])
+    cell_centre = (ox + 21.0, oy + 17.0)
+    water = chemical_survey.nearest_offshore_pump_site(
+        client, surface, cell_centre,
+    )
+    if water is None:
+        raise StuckError("No buildable straight shoreline found near the oil cell")
+    oil_site = _pumpjack_site_nearest(oil_pos, cell_centre)
+    emit(
+        f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
+        f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
+    )
     refinery = generate_fluid_machine_row("basic-oil-processing", 1, ox, oy)
     plastic = generate_fluid_machine_row("plastic-bar", 2, ox + 18, oy)
     sulfur = generate_fluid_machine_row("sulfur", 2, ox + 18, oy + 16)

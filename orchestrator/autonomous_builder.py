@@ -94,6 +94,7 @@ from orchestrator.stage_transport import (
     _swap_infinity_chests,
     _transport_mode,
     ensure_ingredient_transport,
+    relocate_blocking_poles,
     transport_grace_seconds,
 )
 from planners.bootstrap_smelting import (
@@ -507,6 +508,18 @@ def _place_new_mine(
     ox, oy = extraction.mine_origin
     plan = strip_local_power(extraction.build_plan, remove_substations=False)
     _publish_output_chest(plan)
+    if hasattr(client, "command"):
+        belt_rows: dict[float, list[float]] = {}
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                if action.get("entity", "").endswith("transport-belt"):
+                    position = action["position"]
+                    belt_rows.setdefault(position["y"], []).append(position["x"])
+        for belt_y, belt_xs in sorted(belt_rows.items()):
+            relocate_blocking_poles(
+                client, bridge, surface, force,
+                (min(belt_xs), belt_y), (max(belt_xs), belt_y), emit,
+            )
     machine_positions = [
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
@@ -1613,17 +1626,21 @@ def build_mining_stage(
                 "first system; the mine still builds and the temporary "
                 "smelter follows this pass"
             )
-    _submit_mining_plan(
-        client, bridge, surface, force, extraction, ore_output, emit,
-        allow_unfunded_ghosts=earmark_unfunded,
-    )
     if cohesive_target is not None:
         provider = _extend_plate_smelter(
             client, bridge, surface, force, recipe, existing_smelter,
             cohesive_target, ore_output, emit,
             allow_unfunded_ghosts=earmark_unfunded,
         )
+        _submit_mining_plan(
+            client, bridge, surface, force, extraction, ore_output, emit,
+            allow_unfunded_ghosts=earmark_unfunded,
+        )
     else:
+        _submit_mining_plan(
+            client, bridge, surface, force, extraction, ore_output, emit,
+            allow_unfunded_ghosts=earmark_unfunded,
+        )
         try:
             provider = _build_initial_plate_smelter(
                 client, bridge, surface, force, recipe, extraction, ore_output,

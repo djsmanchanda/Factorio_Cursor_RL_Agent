@@ -119,14 +119,32 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
     validate_no_collisions([("crude", plan)])
 
     site["output"] = (20, -47)
-    with pytest.raises(ValueError, match="live-verified connector tile"):
+    with pytest.raises(ValueError, match="rotated connector tile"):
         generate_pumpjack_source([site], [(20, -47)])
 
 
 def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
     plan = generate_offshore_pump_source(
-        [{"position": (20.5, 83.5), "output": (20, 80), "direction": "north"}],
-        [(20, 80)],
+        [{"position": (20.5, 83.5), "output": (20, 82), "direction": "north"}],
+        [(20, 82)],
     )
     assert not any(action["entity"] == "medium-electric-pole" for action in actions(plan))
-    assert (17, 86) not in occupied_tile_indices([("water", plan)])
+    assert not any(action["entity"] == "substation" for action in actions(plan))
+    assert (17, 80) not in occupied_tile_indices([("water", plan)])
+
+
+@pytest.mark.parametrize(
+    ("direction", "output"),
+    [
+        ("north", (17, 20)), ("east", (19, 20)),
+        ("south", (19, 22)), ("west", (17, 22)),
+    ],
+)
+def test_pumpjack_connector_rotates_with_the_machine(
+    direction: str, output: tuple[int, int],
+) -> None:
+    site = {"position": (18.5, 21.5), "output": output, "direction": direction}
+
+    validate_no_collisions([
+        ("crude", generate_pumpjack_source([site], [output])),
+    ])

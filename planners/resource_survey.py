@@ -252,10 +252,10 @@ def _require_local(
 
 def _offshore_candidates(water_tiles: set[tuple[int, int]]) -> list[dict]:
     direction_specs = (
-        ("north", (0, -1), (0.5, -0.5), (0, -4)),
-        ("east", (1, 0), (1.5, 0.5), (4, 0)),
-        ("south", (0, 1), (0.5, 1.5), (0, 4)),
-        ("west", (-1, 0), (-0.5, 0.5), (-4, 0)),
+        ("north", (0, -1), (0.5, -0.5), (0, -2)),
+        ("east", (1, 0), (1.5, 0.5), (2, 0)),
+        ("south", (0, 1), (0.5, 1.5), (0, 2)),
+        ("west", (-1, 0), (-0.5, 0.5), (-2, 0)),
     )
     candidates = []
     for x, y in sorted(water_tiles, key=lambda point: (point[1], point[0])):
@@ -386,8 +386,7 @@ def _oil_site(world: Mapping, bounds: Mapping) -> dict:
     local_spots = []
     for spot in spots:
         position = (float(spot["position"]["x"]), float(spot["position"]["y"]))
-        output_y = position[1] - 3.5
-        output = (floor(position[0]), int(output_y) if output_y == int(output_y) else output_y)
+        output = (floor(position[0] - 1), floor(position[1] - 1))
         if _inside(bounds, position, 1.5) and _inside(bounds, output, 0.5):
             capacity = min(1000.0, float(spot["amount"]) / 3000.0)
             local_spots.append((capacity, position, output))
@@ -429,7 +428,17 @@ def _shore_geometry_is_valid(candidate: Mapping, water_tiles: set[tuple[int, int
     else:
         intake = (land[0] + 1, land[1])
         path = {(x, land[1]) for x in range(output_tile[0], land[0] + 1)}
-    return intake in water_tiles and not path & water_tiles
+    if intake not in water_tiles or path & water_tiles:
+        return False
+    if direction in {"north", "south"}:
+        lateral = ((-1, 0), (1, 0))
+    else:
+        lateral = ((0, -1), (0, 1))
+    return all(
+        (intake[0] + dx, intake[1] + dy) in water_tiles
+        and (land[0] + dx, land[1] + dy) not in water_tiles
+        for dx, dy in lateral
+    )
 
 def _water_site(world: Mapping, bounds: Mapping) -> dict:
     water_tiles = {(entry["x"], entry["y"]) for entry in world["water_tiles"]}

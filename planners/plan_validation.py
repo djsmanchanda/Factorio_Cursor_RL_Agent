@@ -116,12 +116,22 @@ def is_verified_pumpjack_attachment(left: dict, right: dict) -> bool:
     )
     if source["entity"] not in _FLUID_SOURCE_ENTITIES or pipe["entity"] != "pipe":
         return False
-    if source["entity"] == "offshore-pump":
-        return True
-    if source.get("direction") != "west":
-        return False
     position = source["position"]
-    connector = {"x": position["x"] - 1, "y": position["y"] + 1}
+    if source["entity"] == "offshore-pump":
+        vectors = {
+            "north": (0, -1), "east": (1, 0),
+            "south": (0, 1), "west": (-1, 0),
+        }
+        offset = vectors.get(source.get("direction", "north"))
+    else:
+        offsets = {
+            "north": (-1, -1), "east": (1, -1),
+            "south": (1, 1), "west": (-1, 1),
+        }
+        offset = offsets.get(source.get("direction", "north"))
+    if offset is None:
+        return False
+    connector = {"x": position["x"] + offset[0], "y": position["y"] + offset[1]}
     return pipe["position"] == connector
 
 def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
