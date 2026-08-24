@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
 from orchestrator.game_bridge import GameBridge
+from orchestrator.extraction_transport import planned_footprint_tiles
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.stage_extraction import (
     candidate_mining_origins, choose_mining_origin, direct_mine_plan,
@@ -16,7 +17,7 @@ from orchestrator.stage_extraction import (
 from orchestrator.stage_services import (
     StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
     _logistic_chest_positions, _submit,
-    _wait_for_ghosts, extend_roboport_coverage, service_distance,
+    _wait_for_ghosts, extend_power, extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
     _publish_output_chest, _swap_infinity_chests, ensure_ingredient_transport,
@@ -109,7 +110,8 @@ def _separate_landfill_ghosts(*plans: dict) -> tuple[dict | None, dict]:
 
 def _ensure_plan_construction_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    plan: dict, emit: Callable[[str], None],
+    plan: dict, emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> None:
     """Cover every action position the chemical plan places.
 
@@ -126,6 +128,7 @@ def _ensure_plan_construction_coverage(
     })
     if not positions:
         return
+    reserved = reserved_tiles or planned_footprint_tiles(plan)
     radius, square = _ROBOPORT_SERVICE_AREAS["construction"]
     ports = live_base.roboport_positions(client, surface, force)
 
@@ -145,6 +148,7 @@ def _ensure_plan_construction_coverage(
         target = pending[0]
         acted = extend_roboport_coverage(
             client, bridge, surface, force, target, emit,
+            reserved_tiles=reserved,
         )
         ports = live_base.roboport_positions(client, surface, force)
         pending = uncovered(pending)
@@ -164,6 +168,8 @@ def _submit_oil_cell_plans(
     plans: list[dict], links: list[dict], emit: Callable[[str], None],
 ) -> None:
     """Submit landfill, wait for solid ground, then submit its pipe route."""
+    future = _merge(*plans, *links)
+    reserved = planned_footprint_tiles(future)
     landfill, fluid_links = _separate_landfill_ghosts(*links)
     if landfill is None:
         combined = _merge(*plans, *links)
@@ -172,6 +178,7 @@ def _submit_oil_cell_plans(
             client, bridge, surface, combined, "chemical_oil_cell", emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, combined, emit,
+                reserved_tiles=reserved,
             ),
         )
         return
@@ -181,6 +188,7 @@ def _submit_oil_cell_plans(
         client, bridge, surface, foundation, "chemical_oil_cell_foundation", emit,
         stage_coverage=lambda: _ensure_plan_construction_coverage(
             client, bridge, surface, force, foundation, emit,
+            reserved_tiles=reserved,
         ),
     )
     remaining = _wait_for_ghosts(
@@ -196,8 +204,21 @@ def _submit_oil_cell_plans(
         client, bridge, surface, fluid_links, "chemical_oil_cell_fluid_links", emit,
         stage_coverage=lambda: _ensure_plan_construction_coverage(
             client, bridge, surface, force, fluid_links, emit,
+            reserved_tiles=reserved,
         ),
     )
+
+
+def _connect_oil_cell_power(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    plans: list[dict], emit: Callable[[str], None],
+) -> None:
+    """Bring every local oil scaffold onto the generated grid immediately."""
+    substations = sorted({
+        position for plan in plans for position in _positions(plan, "substation")
+    })
+    for position in substations:
+        extend_power(client, bridge, surface, force, position, emit)
 
 
 def _positions(plan: dict, entity: str) -> list[Point]:
@@ -507,6 +528,7 @@ def ensure_oil_cell(
                 f"{fluid} cannot be routed from {source} to {targets}: {error}"
             ) from error
     _submit_oil_cell_plans(client, bridge, surface, force, plans, links, emit)
+    _connect_oil_cell_power(client, bridge, surface, force, plans, emit)
 
     for name, plan, machine in (
         ("crude-oil source", crude_source, "pumpjack"),

@@ -79,7 +79,7 @@ _ROBOPORT_WAVE_GENERATION_KW = 100_000.0
 # bound the wait gives up rather than stalling the build (low_power remediation
 # still applies downstream).
 _ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
-_ROBOPORT_CHARGE_WAIT_SECONDS = 180.0
+_ROBOPORT_CHARGE_WAIT_SECONDS = 30.0
 # Avoid laying the same emergency power bridge repeatedly while a newly
 # connected roboport is still charging and reports low_power.
 _REPAIRED_ROBOPORT_POWER: set[Point] = set()
@@ -766,9 +766,15 @@ def _await_roboport_charge(
         ):
             return
         time.sleep(2.0)
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
     emit(
-        "  roboport charge wait timed out; continuing -- low_power "
-        "remediation still applies downstream"
+        "  ROBOport POWER DEFERRED: the new coverage wave did not charge; "
+        "letting generation and storage production catch up before placing "
+        "more remote infrastructure"
+    )
+    raise ProductionPrerequisiteDeferred(
+        "roboport coverage waits for adequate generated power"
     )
 
 
@@ -791,6 +797,13 @@ def extend_roboport_coverage(
     nearest = live_base.nearest_roboport(client, surface, force, target_position)
     if nearest is None:
         return False
+    if (
+        client is not None
+        and live_base.entity_status_name(client, surface, nearest) == "low_power"
+    ):
+        _await_roboport_charge(
+            client, surface, force, nearest, [nearest], emit,
+        )
     gap = service_distance(nearest, target_position, square=square)
     if gap <= radius:
         return False
@@ -845,7 +858,7 @@ def extend_roboport_coverage(
                         f"{purpose} coverage"
                     )
                 _REPAIRED_ROBOPORT_POWER.add(position)
-        if wave_start + _ROBOPORT_WAVE < len(placed):
+        if client is not None or wave_start + _ROBOPORT_WAVE < len(placed):
             _await_roboport_charge(client, surface, force, nearest, wave, emit)
     return True
 

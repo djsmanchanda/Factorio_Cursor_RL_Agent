@@ -133,14 +133,18 @@ def test_oil_route_uses_landfill_only_when_land_route_is_impossible(monkeypatch)
 
 def test_chemical_coverage_targets_uncovered_positions_not_box_corners(monkeypatch) -> None:
     chained: list[Point] = []
+    reservations: list[set[tuple[int, int]]] = []
     ports: list[list[Point]] = [[]]
     monkeypatch.setattr(
         stage_chemical.live_base, "roboport_positions",
         lambda *_args: list(ports[0]),
     )
 
-    def fake_extend(_client, _bridge, _surface, _force, target, _emit):
+    def fake_extend(
+        _client, _bridge, _surface, _force, target, _emit, *, reserved_tiles,
+    ):
         chained.append(target)
+        reservations.append(reserved_tiles)
         ports[0].append((target[0], target[1] - 10))
         return True
 
@@ -158,6 +162,59 @@ def test_chemical_coverage_targets_uncovered_positions_not_box_corners(monkeypat
     # and the two bounding-box corners (-5, 18.5) / (12.5, 3) are demanded by
     # nobody: they were how roboports got strung across empty map.
     assert chained == [(-5.0, 3)]
+    assert (12, 18) in reservations[0]
+
+
+def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> None:
+    captured: list[set[tuple[int, int]]] = []
+    monkeypatch.setattr(
+        stage_chemical, "_ensure_plan_construction_coverage",
+        lambda *_args, reserved_tiles, **_kwargs:
+            captured.append(reserved_tiles),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_submit",
+        lambda *_args, stage_coverage, **_kwargs: stage_coverage() or {"ok": True},
+    )
+    monkeypatch.setattr(stage_chemical, "_wait_for_ghosts", lambda *_args, **_kwargs: 0)
+    machine = {"phases": [{"name": "machine", "actions": [{
+        "action_type": "place_ghost", "entity": "chemical-plant",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    link = {"phases": [{"name": "fluid", "actions": [
+        {"action_type": "place_tile_ghost", "tile": "landfill",
+         "position": {"x": 8, "y": 4}},
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": 8.5, "y": 4.5}},
+    ]}]}
+
+    stage_chemical._submit_oil_cell_plans(
+        object(), object(), "nauvis", "player", [machine], [link],
+        lambda _message: None,
+    )
+
+    assert len(captured) == 2
+    assert all((8, 4) in reserved for reserved in captured)
+
+
+def test_oil_power_scaffolds_connect_before_stage_waits(monkeypatch) -> None:
+    connected = []
+    monkeypatch.setattr(
+        stage_chemical, "extend_power",
+        lambda _c, _b, _s, _f, position, _emit:
+            connected.append(position) or True,
+    )
+    plan = {"phases": [{"name": "power", "actions": [
+        {"action_type": "place_ghost", "entity": "substation",
+         "position": {"x": -10.0, "y": 4.0}},
+    ]}]}
+
+    stage_chemical._connect_oil_cell_power(
+        object(), object(), "nauvis", "player", [plan, plan],
+        lambda _message: None,
+    )
+
+    assert connected == [(-10.0, 4.0)]
 
 
 def test_occupied_tiles_can_leave_water_for_fluid_routing() -> None:

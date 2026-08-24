@@ -336,6 +336,51 @@ def test_charge_wait_polls_until_every_port_in_the_wave_is_charged(monkeypatch) 
     assert len(polls) == 1
 
 
+def test_charge_timeout_defers_instead_of_placing_more_dead_ports(monkeypatch) -> None:
+    from orchestrator import stage_services
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 167.0)
+    monkeypatch.setattr(live_base, "roboport_energy", lambda *_a: 50_000_000.0)
+    clock = iter([0.0, 31.0])
+    monkeypatch.setattr(stage_services.time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(ProductionPrerequisiteDeferred):
+        stage_services._await_roboport_charge(
+            None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)],
+            lambda _message: None,
+        )
+
+
+def test_existing_low_power_anchor_blocks_the_next_coverage_wave(monkeypatch) -> None:
+    from orchestrator import stage_services
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    monkeypatch.setattr(
+        stage_services, "_repair_existing_roboport_power", lambda *_args: None,
+    )
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *_args: (5.0, 5.0))
+    monkeypatch.setattr(
+        live_base, "entity_status_name", lambda *_args: "low_power",
+    )
+    monkeypatch.setattr(
+        stage_services, "_await_roboport_charge",
+        lambda *_args: (_ for _ in ()).throw(
+            ProductionPrerequisiteDeferred("power must catch up")
+        ),
+    )
+    monkeypatch.setattr(
+        stage_services, "_submit",
+        lambda *_args, **_kwargs: pytest.fail("placed another low-power port"),
+    )
+
+    with pytest.raises(ProductionPrerequisiteDeferred):
+        stage_services.extend_roboport_coverage(
+            object(), object(), "nauvis", "player", (100.0, 5.0),
+            lambda _message: None,
+        )
+
+
 def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
     """Placing nine ports at once stacks ~9 MW of charge demand on the grid;
     waves of three let each batch top up before the next lands."""
