@@ -580,7 +580,7 @@ def nearest_powered_pole(
         "local ok,id=pcall(function() return e.electric_network_id end);"
         "if ok and id==selected then "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
-        "if d<bd then bd=d;best=e.position;bname=e.name end end;"
+        "if d<bd then bd=d;best=e.position;bname=e.name end end end;"
         "if not best then rcon.print('NONE') return end;"
         "rcon.print(best.x..' '..best.y..' '..bname)"
     )

@@ -430,6 +430,7 @@ def test_primary_power_bridge_prefers_generation_over_proximity() -> None:
     assert "generation[id]" in lua
     assert "selected,best_kw" in lua
     assert "goto" not in lua
+    assert "if d<bd then bd=d;best=e.position;bname=e.name end end end;" in lua
 
 
 def test_network_generation_trusts_entity_output_over_interface_prototype() -> None:
