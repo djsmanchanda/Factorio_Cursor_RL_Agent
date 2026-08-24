@@ -574,10 +574,10 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
     monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
     monkeypatch.setattr(
         builder, "_ensure_plan_construction_coverage",
-        lambda *_a: calls.append("coverage"),
+        lambda *_a, **_k: calls.append("coverage"),
     )
     monkeypatch.setattr(
-        builder, "extend_power", lambda *_a: calls.append("power") or True,
+        builder, "extend_power", lambda *_a, **_k: calls.append("power") or True,
     )
     monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: calls.append("submit"))
     monkeypatch.setattr(
@@ -598,15 +598,15 @@ def test_replacement_services_use_the_future_footprint(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
         builder, "_ensure_plan_construction_coverage",
-        lambda *_a: calls.append("coverage"),
+        lambda *_a, **_k: calls.append("coverage"),
     )
     monkeypatch.setattr(
         builder, "extend_power",
-        lambda *_a: calls.append(("power", _a[4])) or True,
+        lambda *_a, **_k: calls.append(("power", _a[4], _k["reserved_tiles"])) or True,
     )
     replacement = {"phases": [{"actions": [
-        {"entity": "substation", "position": {"x": 10.0, "y": 10.0}},
-        {"entity": "medium-electric-pole", "position": {"x": 20.0, "y": 10.0}},
+        {"action_type": "place_ghost", "entity": "substation", "position": {"x": 10.0, "y": 10.0}},
+        {"action_type": "place_ghost", "entity": "medium-electric-pole", "position": {"x": 20.0, "y": 10.0}},
     ]}]}
     delta = {"phases": [{"actions": [
         {"action_type": "remove_entity", "entity": "transport-belt",
@@ -618,7 +618,12 @@ def test_replacement_services_use_the_future_footprint(monkeypatch) -> None:
         replacement, delta, lambda _message: None,
     )
 
-    assert calls == ["coverage", ("power", (10.0, 10.0)), ("power", (20.0, 10.0))]
+    future = builder.planned_footprint_tiles(replacement)
+    assert calls == [
+        "coverage",
+        ("power", (10.0, 10.0), future),
+        ("power", (20.0, 10.0), future),
+    ]
 
 
 def test_replacement_services_refuse_roboport_removal_without_alternative(monkeypatch) -> None:

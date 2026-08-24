@@ -200,6 +200,7 @@ def test_healthy_network_skips_the_top_up(monkeypatch, tmp_path) -> None:
         builder, "_submit",
         lambda *_a: pytest.fail("healthy grids must not be built upon"),
     )
+    monkeypatch.setattr(builder, "extend_power", lambda *_a, **_k: False)
     assert builder._top_up_solar_generation(
         object(), SimpleNamespace(script_output=tmp_path), "nauvis",
         "player", (0.0, 0.0), lambda _m: None,
@@ -236,12 +237,32 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
         builder, "_submit",
         lambda *_a: pytest.fail("partial or unfunded power units are forbidden"),
     )
+    monkeypatch.setattr(builder, "extend_power", lambda *_a, **_k: False)
     assert builder._top_up_solar_generation(
         object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
         (0.0, 0.0),
         messages.append,
     ) is False
     assert any("full unit materials" in message for message in messages)
+
+
+def test_power_sizing_joins_the_primary_grid_before_building_more_panels(monkeypatch, tmp_path) -> None:
+    """A 167 kW local island must not hide the supplied 10 MW base grid."""
+    calls = []
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: calls.append(_a[4]) or True,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_power_capacity",
+        lambda *_a, **_k: pytest.fail("do not size a new district before joining the grid"),
+    )
+
+    assert builder._top_up_solar_generation(
+        object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
+        (3.0, -1.0), lambda _message: None,
+    )
+    assert calls == [(3.0, -1.0)]
 
 
 def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:

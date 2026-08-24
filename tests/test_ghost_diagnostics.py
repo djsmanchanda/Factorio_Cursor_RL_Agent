@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -286,8 +287,40 @@ def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) 
 
     assert ss.extend_power(
         object(), object(), "nauvis", "player", (40.0, -6.0),
-        lambda _m: None,
+        lambda _m: None, _retried=True,
     )
+
+
+def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -> None:
+    """Emergency power may not consume a belt tile planned by an expansion."""
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submitted = []
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((0.0, 0.0), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+    )
+    monkeypatch.setattr(builder_module, "_top_up_solar_generation", lambda *_a, **_k: False)
+
+    reserved = {(x, 0) for x in range(4, 21)}
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (24.0, 0.0),
+        lambda _message: None, reserved_tiles=reserved,
+    )
+
+    poles = {
+        (math.floor(action["position"]["x"]), math.floor(action["position"]["y"]))
+        for action in submitted[0]["phases"][0]["actions"]
+    }
+    assert not poles & reserved
 
 
 def test_remediation_extends_repeatedly_while_local_ghosts_fall(monkeypatch) -> None:

@@ -957,6 +957,7 @@ def _bring_modular_refinery_up(
         furnace_count, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
     machines = _modular_machine_positions(plan, recipe)
+    reserved = planned_footprint_tiles(plan)
     support_positions = {
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
@@ -965,7 +966,10 @@ def _bring_modular_refinery_up(
     for position in sorted(support_positions):
         if live_base.entity_status_name(client, surface, position) == "no_power":
             emit(f"  support inserter at {position} has no power -- connecting it")
-            if not extend_power(client, bridge, surface, force, position, emit):
+            if not extend_power(
+                client, bridge, surface, force, position, emit,
+                reserved_tiles=reserved,
+            ):
                 raise StuckError(f"support inserter at {position} cannot reach generated power")
     bring_stage_up(
         client, bridge, surface, force, f"modular refinery for {recipe}",
@@ -1754,9 +1758,15 @@ _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
 def _top_up_solar_generation(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    near: Point, emit: Callable[[str], None],
+    near: Point, emit: Callable[[str], None], *,
+    ensure_main_connection: bool = True,
 ) -> bool:
-    """Build one validated rectangular power unit when sizing has not converged."""
+    """Join the primary grid, then build one validated power unit if needed."""
+    if ensure_main_connection and extend_power(
+        client, bridge, surface, force, near, emit,
+    ):
+        emit("POWER DISTRICT: joined the primary generated network before sizing")
+        return True
     script_output = getattr(bridge, "script_output", Path(""))
     return ensure_power_capacity(
         client=client, bridge=bridge, surface=surface, force=force,
@@ -2222,8 +2232,10 @@ def _prepare_replacement_services(
     # Use the complete future footprint, not just the delta. This matters when
     # the old End is removed first: a chain derived from the partial delta can
     # leave the newly-added Repeat rows outside construction range.
+    reserved = planned_footprint_tiles(replacement)
     _ensure_plan_construction_coverage(
         client, bridge, surface, force, replacement, emit,
+        reserved_tiles=reserved,
     )
     power_targets = sorted({
         (action["position"]["x"], action["position"]["y"])
@@ -2236,7 +2248,10 @@ def _prepare_replacement_services(
     for target in power_targets:
         # False means the target is already on a generating network (or no
         # generator exists yet); it is not a reason to tear down the old path.
-        extend_power(client, bridge, surface, force, target, emit)
+        extend_power(
+            client, bridge, surface, force, target, emit,
+            reserved_tiles=reserved,
+        )
 
 
 def _power_and_raise_stage(

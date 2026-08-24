@@ -554,6 +554,7 @@ def _hookup_pole_position(
 def extend_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near_position: Point, emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
     _retried: bool = False,
 ) -> bool:
     """Connect `near_position` to a network that actually generates power.
@@ -568,7 +569,9 @@ def extend_power(
     A hop can lose its tile between the collision survey and the bots' arrival:
     a concurrent build's own substation ghost lands exactly there (live,
     2026-08-22 02:46). That is infrastructure-in-flight, not a wall -- replan
-    once on fresh ground instead of ending the run.
+    once on fresh ground instead of ending the run. `reserved_tiles` are a
+    sibling plan's future footprint: an emergency pole must route around that
+    footprint just as it would around built infrastructure.
     """
     own_network = live_base.pole_network_id(client, surface, near_position)
     target = live_base.nearest_powered_pole(
@@ -578,7 +581,7 @@ def extend_power(
         # A bridge submission can race another stage: enough of the first
         # attempt may land to merge the networks before the retry surveys.
         # That is success, not a reason to tell the caller no repair occurred.
-        if own_network is not None and live_base.network_generation_kw(
+        if _retried and own_network is not None and live_base.network_generation_kw(
             client, surface, force, near_position,
         ) > 0:
             emit(f"  power bridge already joined network {own_network} while retrying")
@@ -618,6 +621,7 @@ def extend_power(
         (max(target_position[0], near_position[0]) + margin,
          max(target_position[1], near_position[1]) + margin),
     )
+    blocked |= reserved_tiles or set()
     hookup_blocked = set(blocked)
     blocked -= {(math.floor(target_position[0]), math.floor(target_position[1]))}
     if own_network is None:
@@ -662,6 +666,7 @@ def extend_power(
         )
         return extend_power(
             client, bridge, surface, force, near_position, emit,
+            reserved_tiles=reserved_tiles,
             _retried=True,
         )
     # Connectivity is not capacity: every run has browned out as stages
@@ -672,6 +677,7 @@ def extend_power(
     try:
         _top_up_solar_generation(
             client, bridge, surface, force, target_position, emit,
+            ensure_main_connection=False,
         )
     except Exception as error:  # generation top-up is opportunistic
         emit(f"  SOLAR TOP-UP skipped: {error}")

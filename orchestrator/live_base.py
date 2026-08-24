@@ -545,12 +545,12 @@ def nearest_powered_pole(
     client: RconClient, surface: str, force: str, near: Point,
     exclude_network_id: int | None = None,
 ) -> tuple[Point, str] | None:
-    """Nearest pole belonging to a network that has real generation on it.
+    """Pole on the primary generated network, closest within that network.
 
-    Bridging to merely a DIFFERENT network is not enough and silently wastes a
-    remediation round: the nearest other network is often a stage's own local
-    substation island, which has no source on it either, so the consumer stays
-    unpowered after a bridge that looked successful.
+    A nearby powered island is not necessarily the base grid. Prefer the
+    network with the largest live generation before minimizing wire distance,
+    so remote construction and a small local EEI island join the supplied main
+    grid rather than repeatedly extending the weaker island.
     """
     exclusion = (
         "" if exclude_network_id is None
@@ -559,18 +559,29 @@ def nearest_powered_pole(
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
-        "local powered={};"
-        "for _,e in pairs(s.find_entities_filtered{type={" + _GENERATOR_TYPES + "}}) do "
+        "local generation={};"
+        "for _,e in pairs(s.find_entities_filtered{force=f,type={" + _GENERATOR_TYPES + "}}) do "
         "local ok,id=pcall(function() return e.electric_network_id end);"
-        "if ok and id then powered[id]=true end end;"
+        "if ok and id then local kw=0;"
+        "if e.type=='electric-energy-interface' then "
+        "local okw,w=pcall(function() return e.power_production end);"
+        "if okw and type(w)=='number' and w==w and w~=math.huge and w~=-math.huge then kw=w/1000 end "
+        "end;"
+        "if kw==0 then local okp,p=pcall(function() return e.prototype.get_max_energy_production() end);"
+        "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge then kw=p end end;"
+        "generation[id]=(generation[id] or 0)+kw end end;"
+        "local selected,best_kw=nil,-1;"
+        "for id,kw in pairs(generation) do "
+        + exclusion +
+        "if kw>best_kw or (kw==best_kw and (selected==nil or id<selected)) then selected=id;best_kw=kw end "
+        "::continue:: end;"
+        "if selected==nil or best_kw<=0 then rcon.print('NONE') return end;"
         "local best,bd,bname=nil,1e18,nil;"
         "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
         "local ok,id=pcall(function() return e.electric_network_id end);"
-        "if ok and id and powered[id] then "
-        + exclusion +
+        "if ok and id==selected then "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
         "if d<bd then bd=d;best=e.position;bname=e.name end end;"
-        "::continue:: end;"
         "if not best then rcon.print('NONE') return end;"
         "rcon.print(best.x..' '..best.y..' '..bname)"
     )
