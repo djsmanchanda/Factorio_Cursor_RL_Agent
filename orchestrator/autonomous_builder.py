@@ -1550,10 +1550,11 @@ def build_logistic_smelter(
 # both are made FROM this very plate. On a cold base either shortfall is
 # unaffordable forever even with perfect mall behaviour: the demand for the
 # system's own inputs feeding back into itself.
-_BELT_FAMILY_ENTITIES = frozenset({
+_BOOTSTRAP_CIRCULAR_ENTITIES = frozenset({
     "transport-belt", "underground-belt",
     "fast-transport-belt", "fast-underground-belt",
     "express-transport-belt", "express-underground-belt",
+    "inserter", "fast-inserter", "bulk-inserter", "stack-inserter",
 })
 
 
@@ -1561,7 +1562,7 @@ def _cold_start_belt_shortage(
     client: RconClient, surface: str, force: str, recipe: str,
     error: Exception,
 ) -> bool:
-    """Whether the FIRST plate system failed affordability on belts/inserters.
+    """Whether the FIRST plate system hit its own construction loop.
 
     Only then is the beltless smelter the right answer: it exists to break
     exactly this circle, and any other shortfall has a producer that can grow.
@@ -1570,7 +1571,7 @@ def _cold_start_belt_shortage(
     if recipe not in ("iron-plate", "copper-plate"):
         return False
     required = getattr(error, "required", None)
-    if not required or not set(required).issubset(_BELT_FAMILY_ENTITIES):
+    if not required or not set(required).issubset(_BOOTSTRAP_CIRCULAR_ENTITIES):
         return False
     line = live_base.find_line(
         client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],

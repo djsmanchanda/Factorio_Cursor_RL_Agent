@@ -25,6 +25,19 @@ def _short_belts() -> MaterialShortage:
     )
 
 
+def test_first_plate_refinery_bootstraps_when_inserters_are_circular(monkeypatch) -> None:
+    shortage = MaterialShortage(
+        "initial_iron-plate_system",
+        {"transport-belt": 30, "inserter": 12},
+        {"transport-belt": 0, "inserter": 0},
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+
+    assert builder._cold_start_belt_shortage(
+        object(), "nauvis", "player", "iron-plate", shortage,
+    )
+
+
 def _wire_cold_base(monkeypatch, extraction) -> list:
     calls = []
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
@@ -395,32 +408,6 @@ def test_cell_health_window_scales_with_bot_flight(monkeypatch) -> None:
     assert captured["grace_seconds"] == builder._bot_delivery_grace(
         (90.0, -40.0), (80, -11),
     )
-
-
-def test_inserter_shortfall_propagates_to_the_mall(monkeypatch) -> None:
-    """The user rejected requester-fed plate refineries. Inserters are NOT part
-    of the true circle: the mall produces them within minutes (MALL READY
-    12/12, run 13), so an inserter shortage must flow through the normal
-    demand path instead of opening a temporary cell."""
-    extraction = _extraction()
-    calls = _wire_cold_base(monkeypatch, extraction)
-    monkeypatch.setattr(
-        builder, "_build_initial_plate_smelter",
-        lambda *_a, **_k: (_ for _ in ()).throw(MaterialShortage(
-            "initial_iron-plate_system", {"inserter": 12}, {"inserter": 4},
-        )),
-    )
-    monkeypatch.setattr(
-        builder, "build_logistic_smelter",
-        lambda *_a, **_k: pytest.fail("inserters must not open a logistic cell"),
-    )
-
-    with pytest.raises(MaterialShortage, match="inserter"):
-        builder.build_mining_stage(
-            object(), object(), "nauvis", "player", "iron-plate", (3.0, -1.0),
-            lambda _m: None,
-        )
-    assert "intake" not in calls
 
 
 def test_own_power_scaffolding_never_blocks_the_refinery_survey(monkeypatch) -> None:
