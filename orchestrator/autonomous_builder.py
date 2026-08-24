@@ -1095,6 +1095,10 @@ def _prepare_initial_refinery(
             (ore_output[0] + 1, ore_output[1])
             if build_plan is not None else None
         ),
+        # Managed collectors flow east by design (direct_mine_plan
+        # output_side="east"); the position heuristic cannot know that while
+        # the row is still ghosts and reads the head as a west terminal.
+        through_flow_direction="east",
         destination_belt_direction="east",
     )
     if route is None:

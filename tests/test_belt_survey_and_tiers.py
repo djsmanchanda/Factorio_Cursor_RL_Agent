@@ -358,3 +358,37 @@ def test_phantom_through_source_does_not_force_a_backwards_exit(
     )
 
     assert exit_direction == "east"
+
+
+def test_stated_flow_direction_beats_the_position_heuristic(
+    monkeypatch,
+) -> None:
+    """Live run of 2026-08-24 16:24: a fresh east-flow row is still ghosts,
+    so the occupied survey saw no head belt; the raw heuristic read the
+    planned handoff as a west terminal and the haul cornered on the head
+    tile it can never own. When the caller states the collector's flow, that
+    flow is the exit."""
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source",
+        lambda *_args, **_kwargs: (90.5, -39.5),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_args: None,
+    )
+
+    _source, _route, _blocked, _entry, exit_direction = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "stone",
+            (89.5, -39.5), (110.5, -39.5),
+            reuse_existing=True, additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=(90.5, -39.5),
+            through_flow_direction="east",
+        )
+    )
+
+    assert exit_direction == "east"

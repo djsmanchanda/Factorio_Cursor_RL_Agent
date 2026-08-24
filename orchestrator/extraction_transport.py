@@ -44,6 +44,7 @@ def preflight_ingredient_transport(
     reserved_transport_belts: int = 0,
     planned_belt_source: Point | None = None,
     destination_belt_direction: str = "east",
+    through_flow_direction: str | None = None,
 ) -> tuple[list[dict], str] | None:
     """Return one exact affordable route from the shared belt planner."""
     if (mode or _transport_mode(recipe, ingredient, machine_count)) == "logistic":
@@ -56,5 +57,6 @@ def preflight_ingredient_transport(
         reserved_transport_belts=reserved_transport_belts,
         planned_belt_source=planned_belt_source,
         destination_belt_direction=destination_belt_direction,
+        through_flow_direction=through_flow_direction,
     )
     return actions, belt_type

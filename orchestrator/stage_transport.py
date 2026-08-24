@@ -436,6 +436,7 @@ def _survey_belt_route(
     additional_blocked: set[tuple[int, int]] | None, upstream_shift: int,
     destination_is_belt: bool, destination_belt_direction: str,
     planned_belt_source: Point | None,
+    through_flow_direction: str | None = None,
 ) -> tuple[Point | None, Point, set[tuple[int, int]], str, str]:
     """Survey the exact source/endpoint geometry before pricing belt tiers."""
     belt_source = _through_belt_source(
@@ -485,14 +486,27 @@ def _survey_belt_route(
     )
     # An already built raw terminal keeps its surveyed handoff direction and
     # fails closed if that route cannot work. A freshly planned terminal may
-    # choose another clear side rather than force a tunnel corner.
-    exit_direction = (
-        raw_exit
-        if raw_exit is not None and (
-            not planned_handoff or raw_exit_tile not in blocked
+    # choose another clear side rather than force a tunnel corner. When the
+    # caller states the collector's flow, that flow IS the exit: the position
+    # heuristic reads a planned east-flow head as a west-flow terminal and
+    # drove the haul backwards into the head ghost while the row was still
+    # unbuilt (live run of 2026-08-24 16:24, stone refinery feed).
+    if through_flow_direction is not None:
+        flow_tile = (
+            math.floor(route_source[0] + DIRECTION_VECTORS[through_flow_direction][0]),
+            math.floor(route_source[1] + DIRECTION_VECTORS[through_flow_direction][1]),
         )
-        else None
-    ) or _clear_side(route_source, direction, blocked)
+        exit_direction = (
+            through_flow_direction if flow_tile not in blocked else None
+        ) or _clear_side(route_source, direction, blocked)
+    else:
+        exit_direction = (
+            raw_exit
+            if raw_exit is not None and (
+                not planned_handoff or raw_exit_tile not in blocked
+            )
+            else None
+        ) or _clear_side(route_source, direction, blocked)
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
     if destination_is_belt:
         entry_direction = _direct_belt_entry(
@@ -557,6 +571,7 @@ def _plan_belt_transport(
     reserved_transport_belts: int = 0,
     destination_belt_direction: str = "east",
     planned_belt_source: Point | None = None,
+    through_flow_direction: str | None = None,
 ) -> tuple[list[dict], str, bool]:
     """Choose the first affordable legal tier after one shared geometry survey."""
     belt_source, route_source, blocked, entry_direction, exit_direction = (
@@ -566,6 +581,7 @@ def _plan_belt_transport(
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
             destination_belt_direction=destination_belt_direction,
             planned_belt_source=planned_belt_source,
+            through_flow_direction=through_flow_direction,
         )
     )
     span = int(abs(route_source[0] - feed_position[0])
