@@ -560,6 +560,14 @@ def extend_power(
         client, surface, force, near_position, exclude_network_id=own_network,
     )
     if target is None:
+        # A bridge submission can race another stage: enough of the first
+        # attempt may land to merge the networks before the retry surveys.
+        # That is success, not a reason to tell the caller no repair occurred.
+        if own_network is not None and live_base.network_generation_kw(
+            client, surface, force, near_position,
+        ) > 0:
+            emit(f"  power bridge already joined network {own_network} while retrying")
+            return True
         return False
     target_position, target_name = target
     target_supply = POLE_SPECS.get(

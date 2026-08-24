@@ -237,6 +237,21 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
     assert submits.count("power_bridge") == 2
 
 
+def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) -> None:
+    """A partial first submission can join power before its retry re-surveys."""
+    from orchestrator import stage_services as ss
+
+    network_ids = iter((3, 1))
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: next(network_ids))
+    monkeypatch.setattr(ss.live_base, "nearest_powered_pole", lambda *_a, **_k: None)
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 166.7)
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (40.0, -6.0),
+        lambda _m: None,
+    )
+
+
 def test_remediation_extends_repeatedly_while_local_ghosts_fall(monkeypatch) -> None:
     """Live run 30 (2026-08-22): a ~250-tile oil pipeline built at cross-base
     robot-flight speed fell 15 -> 10 ghosts across two extensions and was
