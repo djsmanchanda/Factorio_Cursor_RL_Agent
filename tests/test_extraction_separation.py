@@ -259,6 +259,7 @@ def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
 
     assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
         (7.5, 20.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
+        first_column_x=11.5, haul_head=(16.5, 20.5), growth_direction=-1,
     )
 
 

@@ -114,6 +114,7 @@ from planners.recipe_data import (
     install_catalog_line_recipes,
     install_catalog_machines,
     install_catalog_stack_sizes,
+    machine_ingredient_rates,
 )
 from planners.smelter_block import (
     FURNACES_PER_MODULE, generate_managed_refinery_extension_plan,
@@ -592,6 +593,7 @@ def _service_legacy_mine(
     origin, area, substation_position, machines = existing_mine_service_geometry(
         extraction.ore_output, extraction.row_drill_count or extraction.drill_count,
         extraction.expansion_step, shared_belt_y=extraction.shared_belt_y,
+        first_column_x=getattr(extraction, "first_column_x", None),
     )
     bring_stage_up(
         client, bridge, surface, force, f"existing mine for {extraction.ore}",
@@ -2796,6 +2798,43 @@ def _ingredient_sources(
     return sources
 
 
+def _promotion_upstream_shortfall(
+    client: RconClient, surface: str, force: str, item: str, machine_count: int,
+) -> tuple[str, float, float] | None:
+    """Return the raw stage that cannot feed a proposed promoted line.
+
+    A backlog only says the existing mall cell is busy.  It does not prove the
+    base has material for a larger line.  In particular, a six-machine pipe
+    line consumes 9/s iron plate while six working electric furnaces produce
+    far less; building it merely turns an iron shortage into six more waiting
+    assemblers and a route from a sealed provider chest.
+    """
+    stock = live_base.available_items(client, surface, force)
+    for ingredient, required_rate in zip(
+        LINE_RECIPES[item]["ingredients"],
+        machine_ingredient_rates(item, machine_count),
+        strict=True,
+    ):
+        extraction = expansion_target(ingredient, stock)
+        if extraction is None or not _mineable(extraction):
+            continue
+        source = live_base.find_line(
+            client, surface, force, extraction,
+            LINE_RECIPES[extraction]["machine"],
+        )
+        produced_per_machine = (
+            LINE_RECIPES[extraction].get("product_amount", 1)
+            * MACHINE_SPEEDS[LINE_RECIPES[extraction]["machine"]]
+            / LINE_RECIPES[extraction]["craft_time"]
+        )
+        available_rate = (
+            source.working_count * produced_per_machine if source is not None else 0.0
+        )
+        if available_rate + 1e-9 < required_rate:
+            return extraction, available_rate, required_rate
+    return None
+
+
 def _build_assembled_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
@@ -2824,6 +2863,25 @@ def _build_assembled_stage(
         )
         return
     if promote_to_line:
+        upstream = _promotion_upstream_shortfall(
+            client, surface, force, item, promoted_count,
+        )
+        if upstream is not None:
+            extraction, available_rate, required_rate = upstream
+            emit(
+                f"  PROMOTION DEFERRED: {item} would draw {required_rate:.2f}/s "
+                f"of {extraction}, but its live line supplies only "
+                f"{available_rate:.2f}/s; expanding {extraction} before adding "
+                "downstream machines"
+            )
+            try:
+                build_mining_stage(
+                    client, bridge, surface, force, extraction,
+                    reference_point, emit, expand=True,
+                )
+            except stage_extraction.PendingSystemDeferred as error:
+                raise ProductionPrerequisiteDeferred(str(error)) from error
+            return
         # Site the line beside the input it eats most of, not beside the
         # mall. A 6-machine copper-cable line placed at the mall needed
         # 9.00/s of plate belted ~90 tiles from the mine and died on

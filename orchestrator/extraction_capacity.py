@@ -33,7 +33,7 @@ def expandable_mine(mines: list[ResourceMine]) -> ResourceMine | None:
     return next(
         (
             mine for mine in mines
-            if mine.expansion_step > 0 and mine.row_capacity > mine.drill_count
+            if mine.row_capacity > mine.drill_count
         ),
         None,
     )
@@ -49,7 +49,12 @@ def phase_batch_positions(
     pair_count = min(requested_drills // 2, free_pairs)
     positions = []
     for offset in range(pair_count):
-        index = mine.drill_count + offset
-        x = mine.output[0] + mine.expansion_step * (4 + 3 * index)
+        if mine.first_column_x is not None:
+            # The refinery haul is fixed at the east head.  New columns must
+            # grow away from it, while their belts still flow east.
+            x = mine.first_column_x + mine.growth_direction * (3 * (offset + 1))
+        else:
+            index = mine.drill_count + offset
+            x = mine.output[0] + mine.expansion_step * (4 + 3 * index)
         positions.extend(((x, mine.shared_belt_y - 2), (x, mine.shared_belt_y + 2)))
     return tuple(positions)

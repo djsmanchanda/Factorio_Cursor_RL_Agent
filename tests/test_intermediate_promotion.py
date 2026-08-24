@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,7 @@ from orchestrator.intermediate_scaling import (  # noqa: E402
     promoted_line_belt_type,
     promoted_line_machine_count,
 )
+from orchestrator import autonomous_builder as builder  # noqa: E402
 
 GEARS = "iron-gear-wheel"
 
@@ -84,3 +86,62 @@ def test_saturation_never_proposes_a_line_it_already_has() -> None:
     """Re-proposing the current size would rebuild instead of expanding."""
     for have in PROMOTED_LINE_PHASES[:-1]:
         assert promoted_line_machine_count(GEARS, 0.0, have, saturated=True) > have
+
+
+def test_promoted_pipe_defers_to_its_starved_iron_extraction(monkeypatch) -> None:
+    """A large pipe backlog is not evidence that six pipe assemblers have iron.
+
+    The live failure created a 9/s pipe line while the six-furnace iron system
+    was still ore-starved, then tried to belt from a provider chest enclosed by
+    its own inserters.  The next action must be iron extraction, not the line.
+    """
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_args: {"iron-plate": 0},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_args: SimpleNamespace(working_count=6),
+    )
+
+    shortfall = builder._promotion_upstream_shortfall(
+        object(), "nauvis", "player", "pipe", 6,
+    )
+
+    assert shortfall is not None
+    extraction, available_rate, required_rate = shortfall
+    assert extraction == "iron-plate"
+    assert available_rate < required_rate
+
+
+def test_promoted_line_expands_raw_input_before_building_downstream(monkeypatch) -> None:
+    plan = SimpleNamespace(
+        spec=builder.LINE_RECIPES["pipe"],
+        promote_to_line=True,
+        promoted_count=6,
+        existing=None,
+        mall_storage_limit=1,
+        fill_provider=False,
+    )
+    monkeypatch.setattr(
+        builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (1.5, 1.5)},
+    )
+    monkeypatch.setattr(
+        builder, "_promotion_upstream_shortfall",
+        lambda *_args: ("iron-plate", 3.75, 9.0),
+    )
+    expanded: list[str] = []
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda *_args, **_kwargs: expanded.append("iron-plate"),
+    )
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *_args, **_kwargs: pytest.fail("pipe line must not be built first"),
+    )
+
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "pipe", (0.0, 0.0),
+        lambda _message: None, plan, None, upgrade_bootstrap=False,
+    )
+
+    assert expanded == ["iron-plate"]

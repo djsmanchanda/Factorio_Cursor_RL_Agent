@@ -55,6 +55,23 @@ def test_a_clear_corridor_is_returned_whole(survey) -> None:
     assert _prefix(positions) == positions
 
 
+def test_direct_east_head_grows_away_from_its_haul() -> None:
+    mine = ResourceMine(
+        output=(12.5, -1.5), drill_count=3, row_capacity=13,
+        belt_y=-1.5, first_column_x=16.5, haul_head=(24.5, -1.5),
+        growth_direction=-1,
+    )
+
+    positions = phase_batch_positions(mine, 6)
+
+    assert positions == (
+        (13.5, -3.5), (13.5, 0.5),
+        (10.5, -3.5), (10.5, 0.5),
+        (7.5, -3.5), (7.5, 0.5),
+    )
+    assert mine.haul_head not in positions
+
+
 def test_a_blocked_column_truncates_the_batch(survey) -> None:
     positions = _corridor(4)
     survey["blocked"].add(positions[4])

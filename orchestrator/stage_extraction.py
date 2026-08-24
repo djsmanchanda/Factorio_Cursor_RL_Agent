@@ -55,6 +55,7 @@ class LocalExtractionPlan:
     system_drill_target: int = 0
     shared_belt_y: float | None = None
     smelter_flow_direction: str = "east"
+    first_column_x: float | None = None
 
 
 def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
@@ -72,11 +73,16 @@ def paired_mining_drill_positions(origin: Point, machine_count: int) -> list[Poi
 def existing_mine_service_geometry(
     output: Point, drill_count: int, expansion_step: int = -1, *,
     shared_belt_y: float | None = None,
+    first_column_x: float | None = None,
 ) -> tuple[Point, tuple[Point, Point], Point, list[Point]]:
     """Reconstruct immutable direct-mine power/service geometry on retry."""
     belt_y = output[1] if shared_belt_y is None else shared_belt_y
-    upper = [(output[0] + expansion_step * (4 + 3 * index), belt_y - 2)
-             for index in range(drill_count)]
+    if first_column_x is not None:
+        upper = [(first_column_x + 3 * index, belt_y - 2)
+                 for index in range(drill_count)]
+    else:
+        upper = [(output[0] + expansion_step * (4 + 3 * index), belt_y - 2)
+                 for index in range(drill_count)]
     drills = upper + [(x, belt_y + 2) for x, _ in upper]
     first_x = min(position[0] for position in upper)
     last_x = max(position[0] for position in upper)
@@ -87,22 +93,26 @@ def existing_mine_service_geometry(
 
 def adjacent_mining_positions(
     output: Point, drill_count: int, expansion_step: int = -1,
+    *, first_column_x: float | None = None,
 ) -> list[Point]:
     """Mirror the primary south-facing row below its shared output belt."""
     return sorted([
-        (output[0] + expansion_step * (4 + 3 * index), output[1] + 2)
+        ((first_column_x + 3 * index) if first_column_x is not None
+         else output[0] + expansion_step * (4 + 3 * index), output[1] + 2)
         for index in range(drill_count)
     ])
 
 
 def adjacent_mine_row_state(
     client: RconClient, surface: str, output: Point, drill_count: int,
-    expansion_step: int = -1,
+    expansion_step: int = -1, *, first_column_x: float | None = None,
 ) -> str:
     """Return missing, complete, or partial for the deterministic second row."""
     entities = [
         live_base.entity_at(client, surface, position)
-        for position in adjacent_mining_positions(output, drill_count, expansion_step)
+        for position in adjacent_mining_positions(
+            output, drill_count, expansion_step, first_column_x=first_column_x,
+        )
     ]
     drills = [entity is not None and entity["name"] == "electric-mining-drill"
               for entity in entities]
@@ -219,9 +229,10 @@ def direct_mine_plan(
         raise ValueError(f"Unknown mine output side: {output_side}")
     if output_side == "east":
         last_x = upper[-1][0]
-        # Dedicated refinery feeds are belt-only: the head is the east turn
-        # tile past the row and its prebuilt corridor.
-        belt_anchor = (last_x + 2 + 3 * prebuilt_pair_columns, belt_y)
+        # The east head is fixed.  Reserved capacity grows west of the row,
+        # so paving any "prebuilt" east columns would only move the egress
+        # into unrelated space and make a later survey lose the real head.
+        belt_anchor = (last_x + 2, belt_y)
         output_chest = tuple(belt_anchor)
     else:
         belt_anchor = (ox - 2.5, belt_y)
@@ -273,10 +284,19 @@ def _new_direct_mine(
     footprint_has_resource = lambda centres: live_base.drill_footprints_have_resource(
         client, surface, ore, centres
     )
-    selected = choose_mining_origin(
-        preferred, patch_min, patch_max, row_drill_count,
-        area_is_clear, footprint_has_resource, 0,
-    )
+    # Reserve the corridor *west* of the initial row.  The east end is the
+    # permanent haul head, so reserving east made phase 2 place drills on the
+    # first outbound belt tile (live iron mine: x=25.5).
+    selected = None
+    reserved_columns = 0
+    for reserve in range(maximum_reserve, -1, -1):
+        candidate = choose_mining_origin(
+            preferred, patch_min, patch_max, row_drill_count,
+            area_is_clear, footprint_has_resource, reserve,
+        )
+        if candidate is not None:
+            selected, reserved_columns = candidate, reserve
+            break
     if selected is None:
         raise PendingSystemDeferred(
             f"No clear position near the {ore} patch at {nearest_tile} "
@@ -284,18 +304,15 @@ def _new_direct_mine(
             "infrastructure; expansion defers instead of bulldozing it"
         )
     selected_origin, row_drill_count = selected
-    origin = (int(selected_origin[0]), int(selected_origin[1]))
-    reserved_columns = _supported_pair_reserve(
-        origin, row_drill_count, maximum_reserve,
-        area_is_clear, footprint_has_resource,
-    )
-    prebuilt_columns = extraction_capacity.affordable_prebuilt_columns(
-        belt_stock, reserved_columns,
+    # `selected_origin` is the west edge of a fully verified strip.  Start at
+    # its east edge so every future column extends west, away from the head.
+    origin = (
+        int(selected_origin[0] + 3 * reserved_columns),
+        int(selected_origin[1]),
     )
     plan, output = direct_mine_plan(
         origin, row_drill_count, belt_type=belt_type, inserter_type=inserter_type,
         reserved_pair_columns=reserved_columns,
-        prebuilt_pair_columns=prebuilt_columns,
         output_side="east",
     )
     return origin, row_drill_count * 2, plan, output
@@ -564,12 +581,18 @@ def plan_local_extraction(
     expansion_positions: tuple[Point, ...] = ()
     row_drill_count = 0
     expansion_step = -1
+    first_column_x: float | None = None
     if existing is not None:
-        expansion_step = existing.expansion_step
+        expansion_step = existing.growth_direction if existing.first_column_x is not None else existing.expansion_step
+        first_column_x = existing.first_column_x
         row_drill_count = existing.drill_count
+        row_state_kwargs = (
+            {"first_column_x": existing.first_column_x}
+            if existing.first_column_x is not None else {}
+        )
         row_state = adjacent_mine_row_state(
             client, surface, (existing.output[0], existing.shared_belt_y),
-            row_drill_count, expansion_step
+            row_drill_count, expansion_step, **row_state_kwargs,
         )
         # A partially built row is recoverable: ghosts and powered/service
         # gaps must reach the normal remediation path instead of aborting the
@@ -578,8 +601,8 @@ def plan_local_extraction(
         drill_count = row_drill_count * (
             2 if existing.pending or row_state == "complete" else 1
         )
-        ore_output = existing.output
-        if expansion_step > 0:
+        ore_output = existing.haul_head or existing.output
+        if existing.first_column_x is None and expansion_step > 0:
             # East-flow collector: the haul head is the row's east end, not
             # the surveyed west anchor (which only books expansion columns).
             ore_output = (
@@ -599,17 +622,18 @@ def plan_local_extraction(
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
             build_plan = generate_shared_belt_batch_expansion(
                 drill_xs, active.shared_belt_y,
-                belt_direction="east" if active.expansion_step > 0 else "west",
+                belt_direction="east" if active.first_column_x is not None or active.expansion_step > 0 else "west",
             )
             drill_count = len(positions)
-            ore_output = active.output
-            if active.expansion_step > 0:
+            ore_output = active.haul_head or active.output
+            if active.first_column_x is None and active.expansion_step > 0:
                 ore_output = (
                     active.output[0] + 4 + 3 * (active.drill_count + len(drill_xs) - 1) + 2,
                     active.shared_belt_y,
                 )
             row_drill_count = len(drill_xs)
-            expansion_step = active.expansion_step
+            expansion_step = active.growth_direction if active.first_column_x is not None else active.expansion_step
+            first_column_x = min(drill_xs) if active.first_column_x is not None else None
             expansion_positions = positions
         else:
             raise PendingSystemDeferred(
@@ -624,7 +648,8 @@ def plan_local_extraction(
             machine_count, belt_type, inserter_type, belt_stock,
         )
         row_drill_count = drill_count // 2
-        expansion_step = 1
+        expansion_step = -1
+        first_column_x = mine_origin[0] + 1.5
     furnace_count = planned_smelter_count_for_drills(
         recipe, drill_count, productivity,
     )
@@ -720,9 +745,10 @@ def plan_local_extraction(
         expansion_step=expansion_step,
         system_drill_count_before=system_before,
         smelter_flow_direction=smelter_flow_direction,
+        first_column_x=first_column_x,
         shared_belt_y=(
             (existing or active).shared_belt_y if (existing or active) is not None
-            else ore_output[1] + 2
+            else ore_output[1]
         ),
         system_drill_target=(
             phase_target if not reuse_existing or not mines else system_before

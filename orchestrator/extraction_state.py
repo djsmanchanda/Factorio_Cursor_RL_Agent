@@ -28,6 +28,12 @@ class ResourceMine:
     expansion_step: int = -1
     row_capacity: int = 0
     belt_y: float | None = None
+    # Direct east-flow collectors keep their haul head at the east end and
+    # grow their drill columns west.  `output` remains the surveyed belt tail
+    # for compatibility with legacy side-tap mines.
+    first_column_x: float | None = None
+    haul_head: Point | None = None
+    growth_direction: int = 1
 
     @property
     def shared_belt_y(self) -> float:
@@ -192,7 +198,8 @@ def _classify_direct_mines(
         mine = ResourceMine(
             (output_x, belt_y), len(drill_xs), pending=not complete,
             expansion_step=1, row_capacity=len(drill_xs) + RESERVED_PAIR_COLUMNS,
-            belt_y=belt_y,
+            belt_y=belt_y, first_column_x=min(drill_xs),
+            haul_head=(max(drill_xs) + 2, belt_y), growth_direction=-1,
         )
         distance = (output_x - near[0]) ** 2 + (belt_y - near[1]) ** 2
         direct_candidates.append((distance, mine))
