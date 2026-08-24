@@ -17,6 +17,7 @@ from planners.local_layout_planner import LocalLayoutPlanner  # noqa: E402
 from planners.plan_validation import (  # noqa: E402
     ENTITY_FOOTPRINTS,
     actions,
+    entity_footprint_tiles,
     validate_build_plan,
 )
 
@@ -56,6 +57,54 @@ def test_a_two_by_two_over_a_one_by_one_counts_as_a_collision() -> None:
     CENTRE is identical, and a 2x2 over a 1x1 never has the same centre."""
     assert boxes_overlap((49.0, 47.0), 2, (49.5, 47.5), 1)
     assert (49.0, 47.0) != (49.5, 47.5)
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [
+        ("north", frozenset({(9, 10), (10, 10)})),
+        ("south", frozenset({(9, 10), (10, 10)})),
+        ("east", frozenset({(10, 9), (10, 10)})),
+        ("west", frozenset({(10, 9), (10, 10)})),
+    ],
+)
+def test_splitter_footprint_rotates_with_belt_flow(
+    direction: str, expected: frozenset[tuple[int, int]],
+) -> None:
+    action = {
+        "action_type": "place_ghost",
+        "entity": "splitter",
+        "position": {"x": 10.0 if direction in {"north", "south"} else 10.5,
+                     "y": 10.5 if direction in {"north", "south"} else 10.0},
+        "direction": direction,
+    }
+
+    assert entity_footprint_tiles(action) == expected
+
+
+def test_splitter_second_tile_participates_in_self_collision_validation() -> None:
+    plan = {
+        "phases": [{
+            "name": "splitter_collision",
+            "actions": [
+                {
+                    "action_type": "place_ghost",
+                    "entity": "splitter",
+                    "position": {"x": 10.5, "y": 10.0},
+                    "direction": "east",
+                },
+                {
+                    "action_type": "place_ghost",
+                    "entity": "transport-belt",
+                    "position": {"x": 10.5, "y": 9.5},
+                    "direction": "east",
+                },
+            ],
+        }],
+    }
+
+    with pytest.raises(ValueError, match="Plan collision"):
+        validate_build_plan(plan)
 
 
 @pytest.mark.parametrize("machines", _SIZES)

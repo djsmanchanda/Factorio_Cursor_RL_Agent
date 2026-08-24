@@ -107,6 +107,22 @@ class PriorityList:
             ),
         )
 
+    def promote(self, item: str, target: int, tick: int) -> None:
+        """Make one newly discovered blocking prerequisite ready immediately."""
+        self.tick = tick
+        task = self.items.get(item)
+        if task is None:
+            task = PriorityItem(
+                item=item, target=target,
+                base_rating=_DEFAULT_RATINGS.get(item, 45), created_tick=tick,
+            )
+            self.items[item] = task
+        task.target = max(task.target, target)
+        task.status = "ready"
+        task.reason = "blocking prerequisite"
+        task.retry_tick = tick
+        self._save()
+
     def defer(self, item: str, tick: int, reason: str, *, retry_ticks: int = 3_600) -> None:
         self.tick = tick
         task = self.items[item]

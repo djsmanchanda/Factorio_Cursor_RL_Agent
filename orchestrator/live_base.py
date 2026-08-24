@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from orchestrator import resource_patches
+from planners.transport_occupancy import Occupant, OccupantIdentity, RouteOccupancy
 from planners.recipe_data import DRILL_MINING_AREAS, drill_mining_reach
 from tools.rcon_client import RconClient
 
@@ -36,6 +37,7 @@ class LineState:
     working_count: int
     output_position: Point | None
     machine_positions: tuple[Point, ...] = ()
+    produced_count: int = 0
 
 
 def find_line(client: RconClient, surface: str, force: str, recipe: str, machine: str) -> LineState | None:
@@ -49,7 +51,7 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local n=0;local w=0;local pos={};"
+        "local n=0;local w=0;local made=0;local pos={};"
         "local machines=s.find_entities_filtered{name='" + machine + "',force=f};"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
         "if g.ghost_name=='" + machine + "' then table.insert(machines,g) end end;"
@@ -57,22 +59,30 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
         "local ok,r=pcall(function() return e.get_recipe() end);"
         "if ok and r and r.name=='" + recipe + "' then n=n+1;"
         "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
+        "local okp,p=pcall(function() return e.products_finished end);"
+        "if okp and type(p)=='number' then made=made+p end;"
         "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
-        "rcon.print(n..' '..w..' '..table.concat(pos,','))"
+        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made)"
     )
-    parts = _sc(client, lua).split(" ", 2)
-    count = int(parts[0])
+    tokens = _sc(client, lua).split()
+    count = int(tokens[0])
     if count == 0:
         return None
-    working = int(parts[1])
+    working = int(tokens[1])
+    produced_count = int(tokens[3]) if len(tokens) > 3 else 0
+    position_payload = (
+        " ".join(tokens[2:-1]) if len(tokens) > 3 else
+        (tokens[2] if len(tokens) > 2 else "")
+    )
     machines = tuple(
         (float(pair.split(":")[0]), float(pair.split(":")[1]))
-        for pair in (parts[2] if len(parts) > 2 else "").split(",") if pair
+        for pair in position_payload.split(",") if pair and ":" in pair
     )
     return LineState(
         recipe=recipe, machine_count=count, working_count=working,
         output_position=machines[-1] if machines else None,
         machine_positions=machines,
+        produced_count=produced_count,
     )
 
 
@@ -787,6 +797,186 @@ def deconstruction_tiles(
     return tiles
 
 
+@dataclass(frozen=True, slots=True)
+class TransportOccupancyObservation:
+    """One bounded live fact plus transport-specific endpoint metadata."""
+
+    occupant: Occupant
+    position: Point | None = None
+    underground_type: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TransportOccupancySnapshot:
+    """Planner-ready occupancy without discarding richer live belt facts."""
+
+    occupancy: RouteOccupancy
+    observations: tuple[TransportOccupancyObservation, ...]
+
+
+_TRANSPORT_LIVE_CATEGORIES = frozenset({
+    "live_entity", "entity_ghost", "tile_ghost", "terrain",
+    "deconstruction_order",
+})
+_CARDINAL_DIRECTIONS = frozenset({"north", "east", "south", "west"})
+_UNDERGROUND_TYPES = frozenset({"input", "output"})
+
+
+def transport_occupancy_snapshot(
+    client: RconClient,
+    surface: str,
+    min_point: Point,
+    max_point: Point,
+    *,
+    exact_identities: Mapping[
+        tuple[str, str, float, float], OccupantIdentity
+    ] | None = None,
+    pending_claims: Sequence[Occupant] = (),
+    district_reservations: Sequence[Occupant] = (),
+    interfaces: Sequence[Occupant] = (),
+) -> TransportOccupancySnapshot:
+    """Observe typed route occupancy inside exactly one requested area.
+
+    Live force and prototype membership never imply planner ownership. An
+    identity is attached only when the caller supplies an exact category,
+    prototype, and entity-centre key. Pending plans, reservations, and legal
+    endpoint interfaces are supplied separately because none are discoverable
+    from an arbitrary live entity.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},{"
+        + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "local dirs={[defines.direction.north]='north',"
+        "[defines.direction.east]='east',[defines.direction.south]='south',"
+        "[defines.direction.west]='west'};"
+        "local function emit(category,e,name) local b=e.bounding_box;local tiles={};"
+        "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
+        "for y=math.floor(b.left_top.y),math.ceil(b.right_bottom.y)-1 do "
+        "tiles[#tiles+1]=x..','..y end end;"
+        "local underground='';if e.type=='underground-belt' then "
+        "local oku,u=pcall(function() return e.belt_to_ground_type end);"
+        "if oku and u then underground=tostring(u) end end;"
+        "out[#out+1]=table.concat({category,name,dirs[e.direction] or '',"
+        "underground,string.format('%.3f',e.position.x),"
+        "string.format('%.3f',e.position.y),table.concat(tiles,':')},'|') end;"
+        "for _,e in pairs(s.find_entities_filtered{area=area}) do "
+        "if e.type~='character' and e.type~='resource' then "
+        "local category='live_entity';local name=e.name;"
+        "if e.type=='entity-ghost' then category='entity_ghost';name=e.ghost_name "
+        "elseif e.type=='tile-ghost' then category='tile_ghost';name=e.ghost_name end;"
+        "emit(category,e,name or e.name);"
+        "local okd,d=pcall(function() return e.to_be_deconstructed() end);"
+        "if okd and d then emit('deconstruction_order',e,name or e.name) end end end;"
+        "for _,t in pairs(s.find_tiles_filtered{area=area,collision_mask='water_tile'}) do "
+        "out[#out+1]=table.concat({'terrain',t.name,'','','','',"
+        "t.position.x..','..t.position.y},'|') end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    observations: list[TransportOccupancyObservation] = []
+    for index, raw_record in enumerate(_sc(client, lua).split(";"), start=1):
+        if not raw_record:
+            continue
+        fields = raw_record.split("|", 6)
+        if len(fields) != 7:
+            raise TelemetryError(
+                f"malformed transport occupancy record {index}: {raw_record!r}",
+            )
+        category, name, direction, underground, raw_x, raw_y, raw_tiles = fields
+        if category not in _TRANSPORT_LIVE_CATEGORIES:
+            raise TelemetryError(
+                f"unknown transport occupancy category in record {index}: {category!r}",
+            )
+        if direction and direction not in _CARDINAL_DIRECTIONS:
+            raise TelemetryError(
+                f"invalid transport occupancy direction in record {index}: {direction!r}",
+            )
+        if underground and underground not in _UNDERGROUND_TYPES:
+            raise TelemetryError(
+                f"invalid underground endpoint type in record {index}: {underground!r}",
+            )
+        try:
+            tiles = frozenset(
+                (int(pair.split(",", 1)[0]), int(pair.split(",", 1)[1]))
+                for pair in raw_tiles.split(":") if pair
+            )
+        except (ValueError, IndexError) as exc:
+            raise TelemetryError(
+                f"malformed transport footprint in record {index}: {raw_tiles!r}",
+            ) from exc
+        if not tiles:
+            raise TelemetryError(
+                f"empty transport footprint in record {index}: {raw_record!r}",
+            )
+        position: Point | None = None
+        identity = None
+        if category != "terrain":
+            try:
+                position = (float(raw_x), float(raw_y))
+            except ValueError as exc:
+                raise TelemetryError(
+                    f"malformed transport entity centre in record {index}: "
+                    f"{raw_x!r},{raw_y!r}",
+                ) from exc
+            if not all(math.isfinite(value) for value in position):
+                raise TelemetryError(
+                    f"non-finite transport entity centre in record {index}: {position!r}",
+                )
+            identity = (exact_identities or {}).get(
+                (category, name, position[0], position[1]),
+            )
+        occupant = Occupant(
+            category=category,
+            tiles=tiles,
+            name=name or None,
+            direction=direction or None,
+            underground_type=underground or None,
+            identity=identity,
+        )
+        observations.append(TransportOccupancyObservation(
+            occupant=occupant,
+            position=position,
+            underground_type=underground or None,
+        ))
+
+    supplied = (
+        ("pending-plan claim", "pending_plan", pending_claims),
+        ("district-reservation claim", "district_reservation", district_reservations),
+    )
+    for label, expected, claims in supplied:
+        for claim in claims:
+            if claim.category != expected:
+                raise TelemetryError(
+                    f"{label} has category {claim.category!r}, expected {expected!r}",
+                )
+            if claim.identity is None:
+                raise TelemetryError(f"{label} requires an exact planner identity")
+            observations.append(TransportOccupancyObservation(occupant=claim))
+    for interface in interfaces:
+        if interface.category not in {"source_interface", "destination_interface"}:
+            raise TelemetryError(
+                "transport interface claim must be source_interface or "
+                f"destination_interface, got {interface.category!r}",
+            )
+        if interface.identity is None:
+            raise TelemetryError("transport interface requires an exact planner identity")
+        observations.append(TransportOccupancyObservation(occupant=interface))
+
+    observations.sort(key=lambda item: (
+        item.occupant.category,
+        item.occupant.name or "",
+        item.occupant.direction or "",
+        item.position or (float("-inf"), float("-inf")),
+        tuple(sorted(item.occupant.tiles)),
+        item.occupant.identity.district_id if item.occupant.identity else "",
+        item.occupant.identity.entity_id if item.occupant.identity else "",
+    ))
+    return TransportOccupancySnapshot(
+        occupancy=RouteOccupancy(tuple(item.occupant for item in observations)),
+        observations=tuple(observations),
+    )
+
+
 def available_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
     """Everything the force is holding in containers on this surface.
 
@@ -861,6 +1051,32 @@ _GENERATOR_TYPES = (
 
 class TelemetryError(RuntimeError):
     """A live survey returned an unusable numeric value."""
+
+
+def belt_underground_reach(client: RconClient, belt_type: str) -> int:
+    """Live maximum entrance-to-exit distance for one selected belt tier."""
+    lua = (
+        "local p=prototypes.entity['" + belt_type + "'];"
+        "if not p then rcon.print('INVALID|missing-prototype') return end;"
+        "local ok,v=pcall(function() return p.max_underground_distance end);"
+        "if not ok or type(v)~='number' then "
+        "rcon.print('INVALID|max_underground_distance-unavailable') return end;"
+        "if v~=v or v==math.huge or v==-math.huge or v<=0 then "
+        "rcon.print('INVALID|max_underground_distance|'..tostring(v)) return end;"
+        "rcon.print(tostring(v))"
+    )
+    raw = _sc(client, lua)
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise TelemetryError(
+            f"invalid underground reach for {belt_type!r}: {raw!r}",
+        ) from exc
+    if not math.isfinite(value) or value <= 0 or not value.is_integer():
+        raise TelemetryError(
+            f"invalid underground reach for {belt_type!r}: {raw!r}",
+        )
+    return int(value)
 
 
 def _network_generation_kw_impl(
@@ -1563,13 +1779,27 @@ def intake_candidate_tiles(
     or its lanes hold items right now. Everything else -- upstream tails,
     west-of-drop edges on eastbound rows -- waited forever with 'no source
     items' beside frozen ore (live runs 8-10). Both entity kinds are
-    snapshotted to plain numbers before any second query."""
+    snapshotted to plain numbers before any second query.
+
+    Ghost corridor belts count toward the row's true ends: the prebuilt
+    corridor paves ghost belts past the last built tile, and an intake
+    anchored inside them has every side occupied (live run of 2026-08-24
+    06:30 starved copper this way). Anchoring past the ghosts is safe -- the
+    inserter picks from the corridor belt once bots finish it.
+
+    Only the DOWNSTREAM end is offered as an end candidate: items jam where
+    the belt flow leaves the row, and an east-flow row's west tail (paved so
+    the surveyed anchor stays first-column-minus-4) is an upstream dead-end
+    that never holds ore (live run of 2026-08-24 15:10 starved the logistic
+    feed from an intake on that tail)."""
     lua = (
         "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['player'];"
         "local ox,oy=" + str(ore_output[0]) + "," + str(ore_output[1]) + ";"
         "local offs={[0]={0,-2},[4]={2,0},[8]={0,2},[12]={-2,0}};"
         "local tiles={};local drops={};local drills={};"
         "local minx,maxx=nil,nil;"
+        "local minx_dir,maxx_dir=nil,nil;"
         "for _,d in pairs(s.find_entities_filtered{type='mining-drill'}) do "
         "if math.abs(d.position.y-oy)<=3 then "
         "local dd={x=d.position.x,y=d.position.y,dir=d.direction};"
@@ -1584,15 +1814,31 @@ def intake_candidate_tiles(
         "local key=math.floor(b.position.x)..'_'..math.floor(b.position.y);"
         "tiles[#tiles+1]={x=b.position.x,y=b.position.y,n=n,"
         "drop=not not drops[key],key=key};"
-        "if not minx or b.position.x<minx then minx=b.position.x end "
-        "if not maxx or b.position.x>maxx then maxx=b.position.x end end end;"
+        "if not minx or b.position.x<minx then minx=b.position.x; minx_dir=b.direction end "
+        "if not maxx or b.position.x>maxx then maxx=b.position.x; maxx_dir=b.direction end end end;"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
+        "if math.abs(g.position.y-oy)<0.6 and math.abs(g.position.x-ox)<=40 then "
+        "local gn=g.ghost_name or '';"
+        "if string.sub(gn,-14)=='transport-belt' then "
+        "tiles[#tiles+1]={x=g.position.x,y=g.position.y,n=0,drop=false,"
+        "key=math.floor(g.position.x)..'_'..math.floor(g.position.y)};"
+        "if not minx or g.position.x<minx then minx=g.position.x end "
+        "if not maxx or g.position.x>maxx then maxx=g.position.x end "
+        "end end end;"
         "local out={};local seen={};"
         "for _,t in ipairs(tiles) do "
         "if (t.drop or t.n>0) and not seen[t.key] then seen[t.key]=true;"
         "out[#out+1]=t.x..' '..t.y end end;"
+        "local function emit_end(ex) "
+        "for _,t in ipairs(tiles) do "
+        "if t.x==ex and not seen[t.key] then seen[t.key]=true;"
+        "out[#out+1]=t.x..' '..t.y end end end;"
+        "if minx_dir==2 then emit_end(maxx) "
+        "elseif minx_dir==6 then emit_end(minx) "
+        "else "
         "for _,t in ipairs(tiles) do "
         "if (t.x==minx or t.x==maxx) and not seen[t.key] then seen[t.key]=true;"
-        "out[#out+1]=t.x..' '..t.y end end;"
+        "out[#out+1]=t.x..' '..t.y end end end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = _sc(client, lua)

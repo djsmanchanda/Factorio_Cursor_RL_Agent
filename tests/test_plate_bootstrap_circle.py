@@ -328,6 +328,52 @@ def test_blocked_drill_drop_tile_becomes_the_intake_chest(monkeypatch) -> None:
     }]
 
 
+def test_intake_places_past_ore_ground_at_the_haul_head(monkeypatch) -> None:
+    """Live run of 2026-08-24 06:56: the copper patch continues east past the
+    collector head, so the intake spots east of the head are resource tiles.
+    entity_at reports them, but ore ground is buildable -- the intake must
+    place there instead of declaring the row wedged."""
+    monkeypatch.setattr(
+        builder.live_base, "blocked_drill_drop_tile", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "intake_candidate_tiles",
+        lambda *_a, **_k: [(87.5, -39.5), (89.5, -39.5)],
+    )
+
+    def entity_at(_c, _s, position):
+        x, y = position
+        if abs(y - (-40.5)) < 0.6:  # north of the row: upper drill bodies
+            return {"name": "electric-mining-drill", "type": "mining-drill"}
+        if abs(y - (-38.5)) < 0.6:  # south of the row: lower drill bodies
+            return {"name": "electric-mining-drill", "type": "mining-drill"}
+        if x in (86.5, 87.5, 88.5):
+            return {"name": "fast-transport-belt", "type": "transport-belt"}
+        if x in (90.5, 91.5) and abs(y - (-39.5)) < 0.6:
+            return {"name": "copper-ore", "type": "resource"}
+        return None
+
+    monkeypatch.setattr(builder.live_base, "entity_at", entity_at)
+    powered: list = []
+    monkeypatch.setattr(
+        builder, "extend_power", lambda _c, _b, _s, _f, spot, _e: powered.append(spot),
+    )
+    submits: list = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e: submits.append(name),
+    )
+
+    chest = builder._mine_logistic_intake(
+        object(), object(), "nauvis", "player", "copper-ore",
+        (89.5, -39.5), lambda _m: None,
+    )
+
+    assert chest == (91.5, -39.5)
+    assert submits == ["mine_copper-ore_intake"]
+    assert powered == [(90.5, -39.5)]
+
+
 def test_cell_health_window_scales_with_bot_flight(monkeypatch) -> None:
     """The default 20 s condemned two correctly-built furnaces while bots were
     still flying ore across ~40 tiles; the window now follows the distance."""
@@ -378,12 +424,11 @@ def test_inserter_shortfall_propagates_to_the_mall(monkeypatch) -> None:
 
 
 def test_own_power_scaffolding_never_blocks_the_refinery_survey(monkeypatch) -> None:
-    """Runs 1-7 kept dying on tiles like (11,5): our own service-placed
-    substations/poles sit near active stages, are in no plan bill, and read as
-    foreign infrastructure. They are rewirable -- excused; a FOREIGN pole of
-    the same kind must still fail closed."""
+    """Known planned scaffolding is excused, but same-force service entities
+    without an exact persisted identity remain unknown infrastructure."""
     owners = {
-        (11, 5): ("substation", 10.0, 4.0),   # ours (service-placed)
+        # Unmanaged: same force and prototype are not ownership.
+        (11, 5): ("substation", 10.0, 4.0),
         (30, 30): ("substation", 31.0, 31.0), # someone else's pole body
     }
     monkeypatch.setattr(builder.live_base, "occupied_tile_owners",
@@ -395,18 +440,11 @@ def test_own_power_scaffolding_never_blocks_the_refinery_survey(monkeypatch) -> 
     monkeypatch.setattr(builder, "_tile_bounds",
                         lambda *_a: ((0.0, 0.0), (99.0, 99.0)))
 
-    def entity_at(_c, _s, position):
-        if position == (10.0, 4.0):
-            return {"name": "substation", "type": "electric-pole", "force": "player"}
-        return None
-
-    monkeypatch.setattr(builder.live_base, "entity_at", entity_at)
-
     class FakeClient:
         def command(self, *_a):
             return ""
 
-    with pytest.raises(builder.StuckError, match=r"\[\(30, 30\)\]"):
+    with pytest.raises(builder.StuckError, match=r"\[\(11, 5\), \(30, 30\)\]"):
         builder._plate_expansion_foundation(
             FakeClient(), "nauvis", "player", "iron-plate",
             SimpleNamespace(phases=[]), own_action_positions=set(),
@@ -462,3 +500,44 @@ def test_starved_standing_refinery_grows_its_own_mine(monkeypatch) -> None:
     )
 
     assert captured["expand"] is True
+
+
+def test_intake_inserter_gets_power_extended(monkeypatch) -> None:
+    """Live run of 2026-08-24 14:05: the intake landed past the row's power
+    scaffold, so its inserter never ran, the chest stayed empty, and both
+    temporary furnaces starved on ingredients for 300s. The intake must chain
+    itself onto a powered network when it is placed."""
+    monkeypatch.setattr(
+        builder.live_base, "blocked_drill_drop_tile", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "intake_candidate_tiles",
+        lambda *_a, **_k: [(89.5, -39.5)],
+    )
+
+    def entity_at(_c, _s, position):
+        x, y = position
+        if abs(y - (-40.5)) < 0.6 or abs(y - (-38.5)) < 0.6:
+            return {"name": "electric-mining-drill", "type": "mining-drill"}
+        if position == (88.5, -39.5):
+            return {"name": "fast-transport-belt", "type": "transport-belt"}
+        return None
+
+    monkeypatch.setattr(builder.live_base, "entity_at", entity_at)
+    powered: list = []
+    monkeypatch.setattr(
+        builder, "extend_power", lambda _c, _b, _s, _f, spot, _e: powered.append(spot),
+    )
+    submits: list = []
+    monkeypatch.setattr(
+        builder, "_submit", lambda _c, _b, _s, _plan, name, _e: submits.append(name),
+    )
+
+    chest = builder._mine_logistic_intake(
+        object(), object(), "nauvis", "player", "copper-ore",
+        (89.5, -39.5), lambda _m: None,
+    )
+
+    assert chest == (91.5, -39.5)
+    assert submits == ["mine_copper-ore_intake"]
+    assert powered == [(90.5, -39.5)]

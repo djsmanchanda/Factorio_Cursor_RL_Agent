@@ -50,8 +50,12 @@ class GameBridge:
         poll_interval: float = 0.5,
         command_timeout: float = 300.0,
         retain_reports: int = REPORT_RETENTION,
+        episode_id: str | None = None,
     ):
         self.script_output = Path(script_output)
+        if episode_id is not None and (not isinstance(episode_id, str) or not episode_id):
+            raise ValueError("episode_id must be a non-empty string when supplied")
+        self.episode_id = episode_id
         if not self.script_output.is_dir():
             raise BridgeError(f"script-output directory not found: {self.script_output}")
         if retain_reports < 1:

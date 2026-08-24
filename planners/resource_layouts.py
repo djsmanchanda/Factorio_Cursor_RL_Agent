@@ -167,7 +167,13 @@ def generate_direct_mining_to_chest(
         raise ValueError("Output chest must sit on the drills' south output row")
     last_x = max(x for x, _ in drills)
     if output_side == "east":
-        belt_start_x = first_x
+        # The west tail matches the west design's span so a surveyed row's
+        # minimum belt x is always the expansion anchor (first column - 4).
+        # Starting at first_x instead made every post-build survey report the
+        # first column as the anchor, skewing expansion columns and haul-head
+        # math by +4 tiles (live run of 2026-08-24 08:14 aimed the stone
+        # refinery feed 4 tiles past the real collector head).
+        belt_start_x = first_x - 4
         belt_end_x = chest_x
         if belt_end_x < last_x:
             raise ValueError("Output tap needs a belt endpoint east of every drill")
@@ -309,7 +315,9 @@ def generate_shared_belt_batch_expansion(
     if belt_direction not in {"east", "west"}:
         raise ValueError(f"Unknown belt direction: {belt_direction}")
     columns = sorted(set(drill_xs))
-    step = 1 if belt_direction == "west" else -1
+    # Reserved corridors only ever grow EAST of the row, so each column's
+    # three belt tiles extend eastward from its centre; belt_direction is
+    # purely the flow the ore travels toward the haul head.
     plan = {"phases": [
         {"name": "shared_belt_batch_power", "actions": [
             {"action_type": "place_ghost", "entity": ROW_POLE,
@@ -323,7 +331,7 @@ def generate_shared_belt_batch_expansion(
             for x in columns for dy, direction in ((-2, "south"), (2, "north"))
         ] + [
             {"action_type": "place_ghost", "entity": "fast-transport-belt",
-             "position": {"x": x + step * offset, "y": shared_belt_y},
+             "position": {"x": x + offset, "y": shared_belt_y},
              "direction": belt_direction}
             for x in columns for offset in range(3)
         ]},

@@ -26,6 +26,14 @@ def _bridge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs) -> GameBr
     return GameBridge(script_output=tmp_path, **kwargs)
 
 
+def test_bridge_keeps_optional_managed_episode_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, monkeypatch, episode_id="episode-test")
+
+    assert bridge.episode_id == "episode-test"
+
+
 def _write_reports(tmp_path: Path, count: int) -> list[Path]:
     """`count` reports with strictly increasing mtimes, oldest first."""
     directory = tmp_path / SUBDIR

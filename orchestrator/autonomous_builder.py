@@ -717,38 +717,16 @@ def _prefer_stocked_belt_tiers(plan: dict, available: Mapping[str, int]) -> int:
     return swapped
 
 
-# Power and coverage scaffolding that OUR OWN services place around active
-# stages -- never part of any plan bill, therefore never excused by centre
-# matching, and exactly what kept re-colliding iron's refinery survey on tiles
-# like (11,5) that no plan ever claimed. It is rewirable by design; foreign
-# infrastructure still fails closed below.
-_SERVICE_INFRASTRUCTURE_TYPES = frozenset({
-    "electric-pole", "roboport", "transport-belt", "underground-belt",
-})
-
-
 def _own_service_infrastructure(
     client: RconClient, surface: str, force: str,
     owner: tuple[str, float, float],
+    *, owned_entities: set[tuple[str, float, float]] | None = None,
 ) -> bool:
-    """Whether a collision occupant is our own rewirable scaffolding.
-
-    Poles, roboports and BELTS: services place them freely around active
-    stages and earlier passes leave them standing -- a later extension must
-    rewire around its own mine belt (live run 11: tile (46,-85)), not refuse
-    forever. Machines/chests stay strict."""
+    """Accept service infrastructure only by an exact persisted placement ID."""
+    del client, surface, force
     if owner[1] != owner[1] or owner[2] != owner[2]:  # NaN guard
         return False
-    try:
-        entity = live_base.entity_at(client, surface, (owner[1], owner[2]))
-    except Exception:  # a survey hiccup must not reclassify a conflict as ours
-        return False
-    return (
-        entity is not None
-        and entity.get("name") == owner[0]
-        and entity.get("force") == force
-        and entity.get("type") in _SERVICE_INFRASTRUCTURE_TYPES
-    )
+    return owner in (owned_entities or set())
 
 
 def _plate_expansion_foundation(
@@ -783,7 +761,9 @@ def _plate_expansion_foundation(
     for tile, owner in suspects:
         is_ours = excusable.get(owner)
         if is_ours is None:
-            is_ours = _own_service_infrastructure(client, surface, force, owner)
+            is_ours = _own_service_infrastructure(
+                client, surface, force, owner, owned_entities=own,
+            )
             excusable[owner] = is_ours
             if is_ours:
                 emit(
@@ -1108,8 +1088,13 @@ def _prepare_initial_refinery(
         additional_blocked=planned_blocked,
         mode="belt", destination_is_belt=True,
         reserved_transport_belts=reserved_transport_belts,
-        planned_belt_source=(ore_output[0] + 1, ore_output[1])
-        if preflight_only else None,
+        # The mine is part of this same transaction on both the survey and
+        # build pass; otherwise the build pass mistakes our fresh terminal for
+        # an existing one and preserves an unusable exit direction.
+        planned_belt_source=(
+            (ore_output[0] + 1, ore_output[1])
+            if build_plan is not None else None
+        ),
         destination_belt_direction="east",
     )
     if route is None:
@@ -1371,46 +1356,10 @@ def build_mining_stage(
             f"{recipe} expansion waits for electric-furnace production after "
             f"the {bootstrap_cap}-furnace bootstrap cap"
         )
-    unmanaged_refinery = False
-    try:
-        existing_smelter, cohesive_target = _cohesive_smelter_target(
-            client, surface, force, recipe, extraction, expand, emit,
-        )
-    except StuckError as error:
-        # Starter saves may contain a working furnace row that predates the
-        # approved Start/Repeat/End templates. We cannot safely retire or
-        # reshape that row, but refusing every expansion leaves the base
-        # permanently iron-starved. Preserve it and open a managed replacement
-        # at the newly selected site instead.
-        structural = (
-            "complete six-furnace modules",
-            "one contiguous managed block",
-            "does not match phased block growth",
-        )
-        if not expand or not any(marker in str(error) for marker in structural):
-            raise
-        unmanaged_refinery = True
-        existing_smelter, cohesive_target = None, None
-        emit(
-            f"SMELTER RECOVERY: existing {recipe} row is not an approved managed "
-            "template; preserving it and opening a managed replacement"
-        )
-    if (
-        expand and existing_smelter is not None
-        and existing_smelter.variant == "standard"
-        and existing_smelter.furnace_count < _FAST_BELT_IRON_CAPACITY
-    ):
-        # Standard templates consume fast belts. Before the iron system has
-        # reached its 24-furnace/24-drill bootstrap threshold, keep growth on
-        # the cheaper basic templates and preserve the existing standard row.
-        unmanaged_refinery = True
-        existing_smelter, cohesive_target = None, None
-        emit(
-            f"SMELTER RECOVERY: keeping fast-belt refinery growth deferred until "
-            f"iron reaches {_FAST_BELT_IRON_CAPACITY} furnaces and drills; opening "
-            "a basic managed replacement"
-        )
-    if expand and existing_smelter is None and not unmanaged_refinery:
+    existing_smelter, cohesive_target = _cohesive_smelter_target(
+        client, surface, force, recipe, extraction, expand, emit,
+    )
+    if expand and existing_smelter is None:
         raise StuckError(
             f"{recipe} expansion has no recoverable managed refinery; refusing to "
             "expand its mine ahead of the refinery"
@@ -1423,18 +1372,9 @@ def build_mining_stage(
                 cohesive_target, emit,
             )
         except StuckError as error:
-            # A managed tail can become permanently blocked by infrastructure
-            # placed after the original refinery. Keep that base intact and
-            # use the already surveyed clear origin for a new managed block;
-            # do not keep retrying the same collision or move entities by hand.
             if "refinery extension intersects real infrastructure" not in str(error):
                 raise
-            emit(
-                f"SMELTER RECOVERY: existing {recipe} extension is blocked; "
-                "opening a new managed refinery at the selected clear site"
-            )
-            existing_smelter, cohesive_target = None, None
-            unmanaged_refinery = True
+            raise ProductionPrerequisiteDeferred(str(error)) from error
     if expand:
         _log_mining_expansion(extraction, emit)
     emit(
@@ -1714,9 +1654,16 @@ def _mine_logistic_intake(
             chest = (anchor[0] + 2 * dx, anchor[1] + 2 * dy)
             if chest in dead_pair_positions:
                 continue
-            if (
-                live_base.entity_at(client, surface, inserter) is not None
-                or live_base.entity_at(client, surface, chest) is not None
+            # Ore ground is buildable: an east-flow collector's head sits at
+            # the patch's east edge, so the intake spots past it are resource
+            # tiles (live run of 2026-08-24 06:56 starved copper because the
+            # resource entity counted as an occupant).
+            if any(
+                spot is not None and spot.get("type") != "resource"
+                for spot in (
+                    live_base.entity_at(client, surface, inserter),
+                    live_base.entity_at(client, surface, chest),
+                )
             ):
                 continue
             plan = {"phases": [{
@@ -1732,6 +1679,12 @@ def _mine_logistic_intake(
             }]}
             plan["surface"], plan["force"] = surface, force
             _submit(client, bridge, surface, plan, f"mine_{ore}_intake", emit)
+            # The head of an east-flow collector sits past the row's power
+            # scaffold, so the intake inserter can land outside every pole's
+            # supply area and starve the whole logistic feed silently (live
+            # run of 2026-08-24 14:05: two temp furnaces no_ingredients for
+            # 300s while the chest sat empty).
+            extend_power(client, bridge, surface, force, inserter, emit)
             return chest
     raise StuckError(
         f"{ore}: every tile around the mine belt row at {candidates[:2]} is "
@@ -3225,7 +3178,21 @@ def _serve_mall_task(
                 # concrete mall work instead of letting the gate idle the
                 # whole expansion ladder (live run of 2026-08-22 03:01 crashed
                 # here because this deferral escaped the StuckError handler).
-                _queue_electric_furnace_unlock(mall_targets, str(deferred), emit)
+                if "electric-furnace" in str(deferred):
+                    _queue_electric_furnace_unlock(
+                        client, surface, force,
+                        mall_targets, str(deferred), emit,
+                    )
+                    priorities.promote(
+                        "electric-furnace",
+                        mall_targets["electric-furnace"],
+                        current_tick,
+                    )
+                else:
+                    _queue_electric_furnace_unlock(
+                        client, surface, force,
+                        mall_targets, str(deferred), emit,
+                    )
                 return False
             return True
 
@@ -3255,16 +3222,20 @@ def _serve_mall_task(
 def _electric_furnace_producer_started(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Whether the mall has a working producer for electric furnaces.
+    """Whether the mall producer for electric furnaces has demonstrably run.
 
     Smelting furnaces are not this producer: the item itself must be made by
-    an assembling-machine line. A working line is the point at which the
-    early extraction ceilings may be lifted to answer real demand.
+    an assembling-machine line. Demand is intermittent, so requiring the
+    machine to be working at the exact survey tick made a proven producer look
+    unstarted; monotonic ``products_finished`` is the durable evidence.
     """
     line = live_base.find_line(
         client, surface, force, "electric-furnace", "assembling-machine-2",
     )
-    return bool(line is not None and getattr(line, "working_count", 0) > 0)
+    return bool(
+        line is not None
+        and (line.working_count > 0 or line.produced_count > 0)
+    )
 
 
 def _prep_plate_extraction(
@@ -3341,7 +3312,9 @@ def _prep_plate_extraction(
     except ProductionPrerequisiteDeferred as deferred:
         deferred_targets[short_plate] = wanted_furnaces
         emit(f"  PREP DEFERRED: {short_plate} extraction -- {deferred}")
-        _queue_electric_furnace_unlock(mall_targets, str(deferred), emit)
+        _queue_electric_furnace_unlock(
+            client, surface, force, mall_targets, str(deferred), emit,
+        )
         return False
     except MaterialShortage as shortage:
         # Raising a drill phase needs drills, and drills come from
@@ -3373,6 +3346,7 @@ def _prep_plate_extraction(
 
 
 def _queue_electric_furnace_unlock(
+    client: RconClient, surface: str, force: str,
     mall_targets: dict[str, int], deferred_text: str,
     emit: Callable[[str], None],
 ) -> None:
@@ -3383,11 +3357,22 @@ def _queue_electric_furnace_unlock(
     idled at 12 furnaces while every downstream cell starved on plates (live
     run of 2026-08-22 03:54). Queueing the producer lets the normal mall
     recursion chain its prerequisites (steel, stone-brick, circuits) into real
-    passes."""
+    passes.
+
+    The demand is one MORE furnace than the force already owns: a flat target
+    of 1 was retired by the survey the moment it saw idle starter stock, so
+    the gate requeued and was re-retired every pass while the producer line
+    never ran (live run of 2026-08-24 02:38 livelocked to STUCK this way).
+    Requiring new production is what actually lifts the cap.
+    """
     if "electric-furnace" not in deferred_text:
         return
+    owned = int(
+        live_base.available_items(client, surface, force)
+        .get("electric-furnace", 0)
+    )
     add_demands(mall_targets, MaterialShortage(
-        "unlock_plate_expansion", {"electric-furnace": 1}, {},
+        "unlock_plate_expansion", {"electric-furnace": owned + 1}, {},
     ))
     emit(
         "  GATE WORK: queued an electric-furnace producer -- "
@@ -3738,6 +3723,7 @@ def run(
     script_output: Path | str = "", reference_point: Point = (0.0, 0.0),
     max_iterations: int = 20, emit: Callable[[str], None] = print,
     mission_items: tuple[str, ...] = (),
+    episode_id: str | None = None,
 ) -> dict:
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
@@ -3746,7 +3732,7 @@ def run(
     client = RconClient(rcon_host, rcon_port, rcon_password)
     bridge = GameBridge(
         script_output=Path(script_output), host=rcon_host, port=rcon_port,
-        password=rcon_password, command_timeout=30.0,
+        password=rcon_password, command_timeout=30.0, episode_id=episode_id,
     )
     budget = begin_run_budget(max_iterations)
     try:
@@ -3854,6 +3840,12 @@ def run(
                     break
             if plate_spent:
                 continue
+            # No gate preemption here: a ready surveyed task is useful work,
+            # and the promoted gate outranks only DEFERRED tasks (the ranking
+            # already excludes those). Preempting ready work spun forever --
+            # the gate re-promoted itself each pass while a higher-rated
+            # inserter task starved, and the spin guard killed the run
+            # (live runs of 2026-08-24 07:25 and 07:47).
             position = _serve_ready_pass(
                 client, bridge, surface, force, task, tick, mall_targets,
                 background_targets, priorities, reference_point, goal_item, emit,

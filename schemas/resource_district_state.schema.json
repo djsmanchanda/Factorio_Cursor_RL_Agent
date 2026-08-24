@@ -1,0 +1,607 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "resource_district_state.schema.json",
+  "title": "Resource District State 1",
+  "description": "Canonical episode-scoped journal for one persistent mine/refinery district.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "district_id",
+    "episode_id",
+    "surface",
+    "force",
+    "ore",
+    "recipe",
+    "root",
+    "output",
+    "expansion_direction",
+    "parallel_band_pitch",
+    "collector_bands",
+    "reservations",
+    "refinery",
+    "transport_lanes",
+    "transport_paths",
+    "belt_tier",
+    "belt_capacity_items_per_second",
+    "drill_items_per_second",
+    "maximum_drills",
+    "revision",
+    "pending_revision",
+    "pending_plan_id",
+    "owned_placements"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "district_id": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "episode_id": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "surface": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "force": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "ore": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "recipe": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "root": {
+      "$ref": "#/definitions/point"
+    },
+    "output": {
+      "$ref": "#/definitions/point"
+    },
+    "expansion_direction": {
+      "enum": [
+        "east",
+        "west"
+      ]
+    },
+    "parallel_band_pitch": {
+      "$ref": "#/definitions/positiveFiniteNumber"
+    },
+    "collector_bands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/collectorBand"
+      }
+    },
+    "reservations": {
+      "$ref": "#/definitions/reservations"
+    },
+    "refinery": {
+      "$ref": "#/definitions/managedRefinery"
+    },
+    "transport_lanes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/transportLane"
+      }
+    },
+    "transport_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/transportPath"
+      }
+    },
+    "belt_tier": {
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "belt_capacity_items_per_second": {
+      "$ref": "#/definitions/positiveFiniteNumber"
+    },
+    "drill_items_per_second": {
+      "$ref": "#/definitions/positiveFiniteNumber"
+    },
+    "maximum_drills": {
+      "type": "integer",
+      "minimum": 2,
+      "multipleOf": 2
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pending_revision": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pending_plan_id": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "owned_placements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ownedPlacement"
+      }
+    }
+  },
+  "definitions": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "finiteNumber": {
+      "type": "number",
+      "minimum": -1.7976931348623157e+308,
+      "maximum": 1.7976931348623157e+308
+    },
+    "nonNegativeFiniteNumber": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1.7976931348623157e+308
+    },
+    "positiveFiniteNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1.7976931348623157e+308
+    },
+    "heading": {
+      "enum": [
+        "north",
+        "east",
+        "south",
+        "west"
+      ]
+    },
+    "nullableHeading": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/heading"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "point": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "$ref": "#/definitions/finiteNumber"
+      }
+    },
+    "nullablePoint": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/point"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tile": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "integer"
+      }
+    },
+    "tileSet": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/tile"
+      }
+    },
+    "axisValues": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/finiteNumber"
+      }
+    },
+    "collectorBand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "belt_y",
+        "column_xs",
+        "built_column_xs",
+        "pending_column_xs",
+        "planned_column_xs"
+      ],
+      "properties": {
+        "order": {
+          "type": "integer"
+        },
+        "belt_y": {
+          "$ref": "#/definitions/finiteNumber"
+        },
+        "column_xs": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/axisValues"
+            },
+            {
+              "minItems": 1
+            }
+          ]
+        },
+        "built_column_xs": {
+          "$ref": "#/definitions/axisValues"
+        },
+        "pending_column_xs": {
+          "$ref": "#/definitions/axisValues"
+        },
+        "planned_column_xs": {
+          "$ref": "#/definitions/axisValues"
+        }
+      }
+    },
+    "reservations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "longitudinal",
+        "parallel_bands",
+        "manifold",
+        "egress",
+        "service",
+        "refinery"
+      ],
+      "properties": {
+        "longitudinal": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "parallel_bands": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "manifold": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "egress": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "service": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "refinery": {
+          "$ref": "#/definitions/tileSet"
+        }
+      }
+    },
+    "managedRefinery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site_id",
+        "origin",
+        "variant",
+        "generation",
+        "maximum_furnaces",
+        "current_furnaces",
+        "current_footprint_tiles",
+        "ore_inputs",
+        "ore_input_headings",
+        "maximum_footprint_tiles"
+      ],
+      "properties": {
+        "site_id": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "origin": {
+          "$ref": "#/definitions/point"
+        },
+        "variant": {
+          "enum": [
+            "basic",
+            "standard"
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maximum_furnaces": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "current_furnaces": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_footprint_tiles": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "ore_inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/point"
+          }
+        },
+        "ore_input_headings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/heading"
+          }
+        },
+        "maximum_footprint_tiles": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/tileSet"
+            },
+            {
+              "minItems": 1
+            }
+          ]
+        }
+      }
+    },
+    "transportLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lane_id",
+        "source_band_orders",
+        "declared_items_per_second",
+        "capacity_items_per_second",
+        "belt_tier",
+        "splitter_action_ids",
+        "refinery_input",
+        "path_ids",
+        "measured_items_per_second"
+      ],
+      "properties": {
+        "lane_id": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "source_band_orders": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "declared_items_per_second": {
+          "$ref": "#/definitions/nonNegativeFiniteNumber"
+        },
+        "capacity_items_per_second": {
+          "$ref": "#/definitions/positiveFiniteNumber"
+        },
+        "belt_tier": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "splitter_action_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/nonEmptyString"
+          }
+        },
+        "refinery_input": {
+          "$ref": "#/definitions/nullablePoint"
+        },
+        "path_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/nonEmptyString"
+          }
+        },
+        "measured_items_per_second": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/nonNegativeFiniteNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "transportPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path_id",
+        "role",
+        "lane_id",
+        "source_band_order",
+        "source",
+        "destination",
+        "source_heading",
+        "destination_heading",
+        "action_ids",
+        "route_tiles",
+        "reused_tiles",
+        "underground_spans",
+        "underground_reach"
+      ],
+      "properties": {
+        "path_id": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "role": {
+          "enum": [
+            "collector",
+            "manifold",
+            "haul"
+          ]
+        },
+        "lane_id": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "source_band_order": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/definitions/point"
+        },
+        "destination": {
+          "$ref": "#/definitions/point"
+        },
+        "source_heading": {
+          "$ref": "#/definitions/heading"
+        },
+        "destination_heading": {
+          "$ref": "#/definitions/heading"
+        },
+        "action_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/definitions/nonEmptyString"
+          }
+        },
+        "route_tiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/tile"
+          }
+        },
+        "reused_tiles": {
+          "$ref": "#/definitions/tileSet"
+        },
+        "underground_spans": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/definitions/tile"
+            }
+          }
+        },
+        "underground_reach": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ownedPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "entity",
+        "position",
+        "direction",
+        "status",
+        "revision",
+        "underground_type",
+        "input_priority",
+        "output_priority"
+      ],
+      "properties": {
+        "action_id": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "entity": {
+          "$ref": "#/definitions/nonEmptyString"
+        },
+        "position": {
+          "$ref": "#/definitions/point"
+        },
+        "direction": {
+          "$ref": "#/definitions/nullableHeading"
+        },
+        "status": {
+          "enum": [
+            "prepared",
+            "ghost",
+            "built"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "underground_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "input",
+                "output"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_priority": {
+          "$ref": "#/definitions/nullablePriority"
+        },
+        "output_priority": {
+          "$ref": "#/definitions/nullablePriority"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "underground_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "underground_type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entity": {
+                "type": "string",
+                "pattern": "underground-belt$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "nullablePriority": {
+      "anyOf": [
+        {
+          "enum": [
+            "left",
+            "none",
+            "right"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

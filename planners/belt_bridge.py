@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import heapq
 import math
+from dataclasses import dataclass
 from typing import Sequence
 
 from planners.infrastructure_geometry import choose_clear_l_route
+from planners.transport_occupancy import RouteOccupancy
 
 Point = tuple[float, float]
 
@@ -129,6 +131,668 @@ def _aligned_final_route(
 _ROUTE_TURN_COST = 6
 _ROUTE_SEARCH_MARGIN = 48.0
 _ROUTE_SEARCH_LIMIT = 400_000
+
+# The typed planner prices a crossover above ordinary belt travel while still
+# keeping a legal short tunnel cheaper than a multi-turn surface detour.
+_TYPED_ROUTE_TURN_COST = 6.0
+_TYPED_UNDERGROUND_COST = 4.0
+_TYPED_DEFAULT_EXTRA_TILES = 96
+
+Tile = tuple[int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class RoutePlan:
+    """A deterministic, preflighted belt route ready for plan submission."""
+
+    actions: tuple[dict, ...]
+    route_tiles: tuple[Tile, ...]
+    reused_tiles: frozenset[Tile]
+    underground_spans: tuple[tuple[Tile, Tile], ...]
+    underground_reach: int
+    turns: int
+    total_cost: float
+
+
+@dataclass(frozen=True, slots=True)
+class RouteFailure:
+    """A fail-closed routing result. Failures never carry executable actions."""
+
+    reason: str
+    detail: str
+    actions: tuple[dict, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _TypedRouteLabel:
+    tile: Tile
+    incoming: str | None
+    route_count: int
+    action_count: int
+    cost: float
+    turns: int
+    parent_id: int | None
+    segment_actions: tuple[dict, ...]
+    segment_tiles: tuple[Tile, ...]
+    segment_reused: tuple[tuple[Tile, str, str | None], ...]
+    underground_span: tuple[Tile, Tile] | None = None
+
+
+def _tile_center(tile: Tile) -> Point:
+    return tile[0] + 0.5, tile[1] + 0.5
+
+
+def _surface_action(tile: Tile, belt_type: str, direction: str) -> dict:
+    point = _tile_center(tile)
+    return {
+        "action_type": "place_ghost",
+        "entity": belt_type,
+        "position": {"x": point[0], "y": point[1]},
+        "direction": direction,
+    }
+
+
+def _underground_action(
+    tile: Tile, belt_type: str, direction: str, underground_type: str,
+) -> dict:
+    point = _tile_center(tile)
+    return {
+        "action_type": "place_ghost",
+        "entity": belt_type.replace("transport-belt", "underground-belt"),
+        "position": {"x": point[0], "y": point[1]},
+        "direction": direction,
+        "underground_type": underground_type,
+    }
+
+
+def _advance(tile: Tile, direction: str, distance: int = 1) -> Tile:
+    vector = _FACING_TO_VECTOR[direction]
+    return (
+        tile[0] + int(vector[0]) * distance,
+        tile[1] + int(vector[1]) * distance,
+    )
+
+
+def _typed_direction_order(incoming: str | None) -> tuple[str, ...]:
+    fixed = ("east", "south", "west", "north")
+    if incoming is None:
+        return fixed
+    return (incoming,) + tuple(
+        direction
+        for direction in fixed
+        if direction != incoming and direction != _OPPOSITE[incoming]
+    )
+
+
+def _label_is_dominated(
+    labels: Sequence[_TypedRouteLabel], candidate: _TypedRouteLabel,
+) -> bool:
+    return any(
+        existing.cost <= candidate.cost
+        and existing.route_count <= candidate.route_count
+        and existing.action_count <= candidate.action_count
+        for existing in labels
+    )
+
+
+def _reconstruct_typed_route(
+    labels: dict[int, _TypedRouteLabel], goal_id: int,
+    *,
+    destination: Tile,
+    destination_action: dict | None,
+    destination_reuse: tuple[Tile, str, str | None] | None,
+    total_cost: float,
+) -> tuple[
+    tuple[dict, ...], tuple[Tile, ...],
+    tuple[tuple[Tile, str, str | None], ...],
+    tuple[tuple[Tile, Tile], ...], int,
+]:
+    lineage: list[_TypedRouteLabel] = []
+    label_id: int | None = goal_id
+    while label_id is not None:
+        label = labels[label_id]
+        lineage.append(label)
+        label_id = label.parent_id
+    lineage.reverse()
+
+    actions: list[dict] = []
+    route_tiles: list[Tile] = []
+    reused: list[tuple[Tile, str, str | None]] = []
+    spans: list[tuple[Tile, Tile]] = []
+    for label in lineage[1:]:
+        actions.extend(label.segment_actions)
+        route_tiles.extend(label.segment_tiles)
+        reused.extend(label.segment_reused)
+        if label.underground_span is not None:
+            spans.append(label.underground_span)
+    route_tiles.append(destination)
+    if destination_action is not None:
+        actions.append(destination_action)
+    if destination_reuse is not None:
+        reused.append(destination_reuse)
+    # `total_cost` is deliberately accepted here to keep reconstruction's
+    # inputs explicit when route metrics grow; turns come from the goal label.
+    _ = total_cost
+    return (
+        tuple(actions), tuple(route_tiles), tuple(reused), tuple(spans),
+        labels[goal_id].turns,
+    )
+
+
+def _fresh_typed_route_is_valid(
+    occupancy: RouteOccupancy,
+    *,
+    actions: Sequence[dict],
+    reused: Sequence[tuple[Tile, str, str | None]],
+    district_id: str,
+    belt_type: str,
+) -> tuple[bool, str]:
+    for action in actions:
+        position = action["position"]
+        tile = (math.floor(position["x"]), math.floor(position["y"]))
+        if action.get("underground_type"):
+            if not occupancy.underground_endpoint_is_clear(
+                tile, district_id=district_id, belt_type=belt_type,
+            ):
+                return False, f"underground endpoint {tile} is no longer clear"
+            continue
+        interface = None
+        disposition = occupancy.surface_disposition(
+            tile,
+            district_id=district_id,
+            belt_type=belt_type,
+            direction=action["direction"],
+            interface=interface,
+        )
+        if disposition != "place":
+            return False, f"surface action tile {tile} is no longer clear"
+    for tile, direction, interface in reused:
+        if interface in {"underground_input", "underground_output"}:
+            endpoint_type = "input" if interface == "underground_input" else "output"
+            if not occupancy.owned_underground_endpoint(
+                tile,
+                district_id=district_id,
+                belt_type=belt_type,
+                direction=direction,
+                underground_type=endpoint_type,
+            ):
+                return False, f"reused underground {endpoint_type} at {tile} no longer matches"
+            continue
+        disposition = occupancy.surface_disposition(
+            tile,
+            district_id=district_id,
+            belt_type=belt_type,
+            direction=direction,
+            interface=interface,
+        )
+        if disposition != "reuse":
+            return False, f"reused belt at {tile} no longer matches"
+    return True, ""
+
+
+def plan_belt_route(
+    source: Point,
+    destination: Point,
+    *,
+    belt_type: str,
+    occupancy: RouteOccupancy,
+    district_id: str,
+    source_heading: str,
+    destination_heading: str,
+    max_route_tiles: int | None = None,
+    max_actions: int | None = None,
+    max_search_nodes: int = _ROUTE_SEARCH_LIMIT,
+    underground_reach: int | float | None = None,
+    fresh_occupancy: RouteOccupancy | None = None,
+) -> RoutePlan | RouteFailure:
+    """Plan one legal belt route with surface and underground graph edges.
+
+    The search never overlays tunnels onto a chosen route. Underground pairs
+    are bounded, straight crossover edges whose endpoints are checked before
+    entering the queue. A second occupancy snapshot can invalidate the entire
+    result before any action is returned to the caller.
+    """
+    if belt_type not in UNDERGROUND_REACH:
+        return RouteFailure(
+            "invalid_belt_type", f"unknown underground reach for {belt_type!r}",
+        )
+    if underground_reach is None:
+        underground_reach = UNDERGROUND_REACH[belt_type]
+    if (
+        isinstance(underground_reach, bool)
+        or not isinstance(underground_reach, (int, float))
+        or not math.isfinite(float(underground_reach))
+        or float(underground_reach) <= 0
+        or not float(underground_reach).is_integer()
+    ):
+        return RouteFailure(
+            "invalid_underground_reach",
+            f"underground reach must be a finite positive integer, got {underground_reach!r}",
+        )
+    live_reach = int(underground_reach)
+    if source_heading not in _FACING_TO_VECTOR or destination_heading not in _FACING_TO_VECTOR:
+        return RouteFailure(
+            "invalid_heading",
+            f"unknown source/destination heading: {source_heading!r}/{destination_heading!r}",
+        )
+    if not district_id:
+        return RouteFailure("invalid_district", "district_id must be non-empty")
+    if not isinstance(occupancy, RouteOccupancy):
+        return RouteFailure("invalid_occupancy", "occupancy must be RouteOccupancy")
+    if max_search_nodes <= 0:
+        return RouteFailure("invalid_search_limit", "max_search_nodes must be positive")
+
+    source_tile, destination_tile = _tile(source), _tile(destination)
+    direct_tiles = (
+        abs(destination_tile[0] - source_tile[0])
+        + abs(destination_tile[1] - source_tile[1]) + 1
+    )
+    route_limit_was_explicit = max_route_tiles is not None
+    if max_route_tiles is None:
+        max_route_tiles = direct_tiles + _TYPED_DEFAULT_EXTRA_TILES
+    if max_route_tiles <= 0:
+        return RouteFailure("invalid_route_limit", "max_route_tiles must be positive")
+    if max_actions is not None and max_actions < 0:
+        return RouteFailure("invalid_action_limit", "max_actions cannot be negative")
+
+    source_disposition = occupancy.surface_disposition(
+        source_tile,
+        district_id=district_id,
+        belt_type=belt_type,
+        direction=source_heading,
+        interface="source",
+    )
+    if source_disposition == "blocked":
+        return RouteFailure(
+            "blocked_source", f"source tile {source_tile} is not a legal district interface",
+        )
+    destination_disposition = occupancy.surface_disposition(
+        destination_tile,
+        district_id=district_id,
+        belt_type=belt_type,
+        direction=destination_heading,
+        interface="destination",
+    )
+    if destination_disposition == "blocked":
+        return RouteFailure(
+            "blocked_destination",
+            f"destination tile {destination_tile} is not a legal district interface",
+        )
+    if direct_tiles > max_route_tiles:
+        return RouteFailure(
+            "route_limit",
+            f"direct route needs {direct_tiles} tiles, beyond limit {max_route_tiles}",
+        )
+
+    labels: dict[int, _TypedRouteLabel] = {
+        0: _TypedRouteLabel(
+            tile=source_tile,
+            incoming=None,
+            route_count=1,
+            action_count=0,
+            cost=0.0,
+            turns=0,
+            parent_id=None,
+            segment_actions=(),
+            segment_tiles=(),
+            segment_reused=(),
+        ),
+    }
+    frontier: dict[tuple[Tile, str | None], list[_TypedRouteLabel]] = {
+        (source_tile, None): [labels[0]],
+    }
+    queue: list[tuple[float, float, int]] = [
+        (float(direct_tiles - 1), 0.0, 0),
+    ]
+    next_id = 1
+    expanded = 0
+    route_pruned = False
+    action_pruned = False
+    goal_id: int | None = None
+
+    while queue:
+        _priority, _cost_tie, label_id = heapq.heappop(queue)
+        label = labels[label_id]
+        if label not in frontier.get((label.tile, label.incoming), ()):
+            continue
+        expanded += 1
+        if expanded > max_search_nodes:
+            return RouteFailure(
+                "search_limit", f"route search exceeded {max_search_nodes} expanded labels",
+            )
+
+        if label.tile == destination_tile:
+            if label.incoming == destination_heading or (
+                label.incoming is None and source_heading == destination_heading
+            ):
+                final_action_count = label.action_count + (
+                    0 if destination_disposition == "reuse" else 1
+                )
+                if max_actions is not None and final_action_count > max_actions:
+                    action_pruned = True
+                else:
+                    goal_id = label_id
+                    break
+            # The destination is an interface, never a transit tile.
+            continue
+
+        directions = (
+            (source_heading,) if label.incoming is None
+            else _typed_direction_order(label.incoming)
+        )
+        for direction in directions:
+            if label.incoming is not None and direction == _OPPOSITE[label.incoming]:
+                continue
+            interface = "source" if label.tile == source_tile else None
+            disposition = occupancy.surface_disposition(
+                label.tile,
+                district_id=district_id,
+                belt_type=belt_type,
+                direction=direction,
+                interface=interface,
+            )
+            if disposition == "blocked":
+                continue
+            next_tile = _advance(label.tile, direction)
+            next_interface = "destination" if next_tile == destination_tile else None
+            next_required_direction = (
+                destination_heading if next_tile == destination_tile else None
+            )
+            if not occupancy.may_enter_surface(
+                next_tile,
+                district_id=district_id,
+                belt_type=belt_type,
+                interface=next_interface,
+                required_direction=next_required_direction,
+            ):
+                continue
+            route_count = label.route_count + 1
+            if route_count > max_route_tiles:
+                route_pruned = True
+                continue
+            action_count = label.action_count + (0 if disposition == "reuse" else 1)
+            if max_actions is not None and action_count > max_actions:
+                action_pruned = True
+                continue
+            turned = label.incoming is not None and direction != label.incoming
+            cost = label.cost + 1.0 + (_TYPED_ROUTE_TURN_COST if turned else 0.0)
+            action = () if disposition == "reuse" else (
+                _surface_action(label.tile, belt_type, direction),
+            )
+            reused = () if disposition != "reuse" else (
+                (label.tile, direction, interface),
+            )
+            candidate = _TypedRouteLabel(
+                tile=next_tile,
+                incoming=direction,
+                route_count=route_count,
+                action_count=action_count,
+                cost=cost,
+                turns=label.turns + int(turned),
+                parent_id=label_id,
+                segment_actions=action,
+                segment_tiles=(label.tile,),
+                segment_reused=reused,
+            )
+            state = (candidate.tile, candidate.incoming)
+            state_labels = frontier.setdefault(state, [])
+            if _label_is_dominated(state_labels, candidate):
+                continue
+            frontier[state] = [
+                existing for existing in state_labels
+                if not (
+                    candidate.cost <= existing.cost
+                    and candidate.route_count <= existing.route_count
+                    and candidate.action_count <= existing.action_count
+                )
+            ]
+            frontier[state].append(candidate)
+            labels[next_id] = candidate
+            heuristic = abs(next_tile[0] - destination_tile[0]) + abs(
+                next_tile[1] - destination_tile[1]
+            )
+            heapq.heappush(queue, (cost + heuristic, cost, next_id))
+            next_id += 1
+
+        # Exact owned underground pairs are graph edges too. Reuse requires
+        # both endpoint identities, directions, endpoint types, and live reach.
+        tunnel_direction = source_heading if label.incoming is None else label.incoming
+        label_interface = "source" if label.tile == source_tile else None
+        label_disposition = occupancy.surface_disposition(
+            label.tile,
+            district_id=district_id,
+            belt_type=belt_type,
+            direction=tunnel_direction,
+            interface=label_interface,
+        )
+        input_tile = _advance(label.tile, tunnel_direction)
+        if label_disposition != "blocked" and occupancy.owned_underground_endpoint(
+            input_tile,
+            district_id=district_id,
+            belt_type=belt_type,
+            direction=tunnel_direction,
+            underground_type="input",
+        ):
+            for span in range(1, live_reach + 1):
+                output_tile = _advance(input_tile, tunnel_direction, span)
+                if not occupancy.owned_underground_endpoint(
+                    output_tile,
+                    district_id=district_id,
+                    belt_type=belt_type,
+                    direction=tunnel_direction,
+                    underground_type="output",
+                ):
+                    continue
+                next_tile = _advance(output_tile, tunnel_direction)
+                next_interface = (
+                    "destination" if next_tile == destination_tile else None
+                )
+                next_required_direction = (
+                    destination_heading if next_tile == destination_tile else None
+                )
+                if not occupancy.may_enter_surface(
+                    next_tile,
+                    district_id=district_id,
+                    belt_type=belt_type,
+                    interface=next_interface,
+                    required_direction=next_required_direction,
+                ):
+                    continue
+                route_count = label.route_count + span + 2
+                if route_count > max_route_tiles:
+                    route_pruned = True
+                    continue
+                surface_action_count = 0 if label_disposition == "reuse" else 1
+                action_count = label.action_count + surface_action_count
+                if max_actions is not None and action_count > max_actions:
+                    action_pruned = True
+                    continue
+                cost = label.cost + span + 2
+                candidate = _TypedRouteLabel(
+                    tile=next_tile,
+                    incoming=tunnel_direction,
+                    route_count=route_count,
+                    action_count=action_count,
+                    cost=cost,
+                    turns=label.turns,
+                    parent_id=label_id,
+                    segment_actions=(
+                        () if label_disposition == "reuse" else (
+                            _surface_action(label.tile, belt_type, tunnel_direction),
+                        )
+                    ),
+                    segment_tiles=tuple(
+                        _advance(label.tile, tunnel_direction, distance)
+                        for distance in range(span + 2)
+                    ),
+                    segment_reused=(
+                        *((
+                            (label.tile, tunnel_direction, label_interface),
+                        ) if label_disposition == "reuse" else ()),
+                        (input_tile, tunnel_direction, "underground_input"),
+                        (output_tile, tunnel_direction, "underground_output"),
+                    ),
+                    underground_span=(input_tile, output_tile),
+                )
+                state_key = (candidate.tile, candidate.incoming)
+                state_labels = frontier.setdefault(state_key, [])
+                if _label_is_dominated(state_labels, candidate):
+                    continue
+                frontier[state_key] = [
+                    existing for existing in state_labels
+                    if not (
+                        candidate.cost <= existing.cost
+                        and candidate.route_count <= existing.route_count
+                        and candidate.action_count <= existing.action_count
+                    )
+                ]
+                frontier[state_key].append(candidate)
+                labels[next_id] = candidate
+                heuristic = abs(next_tile[0] - destination_tile[0]) + abs(
+                    next_tile[1] - destination_tile[1]
+                )
+                heapq.heappush(queue, (cost + heuristic, cost, next_id))
+                next_id += 1
+                break
+
+        # A new tunnel is a graph edge only when the tile immediately ahead cannot
+        # carry a surface belt. This covers the useful crossover case while
+        # avoiding arbitrary underground runs through clear ground.
+        if not occupancy.underground_endpoint_is_clear(
+            label.tile, district_id=district_id, belt_type=belt_type,
+        ):
+            continue
+        immediately_ahead = _advance(label.tile, tunnel_direction)
+        if occupancy.may_enter_surface(
+            immediately_ahead,
+            district_id=district_id,
+            belt_type=belt_type,
+        ):
+            continue
+        for span in range(2, live_reach + 1):
+            exit_tile = _advance(label.tile, tunnel_direction, span)
+            if not occupancy.underground_endpoint_is_clear(
+                exit_tile, district_id=district_id, belt_type=belt_type,
+            ):
+                continue
+            next_tile = _advance(exit_tile, tunnel_direction)
+            next_interface = "destination" if next_tile == destination_tile else None
+            next_required_direction = (
+                destination_heading if next_tile == destination_tile else None
+            )
+            if not occupancy.may_enter_surface(
+                next_tile,
+                district_id=district_id,
+                belt_type=belt_type,
+                interface=next_interface,
+                required_direction=next_required_direction,
+            ):
+                continue
+            route_count = label.route_count + span + 1
+            if route_count > max_route_tiles:
+                route_pruned = True
+                continue
+            action_count = label.action_count + 2
+            if max_actions is not None and action_count > max_actions:
+                action_pruned = True
+                continue
+            cost = label.cost + span + 1 + _TYPED_UNDERGROUND_COST
+            segment_tiles = tuple(
+                _advance(label.tile, tunnel_direction, distance)
+                for distance in range(span + 1)
+            )
+            candidate = _TypedRouteLabel(
+                tile=next_tile,
+                incoming=tunnel_direction,
+                route_count=route_count,
+                action_count=action_count,
+                cost=cost,
+                turns=label.turns,
+                parent_id=label_id,
+                segment_actions=(
+                    _underground_action(
+                        label.tile, belt_type, tunnel_direction, "input",
+                    ),
+                    _underground_action(
+                        exit_tile, belt_type, tunnel_direction, "output",
+                    ),
+                ),
+                segment_tiles=segment_tiles,
+                segment_reused=(),
+                underground_span=(label.tile, exit_tile),
+            )
+            state = (candidate.tile, candidate.incoming)
+            state_labels = frontier.setdefault(state, [])
+            if _label_is_dominated(state_labels, candidate):
+                continue
+            frontier[state] = [
+                existing for existing in state_labels
+                if not (
+                    candidate.cost <= existing.cost
+                    and candidate.route_count <= existing.route_count
+                    and candidate.action_count <= existing.action_count
+                )
+            ]
+            frontier[state].append(candidate)
+            labels[next_id] = candidate
+            heuristic = abs(next_tile[0] - destination_tile[0]) + abs(
+                next_tile[1] - destination_tile[1]
+            )
+            heapq.heappush(queue, (cost + heuristic, cost, next_id))
+            next_id += 1
+
+    if goal_id is None:
+        if action_pruned:
+            reason = "action_limit"
+            detail = f"no route fits the {max_actions}-action limit"
+        elif route_pruned and route_limit_was_explicit:
+            reason = "route_limit"
+            detail = f"no legal route fits the {max_route_tiles}-tile limit"
+        else:
+            reason = "no_legal_route"
+            detail = "no legal surface/underground route was found"
+        return RouteFailure(reason, detail)
+
+    goal = labels[goal_id]
+    destination_action = (
+        None if destination_disposition == "reuse"
+        else _surface_action(destination_tile, belt_type, destination_heading)
+    )
+    destination_reuse = (
+        (destination_tile, destination_heading, "destination")
+        if destination_disposition == "reuse" else None
+    )
+    actions, route_tiles, reused, spans, turns = _reconstruct_typed_route(
+        labels,
+        goal_id,
+        destination=destination_tile,
+        destination_action=destination_action,
+        destination_reuse=destination_reuse,
+        total_cost=goal.cost,
+    )
+    if fresh_occupancy is not None:
+        if not isinstance(fresh_occupancy, RouteOccupancy):
+            return RouteFailure(
+                "invalid_fresh_occupancy", "fresh_occupancy must be RouteOccupancy",
+            )
+        valid, detail = _fresh_typed_route_is_valid(
+            fresh_occupancy,
+            actions=actions,
+            reused=reused,
+            district_id=district_id,
+            belt_type=belt_type,
+        )
+        if not valid:
+            return RouteFailure("fresh_occupancy_conflict", detail)
+    return RoutePlan(
+        actions=actions,
+        route_tiles=route_tiles,
+        reused_tiles=frozenset(tile for tile, _direction, _interface in reused),
+        underground_spans=spans,
+        underground_reach=live_reach,
+        turns=turns,
+        total_cost=goal.cost,
+    )
 
 
 def search_clear_route(

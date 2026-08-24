@@ -114,18 +114,42 @@ def test_conflicts_are_surveyed_in_one_call(survey, monkeypatch) -> None:
     assert len(calls[0]) == 8
 
 
-def test_an_exhausted_corridor_falls_through_to_a_new_row() -> None:
-    """The empty prefix has to reach the branch that sites a fresh mine --
-    otherwise it is the old permanent failure wearing a different shape."""
-    import inspect
+def test_an_exhausted_corridor_never_opens_an_independent_mine(monkeypatch) -> None:
+    """A blocked tail is not proof that the owned district is exhausted."""
+    mine = ResourceMine(
+        output=(0.5, 0.5), drill_count=3, row_capacity=10,
+        expansion_step=1, belt_y=0.5,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "find_resource_mines", lambda *_a: [mine],
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "pending_plate_smelter", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "resource_drill_count", lambda *_a: 6,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "mining_productivity_bonus", lambda *_a: 0.0,
+    )
+    monkeypatch.setattr(
+        stage_extraction.resource_patches, "patch_for_extraction",
+        lambda *_a, **_k: stage_extraction.resource_patches.ResourcePatch(
+            (1.0, 1.0), (-20.0, -20.0), (80.0, 80.0), 500_000,
+        ),
+    )
+    monkeypatch.setattr(stage_extraction, "buildable_batch_prefix", lambda *_a: ())
+    monkeypatch.setattr(
+        stage_extraction, "_new_direct_mine",
+        lambda *_a, **_k: pytest.fail("an existing district cannot spawn a new mine"),
+    )
 
-    source = inspect.getsource(stage_extraction.plan_local_extraction)
-    body = source[source.index("buildable_batch_prefix("):]
-    guard = body[:body.index("else:")]
-    fallback = body[body.index("else:"):]
-
-    assert "if positions:" in guard
-    assert "_new_direct_mine(" in fallback
+    with pytest.raises(stage_extraction.PendingSystemDeferred, match="district"):
+        stage_extraction.plan_local_extraction(
+            object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+            belt_type="transport-belt", inserter_type="inserter",
+            reuse_existing=False,
+        )
 
 
 def test_the_batch_is_no_longer_all_or_nothing() -> None:

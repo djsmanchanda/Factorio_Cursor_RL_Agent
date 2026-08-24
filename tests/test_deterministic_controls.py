@@ -112,6 +112,29 @@ def test_zero_placement_execution_is_not_treated_as_success(monkeypatch) -> None
         _submit(object(), bridge, "nauvis", plan, "empty", lambda _message: None)
 
 
+def test_removal_only_plans_are_not_churn(monkeypatch) -> None:
+    """Live run of 2026-08-24 15:16: retiring a starved bootstrap cell is a
+    pure remove_entity plan; the executor counts only place actions, so the
+    zero-placement guard killed the run AFTER the removals had already run.
+    Removal-only plans are governed by the report's ok status alone."""
+    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
+    report = {
+        "ok": True, "attempted_placements": 0, "succeeded_placements": 0,
+        "placed_ghosts": 0, "placed_entities": 0, "removed_entities": 6,
+    }
+    bridge = SimpleNamespace(build_layout=lambda *_a: report)
+    monkeypatch.setattr("orchestrator.stage_services.load_json", lambda value: value)
+    plan = {"phases": [{"name": "retire", "actions": [
+        {"action_type": "remove_entity", "entity": "stone-furnace",
+         "position": {"x": 145.5, "y": -77.5}},
+    ]}]}
+
+    result = _submit(object(), bridge, "nauvis", plan, "retire", lambda _m: None)
+
+    assert result["removed_entities"] == 6
+
+
 def test_successful_plans_record_exact_pending_footprints(
     monkeypatch, tmp_path: Path,
 ) -> None:

@@ -244,9 +244,8 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
     assert any("full unit materials" in message for message in messages)
 
 
-def test_underground_actions_adopt_the_own_corridor(monkeypatch) -> None:
-    """Run 12: the bridge's underground-belt pairs hit the mine's own regular
-    belts -- same corridor, different family member; adoption applies."""
+def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
+    """Force and prototype family do not establish planner ownership."""
     from types import SimpleNamespace
 
     import orchestrator.stage_services as ss
@@ -264,8 +263,7 @@ def test_underground_actions_adopt_the_own_corridor(monkeypatch) -> None:
             "reason": "exact_position_occupied_by_different_entity",
             "position": {"x": 51.5, "y": -104.5},
         }],
-    }, {"ok": True, "succeeded_placements": 0, "placed_ghosts": 0,
-        "placed_entities": 0}])
+    }])
     built = []
 
     class FakeBridge:
@@ -279,14 +277,20 @@ def test_underground_actions_adopt_the_own_corridor(monkeypatch) -> None:
     monkeypatch.setattr(ss, "build_layout_authorization", lambda *_a: object())
     monkeypatch.setattr(
         ss.live_base, "entity_at",
-        lambda _c, _s, pos: {"name": "transport-belt", "force": "player"}
+        lambda _c, _s, pos: {
+            "name": "transport-belt", "type": "transport-belt", "force": "player",
+        }
         if (pos[0], pos[1]) == (51.5, -104.5) else None,
     )
 
-    ss._submit(object(), FakeBridge(), "nauvis", plan, "landfill bridge",
-               lambda _m: None)
+    with pytest.raises(ss.StuckError, match="blocked by real infrastructure"):
+        ss._submit(
+            object(), FakeBridge(), "nauvis", plan, "landfill bridge",
+            lambda _m: None,
+        )
 
-    assert built[-1]["phases"][0]["actions"] == []
+    assert len(built) == 1
+    assert plan["phases"][0]["actions"]
 
 
 def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:

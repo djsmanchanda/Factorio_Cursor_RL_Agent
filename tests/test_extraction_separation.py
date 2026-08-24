@@ -453,15 +453,16 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
         "avoid_resources": True,
         "resource_clearance": 5.0,
     }
+    assert clear_calls[1][0][3:5] == (54.0, 25.0)
     layout = generate_managed_refinery_plan(
-        "iron-plate", 2, origin_x=planned.smelter_origin[0],
+        "iron-plate", 48, origin_x=planned.smelter_origin[0],
         origin_y=planned.smelter_origin[1],
     )
     for action in actions(layout):
         size = ENTITY_FOOTPRINTS.get(action["entity"], 1)
         x, y = action["position"]["x"], action["position"]["y"]
-        assert 80.0 <= x - size / 2 and x + size / 2 <= 98.0
-        assert 80.0 <= y - size / 2 and y + size / 2 <= 96.0
+        assert 80.0 <= x - size / 2 and x + size / 2 <= 134.0
+        assert 80.0 <= y - size / 2 and y + size / 2 <= 105.0
 
 
 def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:
@@ -632,6 +633,37 @@ def test_find_line_includes_configured_machine_ghosts() -> None:
 
     assert line is not None and line.machine_count == 2 and line.working_count == 0
     assert "ghost_name=='electric-furnace'" in client.commands[0]
+
+
+def test_find_line_parses_a_proven_machine_with_no_reported_position() -> None:
+    client = _StateRcon(["1 0 0"])
+
+    line = live_base.find_line(
+        client, "nauvis", "player", "iron-plate", "electric-furnace"
+    )
+
+    assert line is not None
+    assert line.machine_count == 1
+    assert line.working_count == 0
+    assert line.produced_count == 0
+    assert line.machine_positions == ()
+
+
+def test_intake_candidates_treat_ghost_corridor_belts_as_row_ends() -> None:
+    """Live run of 2026-08-24 06:30: prebuilt ghost belts extended the mine
+    row past its built head, so every side of the built end was occupied and
+    the temporary smelter's intake had nowhere to go. The end scan must see
+    ghost belts so the intake anchors past the corridor."""
+    client = _StateRcon([""])
+
+    live_base.intake_candidate_tiles(client, "nauvis", (89.5, -39.5))
+
+    lua = client.commands[0]
+    assert "type='entity-ghost'" in lua
+    assert "string.sub(gn,-14)=='transport-belt'" in lua
+    # Eastbound rows (dir 2) jam at their east end; westbound at the west.
+    assert "if minx_dir==2 then emit_end(maxx) " in lua
+    assert "elseif minx_dir==6 then emit_end(minx) " in lua
 
 
 def test_pending_smelter_is_repaired_instead_of_duplicate_mining(monkeypatch) -> None:

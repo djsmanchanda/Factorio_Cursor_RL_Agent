@@ -61,7 +61,119 @@ local function exact_position_occupants(surface, force, position)
   return exact
 end
 
-local function atomic_placement_blocked(surface, force, action)
+local function collision_layers(prototype)
+  local mask = prototype and prototype.collision_mask or nil
+  if not mask then return nil end
+  return mask.layers or mask
+end
+
+local function masks_overlap(left, right)
+  if not left or not right then return true end
+  for layer, enabled in pairs(left) do
+    if enabled == true and right[layer] == true then return true end
+  end
+  return false
+end
+
+local function oriented_collision_area(action, direction)
+  local prototype = prototypes.entity[action.entity]
+  local box = prototype and prototype.collision_box or nil
+  if not box then return nil end
+  local left_top = box.left_top or box[1]
+  local right_bottom = box.right_bottom or box[2]
+  if not left_top or not right_bottom then return nil end
+  local left = left_top.x or left_top[1]
+  local top = left_top.y or left_top[2]
+  local right = right_bottom.x or right_bottom[1]
+  local bottom = right_bottom.y or right_bottom[2]
+  if not left or not top or not right or not bottom then return nil end
+
+  if direction == defines.direction.east or direction == defines.direction.west then
+    left, top, right, bottom = -bottom, left, -top, right
+  elseif direction ~= nil
+    and direction ~= defines.direction.north
+    and direction ~= defines.direction.south then
+    local radius = math.max(
+      math.abs(left), math.abs(top), math.abs(right), math.abs(bottom)
+    )
+    left, top, right, bottom = -radius, -radius, radius, radius
+  end
+  local position = action.position
+  return {
+    { position.x + left + 0.001, position.y + top + 0.001 },
+    { position.x + right - 0.001, position.y + bottom - 0.001 }
+  }
+end
+
+local function exact_removal_targets(surface, force, action)
+  if type(action.entity) ~= "string" or type(action.position) ~= "table"
+    or type(action.position.x) ~= "number" or type(action.position.y) ~= "number" then
+    return {}
+  end
+  local targets = {}
+  local entity = find_exact_entity(surface, force, action.entity, action.position)
+  if entity and entity.valid then targets[entity] = true end
+  local ghost = find_exact_ghost(surface, force, action.entity, action.position)
+  if ghost and ghost.valid then targets[ghost] = true end
+  return targets
+end
+
+local function collect_atomic_removals(surface, force, build_plan)
+  local targets = {}
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      if action.action_type == "remove_entity" then
+        for entity in pairs(exact_removal_targets(surface, force, action)) do
+          targets[entity] = true
+        end
+      end
+    end
+  end
+  return targets
+end
+
+local function terrain_blocks_placement(surface, action, area)
+  local prototype = prototypes.entity[action.entity]
+  local layers = collision_layers(prototype)
+  if not layers then return true end
+  local left_top, right_bottom = area[1], area[2]
+  local min_x = math.floor(left_top[1])
+  local min_y = math.floor(left_top[2])
+  local max_x = math.ceil(right_bottom[1]) - 1
+  local max_y = math.ceil(right_bottom[2]) - 1
+  for x = min_x, max_x do
+    for y = min_y, max_y do
+      local tile = surface.get_tile(x, y)
+      if not tile or not tile.valid then return true end
+      for layer, enabled in pairs(layers) do
+        if enabled == true and tile.collides_with(layer) then return true end
+      end
+    end
+  end
+  return false
+end
+
+local function blocked_only_by_removals(surface, action, direction, removals)
+  local area = oriented_collision_area(action, direction)
+  if not area or terrain_blocks_placement(surface, action, area) then return false end
+  local candidate_layers = collision_layers(prototypes.entity[action.entity])
+  local saw_removal = false
+  for _, entity in pairs(surface.find_entities_filtered({ area = area })) do
+    if entity.valid then
+      local entity_prototype = entity.prototype or prototypes.entity[entity.name]
+      if masks_overlap(candidate_layers, collision_layers(entity_prototype)) then
+        if removals[entity] then
+          saw_removal = true
+        else
+          return false
+        end
+      end
+    end
+  end
+  return saw_removal
+end
+
+local function atomic_placement_blocked(surface, force, action, removals)
   local position = action.position
   if find_exact_entity(surface, force, action.entity, position) ~= nil then
     return false
@@ -71,15 +183,42 @@ local function atomic_placement_blocked(surface, force, action)
   end
   local check_type = defines.build_check_type.manual
     or defines.build_check_type.ghost_revive
+  local direction = action.direction and defines.direction[action.direction] or nil
   local ok, can_place = pcall(function()
     return surface.can_place_entity({
       name = action.entity,
       position = { position.x, position.y },
+      direction = direction,
+      type = action.underground_type,
       force = force,
       build_check_type = check_type
     })
   end)
-  return not ok or can_place ~= true
+  if not ok then return true end
+  if can_place == true then return false end
+  return not blocked_only_by_removals(surface, action, direction, removals)
+end
+
+local function atomic_planned_placement_blocked(action, planned_actions)
+  local direction = action.direction and defines.direction[action.direction] or nil
+  local area = oriented_collision_area(action, direction)
+  if not area then return true end
+  local layers = collision_layers(prototypes.entity[action.entity])
+  for _, planned in ipairs(planned_actions) do
+    local planned_direction = planned.direction
+      and defines.direction[planned.direction] or nil
+    local planned_area = oriented_collision_area(planned, planned_direction)
+    if not planned_area then return true end
+    local horizontal_overlap = area[1][1] < planned_area[2][1]
+      and area[2][1] > planned_area[1][1]
+    local vertical_overlap = area[1][2] < planned_area[2][2]
+      and area[2][2] > planned_area[1][2]
+    if horizontal_overlap and vertical_overlap
+      and masks_overlap(layers, collision_layers(prototypes.entity[planned.entity])) then
+      return true
+    end
+  end
+  return false
 end
 
 local function recipe_name(entity)
@@ -459,7 +598,8 @@ local function execute_build_plan(authorization, build_plan)
     attempted_entities = 0,
     placed_entities = 0,
     already_present_entities = 0,
-    failed_entities = 0
+    failed_entities = 0,
+    attempted_placements = 0
   }
   local placement_failures = {}
   local recipe_failures = 0
@@ -483,11 +623,43 @@ local function execute_build_plan(authorization, build_plan)
   if build_plan.atomic == true then
     for _, phase in ipairs(build_plan.phases) do
       for _, action in ipairs(phase.actions or {}) do
+        local permission = required_authorization[action.action_type]
+        if not permission then
+          error("Unsupported build plan action: " .. tostring(action.action_type))
+        end
+        if not approved[permission] then
+          error("Authorization does not permit " .. permission .. " for " .. action.action_type)
+        end
+        local position = action.position
+        if type(position) ~= "table" or type(position.x) ~= "number"
+          or type(position.y) ~= "number" then
+          error("BuildPlan action requires numeric position with x and y")
+        end
+        if action.action_type ~= "place_tile_ghost" and type(action.entity) ~= "string" then
+          error("BuildPlan entity action requires entity name")
+        end
+        if action.action_type == "place_tile_ghost" and type(action.tile) ~= "string" then
+          error("BuildPlan tile action requires tile name")
+        end
+        if action.direction and defines.direction[action.direction] == nil then
+          error("Unknown direction: " .. tostring(action.direction))
+        end
+      end
+    end
+    local removals = collect_atomic_removals(surface, force, build_plan)
+    local planned_placements = {}
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
         if action.action_type == "place_entity" or action.action_type == "place_ghost" then
           counts.attempted_placements = counts.attempted_placements + 1
-          if atomic_placement_blocked(surface, force, action) then
+          local blocked = atomic_placement_blocked(surface, force, action, removals)
+          if atomic_planned_placement_blocked(action, planned_placements) then
+            blocked = true
+          end
+          if blocked then
             record_failure(phase, action, "atomic_footprint_blocked")
           end
+          table.insert(planned_placements, action)
         end
       end
     end
@@ -653,25 +825,9 @@ local function execute_build_plan(authorization, build_plan)
           end
         end
       else
-        local doomed = surface.find_entities_filtered({
-          name = action.entity,
-          area = { { position.x - 0.6, position.y - 0.6 }, { position.x + 0.6, position.y + 0.6 } },
-          force = force
-        })
-        for _, entity in pairs(doomed) do
+        for entity in pairs(exact_removal_targets(surface, force, action)) do
           if entity.valid then
             entity.destroy()
-            removed_entities = removed_entities + 1
-          end
-        end
-        local ghosts = surface.find_entities_filtered({
-          name = "entity-ghost",
-          area = { { position.x - 0.6, position.y - 0.6 }, { position.x + 0.6, position.y + 0.6 } },
-          force = force
-        })
-        for _, existing_ghost in pairs(ghosts) do
-          if existing_ghost.valid and existing_ghost.ghost_name == action.entity then
-            existing_ghost.destroy()
             removed_entities = removed_entities + 1
           end
         end

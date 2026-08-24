@@ -55,6 +55,8 @@ def test_direct_mining_to_chest_is_real_electric_output_primitive() -> None:
         {"x": 1.5, "y": 10.5}, {"x": 4.5, "y": 10.5},
     ]
     assert [action["position"] for action in actions_by_entity["fast-transport-belt"]] == [
+        {"x": -2.5, "y": 12.5}, {"x": -1.5, "y": 12.5},
+        {"x": -0.5, "y": 12.5}, {"x": 0.5, "y": 12.5},
         {"x": 1.5, "y": 12.5}, {"x": 2.5, "y": 12.5},
         {"x": 3.5, "y": 12.5}, {"x": 4.5, "y": 12.5},
         {"x": 5.5, "y": 12.5}, {"x": 6.5, "y": 12.5},

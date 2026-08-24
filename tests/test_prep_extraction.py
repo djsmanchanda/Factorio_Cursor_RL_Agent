@@ -63,7 +63,10 @@ def test_an_existing_line_is_expanded_rather_than_duplicated() -> None:
 def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:
     """A chemical build can need more iron than the opening mall baseline."""
     calls: list[tuple[str, bool]] = []
-    line = type("Line", (), {"machine_count": 6})()
+    line = type(
+        "Line", (),
+        {"machine_count": 6, "working_count": 0, "produced_count": 0},
+    )()
     autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
     monkeypatch.setattr(
         autonomous_builder.live_base, "available_items", lambda *_args: {"pipe": 77},
@@ -177,7 +180,9 @@ def test_bootstrap_furnace_caps_match_the_early_resource_policy() -> None:
 
 
 def test_furnace_cap_lifts_only_after_a_working_furnace_producer(monkeypatch) -> None:
-    line = type("Line", (), {"working_count": 0})()
+    line = type(
+        "Line", (), {"working_count": 0, "produced_count": 0},
+    )()
     monkeypatch.setattr(
         autonomous_builder.live_base, "find_line", lambda *_args: line,
     )

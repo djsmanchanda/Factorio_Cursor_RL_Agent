@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.smelter_block import (
-    FURNACES_PER_MODULE, generate_managed_refinery_plan, refinery_interfaces,
+    FURNACES_PER_MODULE, REFINERY_GENERATION_1_CAPACITIES,
+    generate_managed_refinery_plan, refinery_interfaces,
 )
 from planners.resource_layouts import (
     generate_direct_mine_row_expansion,
@@ -201,19 +202,37 @@ def direct_mine_plan(
     inserter_type: str,
     reserved_pair_columns: int = RESERVED_PAIR_COLUMNS,
     prebuilt_pair_columns: int = 0,
+    output_side: str = "west",
 ) -> tuple[dict, Point]:
-    """Return a paired mine start with its measured future corridor reserved."""
+    """Return a paired mine start with its measured future corridor reserved.
+
+    ``output_side`` picks which end of the shared collector belt is the haul
+    head. Managed refineries are east-flow and their feed must be approached
+    travelling east, so east of the row is the only side that connects without
+    a detour around the whole patch (live run of 2026-08-24 04:00 hauled from
+    a west-flowing head, misconnected diagonally, and starved the refinery).
+    """
     ox, oy = origin
     upper = mining_drill_positions(origin, machine_count)
-    belt_anchor = (ox - 2.5, oy + 0.5)
-    # Dedicated refinery feeds are belt-only: belt_anchor is the west turn tile.
-    # Side taps remain available to generic multi-input layouts, but never sit
-    # in the raw ore path.
-    output_chest = (belt_anchor[0] + 2, belt_anchor[1])
+    belt_y = oy + 0.5
+    if output_side not in {"east", "west"}:
+        raise ValueError(f"Unknown mine output side: {output_side}")
+    if output_side == "east":
+        last_x = upper[-1][0]
+        # Dedicated refinery feeds are belt-only: the head is the east turn
+        # tile past the row and its prebuilt corridor.
+        belt_anchor = (last_x + 2 + 3 * prebuilt_pair_columns, belt_y)
+        output_chest = tuple(belt_anchor)
+    else:
+        belt_anchor = (ox - 2.5, belt_y)
+        # Dedicated refinery feeds are belt-only: belt_anchor is the west turn tile.
+        # Side taps remain available to generic multi-input layouts, but never sit
+        # in the raw ore path.
+        output_chest = (belt_anchor[0] + 2, belt_anchor[1])
     inserter_type = "inserter"
     plan = generate_direct_mining_to_chest(
         upper, output_chest, belt_type=belt_type, inserter_type=inserter_type,
-        output_side="west", reserved_pair_columns=reserved_pair_columns,
+        output_side=output_side, reserved_pair_columns=reserved_pair_columns,
         prebuilt_pair_columns=prebuilt_pair_columns,
         include_side_tap=False,
     )
@@ -277,6 +296,7 @@ def _new_direct_mine(
         origin, row_drill_count, belt_type=belt_type, inserter_type=inserter_type,
         reserved_pair_columns=reserved_columns,
         prebuilt_pair_columns=prebuilt_columns,
+        output_side="east",
     )
     return origin, row_drill_count * 2, plan, output
 
@@ -559,6 +579,13 @@ def plan_local_extraction(
             2 if existing.pending or row_state == "complete" else 1
         )
         ore_output = existing.output
+        if expansion_step > 0:
+            # East-flow collector: the haul head is the row's east end, not
+            # the surveyed west anchor (which only books expansion columns).
+            ore_output = (
+                existing.output[0] + 4 + 3 * (row_drill_count - 1) + 2,
+                existing.shared_belt_y,
+            )
     elif mines:
         requested = phase_target - system_before
         requested += requested % 2
@@ -572,21 +599,25 @@ def plan_local_extraction(
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
             build_plan = generate_shared_belt_batch_expansion(
                 drill_xs, active.shared_belt_y,
-                belt_direction="west" if active.expansion_step > 0 else "east",
+                belt_direction="east" if active.expansion_step > 0 else "west",
             )
             drill_count = len(positions)
             ore_output = active.output
+            if active.expansion_step > 0:
+                ore_output = (
+                    active.output[0] + 4 + 3 * (active.drill_count + len(drill_xs) - 1) + 2,
+                    active.shared_belt_y,
+                )
             row_drill_count = len(drill_xs)
             expansion_step = active.expansion_step
             expansion_positions = positions
         else:
-            pair_count = max(3, math.ceil(requested / 2))
-            mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
-                client, surface, ore, nearest_tile, patch_min, patch_max,
-                pair_count, belt_type, inserter_type, belt_stock,
+            raise PendingSystemDeferred(
+                f"The owned {ore} resource district at {active.output} cannot "
+                "extend its active collector corridor. A blocked tail is not "
+                "physical patch exhaustion, so expansion defers without opening "
+                "an independent mine or refinery."
             )
-            row_drill_count = drill_count // 2
-            expansion_step = 1
     else:
         mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
             client, surface, ore, nearest_tile, patch_min, patch_max,
@@ -597,11 +628,15 @@ def plan_local_extraction(
     furnace_count = planned_smelter_count_for_drills(
         recipe, drill_count, productivity,
     )
-    geometries = {
-        "east": _smelter_layout_geometry(
-            recipe, furnace_count, belt_type, inserter_type, "east",
-        )
-    }
+    current_bounds, feed_offset, output_offset = _smelter_layout_geometry(
+        recipe, furnace_count, belt_type, inserter_type, "east",
+    )
+    maximum_bounds, _maximum_feed, _maximum_output = _smelter_layout_geometry(
+        recipe, REFINERY_GENERATION_1_CAPACITIES[-1], belt_type, inserter_type,
+        "east",
+    )
+    del current_bounds
+    geometries = {"east": (maximum_bounds, feed_offset, output_offset)}
     east_bounds = geometries["east"][0]
     footprint = (
         east_bounds.max_x - east_bounds.min_x,

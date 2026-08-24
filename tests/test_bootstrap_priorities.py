@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator import autonomous_builder as builder
+from orchestrator import live_base
 from orchestrator.parts_mall import MaterialShortage
 
 
@@ -111,14 +112,18 @@ def test_expansion_gate_defers_and_queues_the_unlock_work(monkeypatch) -> None:
     defer the priority and queue the electric-furnace producer instead."""
     from collections import Counter
 
-    deferred: list[tuple[str, str]] = []
+    deferred: list[tuple[str, str, int]] = []
+    promoted: list[tuple[str, int, int]] = []
 
     class FakePriorities:
         def describe(self, task, tick):
             return f"{task.item}"
 
-        def defer(self, item, tick, reason):
-            deferred.append((item, reason))
+        def defer(self, item, tick, reason, *, retry_ticks=3_600):
+            deferred.append((item, reason, retry_ticks))
+
+        def promote(self, item, target, tick):
+            promoted.append((item, target, tick))
 
     monkeypatch.setattr(
         builder, "_ensure_mall_item",
@@ -156,7 +161,26 @@ def test_expansion_gate_defers_and_queues_the_unlock_work(monkeypatch) -> None:
 
     assert len(deferred) == 1
     assert "bootstrap cap" in deferred[0][1]
-    assert mall_targets.get("electric-furnace") == 1
+    assert deferred[0][2] == 3_600
+    assert promoted == [("electric-furnace", 1, 100)]
+
+
+def test_proven_electric_furnace_producer_unlocks_cap_after_demand_ends(
+    monkeypatch,
+) -> None:
+    """A producer that made a furnace may be idle at the next survey because
+    demand is gone. Monotonic output, not instantaneous status, proves startup.
+    """
+    line = live_base.LineState(
+        recipe="electric-furnace", machine_count=1, working_count=0,
+        output_position=(1.0, 1.0), machine_positions=((1.0, 1.0),),
+        produced_count=1,
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+
+    assert builder._electric_furnace_producer_started(
+        object(), "nauvis", "player",
+    )
 
 
 def test_prep_path_cap_deferral_queues_the_furnace_unlock(monkeypatch) -> None:
@@ -165,7 +189,11 @@ def test_prep_path_cap_deferral_queues_the_furnace_unlock(monkeypatch) -> None:
     Both paths must queue the unlock producer."""
     queued: dict[str, int] = {}
     monkeypatch.setattr(builder, "add_demands", lambda t, s: t.update(s.required))
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {},
+    )
     builder._queue_electric_furnace_unlock(
+        object(), "nauvis", "player",
         queued,
         "iron-plate expansion waits for electric-furnace production after "
         "the 12-furnace bootstrap cap",
@@ -175,11 +203,32 @@ def test_prep_path_cap_deferral_queues_the_furnace_unlock(monkeypatch) -> None:
 
     unrelated: dict[str, int] = {}
     builder._queue_electric_furnace_unlock(
+        object(), "nauvis", "player",
         unrelated,
         "fast-transport-belt waits for iron capacity",
         lambda _m: None,
     )
     assert unrelated == {}
+
+
+def test_gate_demand_exceeds_idle_furnace_stock(monkeypatch) -> None:
+    """Live run of 2026-08-24 02:38: the base already owned one electric
+    furnace, so the survey retired the flat target of 1 every pass and the
+    cap livelocked to STUCK. The unlock must demand NEW production."""
+    queued: dict[str, int] = {}
+    monkeypatch.setattr(builder, "add_demands", lambda t, s: t.update(s.required))
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"electric-furnace": 1},
+    )
+    builder._queue_electric_furnace_unlock(
+        object(), "nauvis", "player",
+        queued,
+        "iron-plate expansion waits for electric-furnace production after "
+        "the 12-furnace bootstrap cap",
+        lambda _m: None,
+    )
+    assert queued.get("electric-furnace") == 2
 
 
 def test_electric_furnace_chain_intermediates_are_persistent(monkeypatch) -> None:
@@ -188,3 +237,14 @@ def test_electric_furnace_chain_intermediates_are_persistent(monkeypatch) -> Non
     drawing them schedules their producers."""
     for item in ("advanced-circuit", "steel-chest", "steel-plate"):
         assert item in builder.PERSISTENT_INTERMEDIATES
+
+
+def test_gate_task_itself_is_served_not_repromoted() -> None:
+    """Live runs of 2026-08-24 07:25 and 07:47: a main-loop gate preemption
+    first captured the electric-furnace task itself (promote-and-continue
+    forever), then captured higher-rated ready tasks the same way. The run
+    loop must contain no gate preemption at all: ready work is served, and
+    the promoted gate outranks only deferred tasks via normal ranking."""
+    import inspect
+
+    assert "priorities.promote" not in inspect.getsource(builder.run)

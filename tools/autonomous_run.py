@@ -69,10 +69,10 @@ def _directory_hash(root: Path) -> str:
     return digest.hexdigest()
 
 
-def _validate_episode_manifest(path: Path | None) -> None:
-    """Refuse to attach a controller to an unverified or changed baseline."""
+def _validate_episode_manifest(path: Path | None) -> str | None:
+    """Refuse an unverified baseline and return its stable episode identity."""
     if path is None:
-        return
+        return None
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -123,6 +123,10 @@ def _validate_episode_manifest(path: Path | None) -> None:
             raise StuckError(
                 f"deployed mod hash differs from the episode manifest: {field}"
             )
+    episode_id = manifest["episode_id"]
+    if not isinstance(episode_id, str) or not episode_id:
+        raise StuckError("episode manifest has an invalid episode_id")
+    return episode_id
 
 
 def _patch_episode_manifest(path: Path | None, **fields: object) -> None:
@@ -179,6 +183,7 @@ def _run_item(
         max_iterations=args.max_iterations,
         emit=emit,
         mission_items=tuple(getattr(args, "mission_items", (item,))),
+        episode_id=getattr(args, "episode_id", None),
     )
 
 
@@ -315,7 +320,9 @@ def main(argv: list[str] | None = None) -> int:
             args.rcon_password = _load_rcon_secret(args.rcon_secret_file)
         except ValueError as error:
             parser.error(str(error))
-    _validate_episode_manifest(getattr(args, "episode_manifest", None))
+    args.episode_id = _validate_episode_manifest(
+        getattr(args, "episode_manifest", None)
+    )
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
     pid_path = log_path.with_name("autonomous-run.pid")

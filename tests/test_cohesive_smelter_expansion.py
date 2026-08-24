@@ -285,7 +285,7 @@ def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:
     ] == ["electric-mining-drill", "electric-furnace"]
 
 
-def test_unmanaged_refinery_expansion_opens_basic_replacement(monkeypatch) -> None:
+def test_unmanaged_refinery_expansion_defers_without_opening_replacement(monkeypatch) -> None:
     calls = []
     extraction = SimpleNamespace(
         build_plan=None, drill_count=6, furnace_count=6,
@@ -309,16 +309,16 @@ def test_unmanaged_refinery_expansion_opens_basic_replacement(monkeypatch) -> No
     )
     monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append(("mine",)))
 
-    output = builder.build_mining_stage(
-        object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
-        lambda _message: None, expand=True,
-    )
+    with pytest.raises(StuckError, match="complete six-furnace modules"):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
+            lambda _message: None, expand=True,
+        )
 
-    assert output == (31.0, 41.0)
-    assert calls == [("refinery", True), ("mine",), ("refinery", False)]
+    assert calls == []
 
 
-def test_blocked_refinery_tail_falls_back_to_new_managed_site(monkeypatch) -> None:
+def test_blocked_refinery_tail_defers_without_opening_new_site(monkeypatch) -> None:
     calls = []
     extraction = SimpleNamespace(
         build_plan=None, drill_count=6, furnace_count=6,
@@ -344,13 +344,30 @@ def test_blocked_refinery_tail_falls_back_to_new_managed_site(monkeypatch) -> No
     )
     monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append(("mine",)))
 
-    output = builder.build_mining_stage(
-        object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
-        lambda _message: None, expand=True,
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="refinery extension intersects real infrastructure",
+    ):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
+            lambda _message: None, expand=True,
+        )
+
+    assert calls == []
+
+
+def test_same_force_service_entity_is_not_owned_without_exact_identity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda *_a: {
+            "name": "medium-electric-pole", "type": "electric-pole", "force": "player",
+        },
     )
 
-    assert output == (31.0, 41.0)
-    assert calls == [("refinery", True), ("mine",), ("refinery", False)]
+    assert not builder._own_service_infrastructure(
+        object(), "nauvis", "player", ("medium-electric-pole", 10.5, 20.5),
+    )
+
 
 def test_mining_expansion_rejects_full_bill_before_submitting_mine(monkeypatch) -> None:
     extraction = SimpleNamespace(build_plan={"phases": []})
@@ -562,6 +579,38 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
         action["entity"] == "passive-provider-chest"
         for action in actions(captured["plan"])
     )
+
+
+def test_initial_refinery_keeps_the_mine_transaction_planned_on_build_pass(
+    monkeypatch,
+) -> None:
+    captured = {}
+    extraction = SimpleNamespace(
+        smelter_origin=(20.0, -10.0), furnace_count=2, ore="iron-ore",
+        build_plan={"phases": []},
+    )
+
+    def preflight(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return ([], "transport-belt")
+
+    monkeypatch.setattr(builder, "preflight_ingredient_transport", preflight)
+    monkeypatch.setattr(
+        builder, "_plate_expansion_foundation", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_bring_modular_refinery_up", lambda *_a, **_k: None,
+    )
+
+    builder._build_initial_plate_smelter(
+        object(), object(), "nauvis", "player", "iron-plate", extraction,
+        (5.5, -2.5), (0.0, 0.0), lambda _message: None,
+    )
+
+    assert captured["kwargs"]["planned_belt_source"] == (6.5, -2.5)
 
 
 def test_planned_footprint_ignores_retirement_actions() -> None:

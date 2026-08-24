@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import sys
 from pathlib import Path
 
@@ -15,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import extraction_transport, stage_transport  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402
-from orchestrator.stage_services import _BRIDGE_SURVEY_MARGIN  # noqa: E402
+from orchestrator.stage_services import StuckError, _BRIDGE_SURVEY_MARGIN  # noqa: E402
 from orchestrator.stage_extraction import direct_mine_plan  # noqa: E402
 from orchestrator.stage_transport import (  # noqa: E402
     _BELT_TIERS_CHEAPEST_FIRST,
@@ -144,7 +145,7 @@ def test_non_raw_routes_do_not_override_the_router_exit() -> None:
     ) is None
 
 
-def test_direct_ore_route_reorients_the_terminal_without_an_inserter(
+def test_unowned_direct_ore_terminal_is_not_reoriented_or_removed(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -167,18 +168,43 @@ def test_direct_ore_route_reorients_the_terminal_without_an_inserter(
         ),
     )
 
-    actions, tier, reused = stage_transport._plan_belt_transport(
-        object(), "nauvis", "player", "iron-ore",
-        (12.5, -1.5), (0.5, 10.5), reuse_existing=True,
-        max_belt_route_tiles=100, destination_is_belt=True,
-        destination_belt_direction="east",
+    with pytest.raises(StuckError, match="no belt route"):
+        stage_transport._plan_belt_transport(
+            object(), "nauvis", "player", "iron-ore",
+            (12.5, -1.5), (0.5, 10.5), reuse_existing=True,
+            max_belt_route_tiles=100, destination_is_belt=True,
+            destination_belt_direction="east",
+        )
+
+
+def test_source_belt_replacement_requires_exact_owned_signature(monkeypatch) -> None:
+    source = (13.5, -1.5)
+    actions = [{
+        "action_type": "place_ghost",
+        "entity": "transport-belt",
+        "position": {"x": source[0], "y": source[1]},
+        "direction": "west",
+    }]
+    monkeypatch.setattr(
+        stage_transport.live_base,
+        "entity_at",
+        lambda *_a: {
+            "name": "transport-belt", "type": "transport-belt",
+            "direction": 4, "force": "player",
+        },
     )
 
-    assert (tier, reused) == ("transport-belt", True)
-    assert actions[0]["action_type"] == "remove_entity"
-    assert actions[1]["position"] == {"x": 13.5, "y": -1.5}
-    assert actions[1]["direction"] == "west"
-    assert not any(action["entity"].endswith("inserter") for action in actions)
+    assert stage_transport._replace_existing_source_belt(
+        object(), "nauvis", source, actions,
+    ) == actions
+
+    replaced = stage_transport._replace_existing_source_belt(
+        object(), "nauvis", source, actions,
+        owned_source=("transport-belt", source[0], source[1], "east"),
+    )
+    assert [action["action_type"] for action in replaced] == [
+        "remove_entity", "place_ghost",
+    ]
 
 
 def test_planned_direct_mine_handoff_is_not_treated_as_an_obstacle(monkeypatch) -> None:
@@ -199,6 +225,9 @@ def test_planned_direct_mine_handoff_is_not_treated_as_an_obstacle(monkeypatch) 
         stage_transport.live_base, "occupied_tiles",
         lambda *_args, **_kwargs: set(),
     )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_args: None,
+    )
 
     source, route_source, _blocked, _entry, exit_direction = (
         stage_transport._survey_belt_route(
@@ -215,8 +244,117 @@ def test_planned_direct_mine_handoff_is_not_treated_as_an_obstacle(monkeypatch) 
     assert exit_direction == "west"
 
 
+def test_blocked_raw_mine_exit_falls_back_to_the_router_exit(monkeypatch) -> None:
+    mine_plan, ore_output = direct_mine_plan(
+        (100.0, 100.0), 6, belt_type="transport-belt",
+        inserter_type="inserter", reserved_pair_columns=0,
+    )
+    planned = extraction_transport.planned_footprint_tiles(mine_plan)
+    planned -= {
+        (int(ore_output[0]), int(ore_output[1])),
+        (int(ore_output[0] + 1), int(ore_output[1])),
+    }
+    belt_source = (ore_output[0] + 1, ore_output[1])
+    blocked_west_tile = (
+        math.floor(belt_source[0] - 1), math.floor(belt_source[1]),
+    )
+
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **_kwargs: {blocked_west_tile},
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_args: None,
+    )
+
+    source, route_source, _blocked, _entry, exit_direction = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "iron-ore", ore_output,
+            (100.0, 130.0), reuse_existing=True,
+            additional_blocked=planned, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=belt_source,
+        )
+    )
+
+    assert source == route_source == belt_source
+    assert exit_direction != "west"
+    assert exit_direction == "south"
+
+
+def test_reuse_survey_does_not_hide_foreign_belt_families(monkeypatch) -> None:
+    captured: dict[str, tuple[str, ...]] = {}
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source", lambda *_a, **_k: None,
+    )
+
+    def occupied(*_args, **kwargs):
+        ignored = tuple(kwargs.get("ignore_names", ()))
+        captured["ignored"] = ignored
+        return set() if "transport-belt" in ignored else {(4, 0)}
+
+    monkeypatch.setattr(stage_transport.live_base, "occupied_tiles", occupied)
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_args: None,
+    )
+
+    _source, _route_source, blocked, _entry, _exit = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "iron-plate",
+            (0.5, 0.5), (10.5, 0.5), reuse_existing=True,
+            additional_blocked=None, upstream_shift=1,
+            destination_is_belt=False, destination_belt_direction="east",
+            planned_belt_source=None,
+        )
+    )
+
+    assert "transport-belt" not in captured["ignored"]
+    assert (4, 0) in blocked
+
+
 def test_the_cheapest_tier_is_a_real_belt_the_agent_can_build() -> None:
     from planners.recipe_data import LINE_RECIPES
 
     assert _BELT_TIERS_CHEAPEST_FIRST[0] == "transport-belt"
     assert "transport-belt" in LINE_RECIPES
+
+
+def test_phantom_through_source_does_not_force_a_backwards_exit(
+    monkeypatch,
+) -> None:
+    """Live run of 2026-08-24 14:12: an east-flow head reports the EMPTY tile
+    past the head as its through source; the raw-exit heuristic read that
+    phantom as a west-flow terminal and drove the haul backwards into the
+    head belt, cornering on a tile it can never own. A raw exit describes a
+    belt that stands at the through source -- no belt, no surveyed direction."""
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source",
+        lambda *_args, **_kwargs: (90.5, -39.5),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at",
+        lambda _c, _s, position: (
+            {"type": "transport-belt", "name": "fast-transport-belt"}
+            if position == (89.5, -39.5) else None
+        ),
+    )
+
+    _belt_source, _route, _blocked, _entry, exit_direction = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "copper-ore",
+            (89.5, -39.5), (110.5, -39.5),
+            reuse_existing=True, additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=None,
+        )
+    )
+
+    assert exit_direction == "east"

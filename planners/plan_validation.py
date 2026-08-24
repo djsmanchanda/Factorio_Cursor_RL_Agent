@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Iterable
 
 from jsonschema import Draft7Validator
 
-from planners.infrastructure_geometry import boxes_overlap
 from planners.recipe_data import _reject_fuel_entities
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +29,44 @@ ENTITY_FOOTPRINTS = {
     "electric-energy-interface": 2,
     "storage-tank": 3,
 }
+
+# Splitters are the only rectangular placement used by the deterministic
+# planners. Their long axis is perpendicular to belt flow.
+ENTITY_RECTANGULAR_FOOTPRINTS = {
+    "splitter": (2, 1),
+    "fast-splitter": (2, 1),
+    "express-splitter": (2, 1),
+    "turbo-splitter": (2, 1),
+}
+
+
+def entity_footprint_dimensions(
+    entity: str, direction: str | None = None,
+) -> tuple[int, int]:
+    """Return the grid footprint width/height for one oriented entity."""
+    rectangular = ENTITY_RECTANGULAR_FOOTPRINTS.get(entity)
+    if rectangular is not None:
+        width, height = rectangular
+        if direction in {"east", "west"}:
+            width, height = height, width
+        return width, height
+    size = ENTITY_FOOTPRINTS.get(entity, 1)
+    return int(size), int(size)
+
+
+def entity_footprint_tiles(action: dict) -> frozenset[tuple[int, int]]:
+    """Return every occupied tile for one cardinal grid placement."""
+    position = action["position"]
+    width, height = entity_footprint_dimensions(
+        action["entity"], action.get("direction"),
+    )
+    left = math.floor(float(position["x"]) - width / 2)
+    top = math.floor(float(position["y"]) - height / 2)
+    return frozenset(
+        (x, y)
+        for x in range(left, left + width)
+        for y in range(top, top + height)
+    )
 
 
 def actions(plan: dict) -> Iterable[dict]:
@@ -95,11 +133,10 @@ def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
     ]
     for index, (left_name, left) in enumerate(placements):
         left_position = (left["position"]["x"], left["position"]["y"])
-        left_size = ENTITY_FOOTPRINTS.get(left["entity"], 1)
+        left_tiles = entity_footprint_tiles(left)
         for right_name, right in placements[index + 1:]:
             right_position = (right["position"]["x"], right["position"]["y"])
-            right_size = ENTITY_FOOTPRINTS.get(right["entity"], 1)
-            if boxes_overlap(left_position, left_size, right_position, right_size) and not is_verified_pumpjack_attachment(left, right):
+            if left_tiles & entity_footprint_tiles(right) and not is_verified_pumpjack_attachment(left, right):
                 raise ValueError(
                     f"Plan collision: {left_name} {left['entity']} at {left_position} overlaps "
                     f"{right_name} {right['entity']} at {right_position}"
@@ -113,15 +150,7 @@ def occupied_tile_indices(named_plans: list[tuple[str, dict]]) -> set[tuple[int,
         for action in actions(plan):
             if action.get("action_type") not in _PLACEMENTS:
                 continue
-            size = ENTITY_FOOTPRINTS.get(action["entity"], 1)
-            x, y = action["position"]["x"], action["position"]["y"]
-            left = int(x - size / 2)
-            top = int(y - size / 2)
-            occupied.update(
-                (tile_x, tile_y)
-                for tile_x in range(left, left + size)
-                for tile_y in range(top, top + size)
-            )
+            occupied.update(entity_footprint_tiles(action))
     return occupied
 
 def placement_keys(named_plans: list[tuple[str, dict]]) -> set[str]:

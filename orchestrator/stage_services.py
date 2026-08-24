@@ -205,10 +205,22 @@ def _submit(
     if stage_coverage is not None:
         stage_coverage()
     authorization = build_layout_authorization([(name, plan)])
+    # Removal-only plans (bootstrap cell retirement) place nothing by design;
+    # the executor counts only place actions, so demanding attempted
+    # placements here killed every retirement with "silent churn" after the
+    # removals had already run (live run of 2026-08-24 15:16).
+    expected_placements = sum(
+        1
+        for phase in plan.get("phases", [])
+        for action in phase.get("actions", [])
+        if action.get("action_type") in {
+            "place_entity", "place_ghost", "place_tile_ghost",
+        }
+    )
     for attempt in range(max_retries + 1):
         consume_plan_submission(f"{name}#retry{attempt}")
         report = load_json(bridge.build_layout(authorization, plan))
-        if report.get("attempted_placements") == 0:
+        if expected_placements and report.get("attempted_placements") == 0:
             raise StuckError(
                 f"{name}: execution attempted zero placements; refusing silent churn"
             )
@@ -221,43 +233,7 @@ def _submit(
             return report
         cleared_any = False
         blocking = []
-        adopted_belt_positions: set[tuple[float, float]] = set()
-        action_at: dict[tuple[float, float], dict] = {}
-        for phase in plan["phases"]:
-            for action in phase["actions"]:
-                pos = action.get("position") or {}
-                action_at[(pos.get("x"), pos.get("y"))] = action
-
-        def _is_belt(name: str) -> bool:
-            # The whole belt LINE family joins as one corridor: transport,
-            # underground, and their tiered variants.
-            return "transport-belt" in name or "underground-belt" in name
-
-        def is_own_belt_join(failure: dict) -> bool:
-            """A belt action colliding with OUR OWN standing belt of any tier
-            or kind: the standing belt IS the corridor -- adopt it, don't
-            overwrite."""
-            if failure.get("reason") not in (
-                "direction_mismatch",
-                "exact_position_occupied_by_different_entity",
-            ):
-                return False
-            position = (failure["position"]["x"], failure["position"]["y"])
-            action = action_at.get(position, {})
-            if not _is_belt(action.get("entity", "")):
-                return False
-            occupant = live_base.entity_at(client, surface, position)
-            return (
-                occupant is not None
-                and occupant.get("force") == plan.get("force", "player")
-                and _is_belt(occupant.get("name", ""))
-            )
-
         for failure in report.get("placement_failures", []):
-            if is_own_belt_join(failure):
-                position = (failure["position"]["x"], failure["position"]["y"])
-                adopted_belt_positions.add(position)
-                continue
             if failure.get("reason") != "exact_position_occupied_by_different_entity":
                 blocking.append(failure)
                 continue
@@ -269,29 +245,6 @@ def _submit(
                 cleared_any = True
             else:
                 blocking.append({**failure, "occupant": occupant})
-        if adopted_belt_positions:
-            removed = 0
-            for phase in plan["phases"]:
-                kept = []
-                for action in phase["actions"]:
-                    pos = action.get("position") or {}
-                    key = (pos.get("x"), pos.get("y"))
-                    if (
-                        ("transport-belt" in action.get("entity", "")
-                         or "underground-belt" in action.get("entity", ""))
-                        and (key[0], key[1]) in adopted_belt_positions
-                    ):
-                        removed += 1
-                        continue
-                    kept.append(action)
-                phase["actions"] = kept
-            if removed:
-                emit(
-                    f"  {name}: adopting {removed} existing belt tile(s) as "
-                    "the join instead of overwriting them"
-                )
-                authorization = build_layout_authorization([(name, plan)])
-                continue
         if blocking:
             raise StuckError(
                 f"{name}: blocked by real infrastructure, not map clutter -- needs a "

@@ -39,6 +39,9 @@ from planners.recipe_data import BELT_TIERS, LINE_RECIPES, MACHINE_SPEEDS
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+OwnedBeltSignature = tuple[str, float, float, str]
+
+_CARDINAL_DIRECTION = {0: "north", 4: "east", 8: "south", 12: "west"}
 
 
 def _direct_belt_entry(
@@ -175,10 +178,18 @@ def _preserve_existing_side_tap_belts(
 
 def _replace_existing_source_belt(
     client: RconClient, surface: str, source: Point, actions: list[dict],
+    *, owned_source: OwnedBeltSignature | None = None,
 ) -> list[dict]:
-    """Let a bridge turn an existing mine endpoint into its route corner."""
+    """Replace only an endpoint whose exact persisted signature authorizes it."""
     existing = live_base.entity_at(client, surface, source)
     if not existing or existing["type"] != "transport-belt":
+        return actions
+    actual_direction = _CARDINAL_DIRECTION.get(
+        existing.get("direction"), existing.get("direction"),
+    )
+    if owned_source != (
+        existing.get("name"), source[0], source[1], actual_direction,
+    ):
         return actions
     if not any(
         action.get("position") == {"x": source[0], "y": source[1]}
@@ -437,23 +448,22 @@ def _survey_belt_route(
             f"{source_position}; refusing a chest/inserter side-feed"
         )
     route_source = belt_source or source_position
-    ignored = ()
-    if reuse_existing:
-        belt_names = tuple(UNDERGROUND_REACH)
-        ignored = (
-            *belt_names,
-            *(name.replace("transport-belt", "underground-belt")
-              for name in belt_names),
-        )
-        if not destination_is_belt:
-            ignored = (*ignored, _DEFAULT_INSERTER)
+    planned_handoff = belt_source == planned_belt_source
+    # A raw exit describes a belt that STANDS at the through source, or one
+    # this transaction is about to lay. East-flow collector heads report the
+    # empty tile past the head as the through source on re-plans; reading that
+    # phantom as a west-flow terminal drove the haul backwards into the head
+    # belt, and the route died on a corner it could never own (live run of
+    # 2026-08-24 14:12).
+    through_belt_stands = _entity_or_ghost_is(
+        live_base.entity_at(client, surface, route_source), "transport-belt",
+    )
     blocked = live_base.occupied_tiles(
         client, surface,
         (min(route_source[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
          min(route_source[1], feed_position[1]) - _BRIDGE_SURVEY_MARGIN),
         (max(route_source[0], feed_position[0]) + _BRIDGE_SURVEY_MARGIN,
          max(route_source[1], feed_position[1]) + _BRIDGE_SURVEY_MARGIN),
-        ignore_names=ignored,
     )
     blocked |= additional_blocked or set()
     blocked -= {
@@ -461,9 +471,27 @@ def _survey_belt_route(
         (math.floor(feed_position[0]), math.floor(feed_position[1])),
     }
     direction = _toward(route_source, feed_position)
-    exit_direction = (
+    raw_exit = (
         _raw_belt_exit_direction(ingredient, route_source, source_position)
-        if belt_source is not None and destination_is_belt else None
+        if (
+            belt_source is not None and destination_is_belt
+            and (through_belt_stands or planned_handoff)
+        ) else None
+    )
+    raw_exit_tile = (
+        (math.floor(route_source[0] + DIRECTION_VECTORS[raw_exit][0]),
+         math.floor(route_source[1] + DIRECTION_VECTORS[raw_exit][1]))
+        if raw_exit is not None else None
+    )
+    # An already built raw terminal keeps its surveyed handoff direction and
+    # fails closed if that route cannot work. A freshly planned terminal may
+    # choose another clear side rather than force a tunnel corner.
+    exit_direction = (
+        raw_exit
+        if raw_exit is not None and (
+            not planned_handoff or raw_exit_tile not in blocked
+        )
+        else None
     ) or _clear_side(route_source, direction, blocked)
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
     if destination_is_belt:
