@@ -56,8 +56,38 @@ def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
     assert "build_mining_stage(" in _PREP
 
 
-def test_an_existing_line_is_expanded_rather_than_duplicated() -> None:
-    assert "expand=plate_line is not None" in _PREP
+def test_requester_bootstrap_never_counts_as_the_first_direct_refinery(
+    monkeypatch,
+) -> None:
+    calls = []
+    line = type("Line", (), {
+        "machine_count": 2,
+        "machine_positions": ((145.5, -77.5), (145.5, -71.5)),
+    })()
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items", lambda *_args: {},
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line", lambda *_args: line,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "smelter_count_for_draw", lambda *_args: 6,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_args, **kwargs: calls.append(kwargs["expand"]) or (10.5, 10.5),
+    )
+
+    autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "copper-plate", set(), {},
+        {}, (0.0, 0.0), lambda _message: None,
+    )
+
+    assert calls == [False]
 
 
 def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:

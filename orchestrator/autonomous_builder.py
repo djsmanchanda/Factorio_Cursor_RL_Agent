@@ -1174,15 +1174,14 @@ def _prepare_initial_refinery(
 
 def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, ore: str, emit: Callable[[str], None],
+    recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
 ) -> int:
-    """Deconstruct every standing logistic bootstrap cell for `recipe`.
+    """Retire a recognized bootstrap cell and its mine-side logistic intake.
 
-    User standard, 2026-08-22: the temporary requester-fed cell is a scaffold,
-    not a destination -- the moment the real belt-driven system becomes
-    affordable, the cell goes FIRST and the proper refinery follows. Leaving
-    both up split the plate supply and left orphaned furnaces everywhere
-    (live run 15). Returns the number of cells deconstructed."""
+    The caller invokes this only after the direct refinery is healthy. Keeping
+    the temporary path until then preserves the only working plate source when
+    construction or bring-up fails. Returns the number of cells deconstructed.
+    """
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
     except Exception:  # survey unavailable (dry harness): nothing to retire
@@ -1196,9 +1195,75 @@ def _retire_standing_bootstrap_cells(
                 f"retire_logistic_{recipe}_cell", emit)
         removed += 1
     if removed:
+        intake_actions: list[dict] = []
+        try:
+            surveyed = live_base.intake_candidate_tiles(
+                client, surface, ore_output,
+            )
+            candidates = list(dict.fromkeys([
+                ore_output, *(surveyed or ()),
+            ]))
+        except Exception:
+            candidates = [ore_output]
+        seen: set[Point] = set()
+        directions = ((0.0, -1.0), (0.0, 1.0),
+                      (-1.0, 0.0), (1.0, 0.0))
+        for anchor in candidates:
+            standing = live_base.entity_at(client, surface, anchor)
+            if (
+                standing is not None
+                and standing.get("name") == "passive-provider-chest"
+                and anchor not in seen
+            ):
+                intake_actions.append({
+                    "action_type": "remove_entity",
+                    "entity": "passive-provider-chest",
+                    "position": {"x": anchor[0], "y": anchor[1]},
+                })
+                seen.add(anchor)
+            for dx, dy in directions:
+                inserter = (anchor[0] + dx, anchor[1] + dy)
+                chest = (anchor[0] + 2 * dx, anchor[1] + 2 * dy)
+                standing_inserter = live_base.entity_at(
+                    client, surface, inserter,
+                )
+                standing_chest = live_base.entity_at(client, surface, chest)
+                if not (
+                    standing_inserter is not None
+                    and standing_inserter.get("type") == "inserter"
+                    and standing_chest is not None
+                    and standing_chest.get("name") == "passive-provider-chest"
+                ):
+                    continue
+                for position, entity in (
+                    (inserter, standing_inserter["name"]),
+                    (chest, "passive-provider-chest"),
+                ):
+                    if position in seen:
+                        continue
+                    intake_actions.append({
+                        "action_type": "remove_entity",
+                        "entity": entity,
+                        "position": {"x": position[0], "y": position[1]},
+                    })
+                    seen.add(position)
+        if intake_actions:
+            intake_plan = {
+                "surface": surface,
+                "force": force,
+                "phases": [{
+                    "name": f"retire_{ore}_logistic_intake",
+                    "actions": intake_actions,
+                }],
+            }
+            _submit(
+                client, bridge, surface, intake_plan,
+                f"retire_{ore}_logistic_intake", emit,
+            )
         emit(
-            f"BOOTSTRAP SWAP: deconstructed {removed} temporary {recipe} "
-            "cell(s) -- installing the belt-driven system in their place"
+            f"BOOTSTRAP SWAP COMPLETE: direct {recipe} refinery is healthy; "
+            f"removed {removed} temporary cell(s) and their recognized "
+            "mine-side logistic intake"
         )
     return removed
 
@@ -1214,13 +1279,6 @@ def _build_initial_plate_smelter(
         client, surface, force, recipe, extraction, ore_output, emit,
         preflight_only=preflight_only,
     )
-    if not preflight_only:
-        # Affordability just passed: the temporary requester-fed cell's whole
-        # reason to exist is gone. Deconstruct it FIRST (user standard), then
-        # install the belt-driven refinery in its place.
-        _retire_standing_bootstrap_cells(
-            client, bridge, surface, force, recipe, extraction.ore, emit,
-        )
     if foundation is not None:
         _place_plate_expansion_foundation(
             client, bridge, surface, force, recipe, foundation, emit,
@@ -1253,6 +1311,10 @@ def _build_initial_plate_smelter(
         extraction.smelter_origin, emit,
         feed_grace_seconds=transport_grace_seconds(belt_type, belt_tiles),
         variant="basic",
+    )
+    _retire_standing_bootstrap_cells(
+        client, bridge, surface, force, recipe, extraction.ore,
+        ore_output, emit,
     )
     return provider
 
@@ -3287,6 +3349,12 @@ def _prep_plate_extraction(
         client, surface, force, short_plate,
         LINE_RECIPES[short_plate]["machine"],
     )
+    bootstrap_line = bool(
+        plate_line is not None
+        and logistic_smelter_origin(tuple(
+            getattr(plate_line, "machine_positions", ()) or (),
+        )) is not None
+    )
     have = plate_line.machine_count if plate_line else 0
     if have >= wanted_furnaces:
         newly_prepped = short_plate not in prepped
@@ -3305,7 +3373,12 @@ def _prep_plate_extraction(
     try:
         output_source = build_mining_stage(
             client, bridge, surface, force, short_plate,
-            reference_point, emit, expand=plate_line is not None,
+            reference_point, emit,
+            # The two requester-fed furnaces are not the first direct
+            # refinery. Treating them as one sent every later pass into mine
+            # expansion, so the proper belt-fed system was never retried even
+            # after belt production started (live trace 2026-08-24 17:59).
+            expand=plate_line is not None and not bootstrap_line,
         )
         if output_source is not None:
             MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source

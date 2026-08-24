@@ -541,6 +541,7 @@ def test_replacement_services_refuse_roboport_removal_without_alternative(monkey
 
 def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatch) -> None:
     captured = {}
+    order = []
     extraction = SimpleNamespace(
         smelter_origin=(20.0, -10.0), furnace_count=2, ore="iron-ore",
     )
@@ -559,9 +560,17 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
     monkeypatch.setattr(
-        builder, "_submit", lambda *_a, **_k: captured.update(plan=_a[3]),
+        builder, "_submit",
+        lambda *_a, **_k: (captured.update(plan=_a[3]), order.append("submit")),
     )
-    monkeypatch.setattr(builder, "_bring_modular_refinery_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_bring_modular_refinery_up",
+        lambda *_a, **_k: order.append("healthy"),
+    )
+    monkeypatch.setattr(
+        builder, "_retire_standing_bootstrap_cells",
+        lambda *_a, **_k: order.append("retire") or 1,
+    )
 
     output = builder._build_initial_plate_smelter(
         object(), object(), "nauvis", "player", "iron-plate", extraction,
@@ -575,6 +584,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     assert captured["kwargs"]["destination_belt_direction"] == "east"
     assert captured["kwargs"]["reserved_transport_belts"] > 0
     assert output == interface.provider
+    assert order == ["submit", "healthy", "retire"]
     assert any(
         action["entity"] == "passive-provider-chest"
         for action in actions(captured["plan"])
@@ -604,6 +614,9 @@ def test_initial_refinery_keeps_the_mine_transaction_planned_on_build_pass(
     monkeypatch.setattr(
         builder, "_bring_modular_refinery_up", lambda *_a, **_k: None,
     )
+    monkeypatch.setattr(
+        builder, "_retire_standing_bootstrap_cells", lambda *_a, **_k: 0,
+    )
 
     builder._build_initial_plate_smelter(
         object(), object(), "nauvis", "player", "iron-plate", extraction,
@@ -611,6 +624,50 @@ def test_initial_refinery_keeps_the_mine_transaction_planned_on_build_pass(
     )
 
     assert captured["kwargs"]["planned_belt_source"] == (6.5, -2.5)
+
+
+def test_bootstrap_retirement_removes_the_mine_logistic_intake(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "bootstrap_cell_origins",
+        lambda *_a, **_k: [(145.5, -74.5)],
+    )
+    monkeypatch.setattr(
+        builder.live_base, "intake_candidate_tiles",
+        # The completed haul extends the apparent row past the original head;
+        # teardown must still inspect the recorded ore output first.
+        lambda *_a, **_k: [(91.5, -39.5)],
+    )
+
+    def entity_at(_client, _surface, position):
+        if position == (89.5, -40.5):
+            return {"name": "fast-inserter", "type": "inserter"}
+        if position == (89.5, -41.5):
+            return {"name": "passive-provider-chest", "type": "logistic-container"}
+        return None
+
+    monkeypatch.setattr(builder.live_base, "entity_at", entity_at)
+    submissions = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e, **_k: submissions.append((name, plan)),
+    )
+
+    removed = builder._retire_standing_bootstrap_cells(
+        object(), object(), "nauvis", "player", "copper-plate",
+        "copper-ore", (89.5, -39.5), lambda _message: None,
+    )
+
+    assert removed == 1
+    assert [name for name, _plan in submissions] == [
+        "retire_logistic_copper-plate_cell",
+        "retire_copper-ore_logistic_intake",
+    ]
+    intake_actions = submissions[1][1]["phases"][0]["actions"]
+    assert {(action["entity"], tuple(action["position"].values()))
+            for action in intake_actions} == {
+        ("fast-inserter", (89.5, -40.5)),
+        ("passive-provider-chest", (89.5, -41.5)),
+    }
 
 
 def test_planned_footprint_ignores_retirement_actions() -> None:

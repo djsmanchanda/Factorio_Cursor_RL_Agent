@@ -22,6 +22,27 @@ These names describe intended responsibilities, not permission to build speculat
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
 - Base capacity on rates and live game facts, not machine counts alone.
 
+## Production lifecycle invariants
+
+- A requester-fed iron or copper smelter is temporary bootstrap infrastructure.
+  Once belt production can fund a complete direct mine-to-refinery system, the
+  controller must build that direct system without waiting for more demand.
+- Migration is build -> validate -> retire. The bootstrap remains intact until
+  the direct mine, continuous ore belt, refinery, power, and plate output are
+  built and observed healthy. Only then may its requester/provider chests,
+  temporary furnaces, and mine-side logistic intake be removed.
+- A migration is incomplete while any recognized bootstrap chest or furnace
+  remains. Producing plates somewhere else is not sufficient evidence.
+- Furnace capacity may grow only after measured ore delivery can feed it. A
+  supply-starved refinery triggers mine or transport repair, never another
+  furnace block.
+- Multiple consumers of one resource require an explicit splitter/manifold and
+  throughput budget. Independent belts may not overwrite or reverse the same
+  collector head.
+- A test may claim migration success only from the complete lifecycle outcome,
+  including teardown. Mocked helper calls and source-text assertions are not
+  acceptance evidence.
+
 These are also useful RL priors and reward features. They are not a catalog the learned policy must copy.
 
 ## Deterministic power districts
