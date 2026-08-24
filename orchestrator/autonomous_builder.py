@@ -25,7 +25,8 @@ from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
     demand_adjusted_plate_draw, drill_phase_for_draw, iron_growth_target,
-    smelter_count_for_draw,
+    smelter_count_for_draw, STEEL_BASELINE_FURNACES,
+    STEEL_IRON_CAPACITY_FLOOR,
 )
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.controller_budget import (
@@ -2074,14 +2075,16 @@ def _conversion_feed_plan(
     # allow_logistic_inputs still forces bots for callers that must avoid belts.
     modes = {
         ingredient: (
-            "logistic" if allow_logistic_inputs
+            "belt" if recipe == "steel-plate"
+            else "logistic" if allow_logistic_inputs
             else _transport_mode(recipe, ingredient, machine_count)
         )
         for ingredient in LINE_RECIPES[recipe]["ingredients"]
     }
     direct_belt_input = (
-        recipe in {"iron-plate", "copper-plate"}
+        recipe in {"iron-plate", "copper-plate", "steel-plate"}
         and len(modes) == 1
+        and next(iter(modes.values())) == "belt"
     )
     if direct_belt_input:
         modes[next(iter(modes))] = "belt"
@@ -2997,14 +3000,36 @@ def _build_assembled_stage(
     promote_to_line, promoted_count = plan.promote_to_line, plan.promoted_count
     mall_storage_limit = plan.mall_storage_limit
     if item == "steel-plate":
+        iron_furnaces, iron_drills = _iron_capacity_for_fast_belts(
+            client, surface, force,
+        )
+        if min(iron_furnaces, iron_drills) < STEEL_IRON_CAPACITY_FLOOR:
+            emit(
+                "  STEEL CAPACITY GATE: six steel furnaces need the shared "
+                f"iron line at {STEEL_IRON_CAPACITY_FLOOR} furnaces and drills "
+                f"(have {iron_furnaces}/{iron_drills}); expanding iron first"
+            )
+            build_mining_stage(
+                client, bridge, surface, force, "iron-plate", reference_point,
+                emit, expand=iron_furnaces > 0,
+            )
+            raise ProductionPrerequisiteDeferred(
+                "steel-plate waits for the 12-furnace/12-drill iron checkpoint"
+            )
+        existing_count = existing.machine_count if existing is not None else 0
+        missing = max(0, STEEL_BASELINE_FURNACES - existing_count)
+        if missing == 0:
+            return
+        line_reference = sources["iron-plate"]
         output = build_conversion_stage(
-            client, bridge, surface, force, item, sources, reference_point, emit,
-            machine_count=1, allow_logistic_inputs=True, side_tap_output=True,
+            client, bridge, surface, force, item, sources, line_reference, emit,
+            machine_count=missing, allow_logistic_inputs=False,
+            side_tap_output=True,
         )
         MANAGED_INTERMEDIATE_SOURCES[item] = output
         emit(
-            "  PERSISTENT INTERMEDIATE: steel-plate now has a dedicated "
-            "logistic-fed furnace producer"
+            f"  PERSISTENT INTERMEDIATE: steel-plate now has its "
+            f"{STEEL_BASELINE_FURNACES}-furnace baseline beside the iron source"
         )
         return
     if promote_to_line:
@@ -3110,6 +3135,8 @@ def ensure_produced(
     first) and returns None so the caller re-surveys and calls again."""
     if item in MANAGED_INTERMEDIATE_SOURCES:
         return MANAGED_INTERMEDIATE_SOURCES[item]
+    if item == "steel-plate":
+        minimum_machines = max(minimum_machines, STEEL_BASELINE_FURNACES)
     if item == "fast-transport-belt":
         if not _electric_furnace_producer_started(client, surface, force):
             emit(

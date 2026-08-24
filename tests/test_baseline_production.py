@@ -22,6 +22,8 @@ from orchestrator.baseline_production import (  # noqa: E402
     demand_adjusted_plate_draw,
     iron_growth_target,
     mall_plate_draw,
+    STEEL_BASELINE_FURNACES,
+    STEEL_IRON_CAPACITY_FLOOR,
 )
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E402
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS  # noqa: E402
@@ -113,6 +115,11 @@ def test_iron_growth_policy_earmarks_next_modules_from_mine_capacity() -> None:
     assert iron_growth_target(12) == 24
     assert iron_growth_target(20) == 24
     assert iron_growth_target(24) == 24
+
+
+def test_steel_baseline_preserves_shared_iron_capacity() -> None:
+    assert STEEL_BASELINE_FURNACES == 6
+    assert STEEL_IRON_CAPACITY_FLOOR == 12
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)

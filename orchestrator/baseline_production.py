@@ -33,6 +33,13 @@ BASELINE_MACHINES = {
 # the set is produced by the set itself.
 BASELINE_PLATES = ("iron-plate", "copper-plate")
 
+# Steel is slow enough that one electric furnace is only a bootstrap token:
+# 0.125 plate/s while consuming 0.625 iron plate/s. Six furnaces make the
+# first useful construction line, and twelve iron furnaces leave half of the
+# opening iron checkpoint available for belts, gears, and other consumers.
+STEEL_BASELINE_FURNACES = 6
+STEEL_IRON_CAPACITY_FLOOR = 12
+
 # Before the electric-furnace mall chain is alive, extraction is deliberately
 # bounded. These are ceilings, not promises to build every line immediately:
 # the run may use fewer if the current demand is lower, but it cannot let a
@@ -41,7 +48,7 @@ BOOTSTRAP_FURNACE_CAPS = {
     "iron-plate": 12,
     "copper-plate": 6,
     "stone-brick": 6,
-    "steel-plate": 6,
+    "steel-plate": STEEL_BASELINE_FURNACES,
 }
 
 # Iron is the common construction input for the early factory.  Keep the

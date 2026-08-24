@@ -104,10 +104,15 @@ def test_steel_line_reuses_the_real_iron_provider_not_starter_storage(monkeypatc
 
 def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):
     monkeypatch.setattr(
-        builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (1.5, 2.5)},
+        builder, "_iron_capacity_for_fast_belts", lambda *_args: (12, 12),
     )
     monkeypatch.setattr(
-        builder, "build_conversion_stage", lambda *_args, **_kwargs: (9.5, 8.5),
+        builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (1.5, 2.5)},
+    )
+    calls = []
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or (9.5, 8.5),
     )
     plan = SimpleNamespace(
         existing=None, spec={"machine": "electric-furnace"},
@@ -120,3 +125,88 @@ def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):
     )
 
     assert builder.MANAGED_INTERMEDIATE_SOURCES == {"steel-plate": (9.5, 8.5)}
+    assert calls[0][0][6] == (1.5, 2.5)
+    assert calls[0][1]["machine_count"] == 6
+    assert calls[0][1]["allow_logistic_inputs"] is False
+
+
+def test_existing_single_steel_furnace_adds_only_five(monkeypatch):
+    monkeypatch.setattr(
+        builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (4.5, 5.5)},
+    )
+    monkeypatch.setattr(
+        builder, "_iron_capacity_for_fast_belts", lambda *_args: (12, 12),
+    )
+    calls = []
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or (9.5, 8.5),
+    )
+    plan = SimpleNamespace(
+        existing=SimpleNamespace(machine_count=1),
+        spec={"machine": "electric-furnace"}, promote_to_line=False,
+        promoted_count=None, mall_storage_limit=1,
+    )
+
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "steel-plate", (0.0, 0.0),
+        lambda _message: None, plan, None, upgrade_bootstrap=False,
+    )
+
+    assert calls[0][1]["machine_count"] == 5
+
+
+def test_steel_expands_iron_before_building_six_furnaces(monkeypatch):
+    monkeypatch.setattr(
+        builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (4.5, 5.5)},
+    )
+    monkeypatch.setattr(
+        builder, "_iron_capacity_for_fast_belts", lambda *_args: (6, 12),
+    )
+    expansions = []
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda *args, **kwargs: expansions.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *_args, **_kwargs: pytest.fail("steel built before iron capacity"),
+    )
+    plan = SimpleNamespace(
+        existing=None, spec={"machine": "electric-furnace"},
+        promote_to_line=False, promoted_count=None, mall_storage_limit=1,
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder._build_assembled_stage(
+            object(), object(), "nauvis", "player", "steel-plate", (0.0, 0.0),
+            lambda _message: None, plan, None, upgrade_bootstrap=False,
+        )
+
+    assert expansions[0][0][4] == "iron-plate"
+    assert expansions[0][1]["expand"] is True
+
+
+def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):
+    monkeypatch.setattr(
+        builder, "_transport_mode", lambda *_args: "logistic",
+    )
+    monkeypatch.setattr(
+        builder, "_direct_single_belt_feed",
+        lambda *_args: (8.5, 9.5),
+    )
+    monkeypatch.setattr(
+        builder, "_swap_infinity_chests",
+        lambda *_args: pytest.fail("steel fell back to a requester feed"),
+    )
+
+    modes, feeds, _preflighted, direct = builder._conversion_feed_plan(
+        object(), object(), "nauvis", "player", "steel-plate", {},
+        {"iron-plate": (1.5, 2.5)}, 4, "transport-belt", "east",
+        lambda _message: None, allow_logistic_inputs=True,
+        max_belt_route_tiles=None,
+    )
+
+    assert modes == {"iron-plate": "belt"}
+    assert feeds == {"iron-plate": (8.5, 9.5)}
+    assert direct is True

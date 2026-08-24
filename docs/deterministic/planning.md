@@ -40,6 +40,9 @@ These names describe intended responsibilities, not permission to build speculat
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.
+- The first persistent steel line is six furnaces, placed beside and belt-fed
+  from iron. It waits for at least the 12-furnace/12-drill iron checkpoint so
+  steel cannot consume the entire iron line while belts and gears are starved.
 - Planner-owned roboports are movable service infrastructure. When one blocks
   an owned refinery extension, place and power a connected replacement outside
   the future footprint before removing the old port. Production infrastructure
