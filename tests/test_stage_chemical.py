@@ -35,6 +35,57 @@ def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:
     assert _ghost_materials(foundation) == {"landfill": 1}
 
 
+def test_oil_route_tries_land_before_requesting_landfill(monkeypatch) -> None:
+    tunnel_choices = []
+
+    def link(*_args, **kwargs):
+        tunnel_choices.append(kwargs["allow_terrain_tunnels"])
+        return {"phases": [{"name": "fluid", "actions": []}]}
+
+    monkeypatch.setattr(stage_chemical, "generate_shortest_fluid_chain_link", link)
+    monkeypatch.setattr(
+        stage_chemical, "shortest_fluid_chain_segments",
+        lambda *_args, **kwargs: [{
+            "fluid": "water", "tiles": [],
+            "used_tunnels": kwargs["allow_terrain_tunnels"],
+        }],
+    )
+
+    _link, segments, crossed_water = stage_chemical._route_oil_fluid_link(
+        (0.5, 0.5), [(5.5, 0.5)], "water", foreign=[], hard=set(),
+        terrain_water={(2, 0)}, existing_tiles=[],
+    )
+
+    assert tunnel_choices == [False]
+    assert not crossed_water
+    assert segments[0]["used_tunnels"] is False
+
+
+def test_oil_route_uses_landfill_only_when_land_route_is_impossible(monkeypatch) -> None:
+    choices = []
+
+    def link(*_args, **kwargs):
+        allow = kwargs["allow_terrain_tunnels"]
+        choices.append(allow)
+        if not allow:
+            raise ValueError("no land detour")
+        return {"phases": [{"name": "fluid", "actions": []}]}
+
+    monkeypatch.setattr(stage_chemical, "generate_shortest_fluid_chain_link", link)
+    monkeypatch.setattr(
+        stage_chemical, "shortest_fluid_chain_segments",
+        lambda *_args, **_kwargs: [],
+    )
+
+    _link, _segments, crossed_water = stage_chemical._route_oil_fluid_link(
+        (0.5, 0.5), [(5.5, 0.5)], "water", foreign=[], hard=set(),
+        terrain_water={(2, 0)}, existing_tiles=[],
+    )
+
+    assert choices == [False, True]
+    assert crossed_water
+
+
 def test_chemical_coverage_targets_uncovered_positions_not_box_corners(monkeypatch) -> None:
     chained: list[Point] = []
     ports: list[list[Point]] = [[]]

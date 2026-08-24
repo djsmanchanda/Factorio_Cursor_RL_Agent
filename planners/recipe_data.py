@@ -92,14 +92,17 @@ LINE_RECIPES: Dict[str, dict] = {
     "iron-plate": {
         "machine": "electric-furnace", "ingredients": ["iron-ore"],
         "amounts": [1], "product_amount": 1, "craft_time": 3.2, "set_recipe": False,
+        "direct_extraction": True,
     },
     "copper-plate": {
         "machine": "electric-furnace", "ingredients": ["copper-ore"],
         "amounts": [1], "product_amount": 1, "craft_time": 3.2, "set_recipe": False,
+        "direct_extraction": True,
     },
     "stone-brick": {
         "machine": "electric-furnace", "ingredients": ["stone"],
         "amounts": [2], "product_amount": 1, "craft_time": 3.2, "set_recipe": False,
+        "direct_extraction": True,
     },
 }
 

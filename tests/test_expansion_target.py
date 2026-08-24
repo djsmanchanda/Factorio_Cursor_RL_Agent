@@ -69,6 +69,18 @@ def test_stone_brick_is_a_mineable_furnace_stage() -> None:
     assert expansion_target("stone-brick", {}) == "stone-brick"
 
 
+def test_raw_ingredient_does_not_turn_an_assembler_recipe_into_a_refinery(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(LINE_RECIPES, "landfill", {
+        "machine": "assembling-machine-2", "ingredients": ["stone"],
+        "amounts": [50], "product_amount": 1, "craft_time": 0.5,
+    })
+
+    assert not _mineable("landfill")
+    assert expansion_target("landfill", {}) is None
+
+
 @pytest.mark.parametrize("item", ["automation-science-pack", "electronic-circuit", "inserter"])
 def test_every_real_goal_resolves_to_an_extraction_stage(item: str) -> None:
     target = expansion_target(item, {})

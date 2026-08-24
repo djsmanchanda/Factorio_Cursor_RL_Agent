@@ -22,11 +22,11 @@ Point = tuple[float, float]
 
 def _mineable(recipe: str) -> bool:
     """Whether this recipe is a supported direct resource-extraction stage."""
-    ingredients = LINE_RECIPES[recipe]["ingredients"]
-    return (
-        len(ingredients) == 1
-        and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
-    )
+    spec = LINE_RECIPES[recipe]
+    if not spec.get("direct_extraction", False):
+        return False
+    ingredients = spec["ingredients"]
+    return len(ingredients) == 1 and ingredients[0] in NAUVIS_DIRECT_RESOURCE_INPUTS
 
 
 def may_consume_stocked_inputs(

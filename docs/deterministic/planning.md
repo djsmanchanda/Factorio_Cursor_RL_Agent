@@ -39,6 +39,9 @@ These names describe intended responsibilities, not permission to build speculat
 - Multiple consumers of one resource require an explicit splitter/manifold and
   throughput budget. Independent belts may not overwrite or reverse the same
   collector head.
+- A product does not become a mine/refinery stage merely because its recipe has
+  one raw-resource ingredient. Direct extraction is an explicit recipe role;
+  assembler products such as landfill stay in the assembly path.
 - A test may claim migration success only from the complete lifecycle outcome,
   including teardown. Mocked helper calls and source-text assertions are not
   acceptance evidence.

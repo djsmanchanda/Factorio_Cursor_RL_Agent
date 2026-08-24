@@ -321,6 +321,33 @@ def _existing_outputs(
     return None
 
 
+def _route_oil_fluid_link(
+    source: Point, targets: list[Point], fluid: str, *,
+    foreign: list[dict], hard: set[tuple[int, int]],
+    terrain_water: set[tuple[int, int]], existing_tiles: list[Point],
+) -> tuple[dict, list[dict], bool]:
+    """Prefer a land route; cross water only when no bounded detour exists."""
+    last_error: ValueError | None = None
+    for allow_water_crossing in (False, True):
+        try:
+            link = generate_shortest_fluid_chain_link(
+                source, targets, fluid, foreign=foreign, hard_tiles=hard,
+                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
+                existing_tiles=existing_tiles, mixing_margin=True,
+                allow_terrain_tunnels=allow_water_crossing,
+            )
+            segments = shortest_fluid_chain_segments(
+                source, targets, fluid, foreign=foreign, hard_tiles=hard,
+                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
+                mixing_margin=True,
+                allow_terrain_tunnels=allow_water_crossing,
+            )
+            return link, segments, allow_water_crossing
+        except ValueError as error:
+            last_error = error
+    raise last_error or ValueError("No bounded fluid route found")
+
+
 def ensure_oil_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, ensure_item: EnsureItem, service_stage: ServiceStage,
@@ -413,22 +440,18 @@ def ensure_oil_cell(
         (petroleum_from, [plastic_gas, sulfur_gas], "petroleum-gas", []),
         (water["output"], [sulfur_water], "water", [water["output"]]),
     ):
-        # Fluid routing rejects an impossible layout with ValueError. Left
-        # uncaught it escapes run() as a raw traceback, which reads as a crash
-        # rather than the bounded planning refusal it actually is.
         try:
-            link = generate_shortest_fluid_chain_link(
-                source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
-                existing_tiles=existing_tiles, mixing_margin=True,
-                allow_terrain_tunnels=True,
+            link, segments, crossed_water = _route_oil_fluid_link(
+                source, targets, fluid, foreign=foreign, hard=hard,
+                terrain_water=terrain_water, existing_tiles=existing_tiles,
             )
             links.append(link)
-            foreign.extend(shortest_fluid_chain_segments(
-                source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
-                mixing_margin=True, allow_terrain_tunnels=True,
-            ))
+            foreign.extend(segments)
+            if crossed_water:
+                emit(
+                    f"  FLUID ROUTE: {fluid} has no bounded land detour; "
+                    "using a water crossing with landfill endpoints"
+                )
         except ValueError as error:
             raise StuckError(
                 f"{fluid} cannot be routed from {source} to {targets}: {error}"
