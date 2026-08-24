@@ -185,6 +185,7 @@ def _submit(
     client: RconClient, bridge: GameBridge, surface: str, plan: dict, name: str,
     emit: Callable[[str], None], *, max_retries: int = 2,
     stage_coverage: Callable[[], None] | None = None,
+    allow_unfunded_ghosts: bool = False,
 ) -> dict:
     """Submit a plan; if a tile is blocked, clear it ONLY when it's obviously
     safe map clutter (a tree, a rock -- never anything a force built) and
@@ -192,16 +193,30 @@ def _submit(
     genuinely occupied -- raise so the caller picks a different spot instead
     of bulldozing real infrastructure.
 
-    `stage_coverage` runs after the material check passes and before any ghost
-    is submitted. Coverage roboports are service infrastructure for THIS plan;
-    staging them before affordability is how a chain of ports got strung across
-    the map for an oil cell whose landfill bill then failed -- the plan never
-    submitted and the grid kept the scars."""
+    `stage_coverage` runs after the material check and before any ghost is
+    submitted. Normal plans still require full stock first. The narrow
+    `allow_unfunded_ghosts` path is reserved for a collision-checked coherent
+    iron mine/refinery expansion whose missing items have already been queued;
+    its coverage and ghosts intentionally remain as one visible pending job."""
     if not any(phase.get("actions") for phase in plan.get("phases", [])):
         raise StuckError(f"{name}: proposed zero actions")
     consume_plan_submission(name)
     clear_plan_clutter(client, surface, plan, emit)
-    assert_affordable(client, surface, plan.get("force", "player"), plan, name, emit)
+    try:
+        assert_affordable(
+            client, surface, plan.get("force", "player"), plan, name, emit,
+        )
+    except MaterialShortage as shortage:
+        if not allow_unfunded_ghosts:
+            raise
+        emit(
+            f"  BLUEPRINT EARMARK: {name} is short "
+            + ", ".join(
+                f"{item}={count - shortage.available.get(item, 0)}"
+                for item, count in sorted(shortage.required.items())
+            )
+            + "; placing coherent ghosts while queued producers catch up"
+        )
     if stage_coverage is not None:
         stage_coverage()
     authorization = build_layout_authorization([(name, plan)])

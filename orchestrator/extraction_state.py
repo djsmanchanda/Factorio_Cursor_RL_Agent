@@ -187,9 +187,16 @@ def _classify_direct_mines(
         drill_xs = sorted({position[0] for position in row_drills})
         output_x = min(position[0] for position in belts if position[1] == belt_y)
         required_end = max(drill_xs) + 2
+        # The collector may reserve a straight continuation beyond the last
+        # drill before its haul turns. Recover that true head from the
+        # contiguous row instead of collapsing it back to ``last drill + 2``
+        # on every runner restart.
+        collector_end = required_end
+        while (collector_end + 1, belt_y) in belts:
+            collector_end += 1
         required_belts = [
             (output_x + offset, belt_y)
-            for offset in range(round(required_end - output_x) + 1)
+            for offset in range(round(collector_end - output_x) + 1)
         ]
         complete = (
             all(row_drills.values())
@@ -199,7 +206,7 @@ def _classify_direct_mines(
             (output_x, belt_y), len(drill_xs), pending=not complete,
             expansion_step=1, row_capacity=len(drill_xs) + RESERVED_PAIR_COLUMNS,
             belt_y=belt_y, first_column_x=min(drill_xs),
-            haul_head=(max(drill_xs) + 2, belt_y), growth_direction=-1,
+            haul_head=(collector_end, belt_y), growth_direction=-1,
         )
         distance = (output_x - near[0]) ** 2 + (belt_y - near[1]) ** 2
         direct_candidates.append((distance, mine))

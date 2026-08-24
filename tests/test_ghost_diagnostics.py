@@ -14,6 +14,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator import live_base  # noqa: E402
+from orchestrator import stage_services  # noqa: E402
+from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 
 
 class _Client:
@@ -24,6 +26,42 @@ class _Client:
     def command(self, command: str) -> str:
         self.commands.append(command)
         return self.reply
+
+
+def test_coherent_earmark_submits_ghosts_despite_queued_shortage(monkeypatch) -> None:
+    plan = {
+        "force": "player",
+        "phases": [{"actions": [{
+            "action_type": "place_ghost", "entity": "electric-mining-drill",
+            "position": {"x": 10.5, "y": 20.5},
+        }]}],
+    }
+    reports = []
+    bridge = type("Bridge", (), {
+        "build_layout": lambda _self, _authorization, _plan: (
+            reports.append(_plan) or {
+                "ok": True, "attempted_placements": 1,
+                "succeeded_placements": 1, "placed_ghosts": 1,
+                "placed_entities": 0,
+            }
+        ),
+    })()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a: (_ for _ in ()).throw(MaterialShortage(
+            "iron-expansion", {"electric-mining-drill": 6}, {},
+        )),
+    )
+
+    stage_services._submit(
+        object(), bridge, "nauvis", plan, "iron-expansion",
+        lambda _message: None, allow_unfunded_ghosts=True,
+    )
+
+    assert reports == [plan]
 
 
 def test_ghost_blockages_decodes_missing_material() -> None:

@@ -93,7 +93,7 @@ def test_without_an_ore_output_the_old_ordering_still_applies() -> None:
 def test_the_ore_haul_outranks_the_plate_haul_in_scoring() -> None:
     """Summing the two let a site far from the mine win because it happened to
     sit near the base. The ore belt is re-laid every time the drill row grows
-    6 -> 20 -> 50 -> 100; the plate belt out is built once."""
+    6 -> 12 -> 24 -> 48 -> 96; the plate belt out is built once."""
     source = inspect.getsource(plan_local_extraction)
     block = source[source.index("candidates.append(("):]
     block = block[:block.index("))")]

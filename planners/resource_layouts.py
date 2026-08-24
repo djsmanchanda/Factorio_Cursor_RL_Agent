@@ -14,6 +14,26 @@ from planners.recipe_data import BELT_TIERS
 
 ROW_POLE = "medium-electric-pole"
 
+# Keep the first collector straight for a bounded reserve before a refinery
+# haul is allowed to turn.  Twenty-four tiles puts the continuation near the
+# 115..120 coordinates seen in the early iron layout without reserving an
+# unbounded corridor on every patch.
+DIRECT_EAST_CONTINUATION_TILES = 24
+
+_SPLITTER_FOR_BELT = {
+    "transport-belt": "splitter",
+    "fast-transport-belt": "fast-splitter",
+    "express-transport-belt": "express-splitter",
+    "turbo-transport-belt": "turbo-splitter",
+}
+
+_UNDERGROUND_REACH = {
+    "transport-belt": 5,
+    "fast-transport-belt": 7,
+    "express-transport-belt": 9,
+    "turbo-transport-belt": 11,
+}
+
 
 def verified_pumpjack_output_tile(site: dict) -> tuple[int, int] | None:
     """Return the only verified pumpjack output tile, or None for unknown directions.
@@ -135,6 +155,7 @@ def generate_direct_mining_to_chest(
     output_side: str = "east",
     reserved_pair_columns: int = 0,
     prebuilt_pair_columns: int = 0,
+    continuation_tiles: int = 0,
     include_side_tap: bool = True,
 ) -> dict:
     """Mine onto a continuous belt, optionally with a side-tapped steel chest.
@@ -156,6 +177,8 @@ def generate_direct_mining_to_chest(
         raise ValueError("reserved and prebuilt pair columns cannot be negative")
     if prebuilt_pair_columns > reserved_pair_columns:
         raise ValueError("prebuilt_pair_columns cannot exceed the reserved corridor")
+    if continuation_tiles < 0:
+        raise ValueError("continuation_tiles cannot be negative")
 
     drills = sorted(drill_positions)
     first_x, drill_y = drills[0]
@@ -174,7 +197,7 @@ def generate_direct_mining_to_chest(
         # math by +4 tiles (live run of 2026-08-24 08:14 aimed the stone
         # refinery feed 4 tiles past the real collector head).
         belt_start_x = first_x - 4
-        belt_end_x = chest_x
+        belt_end_x = chest_x + continuation_tiles
         if belt_end_x < last_x:
             raise ValueError("Output tap needs a belt endpoint east of every drill")
         terminal_inserter_x, belt_direction = chest_x - 1, "east"
@@ -237,6 +260,124 @@ def generate_direct_mining_to_chest(
         ] if output_pole is not None else [])},
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
+    if output_side == "east" and continuation_tiles:
+        plan["collector_geometry"] = {
+            "flow": "east",
+            "collector_tail": (belt_start_x, belt_y),
+            "collector_head": (belt_end_x, belt_y),
+            "continuation_tiles": continuation_tiles,
+        }
+    validate_build_plan(plan)
+    return plan
+
+
+def generate_parallel_mining_row_expansion(
+    drill_xs: list[float], source_belt_y: float, *,
+    belt_type: str = "fast-transport-belt",
+    parallel_belt_y: float | None = None,
+    merge_x: float | None = None,
+    splitter_type: str | None = None,
+) -> dict:
+    """Build a second paired collector row and merge it into the source lane.
+
+    The parallel belt runs east and feeds the second splitter lane through a
+    vertical underground crossover.  This keeps the two collector rows
+    independent while making the merge explicit; a raw perpendicular T is
+    never emitted.  ``merge_x`` is the tile immediately before the splitter
+    centre and defaults to the row's east edge.
+    """
+    if not drill_xs:
+        raise ValueError("Parallel mine expansion needs drill columns")
+    if belt_type not in BELT_TIERS:
+        raise ValueError(f"Unknown belt tier: {belt_type}")
+    if parallel_belt_y is None:
+        parallel_belt_y = source_belt_y + 8
+    if parallel_belt_y == source_belt_y:
+        raise ValueError("Parallel collector row must have a distinct belt_y")
+    columns = sorted(set(float(x) for x in drill_xs))
+    if len(columns) != len(drill_xs):
+        raise ValueError("Parallel mine expansion columns must be unique")
+    merge_x = float(max(columns) + 4 if merge_x is None else merge_x)
+    splitter_type = splitter_type or _SPLITTER_FOR_BELT[belt_type]
+    if splitter_type not in {
+        "splitter", "fast-splitter", "express-splitter", "turbo-splitter",
+    }:
+        raise ValueError(f"Unknown splitter tier: {splitter_type}")
+    if merge_x <= max(columns) + 1:
+        raise ValueError("Parallel merge must leave room east of the drill row")
+    if not isclose(merge_x % 1, 0.5):
+        raise ValueError("East-facing parallel merge must be centred on a belt tile")
+
+    first_x = min(columns)
+    # East/west splitters are centred on the belt's half-tile x and an integer
+    # y between their two lanes. The previous extra half tile produced an
+    # integer x, which is not the centre of an east-facing splitter.
+    splitter_x = merge_x
+    side_y = source_belt_y + 1
+    crossover_x = merge_x - 2
+    if abs(parallel_belt_y - side_y) < 1:
+        raise ValueError("Parallel row is too close for a legal splitter crossover")
+    crossover_span = abs(parallel_belt_y - side_y)
+    if crossover_span > _UNDERGROUND_REACH[belt_type]:
+        raise ValueError(
+            f"{belt_type} underground reach { _UNDERGROUND_REACH[belt_type] } "
+            f"cannot cross {crossover_span:g} tiles"
+        )
+
+    lower_start_x = first_x - 4
+    lower_length = round(crossover_x - lower_start_x)
+    lower_belts = [
+        {"action_type": "place_ghost", "entity": belt_type,
+         "position": {"x": lower_start_x + step, "y": parallel_belt_y},
+         "direction": "east"}
+        for step in range(lower_length)
+    ]
+    # Two underground endpoints cross the source belt without creating a
+    # perpendicular belt overlap; the output then runs into splitter lane 2.
+    if belt_type == "transport-belt":
+        underground_name = "underground-belt"
+    else:
+        underground_name = belt_type.replace("transport-belt", "underground-belt")
+    crossover = [
+        {"action_type": "place_ghost", "entity": underground_name,
+         "position": {"x": crossover_x, "y": parallel_belt_y},
+         "direction": "north", "underground_type": "input"},
+        {"action_type": "place_ghost", "entity": underground_name,
+         "position": {"x": crossover_x, "y": side_y},
+         "direction": "north", "underground_type": "output"},
+    ]
+    side_belt = {
+        "action_type": "place_ghost", "entity": belt_type,
+        "position": {"x": merge_x - 1, "y": side_y}, "direction": "east",
+    }
+    splitter = {
+        "action_type": "place_ghost", "entity": splitter_type,
+        "position": {"x": splitter_x, "y": source_belt_y + 0.5},
+        "direction": "east", "input_priority": "right", "output_priority": "right",
+    }
+    replace_trunk_belt = {
+        "action_type": "remove_entity", "entity": belt_type,
+        "position": {"x": merge_x, "y": source_belt_y},
+    }
+    plan = {"atomic": True, "phases": [
+        {"name": "parallel_mine_power", "actions": _power_scaffold(
+            (first_x - 2, parallel_belt_y - 4),
+            "electric-mining-drill", max(columns),
+        )},
+        {"name": "parallel_mine_row", "actions": [
+            {"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": x, "y": y},
+             "direction": direction}
+            for x, y, direction in [
+                *[(x, parallel_belt_y - 2, "south") for x in columns],
+                *[(x, parallel_belt_y + 2, "north") for x in columns],
+            ]
+        ] + [replace_trunk_belt] + lower_belts + crossover + [side_belt, splitter]},
+    ], "parallel_merge": {
+        "source_belt_y": source_belt_y,
+        "parallel_belt_y": parallel_belt_y,
+        "splitter": (splitter_x, source_belt_y + 0.5),
+    }}
     validate_build_plan(plan)
     return plan
 

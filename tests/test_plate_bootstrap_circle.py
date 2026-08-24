@@ -43,7 +43,9 @@ def _wire_cold_base(monkeypatch, extraction) -> list:
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
     monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (None, None))
-    monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append("mine"))
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan", lambda *_a, **_k: calls.append("mine"),
+    )
     monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
@@ -218,6 +220,7 @@ def test_bootstrap_cell_is_not_cached_over_its_upgrade_survey(monkeypatch) -> No
     """Caching the temp cell in MANAGED_INTERMEDIATE_SOURCES would hide it from
     the BOOTSTRAP UPGRADE that replaces it with a belt-fed refinery."""
     extraction = _extraction()
+    builder.MANAGED_INTERMEDIATE_SOURCES.pop("iron-plate", None)
     _wire_cold_base(monkeypatch, extraction)
     monkeypatch.setattr(
         builder, "_build_initial_plate_smelter",

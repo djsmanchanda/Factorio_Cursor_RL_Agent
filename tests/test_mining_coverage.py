@@ -47,7 +47,10 @@ def test_new_mine_extends_coverage_to_full_blueprint_before_submit(monkeypatch) 
 
     monkeypatch.setattr(autonomous_builder, "extend_roboport_coverage", fake_extend)
 
-    def fake_submit(_client, _bridge, _surface, _plan, name, _emit, *, stage_coverage=None):
+    def fake_submit(
+        _client, _bridge, _surface, _plan, name, _emit, *,
+        stage_coverage=None, **_kwargs,
+    ):
         events.append(("affordable", name))
         if stage_coverage is not None:
             stage_coverage()

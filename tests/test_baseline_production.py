@@ -20,6 +20,7 @@ from orchestrator.baseline_production import (  # noqa: E402
     baseline_plate_draw,
     baseline_smelter_count,
     demand_adjusted_plate_draw,
+    iron_growth_target,
     mall_plate_draw,
 )
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E402
@@ -98,12 +99,20 @@ def test_mall_burst_has_a_bounded_influence_on_standing_draw() -> None:
 def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
     """8.75 plate/s is well past what six drills carry -- the reason prep has
     to raise extraction rather than inherit the opening row."""
-    assert baseline_drill_phase("iron-plate") == 20
+    assert baseline_drill_phase("iron-plate") == 24
     assert EXTRACTION_DRILL_PHASES[0] == 6
 
 
 def test_copper_is_already_covered_by_the_opening_row() -> None:
     assert baseline_drill_phase("copper-plate") == EXTRACTION_DRILL_PHASES[0]
+
+
+def test_iron_growth_policy_earmarks_next_modules_from_mine_capacity() -> None:
+    assert iron_growth_target(0) == 0
+    assert iron_growth_target(6) == 12
+    assert iron_growth_target(12) == 24
+    assert iron_growth_target(20) == 24
+    assert iron_growth_target(24) == 24
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)

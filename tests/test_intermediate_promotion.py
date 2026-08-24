@@ -45,13 +45,13 @@ def test_a_saturated_cell_promotes_without_measurable_demand() -> None:
 
 def test_saturation_climbs_the_ladder_one_phase_at_a_time() -> None:
     """A machine running flat out cannot go faster; the only move is more of
-    them, and the base steps 6 -> 20 -> 50 -> 100."""
+    them, and the base grows in complete doubled six-machine sets."""
     sizes, have = [], 1
     for _ in range(len(PROMOTED_LINE_PHASES)):
         have = promoted_line_machine_count(GEARS, 0.0, have, saturated=True)
         sizes.append(have)
 
-    assert sizes == [6, 20, 50, 100]
+    assert sizes == [6, 12, 24, 48, 96]
 
 
 def test_the_top_phase_is_a_ceiling_not_a_loop() -> None:
@@ -63,10 +63,10 @@ def test_the_top_phase_is_a_ceiling_not_a_loop() -> None:
 def test_the_ladder_is_the_one_the_mining_system_uses() -> None:
     """Extraction and the assembly it feeds must step up together; a parallel
     copy of the ladder could drift."""
-    assert PROMOTED_LINE_PHASES == EXTRACTION_DRILL_PHASES == (6, 20, 50, 100)
+    assert PROMOTED_LINE_PHASES == EXTRACTION_DRILL_PHASES == (6, 12, 24, 48, 96)
 
 
-@pytest.mark.parametrize("demand,expected", [(4.0, 6), (20.0, 20), (60.0, 50), (200.0, 100)])
+@pytest.mark.parametrize("demand,expected", [(4.0, 6), (20.0, 24), (60.0, 96), (200.0, 96)])
 def test_demand_driven_sizing_also_snaps_to_the_ladder(demand: float, expected: int) -> None:
     assert promoted_line_machine_count(GEARS, demand, 0) == expected
 

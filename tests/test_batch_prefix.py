@@ -13,7 +13,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator import live_base, stage_extraction  # noqa: E402
-from orchestrator.extraction_capacity import phase_batch_positions  # noqa: E402
+from orchestrator.extraction_capacity import (  # noqa: E402
+    parallel_phase_batch_positions, phase_batch_positions,
+)
 from orchestrator.extraction_state import ResourceMine  # noqa: E402
 
 _CLIENT = object()
@@ -70,6 +72,22 @@ def test_direct_east_head_grows_away_from_its_haul() -> None:
         (7.5, -3.5), (7.5, 0.5),
     )
     assert mine.haul_head not in positions
+
+
+def test_parallel_band_reuses_existing_columns() -> None:
+    mine = ResourceMine(
+        output=(12.5, -1.5), drill_count=6, row_capacity=16,
+        belt_y=-1.5, first_column_x=16.5, haul_head=(24.5, -1.5),
+        growth_direction=-1,
+    )
+
+    positions = parallel_phase_batch_positions(mine, 6)
+
+    assert positions == (
+        (16.5, 4.5), (16.5, 8.5),
+        (19.5, 4.5), (19.5, 8.5),
+        (22.5, 4.5), (22.5, 8.5),
+    )
 
 
 def test_a_blocked_column_truncates_the_batch(survey) -> None:

@@ -10,6 +10,7 @@ import pytest
 from orchestrator import live_base
 from orchestrator import autonomous_builder as builder
 from orchestrator.autonomous_builder import _deliver_cell_ingredients, _diagnose_blockage
+from orchestrator import roboport_placement
 from orchestrator.roboport_placement import clear_chain_positions
 from planners.infrastructure_geometry import footprint_tile_indices
 from orchestrator.stage_services import (
@@ -250,6 +251,40 @@ def test_chain_relocates_off_pending_plan_footprints(monkeypatch) -> None:
         reserved_tiles=reserved,
     )
     assert not (footprint_tile_indices(placed[0], 4) & reserved)
+
+
+def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) -> None:
+    """A 10-tile local failure must not terminate a remote coverage task.
+
+    This models the live oil-cell failure near (-67, 18): the direct ideal is
+    blocked, but a nearby connected site is valid and keeps the final target
+    covered.
+    """
+    ideals = roboport_chain((0.0, 0.0), (100.0, 0.0), _ROBOPORT_CONSTRUCTION_RADIUS)
+    blocked = footprint_tile_indices(ideals[0], 4)
+    # Use an explicit local failure rather than probing the game for it; the
+    # fallback itself still receives the surveyed obstacle.
+    monkeypatch.setattr(
+        roboport_placement, "_local_chain_positions",
+        lambda *_a, **_k: (_ for _ in ()).throw(ValueError("local blocked")),
+    )
+    monkeypatch.setattr(
+        live_base, "occupied_tiles", lambda *_a, **_k: blocked,
+    )
+
+    placed = clear_chain_positions(
+        None, "nauvis", (0.0, 0.0), (100.0, 0.0), ideals,
+        service_radius=_ROBOPORT_CONSTRUCTION_RADIUS,
+        service_square=False,
+        link_distance=_ROBOPORT_LINK_DISTANCE,
+    )
+
+    assert placed[0] != ideals[0]
+    assert all(
+        math.dist(previous, current) <= _ROBOPORT_LINK_DISTANCE
+        for previous, current in zip([(0.0, 0.0), *placed], placed)
+    )
+    assert math.dist(placed[-1], (100.0, 0.0)) <= _ROBOPORT_CONSTRUCTION_RADIUS
 
 
 def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:

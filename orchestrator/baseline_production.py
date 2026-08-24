@@ -44,7 +44,31 @@ BOOTSTRAP_FURNACE_CAPS = {
     "steel-plate": 6,
 }
 
+# Iron is the common construction input for the early factory.  Keep the
+# growth ladder explicit so a short-lived mall target cannot leave its direct
+# refinery at the opening six-furnace block.  The thresholds are mine capacity
+# thresholds, not permission to overbuild a mine: callers still verify that the
+# expansion can coherently add that drill phase and refinery module together.
+# Beyond 24, measured demand controls the 48/96 phases.
+IRON_GROWTH_TARGETS = ((6, 12), (12, 24))
+
 ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
+
+
+def iron_growth_target(drill_count: int) -> int:
+    """Return the proactive iron-furnace checkpoint supported by a mine.
+
+    Six live drills trigger the coherent 12-drill/12-furnace expansion, and
+    twelve trigger the 24/24 checkpoint. The atomic expansion preflight keeps
+    furnace ghosts paired with the mine and transport that will feed them.
+    """
+    if drill_count <= 0:
+        return 0
+    target = 6
+    for minimum_drills, furnace_target in IRON_GROWTH_TARGETS:
+        if drill_count >= minimum_drills:
+            target = furnace_target
+    return target
 
 
 def _machine_craft_rate(recipe: str) -> float:

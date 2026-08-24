@@ -33,9 +33,20 @@ These names describe intended responsibilities, not permission to build speculat
   temporary furnaces, and mine-side logistic intake be removed.
 - A migration is incomplete while any recognized bootstrap chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.
-- Furnace capacity may grow only after measured ore delivery can feed it. A
-  supply-starved refinery triggers mine or transport repair, never another
-  furnace block.
+- Extraction grows in complete six-drill checkpoints:
+  `6 -> 12 -> 24 -> 48 -> 96`. Early direct iron deliberately advances to
+  12, then 24, because most construction demand consumes iron or an iron
+  derivative. Larger phases remain demand-driven.
+- Preserve a bounded straight collector beyond the first drill row before the
+  haul may turn. Expand longitudinally first; if that owned corridor is full
+  or blocked, add a parallel collector through an explicit splitter instead
+  of opening a duplicate mine.
+- Furnace expansion must include enough mine and transport capacity to feed
+  it. A coherent iron mine/refinery expansion may be placed as pending ghosts
+  before every construction item is stocked; collision, ownership, and
+  duplicate-pending checks still run first, and missing items stay queued.
+  A supply-starved refinery triggers mine or transport repair, never an
+  isolated furnace block.
 - Multiple consumers of one resource require an explicit splitter/manifold and
   throughput budget. Independent belts may not overwrite or reverse the same
   collector head.

@@ -14,7 +14,9 @@ from planners.smelter_block import (
     generate_managed_refinery_plan, refinery_interfaces,
 )
 from planners.resource_layouts import (
+    DIRECT_EAST_CONTINUATION_TILES,
     generate_direct_mine_row_expansion,
+    generate_parallel_mining_row_expansion,
     generate_shared_belt_batch_expansion,
     generate_shared_belt_column_expansion,
     generate_direct_mining_to_chest,
@@ -213,6 +215,7 @@ def direct_mine_plan(
     reserved_pair_columns: int = RESERVED_PAIR_COLUMNS,
     prebuilt_pair_columns: int = 0,
     output_side: str = "west",
+    continuation_tiles: int | None = None,
 ) -> tuple[dict, Point]:
     """Return a paired mine start with its measured future corridor reserved.
 
@@ -229,12 +232,19 @@ def direct_mine_plan(
         raise ValueError(f"Unknown mine output side: {output_side}")
     if output_side == "east":
         last_x = upper[-1][0]
-        # The east head is fixed.  Reserved capacity grows west of the row,
-        # so paving any "prebuilt" east columns would only move the egress
-        # into unrelated space and make a later survey lose the real head.
-        belt_anchor = (last_x + 2, belt_y)
-        output_chest = tuple(belt_anchor)
+        # Keep the collector straight east for a bounded reserve before the
+        # refinery haul turns. This leaves a reusable line for later columns
+        # instead of forcing every expansion through the first corner.
+        if continuation_tiles is None:
+            continuation_tiles = DIRECT_EAST_CONTINUATION_TILES
+        collector_end = last_x + 2 + continuation_tiles
+        belt_anchor = (collector_end, belt_y)
+        # The generator extends from the actual drill head. Passing the
+        # already-extended anchor as its chest would count the reserve twice.
+        output_chest = (last_x + 2, belt_y)
     else:
+        if continuation_tiles not in (None, 0):
+            raise ValueError("continuation_tiles only applies to east-flow mines")
         belt_anchor = (ox - 2.5, belt_y)
         # Dedicated refinery feeds are belt-only: belt_anchor is the west turn tile.
         # Side taps remain available to generic multi-input layouts, but never sit
@@ -245,6 +255,7 @@ def direct_mine_plan(
         upper, output_chest, belt_type=belt_type, inserter_type=inserter_type,
         output_side=output_side, reserved_pair_columns=reserved_pair_columns,
         prebuilt_pair_columns=prebuilt_pair_columns,
+        continuation_tiles=continuation_tiles or 0,
         include_side_tap=False,
     )
     lower = [(x, belt_anchor[1] + 2) for x, _ in upper]
@@ -439,7 +450,7 @@ def smelter_search_anchors(
 
     The ore haul is the expensive side of the trade: it carries the drill
     row's whole output, and it is re-laid every time the row grows
-    6 -> 20 -> 50 -> 100, so its length is paid over and over. The plate belt
+    6 -> 12 -> 24 -> 48 -> 96, so its length is paid over and over. The plate belt
     leaving the smelter is built once. `reference_point` only breaks ties.
 
     Live resource clearance remains authoritative over all of this.
@@ -636,12 +647,46 @@ def plan_local_extraction(
             first_column_x = min(drill_xs) if active.first_column_x is not None else None
             expansion_positions = positions
         else:
-            raise PendingSystemDeferred(
-                f"The owned {ore} resource district at {active.output} cannot "
-                "extend its active collector corridor. A blocked tail is not "
-                "physical patch exhaustion, so expansion defers without opening "
-                "an independent mine or refinery."
+            # The owned district remains the source of truth when its first
+            # collector is full or physically blocked. Reuse its straight
+            # trunk and add a splitter-fed parallel band instead of opening a
+            # duplicate mine or deferring the same demand forever.
+            parallel_source = active or observed
+            parallel_positions = extraction_capacity.parallel_phase_batch_positions(
+                parallel_source, requested,
             )
+            parallel_positions = buildable_batch_prefix(
+                client, surface, ore, parallel_positions,
+            )
+            if parallel_positions:
+                drill_xs = sorted({x for x, _y in parallel_positions})
+                parallel_belt_y = parallel_source.shared_belt_y + (
+                    extraction_capacity.PARALLEL_BAND_PITCH
+                )
+                mine_origin = (drill_xs[0] - 1.5, parallel_belt_y + 3.5)
+                try:
+                    build_plan = generate_parallel_mining_row_expansion(
+                        drill_xs, parallel_source.shared_belt_y,
+                        belt_type=belt_type, parallel_belt_y=parallel_belt_y,
+                    )
+                except ValueError as error:
+                    raise PendingSystemDeferred(
+                        f"The parallel {ore} batch is surveyed but its merge "
+                        f"cannot be built with {belt_type}: {error}"
+                    ) from error
+                drill_count = len(parallel_positions)
+                ore_output = parallel_source.haul_head or parallel_source.output
+                row_drill_count = len(drill_xs)
+                expansion_step = parallel_source.growth_direction
+                first_column_x = min(drill_xs)
+                expansion_positions = parallel_positions
+            else:
+                raise PendingSystemDeferred(
+                    f"The owned {ore} resource district at {parallel_source.output} "
+                    "has no buildable straight or parallel collector batch for "
+                    "the next six-drill checkpoint. Expansion stays in this "
+                    "district instead of opening a duplicate mine or refinery."
+                )
     else:
         mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
             client, surface, ore, nearest_tile, patch_min, patch_max,

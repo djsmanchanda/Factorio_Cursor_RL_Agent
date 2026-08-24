@@ -82,6 +82,50 @@ def test_cohesive_target_merges_starved_furnaces_and_rounds_modules(monkeypatch)
     assert target == 48
 
 
+def test_cohesive_target_keeps_valid_block_when_partial_expansion_is_nearby(
+    monkeypatch,
+) -> None:
+    """Recipe-less expansion furnaces must not invalidate the six-furnace block.
+
+    A live iron run had six recipe-visible furnaces plus three or four nearby
+    machines already placed for the next phase.  Merging those machines before
+    recovery made a 9/10-furnace pseudo-module and permanently deferred the
+    6->12 expansion.
+    """
+    state = _state("iron-plate", 6)
+    extra = ((100.5, 100.5), (103.5, 100.5), (106.5, 100.5))
+    line = SimpleNamespace(machine_positions=state.machine_positions)
+    idle = SimpleNamespace(machine_positions=extra)
+    calls = []
+
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(
+        builder.live_base, "find_idle_machine_row", lambda *_a, **_k: idle,
+    )
+
+    def recover(_client, _surface, _force, recipe, positions):
+        calls.append(tuple(sorted(positions)))
+        if set(positions) != set(state.machine_positions):
+            raise ValueError("furnaces do not form complete six-furnace modules")
+        return state
+
+    monkeypatch.setattr(builder, "recover_managed_refinery", recover)
+    monkeypatch.setattr(builder, "smelter_count_for_drills", lambda *_a: 7)
+    extraction = SimpleNamespace(
+        smelter_origin=(100.0, 100.0), system_drill_count_before=6,
+        drill_count=6, mining_productivity_bonus=0.0, ore="iron-ore",
+    )
+
+    recovered, target = builder._cohesive_smelter_target(
+        object(), "nauvis", "player", "iron-plate", extraction, True,
+        lambda _message: None,
+    )
+
+    assert recovered == state
+    assert target == 12
+    assert len(calls) == 2
+
+
 def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -> None:
     state = _state()
     line = SimpleNamespace(machine_positions=state.machine_positions)
@@ -234,14 +278,19 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
     monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 60))
     monkeypatch.setattr(
-        builder, "_assert_atomic_plate_expansion_affordable", lambda *_a: foundation,
+        builder, "_assert_atomic_plate_expansion_affordable",
+        lambda *_a, **_k: foundation,
     )
     monkeypatch.setattr(
         builder, "_place_plate_expansion_foundation",
         lambda *_a: calls.append("foundation"),
     )
-    monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a: calls.append("mine"))
-    monkeypatch.setattr(builder, "_extend_plate_smelter", lambda *_a: (30.0, 40.0))
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan", lambda *_a, **_k: calls.append("mine"),
+    )
+    monkeypatch.setattr(
+        builder, "_extend_plate_smelter", lambda *_a, **_k: (30.0, 40.0),
+    )
 
     output = builder.build_mining_stage(
         object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
@@ -333,7 +382,7 @@ def test_blocked_refinery_tail_defers_without_opening_new_site(monkeypatch) -> N
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 12))
     monkeypatch.setattr(
         builder, "_assert_atomic_plate_expansion_affordable",
-        lambda *_a: (_ for _ in ()).throw(
+        lambda *_a, **_k: (_ for _ in ()).throw(
             StuckError("iron-plate refinery extension intersects real infrastructure at [(1, 2)]")
         ),
     )
@@ -378,7 +427,7 @@ def test_mining_expansion_rejects_full_bill_before_submitting_mine(monkeypatch) 
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 60))
     monkeypatch.setattr(
         builder, "_assert_atomic_plate_expansion_affordable",
-        lambda *_a: (_ for _ in ()).throw(
+        lambda *_a, **_k: (_ for _ in ()).throw(
             MaterialShortage("expand_iron-plate_system", {"fast-transport-belt": 74}, {})
         ),
     )

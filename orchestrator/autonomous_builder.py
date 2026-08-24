@@ -24,7 +24,7 @@ from orchestrator.construction_stock import MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
-    demand_adjusted_plate_draw, drill_phase_for_draw,
+    demand_adjusted_plate_draw, drill_phase_for_draw, iron_growth_target,
     smelter_count_for_draw,
 )
 from orchestrator.game_bridge import GameBridge, load_json
@@ -495,7 +495,8 @@ def bring_stage_up(
 
 def _place_new_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    extraction, emit: Callable[[str], None],
+    extraction, emit: Callable[[str], None], *,
+    allow_unfunded_ghosts: bool = False,
 ) -> None:
     """Submit a freshly planned mine and work it up to running."""
     if extraction.mine_origin is None:
@@ -522,6 +523,7 @@ def _place_new_mine(
         stage_coverage=lambda: _ensure_plan_construction_coverage(
             client, bridge, surface, force, plan, emit,
         ),
+        allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
     stage_xs = [x for x, _y in machine_positions] + [extraction.ore_output[0]]
     stage_ys = [y for _x, y in machine_positions] + [extraction.ore_output[1]]
@@ -608,11 +610,15 @@ def _service_legacy_mine(
 
 def _submit_mining_plan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    extraction, ore_output: Point, emit: Callable[[str], None],
+    extraction, ore_output: Point, emit: Callable[[str], None], *,
+    allow_unfunded_ghosts: bool = False,
 ) -> None:
     """Place a freshly planned mine and work it up, or service an existing one."""
     if extraction.build_plan is not None:
-        _place_new_mine(client, bridge, surface, force, extraction, emit)
+        _place_new_mine(
+            client, bridge, surface, force, extraction, emit,
+            allow_unfunded_ghosts=allow_unfunded_ghosts,
+        )
     elif extraction.expansion_positions:
         _reuse_expansion_row(client, bridge, surface, force, extraction, emit)
     else:
@@ -883,7 +889,8 @@ def _bring_modular_refinery_up(
 def _extend_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, state: ManagedRefineryState, target_machines: int,
-    ore_output: Point, emit: Callable[[str], None],
+    ore_output: Point, emit: Callable[[str], None], *,
+    allow_unfunded_ghosts: bool = False,
 ) -> Point:
     """Expand one recovered block by migrating its planner-owned End/output cap."""
     del ore_output
@@ -927,7 +934,10 @@ def _extend_plate_smelter(
     _prepare_replacement_services(
         client, bridge, surface, force, full, delta, emit,
     )
-    _submit(client, bridge, surface, delta, f"extend_{recipe}_refinery", emit)
+    _submit(
+        client, bridge, surface, delta, f"extend_{recipe}_refinery", emit,
+        allow_unfunded_ghosts=allow_unfunded_ghosts,
+    )
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, full,
         target_machines, origin, emit, variant=target_variant,
@@ -937,7 +947,8 @@ def _extend_plate_smelter(
 
 def _assert_atomic_plate_expansion_affordable(
     client: RconClient, surface: str, force: str, recipe: str, extraction,
-    state: ManagedRefineryState, target_machines: int, emit: Callable[[str], None],
+    state: ManagedRefineryState, target_machines: int, emit: Callable[[str], None], *,
+    allow_unfunded_ghosts: bool = False,
 ) -> dict | None:
     """Preflight the mine and exact modular refinery delta before either grows."""
     if target_machines <= state.furnace_count:
@@ -985,9 +996,17 @@ def _assert_atomic_plate_expansion_affordable(
         "force": force,
         "phases": [phase for plan in plans for phase in plan["phases"]],
     }
-    assert_affordable(
-        client, surface, force, combined, f"expand_{recipe}_system", emit,
-    )
+    try:
+        assert_affordable(
+            client, surface, force, combined, f"expand_{recipe}_system", emit,
+        )
+    except MaterialShortage:
+        if not allow_unfunded_ghosts:
+            raise
+        emit(
+            f"  BLUEPRINT EARMARK: coherent {recipe} mine/refinery expansion "
+            "passed ownership and layout preflight; material shortfalls are queued"
+        )
     return foundation
 
 
@@ -1032,7 +1051,28 @@ def _cohesive_smelter_target(
             client, surface, force, recipe, positions,
         )
     except ValueError as error:
-        raise StuckError(str(error)) from error
+        # A direct line can have expansion furnaces already placed (or ghosts
+        # still waiting for their recipe) beside it.  The old recovery path
+        # merged every nearby recipe-less furnace first, so a valid six-furnace
+        # block plus three or four in-progress machines became an invalid
+        # 9/10-furnace "module" and expansion deferred forever.  Recover the
+        # recipe-visible managed block on its own; the next extension plan can
+        # claim the pending slots once the complete target is affordable.
+        visible = tuple(sorted(set(line.machine_positions))) if line is not None else ()
+        if visible and set(visible) != set(positions):
+            try:
+                existing = recover_managed_refinery(
+                    client, surface, force, recipe, visible,
+                )
+            except ValueError:
+                raise StuckError(str(error)) from error
+            emit(
+                f"SMELTER RECOVERY: ignored {len(set(positions) - set(visible))} "
+                f"unconfigured {recipe} furnace(s) outside the current managed "
+                "block; expansion will finish them from a complete blueprint"
+            )
+        else:
+            raise StuckError(str(error)) from error
     total_drills = extraction.system_drill_count_before + extraction.drill_count
     required = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
@@ -1339,7 +1379,7 @@ def _log_mining_expansion(extraction, emit: Callable[[str], None]) -> None:
 def build_mining_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, reference_point: Point, emit: Callable[[str], None], *,
-    expand: bool = False,
+    expand: bool = False, earmark_unfunded: bool = False,
 ) -> Point:
     """Build or expand one cohesive mine-to-smelter system."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
@@ -1438,6 +1478,7 @@ def build_mining_stage(
             foundation = _assert_atomic_plate_expansion_affordable(
                 client, surface, force, recipe, extraction, existing_smelter,
                 cohesive_target, emit,
+                allow_unfunded_ghosts=earmark_unfunded,
             )
         except StuckError as error:
             if "refinery extension intersects real infrastructure" not in str(error):
@@ -1490,11 +1531,13 @@ def build_mining_stage(
             )
     _submit_mining_plan(
         client, bridge, surface, force, extraction, ore_output, emit,
+        allow_unfunded_ghosts=earmark_unfunded,
     )
     if cohesive_target is not None:
         provider = _extend_plate_smelter(
             client, bridge, surface, force, recipe, existing_smelter,
             cohesive_target, ore_output, emit,
+            allow_unfunded_ghosts=earmark_unfunded,
         )
     else:
         try:
@@ -3383,11 +3426,39 @@ def _prep_plate_extraction(
         return False
     if pending_materials is not None:
         pending_materials.pop(short_plate, None)
+    plate_line = live_base.find_line(
+        client, surface, force, short_plate,
+        LINE_RECIPES[short_plate]["machine"],
+    )
+    bootstrap_line = bool(
+        plate_line is not None
+        and logistic_smelter_origin(tuple(
+            getattr(plate_line, "machine_positions", ()) or (),
+        )) is not None
+    )
     targets = dict(demand_targets or {})
     for item, target in mall_targets.items():
         targets[item] = max(targets.get(item, 0), target)
     adjusted_draw = demand_adjusted_plate_draw(targets, available)
     wanted_furnaces = smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
+    if short_plate == "iron-plate" and plate_line is not None and not bootstrap_line:
+        # A direct iron line is strategic capacity, not a mall item.  Let the
+        # mine phase earmark the next complete refinery module even when the
+        # immediate mall bill is briefly quiet; the physical drill count keeps
+        # this from becoming speculative furnace overbuild.
+        try:
+            drill_count = extraction_state.resource_drill_count(
+                client, surface, force, "iron-ore",
+            )
+        except Exception:
+            drill_count = 0
+        proactive_target = iron_growth_target(drill_count)
+        if proactive_target > wanted_furnaces:
+            emit(
+                f"  IRON CAPACITY POLICY: direct line has {plate_line.machine_count} "
+                f"furnace(s); mine supports a {proactive_target}-furnace checkpoint"
+            )
+            wanted_furnaces = proactive_target
     if (
         short_plate in BOOTSTRAP_FURNACE_CAPS
         and not _electric_furnace_producer_started(client, surface, force)
@@ -3404,16 +3475,6 @@ def _prep_plate_extraction(
     if deferred_target is not None and wanted_furnaces <= deferred_target:
         return False
     deferred_targets.pop(short_plate, None)
-    plate_line = live_base.find_line(
-        client, surface, force, short_plate,
-        LINE_RECIPES[short_plate]["machine"],
-    )
-    bootstrap_line = bool(
-        plate_line is not None
-        and logistic_smelter_origin(tuple(
-            getattr(plate_line, "machine_positions", ()) or (),
-        )) is not None
-    )
     have = plate_line.machine_count if plate_line else 0
     if have >= wanted_furnaces:
         newly_prepped = short_plate not in prepped
@@ -3470,6 +3531,24 @@ def _prep_plate_extraction(
             )
             + " -- queued for the mall"
         )
+        if short_plate == "iron-plate" and plate_line is not None and not bootstrap_line:
+            try:
+                output_source = build_mining_stage(
+                    client, bridge, surface, force, short_plate,
+                    reference_point, emit, expand=True, earmark_unfunded=True,
+                )
+                if output_source is not None:
+                    MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
+                emit(
+                    "  BLUEPRINT EARMARK: iron mine/refinery expansion is staged; "
+                    "construction may finish asynchronously"
+                )
+                return True
+            except (ProductionPrerequisiteDeferred, MaterialShortage, StuckError) as error:
+                # A coherent ghost plan may now exist even though its machines
+                # are not healthy yet. The next prep pass re-surveys pending
+                # ghosts and will not submit a duplicate.
+                emit(f"  BLUEPRINT EARMARK pending: {error}")
         return False
     except (StuckError, ValueError) as error:
         deferred_targets[short_plate] = wanted_furnaces

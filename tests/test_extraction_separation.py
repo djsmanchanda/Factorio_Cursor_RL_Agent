@@ -54,6 +54,49 @@ def test_direct_mine_plan_contains_drills_and_egress_but_no_furnaces() -> None:
     assert "steel-chest" not in _entities(plan)
     assert "inserter" not in _entities(plan)
 
+
+def test_east_direct_mine_paves_a_bounded_straight_collector_continuation() -> None:
+    plan, output = direct_mine_plan(
+        (40.0, -1.0), 6, belt_type="fast-transport-belt",
+        inserter_type="fast-inserter", output_side="east",
+        continuation_tiles=6,
+    )
+
+    # Drill head is x=56.5; the returned haul head is exactly six tiles past
+    # it, and the continuation is counted once rather than twice.
+    assert output == (64.5, -0.5)
+    geometry = plan["collector_geometry"]
+    assert geometry["collector_head"] == output
+    belts = [
+        action for action in plan["phases"][1]["actions"]
+        if action.get("entity") == "fast-transport-belt"
+    ]
+    assert belts[-1]["position"] == {"x": output[0], "y": output[1]}
+
+
+def test_parallel_row_expansion_declares_splitter_merge() -> None:
+    from planners.resource_layouts import generate_parallel_mining_row_expansion
+
+    plan = generate_parallel_mining_row_expansion(
+        [44.5, 47.5, 50.5, 53.5, 56.5, 59.5], -1.5, merge_x=64.5,
+    )
+    actions = list(plan["phases"][1]["actions"])
+    splitters = [action for action in actions if action["entity"] == "fast-splitter"]
+    tunnels = [action for action in actions if action["entity"] == "fast-underground-belt"]
+    removals = [action for action in actions if action["action_type"] == "remove_entity"]
+    belts = [action for action in actions if action["entity"] == "fast-transport-belt"]
+    assert len(splitters) == 1
+    assert plan["atomic"] is True
+    assert removals == [{
+        "action_type": "remove_entity", "entity": "fast-transport-belt",
+        "position": {"x": 64.5, "y": -1.5},
+    }]
+    assert {action["underground_type"] for action in tunnels} == {"input", "output"}
+    assert all(action["position"]["x"] % 1 == 0.5 for action in belts)
+    assert plan["parallel_merge"]["splitter"] == (
+        splitters[0]["position"]["x"], splitters[0]["position"]["y"],
+    )
+
 def test_planned_metal_refinery_stays_proportional_to_drills() -> None:
     assert planned_smelter_count_for_drills("iron-plate", 6, 0.30) == 6
     assert planned_smelter_count_for_drills("copper-plate", 12, 0.30) == 12
@@ -261,6 +304,19 @@ def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
         (7.5, 20.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
         first_column_x=11.5, haul_head=(16.5, 20.5), growth_direction=-1,
     )
+
+
+def test_direct_mine_classifier_preserves_straight_collector_continuation() -> None:
+    entities = [
+        *(ExtractionEntity("drill", (x, 18.5), True) for x in (11.5, 14.5)),
+        *(ExtractionEntity("drill", (x, 22.5), True) for x in (11.5, 14.5)),
+        *(ExtractionEntity("belt", (x + 0.5, 20.5), True) for x in range(7, 25)),
+    ]
+
+    mine = _classify_direct_mine(entities, (0.0, 0.0))
+
+    assert mine is not None
+    assert mine.haul_head == (24.5, 20.5)
 
 
 def test_direct_mine_classifier_marks_belt_only_ghosts_pending() -> None:
@@ -478,6 +534,33 @@ def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:
     assert planned.build_plan is None
     assert planned.mine_origin is None
     assert planned.ore_output == (18.5, 20.5)
+
+
+def test_full_straight_corridor_uses_parallel_splitter_band(monkeypatch) -> None:
+    mine = ResourceMine(
+        output=(36.5, -1.5), drill_count=3, row_capacity=3,
+        belt_y=-1.5, first_column_x=46.5, haul_head=(78.5, -1.5),
+        growth_direction=-1,
+    )
+    _patch_and_rates(monkeypatch, existing=mine)
+    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "drill_siting_conflicts", lambda *_a: [])
+
+    planned = plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+        belt_type="fast-transport-belt", inserter_type="fast-inserter",
+        reuse_existing=False,
+    )
+
+    assert planned.expansion_positions == (
+        (46.5, 4.5), (46.5, 8.5),
+        (49.5, 4.5), (49.5, 8.5),
+        (52.5, 4.5), (52.5, 8.5),
+    )
+    assert planned.ore_output == (78.5, -1.5)
+    assert {phase["name"] for phase in planned.build_plan["phases"]} == {
+        "parallel_mine_power", "parallel_mine_row",
+    }
 
 
 def test_planner_resumes_matching_mine_ghosts_instead_of_duplicating(

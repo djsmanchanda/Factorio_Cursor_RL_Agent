@@ -37,18 +37,12 @@ def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
     assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_ready_pass(")
 
 
-def test_blocked_prep_hands_the_pass_to_the_mall() -> None:
-    """Prep runs first now, so keeping the pass on a shortage would re-hit the
-    identical shortage every pass and never reach the mall that fixes it."""
-    import inspect
+def test_blocked_intermediate_hands_the_pass_to_the_mall() -> None:
+    """An intermediate shortage cannot stage a coherent mine/refinery plan."""
+    source = inspect.getsource(autonomous_builder._prep_intermediate)
+    clause = source[source.index("except MaterialShortage"):]
 
-    from orchestrator import autonomous_builder as builder
-
-    for helper in (builder._prep_intermediate, builder._prep_plate_extraction):
-        source = inspect.getsource(helper)
-        clause = source[source.index("except MaterialShortage"):]
-        clause = clause[:clause.index("return") + len("return False")]
-        assert "return False" in clause, f"{helper.__name__} keeps a blocked pass"
+    assert "return False" in clause
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
@@ -119,6 +113,42 @@ def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:
     autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
 
 
+def test_iron_direct_line_earmarks_twelve_furnaces_from_twelve_drills(monkeypatch) -> None:
+    calls: list[bool] = []
+    line = type(
+        "Line", (), {
+            "machine_count": 6,
+            "working_count": 6,
+            "produced_count": 1,
+            "machine_positions": (),
+        },
+    )()
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items", lambda *_args: {},
+    )
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_args: line)
+    monkeypatch.setattr(
+        autonomous_builder.extraction_state, "resource_drill_count",
+        lambda *_args: 12,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "smelter_count_for_draw", lambda *_args: 6,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_args, **kwargs: calls.append(kwargs["expand"]) or (10.5, 10.5),
+    )
+
+    autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(), {},
+        {}, (0.0, 0.0), lambda _message: None,
+    )
+
+    assert calls == [True]
 def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     """Reserved drill sites have been blocked for days of runs; that should
     cost a pass, not the run -- the ladder still climbs on demand."""
@@ -228,7 +258,7 @@ def test_furnace_cap_lifts_only_after_a_working_furnace_producer(monkeypatch) ->
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
     """7.5 plate/s needs 12 furnaces; a standard row builds 7."""
     assert baseline_smelter_count("iron-plate") == 12
-    assert baseline_drill_phase("iron-plate") == 20
+    assert baseline_drill_phase("iron-plate") == 24
 
 
 def test_copper_prep_is_satisfied_by_a_smaller_row() -> None:

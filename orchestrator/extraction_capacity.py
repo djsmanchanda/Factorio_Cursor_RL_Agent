@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from orchestrator.extraction_state import ResourceMine
 
-EXTRACTION_DRILL_PHASES = (6, 20, 50, 100)
+# Early plate demand is iron-heavy; complete paired checkpoints make the
+# first expansions useful while preserving complete six-drill doubling sets.
+EXTRACTION_DRILL_PHASES = (6, 12, 24, 48, 96)
+PARALLEL_BAND_PITCH = 8.0
 
 
 def affordable_prebuilt_columns(belt_stock: int, maximum: int) -> int:
@@ -58,3 +61,37 @@ def phase_batch_positions(
             x = mine.output[0] + mine.expansion_step * (4 + 3 * index)
         positions.extend(((x, mine.shared_belt_y - 2), (x, mine.shared_belt_y + 2)))
     return tuple(positions)
+
+
+def parallel_phase_batch_positions(
+    mine: ResourceMine, requested_drills: int, *,
+    band_order: int = 1, band_pitch: float = PARALLEL_BAND_PITCH,
+) -> tuple[tuple[float, float], ...]:
+    """Return a paired row on a parallel collector band.
+
+    Longitudinal growth remains the first choice. This helper is the explicit
+    fallback for a valid second band: it preserves the same column x's while
+    moving both drill rows by a fixed pitch, leaving the merge/splitter
+    geometry to ``generate_parallel_mining_row_expansion``.
+    """
+    if band_order == 0:
+        raise ValueError("parallel band_order must be non-zero")
+    if band_pitch <= 0:
+        raise ValueError("band_pitch must be positive")
+    if requested_drills <= 0 or requested_drills % 2:
+        raise ValueError("A parallel mining phase must request a positive even drill count")
+    columns = requested_drills // 2
+    if mine.first_column_x is not None:
+        xs = [mine.first_column_x + 3 * index for index in range(columns)]
+    else:
+        xs = [
+            mine.output[0] + mine.expansion_step * (4 + 3 * index)
+            for index in range(columns)
+        ]
+    base = tuple(
+        position
+        for x in xs
+        for position in ((x, mine.shared_belt_y - 2), (x, mine.shared_belt_y + 2))
+    )
+    offset = band_order * band_pitch
+    return tuple((x, y + offset) for x, y in base)
