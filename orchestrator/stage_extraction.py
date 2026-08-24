@@ -414,7 +414,19 @@ def planned_smelter_count_for_drills(
     required = smelter_count_for_drills(
         recipe, drill_count, mining_productivity_bonus,
     )
-    return min(required, max(FURNACES_PER_MODULE, drill_count))
+    # Metal plate districts grow mine and smelter capacity on the same
+    # six-machine phase boundary. Mining-productivity headroom may calculate
+    # one extra furnace, but it must not turn a 12-drill phase into an 18- or
+    # 24-furnace build. Other recipes keep their measured input-rate sizing.
+    supported = (
+        max(FURNACES_PER_MODULE, drill_count)
+        if recipe in {"iron-plate", "copper-plate"}
+        else required
+    )
+    return max(
+        FURNACES_PER_MODULE,
+        supported // FURNACES_PER_MODULE * FURNACES_PER_MODULE,
+    )
 
 
 def ore_reservation(

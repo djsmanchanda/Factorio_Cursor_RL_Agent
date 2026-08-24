@@ -79,7 +79,7 @@ def test_cohesive_target_merges_starved_furnaces_and_rounds_modules(monkeypatch)
 
     assert len(captured["positions"]) == 30
     assert state.furnace_count == 30
-    assert target == 48
+    assert target == 36
 
 
 def test_cohesive_target_keeps_valid_block_when_partial_expansion_is_nearby(
@@ -146,7 +146,7 @@ def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -
     )
 
     assert recovered.origin == (0.0, 0.0)
-    assert target == 48
+    assert target == 36
 
 
 def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> None:
@@ -160,6 +160,53 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
 
     with pytest.raises(StuckError, match="intersects real infrastructure"):
         builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
+
+
+def test_plate_expansion_marks_an_obstructing_roboport_for_relocation(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(
+        builder.live_base, "occupied_tile_owners",
+        lambda *_a, **_k: {(0, 0): ("roboport", 0.0, 0.0)},
+    )
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    preparation = builder._plate_expansion_foundation(
+        client, "nauvis", "player", "iron-plate", plan,
+    )
+
+    assert preparation is not None
+    assert preparation["relocate_roboports"] == [(0.0, 0.0)]
+
+
+def test_obstructing_roboport_is_replaced_before_removal(monkeypatch) -> None:
+    submitted = []
+    monkeypatch.setattr(
+        builder.live_base, "roboport_positions",
+        lambda *_a: [(0.0, 0.0), (30.0, 0.0)],
+    )
+    monkeypatch.setattr(builder.live_base, "area_clear", lambda *_a: True)
+    monkeypatch.setattr(builder, "extend_power", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _emit, **_k: submitted.append((name, plan)),
+    )
+
+    builder._relocate_roboport_for_expansion(
+        SimpleNamespace(command=lambda _text: ""), object(), "nauvis", "player",
+        (0.0, 0.0), {(0, 0)}, lambda _message: None,
+    )
+
+    assert [name for name, _plan in submitted] == [
+        "relocate_smelter_roboport", "retire_obstructing_roboport",
+    ]
+    placed = submitted[0][1]["phases"][0]["actions"][0]["position"]
+    assert (placed["x"], placed["y"]) != (0.0, 0.0)
+    removed = submitted[1][1]["phases"][0]["actions"][0]["position"]
+    assert removed == {"x": 0.0, "y": 0.0}
 
 
 def test_own_sibling_mine_scaffold_does_not_collide_with_the_refinery(monkeypatch) -> None:

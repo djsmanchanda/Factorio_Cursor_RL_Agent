@@ -37,6 +37,13 @@ These names describe intended responsibilities, not permission to build speculat
   `6 -> 12 -> 24 -> 48 -> 96`. Early direct iron deliberately advances to
   12, then 24, because most construction demand consumes iron or an iron
   derivative. Larger phases remain demand-driven.
+- Metal refineries grow with their mine in complete six-furnace modules. A
+  12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
+  productivity headroom must not skip a module or double the requested block.
+- Planner-owned roboports are movable service infrastructure. When one blocks
+  an owned refinery extension, place and power a connected replacement outside
+  the future footprint before removing the old port. Production infrastructure
+  remains authoritative and must be routed around or reported as a conflict.
 - Preserve a bounded straight collector beyond the first drill row before the
   haul may turn. Expand longitudinally first; if that owned corridor is full
   or blocked, add a parallel collector through an explicit splitter instead

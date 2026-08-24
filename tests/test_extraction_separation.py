@@ -100,7 +100,7 @@ def test_parallel_row_expansion_declares_splitter_merge() -> None:
 def test_planned_metal_refinery_stays_proportional_to_drills() -> None:
     assert planned_smelter_count_for_drills("iron-plate", 6, 0.30) == 6
     assert planned_smelter_count_for_drills("copper-plate", 12, 0.30) == 12
-    assert planned_smelter_count_for_drills("iron-plate", 20, 0.30) == 20
+    assert planned_smelter_count_for_drills("iron-plate", 20, 0.30) == 18
 
 
 def test_furnaces_use_force_productivity_instead_of_copying_drill_count() -> None:

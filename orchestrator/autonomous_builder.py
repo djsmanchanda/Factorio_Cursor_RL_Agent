@@ -52,7 +52,8 @@ from orchestrator.extraction_transport import (
     planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
 )
 from orchestrator.refinery_state import (
-    ManagedRefineryState, assert_refinery_removals_owned, recover_managed_refinery,
+    ManagedRefineryState, assert_refinery_removals_owned,
+    live_refinery_placements, recover_managed_refinery,
 )
 from orchestrator.stage_chemical import ensure_coal_mine, ensure_oil_cell
 from orchestrator.stage_extraction import (
@@ -61,6 +62,7 @@ from orchestrator.stage_extraction import (
     choose_mining_origin as _choose_mining_origin,  # noqa: F401 - compatibility export
     mining_drill_positions as _mining_drill_positions,  # noqa: F401 - compatibility export
     plan_local_extraction,
+    planned_smelter_count_for_drills,
     smelter_count_for_drills,
 )
 from orchestrator.stage_recovery import repair_existing_ingredient_transport
@@ -71,6 +73,7 @@ from orchestrator.stage_services import (
     _DEFAULT_BELT,
     _DEFAULT_INSERTER,
     _LOGISTIC_CHEST_ENTITIES,
+    _ROBOPORT_LINK_DISTANCE,
     _ROBOPORT_SERVICE_AREAS,
     _STAGE_CHEST_REACH,
     _diagnose_machines,
@@ -766,6 +769,7 @@ def _plate_expansion_foundation(
     )
     excusable: dict[tuple[str, float, float], bool] = {}
     collision: list[tuple[int, int]] = []
+    relocate_roboports: set[Point] = set()
     for tile, owner in suspects:
         is_ours = excusable.get(owner)
         if is_ours is None:
@@ -779,7 +783,9 @@ def _plate_expansion_foundation(
                     "own power/coverage scaffolding -- rewiring it beats "
                     "refusing the extension"
                 )
-        if not is_ours:
+        if owner[0] == "roboport":
+            relocate_roboports.add((owner[1], owner[2]))
+        elif not is_ours:
             collision.append(tile)
     if collision:
         raise StuckError(
@@ -787,16 +793,83 @@ def _plate_expansion_foundation(
             f"{collision[:3]}; refusing to expand its mine ahead of that conflict"
         )
     water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
-    if not water:
+    if not water and not relocate_roboports:
         return None
-    return {"phases": [{
+    phases = [{
         "name": f"{recipe}_smelter_landfill_foundation",
         "actions": [
             {"action_type": "place_tile_ghost", "tile": "landfill",
              "position": {"x": x, "y": y}}
             for x, y in water
         ],
+    }] if water else []
+    return {
+        "phases": phases,
+        "relocate_roboports": sorted(relocate_roboports),
+        "reserved_tiles": sorted(footprint),
+    }
+
+
+def _relocate_roboport_for_expansion(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    old: Point, reserved_tiles: set[tuple[int, int]], emit: Callable[[str], None],
+) -> None:
+    """Move one obstructing service port while preserving all of its links."""
+    ports = [position for position in live_base.roboport_positions(
+        client, surface, force,
+    ) if position != old]
+    neighbors = [
+        position for position in ports
+        if math.dist(position, old) <= _ROBOPORT_LINK_DISTANCE
+    ]
+    if not neighbors:
+        raise StuckError(
+            f"roboport at {old} blocks refinery growth but has no alternate "
+            "network neighbor; refusing to strand its logistic network"
+        )
+    candidates = sorted(
+        {
+            (old[0] + dx, old[1] + dy)
+            for dx in range(-20, 21) for dy in range(-20, 21)
+            if dx or dy
+        },
+        key=lambda point: (math.dist(point, old), point),
+    )
+    replacement = next((
+        point for point in candidates
+        if all(math.dist(point, neighbor) <= _ROBOPORT_LINK_DISTANCE
+               for neighbor in neighbors)
+        and not (footprint_tile_indices(point, 4) & reserved_tiles)
+        and live_base.area_clear(
+            client, surface,
+            (point[0] - 2, point[1] - 2), (point[0] + 2, point[1] + 2),
+        )
+    ), None)
+    if replacement is None:
+        raise StuckError(
+            f"roboport at {old} blocks refinery growth and no connected clear "
+            "replacement site exists within 20 tiles"
+        )
+    emit(
+        f"SMELTER SERVICE RELOCATION: moving roboport at {old} to {replacement} "
+        "before expanding the furnace line"
+    )
+    place = {"surface": surface, "force": force, "phases": [{
+        "name": "relocate_smelter_roboport",
+        "actions": [{"action_type": "place_entity", "entity": "roboport",
+                     "position": {"x": replacement[0], "y": replacement[1]}}],
     }]}
+    _submit(client, bridge, surface, place, "relocate_smelter_roboport", emit)
+    if not extend_power(client, bridge, surface, force, replacement, emit):
+        status = live_base.entity_status_name(client, surface, replacement)
+        if status in {"no_power", "low_power"}:
+            raise StuckError(f"replacement roboport at {replacement} cannot be powered")
+    remove = {"surface": surface, "force": force, "phases": [{
+        "name": "retire_obstructing_roboport",
+        "actions": [{"action_type": "remove_entity", "entity": "roboport",
+                     "position": {"x": old[0], "y": old[1]}}],
+    }]}
+    _submit(client, bridge, surface, remove, "retire_obstructing_roboport", emit)
 
 
 def _place_plate_expansion_foundation(
@@ -804,6 +877,13 @@ def _place_plate_expansion_foundation(
     recipe: str, foundation: dict, emit: Callable[[str], None],
 ) -> None:
     """Build solid ground before a plate-refinery ghost is submitted there."""
+    reserved = {tuple(tile) for tile in foundation.get("reserved_tiles", [])}
+    for position in foundation.get("relocate_roboports", []):
+        _relocate_roboport_for_expansion(
+            client, bridge, surface, force, tuple(position), reserved, emit,
+        )
+    if not foundation.get("phases"):
+        return
     foundation["surface"], foundation["force"] = surface, force
     tiles = [
         action["position"] for phase in foundation["phases"]
@@ -973,7 +1053,7 @@ def _assert_atomic_plate_expansion_affordable(
         own_action_positions=_planned_entity_positions(
             smelter_delta,
             *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
-        ),
+        ) | live_refinery_placements(client, surface, force, state),
     )
     plans = [smelter_delta]
     if foundation is not None:
@@ -1074,10 +1154,13 @@ def _cohesive_smelter_target(
         else:
             raise StuckError(str(error)) from error
     total_drills = extraction.system_drill_count_before + extraction.drill_count
-    required = smelter_count_for_drills(
+    rate_required = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
     )
-    target = scheduled_refinery_target(existing.furnace_count, required)
+    supported = planned_smelter_count_for_drills(
+        recipe, total_drills, extraction.mining_productivity_bonus,
+    )
+    target = scheduled_refinery_target(existing.furnace_count, supported)
     if target is None:
         raise StuckError(
             f"{recipe} refinery reached its generation-1 cap at "
@@ -1086,7 +1169,8 @@ def _cohesive_smelter_target(
         )
     emit(
         f"SMELTER SYSTEM TARGET: {total_drills} total {extraction.ore} "
-        f"drill(s) require {required} furnace(s); scheduled target is {target}"
+        f"drill(s) calculate {rate_required} furnace(s), but the current mine "
+        f"supports {supported}; scheduled target is {target}"
     )
     return existing, target
 

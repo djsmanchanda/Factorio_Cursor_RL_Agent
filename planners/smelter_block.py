@@ -24,10 +24,10 @@ PREFERRED_COLUMNS = 5
 # Capacity is deliberately policy data, not an emergent consequence of the
 # current drill count. A refinery generation expands through these checkpoints
 # before a later generation is opened elsewhere.
-REFINERY_GENERATION_1_CAPACITIES = (6, 12, 24, 48)
-REFINERY_GENERATION_2_CAPACITIES = (48, 96, 192, 288)
-REFINERY_GENERATION_3_CAPACITIES = (36, 72, 144, 288, 576)
-REFINERY_GENERATION_4_CAPACITIES = (144, 288, 576)
+REFINERY_GENERATION_1_CAPACITIES = tuple(range(6, 49, 6))
+REFINERY_GENERATION_2_CAPACITIES = tuple(range(48, 289, 6))
+REFINERY_GENERATION_3_CAPACITIES = tuple(range(36, 577, 6))
+REFINERY_GENERATION_4_CAPACITIES = tuple(range(144, 577, 6))
 REFINERY_GENERATION_5_CAPACITIES = (576,)
 REFINERY_CAPACITY_SCHEDULES = (
     REFINERY_GENERATION_1_CAPACITIES,
@@ -87,6 +87,14 @@ def block_shape(furnaces: int) -> BlockShape:
     scheduled = _SCHEDULED_BLOCK_DIMENSIONS.get(furnaces)
     if scheduled is not None:
         columns, rows = scheduled
+        return BlockShape(furnaces, columns, rows - 1)
+    if furnaces % FURNACES_PER_MODULE == 0:
+        modules = furnaces // FURNACES_PER_MODULE
+        columns = max(
+            candidate for candidate in range(1, min(PREFERRED_COLUMNS, modules) + 1)
+            if modules % candidate == 0
+        )
+        rows = modules // columns
         return BlockShape(furnaces, columns, rows - 1)
     columns = min(PREFERRED_COLUMNS, math.ceil(furnaces / FURNACES_PER_MODULE))
     rows = math.ceil(furnaces / (FURNACES_PER_MODULE * columns))

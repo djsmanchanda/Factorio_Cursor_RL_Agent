@@ -72,8 +72,8 @@ def test_scheduled_capacities_keep_exact_lattice_counts() -> None:
 
 def test_first_generation_stops_at_its_cap_instead_of_rounding_to_sixty() -> None:
     assert scheduled_refinery_target(6, 7) == 12
-    assert scheduled_refinery_target(12, 13) == 24
-    assert scheduled_refinery_target(24, 25) == 48
+    assert scheduled_refinery_target(12, 13) == 18
+    assert scheduled_refinery_target(24, 25) == 30
     assert scheduled_refinery_target(48, 49) is None
 
 

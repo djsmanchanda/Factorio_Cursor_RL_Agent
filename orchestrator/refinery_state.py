@@ -101,7 +101,13 @@ def recover_managed_refinery(
     client: RconClient, surface: str, force: str, recipe: str,
     machine_positions: tuple[Point, ...],
 ) -> ManagedRefineryState:
-    """Recover a block only when its furnace lattice and splitter signature agree."""
+    """Recover a block from its furnace lattice and stable splitter signature.
+
+    Retained belts are repairable transport, not proof of ownership. Requiring
+    every one to remain identical prevented a working six-furnace line from
+    expanding after one belt was missing. Removals remain exact-checked by
+    ``assert_refinery_removals_owned`` before a delta is submitted.
+    """
     candidates = []
     first_error: ValueError | None = None
     for variant in ("standard", "basic"):
@@ -113,6 +119,7 @@ def recover_managed_refinery(
         signature = [
             action for action in plan_actions(plan)
             if action["action_type"] in {"place_entity", "place_ghost"}
+            and action.get("entity", "").endswith("splitter")
         ]
         try:
             _assert_live_actions(
@@ -155,3 +162,27 @@ def assert_refinery_removals_owned(
     _assert_live_actions(
         client, surface, force, expected, f"{state.recipe} removable End",
     )
+
+
+def live_refinery_placements(
+    client: RconClient, surface: str, force: str, state: ManagedRefineryState,
+) -> set[tuple[str, float, float]]:
+    """Return only live entities that still match the recovered old plan."""
+    if not hasattr(client, "command"):
+        return set()
+    full = generate_managed_refinery_plan(
+        state.recipe, state.furnace_count,
+        origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
+    )
+    expected = [
+        action for action in plan_actions(full)
+        if action["action_type"] in {"place_entity", "place_ghost"}
+    ]
+    actual = live_base.entity_signatures_at(
+        client, surface, force, [_action_position(action) for action in expected],
+    )
+    return {
+        (action["entity"], *_action_position(action))
+        for action in expected
+        if _matches_signature(action, actual.get(_action_position(action)))
+    }

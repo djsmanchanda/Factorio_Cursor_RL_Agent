@@ -74,7 +74,7 @@ def test_live_recovery_requires_the_blueprint_splitter_signature(monkeypatch) ->
     assert state.shape.columns == 5
 
 
-def test_live_recovery_rejects_a_missing_retained_belt(monkeypatch) -> None:
+def test_live_recovery_tolerates_a_missing_retained_belt(monkeypatch) -> None:
     plan = generate_managed_refinery_plan("iron-plate", 6)
     signatures = _signatures(plan)
     belt = next(
@@ -89,10 +89,11 @@ def test_live_recovery_rejects_a_missing_retained_belt(monkeypatch) -> None:
         },
     )
 
-    with pytest.raises(ValueError, match="not the planner-owned template"):
-        refinery_state.recover_managed_refinery(
-            object(), "nauvis", "player", "iron-plate", _furnaces(plan),
-        )
+    state = refinery_state.recover_managed_refinery(
+        object(), "nauvis", "player", "iron-plate", _furnaces(plan),
+    )
+
+    assert state.furnace_count == 6
 
 
 def test_live_recovery_rejects_a_rotated_splitter(monkeypatch) -> None:
@@ -111,6 +112,33 @@ def test_live_recovery_rejects_a_rotated_splitter(monkeypatch) -> None:
         refinery_state.recover_managed_refinery(
             object(), "nauvis", "player", "iron-plate", _furnaces(plan),
         )
+
+
+def test_live_refinery_placements_include_only_matching_entities(monkeypatch) -> None:
+    plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    state = refinery_state.infer_refinery_state(
+        "iron-plate", _furnaces(plan), variant="basic",
+    )
+    signatures = _signatures(plan)
+    belt = next(
+        action for action in actions(plan) if action["entity"] == "transport-belt"
+    )
+    missing = (belt["position"]["x"], belt["position"]["y"])
+    signatures.pop(missing)
+    monkeypatch.setattr(
+        live_base, "entity_signatures_at",
+        lambda _c, _s, _f, positions: {
+            position: signatures[position]
+            for position in positions if position in signatures
+        },
+    )
+
+    owned = refinery_state.live_refinery_placements(
+        _RconOutput(""), "nauvis", "player", state,
+    )
+
+    assert ("transport-belt", *missing) not in owned
+    assert ("electric-furnace", *state.machine_positions[0]) in owned
 
 
 def test_removal_authorization_checks_the_exact_old_end_and_output(monkeypatch) -> None:
