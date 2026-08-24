@@ -363,3 +363,35 @@ def test_unmatched_removal_never_creates_a_preflight_hole(
           assert(mutation_log[1] == "preflight:fast-transport-belt")
         """,
     )
+
+
+def test_flying_robot_does_not_block_ghost_placement(tmp_path: Path) -> None:
+    """A logistic robot crossing the target tile has an empty collision mask
+    and must not read as real infrastructure (live run of 2026-08-24 18:47
+    killed a promoted pipe line on exactly this false occupant)."""
+    scenario = f"""
+        dofile("{EXECUTOR.as_posix()}")
+        add_entity("transport-belt", 4, 0)
+        local robot = {{
+          name = "logistic-robot", type = "logistic-robot",
+          position = {{ x = 8, y = 0 }}, force = force, valid = true,
+          prototype = {{ collision_mask = {{ layers = {{}} }} }},
+        }}
+        entities[#entities + 1] = robot
+        payload = {{
+          authorization = {{ approved_actions = {{ "place_core_infrastructure" }} }},
+          build_plan = {{ surface = "nauvis", force = "player", phases = {{
+            {{ name = "p", actions = {{
+              {{ action_type = "place_entity", entity = "transport-belt",
+                 position = {{ x = 8, y = 0 }}, direction = "north" }},
+            }} }},
+          }} }},
+        }}
+        registered["build_layout_plan"]({{ parameter = "ignored" }})
+        assert(captured_report.ok == true, captured_report.error)
+        assert(captured_report.placed_entities == 1)
+    """
+    script = tmp_path / "flying_robot.lua"
+    script.write_text(_HARNESS + scenario, encoding="utf-8")
+    result = subprocess.run(["lua", str(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr or result.stdout

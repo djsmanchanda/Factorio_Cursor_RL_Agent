@@ -44,6 +44,23 @@ local function find_exact_tile_ghost(surface, force, tile_name, position)
   return nil
 end
 
+-- Flying robots and the character share tiles with everything while
+-- colliding with nothing: counting them made ghost placement fail whenever a
+-- bot happened to cross the tile mid-flight (live run of 2026-08-24 18:47).
+local function collides_with_tiles(entity)
+  if not entity or not entity.valid then return false end
+  if entity.type == "character" then return false end
+  local prototype = entity.prototype
+  local mask = prototype and prototype.collision_mask or nil
+  if not mask then return true end
+  local layers = mask.layers or mask
+  if type(layers) ~= "table" then return true end
+  for _, enabled in pairs(layers) do
+    if enabled == true then return true end
+  end
+  return false
+end
+
 local function exact_position_occupants(surface, force, position)
   local exact = {}
   local candidates = surface.find_entities_filtered({
@@ -54,7 +71,8 @@ local function exact_position_occupants(surface, force, position)
     force = force
   })
   for _, entity in pairs(candidates) do
-    if entity.position.x == position.x and entity.position.y == position.y then
+    if entity.position.x == position.x and entity.position.y == position.y
+      and collides_with_tiles(entity) then
       table.insert(exact, entity)
     end
   end

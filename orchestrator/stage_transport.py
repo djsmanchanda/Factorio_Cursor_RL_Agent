@@ -467,8 +467,16 @@ def _survey_belt_route(
          max(route_source[1], feed_position[1]) + _BRIDGE_SURVEY_MARGIN),
     )
     blocked |= additional_blocked or set()
+    # A belt endpoint owns its tile, so a continuing bridge may connect on it.
+    # A CHEST source attaches beside itself (+1 inserter, +2 belt) and its tile
+    # must stay an obstacle: releasing it let a route thread belts straight
+    # over the provider chest and die on execution against real infrastructure
+    # (live run of 2026-08-24 18:47, iron plate to the promoted pipe line).
+    if belt_source is not None:
+        blocked -= {
+            (math.floor(route_source[0]), math.floor(route_source[1])),
+        }
     blocked -= {
-        (math.floor(route_source[0]), math.floor(route_source[1])),
         (math.floor(feed_position[0]), math.floor(feed_position[1])),
     }
     direction = _toward(route_source, feed_position)

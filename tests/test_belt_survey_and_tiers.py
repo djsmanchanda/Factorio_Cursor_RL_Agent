@@ -177,6 +177,38 @@ def test_unowned_direct_ore_terminal_is_not_reoriented_or_removed(
         )
 
 
+def test_chest_source_tile_stays_blocked_against_its_own_bridge(monkeypatch) -> None:
+    """Live run of 2026-08-24 18:47: the recorded provider chest's tile was
+    released from the occupancy survey, so the pipe bridge routed belts over
+    the chest and its feed inserter and died on execution. A chest bridge
+    attaches beside its source (+1 inserter, +2 belt); only belt endpoints
+    own their tile."""
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source", lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "available_items",
+        lambda *_args: {"transport-belt": 400},
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_args, **_kwargs: {(110, 29)},
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_args: None,
+    )
+
+    _source, _route, blocked, _entry, _exit = stage_transport._survey_belt_route(
+        object(), "nauvis", "player", "iron-plate",
+        (110.5, 29.5), (120.5, 39.5),
+        reuse_existing=False, additional_blocked=None, upstream_shift=1,
+        destination_is_belt=False, destination_belt_direction="east",
+        planned_belt_source=None,
+    )
+
+    assert (110, 29) in blocked
+
+
 def test_source_belt_replacement_requires_exact_owned_signature(monkeypatch) -> None:
     source = (13.5, -1.5)
     actions = [{
