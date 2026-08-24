@@ -552,9 +552,9 @@ def nearest_powered_pole(
     so remote construction and a small local EEI island join the supplied main
     grid rather than repeatedly extending the weaker island.
     """
-    exclusion = (
-        "" if exclude_network_id is None
-        else "if id==" + str(exclude_network_id) + " then goto continue end;"
+    eligible = (
+        "true" if exclude_network_id is None
+        else "id~=" + str(exclude_network_id)
     )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
@@ -572,9 +572,8 @@ def nearest_powered_pole(
         "generation[id]=(generation[id] or 0)+kw end end;"
         "local selected,best_kw=nil,-1;"
         "for id,kw in pairs(generation) do "
-        + exclusion +
-        "if kw>best_kw or (kw==best_kw and (selected==nil or id<selected)) then selected=id;best_kw=kw end "
-        "::continue:: end;"
+        "if (" + eligible + ") and (kw>best_kw or (kw==best_kw and (selected==nil or id<selected))) "
+        "then selected=id;best_kw=kw end end;"
         "if selected==nil or best_kw<=0 then rcon.print('NONE') return end;"
         "local best,bd,bname=nil,1e18,nil;"
         "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
@@ -588,8 +587,13 @@ def nearest_powered_pole(
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
-    x, y, name = raw.split(" ", 2)
-    return (float(x), float(y)), name
+    try:
+        x, y, name = raw.split(" ", 2)
+        return (float(x), float(y)), name
+    except (TypeError, ValueError) as exc:
+        raise TelemetryError(
+            f"malformed primary-power-pole survey: {raw!r}",
+        ) from exc
 
 
 def occupied_tiles(
