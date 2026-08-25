@@ -804,6 +804,40 @@ def test_bootstrap_retirement_removes_the_mine_logistic_intake(monkeypatch) -> N
     }
 
 
+def test_direct_starter_retires_only_after_the_full_refinery_is_healthy(
+    monkeypatch,
+) -> None:
+    starter = builder.live_base.DirectPlateStarter(
+        (61.5, 24.5), "north", 1,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter",
+        lambda *_a, **_k: starter,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "bootstrap_cell_origins", lambda *_a, **_k: [],
+    )
+    submissions = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e, **_k: submissions.append((name, plan)),
+    )
+
+    removed = builder._retire_standing_bootstrap_cells(
+        object(), object(), "nauvis", "player", "copper-plate",
+        "copper-ore", (113.5, -39.5), lambda _message: None,
+    )
+
+    assert removed == 1
+    assert [name for name, _plan in submissions] == [
+        "retire_direct_copper-plate_starter",
+    ]
+    assert {action["entity"] for action in submissions[0][1]["phases"][0]["actions"]} == {
+        "electric-mining-drill", "electric-furnace",
+        "fast-inserter", "passive-provider-chest",
+    }
+
+
 def test_planned_footprint_ignores_retirement_actions() -> None:
     plan = {"phases": [{"actions": [
         {"action_type": "remove_entity", "entity": "electric-furnace",

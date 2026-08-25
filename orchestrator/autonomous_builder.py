@@ -100,8 +100,10 @@ from orchestrator.stage_transport import (
     transport_grace_seconds,
 )
 from planners.bootstrap_smelting import (
-    generate_logistic_smelter,
+    direct_smelter_positions,
+    generate_direct_smelter,
     logistic_smelter_origin,
+    retire_direct_smelter_plan,
     retire_logistic_smelter_plan,
 )
 from planners.infrastructure import strip_local_power
@@ -1382,17 +1384,40 @@ def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
 ) -> int:
-    """Retire a recognized bootstrap cell and its mine-side logistic intake.
+    """Retire recognized temporary plate producers after replacement is healthy.
 
     The caller invokes this only after the direct refinery is healthy. Keeping
     the temporary path until then preserves the only working plate source when
-    construction or bring-up fails. Returns the number of cells deconstructed.
+    construction or bring-up fails. Legacy requester cells are also recognized
+    so an old save can migrate without opening another temporary path.
     """
+    removed = 0
+    try:
+        starter = live_base.direct_plate_starter(
+            client, surface, force, recipe, ore, ore_output,
+        )
+    except Exception:  # survey unavailable (dry harness): legacy path still runs
+        starter = None
+    if starter is not None:
+        plan = retire_direct_smelter_plan(
+            recipe, ore, starter.drill_position, starter.output_direction,
+            pole_side=starter.pole_side,
+        )
+        plan["surface"], plan["force"] = surface, force
+        _submit(
+            client, bridge, surface, plan,
+            f"retire_direct_{recipe}_starter", emit,
+        )
+        removed += 1
+        emit(
+            f"BOOTSTRAP SWAP: full {recipe} system is healthy; retiring the "
+            f"one-drill starter at {starter.drill_position}"
+        )
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
-    except Exception:  # survey unavailable (dry harness): nothing to retire
-        return 0
-    removed = 0
+    except Exception:  # survey unavailable (dry harness): no legacy cell to retire
+        standing = []
+    legacy_removed = 0
     for spot in standing:
         origin = (round(spot[0] - 1.5), round(spot[1] - 3.5))
         plan = retire_logistic_smelter_plan(recipe, ore, origin)
@@ -1400,7 +1425,8 @@ def _retire_standing_bootstrap_cells(
         _submit(client, bridge, surface, plan,
                 f"retire_logistic_{recipe}_cell", emit)
         removed += 1
-    if removed:
+        legacy_removed += 1
+    if legacy_removed:
         intake_actions: list[dict] = []
         try:
             surveyed = live_base.intake_candidate_tiles(
@@ -1468,7 +1494,7 @@ def _retire_standing_bootstrap_cells(
             )
         emit(
             f"BOOTSTRAP SWAP COMPLETE: direct {recipe} refinery is healthy; "
-            f"removed {removed} temporary cell(s) and their recognized "
+            f"removed {legacy_removed} legacy requester cell(s) and their recognized "
             "mine-side logistic intake"
         )
     return removed
@@ -1548,9 +1574,9 @@ def build_mining_stage(
 ) -> Point:
     """Build or expand one cohesive mine-to-smelter system.
 
-    ``require_direct`` is used only while replacing a standing logistic
-    bootstrap. A material shortage must then stay visible to the mall instead
-    of selecting the same temporary fallback again.
+    ``require_direct`` is used while replacing temporary startup production.
+    A material shortage must then stay visible to the mall instead of selecting
+    another starter.
     """
     ore = LINE_RECIPES[recipe]["ingredients"][0]
     # Retirement is deferred until the replacement mine and refinery are
@@ -1699,16 +1725,15 @@ def build_mining_stage(
                 raise
             raise ProductionPrerequisiteDeferred(str(error)) from error
         except MaterialShortage as error:
-            # A cold base cannot afford the first system's belt bill (belts
-            # are made from this very plate). That is not a demand to queue --
-            # it resolves once a plate producer exists, which the REAL submit
-            # below bootstraps. Anything else stays a normal shortage.
+            # Before the direct starter exists, belts made from this same plate
+            # are circular. The startup path normally prevents reaching this
+            # fallback; it remains restart-safe for a cold interrupted pass.
             if not _cold_start_belt_shortage(client, surface, force, recipe, error):
                 raise
             emit(
                 f"  PLATE BOOTSTRAP PENDING: {error.required} short for the "
-                "first system; the mine still builds and the temporary "
-                "smelter follows this pass"
+                "first system; the mine still builds and the one-drill "
+                "direct starter follows this pass"
             )
     if cohesive_target is not None:
         provider = _extend_plate_smelter(
@@ -1739,8 +1764,8 @@ def build_mining_stage(
                 raise
             if require_direct:
                 raise
-            provider = _bootstrap_logistic_plate_line(
-                client, bridge, surface, force, recipe, extraction, emit,
+            provider = _bootstrap_direct_plate_line(
+                client, bridge, surface, force, recipe, reference_point, emit,
             )
     try:
         retire_depleted_mines(
@@ -1756,23 +1781,77 @@ def build_mining_stage(
     return provider
 
 
-def build_logistic_smelter(
+def _serve_direct_plate_starter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, ore: str, origin: Point, ore_output: Point,
-    emit: Callable[[str], None], *, ore_pickup: Point | None = None,
+    recipe: str, ore: str, starter: live_base.DirectPlateStarter,
+    emit: Callable[[str], None], *, submit: bool,
 ) -> Point:
-    """Build the first plate line without depending on belt production.
-
-    `ore_pickup` names the logistic chest bots actually draw ore from; it
-    must be a chest, not the mine's belt tile, or the coverage check waits
-    forever for a network that can never exist."""
-    ox, oy = round(origin[0]), round(origin[1])
-    plan = generate_logistic_smelter(recipe, ore, (ox, oy))
+    """Build or service the removable drill -> furnace starter."""
+    positions = direct_smelter_positions(
+        starter.drill_position, starter.output_direction,
+        pole_side=starter.pole_side,
+    )
+    plan = generate_direct_smelter(
+        recipe, ore, starter.drill_position, starter.output_direction,
+        pole_side=starter.pole_side,
+    )
     plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, f"logistic_{recipe}_bootstrap", emit)
-    return _serve_bootstrap_cell(
-        client, bridge, surface, force, recipe, ore,
-        (ox, oy), ore_pickup, emit,
+    if submit:
+        _submit(
+            client, bridge, surface, plan, f"direct_{recipe}_starter", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, plan, emit,
+            ),
+        )
+    area = _plan_area(plan, padding=10.0)
+    machines = [positions["drill"], positions["furnace"]]
+    bring_stage_up(
+        client, bridge, surface, force, f"direct starter for {recipe}",
+        starter.drill_position, area, positions["power"], machines, emit,
+        logistic_chest_positions=[positions["provider"]],
+    )
+    stuck = _diagnose_machines(
+        client, surface, machines, emit, bridge=bridge, force=force,
+        grace_seconds=60.0,
+    )
+    if stuck:
+        raise StuckError(f"direct starter for {recipe} built but not healthy: {stuck}")
+    UNBACKED_DRAWS.discard(recipe)
+    return positions["provider"]
+
+
+def _bootstrap_direct_plate_line(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, reference_point: Point, emit: Callable[[str], None],
+) -> Point:
+    """Ensure exactly one local, direct plate starter without bots or belts."""
+    ore = LINE_RECIPES[recipe]["ingredients"][0]
+    standing = live_base.direct_plate_starter(
+        client, surface, force, recipe, ore, reference_point,
+    )
+    if standing is not None:
+        emit(
+            f"  PLATE STARTER: reusing the direct {recipe} stack at "
+            f"{standing.drill_position}"
+        )
+        return _serve_direct_plate_starter(
+            client, bridge, surface, force, recipe, ore, standing, emit,
+            submit=False,
+        )
+    site = live_base.direct_plate_starter_site(
+        client, surface, force, ore, reference_point,
+    )
+    if site is None:
+        raise StuckError(
+            f"no legal one-drill {recipe} starter fits on a {ore} patch within "
+            "the local search radius"
+        )
+    emit(
+        f"PLATE STARTER: {recipe} begins with one drill feeding one furnace "
+        f"directly at {site.drill_position}; no belts, requesters, or bot haul"
+    )
+    return _serve_direct_plate_starter(
+        client, bridge, surface, force, recipe, ore, site, emit, submit=True,
     )
 
 
@@ -1792,12 +1871,12 @@ def _cold_start_belt_shortage(
     client: RconClient, surface: str, force: str, recipe: str,
     error: Exception,
 ) -> bool:
-    """Whether the FIRST plate system hit its own construction loop.
+    """Whether the FIRST plate system predates direct starter production.
 
-    Only then is the beltless smelter the right answer: it exists to break
-    exactly this circle, and any other shortfall has a producer that can grow.
-    A standing compact bootstrap cell still counts as cold -- it exists
-    precisely because plates do not flow yet."""
+    Only then may the one-drill direct starter absorb a circular belt/inserter
+    shortage. Once one furnace exists, the complete system's bill must remain
+    visible. A legacy requester cell counts as cold solely so an old save can
+    migrate through the direct starter instead of creating another cell."""
     if recipe not in ("iron-plate", "copper-plate"):
         return False
     required = getattr(error, "required", None)
@@ -1864,255 +1943,6 @@ def _top_up_solar_generation(
         client=client, bridge=bridge, surface=surface, force=force,
         near=capacity_near, script_output=script_output, emit=emit, submit=_submit,
     )
-
-
-def _mine_logistic_intake(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    ore: str, ore_output: Point, emit: Callable[[str], None],
-) -> Point:
-    """Chest + inserter lifting ore off a belt-only mine into logistics.
-
-    Modern mines emit a belt-only output with NO logistic interface, so a
-    requester-fed smelter starves forever no matter how well it is built --
-    observed live 2026-08-22: the cell's chest held a correct copper-ore
-    request while the mine belt ended in open air. Candidate anchors are the
-    drill drop columns and both run ends (where a dead-ended belt jams); each
-    is tried in all four directions because modular mine rows wedge their
-    drop columns between two drill bodies -- only the end cap past the last
-    column had room (live run 9). Positions keep half-tile centres.
-    Idempotent: an existing pair is returned, not     rebuilt."""
-    # PREFERRED INTERFACE: a blocked drill's own empty drop tile. Modular rows
-    # wedge every belt-side tile between drill bodies, but a drill staring at
-    # 'waiting for space' has a bare drop tile that becomes a provider chest
-    # with zero demolition (live run 9: no legal inserter placement existed).
-    try:
-        drop = live_base.blocked_drill_drop_tile(
-            client, surface, tuple(ore_output),
-        )
-    except Exception:  # survey hiccup: fall through to belt-tap candidates
-        drop = None
-    if drop is not None:
-        standing = live_base.entity_at(client, surface, drop)
-        if standing is None:
-            plan = {"phases": [{
-                "name": f"mine_{ore}_drop_chest",
-                "actions": [
-                    {"action_type": "place_entity",
-                     "entity": "passive-provider-chest",
-                     "position": {"x": drop[0], "y": drop[1]}},
-                ],
-            }]}
-            plan["surface"], plan["force"] = surface, force
-            _submit(client, bridge, surface, plan,
-                    f"mine_{ore}_drop_chest", emit)
-            emit(
-                f"  INTAKE: ore-blocked drill at the {ore} mine gets a drop "
-                f"chest at {drop}"
-            )
-        return drop
-    try:
-        candidates = live_base.intake_candidate_tiles(
-            client, surface, ore_output,
-        ) or [(float(ore_output[0]), float(ore_output[1]))]
-    except Exception:  # survey hiccup: the output tile remains a safe guess
-        candidates = [(float(ore_output[0]), float(ore_output[1]))]
-    # End caps first: modular rows wedge their drop columns between drill
-    # bodies, and a dead-ended belt JAMS at its far end -- the one place an
-    # inserter always finds items (live runs 8-10).
-    ends = [c for c in candidates if c in candidates[-2:]]
-    drops = [c for c in candidates if c not in ends]
-    candidates = ends + drops
-    # Facing is what the EXECUTOR makes it: live readback showed a
-    # 'north'-facing inserter picking up from its NORTH neighbour and dropping
-    # south -- so the label names the PICKUP side here, and each offset below
-    # states the pickup neighbour relative to the anchor tile.
-    directions = ((0.0, -1.0, "south"), (0.0, 1.0, "north"),
-                  (-1.0, 0.0, "east"), (1.0, 0.0, "west"))
-    dead_pair_positions: set[tuple[float, float]] = set()
-    for anchor in candidates:
-        # An existing LIVE pair on this anchor returns its chest. A pair whose
-        # inserter has been source-starved with an empty chest is a dead tap
-        # (the run-9 legacy pair at the upstream tail): skip that whole anchor
-        # -- both the return AND a fresh placement beside the corpse, which
-        # would starve identically (live run 10).
-        anchor_dead = False
-        found_chest = None
-        for dx, dy, _facing in directions:
-            inserter = (anchor[0] + dx, anchor[1] + dy)
-            chest = (anchor[0] + 2 * dx, anchor[1] + 2 * dy)
-            standing_inserter = live_base.entity_at(client, surface, inserter)
-            standing_chest = live_base.entity_at(client, surface, chest)
-            if not (
-                standing_inserter is not None
-                and standing_inserter.get("type") == "inserter"
-                and standing_chest is not None
-                and standing_chest.get("name") == "passive-provider-chest"
-            ):
-                continue
-            status = live_base.entity_status_name(
-                client, surface, tuple(inserter),
-            )
-            chest_empty = not live_base.chest_has_items(
-                client, surface, tuple(chest),
-            )
-            if status == "waiting_for_source_items" and chest_empty:
-                dead_pair_positions.add(chest)
-                anchor_dead = True
-                break
-            found_chest = chest
-            break
-        if anchor_dead:
-            continue
-        if found_chest is not None:
-            return found_chest
-        for dx, dy, facing in directions:
-            inserter = (anchor[0] + dx, anchor[1] + dy)
-            chest = (anchor[0] + 2 * dx, anchor[1] + 2 * dy)
-            if chest in dead_pair_positions:
-                continue
-            # Ore ground is buildable: an east-flow collector's head sits at
-            # the patch's east edge, so the intake spots past it are resource
-            # tiles (live run of 2026-08-24 06:56 starved copper because the
-            # resource entity counted as an occupant).
-            if any(
-                spot is not None and spot.get("type") != "resource"
-                for spot in (
-                    live_base.entity_at(client, surface, inserter),
-                    live_base.entity_at(client, surface, chest),
-                )
-            ):
-                continue
-            plan = {"phases": [{
-                "name": f"mine_logistic_intake_{ore}",
-                "actions": [
-                    {"action_type": "place_entity", "entity": "fast-inserter",
-                     "position": {"x": inserter[0], "y": inserter[1]},
-                     "direction": facing},
-                    {"action_type": "place_entity",
-                     "entity": "passive-provider-chest",
-                     "position": {"x": chest[0], "y": chest[1]}},
-                ],
-            }]}
-            plan["surface"], plan["force"] = surface, force
-            _submit(client, bridge, surface, plan, f"mine_{ore}_intake", emit)
-            # The head of an east-flow collector sits past the row's power
-            # scaffold, so the intake inserter can land outside every pole's
-            # supply area and starve the whole logistic feed silently (live
-            # run of 2026-08-24 14:05: two temp furnaces no_ingredients for
-            # 300s while the chest sat empty).
-            extend_power(client, bridge, surface, force, inserter, emit)
-            return chest
-    raise StuckError(
-        f"{ore}: every tile around the mine belt row at {candidates[:2]} is "
-        "occupied -- no room for a logistic intake"
-    )
-
-
-# A logistic robot flies loaded at well under its top speed and every delivery
-# is a round trip; sizing the health window from the default 20 s called a
-# correctly-built cell starved while bots were still in flight (live 2026-08-22:
-# two furnaces condemned at exactly the default grace). The window scales with
-# the actual pickup distance instead.
-_LOGISTIC_BOT_SPEED_TPS = 1.5
-_LOGISTIC_CELL_GRACE_CAP_SECONDS = 300.0
-
-
-def _bot_delivery_grace(pickup: Point, origin: Point) -> float:
-    """Health-window seconds one bot round trip of ore may reasonably take."""
-    distance = max(
-        abs(pickup[0] - origin[0]), abs(pickup[1] - origin[1]),
-    )
-    flight = 2 * distance / _LOGISTIC_BOT_SPEED_TPS + 6
-    return min(_LOGISTIC_CELL_GRACE_CAP_SECONDS, 20.0 + 3 * flight)
-
-
-def _bootstrap_cell_geometry(origin: Point) -> tuple[list[Point], list[Point]]:
-    """Machine and provider positions of the compact bootstrap cell."""
-    ox, oy = round(origin[0]), round(origin[1])
-    machines = [(ox + 1.5, oy + 0.5), (ox + 1.5, oy + 6.5)]
-    providers = [(ox + 1.5, oy - 2.5), (ox + 1.5, oy + 9.5)]
-    return machines, providers
-
-
-def _serve_bootstrap_cell(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, ore: str, origin: Point, ore_pickup: Point | None,
-    emit: Callable[[str], None],
-) -> Point:
-    """Bring the compact cell up and hold it to a bot-aware health standard."""
-    ox, oy = round(origin[0]), round(origin[1])
-    machines, providers = _bootstrap_cell_geometry(origin)
-    substation = (ox - 4.0, oy + 3.5)
-    bring_stage_up(
-        client, bridge, surface, force, f"logistic bootstrap for {recipe}",
-        (ox, oy), ((ox - 10, oy - 10), (ox + 10, oy + 12)), substation,
-        machines, emit,
-        logistic_chest_positions=[ore_pickup or (ox + 1.5, oy + 3.5), *providers],
-    )
-    stuck = _diagnose_machines(
-        client, surface, machines, emit, bridge=bridge, force=force,
-        grace_seconds=_bot_delivery_grace(
-            ore_pickup or (ox + 1.5, oy + 3.5), origin,
-        ),
-    )
-    if stuck:
-        raise StuckError(
-            f"logistic bootstrap for {recipe} built but not healthy: {stuck}"
-        )
-    return providers[-1]
-
-
-def _bootstrap_logistic_plate_line(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, extraction, emit: Callable[[str], None],
-) -> Point:
-    """Temporary requester-fed furnaces that make plates WITHOUT belts.
-
-    The compact logistic cell breaks the belts-need-plates circle so the mall
-    can finish belt stock; normal goal planning later upgrades it to a
-    belt-fed refinery and retires it (`BOOTSTRAP UPGRADE`). It is deliberately
-    NOT cached in MANAGED_INTERMEDIATE_SOURCES -- caching would hide it from
-    that upgrade survey forever."""
-    emit(
-        f"PLATE BOOTSTRAP: the first {recipe} system cannot afford its belts "
-        "yet -- opening a temporary requester-fed smelter so plates exist "
-        "before the belts that carry them"
-    )
-    # The cell is bot-fed: give it a real logistic source of ore first, or
-    # its requesters can never be served (belt-only mines expose none).
-    ore_pickup = _mine_logistic_intake(
-        client, bridge, surface, force, extraction.ore,
-        extraction.ore_output, emit,
-    )
-    # A cell from an earlier pass may already stand here. Rebuilding at a
-    # re-surveyed origin orphaned the first cell and killed run 4; recognize
-    # and SERVICE what exists instead. The cell's REQUESTER is its identity:
-    # recipe-less furnaces are invisible to machine surveys (run 8 rebuilt
-    # beside a starving twin for exactly that reason).
-    standing = live_base.bootstrap_cell_origins(
-        client, surface, force, extraction.ore,
-    )
-    existing_origin = None
-    if standing:
-        ox, oy = round(standing[0][0] - 1.5), round(standing[0][1] - 3.5)
-        existing_origin = (ox, oy)
-        emit(
-            f"  PLATE BOOTSTRAP: reusing the standing {recipe} cell at "
-            f"{existing_origin} rather than opening another"
-        )
-        provider = _serve_bootstrap_cell(
-            client, bridge, surface, force, recipe, extraction.ore,
-            existing_origin, ore_pickup, emit,
-        )
-        UNBACKED_DRAWS.discard(recipe)
-        return provider
-    provider = build_logistic_smelter(
-        client, bridge, surface, force, recipe, extraction.ore,
-        extraction.smelter_origin, extraction.ore_output, emit,
-        ore_pickup=ore_pickup,
-    )
-    UNBACKED_DRAWS.discard(recipe)
-    return provider
 
 
 def _conversion_origin(
@@ -3710,14 +3540,10 @@ def _prep_plate_extraction(
         output_source = build_mining_stage(
             client, bridge, surface, force, short_plate,
             reference_point, emit,
-            # The two requester-fed furnaces are not the first direct
-            # refinery. Treating them as one sent every later pass into mine
-            # expansion, so the proper belt-fed system was never retried even
-            # after belt production started (live trace 2026-08-24 17:59).
+            # Temporary starter production is not the first managed refinery.
             # A fixed foundation request establishes or repairs its opening
-            # six-furnace district. Recipe-visible furnaces are an incomplete
-            # observation while ore is still arriving, so their presence must
-            # never turn foundation work into the 6 -> 12 growth policy.
+            # six-furnace district; recipe-visible startup furnaces must never
+            # turn foundation work into the 6 -> 12 growth policy.
             expand=(
                 furnace_target is None
                 and plate_line is not None
@@ -3829,7 +3655,33 @@ def _prep_plate_foundation(
     background_targets: Mapping[str, int],
     pending_materials: dict[str, dict[str, int]],
 ) -> bool:
-    """Build one opening direct line before permitting any plate expansion."""
+    """Start both metals cheaply, then build their opening direct modules.
+
+    The one-drill starter breaks the belt construction circle without a
+    requester network. Once iron and copper both flow, the ordinary six-furnace
+    systems are attempted in the same order and their complete material bills
+    remain visible to the mall.
+    """
+    for plate in PLATE_FOUNDATION_BUILD_ORDER:
+        if _direct_plate_foundation_ready(client, surface, force, plate):
+            continue
+        ore = LINE_RECIPES[plate]["ingredients"][0]
+        starter = live_base.direct_plate_starter(
+            client, surface, force, plate, ore, reference_point,
+        )
+        if starter is not None:
+            continue
+        try:
+            _bootstrap_direct_plate_line(
+                client, bridge, surface, force, plate, reference_point, emit,
+            )
+        except MaterialShortage as error:
+            add_demands(mall_targets, error)
+            emit(
+                f"  PLATE STARTER PENDING: {plate} needs {error.required}; "
+                "queued its construction items"
+            )
+        return True
     for plate in PLATE_FOUNDATION_BUILD_ORDER:
         if _direct_plate_foundation_ready(client, surface, force, plate):
             continue

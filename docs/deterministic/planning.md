@@ -24,20 +24,28 @@ These names describe intended responsibilities, not permission to build speculat
 
 ## Production lifecycle invariants
 
-- A requester-fed iron or copper smelter is temporary bootstrap infrastructure.
-  Once belt production can fund a complete direct mine-to-refinery system, the
-  controller must build that direct system without waiting for more demand.
+- Iron and copper start with one removable direct stack: one drill outputs
+  straight into one electric furnace, then one inserter publishes plates to a
+  provider chest. It uses no belts, requester chest, ore intake, or bot haul,
+  and may use a small patch that is unsuitable for a persistent district.
+- Startup builds the iron starter and copper starter before attempting either
+  complete mine-to-refinery foundation. Once a starter produces plates, the
+  complete system's missing belts and inserters are ordinary construction
+  demand and must remain visible to the mall.
 - Migration is build -> validate -> retire. The bootstrap remains intact until
   the direct mine, continuous ore belt, refinery, power, and plate output are
-  built and observed healthy. Only then may its requester/provider chests,
-  temporary furnaces, and mine-side logistic intake be removed.
-- A migration is incomplete while any recognized bootstrap chest or furnace
+  built and observed healthy. Only then may the starter drill, furnace,
+  inserter, and provider chest be removed. Its grid pole may remain as shared
+  service infrastructure. Legacy requester cells are recognized only so old
+  saves can retire them; new starts must not create one.
+- A migration is incomplete while any recognized starter chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   Mine, transport, and refinery capacity move as one coherent increment.
-- Startup opens a direct six-furnace iron foundation, then copper. Between
-  those explicit raw steps, a standing intermediate may start only when every
+- After both starters, startup opens a direct six-furnace iron foundation,
+  then copper. Between those explicit raw steps, a standing intermediate may
+  start only when every
   direct input is already working or has produced output: gears follow live
   iron, cable follows live copper, and circuits follow their live feeders.
   Intermediate requests never recursively choose or open a missing raw

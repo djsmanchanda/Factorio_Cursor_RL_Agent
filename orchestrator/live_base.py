@@ -40,6 +40,15 @@ class LineState:
     produced_count: int = 0
 
 
+@dataclass(frozen=True)
+class DirectPlateStarter:
+    """Identity needed to service and later retire one direct plate starter."""
+
+    drill_position: Point
+    output_direction: str
+    pole_side: int
+
+
 def find_line(client: RconClient, surface: str, force: str, recipe: str, machine: str) -> LineState | None:
     """Every machine of `machine` type with `recipe` set, anywhere on the base.
 
@@ -151,6 +160,119 @@ def nearest_resource(
         return None
     x, y, minx, miny, maxx, maxy = (float(part) for part in raw.split())
     return (x, y), (minx, miny), (maxx, maxy)
+
+
+def direct_plate_starter(
+    client: RconClient, surface: str, force: str, recipe: str, ore: str,
+    near: Point,
+) -> DirectPlateStarter | None:
+    """Recognize the exact drill -> furnace -> provider starter stack."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local function named(p,name) "
+        "for _,e in pairs(s.find_entities_filtered{position=p,radius=0.4,force=f}) do "
+        "if e.name==name or (e.type=='entity-ghost' and e.ghost_name==name) then "
+        "return e end end return nil end;"
+        "local function furnace_ok(p) local e=named(p,'electric-furnace');"
+        "if not e then return false end;if e.type=='entity-ghost' then return true end;"
+        "local ok,r=pcall(function() return e.get_recipe() end);"
+        "return ok and (not r or r.name=='" + recipe + "') end;"
+        "local dirs={{'north',0,-1,defines.direction.north},"
+        "{'east',1,0,defines.direction.east},{'south',0,1,defines.direction.south},"
+        "{'west',-1,0,defines.direction.west}};"
+        "local drills=s.find_entities_filtered{name='electric-mining-drill',force=f};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
+        "if g.ghost_name=='electric-mining-drill' then drills[#drills+1]=g end end;"
+        "local found={};for _,d in pairs(drills) do "
+        "local mined=false;for _,r in pairs(s.find_entities_filtered{type='resource',"
+        "area={{d.position.x-2.5,d.position.y-2.5},{d.position.x+2.5,d.position.y+2.5}}}) do "
+        "if r.name=='" + ore + "' then mined=true end end;"
+        "if mined then for _,v in pairs(dirs) do if d.direction==v[4] then "
+        "local dx,dy=v[2],v[3];local fp={d.position.x+3*dx,d.position.y+3*dy};"
+        "local ip={d.position.x+5*dx,d.position.y+5*dy};"
+        "local cp={d.position.x+6*dx,d.position.y+6*dy};"
+        "if furnace_ok(fp) and named(ip,'fast-inserter') "
+        "and named(cp,'passive-provider-chest') then "
+        "local side=0;for _,ps in pairs({-1,1}) do "
+        "local px,py=dy*ps,-dx*ps;"
+        "if named({d.position.x+2*dx+2*px,d.position.y+2*dy+2*py},"
+        "'medium-electric-pole') then side=ps end end;"
+        "local dist=(d.position.x-nx)^2+(d.position.y-ny)^2;"
+        "found[#found+1]={dist,d.position.x,d.position.y,v[1],side} end end end end end;"
+        "table.sort(found,function(a,b) return a[1]<b[1] end);"
+        "if #found==0 then rcon.print('NONE') else local z=found[1];"
+        "rcon.print(z[2]..' '..z[3]..' '..z[4]..' '..z[5]) end"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    fields = raw.split()
+    if len(fields) != 4:
+        raise TelemetryError(f"malformed direct plate starter survey: {raw!r}")
+    x, y, direction, pole_side = fields
+    return DirectPlateStarter(
+        (float(x), float(y)), direction, int(pole_side) or 1,
+    )
+
+
+def direct_plate_starter_site(
+    client: RconClient, surface: str, force: str, ore: str, near: Point,
+    *, search_radius: float = 400.0,
+) -> DirectPlateStarter | None:
+    """Nearest legal one-drill starter site, including either pole side.
+
+    Small patches are intentionally eligible. This is a temporary producer,
+    not a claim on the later managed mining district.
+    """
+    min_x, min_y = near[0] - search_radius, near[1] - search_radius
+    max_x, max_y = near[0] + search_radius, near[1] + search_radius
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local rs=s.find_entities_filtered{name='" + ore + "',type='resource',"
+        "area={{" + str(min_x) + "," + str(min_y) + "},{" + str(max_x) + "," + str(max_y) + "}}};"
+        "table.sort(rs,function(a,b) local ad=(a.position.x-nx)^2+(a.position.y-ny)^2;"
+        "local bd=(b.position.x-nx)^2+(b.position.y-ny)^2;return ad<bd end);"
+        "local dirs={{'north',0,-1,defines.direction.north},"
+        "{'east',1,0,defines.direction.east},{'south',0,1,defines.direction.south},"
+        "{'west',-1,0,defines.direction.west}};"
+        "local function empty(p,r) local x,y=p.x or p[1],p.y or p[2];"
+        "for _,e in pairs(s.find_entities_filtered{"
+        "area={{x-r,y-r},{x+r,y+r}}}) do "
+        "if e.type~='resource' then return false end end return true end;"
+        "local function can(name,p,d,r) return empty(p,r) and s.can_place_entity{"
+        "name=name,position=p,direction=d or defines.direction.north,force=f,"
+        "build_check_type=defines.build_check_type.manual} end;"
+        "for i=1,math.min(#rs,512) do local p=rs[i].position;local mixed=false;"
+        "for _,r in pairs(s.find_entities_filtered{type='resource',"
+        "area={{p.x-2.5,p.y-2.5},{p.x+2.5,p.y+2.5}}}) do "
+        "if r.name~='" + ore + "' then mixed=true end end;"
+        "if not mixed then for _,v in pairs(dirs) do local dx,dy=v[2],v[3];"
+        "local fp={p.x+3*dx,p.y+3*dy};local ip={p.x+5*dx,p.y+5*dy};"
+        "local cp={p.x+6*dx,p.y+6*dy};"
+        "if can('electric-mining-drill',p,v[4],1.4) "
+        "and can('electric-furnace',fp,nil,1.4) "
+        "and can('fast-inserter',ip,nil,0.4) "
+        "and can('passive-provider-chest',cp,nil,0.4) then "
+        "for _,side in pairs({1,-1}) do local px,py=dy*side,-dx*side;"
+        "local pp={p.x+2*dx+2*px,p.y+2*dy+2*py};"
+        "if can('medium-electric-pole',pp,nil,0.4) then "
+        "rcon.print(p.x..' '..p.y..' '..v[1]..' '..side);return end end end end end end;"
+        "rcon.print('NONE')"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    fields = raw.split()
+    if len(fields) != 4:
+        raise TelemetryError(f"malformed direct plate starter site survey: {raw!r}")
+    x, y, direction, pole_side = fields
+    return DirectPlateStarter(
+        (float(x), float(y)), direction, int(pole_side),
+    )
 
 
 

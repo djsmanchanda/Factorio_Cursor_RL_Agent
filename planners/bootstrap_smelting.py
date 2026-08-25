@@ -1,15 +1,152 @@
 # Path: planners/bootstrap_smelting.py
-# Purpose: Deterministic beltless plate-smelting layout for construction bootstrap.
+# Purpose: Direct plate starter geometry plus legacy requester-cell retirement.
 
 from __future__ import annotations
 
 
-def generate_logistic_smelter(
+_DIRECTION_VECTORS = {
+    "north": (0.0, -1.0),
+    "east": (1.0, 0.0),
+    "south": (0.0, 1.0),
+    "west": (-1.0, 0.0),
+}
+_OPPOSITE_DIRECTION = {
+    "north": "south",
+    "east": "west",
+    "south": "north",
+    "west": "east",
+}
+
+
+def direct_smelter_positions(
+    drill_position: tuple[float, float],
+    output_direction: str,
+    *,
+    pole_side: int = 1,
+) -> dict[str, tuple[float, float]]:
+    """Exact one-drill starter geometry, aligned to the drill output.
+
+    The drill outputs directly into the furnace. One inserter publishes plates
+    to a provider chest. ``pole_side`` selects either side of the drill/furnace
+    axis so site selection can route around a local obstacle.
+    """
+    if output_direction not in _DIRECTION_VECTORS:
+        raise ValueError(f"Unsupported starter direction {output_direction!r}")
+    if pole_side not in {-1, 1}:
+        raise ValueError("pole_side must be -1 or 1")
+    x, y = drill_position
+    dx, dy = _DIRECTION_VECTORS[output_direction]
+    # Perpendicular to the output axis. For a north-facing drill, pole_side=1
+    # reproduces the live reference pole two tiles west of the drill.
+    px, py = dy * pole_side, -dx * pole_side
+    return {
+        "drill": (x, y),
+        "furnace": (x + 3 * dx, y + 3 * dy),
+        "inserter": (x + 5 * dx, y + 5 * dy),
+        "provider": (x + 6 * dx, y + 6 * dy),
+        "power": (x + 2 * dx + 2 * px, y + 2 * dy + 2 * py),
+    }
+
+
+def generate_direct_smelter(
+    recipe: str,
+    ore: str,
+    drill_position: tuple[float, float],
+    output_direction: str,
+    *,
+    pole_side: int = 1,
+) -> dict:
+    """Build the removable one-drill/one-furnace plate starter."""
+    expected_ore = {
+        "iron-plate": "iron-ore",
+        "copper-plate": "copper-ore",
+    }.get(recipe)
+    if expected_ore != ore:
+        raise ValueError(f"Direct smelter does not support {recipe!r} from {ore!r}")
+    positions = direct_smelter_positions(
+        drill_position, output_direction, pole_side=pole_side,
+    )
+    actions = [
+        {
+            "action_type": "place_ghost",
+            "entity": "medium-electric-pole",
+            "position": {"x": positions["power"][0], "y": positions["power"][1]},
+        },
+        {
+            "action_type": "place_ghost",
+            "entity": "electric-mining-drill",
+            "position": {"x": positions["drill"][0], "y": positions["drill"][1]},
+            "direction": output_direction,
+        },
+        {
+            "action_type": "place_ghost",
+            "entity": "electric-furnace",
+            "position": {"x": positions["furnace"][0], "y": positions["furnace"][1]},
+        },
+        {
+            "action_type": "place_ghost",
+            "entity": "fast-inserter",
+            "position": {"x": positions["inserter"][0], "y": positions["inserter"][1]},
+            "direction": _OPPOSITE_DIRECTION[output_direction],
+        },
+        {
+            "action_type": "place_ghost",
+            "entity": "passive-provider-chest",
+            "position": {"x": positions["provider"][0], "y": positions["provider"][1]},
+        },
+    ]
+    return {
+        "phases": [{"name": f"direct_{recipe}_starter", "actions": actions}],
+        "starter_geometry": {
+            "recipe": recipe,
+            "ore": ore,
+            "direction": output_direction,
+            "pole_side": pole_side,
+            "drill_position": [drill_position[0], drill_position[1]],
+        },
+    }
+
+
+def retire_direct_smelter_plan(
+    recipe: str,
+    ore: str,
+    drill_position: tuple[float, float],
+    output_direction: str,
+    *,
+    pole_side: int = 1,
+) -> dict:
+    """Remove the starter's production stack after its direct replacement works.
+
+    Its medium pole is deliberately retained: by migration time it may be part
+    of the parent grid or construction coverage, while the other four entities
+    are uniquely owned by the recorded starter geometry.
+    """
+    plan = generate_direct_smelter(
+        recipe, ore, drill_position, output_direction, pole_side=pole_side,
+    )
+    actions = [
+        {
+            "action_type": "remove_entity",
+            "entity": action["entity"],
+            "position": action["position"],
+        }
+        for action in plan["phases"][0]["actions"]
+        if action["entity"] != "medium-electric-pole"
+    ]
+    return {
+        "phases": [{
+            "name": f"retire_direct_{recipe}_starter",
+            "actions": actions,
+        }],
+    }
+
+
+def _legacy_logistic_smelter_actions(
     recipe: str,
     ore: str,
     origin: tuple[int, int],
-) -> dict:
-    """Build two furnaces around one shared requester without any belts."""
+) -> list[dict]:
+    """Describe the retired requester layout solely for exact teardown."""
     if recipe not in {"iron-plate", "copper-plate"}:
         raise ValueError(f"Logistic smelter does not support {recipe!r}")
 
@@ -39,7 +176,7 @@ def generate_logistic_smelter(
             {"action_type": "place_entity", "entity": "passive-provider-chest",
              "position": {"x": x, "y": provider_y}},
         ])
-    return {"phases": [{"name": f"logistic_{recipe}_bootstrap", "actions": actions}]}
+    return actions
 
 def logistic_smelter_origin(
     machine_positions: tuple[tuple[float, float], ...],
@@ -55,7 +192,6 @@ def logistic_smelter_origin(
 
 def retire_logistic_smelter_plan(recipe: str, ore: str, origin: tuple[int, int]) -> dict:
     """Remove only the entities belonging to a recognized bootstrap cell."""
-    plan = generate_logistic_smelter(recipe, ore, origin)
     return {"phases": [{
         "name": f"retire_logistic_{recipe}_bootstrap",
         "actions": [
@@ -64,6 +200,6 @@ def retire_logistic_smelter_plan(recipe: str, ore: str, origin: tuple[int, int])
                 "entity": action["entity"],
                 "position": action["position"],
             }
-            for action in plan["phases"][0]["actions"]
+            for action in _legacy_logistic_smelter_actions(recipe, ore, origin)
         ],
     }]}

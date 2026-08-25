@@ -178,6 +178,10 @@ def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch)
         lambda *_args: _args[3] in ready,
     )
     monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter",
+        lambda *_args: object(),
+    )
+    monkeypatch.setattr(
         autonomous_builder, "_prep_plate_extraction",
         lambda *_args, **kwargs: calls.append((_args[4], kwargs["furnace_target"])) or True,
     )
@@ -187,6 +191,43 @@ def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch)
         lambda _message: None, {}, {},
     )
     assert calls == [("copper-plate", 6)]
+
+
+def test_plate_starters_precede_both_full_foundations(monkeypatch) -> None:
+    starters: list[str] = []
+    standing: set[str] = set()
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter",
+        lambda *_args: object() if _args[3] in standing else None,
+    )
+
+    def build_starter(*args):
+        plate = args[4]
+        starters.append(plate)
+        standing.add(plate)
+        return (0.0, 0.0)
+
+    monkeypatch.setattr(
+        autonomous_builder, "_bootstrap_direct_plate_line", build_starter,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_prep_plate_extraction",
+        lambda *_args, **_kwargs: pytest.fail(
+            "full foundation must wait until both direct starters exist"
+        ),
+    )
+
+    for _ in range(2):
+        assert autonomous_builder._prep_plate_foundation(
+            object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+            lambda _message: None, {}, {},
+        )
+
+    assert starters == ["iron-plate", "copper-plate"]
 
 
 def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -> None:
