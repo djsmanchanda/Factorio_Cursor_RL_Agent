@@ -598,11 +598,13 @@ def plan_local_extraction(
     inserter_type: str,
     reuse_existing: bool = True,
     belt_stock: int = 0,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
     mines = extraction_state.find_resource_mines(
-        client, surface, force, ore, reference_point
+        client, surface, force, ore, reference_point,
+        excluded_drill_positions,
     )
     observed = mines[0] if mines else None
     if observed is not None and extraction_state.pending_plate_smelter(
@@ -613,7 +615,7 @@ def plan_local_extraction(
             "refusing to submit a duplicate line"
         )
     system_before = extraction_state.resource_drill_count(
-        client, surface, force, ore
+        client, surface, force, ore, excluded_drill_positions,
     )
     phase_target = extraction_capacity.next_drill_phase(system_before)
     if not reuse_existing and phase_target is None:

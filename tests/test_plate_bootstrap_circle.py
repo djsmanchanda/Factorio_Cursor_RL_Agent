@@ -319,7 +319,9 @@ def test_starved_standing_refinery_grows_its_own_mine(monkeypatch) -> None:
 
     captured = {}
 
-    def fake_expand(_c, _b, _s, _f, recipe, ref, emit, *, expand=False):
+    def fake_expand(
+        _c, _b, _s, _f, recipe, ref, emit, *, expand=False, **_kwargs,
+    ):
         captured["expand"] = expand
         return (10.0, 20.0)
 

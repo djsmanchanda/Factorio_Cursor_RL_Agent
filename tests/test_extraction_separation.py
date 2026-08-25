@@ -366,6 +366,28 @@ def test_extraction_state_reconciles_pending_direct_mine_records() -> None:
     ) == ResourceMine((15.5, 20.5), 1, pending=True)
 
 
+def test_starter_drill_is_not_classified_as_a_persistent_mine() -> None:
+    client = _StateRcon(["drill,17.5,-2.5,1"])
+
+    mines = extraction_state.find_resource_mines(
+        client, "nauvis", "player", "iron-ore", (0.0, 0.0),
+        ((17.5, -2.5),),
+    )
+
+    assert mines == []
+
+
+def test_starter_drill_is_not_counted_in_persistent_capacity() -> None:
+    client = _StateRcon(["0"])
+
+    assert extraction_state.resource_drill_count(
+        client, "nauvis", "player", "iron-ore", ((17.5, -2.5),),
+    ) == 0
+    lua = client.commands[0]
+    assert "math.abs(d.position.x-(17.5))<0.1" in lua
+    assert "math.abs(d.position.y-(-2.5))<0.1" in lua
+
+
 def test_pending_smelter_probe_is_ghost_and_radius_specific() -> None:
     completed = _StateRcon(["0"])
     pending = _StateRcon(["1"])
@@ -523,6 +545,42 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
         x, y = action["position"]["x"], action["position"]["y"]
         assert 80.0 <= x - size / 2 and x + size / 2 <= 134.0
         assert 80.0 <= y - size / 2 and y + size / 2 <= 105.0
+
+
+def test_foundation_plans_six_drills_beside_but_not_from_the_starter(
+    monkeypatch,
+) -> None:
+    _patch_and_rates(monkeypatch)
+    observed: dict[str, tuple[tuple[float, float], ...]] = {}
+
+    def mines(*args):
+        observed["mine_exclusions"] = args[5]
+        return []
+
+    def count(*args):
+        observed["count_exclusions"] = args[4]
+        return 0
+
+    monkeypatch.setattr(extraction_state, "find_resource_mines", mines)
+    monkeypatch.setattr(extraction_state, "resource_drill_count", count)
+    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(
+        "orchestrator.stage_extraction.choose_mining_origin",
+        lambda *_args: ((10.0, 20.0), 3),
+    )
+
+    planned = plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+        belt_type="transport-belt", inserter_type="inserter",
+        excluded_drill_positions=((17.5, -2.5),),
+    )
+
+    assert planned.drill_count == 6
+    assert planned.build_plan is not None
+    assert observed == {
+        "mine_exclusions": ((17.5, -2.5),),
+        "count_exclusions": ((17.5, -2.5),),
+    }
 
 
 def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:

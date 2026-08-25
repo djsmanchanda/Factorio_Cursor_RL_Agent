@@ -293,29 +293,49 @@ def _resource_mine_entities(
 
 def find_resource_mines(
     client: RconClient, surface: str, force: str, resource: str, near: Point,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> list[ResourceMine]:
     """Find every planner-managed mine for one resource, nearest-first."""
+    excluded = set(excluded_drill_positions)
+    entities = [
+        entity
+        for entity in _resource_mine_entities(
+            client, surface, force, resource, near,
+        )
+        if entity.kind != "drill" or entity.position not in excluded
+    ]
     return _classify_direct_mines(
-        _resource_mine_entities(client, surface, force, resource, near), near,
+        entities, near,
     )
 
 
 def find_resource_mine(
     client: RconClient, surface: str, force: str, resource: str, near: Point,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> ResourceMine | None:
     """Compatibility wrapper returning only the nearest managed mine."""
-    mines = find_resource_mines(client, surface, force, resource, near)
+    mines = find_resource_mines(
+        client, surface, force, resource, near, excluded_drill_positions,
+    )
     return mines[0] if mines else None
 
 
 def resource_drill_count(
     client: RconClient, surface: str, force: str, resource: str,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> int:
     """Count all built drills currently targeting this resource."""
+    exclusions = "".join(
+        "if math.abs(d.position.x-(" + str(x) + "))<0.1 and "
+        "math.abs(d.position.y-(" + str(y) + "))<0.1 then skip=true end;"
+        for x, y in excluded_drill_positions
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=0;for _,d in pairs(s.find_entities_filtered{"
-        "name='electric-mining-drill',force=f}) do local t=d.mining_target;"
-        "if t and t.name=='" + resource + "' then n=n+1 end end;rcon.print(n)"
+        "name='electric-mining-drill',force=f}) do local skip=false;"
+        + exclusions
+        + "if not skip then local t=d.mining_target;"
+        "if t and t.name=='" + resource + "' then n=n+1 end end end;rcon.print(n)"
     )
     return int(_sc(client, lua))

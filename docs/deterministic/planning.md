@@ -36,6 +36,9 @@ These names describe intended responsibilities, not permission to build speculat
   complete mine-to-refinery foundation. Once a starter produces plates, the
   complete system's missing belts and inserters are ordinary construction
   demand and must remain visible to the mall.
+- A starter drill is temporary bootstrap capacity, not a one-drill persistent
+  resource district. Exclude it from managed-mine discovery and phase counts
+  while the independent six-drill belt collector and refinery are built.
 - Migration is build -> validate -> retire. The bootstrap remains intact until
   the direct mine, continuous ore belt, refinery, power, and plate output are
   built and observed healthy. Only then may the starter drill, furnace,

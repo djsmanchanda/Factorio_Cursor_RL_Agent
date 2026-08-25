@@ -171,26 +171,32 @@ def test_drill_count_alone_does_not_force_an_iron_expansion(monkeypatch) -> None
 
 
 def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch) -> None:
-    calls: list[tuple[str, int]] = []
+    calls: list[tuple[str, int, tuple[tuple[float, float], ...]]] = []
     ready = {"iron-plate"}
+    copper_starter = autonomous_builder.live_base.DirectPlateStarter(
+        (57.5, 26.5), "north", 1,
+    )
     monkeypatch.setattr(
         autonomous_builder, "_direct_plate_foundation_ready",
         lambda *_args: _args[3] in ready,
     )
     monkeypatch.setattr(
         autonomous_builder.live_base, "direct_plate_starter",
-        lambda *_args: object(),
+        lambda *_args: copper_starter,
     )
     monkeypatch.setattr(
         autonomous_builder, "_prep_plate_extraction",
-        lambda *_args, **kwargs: calls.append((_args[4], kwargs["furnace_target"])) or True,
+        lambda *_args, **kwargs: calls.append((
+            _args[4], kwargs["furnace_target"],
+            kwargs["excluded_drill_positions"],
+        )) or True,
     )
 
     assert autonomous_builder._prep_plate_foundation(
         object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
         lambda _message: None, {}, {},
     )
-    assert calls == [("copper-plate", 6)]
+    assert calls == [("copper-plate", 6, ((57.5, 26.5),))]
 
 
 def test_plate_starters_precede_both_full_foundations(monkeypatch) -> None:

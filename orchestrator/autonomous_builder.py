@@ -1571,6 +1571,7 @@ def build_mining_stage(
     recipe: str, reference_point: Point, emit: Callable[[str], None], *,
     expand: bool = False, earmark_unfunded: bool = False,
     require_direct: bool = False,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> Point:
     """Build or expand one cohesive mine-to-smelter system.
 
@@ -1591,6 +1592,7 @@ def build_mining_stage(
             belt_stock=live_base.available_items(
                 client, surface, force,
             ).get(belt_type, 0),
+            excluded_drill_positions=excluded_drill_positions,
         )
     except stage_extraction.PendingSystemDeferred as error:
         # The system serving this demand is still being built -- bots need
@@ -1655,6 +1657,7 @@ def build_mining_stage(
             return build_mining_stage(
                 client, bridge, surface, force, recipe,
                 reference_point, emit, expand=True,
+                excluded_drill_positions=excluded_drill_positions,
             )
     bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
     if (
@@ -3461,6 +3464,7 @@ def _prep_plate_extraction(
     demand_targets: Mapping[str, int] | None = None,
     pending_materials: dict[str, dict[str, int]] | None = None,
     furnace_target: int | None = None,
+    excluded_drill_positions: tuple[Point, ...] = (),
 ) -> bool:
     """Grow one plate line to the furnace count its own prep draw implies.
 
@@ -3549,6 +3553,7 @@ def _prep_plate_extraction(
                 and plate_line is not None
                 and not bootstrap_line
             ),
+            excluded_drill_positions=excluded_drill_positions,
         )
         if output_source is not None:
             MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
@@ -3586,6 +3591,7 @@ def _prep_plate_extraction(
                 output_source = build_mining_stage(
                     client, bridge, surface, force, short_plate,
                     reference_point, emit, expand=True, earmark_unfunded=True,
+                    excluded_drill_positions=excluded_drill_positions,
                 )
                 if output_source is not None:
                     MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
@@ -3662,6 +3668,7 @@ def _prep_plate_foundation(
     systems are attempted in the same order and their complete material bills
     remain visible to the mall.
     """
+    standing_starters: dict[str, live_base.DirectPlateStarter] = {}
     for plate in PLATE_FOUNDATION_BUILD_ORDER:
         if _direct_plate_foundation_ready(client, surface, force, plate):
             continue
@@ -3670,6 +3677,7 @@ def _prep_plate_foundation(
             client, surface, force, plate, ore, reference_point,
         )
         if starter is not None:
+            standing_starters[plate] = starter
             continue
         try:
             _bootstrap_direct_plate_line(
@@ -3694,6 +3702,9 @@ def _prep_plate_foundation(
             deferred_targets, mall_targets, reference_point, emit,
             background_targets, pending_materials,
             furnace_target=PLATE_FOUNDATION_FURNACES[plate],
+            excluded_drill_positions=(
+                standing_starters[plate].drill_position,
+            ),
         )
     return False
 
