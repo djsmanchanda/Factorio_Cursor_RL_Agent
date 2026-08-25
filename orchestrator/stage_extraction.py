@@ -464,20 +464,13 @@ def smelter_search_anchors(
     reference_point: Point,
     ore_output: Point | None = None,
 ) -> list[Point]:
-    """Cardinal search anchors, nearest the ORE first.
+    """Generate cardinal candidates, surveying the ore interfaces first.
 
-    A smelter is sited beside the thing it consumes, which for a furnace row
-    is unambiguously the ore -- the same rule a promoted line already follows
-    through `_heaviest_source`. Ordering by distance to the BASE instead put
-    the search on the far side of the patch from where the ore comes out, and
-    the site that won was 61 tiles from the mine it was smelting for.
-
-    The ore haul is the expensive side of the trade: it carries the drill
-    row's whole output, and it is re-laid every time the row grows
-    6 -> 12 -> 24 -> 48 -> 96, so its length is paid over and over. The plate belt
-    leaving the smelter is built once. `reference_point` only breaks ties.
-
-    Live resource clearance remains authoritative over all of this.
+    Starting near the actual collector output avoids wasting the first clear
+    area probes at an unrelated edge of a long patch. This ordering does not
+    choose the winning refinery site: `plan_local_extraction` evaluates every
+    clear candidate by legal flow, total belt cost, and demand proximity.
+    Live resource clearance remains authoritative over all of them.
     """
     (min_x, min_y), (max_x, max_y) = ore_reservation(patch_min, patch_max)
     width, height = footprint
@@ -517,6 +510,35 @@ def smelter_search_anchors(
             point[1],
             point[0],
         ),
+    )
+
+
+def _refinery_site_score(
+    ore_output: Point,
+    reference_point: Point,
+    feed: Point,
+    output: Point,
+) -> tuple[bool, bool, float, float, float]:
+    """Rank legal refinery interfaces by total belt cost, then demand access."""
+    input_tiles = abs(feed[0] - ore_output[0]) + abs(feed[1] - ore_output[1])
+    output_tiles = (
+        abs(output[0] - reference_point[0])
+        + abs(output[1] - reference_point[1])
+    )
+    mine_to_output = (
+        abs(output[0] - ore_output[0])
+        + abs(output[1] - ore_output[1])
+    )
+    target_to_feed = (
+        abs(feed[0] - reference_point[0])
+        + abs(feed[1] - reference_point[1])
+    )
+    return (
+        input_tiles > mine_to_output,
+        output_tiles > target_to_feed,
+        input_tiles + output_tiles,
+        output_tiles,
+        input_tiles,
     )
 
 
@@ -742,7 +764,9 @@ def plan_local_extraction(
     )
     smelter_origin = None
     smelter_flow_direction = "east"
-    candidates: list[tuple[bool, bool, float, float, str, Point]] = []
+    candidates: list[
+        tuple[bool, bool, float, float, float, str, Point]
+    ] = []
     for anchor in smelter_search_anchors(
         patch_min, patch_max, footprint, reference_point, ore_output,
     ):
@@ -766,36 +790,19 @@ def plan_local_extraction(
                 candidate[0] + output_offset[0],
                 candidate[1] + output_offset[1],
             )
-            input_tiles = abs(feed[0] - ore_output[0]) + abs(feed[1] - ore_output[1])
-            output_tiles = (
-                abs(output[0] - reference_point[0])
-                + abs(output[1] - reference_point[1])
+            site_score = _refinery_site_score(
+                ore_output, reference_point, feed, output,
             )
-            mine_to_output = (
-                abs(output[0] - ore_output[0])
-                + abs(output[1] - ore_output[1])
-            )
-            target_to_feed = (
-                abs(feed[0] - reference_point[0])
-                + abs(feed[1] - reference_point[1])
-            )
+            input_tiles = site_score[-1]
             if input_tiles <= LOCAL_MODE_MAX_LINK_TILES:
                 candidates.append((
-                    input_tiles > mine_to_output,
-                    output_tiles > target_to_feed,
-                    # ORE HAUL FIRST. Summing the two hauls let a site 61
-                    # tiles from the mine beat one far closer that happened
-                    # to sit further from the base -- but the ore belt is
-                    # re-laid every time the drill row grows, and the plate
-                    # belt out is built once.
-                    input_tiles,
-                    input_tiles + output_tiles,
+                    *site_score,
                     direction,
                     candidate,
                 ))
     if candidates:
         (
-            _input_wrong_way, _output_wrong_way, _input, _total,
+            _input_wrong_way, _output_wrong_way, _total, _output, _input,
             smelter_flow_direction, smelter_origin,
         ) = min(candidates)
     if smelter_origin is None:

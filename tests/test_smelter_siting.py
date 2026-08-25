@@ -1,9 +1,8 @@
 # Path: tests/test_smelter_siting.py
-# Purpose: Prove a smelter is sited beside the ore it consumes rather than beside the base, and that the ranking agrees with what a belt actually costs.
+# Purpose: Prove refinery siting minimizes total transport while preserving legal flow and expansion space.
 
 from __future__ import annotations
 
-import inspect
 import sys
 from pathlib import Path
 
@@ -12,8 +11,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator.stage_extraction import (  # noqa: E402
+    _refinery_site_score,
     ore_reservation,
-    plan_local_extraction,
     smelter_search_anchors,
 )
 from planners.zoning_geometry import Rect  # noqa: E402
@@ -90,21 +89,24 @@ def test_without_an_ore_output_the_old_ordering_still_applies() -> None:
     assert costs == sorted(costs)
 
 
-def test_the_ore_haul_outranks_the_plate_haul_in_scoring() -> None:
-    """Summing the two let a site far from the mine win because it happened to
-    sit near the base. The ore belt is re-laid every time the drill row grows
-    6 -> 12 -> 24 -> 48 -> 96; the plate belt out is built once."""
-    source = inspect.getsource(plan_local_extraction)
-    block = source[source.index("candidates.append(("):]
-    block = block[:block.index("))")]
-    ranked = [line.strip() for line in block.splitlines() if line.strip().endswith(",")]
+def test_total_belt_cost_beats_a_source_close_but_demand_distant_site() -> None:
+    source_close = _refinery_site_score(
+        (0.0, 0.0), (100.0, 0.0), (10.0, 0.0), (20.0, 0.0),
+    )
+    balanced = _refinery_site_score(
+        (0.0, 0.0), (100.0, 0.0), (30.0, 0.0), (70.0, 0.0),
+    )
 
-    assert ranked.index("input_tiles,") < ranked.index("input_tiles + output_tiles,")
+    assert balanced < source_close
 
 
-def test_the_scoring_unpacks_in_the_order_it_ranks() -> None:
-    """A reordered tuple that is unpacked the old way silently mislabels the
-    chosen direction and origin."""
-    source = inspect.getsource(plan_local_extraction)
+def test_demand_proximity_breaks_equal_total_belt_cost() -> None:
+    source_close = _refinery_site_score(
+        (0.0, 0.0), (100.0, 0.0), (10.0, 0.0), (20.0, 0.0),
+    )
+    demand_close = _refinery_site_score(
+        (0.0, 0.0), (100.0, 0.0), (45.0, 0.0), (55.0, 0.0),
+    )
 
-    assert "_input_wrong_way, _output_wrong_way, _input, _total," in source
+    assert source_close[2] == demand_close[2]
+    assert demand_close < source_close

@@ -21,6 +21,10 @@ These names describe intended responsibilities, not permission to build speculat
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
 - Base capacity on rates and live game facts, not machine counts alone.
+- Site persistent refineries by the complete transport bill: preserve legal
+  input/output flow, minimize ore-belt plus plate-belt length, then prefer the
+  output nearer current demand. Reserve the full expansion footprint at that
+  site so later six-furnace modules can extend without relocation.
 
 ## Production lifecycle invariants
 
