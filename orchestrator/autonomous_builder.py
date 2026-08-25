@@ -69,6 +69,7 @@ from orchestrator.stage_extraction import (
 )
 from orchestrator.stage_recovery import repair_existing_ingredient_transport
 from orchestrator.stage_services import (
+    RoboportPowerPending,
     StuckError,
     _BLOCKAGE_INTERVAL,
     _BLOCKAGE_ROUNDS,
@@ -198,9 +199,12 @@ def _apply_remedy(
                 if ghost.get("reason") == "out_of_construction_range":
                     coverage_target = tuple(ghost["position"])
                     break
-        acted = extend_roboport_coverage(
-            client, bridge, surface, force, coverage_target, emit,
-        )
+        try:
+            acted = extend_roboport_coverage(
+                client, bridge, surface, force, coverage_target, emit,
+            )
+        except RoboportPowerPending:
+            acted = False
     elif remedy == "logistic_coverage":
         # Unlike a power gap, this one CAN clear without the remedy doing
         # anything: a roboport that was just connected still has to charge
@@ -209,9 +213,12 @@ def _apply_remedy(
         # no-op here is reported and waited out rather than treated as
         # fatal -- but it is no longer silent, and a run where every single
         # round was a no-op now says so instead of timing out anonymously.
-        acted = ensure_logistic_coverage(
-            client, bridge, surface, force, logistic_chest_positions, emit,
-        )
+        try:
+            acted = ensure_logistic_coverage(
+                client, bridge, surface, force, logistic_chest_positions, emit,
+            )
+        except RoboportPowerPending:
+            acted = False
         if not acted:
             emit(
                 "    coverage is already geometrically sufficient -- waiting for "
@@ -405,8 +412,16 @@ def bring_stage_up(
     # waiting on bots -- and logistic coverage BEFORE the chests are even built,
     # so they join a network the moment they exist rather than after a stage has
     # visibly starved.
-    extend_roboport_coverage(client, bridge, surface, force, origin, emit)
-    ensure_logistic_coverage(client, bridge, surface, force, logistic_chest_positions, emit)
+    try:
+        extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+        ensure_logistic_coverage(
+            client, bridge, surface, force, logistic_chest_positions, emit,
+        )
+    except RoboportPowerPending:
+        emit(
+            f"  [{name}] roboport coverage is charging; stage construction "
+            "and diagnosis continue"
+        )
     description, remedy, acted_ever = "no blockage recorded", "none", False
     extensions = 0
     rebuilt_stale = False
@@ -1542,8 +1557,14 @@ def build_mining_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, reference_point: Point, emit: Callable[[str], None], *,
     expand: bool = False, earmark_unfunded: bool = False,
+    require_direct: bool = False,
 ) -> Point:
-    """Build or expand one cohesive mine-to-smelter system."""
+    """Build or expand one cohesive mine-to-smelter system.
+
+    ``require_direct`` is used only while replacing a standing logistic
+    bootstrap. A material shortage must then stay visible to the mall instead
+    of selecting the same temporary fallback again.
+    """
     ore = LINE_RECIPES[recipe]["ingredients"][0]
     # Retirement is deferred until the replacement mine and refinery are
     # built and healthy. Removing the only live source before prerequisite
@@ -1728,6 +1749,8 @@ def build_mining_stage(
             raise ProductionPrerequisiteDeferred(str(error)) from error
         except MaterialShortage as error:
             if not _cold_start_belt_shortage(client, surface, force, recipe, error):
+                raise
+            if require_direct:
                 raise
             provider = _bootstrap_logistic_plate_line(
                 client, bridge, surface, force, recipe, extraction, emit,
@@ -2753,29 +2776,11 @@ def _serve_healthy_line(
         upgrade_bootstrap and item in {"iron-plate", "copper-plate"}
         and requester and requester["name"] == "requester-chest"
     ):
-        try:
-            belt_type = _essential_belt_type(client, surface, force)
-            extraction = plan_local_extraction(
-                client, surface, force, item, reference_point, 3,
-                belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
-                reuse_existing=True,
-                belt_stock=live_base.available_items(
-                    client, surface, force,
-                ).get(belt_type, 0),
-            )
-        except stage_extraction.PendingSystemDeferred as error:
-            emit(f"PLATE SYSTEM PENDING: {error}")
-            raise ProductionPrerequisiteDeferred(str(error)) from error
         emit(f"  BOOTSTRAP UPGRADE: replacing requester-fed {item} with belt transport")
-        build_conversion_stage(
-            client, bridge, surface, force, item,
-            {extraction.ore: extraction.ore_output}, reference_point, emit,
-            machine_count=extraction.furnace_count,
-            max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+        build_mining_stage(
+            client, bridge, surface, force, item, reference_point, emit,
+            require_direct=True,
         )
-        retirement = retire_logistic_smelter_plan(item, extraction.ore, origin)
-        retirement["surface"], retirement["force"] = surface, force
-        _submit(client, bridge, surface, retirement, f"retire_logistic_{item}", emit)
         return None
     chest = live_base.nearest_container(
         client, surface, force, existing.machine_positions[-1],

@@ -20,7 +20,7 @@ from orchestrator.controller_budget import (
     consume_wait,
     end_run_budget,
 )
-from orchestrator.stage_services import StuckError, _submit
+from orchestrator.stage_services import RoboportPowerPending, StuckError, _submit
 from tools.autonomous_run import (
     REPO_ROOT, _directory_hash, _patch_episode_manifest, _validate_episode_manifest,
 )
@@ -156,6 +156,37 @@ def test_successful_plans_record_exact_pending_footprints(
     ).read_text()
     assert '"name":"pending"' in reservations
     assert "[9,9]" in reservations and "[10,10]" in reservations
+
+
+def test_charging_roboport_does_not_cancel_the_production_blueprint(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
+    monkeypatch.setattr("orchestrator.stage_services.load_json", lambda value: value)
+    report = {
+        "ok": True, "attempted_placements": 1, "succeeded_placements": 1,
+        "placed_ghosts": 1, "placed_entities": 0,
+    }
+    submitted: list[bool] = []
+    bridge = SimpleNamespace(
+        build_layout=lambda *_a: submitted.append(True) or report,
+    )
+    plan = {"phases": [{"name": "p", "actions": [
+        {"action_type": "place_ghost", "entity": "assembling-machine-1",
+         "position": {"x": 10, "y": 10}},
+    ]}]}
+    messages: list[str] = []
+
+    _submit(
+        object(), bridge, "nauvis", plan, "producer", messages.append,
+        stage_coverage=lambda: (_ for _ in ()).throw(
+            RoboportPowerPending("charging")
+        ),
+    )
+
+    assert submitted == [True]
+    assert any("will be submitted" in message for message in messages)
 
 
 def test_full_output_and_intentional_gating_are_not_repaired(monkeypatch) -> None:

@@ -320,41 +320,41 @@ def test_charge_wait_is_skipped_when_the_grid_can_generate_the_threshold(monkeyp
     assert slept == []
 
 
-def test_charge_wait_polls_until_every_port_in_the_wave_is_charged(monkeypatch) -> None:
+def test_charge_check_accepts_an_already_charged_wave(monkeypatch) -> None:
     from orchestrator import stage_services
 
     monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 10_000.0)
-    readings = iter([50_000_000.0, 95_000_000.0])
     monkeypatch.setattr(
-        live_base, "roboport_energy", lambda *_a: next(readings),
+        live_base, "roboport_energy", lambda *_a: 95_000_000.0,
     )
     polls: list[float] = []
     monkeypatch.setattr(stage_services.time, "sleep", polls.append)
     stage_services._await_roboport_charge(
         None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)], lambda _m: None,
     )
-    assert len(polls) == 1
+    assert polls == []
 
 
-def test_charge_timeout_defers_instead_of_placing_more_dead_ports(monkeypatch) -> None:
+def test_charging_wave_pauses_only_roboport_placement_without_sleep(monkeypatch) -> None:
     from orchestrator import stage_services
-    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
 
     monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 167.0)
     monkeypatch.setattr(live_base, "roboport_energy", lambda *_a: 50_000_000.0)
-    clock = iter([0.0, 31.0])
-    monkeypatch.setattr(stage_services.time, "monotonic", lambda: next(clock))
+    slept: list[float] = []
+    monkeypatch.setattr(stage_services.time, "sleep", slept.append)
+    messages: list[str] = []
 
-    with pytest.raises(ProductionPrerequisiteDeferred):
+    with pytest.raises(stage_services.RoboportPowerPending):
         stage_services._await_roboport_charge(
             None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)],
-            lambda _message: None,
+            messages.append,
         )
+    assert slept == []
+    assert any("production blueprints continue" in message for message in messages)
 
 
-def test_existing_low_power_anchor_blocks_the_next_coverage_wave(monkeypatch) -> None:
+def test_existing_low_power_anchor_pauses_only_the_next_coverage_wave(monkeypatch) -> None:
     from orchestrator import stage_services
-    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
 
     monkeypatch.setattr(
         stage_services, "_repair_existing_roboport_power", lambda *_args: None,
@@ -366,7 +366,7 @@ def test_existing_low_power_anchor_blocks_the_next_coverage_wave(monkeypatch) ->
     monkeypatch.setattr(
         stage_services, "_await_roboport_charge",
         lambda *_args: (_ for _ in ()).throw(
-            ProductionPrerequisiteDeferred("power must catch up")
+            stage_services.RoboportPowerPending("power must catch up")
         ),
     )
     monkeypatch.setattr(
@@ -374,7 +374,7 @@ def test_existing_low_power_anchor_blocks_the_next_coverage_wave(monkeypatch) ->
         lambda *_args, **_kwargs: pytest.fail("placed another low-power port"),
     )
 
-    with pytest.raises(ProductionPrerequisiteDeferred):
+    with pytest.raises(stage_services.RoboportPowerPending):
         stage_services.extend_roboport_coverage(
             object(), object(), "nauvis", "player", (100.0, 5.0),
             lambda _message: None,

@@ -238,6 +238,62 @@ def test_bootstrap_cell_is_not_cached_over_its_upgrade_survey(monkeypatch) -> No
     assert "iron-plate" not in builder.MANAGED_INTERMEDIATE_SOURCES
 
 
+def test_bootstrap_upgrade_uses_the_managed_direct_refinery(monkeypatch) -> None:
+    origin = (144, -72)
+    existing = SimpleNamespace(
+        machine_positions=[(145.5, -71.5), (145.5, -65.5)],
+    )
+    plan = SimpleNamespace(existing=existing)
+    monkeypatch.setattr(builder, "logistic_smelter_origin", lambda *_a: origin)
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _c, _s, position: (
+            {"name": "requester-chest"}
+            if position == (origin[0] + 1.5, origin[1] + 3.5) else None
+        ),
+    )
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or (160.5, -50.5),
+    )
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *_a, **_k: pytest.fail("plate migration used generic conversion layout"),
+    )
+
+    result = builder._serve_healthy_line(
+        object(), object(), "nauvis", "player", "copper-plate",
+        (3.0, -1.0), lambda _m: None, plan, None,
+        upgrade_bootstrap=True,
+    )
+
+    assert result is None
+    assert calls[0][0][4] == "copper-plate"
+    assert calls[0][1]["require_direct"] is True
+
+
+def test_required_direct_upgrade_queues_shortage_instead_of_reusing_bootstrap(
+    monkeypatch,
+) -> None:
+    extraction = _extraction()
+    _wire_cold_base(monkeypatch, extraction)
+    monkeypatch.setattr(
+        builder, "_build_initial_plate_smelter",
+        lambda *_a, **_k: (_ for _ in ()).throw(_short_belts()),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_logistic_plate_line",
+        lambda *_a, **_k: pytest.fail("direct migration fell back to requester cell"),
+    )
+
+    with pytest.raises(MaterialShortage):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (3.0, -1.0), lambda _m: None, require_direct=True,
+        )
+
+
 def test_reuses_a_standing_bootstrap_cell_instead_of_opening_another(monkeypatch) -> None:
     """Run 4 pass 2 re-surveyed a different origin, orphaned the first cell,
     and the second cell's health failure escaped and ended the run. Run 8

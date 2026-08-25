@@ -29,6 +29,10 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 
 
+class RoboportPowerPending(RuntimeError):
+    """A coverage wave exists but must charge before it can extend farther."""
+
+
 @dataclass(frozen=True)
 class PowerExtensionResult:
     """Outcome detail for callers that must separate coverage from a bridge."""
@@ -91,11 +95,10 @@ _COVERAGE_MARGIN = 2.0
 # once the network can generate the threshold below, batching stops mattering.
 _ROBOPORT_WAVE = 3
 _ROBOPORT_WAVE_GENERATION_KW = 100_000.0
-# A wave must reach roughly full buffer before the next one lands; past the
-# bound the wait gives up rather than stalling the build (low_power remediation
-# still applies downstream).
+# A wave must reach roughly full buffer before the next one lands. An
+# undercharged wave is recorded immediately and retried by later diagnosis;
+# coverage never blocks the production control loop.
 _ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
-_ROBOPORT_CHARGE_WAIT_SECONDS = 30.0
 # Avoid laying the same emergency power bridge repeatedly while a newly
 # connected roboport is still charging and reports low_power.
 _REPAIRED_ROBOPORT_POWER: set[Point] = set()
@@ -287,7 +290,13 @@ def _submit(
             + "; placing coherent ghosts while scheduled producers catch up"
         )
     if stage_coverage is not None:
-        stage_coverage()
+        try:
+            stage_coverage()
+        except RoboportPowerPending:
+            emit(
+                f"  CONSTRUCTION COVERAGE PENDING: {name} will be submitted; "
+                "its charging roboports continue independently"
+            )
     authorization = build_layout_authorization([(name, plan)])
     # Removal-only plans (bootstrap cell retirement) place nothing by design;
     # the executor counts only place actions, so demanding attempted
@@ -822,37 +831,33 @@ def _await_roboport_charge(
     client: RconClient, surface: str, force: str,
     near: Point, positions: Sequence[Point], emit: Callable[[str], None],
 ) -> None:
-    """Let one roboport wave top up its buffers before the next one lands.
+    """Check whether one roboport wave can support another immediately.
 
     Each fresh port draws up to ~2.1 MW while charging from ~50%. Landing a
     whole chain at once turned that into a multi-megawatt transient that
-    browned out a 10 MW early grid and stalled production for minutes; waves
-    of a few ports give the grid time to charge them. A grid that can generate
-    the threshold capacity absorbs any chain and skips the wait entirely."""
+    browned out an early grid. Coverage is asynchronous infrastructure: a
+    charging port pauses only the next coverage wave, never the production
+    blueprint or the rest of the runner."""
     generation = live_base.network_generation_kw(client, surface, force, near)
     if generation is not None and generation >= _ROBOPORT_WAVE_GENERATION_KW:
         return
-    deadline = time.monotonic() + _ROBOPORT_CHARGE_WAIT_SECONDS
-    while time.monotonic() < deadline:
-        energies = [
-            live_base.roboport_energy(client, surface, force, position)
-            for position in positions
-        ]
-        if all(
-            energy is not None and energy >= _ROBOPORT_CHARGE_TARGET_J
-            for energy in energies
-        ):
-            return
-        time.sleep(2.0)
-    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+    energies = [
+        live_base.roboport_energy(client, surface, force, position)
+        for position in positions
+    ]
+    if all(
+        energy is not None and energy >= _ROBOPORT_CHARGE_TARGET_J
+        for energy in energies
+    ):
+        return
 
     emit(
-        "  ROBOport POWER DEFERRED: the new coverage wave did not charge; "
-        "letting generation and storage production catch up before placing "
-        "more remote infrastructure"
+        "  ROBOport POWER PENDING: this coverage wave is still charging; "
+        "pausing only further roboport placement while production blueprints "
+        "continue"
     )
-    raise ProductionPrerequisiteDeferred(
-        "roboport coverage waits for adequate generated power"
+    raise RoboportPowerPending(
+        "roboport coverage wave is still charging"
     )
 
 
