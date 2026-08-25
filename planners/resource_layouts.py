@@ -14,10 +14,17 @@ _DIRECTION_VECTORS = {
     "south": (0, 1), "west": (-1, 0),
 }
 
-# Rotations of the live-probed west-facing connector offset (-1, +1).
+# The pipe stands immediately outside the 3x3 pumpjack footprint. The
+# graphical connector is on the machine edge, but placing a pipe on that edge
+# tile collides with the pumpjack (live run 2026-08-26 04:43).
 _PUMPJACK_OUTPUT_OFFSETS = {
-    "north": (-1, -1), "east": (1, -1),
-    "south": (1, 1), "west": (-1, 1),
+    "north": (-1, -2), "east": (2, -1),
+    "south": (1, 2), "west": (-2, 1),
+}
+
+_OFFSHORE_OUTPUT_OFFSETS = {
+    "north": (0, -2), "east": (2, 0),
+    "south": (0, 2), "west": (-2, 0),
 }
 
 ROW_POLE = "medium-electric-pole"
@@ -54,11 +61,11 @@ def verified_pumpjack_output_tile(site: dict) -> tuple[int, int] | None:
 
 def verified_offshore_pump_output_tile(site: dict) -> tuple[int, int] | None:
     """Return the pipe tile immediately landward of a legal offshore pump."""
-    vector = _DIRECTION_VECTORS.get(site.get("direction", "north"))
-    if vector is None:
+    offset = _OFFSHORE_OUTPUT_OFFSETS.get(site.get("direction", "north"))
+    if offset is None:
         return None
     x, y = site["position"]
-    return floor(x + vector[0]), floor(y + vector[1])
+    return floor(x + offset[0]), floor(y + offset[1])
 
 
 def _row_pole_positions(

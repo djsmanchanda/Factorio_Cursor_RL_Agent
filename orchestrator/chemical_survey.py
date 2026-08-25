@@ -15,8 +15,8 @@ def nearest_offshore_pump_site(
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
     lua = (
         "local s=game.surfaces['" + surface + "'];local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
-        "local specs={{'north',0,-1,0.5,-0.5,0,-2},{'east',1,0,1.5,0.5,2,0},"
-        "{'south',0,1,0.5,1.5,0,2},{'west',-1,0,-0.5,0.5,-2,0}};"
+        "local specs={{'north',0,-1,0.5,-0.5,0,-3},{'east',1,0,1.5,0.5,3,0},"
+        "{'south',0,1,0.5,1.5,0,3},{'west',-1,0,-0.5,0.5,-3,0}};"
         "local best=nil;local bd=1e18;"
         "for _,t in pairs(s.find_tiles_filtered{name={'water','deepwater'},area={{" +
         str(min_x) + "," + str(min_y) + "},{" + str(max_x) + "," + str(max_y) + "}}}) do "

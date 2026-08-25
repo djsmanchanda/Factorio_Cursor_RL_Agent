@@ -97,43 +97,6 @@ def validate_build_plan(plan: dict) -> None:
     validate_no_collisions([("plan", plan)])
 
 
-# A fluid source hands its output to a pipe sitting ON its connector tile, so
-# the two legitimately share ground. Every other overlap is a fault.
-_FLUID_SOURCE_ENTITIES = {"pumpjack", "offshore-pump"}
-
-
-def is_verified_pumpjack_attachment(left: dict, right: dict) -> bool:
-    """Whether these two are a fluid source and its own output pipe.
-
-    A pumpjack's port is live-probed and must match exactly. An offshore pump
-    declares its output tile in the plan that places it (`_fluid_resource_plan`
-    refuses a plan whose pipe tiles do not include every supplied output), so
-    the pipe standing there is by construction the pump's own connector rather
-    than a stray placement.
-    """
-    source, pipe = (
-        (left, right) if left["entity"] in _FLUID_SOURCE_ENTITIES else (right, left)
-    )
-    if source["entity"] not in _FLUID_SOURCE_ENTITIES or pipe["entity"] != "pipe":
-        return False
-    position = source["position"]
-    if source["entity"] == "offshore-pump":
-        vectors = {
-            "north": (0, -1), "east": (1, 0),
-            "south": (0, 1), "west": (-1, 0),
-        }
-        offset = vectors.get(source.get("direction", "north"))
-    else:
-        offsets = {
-            "north": (-1, -1), "east": (1, -1),
-            "south": (1, 1), "west": (-1, 1),
-        }
-        offset = offsets.get(source.get("direction", "north"))
-    if offset is None:
-        return False
-    connector = {"x": position["x"] + offset[0], "y": position["y"] + offset[1]}
-    return pipe["position"] == connector
-
 def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
     placements = [
         (name, action)
@@ -146,7 +109,7 @@ def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
         left_tiles = entity_footprint_tiles(left)
         for right_name, right in placements[index + 1:]:
             right_position = (right["position"]["x"], right["position"]["y"])
-            if left_tiles & entity_footprint_tiles(right) and not is_verified_pumpjack_attachment(left, right):
+            if left_tiles & entity_footprint_tiles(right):
                 raise ValueError(
                     f"Plan collision: {left_name} {left['entity']} at {left_position} overlaps "
                     f"{right_name} {right['entity']} at {right_position}"

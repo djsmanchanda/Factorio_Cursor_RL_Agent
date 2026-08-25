@@ -23,9 +23,38 @@ def test_pumpjack_faces_the_local_oil_cell() -> None:
     north = stage_chemical._pumpjack_site_nearest((-286.5, -98.5), (-286.0, -160.0))
 
     assert east["direction"] == "east"
-    assert east["output"] == (-286, -100)
+    assert east["output"] == (-285, -100)
     assert north["direction"] == "north"
-    assert north["output"] == (-288, -100)
+    assert north["output"] == (-288, -101)
+
+
+def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
+    site = stage_chemical._pumpjack_site_nearest(
+        (-268.5, -98.5), (-237.0, -91.0),
+    )
+
+    assert site["direction"] == "east"
+    assert site["output"] == (-267, -100)
+    plan = stage_chemical.generate_pumpjack_source([site], [site["output"]])
+    pipe = next(
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "pipe"
+    )
+    assert pipe["position"] == {"x": -266.5, "y": -99.5}
+
+
+def test_requested_straight_shoreline_has_external_land_output() -> None:
+    site = {
+        "position": (-97.5, 15.5), "output": (-98, 13),
+        "resource": "water", "direction": "north",
+    }
+
+    plan = stage_chemical.generate_offshore_pump_source([site], [site["output"]])
+    pipe = next(
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "pipe"
+    )
+    assert pipe["position"] == {"x": -97.5, "y": 13.5}
 
 
 def test_oil_cell_search_is_anchored_to_crude_not_the_base(monkeypatch) -> None:
@@ -60,7 +89,7 @@ def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:
     ) is None
 
     assert "for side=-1,1" in client.command_text
-    assert "{'east',1,0,1.5,0.5,2,0}" in client.command_text
+    assert "{'east',1,0,1.5,0.5,3,0}" in client.command_text
 
 
 def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:

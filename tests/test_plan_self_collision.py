@@ -172,24 +172,3 @@ def test_the_substation_still_reaches_the_line(machines: int) -> None:
     )
 
     assert nearest <= 18, f"{machines} machines: nearest pole {nearest} tiles away"
-
-
-def test_a_fluid_source_may_still_share_ground_with_its_own_pipe() -> None:
-    """An offshore pump hands its output to a pipe standing ON its connector,
-    which is an attachment rather than a fault."""
-    from planners.plan_validation import is_verified_pumpjack_attachment
-
-    assert is_verified_pumpjack_attachment(
-        {"entity": "offshore-pump", "position": {"x": 5.5, "y": 30.5},
-         "direction": "east"},
-        {"entity": "pipe", "position": {"x": 6.5, "y": 30.5}},
-    )
-
-
-def test_two_unrelated_entities_are_never_excused() -> None:
-    from planners.plan_validation import is_verified_pumpjack_attachment
-
-    assert not is_verified_pumpjack_attachment(
-        {"entity": "substation", "position": {"x": 5.5, "y": 30.5}},
-        {"entity": "steel-chest", "position": {"x": 6.5, "y": 30.5}},
-    )

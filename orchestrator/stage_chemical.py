@@ -543,13 +543,13 @@ def ensure_oil_cell(
             _substation(plan), machines, emit,
             logistic_chest_positions=_logistic_chest_positions(plan),
         )
-    ensure_ingredient_transport(
+    coal_grace = ensure_ingredient_transport(
         client, bridge, surface, force, "plastic-bar", "coal", coal,
         plastic_feed, 2, emit,
     )
     stuck = _diagnose_machines(
         client, surface, _positions(plastic, "chemical-plant") + _positions(sulfur, "chemical-plant"),
-        emit, bridge=bridge, force=force,
+        emit, grace_seconds=coal_grace, bridge=bridge, force=force,
     )
     if stuck:
         raise StuckError(f"oil cell built but not healthy: {stuck}")

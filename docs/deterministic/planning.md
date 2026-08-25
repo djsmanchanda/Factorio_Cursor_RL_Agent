@@ -98,8 +98,9 @@ These names describe intended responsibilities, not permission to build speculat
   collector head.
 - Oil refining, plastic, and sulfur form a source-local district. Site the
   chemical block near the selected crude-oil source, rotate the pumpjack toward
-  that block, and connect the exact pump connector before extending a long
-  power, construction, or pipe corridor back toward the factory.
+  that block, and start the pipe on the exact external tile beyond the complete
+  3x3 pumpjack footprint before extending a long power, construction, or pipe
+  corridor back toward the factory.
 - Chemical construction coverage reserves the complete future pipe and machine
   footprint before siting roboports. The complete required roboport chain is
   placed and power-connected without synchronously waiting for charge; only bot
@@ -108,8 +109,8 @@ These names describe intended responsibilities, not permission to build speculat
   rather than after all pipe ghosts complete.
 - Offshore pumps require a straight orthogonal shoreline: water across the
   intake width, land across the output width, and the first pipe on the
-  immediately adjacent land-side connector tile. Diagonal shoreline corners
-  are not candidates.
+  immediately adjacent external land-side tile beyond the pump's 2x2
+  footprint. Diagonal shoreline corners are not candidates.
 - A product does not become a mine/refinery stage merely because its recipe has
   one raw-resource ingredient. Direct extraction is an explicit recipe role;
   assembler products such as landfill stay in the assembly path.

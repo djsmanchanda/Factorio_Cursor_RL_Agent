@@ -92,12 +92,12 @@ def test_direct_mining_to_chest_rejects_invalid_geometry(
 
 def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> None:
     crude = generate_pumpjack_source(
-        [{"position": (18.5, 20.5), "output": (17, 21), "direction": "west"}],
-        [(17, 21), (16, 21)],
+        [{"position": (18.5, 20.5), "output": (16, 21), "direction": "west"}],
+        [(16, 21), (15, 21)],
     )
     water = generate_offshore_pump_source(
-        [{"position": (5.5, 30.5), "output": (6, 30), "direction": "east"}],
-        [(6, 30), (7, 30)],
+        [{"position": (5.5, 30.5), "output": (7, 30), "direction": "east"}],
+        [(7, 30), (8, 30)],
     )
 
     assert any(action["entity"] == "pumpjack" for action in actions(crude))
@@ -106,8 +106,8 @@ def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> No
 
 
 def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
-    site = {"position": (18.5, -43.5), "output": (17, -43), "direction": "west"}
-    plan = generate_pumpjack_source([site], [(17, -43)])
+    site = {"position": (18.5, -43.5), "output": (16, -43), "direction": "west"}
+    plan = generate_pumpjack_source([site], [(16, -43)])
 
     pumpjack = next(action for action in actions(plan) if action["entity"] == "pumpjack")
     pipe = next(action for action in actions(plan) if action["entity"] == "pipe")
@@ -115,7 +115,7 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
         "action_type": "place_ghost", "entity": "pumpjack",
         "position": {"x": 18.5, "y": -43.5}, "direction": "west",
     }
-    assert pipe["position"] == {"x": 17.5, "y": -42.5}
+    assert pipe["position"] == {"x": 16.5, "y": -42.5}
     validate_no_collisions([("crude", plan)])
 
     site["output"] = (20, -47)
@@ -123,10 +123,25 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
         generate_pumpjack_source([site], [(20, -47)])
 
 
+def test_fluid_sources_reject_the_old_overlapping_output_tiles() -> None:
+    with pytest.raises(ValueError, match="rotated connector tile"):
+        generate_pumpjack_source(
+            [{"position": (-268.5, -98.5), "output": (-268, -100),
+              "direction": "east"}],
+            [(-268, -100)],
+        )
+    with pytest.raises(ValueError, match="adjacent land-side tile"):
+        generate_offshore_pump_source(
+            [{"position": (-97.5, 15.5), "output": (-98, 14),
+              "direction": "north"}],
+            [(-98, 14)],
+        )
+
+
 def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
     plan = generate_offshore_pump_source(
-        [{"position": (20.5, 83.5), "output": (20, 82), "direction": "north"}],
-        [(20, 82)],
+        [{"position": (20.5, 83.5), "output": (20, 81), "direction": "north"}],
+        [(20, 81)],
     )
     assert not any(action["entity"] == "medium-electric-pole" for action in actions(plan))
     assert not any(action["entity"] == "substation" for action in actions(plan))
@@ -136,8 +151,8 @@ def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
 @pytest.mark.parametrize(
     ("direction", "output"),
     [
-        ("north", (17, 20)), ("east", (19, 20)),
-        ("south", (19, 22)), ("west", (17, 22)),
+        ("north", (17, 19)), ("east", (20, 20)),
+        ("south", (19, 23)), ("west", (16, 22)),
     ],
 )
 def test_pumpjack_connector_rotates_with_the_machine(
