@@ -12,7 +12,7 @@ from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
 from orchestrator.controller_budget import consume_plan_submission, consume_wait
-from orchestrator import live_base
+from orchestrator import extraction_state, live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
@@ -22,6 +22,7 @@ from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import distance, l_route, step_points
 from planners.plan_validation import ENTITY_FOOTPRINTS
+from planners.recipe_data import LINE_RECIPES
 from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
@@ -117,10 +118,10 @@ _STAGE_CHEST_REACH = 30.0
 # at x=15.5..17.5, and the ore never reached the furnaces.
 _BRIDGE_SURVEY_MARGIN = max(24.0, _ROUTE_SEARCH_MARGIN)
 # Blockage remediation: bounded rounds of (wait -> diagnose -> fix -> recheck).
-# One round is long enough for bots to make visible progress, and the round
-# count bounds how long a genuinely unfixable stage can spin.
+# Give a newly submitted job five minutes before a flat backlog may fail.
+# Visible construction progress can still extend that window below.
 _BLOCKAGE_INTERVAL = 30.0
-_BLOCKAGE_ROUNDS = 6
+_BLOCKAGE_ROUNDS = 10
 # Multiplier on computed belt transit time before judging a fed stage
 # unhealthy: the first item has to cross, then the inserter has to load it.
 _TRANSIT_SAFETY = 1.5
@@ -196,6 +197,53 @@ def assert_affordable(
     emit(f"  {name}: material check ok ({sum(required.values())} ghost items in stock)")
 
 
+_DIRECT_MINED_INPUTS = frozenset({"coal", "copper-ore", "iron-ore", "stone"})
+
+
+def _item_supply_chain_is_scheduled(
+    client: RconClient, surface: str, force: str, item: str,
+    visiting: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether `item` and every solid prerequisite have live production."""
+    if item in visiting:
+        return False
+    if item in _DIRECT_MINED_INPUTS:
+        return extraction_state.resource_drill_count(
+            client, surface, force, item,
+        ) > 0
+    recipe = LINE_RECIPES.get(item)
+    if recipe is None or recipe.get("fluid_ingredients"):
+        # Fluid provenance needs the chemical system's connected-flow survey;
+        # absent that proof, an unfunded blueprint remains blocked.
+        return False
+    if live_base.find_line(
+        client, surface, force, item, str(recipe["machine"]),
+    ) is None:
+        return False
+    parents = visiting | {item}
+    return all(
+        _item_supply_chain_is_scheduled(
+            client, surface, force, str(ingredient), parents,
+        )
+        for ingredient in recipe.get("ingredients", ())
+    )
+
+
+def _shortage_has_complete_supply_chains(
+    client: RconClient, surface: str, force: str, shortage: MaterialShortage,
+) -> bool:
+    """Whether all missing construction items are backed to raw extraction."""
+    try:
+        return all(
+            _item_supply_chain_is_scheduled(
+                client, surface, force, str(item),
+            )
+            for item in shortage.required
+        )
+    except (ValueError, live_base.TelemetryError):
+        return False
+
+
 def _submit(
     client: RconClient, bridge: GameBridge, surface: str, plan: dict, name: str,
     emit: Callable[[str], None], *, max_retries: int = 2,
@@ -209,10 +257,13 @@ def _submit(
     of bulldozing real infrastructure.
 
     `stage_coverage` runs after the material check and before any ghost is
-    submitted. Normal plans still require full stock first. The narrow
-    `allow_unfunded_ghosts` path is reserved for a collision-checked coherent
-    iron mine/refinery expansion whose missing items have already been queued;
-    its coverage and ghosts intentionally remain as one visible pending job."""
+    submitted. A short plan may proceed when every missing item already has a
+    scheduled producer and its complete solid prerequisite chain is active.
+    `allow_unfunded_ghosts` still marks a coherent queued expansion, but it does
+    not bypass that supply-chain proof. Collision and ownership checks are
+    unchanged; only the requirement to warehouse the entire bill first is
+    relaxed.
+    """
     if not any(phase.get("actions") for phase in plan.get("phases", [])):
         raise StuckError(f"{name}: proposed zero actions")
     consume_plan_submission(name)
@@ -222,15 +273,18 @@ def _submit(
             client, surface, plan.get("force", "player"), plan, name, emit,
         )
     except MaterialShortage as shortage:
-        if not allow_unfunded_ghosts:
+        producer_backed = _shortage_has_complete_supply_chains(
+            client, surface, plan.get("force", "player"), shortage,
+        )
+        if not producer_backed:
             raise
         emit(
-            f"  BLUEPRINT EARMARK: {name} is short "
+            f"  CONSTRUCTION BACKLOG: {name} is short "
             + ", ".join(
                 f"{item}={count - shortage.available.get(item, 0)}"
                 for item, count in sorted(shortage.required.items())
             )
-            + "; placing coherent ghosts while queued producers catch up"
+            + "; placing coherent ghosts while scheduled producers catch up"
         )
     if stage_coverage is not None:
         stage_coverage()

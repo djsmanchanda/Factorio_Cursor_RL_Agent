@@ -477,12 +477,12 @@ def network_peak_consumption_kw(
     client: RconClient, surface: str, force: str, near: Point,
     *, emit: Emit | None = None,
 ) -> float | None:
-    """Conservative connected prototype demand on the roboport's network."""
+    """Conservative connected prototype demand on the nearest pole's network."""
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
         "local best,bd=nil,1e18;"
-        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e end end;"
         "if not best then rcon.print('NONE') return end;"
         "local ok,net=pcall(function() return best.electric_network_id end);"
@@ -530,7 +530,7 @@ def network_peak_consumption_kw(
     raw = client.command("/sc " + lua).strip()
     if raw == "NONE":
         if emit:
-            emit("  POWER DISTRICT skipped: no roboport electric network was available")
+            emit("  POWER DISTRICT skipped: no electric-pole network was available")
         return None
     if raw.startswith("INVALID|"):
         detail = raw.removeprefix("INVALID|")

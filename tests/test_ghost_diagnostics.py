@@ -56,10 +56,105 @@ def test_coherent_earmark_submits_ghosts_despite_queued_shortage(monkeypatch) ->
             "iron-expansion", {"electric-mining-drill": 6}, {},
         )),
     )
+    monkeypatch.setattr(
+        stage_services, "_shortage_has_complete_supply_chains",
+        lambda *_a: True,
+    )
 
     stage_services._submit(
         object(), bridge, "nauvis", plan, "iron-expansion",
         lambda _message: None, allow_unfunded_ghosts=True,
+    )
+
+    assert reports == [plan]
+
+
+def test_explicit_earmark_cannot_bypass_a_missing_supply_chain(monkeypatch) -> None:
+    plan = {"force": "player", "phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "pipe",
+        "position": {"x": 10.5, "y": 20.5},
+    }]}]}
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a: (_ for _ in ()).throw(MaterialShortage(
+            "oil-cell", {"pipe": 500}, {},
+        )),
+    )
+    monkeypatch.setattr(
+        stage_services, "_shortage_has_complete_supply_chains",
+        lambda *_a: False,
+    )
+
+    with pytest.raises(MaterialShortage):
+        stage_services._submit(
+            object(), object(), "nauvis", plan, "oil-cell",
+            lambda _message: None, allow_unfunded_ghosts=True,
+        )
+
+
+def test_unfunded_blueprint_requires_the_complete_solid_supply_chain(monkeypatch) -> None:
+    lines = []
+    monkeypatch.setattr(
+        stage_services.live_base, "find_line",
+        lambda _c, _s, _f, recipe, _machine: lines.append(recipe) or object(),
+    )
+    monkeypatch.setattr(
+        stage_services.extraction_state, "resource_drill_count",
+        lambda _c, _s, _f, resource: 6 if resource == "iron-ore" else 0,
+    )
+
+    assert stage_services._item_supply_chain_is_scheduled(
+        object(), "nauvis", "player", "pipe",
+    )
+    assert lines == ["pipe", "iron-plate"]
+
+    monkeypatch.setattr(
+        stage_services.extraction_state, "resource_drill_count",
+        lambda *_a: 0,
+    )
+    assert not stage_services._item_supply_chain_is_scheduled(
+        object(), "nauvis", "player", "pipe",
+    )
+
+
+def test_producer_backed_shortage_places_blueprint_without_explicit_override(
+    monkeypatch,
+) -> None:
+    plan = {
+        "force": "player",
+        "phases": [{"actions": [{
+            "action_type": "place_ghost", "entity": "pipe",
+            "position": {"x": 10.5, "y": 20.5},
+        }]}],
+    }
+    reports = []
+    bridge = type("Bridge", (), {
+        "build_layout": lambda _self, _authorization, _plan: (
+            reports.append(_plan) or {
+                "ok": True, "attempted_placements": 1,
+                "succeeded_placements": 1, "placed_ghosts": 1,
+                "placed_entities": 0,
+            }
+        ),
+    })()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a: (_ for _ in ()).throw(MaterialShortage(
+            "oil-cell", {"pipe": 500}, {},
+        )),
+    )
+    monkeypatch.setattr(
+        stage_services, "_shortage_has_complete_supply_chains",
+        lambda *_a: True,
+    )
+
+    stage_services._submit(
+        object(), bridge, "nauvis", plan, "oil-cell", lambda _message: None,
     )
 
     assert reports == [plan]

@@ -113,7 +113,7 @@ def test_later_pipe_demand_reopens_completed_iron_prep(monkeypatch) -> None:
     autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
 
 
-def test_iron_direct_line_earmarks_twelve_furnaces_from_twelve_drills(monkeypatch) -> None:
+def test_drill_count_alone_does_not_force_an_iron_expansion(monkeypatch) -> None:
     calls: list[bool] = []
     line = type(
         "Line", (), {
@@ -127,10 +127,6 @@ def test_iron_direct_line_earmarks_twelve_furnaces_from_twelve_drills(monkeypatc
         autonomous_builder.live_base, "available_items", lambda *_args: {},
     )
     monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_args: line)
-    monkeypatch.setattr(
-        autonomous_builder.extraction_state, "resource_drill_count",
-        lambda *_args: 12,
-    )
     monkeypatch.setattr(
         autonomous_builder, "smelter_count_for_draw", lambda *_args: 6,
     )
@@ -148,7 +144,7 @@ def test_iron_direct_line_earmarks_twelve_furnaces_from_twelve_drills(monkeypatc
         {}, (0.0, 0.0), lambda _message: None,
     )
 
-    assert calls == [True]
+    assert calls == []
 
 
 def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch) -> None:

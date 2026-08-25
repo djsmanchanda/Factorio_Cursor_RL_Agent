@@ -1099,7 +1099,7 @@ def _network_generation_kw_impl(
     *, include_solar: bool,
 ) -> float | None:
     """Combined generation capacity (kW) of the electric network nearest
-    `near`, or None when no roboport defines that network.
+    `near`, or None when no electric pole defines that network.
 
     Generators only: accumulators store rather than generate, so they are
     excluded -- a charged battery bank must not license a placement burst the
@@ -1116,7 +1116,7 @@ def _network_generation_kw_impl(
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
         "local best=nil;local bd=1e18;"
-        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e end end;"
         "if not best then rcon.print('NONE') return end;"
         "local ok,net=pcall(function() return best.electric_network_id end);"
@@ -1185,12 +1185,12 @@ def network_firm_generation_kw(
 def network_accumulator_storage_mj(
     client: RconClient, surface: str, force: str, near: Point,
 ) -> float | None:
-    """Maximum accumulator energy on the nearest roboport's electric network."""
+    """Maximum accumulator energy on the nearest pole's electric network."""
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
         "local best,bd=nil,1e18;"
-        "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+        "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e end end;"
         "if not best then rcon.print('NONE') return end;"
         "local ok,net=pcall(function() return best.electric_network_id end);"

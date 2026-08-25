@@ -22,7 +22,6 @@ from orchestrator.baseline_production import (  # noqa: E402
     baseline_plate_draw,
     baseline_smelter_count,
     demand_adjusted_plate_draw,
-    iron_growth_target,
     mall_plate_draw,
     STEEL_BASELINE_FURNACES,
     STEEL_IRON_CAPACITY_FLOOR,
@@ -49,7 +48,7 @@ def test_the_prep_set_is_the_agreed_one() -> None:
 
 def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
     assert PLATE_FOUNDATION_BUILD_ORDER == (
-        "iron-plate", "copper-plate", "stone-brick",
+        "iron-plate", "copper-plate",
     )
     assert PLATE_FOUNDATION_FURNACES == {
         "iron-plate": 6,
@@ -120,14 +119,6 @@ def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
 
 def test_copper_is_already_covered_by_the_opening_row() -> None:
     assert baseline_drill_phase("copper-plate") == EXTRACTION_DRILL_PHASES[0]
-
-
-def test_iron_growth_policy_earmarks_next_modules_from_mine_capacity() -> None:
-    assert iron_growth_target(0) == 0
-    assert iron_growth_target(6) == 12
-    assert iron_growth_target(12) == 24
-    assert iron_growth_target(20) == 24
-    assert iron_growth_target(24) == 24
 
 
 def test_steel_baseline_preserves_shared_iron_capacity() -> None:

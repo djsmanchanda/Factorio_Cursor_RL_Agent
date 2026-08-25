@@ -34,12 +34,12 @@ These names describe intended responsibilities, not permission to build speculat
 - A migration is incomplete while any recognized bootstrap chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
-  `6 -> 12 -> 24 -> 48 -> 96`. Early direct iron deliberately advances to
-  12, then 24, because most construction demand consumes iron or an iron
-  derivative. Larger phases remain demand-driven.
-- Before that expansion policy runs, establish direct six-furnace foundations
-  in this strict order: iron plate, copper plate, then stone brick. A failed or
-  deferred iron expansion never permits it to skip those two foundations.
+  `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
+  Mine, transport, and refinery capacity move as one coherent increment.
+- Startup establishes direct six-furnace iron and copper foundations in that
+  order. After both exist, follow the active dependency chain: stone, steel,
+  oil, and later materials are built only when requested rather than acting as
+  additional global readiness gates.
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.
@@ -55,11 +55,17 @@ These names describe intended responsibilities, not permission to build speculat
   or blocked, add a parallel collector through an explicit splitter instead
   of opening a duplicate mine.
 - Furnace expansion must include enough mine and transport capacity to feed
-  it. A coherent iron mine/refinery expansion may be placed as pending ghosts
-  before every construction item is stocked; collision, ownership, and
-  duplicate-pending checks still run first, and missing items stay queued.
-  A supply-starved refinery triggers mine or transport repair, never an
-  isolated furnace block.
+  it. Any coherent demanded mine/refinery expansion may be placed as pending
+  ghosts before every construction item is stocked only when every missing
+  item has a producer and every solid prerequisite traces back to active raw
+  extraction. Collision, ownership, and duplicate-pending checks still run
+  first, and missing items stay queued. A supply-starved refinery triggers
+  mine or transport repair, never an isolated furnace block.
+- The same complete-chain condition applies to every other coherent blueprint.
+  The initial construction window is five minutes. Diagnose and remedy its
+  local ghost backlog throughout that window; only a flat unresolved job may
+  fail at the end (upstream production, delivery, bot or roboport capacity,
+  coverage, or power).
 - A partially built or unconfigured furnace cluster is pending construction,
   not recoverable capacity. Recovery may adopt only an exact planner-shaped
   six-furnace module; until a direct refinery has produced plates, repair its
@@ -67,6 +73,9 @@ These names describe intended responsibilities, not permission to build speculat
 - A position inside a pole's supply area is not evidence that a power bridge
   was built. Capacity planning distinguishes existing coverage from a submitted
   network bridge and keeps measuring the actual connected grid.
+- The base has one primary electric grid: every new pole, substation, roboport,
+  mine, and production district connects to the highest-generation network.
+  Capacity telemetry measures that same network, never a nearer island.
 - Multiple consumers of one resource require an explicit splitter/manifold and
   throughput budget. Independent belts may not overwrite or reverse the same
   collector head.

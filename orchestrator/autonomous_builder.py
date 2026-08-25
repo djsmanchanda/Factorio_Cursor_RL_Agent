@@ -25,7 +25,7 @@ from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
-    demand_adjusted_plate_draw, drill_phase_for_draw, iron_growth_target,
+    demand_adjusted_plate_draw, drill_phase_for_draw,
     smelter_count_for_draw, STEEL_BASELINE_FURNACES,
     STEEL_IRON_CAPACITY_FLOOR,
 )
@@ -1833,6 +1833,7 @@ def _top_up_solar_generation(
     ensure_main_connection: bool = True,
 ) -> bool:
     """Join the primary grid, then build one validated power unit if needed."""
+    capacity_near = near
     if ensure_main_connection:
         outcome = extend_power(
             client, bridge, surface, force, near, emit, detailed=True,
@@ -1843,10 +1844,15 @@ def _top_up_solar_generation(
             return True
         if getattr(outcome, "ready", bool(outcome)):
             emit("POWER DISTRICT: already covered by the selected primary grid; sizing capacity")
+            primary = live_base.nearest_powered_pole(
+                client, surface, force, near,
+            )
+            if primary is not None:
+                capacity_near = primary[0]
     script_output = getattr(bridge, "script_output", Path(""))
     return ensure_power_capacity(
         client=client, bridge=bridge, surface=surface, force=force,
-        near=near, script_output=script_output, emit=emit, submit=_submit,
+        near=capacity_near, script_output=script_output, emit=emit, submit=_submit,
     )
 
 
@@ -3678,28 +3684,6 @@ def _prep_plate_extraction(
         else smelter_count_for_draw(short_plate, declared_draw)
     )
     if (
-        furnace_target is None
-        and short_plate == "iron-plate" and plate_line is not None
-        and not bootstrap_line
-    ):
-        # A direct iron line is strategic capacity, not a mall item.  Let the
-        # mine phase earmark the next complete refinery module even when the
-        # immediate mall bill is briefly quiet; the physical drill count keeps
-        # this from becoming speculative furnace overbuild.
-        try:
-            drill_count = extraction_state.resource_drill_count(
-                client, surface, force, "iron-ore",
-            )
-        except Exception:
-            drill_count = 0
-        proactive_target = iron_growth_target(drill_count)
-        if proactive_target > wanted_furnaces:
-            emit(
-                f"  IRON CAPACITY POLICY: direct line has {plate_line.machine_count} "
-                f"furnace(s); mine supports a {proactive_target}-furnace checkpoint"
-            )
-            wanted_furnaces = proactive_target
-    if (
         short_plate in BOOTSTRAP_FURNACE_CAPS
         and not _electric_furnace_producer_started(client, surface, force)
     ):
@@ -3779,12 +3763,7 @@ def _prep_plate_extraction(
             )
             + " -- queued for the mall"
         )
-        if (
-            furnace_target is None
-            and short_plate == "iron-plate"
-            and plate_line is not None
-            and not bootstrap_line
-        ):
+        if furnace_target is None and plate_line is not None and not bootstrap_line:
             try:
                 output_source = build_mining_stage(
                     client, bridge, surface, force, short_plate,
@@ -3793,7 +3772,8 @@ def _prep_plate_extraction(
                 if output_source is not None:
                     MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
                 emit(
-                    "  BLUEPRINT EARMARK: iron mine/refinery expansion is staged; "
+                    f"  BLUEPRINT EARMARK: {short_plate} mine/refinery expansion "
+                    "is staged; "
                     "construction may finish asynchronously"
                 )
                 return True
@@ -4340,11 +4320,10 @@ def run(
                 reference_point, emit,
             ):
                 continue
-            # Build the three direct raw-material foundations sequentially.
-            # Until this is complete, a strategic iron expansion is prohibited:
-            # it used to go 6 -> 12 immediately, then leave copper and stone
-            # without any direct source while its own drill corridor consumed
-            # the opening construction budget.
+            # Establish the two universal metal inputs first. After that the
+            # active dependency chain decides what to build and when to grow;
+            # stone and every later material are ordinary demand, not startup
+            # contracts that preempt useful goal work.
             if not all(
                 _direct_plate_foundation_ready(client, surface, force, plate)
                 for plate in PLATE_FOUNDATION_BUILD_ORDER

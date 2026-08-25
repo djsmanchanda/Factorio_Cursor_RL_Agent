@@ -418,6 +418,8 @@ def test_network_generation_query_sums_generators_on_one_network() -> None:
     # Accumulators store rather than generate; they must not license a burst.
     assert "accumulator" not in client.commands[0]
     assert "get_max_energy_production" in client.commands[0]
+    assert "type='electric-pole'" in client.commands[0]
+    assert "name='roboport'" not in client.commands[0]
 
 
 def test_primary_power_bridge_prefers_generation_over_proximity() -> None:

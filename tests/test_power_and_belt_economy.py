@@ -275,6 +275,10 @@ def test_power_sizing_does_not_treat_existing_coverage_as_a_grid_join(
         builder, "extend_power",
         lambda *_a, **_k: PowerExtensionResult(ready=True, changed=False),
     )
+    monkeypatch.setattr(
+        builder.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((90.0, 40.0), "substation"),
+    )
     sized = []
     monkeypatch.setattr(
         builder, "ensure_power_capacity",
@@ -285,7 +289,7 @@ def test_power_sizing_does_not_treat_existing_coverage_as_a_grid_join(
         object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
         (3.0, -1.0), lambda _message: None,
     ) is False
-    assert sized == [(3.0, -1.0)]
+    assert sized == [(90.0, 40.0)]
 
 
 def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
