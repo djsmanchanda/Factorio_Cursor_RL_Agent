@@ -3935,6 +3935,31 @@ def _prep_the_belt_cell(
 _BELT_CELL_PREP_KEY = "_belt_cell"
 
 
+def _production_started(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    """Whether an upstream line is working now or has produced before."""
+    spec = LINE_RECIPES.get(item)
+    if spec is None:
+        return True
+    line = live_base.find_line(
+        client, surface, force, item, spec["machine"],
+    )
+    return line is not None and (
+        line.working_count > 0 or getattr(line, "produced_count", 0) > 0
+    )
+
+
+def _baseline_recipe_ready(
+    client: RconClient, surface: str, force: str, recipe: str,
+) -> bool:
+    """Whether baseline prep can build `recipe` without recursive bootstrap."""
+    return all(
+        _production_started(client, surface, force, ingredient)
+        for ingredient in LINE_RECIPES[recipe]["ingredients"]
+    )
+
+
 def _prep_intermediate(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     prepped: set[str], mall_targets: dict[str, int], reference_point: Point,
@@ -3946,8 +3971,12 @@ def _prep_intermediate(
     and the caller should move on to the goal item.
     """
     pending = [r for r in baseline_build_order() if r not in prepped]
-    if pending:
-        recipe = pending[0]
+    ready = [
+        recipe for recipe in pending
+        if _baseline_recipe_ready(client, surface, force, recipe)
+    ]
+    if ready:
+        recipe = ready[0]
         wanted = BASELINE_MACHINES[recipe]
         line = live_base.find_line(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
@@ -4303,27 +4332,18 @@ def run(
                     )
                 ):
                     continue
-            # PREP BEFORE MALL WORK. These standing cells refill the
-            # intermediates used by exact shortages and background reserves.
-            # A blocked prep pass hands control back so the mall can build the
-            # missing machine instead of retrying the same shortage forever.
+            # Start only dependency-ready prep. It may consume a live plate
+            # foundation, but it cannot recursively decide which raw
+            # foundation to open: iron and copper remain explicit below.
             if _prep_intermediate(
                 client, bridge, surface, force, prepped, mall_targets,
                 reference_point, emit,
             ):
                 continue
-            # The belt cell goes up before extraction: mines are the biggest
-            # belt consumers, and a producer that never existed cannot refill
-            # what they spend.
-            if _BELT_CELL_PREP_KEY not in prepped and _prep_the_belt_cell(
-                client, bridge, surface, force, prepped, mall_targets,
-                reference_point, emit,
-            ):
-                continue
-            # Establish the two universal metal inputs first. After that the
-            # active dependency chain decides what to build and when to grow;
-            # stone and every later material are ordinary demand, not startup
-            # contracts that preempt useful goal work.
+            # Establish iron, then copper, through the only startup path that
+            # may create their extraction systems. Between those steps the
+            # readiness gate above may start gears from live iron; after copper
+            # starts it may add cable and then circuits.
             if not all(
                 _direct_plate_foundation_ready(client, surface, force, plate)
                 for plate in PLATE_FOUNDATION_BUILD_ORDER
@@ -4344,6 +4364,13 @@ def run(
                 if position is not None:
                     emit(f"GOAL MET: {goal_item} is producing at {position}")
                     return {"ok": True, "iterations": iteration, "output_position": position}
+                continue
+            # Once both metal foundations exist, stand up the belt producer
+            # before demand-driven extraction spends the remaining reserve.
+            if _BELT_CELL_PREP_KEY not in prepped and _prep_the_belt_cell(
+                client, bridge, surface, force, prepped, mall_targets,
+                reference_point, emit,
+            ):
                 continue
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a

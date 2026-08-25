@@ -25,11 +25,12 @@ _LOOP = inspect.getsource(autonomous_builder.run)
 
 
 def test_the_standing_cells_come_before_the_expensive_extraction() -> None:
-    """Superseded the reverse ordering, 2026-08-02. Plates first was defensible
-    -- an intermediate over a starved plate line starves too -- but extraction
-    prep asks for 14 drills, and drills need circuits, which need the very
-    copper-cable cell that was queued behind it. The cheap half goes first."""
+    """Dependency-ready cells may start between explicit foundations."""
     assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_prep_plate_extraction(")
+
+
+def test_metal_foundations_precede_the_belt_cell() -> None:
+    assert _LOOP.index("_prep_plate_foundation(") < _LOOP.index("_prep_the_belt_cell(")
 
 
 def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
@@ -43,6 +44,28 @@ def test_blocked_intermediate_hands_the_pass_to_the_mall() -> None:
     clause = source[source.index("except MaterialShortage"):]
 
     assert "return False" in clause
+
+
+def test_intermediate_prep_uses_only_inputs_already_producing(monkeypatch) -> None:
+    producing_iron = type("Line", (), {
+        "machine_count": 6, "working_count": 1, "produced_count": 3,
+    })()
+    calls = []
+
+    def find_line(_client, _surface, _force, recipe, _machine):
+        return producing_iron if recipe == "iron-plate" else None
+
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", find_line)
+    monkeypatch.setattr(
+        autonomous_builder, "ensure_produced",
+        lambda *_args, **_kwargs: calls.append(_args[4]),
+    )
+
+    assert autonomous_builder._prep_intermediate(
+        object(), object(), "nauvis", "player", set(), {},
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert calls == ["iron-gear-wheel"]
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:

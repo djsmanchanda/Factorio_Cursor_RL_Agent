@@ -192,7 +192,11 @@ def baseline_build_order() -> tuple[str, ...]:
             raise ValueError(
                 f"Baseline prep set has a circular dependency among {sorted(remaining)}"
             )
-        for recipe in sorted(ready):
+        # Preserve the declared baseline order among equally ready recipes.
+        # Alphabetic sorting put copper-cable ahead of iron-gear-wheel, so an
+        # empty-stock save began by recursively planning copper extraction
+        # instead of consuming the first live iron foundation.
+        for recipe in ready:
             ordered.append(recipe)
             del remaining[recipe]
     return tuple(ordered)

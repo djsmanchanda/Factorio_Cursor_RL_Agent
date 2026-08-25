@@ -36,10 +36,12 @@ These names describe intended responsibilities, not permission to build speculat
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   Mine, transport, and refinery capacity move as one coherent increment.
-- Startup establishes direct six-furnace iron and copper foundations in that
-  order. After both exist, follow the active dependency chain: stone, steel,
-  oil, and later materials are built only when requested rather than acting as
-  additional global readiness gates.
+- Startup opens a direct six-furnace iron foundation, then copper. Between
+  those explicit raw steps, a standing intermediate may start only when every
+  direct input is already working or has produced output: gears follow live
+  iron, cable follows live copper, and circuits follow their live feeders.
+  Intermediate requests never recursively choose or open a missing raw
+  foundation. Stone, steel, oil, and later materials remain demand-driven.
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.

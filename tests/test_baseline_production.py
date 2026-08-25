@@ -142,8 +142,9 @@ def test_smelters_cover_the_draw_they_are_sized_for(plate: str) -> None:
 def test_build_order_puts_a_feeder_before_what_it_feeds() -> None:
     order = baseline_build_order()
 
-    assert set(order) == set(BASELINE_MACHINES)
-    assert order.index("copper-cable") < order.index("electronic-circuit")
+    assert order == (
+        "iron-gear-wheel", "copper-cable", "electronic-circuit",
+    )
 
 
 def test_build_order_is_deterministic() -> None:
