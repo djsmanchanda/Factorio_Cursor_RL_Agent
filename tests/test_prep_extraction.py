@@ -46,7 +46,7 @@ def test_blocked_intermediate_hands_the_pass_to_the_mall() -> None:
 
 
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
-    assert "smelter_count_for_draw(short_plate, adjusted_draw[short_plate])" in _PREP
+    assert "smelter_count_for_draw(short_plate, declared_draw)" in _PREP
     assert "build_mining_stage(" in _PREP
 
 
@@ -193,6 +193,88 @@ def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -
         (0.0, 0.0), lambda _message: None, furnace_target=6,
     )
     assert calls == []
+
+
+def test_foundation_ready_merges_fed_and_unset_furnaces(monkeypatch) -> None:
+    """A furnace has no recipe until ore reaches it, so four fed plus two
+    unset machines can still be the complete opening module."""
+    visible = (
+        (95.5, 16.5), (101.5, 16.5),
+        (95.5, 19.5), (101.5, 19.5),
+    )
+    idle = ((95.5, 22.5), (101.5, 22.5))
+    line = type("Line", (), {
+        "machine_count": 4,
+        "machine_positions": visible,
+        "output_position": visible[-1],
+    })()
+    idle_row = type("Line", (), {"machine_positions": idle})()
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line", lambda *_args: line,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_idle_machine_row",
+        lambda *_args, **_kwargs: idle_row,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "logistic_smelter_origin", lambda _positions: None,
+    )
+
+    assert autonomous_builder._direct_plate_foundation_ready(
+        object(), "nauvis", "player", "iron-plate",
+    )
+
+
+def test_partial_foundation_never_requests_expansion(monkeypatch) -> None:
+    line = type("Line", (), {
+        "machine_count": 4,
+        "machine_positions": ((95.5, 16.5),),
+    })()
+    calls: list[bool] = []
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **kwargs: calls.append(kwargs["expand"]) or (10.5, 10.5),
+    )
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(), {}, {},
+        (0.0, 0.0), lambda _message: None, furnace_target=6,
+    )
+    assert calls == [False]
+    autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
+
+
+def test_stone_foundation_has_a_declared_rate_without_plate_draw(monkeypatch) -> None:
+    calls: list[bool] = []
+    messages: list[str] = []
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        autonomous_builder, "demand_adjusted_plate_draw",
+        lambda *_a: {"iron-plate": 1.0, "copper-plate": 1.0},
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **kwargs: calls.append(kwargs["expand"]) or (10.5, 10.5),
+    )
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "stone-brick", set(), {}, {},
+        (0.0, 0.0), messages.append, furnace_target=6,
+    )
+    assert calls == [False]
+    assert any("stone-brick extraction" in message for message in messages)
+    autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
+
+
 def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     """Reserved drill sites have been blocked for days of runs; that should
     cost a pass, not the run -- the ladder still climbs on demand."""

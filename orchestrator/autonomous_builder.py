@@ -3660,9 +3660,22 @@ def _prep_plate_extraction(
     for item, target in mall_targets.items():
         targets[item] = max(targets.get(item, 0), target)
     adjusted_draw = demand_adjusted_plate_draw(targets, available)
+    declared_draw = adjusted_draw.get(short_plate)
+    if declared_draw is None:
+        if furnace_target is None:
+            raise ValueError(
+                f"{short_plate} has no demand-adjusted extraction rate"
+            )
+        spec = LINE_RECIPES[short_plate]
+        declared_draw = (
+            furnace_target
+            * MACHINE_SPEEDS[spec["machine"]]
+            * spec.get("product_amount", 1)
+            / spec["craft_time"]
+        )
     wanted_furnaces = (
         furnace_target if furnace_target is not None
-        else smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
+        else smelter_count_for_draw(short_plate, declared_draw)
     )
     if (
         furnace_target is None
@@ -3714,8 +3727,8 @@ def _prep_plate_extraction(
     emit(
         f"--- production prep: {short_plate} extraction to "
         f"{wanted_furnaces} furnace(s) for "
-        f"{adjusted_draw[short_plate]:.2f}/s "
-        f"(have {have}, drill phase {drill_phase_for_draw(adjusted_draw[short_plate])}) ---"
+        f"{declared_draw:.2f}/s "
+        f"(have {have}, drill phase {drill_phase_for_draw(declared_draw)}) ---"
     )
     try:
         output_source = build_mining_stage(
@@ -3725,7 +3738,15 @@ def _prep_plate_extraction(
             # refinery. Treating them as one sent every later pass into mine
             # expansion, so the proper belt-fed system was never retried even
             # after belt production started (live trace 2026-08-24 17:59).
-            expand=plate_line is not None and not bootstrap_line,
+            # A fixed foundation request establishes or repairs its opening
+            # six-furnace district. Recipe-visible furnaces are an incomplete
+            # observation while ore is still arriving, so their presence must
+            # never turn foundation work into the 6 -> 12 growth policy.
+            expand=(
+                furnace_target is None
+                and plate_line is not None
+                and not bootstrap_line
+            ),
         )
         if output_source is not None:
             MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
@@ -3758,7 +3779,12 @@ def _prep_plate_extraction(
             )
             + " -- queued for the mall"
         )
-        if short_plate == "iron-plate" and plate_line is not None and not bootstrap_line:
+        if (
+            furnace_target is None
+            and short_plate == "iron-plate"
+            and plate_line is not None
+            and not bootstrap_line
+        ):
             try:
                 output_source = build_mining_stage(
                     client, bridge, surface, force, short_plate,
@@ -3790,15 +3816,37 @@ def _prep_plate_extraction(
 def _direct_plate_foundation_ready(
     client: RconClient, surface: str, force: str, recipe: str,
 ) -> bool:
-    """Whether one real, belt-fed opening line exists for `recipe`."""
+    """Whether one real, belt-fed opening module exists for `recipe`.
+
+    Furnaces infer their recipe from inserted material. During startup a real
+    six-furnace refinery can therefore appear as four recipe-visible machines
+    plus two unset machines. Count an exact planner-shaped module after
+    excluding requester bootstrap geometry; a recipe-only count retriggered
+    iron growth before copper existed in the 2026-08-25 19:12 run.
+    """
     line = live_base.find_line(
         client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
     )
-    if line is None or line.machine_count < PLATE_FOUNDATION_FURNACES[recipe]:
+    if line is None:
         return False
-    return logistic_smelter_origin(tuple(
-        getattr(line, "machine_positions", ()) or (),
-    )) is None
+    visible = tuple(getattr(line, "machine_positions", ()) or ())
+    if logistic_smelter_origin(visible) is not None:
+        return False
+    positions = set(visible)
+    anchor = getattr(line, "output_position", None) or (
+        visible[0] if visible else None
+    )
+    if anchor is not None:
+        idle = live_base.find_idle_machine_row(
+            client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+            anchor, radius=40.0,
+        )
+        if idle is not None:
+            positions.update(idle.machine_positions)
+    required = PLATE_FOUNDATION_FURNACES[recipe]
+    if len(positions) < required:
+        return False
+    return bool(_complete_six_furnace_candidates(tuple(sorted(positions))))
 
 
 def _prep_plate_foundation(
