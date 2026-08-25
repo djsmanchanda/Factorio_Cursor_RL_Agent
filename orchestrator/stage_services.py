@@ -29,10 +29,6 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 
 
-class RoboportPowerPending(RuntimeError):
-    """A coverage wave exists but must charge before it can extend farther."""
-
-
 @dataclass(frozen=True)
 class PowerExtensionResult:
     """Outcome detail for callers that must separate coverage from a bridge."""
@@ -95,9 +91,9 @@ _COVERAGE_MARGIN = 2.0
 # once the network can generate the threshold below, batching stops mattering.
 _ROBOPORT_WAVE = 3
 _ROBOPORT_WAVE_GENERATION_KW = 100_000.0
-# A wave must reach roughly full buffer before the next one lands. An
-# undercharged wave is recorded immediately and retried by later diagnosis;
-# coverage never blocks the production control loop.
+# Charge is observed for diagnostics, but never truncates the required
+# coverage geometry. Ports are direct infrastructure and each receives a power
+# bridge before the next production plan is judged on construction progress.
 _ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
 # Avoid laying the same emergency power bridge repeatedly while a newly
 # connected roboport is still charging and reports low_power.
@@ -290,13 +286,7 @@ def _submit(
             + "; placing coherent ghosts while scheduled producers catch up"
         )
     if stage_coverage is not None:
-        try:
-            stage_coverage()
-        except RoboportPowerPending:
-            emit(
-                f"  CONSTRUCTION COVERAGE PENDING: {name} will be submitted; "
-                "its charging roboports continue independently"
-            )
+        stage_coverage()
     authorization = build_layout_authorization([(name, plan)])
     # Removal-only plans (bootstrap cell retirement) place nothing by design;
     # the executor counts only place actions, so demanding attempted
@@ -831,13 +821,13 @@ def _await_roboport_charge(
     client: RconClient, surface: str, force: str,
     near: Point, positions: Sequence[Point], emit: Callable[[str], None],
 ) -> None:
-    """Check whether one roboport wave can support another immediately.
+    """Report a charging wave without turning it into control flow.
 
     Each fresh port draws up to ~2.1 MW while charging from ~50%. Landing a
-    whole chain at once turned that into a multi-megawatt transient that
-    browned out an early grid. Coverage is asynchronous infrastructure: a
-    charging port pauses only the next coverage wave, never the production
-    blueprint or the rest of the runner."""
+    whole chain is visible load, but incomplete construction coverage is worse:
+    a stopped wave permanently strands remote ghosts. Every required port is
+    therefore placed and power-connected; charging affects when its bots work,
+    not whether later coverage geometry is scheduled."""
     generation = live_base.network_generation_kw(client, surface, force, near)
     if generation is not None and generation >= _ROBOPORT_WAVE_GENERATION_KW:
         return
@@ -853,11 +843,7 @@ def _await_roboport_charge(
 
     emit(
         "  ROBOport POWER PENDING: this coverage wave is still charging; "
-        "pausing only further roboport placement while production blueprints "
-        "continue"
-    )
-    raise RoboportPowerPending(
-        "roboport coverage wave is still charging"
+        "continuing the required coverage chain while ports charge independently"
     )
 
 

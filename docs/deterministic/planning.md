@@ -86,9 +86,11 @@ These names describe intended responsibilities, not permission to build speculat
   that block, and connect the exact pump connector before extending a long
   power, construction, or pipe corridor back toward the factory.
 - Chemical construction coverage reserves the complete future pipe and machine
-  footprint before siting roboports. Remote coverage waves defer while their
-  ports remain power-starved, and every local oil substation is connected as
-  soon as the plan is submitted rather than after all pipe ghosts complete.
+  footprint before siting roboports. The complete required roboport chain is
+  placed and power-connected without synchronously waiting for charge; only bot
+  activity waits on charging, never coverage geometry or production planning.
+  Every local oil substation is connected as soon as the plan is submitted
+  rather than after all pipe ghosts complete.
 - Offshore pumps require a straight orthogonal shoreline: water across the
   intake width, land across the output width, and the first pipe on the
   immediately adjacent land-side connector tile. Diagonal shoreline corners

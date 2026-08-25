@@ -335,7 +335,7 @@ def test_charge_check_accepts_an_already_charged_wave(monkeypatch) -> None:
     assert polls == []
 
 
-def test_charging_wave_pauses_only_roboport_placement_without_sleep(monkeypatch) -> None:
+def test_charging_wave_does_not_sleep_or_stop_coverage(monkeypatch) -> None:
     from orchestrator import stage_services
 
     monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 167.0)
@@ -344,16 +344,15 @@ def test_charging_wave_pauses_only_roboport_placement_without_sleep(monkeypatch)
     monkeypatch.setattr(stage_services.time, "sleep", slept.append)
     messages: list[str] = []
 
-    with pytest.raises(stage_services.RoboportPowerPending):
-        stage_services._await_roboport_charge(
-            None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)],
-            messages.append,
-        )
+    stage_services._await_roboport_charge(
+        None, "nauvis", "player", (0.0, 0.0), [(1.0, 1.0)],
+        messages.append,
+    )
     assert slept == []
-    assert any("production blueprints continue" in message for message in messages)
+    assert any("continuing the required coverage chain" in message for message in messages)
 
 
-def test_existing_low_power_anchor_pauses_only_the_next_coverage_wave(monkeypatch) -> None:
+def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) -> None:
     from orchestrator import stage_services
 
     monkeypatch.setattr(
@@ -363,22 +362,29 @@ def test_existing_low_power_anchor_pauses_only_the_next_coverage_wave(monkeypatc
     monkeypatch.setattr(
         live_base, "entity_status_name", lambda *_args: "low_power",
     )
+    charge_checks: list[tuple] = []
     monkeypatch.setattr(
         stage_services, "_await_roboport_charge",
-        lambda *_args: (_ for _ in ()).throw(
-            stage_services.RoboportPowerPending("power must catch up")
-        ),
+        lambda *_args: charge_checks.append(_args[4]),
     )
     monkeypatch.setattr(
-        stage_services, "_submit",
-        lambda *_args, **_kwargs: pytest.fail("placed another low-power port"),
+        stage_services, "clear_chain_positions",
+        lambda *_args, **_kwargs: [(45.0, 5.0)],
     )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        stage_services, "_submit",
+        lambda _c, _b, _s, _plan, name, _emit, **_kwargs:
+            submitted.append(name) or {"ok": True},
+    )
+    monkeypatch.setattr(stage_services, "_await_built_status", lambda *_args: "working")
 
-    with pytest.raises(stage_services.RoboportPowerPending):
-        stage_services.extend_roboport_coverage(
-            object(), object(), "nauvis", "player", (100.0, 5.0),
-            lambda _message: None,
-        )
+    assert stage_services.extend_roboport_coverage(
+        object(), object(), "nauvis", "player", (100.0, 5.0),
+        lambda _message: None,
+    )
+    assert charge_checks
+    assert submitted == ["roboport_bridge"]
 
 
 def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:

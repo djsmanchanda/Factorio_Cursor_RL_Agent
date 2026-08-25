@@ -165,6 +165,39 @@ def test_chemical_coverage_targets_uncovered_positions_not_box_corners(monkeypat
     assert (12, 18) in reservations[0]
 
 
+def test_chemical_coverage_finishes_each_leg_of_a_noncollinear_pipe_route(
+    monkeypatch,
+) -> None:
+    chained: list[Point] = []
+    ports: list[Point] = [(0.0, 0.0)]
+    monkeypatch.setattr(
+        stage_chemical.live_base, "roboport_positions",
+        lambda *_args: list(ports),
+    )
+
+    def fake_extend(
+        _client, _bridge, _surface, _force, target, _emit, *, reserved_tiles,
+    ):
+        chained.append(target)
+        ports.append(target)
+        return True
+
+    monkeypatch.setattr(stage_chemical, "extend_roboport_coverage", fake_extend)
+    plan = {"phases": [{"name": "fluid", "actions": [
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": -200.5, "y": 0.5}},
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": 0.5, "y": -200.5}},
+    ]}]}
+
+    stage_chemical._ensure_plan_construction_coverage(
+        type("Client", (), {"command": object()})(), object(),
+        "nauvis", "player", plan, lambda _line: None,
+    )
+
+    assert chained == [(-200.5, 0.5), (0.5, -200.5)]
+
+
 def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> None:
     captured: list[set[tuple[int, int]]] = []
     monkeypatch.setattr(

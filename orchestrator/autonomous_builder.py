@@ -69,7 +69,6 @@ from orchestrator.stage_extraction import (
 )
 from orchestrator.stage_recovery import repair_existing_ingredient_transport
 from orchestrator.stage_services import (
-    RoboportPowerPending,
     StuckError,
     _BLOCKAGE_INTERVAL,
     _BLOCKAGE_ROUNDS,
@@ -199,12 +198,9 @@ def _apply_remedy(
                 if ghost.get("reason") == "out_of_construction_range":
                     coverage_target = tuple(ghost["position"])
                     break
-        try:
-            acted = extend_roboport_coverage(
-                client, bridge, surface, force, coverage_target, emit,
-            )
-        except RoboportPowerPending:
-            acted = False
+        acted = extend_roboport_coverage(
+            client, bridge, surface, force, coverage_target, emit,
+        )
     elif remedy == "logistic_coverage":
         # Unlike a power gap, this one CAN clear without the remedy doing
         # anything: a roboport that was just connected still has to charge
@@ -213,12 +209,9 @@ def _apply_remedy(
         # no-op here is reported and waited out rather than treated as
         # fatal -- but it is no longer silent, and a run where every single
         # round was a no-op now says so instead of timing out anonymously.
-        try:
-            acted = ensure_logistic_coverage(
-                client, bridge, surface, force, logistic_chest_positions, emit,
-            )
-        except RoboportPowerPending:
-            acted = False
+        acted = ensure_logistic_coverage(
+            client, bridge, surface, force, logistic_chest_positions, emit,
+        )
         if not acted:
             emit(
                 "    coverage is already geometrically sufficient -- waiting for "
@@ -412,16 +405,10 @@ def bring_stage_up(
     # waiting on bots -- and logistic coverage BEFORE the chests are even built,
     # so they join a network the moment they exist rather than after a stage has
     # visibly starved.
-    try:
-        extend_roboport_coverage(client, bridge, surface, force, origin, emit)
-        ensure_logistic_coverage(
-            client, bridge, surface, force, logistic_chest_positions, emit,
-        )
-    except RoboportPowerPending:
-        emit(
-            f"  [{name}] roboport coverage is charging; stage construction "
-            "and diagnosis continue"
-        )
+    extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+    ensure_logistic_coverage(
+        client, bridge, surface, force, logistic_chest_positions, emit,
+    )
     description, remedy, acted_ever = "no blockage recorded", "none", False
     extensions = 0
     rebuilt_stale = False
