@@ -492,6 +492,40 @@ def test_starved_standing_refinery_grows_its_own_mine(monkeypatch) -> None:
     assert captured["expand"] is True
 
 
+def test_unproven_refinery_does_not_expand_its_mine(monkeypatch) -> None:
+    """A 0/10 line that never made plates is still construction, not starvation."""
+    extraction = SimpleNamespace(
+        build_plan=None, drill_count=6, furnace_count=6, ore="copper-ore",
+        ore_output=(113.5, -39.5), smelter_origin=(144.0, -72.0),
+        mining_productivity_bonus=0.0, smelter_flow_direction="east",
+    )
+    positions = tuple((float(index), 0.0) for index in range(6))
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a, **_k: SimpleNamespace(
+            machine_count=6, working_count=0, machine_positions=positions,
+            produced_count=0,
+        ),
+    )
+    monkeypatch.setattr(builder.live_base, "find_idle_machine_row", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder.live_base, "entity_statuses",
+        lambda *_a, **_k: {position: "no_ingredients" for position in positions},
+    )
+    monkeypatch.setattr(
+        builder, "_cohesive_smelter_target",
+        lambda *_a: pytest.fail("startup must not become a mine-expansion request"),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="has not produced yet"):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "copper-plate", (3.0, -1.0),
+            lambda _message: None,
+        )
+
+
 def test_intake_inserter_gets_power_extended(monkeypatch) -> None:
     """Live run of 2026-08-24 14:05: the intake landed past the row's power
     scaffold, so its inserter never ran, the chest stayed empty, and both

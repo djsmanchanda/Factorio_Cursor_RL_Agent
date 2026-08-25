@@ -511,6 +511,9 @@ def _place_new_mine(
     plan = strip_local_power(extraction.build_plan, remove_substations=False)
     _publish_output_chest(plan)
     if hasattr(client, "command"):
+        _relocate_roboports_blocking_mine_plan(
+            client, bridge, surface, force, plan, emit,
+        )
         belt_rows: dict[float, list[float]] = {}
         for phase in plan["phases"]:
             for action in phase["actions"]:
@@ -887,6 +890,34 @@ def _relocate_roboport_for_expansion(
     _submit(client, bridge, surface, remove, "retire_obstructing_roboport", emit)
 
 
+def _relocate_roboports_blocking_mine_plan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    plan: dict, emit: Callable[[str], None],
+) -> None:
+    """Move owned service ports out of the *current* mine expansion footprint.
+
+    The future corridor remains reserved for later power placement, but a port
+    moves only when the next six-drill module actually needs its tile.
+    """
+    active_tiles = planned_footprint_tiles(plan)
+    if not active_tiles:
+        return
+    reserved = active_tiles | {
+        tuple(tile) for tile in plan.get("reserved_tiles", [])
+        if isinstance(tile, (list, tuple)) and len(tile) == 2
+    }
+    minimum, maximum = _tile_bounds(active_tiles)
+    owners = live_base.occupied_tile_owners(client, surface, minimum, maximum)
+    ports = sorted({
+        (owner[1], owner[2]) for tile, owner in owners.items()
+        if tile in active_tiles and owner[0] == "roboport"
+    })
+    for port in ports:
+        _relocate_roboport_for_expansion(
+            client, bridge, surface, force, port, reserved, emit,
+        )
+
+
 def _place_plate_expansion_foundation(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, foundation: dict, emit: Callable[[str], None],
@@ -1130,6 +1161,24 @@ def _refinery_machine_positions(
     return positions
 
 
+def _complete_six_furnace_candidates(
+    positions: tuple[Point, ...],
+) -> tuple[tuple[Point, ...], ...]:
+    """Exact six-furnace template windows contained in an incomplete survey."""
+    available = set(positions)
+    candidates: list[tuple[Point, ...]] = []
+    for x in sorted({position[0] for position in available}):
+        for y in sorted({position[1] for position in available}):
+            candidate = tuple(sorted({
+                (x, y), (x + 6, y),
+                (x, y + 3), (x + 6, y + 3),
+                (x, y + 6), (x + 6, y + 6),
+            }))
+            if set(candidate) <= available:
+                candidates.append(candidate)
+    return tuple(dict.fromkeys(candidates))
+
+
 def _cohesive_smelter_target(
     client: RconClient, surface: str, force: str, recipe: str,
     extraction, expand: bool, emit: Callable[[str], None],
@@ -1146,9 +1195,7 @@ def _cohesive_smelter_target(
     if not positions:
         return None, None
     try:
-        existing = recover_managed_refinery(
-            client, surface, force, recipe, positions,
-        )
+        existing = recover_managed_refinery(client, surface, force, recipe, positions)
     except ValueError as error:
         # A direct line can have expansion furnaces already placed (or ghosts
         # still waiting for their recipe) beside it.  The old recovery path
@@ -1158,20 +1205,32 @@ def _cohesive_smelter_target(
         # recipe-visible managed block on its own; the next extension plan can
         # claim the pending slots once the complete target is affordable.
         visible = tuple(sorted(set(line.machine_positions))) if line is not None else ()
-        if visible and set(visible) != set(positions):
+        candidates = [visible] if visible and set(visible) != set(positions) else []
+        candidates.extend(_complete_six_furnace_candidates(positions))
+        existing = None
+        for candidate in candidates:
             try:
                 existing = recover_managed_refinery(
-                    client, surface, force, recipe, visible,
+                    client, surface, force, recipe, candidate,
                 )
+                break
             except ValueError:
-                raise StuckError(str(error)) from error
+                continue
+        if existing is None:
             emit(
-                f"SMELTER RECOVERY: ignored {len(set(positions) - set(visible))} "
-                f"unconfigured {recipe} furnace(s) outside the current managed "
-                "block; expansion will finish them from a complete blueprint"
+                f"SMELTER RECOVERY: {len(positions)} observed {recipe} furnace(s) "
+                "are incomplete construction, not a managed refinery; waiting for "
+                "the existing blueprint instead of expanding its mine"
             )
-        else:
-            raise StuckError(str(error)) from error
+            raise ProductionPrerequisiteDeferred(
+                f"{recipe} refinery has incomplete furnace modules"
+            ) from error
+        ignored = len(set(positions) - set(existing.machine_positions))
+        if ignored:
+            emit(
+                f"SMELTER RECOVERY: ignored {ignored} incomplete {recipe} furnace(s) "
+                "outside the verified managed module"
+            )
     total_drills = extraction.system_drill_count_before + extraction.drill_count
     rate_required = smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
@@ -1511,6 +1570,7 @@ def build_mining_stage(
         raise StuckError(str(error)) from error
     if not expand:
         starved = False
+        line = None
         try:
             line = live_base.find_line(
                 client, surface, force, recipe,
@@ -1538,6 +1598,16 @@ def build_mining_stage(
         except Exception:  # survey unavailable (dry harness): guard passes
             starved = False
         if starved:
+            if line is None or getattr(line, "produced_count", 1) == 0:
+                emit(
+                    f"  REFINERY STARTUP PENDING: {recipe} has {working}/"
+                    f"{len(positions)} furnace(s) fed but no completed plates; "
+                    "holding this district for power/transport repair instead of "
+                    "opening another mine phase"
+                )
+                raise ProductionPrerequisiteDeferred(
+                    f"{recipe} direct refinery has not produced yet"
+                )
             # A standing refinery that is mostly UNFED is an ore-supply
             # problem, not a capacity one (live run 15 built 24 stone
             # furnaces fed for three). User standard: keep the proper module
@@ -1571,7 +1641,7 @@ def build_mining_stage(
         client, surface, force, recipe, extraction, expand, emit,
     )
     if expand and existing_smelter is None:
-        raise StuckError(
+        raise ProductionPrerequisiteDeferred(
             f"{recipe} expansion has no recoverable managed refinery; refusing to "
             "expand its mine ahead of the refinery"
         )
@@ -1763,11 +1833,16 @@ def _top_up_solar_generation(
     ensure_main_connection: bool = True,
 ) -> bool:
     """Join the primary grid, then build one validated power unit if needed."""
-    if ensure_main_connection and extend_power(
-        client, bridge, surface, force, near, emit,
-    ):
-        emit("POWER DISTRICT: joined the primary generated network before sizing")
-        return True
+    if ensure_main_connection:
+        outcome = extend_power(
+            client, bridge, surface, force, near, emit, detailed=True,
+        )
+        # Compatibility with narrow harnesses that still stub the legacy bool.
+        if getattr(outcome, "changed", bool(outcome)):
+            emit("POWER DISTRICT: submitted a primary-grid bridge; waiting for it to connect")
+            return True
+        if getattr(outcome, "ready", bool(outcome)):
+            emit("POWER DISTRICT: already covered by the selected primary grid; sizing capacity")
     script_output = getattr(bridge, "script_output", Path(""))
     return ensure_power_capacity(
         client=client, bridge=bridge, surface=surface, force=force,

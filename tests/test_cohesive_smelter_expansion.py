@@ -129,6 +129,33 @@ def test_cohesive_target_keeps_valid_block_when_partial_expansion_is_nearby(
     assert len(calls) == 2
 
 
+def test_cohesive_target_defers_an_incomplete_visible_refinery(monkeypatch) -> None:
+    """Partially configured furnaces are pending construction, never capacity."""
+    partial = (
+        (3.5, 4.5), (9.5, 4.5), (3.5, 7.5), (9.5, 7.5),
+        (3.5, 10.5), (9.5, 10.5), (15.5, 4.5),
+    )
+    line = SimpleNamespace(machine_positions=partial)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(
+        builder.live_base, "find_idle_machine_row", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder, "recover_managed_refinery",
+        lambda *_a: (_ for _ in ()).throw(ValueError("incomplete module")),
+    )
+    extraction = SimpleNamespace(
+        smelter_origin=(0.0, 0.0), system_drill_count_before=6,
+        drill_count=6, mining_productivity_bonus=0.0, ore="iron-ore",
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="incomplete furnace modules"):
+        builder._cohesive_smelter_target(
+            object(), "nauvis", "player", "iron-plate", extraction, True,
+            lambda _message: None,
+        )
+
+
 def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -> None:
     state = _state()
     line = SimpleNamespace(machine_positions=state.machine_positions)
@@ -505,7 +532,10 @@ def test_mining_expansion_refuses_without_recoverable_refinery(monkeypatch, reci
         lambda *_a: pytest.fail("missing refinery must block mine expansion"),
     )
 
-    with pytest.raises(StuckError, match="no recoverable managed refinery"):
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="no recoverable managed refinery",
+    ):
         builder.build_mining_stage(
             object(), object(), "nauvis", "player", recipe,
             (0.0, 0.0), lambda _message: None, expand=True,

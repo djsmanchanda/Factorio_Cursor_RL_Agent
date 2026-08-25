@@ -60,6 +60,13 @@ These names describe intended responsibilities, not permission to build speculat
   duplicate-pending checks still run first, and missing items stay queued.
   A supply-starved refinery triggers mine or transport repair, never an
   isolated furnace block.
+- A partially built or unconfigured furnace cluster is pending construction,
+  not recoverable capacity. Recovery may adopt only an exact planner-shaped
+  six-furnace module; until a direct refinery has produced plates, repair its
+  power/transport path instead of expanding its mine or selecting another site.
+- A position inside a pole's supply area is not evidence that a power bridge
+  was built. Capacity planning distinguishes existing coverage from a submitted
+  network bridge and keeps measuring the actual connected grid.
 - Multiple consumers of one resource require an explicit splitter/manifold and
   throughput budget. Independent belts may not overwrite or reverse the same
   collector head.

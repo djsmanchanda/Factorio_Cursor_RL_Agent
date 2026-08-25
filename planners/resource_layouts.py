@@ -273,6 +273,19 @@ def generate_direct_mining_to_chest(
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
     if output_side == "east" and continuation_tiles:
+        future_first_x = first_x - 3 * reserved_pair_columns
+        # Keep future drill bodies, their shared belt, and local pole clearance
+        # unavailable to unrelated power/coverage work.  This is metadata, not
+        # a ghost: the mine grows only when its next six-drill module is needed.
+        plan["reserved_tiles"] = [
+            [tile_x, tile_y]
+            for tile_x in range(
+                floor(future_first_x - 1.5), floor(last_x + 2.5),
+            )
+            for tile_y in range(
+                floor(belt_y - 4.5), floor(belt_y + 4.5),
+            )
+        ]
         plan["collector_geometry"] = {
             "flow": "east",
             "collector_tail": (belt_start_x, belt_y),

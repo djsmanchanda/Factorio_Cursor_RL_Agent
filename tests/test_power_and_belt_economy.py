@@ -265,6 +265,29 @@ def test_power_sizing_joins_the_primary_grid_before_building_more_panels(monkeyp
     assert calls == [(3.0, -1.0)]
 
 
+def test_power_sizing_does_not_treat_existing_coverage_as_a_grid_join(
+    monkeypatch, tmp_path,
+) -> None:
+    """Coverage by a pole is not proof that the remote grid was bridged."""
+    from orchestrator.stage_services import PowerExtensionResult
+
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: PowerExtensionResult(ready=True, changed=False),
+    )
+    sized = []
+    monkeypatch.setattr(
+        builder, "ensure_power_capacity",
+        lambda **_k: sized.append(_k["near"]) or False,
+    )
+
+    assert builder._top_up_solar_generation(
+        object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
+        (3.0, -1.0), lambda _message: None,
+    ) is False
+    assert sized == [(3.0, -1.0)]
+
+
 def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
     """Force and prototype family do not establish planner ownership."""
     from types import SimpleNamespace

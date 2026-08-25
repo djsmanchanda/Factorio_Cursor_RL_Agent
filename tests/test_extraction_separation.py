@@ -67,6 +67,9 @@ def test_east_direct_mine_paves_a_bounded_straight_collector_continuation() -> N
     assert output == (64.5, -0.5)
     geometry = plan["collector_geometry"]
     assert geometry["collector_head"] == output
+    # The unbuilt westward drill corridor is reserved even though its ghosts
+    # are intentionally not placed until the next six-drill checkpoint.
+    assert (10, -5) in {tuple(tile) for tile in plan["reserved_tiles"]}
     belts = [
         action for action in plan["phases"][1]["actions"]
         if action.get("entity") == "fast-transport-belt"

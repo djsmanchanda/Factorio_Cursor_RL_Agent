@@ -440,7 +440,11 @@ def load_reserved_tiles(script_output: Path | str) -> set[tuple[int, int]]:
 
 
 def plan_footprint_tiles(plan: Mapping[str, object]) -> set[tuple[int, int]]:
-    tiles: set[tuple[int, int]] = set()
+    tiles: set[tuple[int, int]] = {
+        (int(tile[0]), int(tile[1]))
+        for tile in plan.get("reserved_tiles", [])
+        if isinstance(tile, (list, tuple)) and len(tile) == 2
+    }
     for phase in plan.get("phases", []):
         for action in phase.get("actions", []):
             position = action.get("position")

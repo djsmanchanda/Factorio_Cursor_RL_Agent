@@ -7,6 +7,7 @@ import heapq
 import math
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
@@ -25,6 +26,20 @@ from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class PowerExtensionResult:
+    """Outcome detail for callers that must separate coverage from a bridge."""
+
+    ready: bool
+    changed: bool
+
+
+def _power_extension_result(
+    ready: bool, changed: bool, *, detailed: bool,
+) -> bool | PowerExtensionResult:
+    return PowerExtensionResult(ready, changed) if detailed else ready
 
 _DEFAULT_MACHINE_COUNT = 2
 _DEFAULT_BELT = "transport-belt"
@@ -555,16 +570,18 @@ def extend_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near_position: Point, emit: Callable[[str], None], *,
     reserved_tiles: set[tuple[int, int]] | None = None,
+    detailed: bool = False,
     _retried: bool = False,
-) -> bool:
+) -> bool | PowerExtensionResult:
     """Connect `near_position` to a network that actually generates power.
 
     Handles both shapes of power fault. If a pole stands at `near_position` its
     network is bridged to a powered one; if NO pole stands there -- a roboport
     or machine that was never wired at all -- a chain is run out and terminated
-    on a pole whose supply area covers it. Returns True if anything was built,
-    False when there is nothing this can do (no powered network exists, or
-    `near_position` is already on one).
+    on a pole whose supply area covers it. The default boolean says whether the
+    position is usable or a bridge was submitted. Callers that need to size a
+    grid can request ``detailed`` and distinguish physical coverage from an
+    actual network change.
 
     A hop can lose its tile between the collision survey and the bots' arrival:
     a concurrent build's own substation ghost lands exactly there (live,
@@ -585,8 +602,8 @@ def extend_power(
             client, surface, force, near_position,
         ) > 0:
             emit(f"  power bridge already joined network {own_network} while retrying")
-            return True
-        return False
+            return _power_extension_result(True, True, detailed=detailed)
+        return _power_extension_result(False, False, detailed=detailed)
     target_position, target_name = target
     target_supply = POLE_SPECS.get(
         target_name, POLE_SPECS["medium-electric-pole"],
@@ -602,7 +619,7 @@ def extend_power(
     ):
         emit(f"  {near_position} is already inside the supply area of the powered "
              f"{target_name} at {target_position}; waiting for it to charge")
-        return True
+        return _power_extension_result(True, False, detailed=detailed)
     if own_network is None:
         emit(f"  power gap found: {near_position} is not wired to any pole -- running a "
              f"chain from {target_name} at {target_position} and terminating it in supply range")
@@ -667,6 +684,7 @@ def extend_power(
         return extend_power(
             client, bridge, surface, force, near_position, emit,
             reserved_tiles=reserved_tiles,
+            detailed=detailed,
             _retried=True,
         )
     # Connectivity is not capacity: every run has browned out as stages
@@ -681,7 +699,7 @@ def extend_power(
         )
     except Exception as error:  # generation top-up is opportunistic
         emit(f"  SOLAR TOP-UP skipped: {error}")
-    return True
+    return _power_extension_result(True, True, detailed=detailed)
 
 
 def service_distance(roboport: Point, target: Point, *, square: bool) -> float:

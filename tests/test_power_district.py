@@ -21,6 +21,7 @@ from orchestrator.power_district import (
     ensure_power_capacity,
     load_state,
     network_peak_consumption_kw,
+    plan_footprint_tiles,
     required_units,
     UnitTemplate,
     unit_bounds,
@@ -491,3 +492,12 @@ def test_normal_finite_cold_start_has_a_finite_unit_count() -> None:
     )
     assert math.isfinite(count)
     assert count >= 1
+
+
+def test_plan_reservation_includes_an_unbuilt_mine_growth_corridor() -> None:
+    plan = {
+        "reserved_tiles": [[10, -5], [11, -5]],
+        "phases": [{"actions": []}],
+    }
+
+    assert plan_footprint_tiles(plan) == {(10, -5), (11, -5)}
