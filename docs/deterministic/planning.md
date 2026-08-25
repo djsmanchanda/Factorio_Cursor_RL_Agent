@@ -37,6 +37,9 @@ These names describe intended responsibilities, not permission to build speculat
   `6 -> 12 -> 24 -> 48 -> 96`. Early direct iron deliberately advances to
   12, then 24, because most construction demand consumes iron or an iron
   derivative. Larger phases remain demand-driven.
+- Before that expansion policy runs, establish direct six-furnace foundations
+  in this strict order: iron plate, copper plate, then stone brick. A failed or
+  deferred iron expansion never permits it to skip those two foundations.
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.

@@ -33,6 +33,16 @@ BASELINE_MACHINES = {
 # the set is produced by the set itself.
 BASELINE_PLATES = ("iron-plate", "copper-plate")
 
+# Establish one direct line for every early raw material before demand-driven
+# growth begins. Iron deliberately comes first, but its 12/24 expansion policy
+# must not consume the construction window reserved for copper and stone.
+PLATE_FOUNDATION_BUILD_ORDER = ("iron-plate", "copper-plate", "stone-brick")
+PLATE_FOUNDATION_FURNACES = {
+    "iron-plate": 6,
+    "copper-plate": 6,
+    "stone-brick": 6,
+}
+
 # Steel is slow enough that one electric furnace is only a bootstrap token:
 # 0.125 plate/s while consuming 0.625 iron plate/s. Six furnaces make the
 # first useful construction line, and twelve iron furnaces leave half of the

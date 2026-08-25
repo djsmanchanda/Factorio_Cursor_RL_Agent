@@ -23,14 +23,16 @@ def test_every_plate_is_rechecked_after_mall_targets_change() -> None:
     Iterating the full pair lets iron and copper each react to a changed mall
     bill, while ``any`` still gives the pass to the first one that acts.
     """
-    block = _RUN[_RUN.index("Extraction second"):_RUN.index("_serve_ready_pass(")]
+    start = _RUN.index("Extraction second")
+    block = _RUN[start:_RUN.index("_serve_ready_pass(", start)]
 
     assert "for plate in BASELINE_PLATES" in block
     assert "next(" not in block, "taking only the head is what starved copper"
 
 
 def test_the_pass_is_spent_by_whichever_plate_did_work() -> None:
-    block = _RUN[_RUN.index("Extraction second"):_RUN.index("_serve_ready_pass(")]
+    start = _RUN.index("Extraction second")
+    block = _RUN[start:_RUN.index("_serve_ready_pass(", start)]
 
     assert "any(" in block, "stop at the first plate that spends the pass"
 

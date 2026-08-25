@@ -23,6 +23,7 @@ from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plat
 from orchestrator.construction_stock import MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
+    PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
     demand_adjusted_plate_draw, drill_phase_for_draw, iron_growth_target,
     smelter_count_for_draw, STEEL_BASELINE_FURNACES,
@@ -3556,6 +3557,7 @@ def _prep_plate_extraction(
     reference_point: Point, emit: Callable[[str], None],
     demand_targets: Mapping[str, int] | None = None,
     pending_materials: dict[str, dict[str, int]] | None = None,
+    furnace_target: int | None = None,
 ) -> bool:
     """Grow one plate line to the furnace count its own prep draw implies.
 
@@ -3583,8 +3585,15 @@ def _prep_plate_extraction(
     for item, target in mall_targets.items():
         targets[item] = max(targets.get(item, 0), target)
     adjusted_draw = demand_adjusted_plate_draw(targets, available)
-    wanted_furnaces = smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
-    if short_plate == "iron-plate" and plate_line is not None and not bootstrap_line:
+    wanted_furnaces = (
+        furnace_target if furnace_target is not None
+        else smelter_count_for_draw(short_plate, adjusted_draw[short_plate])
+    )
+    if (
+        furnace_target is None
+        and short_plate == "iron-plate" and plate_line is not None
+        and not bootstrap_line
+    ):
         # A direct iron line is strategic capacity, not a mall item.  Let the
         # mine phase earmark the next complete refinery module even when the
         # immediate mall bill is briefly quiet; the physical drill count keeps
@@ -3701,6 +3710,45 @@ def _prep_plate_extraction(
             f"furnace(s) -- {error}"
         )
     return True
+
+
+def _direct_plate_foundation_ready(
+    client: RconClient, surface: str, force: str, recipe: str,
+) -> bool:
+    """Whether one real, belt-fed opening line exists for `recipe`."""
+    line = live_base.find_line(
+        client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
+    )
+    if line is None or line.machine_count < PLATE_FOUNDATION_FURNACES[recipe]:
+        return False
+    return logistic_smelter_origin(tuple(
+        getattr(line, "machine_positions", ()) or (),
+    )) is None
+
+
+def _prep_plate_foundation(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    prepped: set[str], deferred_targets: dict[str, int],
+    mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+    background_targets: Mapping[str, int],
+    pending_materials: dict[str, dict[str, int]],
+) -> bool:
+    """Build one opening direct line before permitting any plate expansion."""
+    for plate in PLATE_FOUNDATION_BUILD_ORDER:
+        if _direct_plate_foundation_ready(client, surface, force, plate):
+            continue
+        emit(
+            f"PLATE FOUNDATION: establishing {plate} "
+            f"({PLATE_FOUNDATION_FURNACES[plate]} furnaces) before expansion"
+        )
+        return _prep_plate_extraction(
+            client, bridge, surface, force, plate, prepped,
+            deferred_targets, mall_targets, reference_point, emit,
+            background_targets, pending_materials,
+            furnace_target=PLATE_FOUNDATION_FURNACES[plate],
+        )
+    return False
 
 
 def _queue_electric_furnace_unlock(
@@ -4168,6 +4216,32 @@ def run(
                 client, bridge, surface, force, prepped, mall_targets,
                 reference_point, emit,
             ):
+                continue
+            # Build the three direct raw-material foundations sequentially.
+            # Until this is complete, a strategic iron expansion is prohibited:
+            # it used to go 6 -> 12 immediately, then leave copper and stone
+            # without any direct source while its own drill corridor consumed
+            # the opening construction budget.
+            if not all(
+                _direct_plate_foundation_ready(client, surface, force, plate)
+                for plate in PLATE_FOUNDATION_BUILD_ORDER
+            ):
+                if _prep_plate_foundation(
+                    client, bridge, surface, force, prepped,
+                    deferred_plate_targets, mall_targets, reference_point, emit,
+                    background_targets, pending_plate_materials,
+                ):
+                    continue
+                position = _serve_ready_pass(
+                    client, bridge, surface, force, task, tick, mall_targets,
+                    background_targets, priorities, reference_point, goal_item, emit,
+                )
+                if position is _SHORTAGE:
+                    continue
+                iteration += 1
+                if position is not None:
+                    emit(f"GOAL MET: {goal_item} is producing at {position}")
+                    return {"ok": True, "iterations": iteration, "output_position": position}
                 continue
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a

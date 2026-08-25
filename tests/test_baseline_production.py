@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 from orchestrator.baseline_production import (  # noqa: E402
     BASELINE_MACHINES,
     BASELINE_PLATES,
+    PLATE_FOUNDATION_BUILD_ORDER,
+    PLATE_FOUNDATION_FURNACES,
     baseline_build_order,
     baseline_drill_phase,
     baseline_plate_draw,
@@ -42,6 +44,17 @@ def test_the_prep_set_is_the_agreed_one() -> None:
         "iron-gear-wheel": 2,
         "copper-cable": 2,
         "electronic-circuit": 1,
+    }
+
+
+def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
+    assert PLATE_FOUNDATION_BUILD_ORDER == (
+        "iron-plate", "copper-plate", "stone-brick",
+    )
+    assert PLATE_FOUNDATION_FURNACES == {
+        "iron-plate": 6,
+        "copper-plate": 6,
+        "stone-brick": 6,
     }
 
 

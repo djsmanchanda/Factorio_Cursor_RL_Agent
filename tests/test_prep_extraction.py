@@ -149,6 +149,50 @@ def test_iron_direct_line_earmarks_twelve_furnaces_from_twelve_drills(monkeypatc
     )
 
     assert calls == [True]
+
+
+def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch) -> None:
+    calls: list[tuple[str, int]] = []
+    ready = {"iron-plate"}
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready",
+        lambda *_args: _args[3] in ready,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_prep_plate_extraction",
+        lambda *_args, **kwargs: calls.append((_args[4], kwargs["furnace_target"])) or True,
+    )
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        lambda _message: None, {}, {},
+    )
+    assert calls == [("copper-plate", 6)]
+
+
+def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -> None:
+    line = type("Line", (), {
+        "machine_count": 6,
+        "machine_positions": (),
+    })()
+    calls = []
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_args: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_args: line)
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.extraction_state, "resource_drill_count", lambda *_args: 12,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage", lambda *_args, **_kwargs: calls.append(True),
+    )
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(), {}, {},
+        (0.0, 0.0), lambda _message: None, furnace_target=6,
+    )
+    assert calls == []
 def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     """Reserved drill sites have been blocked for days of runs; that should
     cost a pass, not the run -- the ladder still climbs on demand."""
@@ -161,6 +205,12 @@ def test_plate_shortage_stops_later_plate_from_spending_belts() -> None:
     assert "plate in pending_plate_materials" in _LOOP
     assert "plate_spent = False" in _LOOP
     assert "if plate_spent:" in _LOOP
+
+
+def test_plate_foundation_gate_runs_before_demand_driven_extraction() -> None:
+    foundation = _LOOP.index("_prep_plate_foundation(")
+    expansion = _LOOP.index("Extraction second")
+    assert foundation < expansion
 
 
 def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatch) -> None:
