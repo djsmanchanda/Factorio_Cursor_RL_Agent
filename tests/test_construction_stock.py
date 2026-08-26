@@ -6,6 +6,7 @@ from __future__ import annotations
 import inspect
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,10 @@ def test_producer_backed_job_releases_before_full_stock(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "construction_supply_chain_is_scheduled",
         lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(working_count=1, produced_count=1),
     )
     monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 123)
     monkeypatch.setattr(

@@ -3406,12 +3406,27 @@ def _serve_mall_task(
         if construction_supply_chain_is_scheduled(
             client, surface, force, item,
         ):
-            emit(
-                f"  MALL PIPELINE READY: {item} and every prerequisite have "
-                "live production; releasing the blueprint while stock builds"
+            line = live_base.find_line(
+                client, surface, force, item,
+                str(LINE_RECIPES[item]["machine"]),
             )
-            priorities.complete(item, live_base.game_tick(client))
-            mall_targets.pop(item, None)
+            if line is not None and (
+                line.working_count > 0 or line.produced_count > 0
+            ):
+                emit(
+                    f"  MALL PRODUCING: {item} and every prerequisite have "
+                    "live production; construction can draw while stock builds"
+                )
+                priorities.complete(item, live_base.game_tick(client))
+                mall_targets.pop(item, None)
+                return
+            if _deliver_cell_ingredients(
+                client, bridge, surface, force, item, reference_point, emit,
+            ):
+                return
+            reason = "producer exists but has not produced yet"
+            priorities.defer(item, live_base.game_tick(client), reason)
+            emit(f"  MALL WAIT: {item} {reason}; retaining its demand")
             return
 
         def expand_upstream() -> bool:

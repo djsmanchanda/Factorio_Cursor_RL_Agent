@@ -145,6 +145,44 @@ def test_mall_task_defers_a_belt_starved_consumer(monkeypatch) -> None:
     assert not ensure_calls
 
 
+def test_mall_keeps_stalled_producer_demand_until_it_makes_output(monkeypatch) -> None:
+    events: list[tuple[str, str]] = []
+
+    class FakePriorities:
+        def describe(self, task, tick):
+            return task.item
+
+        def complete(self, item, tick):
+            events.append(("complete", item))
+
+        def defer(self, item, tick, reason):
+            events.append(("defer", reason))
+
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 1)
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item", lambda *_a, **_k: (True, (1.0, 1.0)),
+    )
+    monkeypatch.setattr(
+        builder, "construction_supply_chain_is_scheduled", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(working_count=0, produced_count=0),
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+
+    targets = {"transport-belt": 132}
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player",
+        SimpleNamespace(item="transport-belt", target=132), 1,
+        targets, FakePriorities(), (3.0, -1.0), lambda _m: None,
+    )
+
+    assert targets == {"transport-belt": 132}
+    assert events == [("defer", "producer exists but has not produced yet")]
+
+
 # --- fast tier substitution --------------------------------------------------
 
 def test_regular_belts_substitute_to_stocked_fast_tiers() -> None:
