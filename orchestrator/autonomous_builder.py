@@ -1403,7 +1403,7 @@ def _retire_standing_bootstrap_cells(
         removed += 1
         emit(
             f"BOOTSTRAP SWAP: full {recipe} system is healthy; retiring the "
-            f"one-drill starter at {starter.drill_position}"
+            f"direct starter at {starter.drill_position}"
         )
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
@@ -1781,10 +1781,12 @@ def _serve_direct_plate_starter(
     recipe: str, ore: str, starter: live_base.DirectPlateStarter,
     emit: Callable[[str], None], *, submit: bool,
 ) -> Point:
-    """Build or service the removable drill -> furnace starter."""
+    """Build or service the removable direct drill -> furnace starter."""
+    drill_count = 2 if recipe == "stone-brick" else 1
     positions = direct_smelter_positions(
         starter.drill_position, starter.output_direction,
         pole_side=starter.pole_side,
+        drill_count=drill_count,
     )
     plan = generate_direct_smelter(
         recipe, ore, starter.drill_position, starter.output_direction,
@@ -1799,7 +1801,10 @@ def _serve_direct_plate_starter(
             ),
         )
     area = _plan_area(plan, padding=10.0)
-    machines = [positions["drill"], positions["furnace"]]
+    machines = [positions["drill"]]
+    if "secondary_drill" in positions:
+        machines.append(positions["secondary_drill"])
+    machines.append(positions["furnace"])
     bring_stage_up(
         client, bridge, surface, force, f"direct starter for {recipe}",
         starter.drill_position, area, positions["power"], machines, emit,
@@ -1819,7 +1824,7 @@ def _bootstrap_direct_plate_line(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, reference_point: Point, emit: Callable[[str], None],
 ) -> Point:
-    """Ensure exactly one local, direct plate starter without bots or belts."""
+    """Ensure one local direct plate or brick starter without bots or belts."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
     standing = live_base.direct_plate_starter(
         client, surface, force, recipe, ore, reference_point,
@@ -1841,8 +1846,9 @@ def _bootstrap_direct_plate_line(
             f"no legal one-drill {recipe} starter fits on a {ore} patch within "
             "the local search radius"
         )
+    drill_count = 2 if recipe == "stone-brick" else 1
     emit(
-        f"PLATE STARTER: {recipe} begins with one drill feeding one furnace "
+        f"PLATE STARTER: {recipe} begins with {drill_count} drill(s) feeding one furnace "
         f"directly at {site.drill_position}; no belts, requesters, or bot haul"
     )
     return _serve_direct_plate_starter(
@@ -3675,7 +3681,7 @@ def _prep_plate_foundation(
 ) -> bool:
     """Start both metals and brick cheaply, then build opening direct modules.
 
-    The one-drill starter breaks the belt construction circle without a
+    The direct starter breaks the belt construction circle without a
     requester network. Once iron, copper, and stone-brick flow, the ordinary
     six-furnace systems are attempted in the same order and their complete
     material bills remain visible to the mall.
@@ -3716,6 +3722,7 @@ def _prep_plate_foundation(
             furnace_target=PLATE_FOUNDATION_FURNACES[plate],
             excluded_drill_positions=(
                 standing_starters[plate].drill_position,
+                *standing_starters[plate].additional_drill_positions,
             ),
         )
     return False

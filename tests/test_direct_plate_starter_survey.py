@@ -38,8 +38,31 @@ def test_direct_starter_site_accepts_a_small_patch_but_rejects_mixed_ore() -> No
     assert site == live_base.DirectPlateStarter((61.5, 24.5), "north", -1)
     lua = client.commands[0]
     assert "math.min(#rs,512)" in lua
-    assert "r.name~='copper-ore' then mixed=true" in lua
+    assert "r.name=='copper-ore' then found=true else return false" in lua
     assert "can('electric-furnace',fp,nil,1.4)" in lua
+
+
+def test_stone_starter_site_and_identity_require_the_second_drill() -> None:
+    response = "54.5 -64.5 north 1 57.5 -67.5"
+    survey_client = _Client(response)
+    site_client = _Client(response)
+
+    starter = live_base.direct_plate_starter(
+        survey_client, "nauvis", "player", "stone-brick", "stone", (0.0, 0.0),
+    )
+    site = live_base.direct_plate_starter_site(
+        site_client, "nauvis", "player", "stone", (0.0, 0.0),
+    )
+
+    expected = live_base.DirectPlateStarter(
+        (54.5, -64.5), "north", 1, ((57.5, -67.5),),
+    )
+    assert starter == expected
+    assert site == expected
+    assert "local two=true" in survey_client.commands[0]
+    assert "sdri.direction==sd" in survey_client.commands[0]
+    assert "mines_only(sp)" in site_client.commands[0]
+    assert "can('electric-mining-drill',sp,sd,1.4)" in site_client.commands[0]
 
 
 def test_direct_starter_surveys_return_none_cleanly() -> None:

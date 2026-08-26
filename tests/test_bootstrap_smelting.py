@@ -1,6 +1,8 @@
 # Path: tests/test_bootstrap_smelting.py
 # Purpose: Verify the plate bootstrap has no circular belt dependency.
 
+import pytest
+
 from planners.bootstrap_smelting import (
     direct_smelter_positions,
     generate_direct_smelter,
@@ -8,6 +10,7 @@ from planners.bootstrap_smelting import (
     retire_direct_smelter_plan,
     retire_logistic_smelter_plan,
 )
+from planners.plan_validation import validate_no_collisions
 
 
 def test_direct_starter_matches_the_live_reference_stack() -> None:
@@ -33,6 +36,53 @@ def test_direct_starter_matches_the_live_reference_stack() -> None:
     ]
     assert not any("transport-belt" in action["entity"] for action in actions)
     assert not any("requester" in action["entity"] for action in actions)
+
+
+def test_stone_starter_uses_two_drills_feeding_one_furnace() -> None:
+    positions = direct_smelter_positions(
+        (54.5, -64.5), "north", drill_count=2,
+    )
+    assert positions["secondary_drill"] == (57.5, -67.5)
+    plan = generate_direct_smelter(
+        "stone-brick", "stone", (54.5, -64.5), "north",
+    )
+    actions = plan["phases"][0]["actions"]
+
+    drills = [
+        action for action in actions
+        if action["entity"] == "electric-mining-drill"
+    ]
+    assert [(action["position"], action["direction"]) for action in drills] == [
+        ({"x": 57.5, "y": -67.5}, "west"),
+        ({"x": 54.5, "y": -64.5}, "north"),
+    ]
+    assert sum(action["entity"] == "electric-furnace" for action in actions) == 1
+    assert sum(action["entity"] == "medium-electric-pole" for action in actions) == 2
+    assert not any("transport-belt" in action["entity"] for action in actions)
+    assert not any("requester" in action["entity"] for action in actions)
+
+
+@pytest.mark.parametrize("direction", ["north", "east", "south", "west"])
+@pytest.mark.parametrize("pole_side", [-1, 1])
+def test_two_drill_starter_is_collision_free_in_every_orientation(
+    direction: str, pole_side: int,
+) -> None:
+    plan = generate_direct_smelter(
+        "stone-brick", "stone", (54.5, -64.5), direction,
+        pole_side=pole_side,
+    )
+
+    validate_no_collisions([("stone-brick-starter", plan)])
+
+
+def test_stone_starter_retirement_removes_both_drills() -> None:
+    retirement = retire_direct_smelter_plan(
+        "stone-brick", "stone", (54.5, -64.5), "north",
+    )
+    actions = retirement["phases"][0]["actions"]
+
+    assert sum(action["entity"] == "electric-mining-drill" for action in actions) == 2
+    assert not any(action["entity"] == "medium-electric-pole" for action in actions)
 
 
 def test_direct_starter_retirement_keeps_only_its_shared_power_pole() -> None:

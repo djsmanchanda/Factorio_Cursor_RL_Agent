@@ -28,10 +28,12 @@ These names describe intended responsibilities, not permission to build speculat
 
 ## Production lifecycle invariants
 
-- Iron, copper, and stone-brick start with one removable direct stack: one drill outputs
+- Iron and copper start with one removable direct stack: one drill outputs
   straight into one electric furnace, then one inserter publishes plates to a
-  provider chest. It uses no belts, requester chest, ore intake, or bot haul,
-  and may use a small patch that is unsuitable for a persistent district.
+  provider chest. Stone-brick uses the same output stack with two perpendicular
+  drills feeding its furnace. These starters use no belts, requester chest, ore
+  intake, or bot haul, and may use small patches unsuitable for a persistent
+  district.
 - Startup builds the iron, copper, then stone-brick starter before attempting any
   complete mine-to-refinery foundation. Once a starter produces plates, the
   complete system's missing belts and inserters are ordinary construction

@@ -236,6 +236,35 @@ def test_plate_starters_precede_both_full_foundations(monkeypatch) -> None:
     assert starters == ["iron-plate", "copper-plate", "stone-brick"]
 
 
+def test_stone_foundation_excludes_both_temporary_starter_drills(
+    monkeypatch,
+) -> None:
+    stone = autonomous_builder.live_base.DirectPlateStarter(
+        (54.5, -64.5), "north", 1, ((57.5, -67.5),),
+    )
+    captured = {}
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready",
+        lambda *_args: _args[3] in {"iron-plate", "copper-plate"},
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter",
+        lambda *_args: stone,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_prep_plate_extraction",
+        lambda *_args, **kwargs: captured.update(kwargs) or True,
+    )
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        lambda _message: None, {}, {},
+    )
+    assert captured["excluded_drill_positions"] == (
+        (54.5, -64.5), (57.5, -67.5),
+    )
+
+
 def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -> None:
     line = type("Line", (), {
         "machine_count": 6,

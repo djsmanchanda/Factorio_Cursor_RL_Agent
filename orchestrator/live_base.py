@@ -42,11 +42,12 @@ class LineState:
 
 @dataclass(frozen=True)
 class DirectPlateStarter:
-    """Identity needed to service and later retire one direct plate starter."""
+    """Identity needed to service and later retire one direct starter."""
 
     drill_position: Point
     output_direction: str
     pole_side: int
+    additional_drill_positions: tuple[Point, ...] = ()
 
 
 def find_line(client: RconClient, surface: str, force: str, recipe: str, machine: str) -> LineState | None:
@@ -182,6 +183,7 @@ def direct_plate_starter(
         "local dirs={{'north',0,-1,defines.direction.north},"
         "{'east',1,0,defines.direction.east},{'south',0,1,defines.direction.south},"
         "{'west',-1,0,defines.direction.west}};"
+        "local two=" + ("true" if recipe == "stone-brick" else "false") + ";"
         "local drills=s.find_entities_filtered{name='electric-mining-drill',force=f};"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
         "if g.ghost_name=='electric-mining-drill' then drills[#drills+1]=g end end;"
@@ -199,21 +201,37 @@ def direct_plate_starter(
         "local px,py=dy*ps,-dx*ps;"
         "if named({d.position.x+2*dx+2*px,d.position.y+2*dy+2*py},"
         "'medium-electric-pole') then side=ps end end;"
-        "local dist=(d.position.x-nx)^2+(d.position.y-ny)^2;"
-        "found[#found+1]={dist,d.position.x,d.position.y,v[1],side} end end end end end;"
+        "local extra=true;local sx,sy=0,0;if two then "
+        "if side==0 then extra=false else local px,py=dy*side,-dx*side;"
+        "sx,sy=fp[1]-3*px,fp[2]-3*py;"
+        "local sd=px==0 and (py<0 and defines.direction.north or defines.direction.south) "
+        "or (px>0 and defines.direction.east or defines.direction.west);"
+        "local sdri=named({sx,sy},'electric-mining-drill');"
+        "extra=sdri and sdri.direction==sd and named({fp[1]-4*px+3*dx,"
+        "fp[2]-4*py+3*dy},'medium-electric-pole')~=nil;"
+        "if extra then local has=false;for _,r in pairs(s.find_entities_filtered{"
+        "type='resource',area={{sx-2.5,sy-2.5},{sx+2.5,sy+2.5}}}) do "
+        "if r.name=='" + ore + "' then has=true else extra=false end end;"
+        "extra=extra and has end end end;"
+        "if extra then local dist=(d.position.x-nx)^2+(d.position.y-ny)^2;"
+        "found[#found+1]={dist,d.position.x,d.position.y,v[1],side,sx,sy} end "
+        "end end end end end;"
         "table.sort(found,function(a,b) return a[1]<b[1] end);"
         "if #found==0 then rcon.print('NONE') else local z=found[1];"
-        "rcon.print(z[2]..' '..z[3]..' '..z[4]..' '..z[5]) end"
+        "if two then rcon.print(z[2]..' '..z[3]..' '..z[4]..' '..z[5]..' '..z[6]..' '..z[7]) "
+        "else rcon.print(z[2]..' '..z[3]..' '..z[4]..' '..z[5]) end end"
     )
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
     fields = raw.split()
-    if len(fields) != 4:
+    if len(fields) not in {4, 6}:
         raise TelemetryError(f"malformed direct plate starter survey: {raw!r}")
-    x, y, direction, pole_side = fields
+    x, y, direction, pole_side, *additional = fields
     return DirectPlateStarter(
         (float(x), float(y)), direction, int(pole_side) or 1,
+        tuple((float(additional[index]), float(additional[index + 1]))
+              for index in range(0, len(additional), 2)),
     )
 
 
@@ -221,10 +239,11 @@ def direct_plate_starter_site(
     client: RconClient, surface: str, force: str, ore: str, near: Point,
     *, search_radius: float = 400.0,
 ) -> DirectPlateStarter | None:
-    """Nearest legal one-drill starter site, including either pole side.
+    """Nearest legal direct starter site, including either pole side.
 
-    Small patches are intentionally eligible. This is a temporary producer,
-    not a claim on the later managed mining district.
+    Stone-brick requires two drill footprints; metal plates require one. Small
+    patches are intentionally eligible. This is a temporary producer, not a
+    claim on the later managed mining district.
     """
     min_x, min_y = near[0] - search_radius, near[1] - search_radius
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
@@ -239,6 +258,7 @@ def direct_plate_starter_site(
         "local dirs={{'north',0,-1,defines.direction.north},"
         "{'east',1,0,defines.direction.east},{'south',0,1,defines.direction.south},"
         "{'west',-1,0,defines.direction.west}};"
+        "local two=" + ("true" if ore == "stone" else "false") + ";"
         "local function empty(p,r) local x,y=p.x or p[1],p.y or p[2];"
         "for _,e in pairs(s.find_entities_filtered{"
         "area={{x-r,y-r},{x+r,y+r}}}) do "
@@ -246,11 +266,12 @@ def direct_plate_starter_site(
         "local function can(name,p,d,r) return empty(p,r) and s.can_place_entity{"
         "name=name,position=p,direction=d or defines.direction.north,force=f,"
         "build_check_type=defines.build_check_type.manual} end;"
-        "for i=1,math.min(#rs,512) do local p=rs[i].position;local mixed=false;"
+        "local function mines_only(p) local found=false;"
         "for _,r in pairs(s.find_entities_filtered{type='resource',"
-        "area={{p.x-2.5,p.y-2.5},{p.x+2.5,p.y+2.5}}}) do "
-        "if r.name~='" + ore + "' then mixed=true end end;"
-        "if not mixed then for _,v in pairs(dirs) do local dx,dy=v[2],v[3];"
+        "area={{p[1]-2.5,p[2]-2.5},{p[1]+2.5,p[2]+2.5}}}) do "
+        "if r.name=='" + ore + "' then found=true else return false end end;return found end;"
+        "for i=1,math.min(#rs,512) do local p=rs[i].position;"
+        "if mines_only({p.x,p.y}) then for _,v in pairs(dirs) do local dx,dy=v[2],v[3];"
         "local fp={p.x+3*dx,p.y+3*dy};local ip={p.x+5*dx,p.y+5*dy};"
         "local cp={p.x+6*dx,p.y+6*dy};"
         "if can('electric-mining-drill',p,v[4],1.4) "
@@ -259,19 +280,28 @@ def direct_plate_starter_site(
         "and can('passive-provider-chest',cp,nil,0.4) then "
         "for _,side in pairs({1,-1}) do local px,py=dy*side,-dx*side;"
         "local pp={p.x+2*dx+2*px,p.y+2*dy+2*py};"
-        "if can('medium-electric-pole',pp,nil,0.4) then "
-        "rcon.print(p.x..' '..p.y..' '..v[1]..' '..side);return end end end end end end;"
+        "local sp={fp[1]-3*px,fp[2]-3*py};"
+        "local sd=px==0 and (py<0 and defines.direction.north or defines.direction.south) "
+        "or (px>0 and defines.direction.east or defines.direction.west);"
+        "local spp={fp[1]-4*px+3*dx,fp[2]-4*py+3*dy};"
+        "local extra=not two or (mines_only(sp) and can('electric-mining-drill',sp,sd,1.4) "
+        "and can('medium-electric-pole',spp,nil,0.4));"
+        "if can('medium-electric-pole',pp,nil,0.4) and extra then "
+        "if two then rcon.print(p.x..' '..p.y..' '..v[1]..' '..side..' '..sp[1]..' '..sp[2]) "
+        "else rcon.print(p.x..' '..p.y..' '..v[1]..' '..side) end;return end end end end end end;"
         "rcon.print('NONE')"
     )
     raw = _sc(client, lua)
     if raw == "NONE":
         return None
     fields = raw.split()
-    if len(fields) != 4:
+    if len(fields) not in {4, 6}:
         raise TelemetryError(f"malformed direct plate starter site survey: {raw!r}")
-    x, y, direction, pole_side = fields
+    x, y, direction, pole_side, *additional = fields
     return DirectPlateStarter(
         (float(x), float(y)), direction, int(pole_side),
+        tuple((float(additional[index]), float(additional[index + 1]))
+              for index in range(0, len(additional), 2)),
     )
 
 
