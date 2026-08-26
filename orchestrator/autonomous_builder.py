@@ -39,6 +39,7 @@ from orchestrator.mine_output_tap import legacy_output_tap_plan
 from orchestrator.mall_builder import (
     build_compact_mall_stage,
     mall_cell_needs_rebuild,
+    refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
 )
 from orchestrator.parts_mall import (
@@ -3848,6 +3849,10 @@ def _prep_intermediate(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
         if line is not None and line.machine_count >= wanted:
+            refresh_paired_mall_requests(
+                client, bridge, surface, force, recipe,
+                list(line.machine_positions), reference_point, emit,
+            )
             prepped.add(recipe)
             emit(f"  PREP READY: {recipe} has {line.machine_count}/{wanted} machine(s)")
             return True

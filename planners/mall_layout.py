@@ -47,9 +47,10 @@ def compact_requests(
     ]
 
 
-def recipe_group_name(recipe: str) -> str:
-    """The label a recipe's ingredient set carries on any chest that feeds it."""
-    return f"mall:{recipe}"
+def recipe_group_name(recipe: str, consumer: str | None = None) -> str:
+    """The label one mall consumer's ingredient set carries on its chest."""
+    base = f"mall:{recipe}"
+    return f"{base}:{consumer}" if consumer else base
 
 
 def machine_crafts_per_second(machine: str, craft_time: float) -> float:
@@ -68,9 +69,9 @@ def machine_crafts_per_second(machine: str, craft_time: float) -> float:
 def recipe_group_requests(ingredients: list[str], amounts: list[float]) -> list[dict]:
     """One craft's worth of each ingredient -- the group's canonical contents.
 
-    The group holds the PER-CRAFT amounts and each chest's section scales them
-    with a multiplier, which is what makes one named group reusable across mall
-    cells that stock different quantities of the same part.
+    The group holds the PER-CRAFT amounts and each chest's consumer section
+    scales them with a multiplier. Each machine gets the same canonical request
+    contents without sharing the section identity used for idempotent updates.
     """
     if len(ingredients) != len(amounts) or not ingredients:
         raise ValueError("Compact mall ingredients and amounts must align")
@@ -95,7 +96,7 @@ def request_multiplier(machine: str, craft_time: float) -> int:
 
 def recipe_logistic_section(
     recipe: str, ingredients: list[str], amounts: list[float],
-    *, machine: str, craft_time: float,
+    *, machine: str, craft_time: float, consumer: str | None = None,
 ) -> dict:
     """One labelled request group for the machines producing `recipe`.
 
@@ -105,7 +106,7 @@ def recipe_logistic_section(
     section instead of accumulating onto whatever the chest already held.
     """
     return {
-        "group": recipe_group_name(recipe),
+        "group": recipe_group_name(recipe, consumer),
         "requests": recipe_group_requests(ingredients, amounts),
         "multiplier": request_multiplier(machine, craft_time),
     }
@@ -206,6 +207,7 @@ def generate_promoted_mall_retirement_plan(
     if py == my:
         raise ValueError("Promoted mall provider must be above or below its machine")
     left = py < my
+    side = "left" if left else "right"
     requester = (mx + (3 if left else -3), my)
     inserter_x = mx + (2 if left else -2)
     output_y = my + (-1 if left else 1)
@@ -224,12 +226,15 @@ def generate_promoted_mall_retirement_plan(
          "position": {"x": px, "y": py}},
         {"action_type": "place_entity", "entity": "requester-chest",
          "position": {"x": requester[0], "y": requester[1]},
-         "clear_logistic_groups": [f"mall:{recipe}"],
+         "clear_logistic_groups": [
+             recipe_group_name(recipe), recipe_group_name(recipe, side),
+         ],
         },
     ])
     return {"phases": [{
         "name": f"retire_promoted_mall_{recipe}", "actions": actions,
     }]}
+
 
 def generate_paired_mall_layout(
     recipe: str,
@@ -254,11 +259,9 @@ def generate_paired_mall_layout(
     """
     if side not in {"left", "right"}:
         raise ValueError("Paired mall side must be left or right")
-    requests = compact_requests(
-        ingredients, amounts, stock_target, product_amount,
-    )
     section = recipe_logistic_section(
         recipe, ingredients, amounts, machine=machine, craft_time=craft_time,
+        consumer=side,
     )
     ox, oy = origin
     left = side == "left"
@@ -292,6 +295,9 @@ def generate_paired_mall_layout(
         machine_action,
         {"action_type": "place_entity", "entity": "requester-chest",
          "position": {"x": ox + 4.5, "y": oy + 1.5},
+         # Clear the pre-consumer-label section when upgrading an existing
+         # cell. The opposite half's labelled section remains untouched.
+         "clear_logistic_groups": [recipe_group_name(recipe)],
          "logistic_sections": [section]},
         {"action_type": "place_entity",
          "entity": compact_input_inserter(machine, ingredients, amounts, craft_time),

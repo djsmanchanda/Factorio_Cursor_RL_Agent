@@ -12,6 +12,32 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
+from orchestrator import mall_builder  # noqa: E402
+
+
+def test_complete_matching_pair_migrates_to_two_request_sections(
+    monkeypatch,
+) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda *_args, **_kwargs: captured.setdefault("plan", _args[3]),
+    )
+
+    changed = mall_builder.refresh_paired_mall_requests(
+        object(), object(), "nauvis", "player", "copper-cable",
+        [(36.5, 32.5), (42.5, 32.5)], (3.0, -1.0),
+        lambda _message: None,
+    )
+
+    assert changed is True
+    actions = captured["plan"]["phases"][0]["actions"]
+    assert len(actions) == 1, "both machines share one physical requester"
+    sections = actions[0]["logistic_sections"]
+    assert {section["group"] for section in sections} == {
+        "mall:copper-cable:left", "mall:copper-cable:right",
+    }
+    assert sum(section["multiplier"] for section in sections) == 30
 
 
 def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None:

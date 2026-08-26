@@ -211,6 +211,44 @@ def rebuild_incomplete_mall_cell(
     return True
 
 
+def refresh_paired_mall_requests(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, machine_positions: list[Point], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Migrate complete paired cells to one request section per machine."""
+    spec = LINE_RECIPES[recipe]
+    requesters: dict[Point, dict] = {}
+    for machine_position in machine_positions:
+        located = locate_mall_cell(machine_position, reference_point)
+        if located is None:
+            continue
+        origin, side = located
+        plan = generate_paired_mall_layout(
+            recipe, spec["machine"], spec["ingredients"], spec["amounts"],
+            origin, side, product_amount=spec.get("product_amount", 1),
+            craft_time=spec["craft_time"],
+            set_recipe=spec.get("set_recipe", True),
+        )
+        action = next(
+            action for phase in plan["phases"] for action in phase["actions"]
+            if action.get("entity") == "requester-chest"
+        )
+        position = (action["position"]["x"], action["position"]["y"])
+        merged = requesters.setdefault(position, {
+            **action, "logistic_sections": [],
+        })
+        merged["logistic_sections"].extend(action["logistic_sections"])
+    if not requesters:
+        return False
+    plan = {"surface": surface, "force": force, "phases": [{
+        "name": f"paired_mall_requests_{recipe}",
+        "actions": list(requesters.values()),
+    }]}
+    _submit(client, bridge, surface, plan, f"paired_mall_requests_{recipe}", emit)
+    return True
+
+
 def build_compact_mall_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,

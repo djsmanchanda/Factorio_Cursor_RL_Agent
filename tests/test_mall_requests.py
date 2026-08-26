@@ -52,7 +52,9 @@ def test_each_half_declares_only_its_own_labelled_group() -> None:
     sections = _requester(_half("electronic-circuit", "left", stock_target=50))["logistic_sections"]
 
     assert len(sections) == 1
-    assert sections[0]["group"] == recipe_group_name("electronic-circuit")
+    assert sections[0]["group"] == recipe_group_name(
+        "electronic-circuit", "left",
+    )
 
 
 def test_both_halves_label_the_same_chest_differently() -> None:
@@ -61,6 +63,21 @@ def test_both_halves_label_the_same_chest_differently() -> None:
 
     assert left["position"] == right["position"], "both halves share one requester"
     assert left["logistic_sections"][0]["group"] != right["logistic_sections"][0]["group"]
+
+
+@pytest.mark.parametrize("recipe", ["copper-cable", "iron-gear-wheel"])
+def test_two_matching_halves_each_contribute_their_own_request(recipe: str) -> None:
+    left_chest = _requester(_half(recipe, "left"))
+    right_chest = _requester(_half(recipe, "right"))
+    left = left_chest["logistic_sections"][0]
+    right = right_chest["logistic_sections"][0]
+
+    assert left["group"] != right["group"]
+    assert left_chest["clear_logistic_groups"] == [recipe_group_name(recipe)]
+    assert right_chest["clear_logistic_groups"] == [recipe_group_name(recipe)]
+    assert left["multiplier"] == 15
+    assert right["multiplier"] == 15
+    assert sum(section["multiplier"] for section in (left, right)) == 30
 
 
 def test_group_holds_per_craft_amounts_and_multiplier_carries_the_rate() -> None:
