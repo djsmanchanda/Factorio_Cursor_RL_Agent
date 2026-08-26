@@ -48,6 +48,7 @@ def _record(name: str, x: float, y: float, *, ghost: bool = False) -> dict:
 
 def test_templates_are_rectangular_grid_aligned_and_adjacent() -> None:
     for template in (EARLY_MEDIUM_UNIT, LARGER_SUBSTATION_UNIT):
+        assert template.panels == template.accumulators
         first_tiles = unit_tiles(0, (100, 100), template)
         second_tiles = unit_tiles(1, (100, 100), template)
         (first_min_x, first_min_y), (first_max_x, first_max_y) = unit_bounds(
@@ -345,7 +346,7 @@ def test_one_atomic_unit_is_submitted_then_convergence_stops(
     monkeypatch.setattr(
         live_base, "available_items",
         lambda *_a: {
-            "solar-panel": 20, "accumulator": 10, "substation": 5,
+            "solar-panel": 20, "accumulator": 20, "substation": 5,
             "medium-electric-pole": 10,
         },
     )
@@ -447,7 +448,7 @@ def test_extremely_large_finite_demand_is_bounded_by_explicit_policy(
     monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 0.0)
     monkeypatch.setattr(live_base, "network_accumulator_storage_mj", lambda *_a: 0.0)
     monkeypatch.setattr(live_base, "available_items", lambda *_a: {
-        "solar-panel": 20, "accumulator": 10, "substation": 5,
+        "solar-panel": 20, "accumulator": 20, "substation": 5,
         "medium-electric-pole": 10,
     })
     monkeypatch.setattr(

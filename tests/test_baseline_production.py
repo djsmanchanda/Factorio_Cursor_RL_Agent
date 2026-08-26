@@ -48,7 +48,7 @@ def test_the_prep_set_is_the_agreed_one() -> None:
 
 def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
     assert PLATE_FOUNDATION_BUILD_ORDER == (
-        "iron-plate", "copper-plate",
+        "iron-plate", "copper-plate", "stone-brick",
     )
     assert PLATE_FOUNDATION_FURNACES == {
         "iron-plate": 6,

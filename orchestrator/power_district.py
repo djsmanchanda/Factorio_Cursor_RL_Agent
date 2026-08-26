@@ -64,16 +64,17 @@ class UnitTemplate:
 
 
 EARLY_MEDIUM_UNIT = UnitTemplate(
-    name="medium-pole-8-panel",
+    name="medium-pole-8x8",
     width=14,
-    height=10,
+    height=14,
     stride_x=18,
-    stride_y=12,
+    stride_y=16,
     placements=(
         ("medium-electric-pole", 4.0, 4.0),
         ("medium-electric-pole", 9.0, 4.0),
         ("medium-electric-pole", 13.0, 4.0),
         ("medium-electric-pole", 4.0, 9.0),
+        ("medium-electric-pole", 9.0, 9.0),
         ("medium-electric-pole", 13.0, 9.0),
         ("solar-panel", 2.5, 1.5),
         ("solar-panel", 5.5, 1.5),
@@ -86,17 +87,22 @@ EARLY_MEDIUM_UNIT = UnitTemplate(
         ("accumulator", 2.5, 7.5),
         ("accumulator", 5.5, 7.5),
         ("accumulator", 8.5, 7.5),
+        ("accumulator", 11.5, 7.5),
+        ("accumulator", 2.5, 11.5),
+        ("accumulator", 5.5, 11.5),
+        ("accumulator", 8.5, 11.5),
+        ("accumulator", 11.5, 11.5),
     ),
     connection_points=((4.0, 4.0), (9.0, 4.0)),
 )
 
 
 LARGER_SUBSTATION_UNIT = UnitTemplate(
-    name="substation-12x4",
+    name="substation-12x12",
     width=18,
-    height=20,
+    height=23,
     stride_x=25,
-    stride_y=24,
+    stride_y=25,
     placements=(
         ("substation", 8.0, 2.0),
         ("substation", 8.0, 15.0),
@@ -114,6 +120,11 @@ LARGER_SUBSTATION_UNIT = UnitTemplate(
         ("accumulator", 5.5, 14.5),
         ("accumulator", 11.5, 14.5),
         ("accumulator", 14.5, 14.5),
+        *[
+            ("accumulator", x, y)
+            for y in (17.5, 20.5)
+            for x in (2.5, 5.5, 11.5, 14.5)
+        ],
     ),
     connection_points=((8.0, 2.0), (8.0, 15.0)),
 )

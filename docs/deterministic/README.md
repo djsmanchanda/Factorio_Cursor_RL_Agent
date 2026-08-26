@@ -35,6 +35,12 @@ Sharing means extracting a narrow interface. It does not mean importing the full
 - Recovery can encode one observed failure as a new deterministic branch.
 - Supply-starved machines, finite mall demand, and true capacity shortages have been confused.
 - Power, roboport, belt, pipe, and future-expansion corridors are not consistently reserved.
+- Fluid item recipes require explicit real-base stages. Battery is supported;
+  processing units, concrete/refined concrete, electric engines, explosives,
+  express belts, and rocket fuel are still catalog-known but not all executable.
+- The first basic refinery is executable. Advanced oil and cracking geometry and
+  rate contracts exist, but source-capacity-aware oil expansion is not yet wired
+  into the real-base controller.
 - Live deployment drift can make tested code differ from running behavior.
 
 Fix these when they block the real runtime or when the fix produces a reusable primitive. Do not let deterministic cleanup displace the RL roadmap.

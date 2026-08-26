@@ -71,6 +71,13 @@ LINE_RECIPES: Dict[str, dict] = {
         "fluid_ingredients": {"petroleum-gas": 30, "water": 30},
         "product_amount": 2, "craft_time": 1.0,
     },
+    "battery": {
+        "machine": "chemical-plant",
+        "ingredients": ["copper-plate", "iron-plate"],
+        "amounts": [1, 1],
+        "fluid_ingredients": {"sulfuric-acid": 20},
+        "product_amount": 1, "craft_time": 4.0,
+    },
     "chemical-science-pack": {
         "machine": "assembling-machine-2",
         "ingredients": ["advanced-circuit", "engine-unit", "sulfur"],

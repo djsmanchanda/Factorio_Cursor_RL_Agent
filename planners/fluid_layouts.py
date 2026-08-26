@@ -45,6 +45,26 @@ FLUID_RECIPES: Dict[str, dict] = {
         "fluid_ingredients": {"crude-oil": 100},
         "item_products": [], "item_product_amounts": {}, "fluid_products": {"petroleum-gas": 45},
     },
+    "advanced-oil-processing": {
+        "machine": "oil-refinery", "craft_time": 5.0,
+        "item_ingredients": [], "item_amounts": [],
+        "fluid_ingredients": {"crude-oil": 100, "water": 50},
+        "item_products": [], "item_product_amounts": {},
+        "fluid_products": {"heavy-oil": 25, "light-oil": 45, "petroleum-gas": 55},
+    },
+    "heavy-oil-cracking": {
+        "machine": "chemical-plant", "craft_time": 2.0,
+        "item_ingredients": [], "item_amounts": [],
+        "fluid_ingredients": {"heavy-oil": 40, "water": 30},
+        "item_products": [], "item_product_amounts": {}, "fluid_products": {"light-oil": 30},
+    },
+    "light-oil-cracking": {
+        "machine": "chemical-plant", "craft_time": 2.0,
+        "item_ingredients": [], "item_amounts": [],
+        "fluid_ingredients": {"light-oil": 30, "water": 30},
+        "item_products": [], "item_product_amounts": {},
+        "fluid_products": {"petroleum-gas": 20},
+    },
     "sulfur": {
         "machine": "chemical-plant", "craft_time": 1.0,
         "item_ingredients": [], "item_amounts": [],
@@ -56,6 +76,14 @@ FLUID_RECIPES: Dict[str, dict] = {
         "item_ingredients": ["iron-plate", "sulfur"], "item_amounts": [1, 5],
         "fluid_ingredients": {"water": 100},
         "item_products": [], "item_product_amounts": {}, "fluid_products": {"sulfuric-acid": 50},
+    },
+    "battery": {
+        "machine": "chemical-plant", "craft_time": 4.0,
+        "item_ingredients": ["copper-plate", "iron-plate"],
+        "item_amounts": [1, 1],
+        "fluid_ingredients": {"sulfuric-acid": 20},
+        "item_products": ["battery"], "item_product_amounts": {"battery": 1},
+        "fluid_products": {},
     },
     "plastic-bar": {
         "machine": "chemical-plant", "craft_time": 1.0,
@@ -79,9 +107,23 @@ FLUID_RECIPES: Dict[str, dict] = {
 VERIFIED_PIPE_TILES: Dict[str, dict] = {
     "basic-oil-processing": {"inputs": {"crude-oil": (1, 3)},
                              "outputs": {"petroleum-gas": (2, -3)}},
+    "advanced-oil-processing": {
+        "inputs": {"water": (-1, 3), "crude-oil": (1, 3)},
+        "outputs": {"heavy-oil": (-2, -3), "light-oil": (0, -3),
+                    "petroleum-gas": (2, -3)},
+    },
+    "heavy-oil-cracking": {
+        "inputs": {"water": (-1, -2), "heavy-oil": (1, -2)},
+        "outputs": {"light-oil": (-1, 2)},
+    },
+    "light-oil-cracking": {
+        "inputs": {"water": (-1, -2), "light-oil": (1, -2)},
+        "outputs": {"petroleum-gas": (-1, 2)},
+    },
     "sulfur": {"inputs": {"water": (-1, -2), "petroleum-gas": (1, -2)}, "outputs": {}},
     "sulfuric-acid": {"inputs": {"water": (-1, -2)},
                       "outputs": {"sulfuric-acid": (-1, 2)}},
+    "battery": {"inputs": {"sulfuric-acid": (-1, -2)}, "outputs": {}},
     "plastic-bar": {"inputs": {"petroleum-gas": (-1, -2)}, "outputs": {}},
     "processing-unit": {"inputs": {"sulfuric-acid": (0, -2)}, "outputs": {}},
 }

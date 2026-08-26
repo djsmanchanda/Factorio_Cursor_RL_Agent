@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -13,9 +14,80 @@ if str(REPO_ROOT) not in sys.path:
 import pytest
 
 from orchestrator import extraction_state, live_base, resource_patches, stage_chemical
+from orchestrator import autonomous_builder
 from orchestrator.stage_services import _ghost_materials
 
 Point = tuple[float, float]
+
+
+def test_oil_capacity_contract_uses_live_factorio_rates() -> None:
+    assert stage_chemical.oil_processing_recipe(0) == "basic-oil-processing"
+    assert stage_chemical.oil_processing_recipe(1) == "advanced-oil-processing"
+    assert stage_chemical.pumpjack_crude_rate(2.19, 0.0) == pytest.approx(21.9)
+    assert stage_chemical.petroleum_rate("basic-oil-processing") == 9.0
+    assert stage_chemical.petroleum_rate(
+        "advanced-oil-processing", crack_all_outputs=False,
+    ) == 11.0
+    assert stage_chemical.petroleum_rate("advanced-oil-processing") == 19.5
+
+
+def test_battery_row_has_real_item_and_acid_feeds() -> None:
+    plan = stage_chemical.generate_fluid_machine_row("battery", 1)
+    stage_chemical._swap_infinity_chests(plan, {})
+    actions = [
+        action for phase in plan["phases"] for action in phase["actions"]
+    ]
+    assert any(
+        action.get("entity") == "chemical-plant"
+        and action.get("recipe") == "battery"
+        for action in actions
+    )
+    assert sum(
+        action.get("entity") == "requester-chest" for action in actions
+    ) == 2
+    assert stage_chemical.header_attachment(
+        "battery", "sulfuric-acid", 1, 0, 0,
+    )["attach"]
+
+
+def test_real_builder_delegates_battery_to_the_chemical_stage(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        autonomous_builder, "ensure_battery_cell",
+        lambda *args: calls.append(args[4]) or (12.5, 13.5),
+    )
+
+    result = autonomous_builder.ensure_produced(
+        object(), object(), "nauvis", "player", "battery", (1.0, 2.0),
+        lambda _message: None,
+    )
+
+    assert result == (12.5, 13.5)
+    assert calls == [(1.0, 2.0)]
+
+
+def test_existing_battery_cell_is_serviced_before_reuse(monkeypatch) -> None:
+    surveys = iter([
+        SimpleNamespace(machine_positions=((10.5, 20.5),), working_count=0),
+        SimpleNamespace(machine_positions=((10.5, 20.5),), working_count=1),
+    ])
+    serviced = []
+    monkeypatch.setattr(
+        stage_chemical.live_base, "find_line", lambda *_args: next(surveys),
+    )
+    monkeypatch.setattr(
+        stage_chemical.live_base, "nearest_container",
+        lambda *_args, **_kwargs: (14.5, 26.5),
+    )
+
+    result = stage_chemical.ensure_battery_cell(
+        object(), object(), "nauvis", "player", (0.0, 0.0),
+        lambda *args, **_kwargs: serviced.append(args[4]),
+        lambda _message: None,
+    )
+
+    assert result == (14.5, 26.5)
+    assert serviced == ["battery chemical cell"]
 
 
 def test_pumpjack_faces_the_local_oil_cell() -> None:

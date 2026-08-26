@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -66,6 +67,31 @@ def _at(plan: dict, tile: tuple) -> list:
 
 
 # --- determinism -------------------------------------------------------------
+
+
+def test_fluid_recipe_data_matches_the_live_player_catalog() -> None:
+    catalog = {
+        recipe["name"]: recipe for recipe in json.loads(
+            (REPO_ROOT / "tests" / "fixtures" / "player_recipe_catalog.json")
+            .read_text(encoding="utf-8")
+        )["recipes"]
+    }
+    for name, spec in FLUID_RECIPES.items():
+        live = catalog[name]
+        expected = dict(zip(
+            spec["item_ingredients"], spec["item_amounts"], strict=True,
+        ))
+        expected.update(spec["fluid_ingredients"])
+        assert expected == {
+            ingredient["name"]: ingredient["amount"]
+            for ingredient in live["ingredients"]
+        }
+        products = dict(spec["item_product_amounts"])
+        products.update(spec["fluid_products"])
+        assert products == {
+            product["name"]: product["amount"] for product in live["products"]
+        }
+        assert round(spec["craft_time"] * 60) == live["energy_ticks"]
 
 @pytest.mark.parametrize("recipe", sorted(FLUID_RECIPES))
 def test_machine_row_is_deterministic(recipe):
@@ -159,6 +185,7 @@ def test_processing_unit_acid_tile_is_the_centre_column_and_inserter_steps_aside
 def test_chemical_plant_row_keeps_the_tight_pitch_but_two_fluids_spread_it():
     assert _pitch("plastic-bar") == 3
     assert _pitch("sulfuric-acid") == 3
+    assert _pitch("battery") == 3
     assert _pitch("sulfur") == 4  # water and gas would otherwise touch
     assert _pitch("basic-oil-processing") == 5
 

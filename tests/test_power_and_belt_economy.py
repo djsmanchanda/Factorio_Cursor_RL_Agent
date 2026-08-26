@@ -188,7 +188,7 @@ def test_healthy_network_skips_the_top_up(monkeypatch, tmp_path) -> None:
     )
     monkeypatch.setattr(
         builder.live_base, "available_items",
-        lambda *_a: {"solar-panel": 20, "accumulator": 10, "substation": 5},
+        lambda *_a: {"solar-panel": 20, "accumulator": 20, "substation": 5},
     )
     import orchestrator.power_district as power
     monkeypatch.setattr(

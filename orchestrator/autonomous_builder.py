@@ -57,7 +57,9 @@ from orchestrator.refinery_state import (
     ManagedRefineryState, assert_refinery_removals_owned,
     live_refinery_placements, recover_managed_refinery,
 )
-from orchestrator.stage_chemical import ensure_coal_mine, ensure_oil_cell
+from orchestrator.stage_chemical import (
+    ensure_battery_cell, ensure_coal_mine, ensure_oil_cell,
+)
 from orchestrator.stage_extraction import (
     LOCAL_MODE_MAX_LINK_TILES, existing_mine_service_geometry,
     candidate_mining_origins as _candidate_mining_origins,  # noqa: F401 - compatibility export
@@ -3078,6 +3080,11 @@ def ensure_produced(
             bring_stage_up, emit,
         )
         return outputs[item] if outputs else None
+    if item == "battery":
+        return ensure_battery_cell(
+            client, bridge, surface, force, reference_point,
+            bring_stage_up, emit,
+        )
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
@@ -3665,12 +3672,12 @@ def _prep_plate_foundation(
     background_targets: Mapping[str, int],
     pending_materials: dict[str, dict[str, int]],
 ) -> bool:
-    """Start both metals cheaply, then build their opening direct modules.
+    """Start both metals and brick cheaply, then build opening direct modules.
 
     The one-drill starter breaks the belt construction circle without a
-    requester network. Once iron and copper both flow, the ordinary six-furnace
-    systems are attempted in the same order and their complete material bills
-    remain visible to the mall.
+    requester network. Once iron, copper, and stone-brick flow, the ordinary
+    six-furnace systems are attempted in the same order and their complete
+    material bills remain visible to the mall.
     """
     standing_starters: dict[str, live_base.DirectPlateStarter] = {}
     for plate in PLATE_FOUNDATION_BUILD_ORDER:

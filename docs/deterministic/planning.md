@@ -28,11 +28,11 @@ These names describe intended responsibilities, not permission to build speculat
 
 ## Production lifecycle invariants
 
-- Iron and copper start with one removable direct stack: one drill outputs
+- Iron, copper, and stone-brick start with one removable direct stack: one drill outputs
   straight into one electric furnace, then one inserter publishes plates to a
   provider chest. It uses no belts, requester chest, ore intake, or bot haul,
   and may use a small patch that is unsuitable for a persistent district.
-- Startup builds the iron starter and copper starter before attempting either
+- Startup builds the iron, copper, then stone-brick starter before attempting any
   complete mine-to-refinery foundation. Once a starter produces plates, the
   complete system's missing belts and inserters are ordinary construction
   demand and must remain visible to the mall.
@@ -50,13 +50,13 @@ These names describe intended responsibilities, not permission to build speculat
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   Mine, transport, and refinery capacity move as one coherent increment.
-- After both starters, startup opens a direct six-furnace iron foundation,
-  then copper. Between those explicit raw steps, a standing intermediate may
-  start only when every
-  direct input is already working or has produced output: gears follow live
+- After all three starters, startup opens a direct six-furnace iron foundation,
+  then copper, then stone-brick. Between those explicit raw steps, a standing
+  intermediate may start only when every direct input is already working or
+  has produced output: gears follow live
   iron, cable follows live copper, and circuits follow their live feeders.
   Intermediate requests never recursively choose or open a missing raw
-  foundation. Stone, steel, oil, and later materials remain demand-driven.
+  foundation. Steel, oil, and later materials remain demand-driven.
 - Opening iron and copper foundations use regular belts throughout. Their
   complete mine, haul, and refinery bill is queued against the working regular
   belt producer; partial fast-belt stock cannot promote the blueprint into a
@@ -105,6 +105,16 @@ These names describe intended responsibilities, not permission to build speculat
   that block, and start the pipe on the exact external tile beyond the complete
   3x3 pumpjack footprint before extending a long power, construction, or pipe
   corridor back toward the factory.
+- The first refinery may use basic oil processing as bootstrap. Every later oil
+  expansion uses advanced oil processing as one complete refinery-and-cracking
+  block; heavy and light outputs may not be left without cracking consumers.
+  Size refinery count against observed pumpjack throughput: at speed 1 a well
+  supplies `10 * yield * (1 + productivity)` crude/s, while one refinery
+  consumes 20 crude/s. A second refinery is not capacity when the wells cannot
+  feed it.
+- Accumulator production is an explicit chemical chain: sulfur plus iron and
+  water make sulfuric acid, then acid plus iron and copper make batteries.
+  Fluid-bearing recipes never fall through the solid mall-line planner.
 - Plastic selects a coal patch local to the oil district rather than reusing a
   remote base-mall mine. Place its chemical plants near the midpoint between
   that coal source and the refinery, and feed coal by one continuous belt; a
@@ -151,3 +161,5 @@ whole-footprint preflight before its first placement and refuses the complete
 unit on any blocked coordinate. Sizing compares usable solar plus firm
 generation and measured connected accumulator storage with bounded peak demand,
 including night energy and recharge surplus; it stops when that metric converges.
+Every Nauvis template contains one accumulator per solar panel; the power bill
+and the placed geometry use the same 1:1 ratio.

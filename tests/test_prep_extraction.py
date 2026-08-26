@@ -227,13 +227,13 @@ def test_plate_starters_precede_both_full_foundations(monkeypatch) -> None:
         ),
     )
 
-    for _ in range(2):
+    for _ in range(3):
         assert autonomous_builder._prep_plate_foundation(
             object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
             lambda _message: None, {}, {},
         )
 
-    assert starters == ["iron-plate", "copper-plate"]
+    assert starters == ["iron-plate", "copper-plate", "stone-brick"]
 
 
 def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -> None:

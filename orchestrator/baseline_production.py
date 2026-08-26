@@ -33,11 +33,14 @@ BASELINE_MACHINES = {
 # the set is produced by the set itself.
 BASELINE_PLATES = ("iron-plate", "copper-plate")
 
-# Establish the two universal metal inputs before following the goal's actual
-# dependency chain. Stone, steel, oil, and later materials are demand-driven;
-# making each one a startup gate delayed useful work and accumulated policy
-# exceptions around conditions the active goal had not requested.
-PLATE_FOUNDATION_BUILD_ORDER = ("iron-plate", "copper-plate")
+# Establish the three raw furnace products before following the goal's actual
+# dependency chain. Iron and copper still come first; stone-brick follows so a
+# base with reduced gifted stock can manufacture electric furnaces instead of
+# discovering the missing stone chain only when the first accumulator/power
+# expansion is already blocked.
+PLATE_FOUNDATION_BUILD_ORDER = (
+    "iron-plate", "copper-plate", "stone-brick",
+)
 PLATE_FOUNDATION_FURNACES = {
     "iron-plate": 6,
     "copper-plate": 6,

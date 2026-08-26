@@ -24,7 +24,8 @@ from orchestrator.stage_services import (
     extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
-    _direct_single_belt_feed, _publish_output_chest, transport_grace_seconds,
+    _direct_single_belt_feed, _publish_output_chest, _swap_infinity_chests,
+    transport_grace_seconds,
 )
 from planners.fluid_layouts import (
     fluid_network_segments, generate_fluid_machine_row, header_attachment,
@@ -45,6 +46,32 @@ Point = tuple[float, float]
 ServiceStage = Callable[..., None]
 
 _CHEMICAL_BELT_ROUTE_LIMIT = 400
+
+
+def oil_processing_recipe(existing_refineries: int) -> str:
+    """Only the first bootstrap refinery may use basic processing."""
+    if existing_refineries < 0:
+        raise ValueError("existing_refineries must be non-negative")
+    return "basic-oil-processing" if existing_refineries == 0 else "advanced-oil-processing"
+
+
+def pumpjack_crude_rate(yield_fraction: float, productivity_bonus: float) -> float:
+    """Factorio pumpjack output in crude/s at speed 1."""
+    if yield_fraction < 0 or productivity_bonus < 0:
+        raise ValueError("oil yield and productivity must be non-negative")
+    return 10.0 * yield_fraction * (1.0 + productivity_bonus)
+
+
+def petroleum_rate(recipe: str, *, crack_all_outputs: bool = True) -> float:
+    """Petroleum/s from one refinery, including complete cracking when asked."""
+    if recipe == "basic-oil-processing":
+        return 45.0 / 5.0
+    if recipe != "advanced-oil-processing":
+        raise ValueError(f"unknown oil processing recipe: {recipe}")
+    if not crack_all_outputs:
+        return 55.0 / 5.0
+    # 25 heavy -> 18.75 light; 63.75 total light -> 42.5 petroleum.
+    return (55.0 + (45.0 + 25.0 * 30.0 / 40.0) * 20.0 / 30.0) / 5.0
 
 
 def _merge(*plans: dict) -> dict:
@@ -575,7 +602,8 @@ def ensure_oil_cell(
         f"  OIL DISTRICT: plastic at {(px, py)} between refinery "
         f"{cell_centre} and local coal belt {coal}"
     )
-    refinery = generate_fluid_machine_row("basic-oil-processing", 1, ox, oy)
+    refinery_recipe = oil_processing_recipe(0)
+    refinery = generate_fluid_machine_row(refinery_recipe, 1, ox, oy)
     plastic = generate_fluid_machine_row("plastic-bar", 2, px, py)
     sulfur = generate_fluid_machine_row("sulfur", 2, ox + 18, oy + 16)
     crude_source = generate_pumpjack_source([oil_site], [oil_site["output"]])
@@ -589,8 +617,8 @@ def ensure_oil_cell(
     _publish_output_chest(plastic)
     _publish_output_chest(sulfur)
 
-    crude_to = header_attachment("basic-oil-processing", "crude-oil", 1, ox, oy)["attach"]
-    petroleum_from = header_attachment("basic-oil-processing", "petroleum-gas", 1, ox, oy)["attach"]
+    crude_to = header_attachment(refinery_recipe, "crude-oil", 1, ox, oy)["attach"]
+    petroleum_from = header_attachment(refinery_recipe, "petroleum-gas", 1, ox, oy)["attach"]
     plastic_gas = header_attachment("plastic-bar", "petroleum-gas", 2, px, py)["attach"]
     sulfur_gas = header_attachment("sulfur", "petroleum-gas", 2, ox + 18, oy + 16)["attach"]
     sulfur_water = header_attachment("sulfur", "water", 2, ox + 18, oy + 16)["attach"]
@@ -629,7 +657,7 @@ def ensure_oil_cell(
                 "tiles": [water["output"]],
             },
         ]
-        + fluid_network_segments("basic-oil-processing", 1, ox, oy)
+        + fluid_network_segments(refinery_recipe, 1, ox, oy)
         + fluid_network_segments("plastic-bar", 2, px, py)
         + fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
     )
@@ -763,3 +791,179 @@ def ensure_oil_cell(
     if stuck:
         raise StuckError(f"oil cell built but not healthy: {stuck}")
     return {"plastic-bar": _provider(plastic), "sulfur": _provider(sulfur)}
+
+
+def ensure_battery_cell(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference: Point, service_stage: ServiceStage,
+    emit: Callable[[str], None],
+) -> Point | None:
+    """Build the explicit water -> acid -> battery chain.
+
+    Fluid-bearing item recipes must never fall through the generic mall-line
+    planner. It has no pipe actions, which is why accumulator production ended
+    with "battery has no recipe" in the 2026-08-26 20:57 run even though the
+    live recipe catalog contained the recipe.
+    """
+    existing = live_base.find_line(
+        client, surface, force, "battery", "chemical-plant",
+    )
+    if existing is not None:
+        positions = list(existing.machine_positions)
+        provider = live_base.nearest_container(
+            client, surface, force,
+            positions[-1],
+            names=("passive-provider-chest",),
+        )
+        if provider is not None and existing.working_count > 0:
+            return provider
+        xs = [position[0] for position in positions]
+        ys = [position[1] for position in positions]
+        service_stage(
+            client, bridge, surface, force, "battery chemical cell",
+            positions[0],
+            ((min(xs) - 15, min(ys) - 15), (max(xs) + 15, max(ys) + 15)),
+            positions[0], positions, emit,
+            logistic_chest_positions=[provider] if provider is not None else [],
+        )
+        refreshed = live_base.find_line(
+            client, surface, force, "battery", "chemical-plant",
+        )
+        if provider is not None and refreshed is not None and refreshed.working_count > 0:
+            return provider
+        from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+        raise ProductionPrerequisiteDeferred(
+            "battery chemical cell exists but is not healthy; service its "
+            "water, acid, item supply, or power before opening another"
+        )
+
+    oil_outputs = ensure_oil_cell(
+        client, bridge, surface, force, reference, service_stage, emit,
+    )
+    if oil_outputs is None:
+        return None
+    sulfur_provider = oil_outputs["sulfur"]
+    site = live_base.find_clear_area(
+        client, surface, sulfur_provider, 30, 24, max_radius=80.0,
+        avoid_resources=True, resource_clearance=5,
+    )
+    if site is None:
+        raise StuckError("No ore-free 30x24 area found for acid and batteries")
+    ox, oy = round(site[0]), round(site[1])
+    water = chemical_survey.nearest_offshore_pump_site(
+        client, surface, (ox + 15.0, oy + 12.0),
+    )
+    if water is None:
+        raise StuckError("No buildable straight shoreline found for battery water")
+
+    acid = generate_fluid_machine_row("sulfuric-acid", 1, ox, oy)
+    battery = generate_fluid_machine_row("battery", 1, ox + 14, oy + 12)
+    water_source = generate_offshore_pump_source([water], [water["output"]])
+    _swap_infinity_chests(acid, {})
+    _swap_infinity_chests(battery, {})
+    _publish_output_chest(battery)
+    plans = [
+        strip_local_power(plan, remove_substations=False)
+        for plan in (water_source, acid, battery)
+    ]
+    water_source, acid, battery = plans
+
+    water_to = header_attachment("sulfuric-acid", "water", 1, ox, oy)["attach"]
+    acid_from = header_attachment(
+        "sulfuric-acid", "sulfuric-acid", 1, ox, oy,
+    )["attach"]
+    acid_to = header_attachment(
+        "battery", "sulfuric-acid", 1, ox + 14, oy + 12,
+    )["attach"]
+    endpoints = [water["output"], water_to, acid_from, acid_to]
+    margin = 24
+    hard = live_base.occupied_tiles(
+        client, surface,
+        (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
+        (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
+        include_water=False,
+    )
+    hard |= _planned_hard_tiles(*plans)
+    terrain_water = live_base.water_tiles(
+        client, surface,
+        (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
+        (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
+    )
+    endpoint_tiles = {(math.floor(x), math.floor(y)) for x, y in endpoints}
+    terrain_water -= hard | endpoint_tiles
+    hard -= endpoint_tiles
+    foreign = [
+        {"fluid": "water", "separated_by_pump": False, "tiles": [water["output"]]},
+        *fluid_network_segments("sulfuric-acid", 1, ox, oy),
+        *fluid_network_segments("battery", 1, ox + 14, oy + 12),
+    ]
+    links: list[tuple[str, dict]] = []
+    for name, source, targets, fluid, existing_tiles in (
+        (
+            "battery_water_pipeline", water["output"], [water_to],
+            "water", [water["output"]],
+        ),
+        (
+            "battery_acid_pipeline", acid_from, [acid_to],
+            "sulfuric-acid", [],
+        ),
+    ):
+        try:
+            link, segments, _crossed_water = _route_oil_fluid_link(
+                source, targets, fluid, foreign=foreign, hard=hard,
+                terrain_water=terrain_water, existing_tiles=existing_tiles,
+            )
+        except ValueError as error:
+            raise StuckError(
+                f"{fluid} cannot be routed from {source} to {targets}: {error}"
+            ) from error
+        links.append((name, link))
+        foreign.extend(segments)
+
+    power_plan = _merge(*(
+        _filter_plan_actions(
+            plan, lambda action: action.get("entity") in _POWER_ENTITIES,
+        )
+        for plan in plans
+    ))
+    unpowered = [
+        _filter_plan_actions(
+            plan, lambda action: action.get("entity") not in _POWER_ENTITIES,
+        )
+        for plan in plans
+    ]
+    water_stage, acid_stage, battery_stage = unpowered
+    link_packets = dict(links)
+    packets = [
+        ("battery_power_backbone", power_plan),
+        ("battery_water_source_and_acid", _merge(water_stage, acid_stage)),
+        ("battery_water_pipeline", link_packets["battery_water_pipeline"]),
+        ("battery_machine", battery_stage),
+        ("battery_acid_pipeline", link_packets["battery_acid_pipeline"]),
+    ]
+    _submit_oil_cell_packets(
+        client, bridge, surface, force, packets, emit,
+        after_packet=lambda name: (
+            _connect_oil_cell_power(client, bridge, surface, force, plans, emit)
+            if name == "battery_power_backbone" else None
+        ),
+    )
+    for name, plan, machine in (
+        ("battery water source", water_source, "offshore-pump"),
+        ("sulfuric-acid stage", acid, "chemical-plant"),
+        ("battery stage", battery, "chemical-plant"),
+    ):
+        machines = _positions(plan, machine)
+        service_stage(
+            client, bridge, surface, force, name, machines[0], _area(plan),
+            _substation(plan), machines, emit,
+            logistic_chest_positions=_logistic_chest_positions(plan),
+        )
+    stuck = _diagnose_machines(
+        client, surface, _positions(battery, "chemical-plant"), emit,
+        grace_seconds=180.0, bridge=bridge, force=force,
+    )
+    if stuck:
+        raise StuckError(f"battery chemical cell built but not healthy: {stuck}")
+    return _provider(battery)

@@ -31,8 +31,8 @@ STARTER_MALL_TARGETS = (
     # pack; once the starter's own panels are placed the mall keeps the array
     # growing. Accumulators joined the reserve after live runs 26-36 (2026-08-22/23)
     # showed nights collapsing a 1000 kW panel nameplate to zero output with no
-    # buffer -- their battery prerequisite resolves through ensure_produced once
-    # the oil cell's sulfur line is up.
+    # buffer -- their battery prerequisite resolves through the explicit
+    # water -> sulfuric-acid -> battery cell once the oil sulfur line is up.
     ("solar-panel", 8),
     ("accumulator", 8),
 )
