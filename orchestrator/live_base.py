@@ -491,6 +491,23 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     return result
 
 
+def transport_belt_direction_at(
+    client: RconClient, surface: str, position: Point,
+) -> str | None:
+    """Return the cardinal flow direction of a built belt at ``position``."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local e=s.find_entities_filtered{type='transport-belt',position={"
+        + str(position[0]) + "," + str(position[1]) + "},radius=0.2,limit=1}[1];"
+        "if not e then rcon.print('NONE') return end;"
+        "local dirs={[defines.direction.north]='north',"
+        "[defines.direction.east]='east',[defines.direction.south]='south',"
+        "[defines.direction.west]='west'};rcon.print(dirs[e.direction] or 'NONE')"
+    )
+    raw = _sc(client, lua)
+    return None if raw == "NONE" else raw
+
+
 def chest_stored_items(
     client: RconClient, surface: str, position: Point,
 ) -> int:

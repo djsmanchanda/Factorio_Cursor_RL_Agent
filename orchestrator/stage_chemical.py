@@ -321,6 +321,41 @@ def _coal_compatible_mining_origins(
     ]
 
 
+def _mine_overlaps_patch(
+    mine: extraction_state.ResourceMine,
+    patch: resource_patches.ResourcePatch,
+) -> bool:
+    """Whether the mine's first drill row belongs to this resource patch."""
+    probe_x = mine.first_column_x if mine.first_column_x is not None else mine.output[0]
+    probe_y = mine.shared_belt_y
+    margin = 3
+    return (
+        patch.minimum[0] - margin <= probe_x <= patch.maximum[0] + margin
+        and patch.minimum[1] - margin <= probe_y <= patch.maximum[1] + margin
+    )
+
+
+def _coal_belt_source(
+    client: RconClient, surface: str,
+    mine: extraction_state.ResourceMine,
+) -> Point:
+    """Recover the downstream end of either legacy west- or new east-flow rows."""
+    if not hasattr(client, "command"):
+        return mine.output
+    if (
+        mine.haul_head is not None
+        and live_base.transport_belt_direction_at(
+            client, surface, mine.haul_head,
+        ) == "east"
+    ):
+        return mine.haul_head
+    if live_base.transport_belt_direction_at(client, surface, mine.output) == "west":
+        return mine.output
+    # Chest-terminal legacy mines and incomplete telemetry retain their
+    # established output contract rather than guessing another endpoint.
+    return mine.output
+
+
 def ensure_coal_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage, emit: Callable[[str], None],
@@ -333,22 +368,29 @@ def ensure_coal_mine(
     existing = extraction_state.find_resource_mine(client, surface, force, "coal", reference)
     found = None
     if existing is not None:
+        if existing.pending:
+            raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
+        source = _coal_belt_source(client, surface, existing)
         if prefer_nearest_patch:
             found = resource_patches.nearest_viable_patch(
                 client, surface, "coal", reference,
             )
-        existing_distance = math.dist(existing.output, reference)
+        existing_distance = math.dist(source, reference)
         patch_distance = (
             math.dist(found.nearest, reference) if found is not None else math.inf
         )
-        if existing_distance <= patch_distance:
-            if existing.pending:
-                raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
-            return existing.output
+        same_patch = found is not None and _mine_overlaps_patch(existing, found)
+        if found is None or same_patch or existing_distance <= patch_distance:
+            if same_patch:
+                emit(
+                    f"  COAL DISTRICT: reusing owned belt mine at {source}; "
+                    "the nearest viable coal belongs to its existing patch"
+                )
+            return source
         emit(
             f"  COAL DISTRICT: local patch at {found.nearest} is "
             f"{patch_distance:.0f} tiles from chemical processing versus "
-            f"{existing_distance:.0f} for the existing mine at {existing.output}"
+            f"{existing_distance:.0f} for the existing mine at {source}"
         )
     if found is None:
         found = resource_patches.nearest_viable_patch(client, surface, "coal", reference)
@@ -374,8 +416,10 @@ def ensure_coal_mine(
             f"ore_compatible_candidates={len(ore_compatible)}"
         )
     origin, count = chosen
+    output_side = "east" if reference[0] >= origin[0] else "west"
     plan, output = direct_mine_plan(
         origin, count, belt_type="transport-belt", inserter_type="fast-inserter",
+        output_side=output_side, continuation_tiles=0,
     )
     plan = strip_local_power(plan, remove_substations=False)
     _publish_output_chest(plan)

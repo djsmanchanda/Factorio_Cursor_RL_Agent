@@ -93,6 +93,109 @@ def test_plastic_site_is_surveyed_at_coal_refinery_midpoint(monkeypatch) -> None
     assert (captured["width"], captured["height"]) == (12, 12)
 
 
+def test_existing_coal_mine_on_selected_patch_is_reused(monkeypatch) -> None:
+    mine = extraction_state.ResourceMine(
+        (-335.5, 11.5), 4, belt_y=11.5, first_column_x=-329.5,
+        haul_head=(-323.5, 11.5), growth_direction=-1,
+    )
+    patch = resource_patches.ResourcePatch(
+        (-329.5, 10.5), (-369.5, 1.5), (-325.5, 43.5), 16_281_288,
+    )
+    messages: list[str] = []
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine",
+        lambda *_a: mine,
+    )
+    monkeypatch.setattr(
+        stage_chemical.resource_patches, "nearest_viable_patch",
+        lambda *_a: patch,
+    )
+    monkeypatch.setattr(
+        stage_chemical.live_base, "transport_belt_direction_at",
+        lambda _client, _surface, position: (
+            "east" if position == mine.haul_head else "west"
+        ),
+    )
+
+    client = type("Client", (), {"command": lambda self, _text: "NONE"})()
+    source = stage_chemical.ensure_coal_mine(
+        client, object(), "nauvis", "player", (-192.5, -91.0),
+        lambda *_a, **_k: None, messages.append,
+        prefer_nearest_patch=True,
+    )
+
+    assert source == mine.haul_head
+    assert any("reusing owned belt mine" in message for message in messages)
+
+
+def test_live_belt_direction_observation_uses_factorio_cardinals() -> None:
+    class Client:
+        command_text = ""
+
+        def command(self, text: str) -> str:
+            self.command_text = text
+            return "east"
+
+    client = Client()
+
+    assert live_base.transport_belt_direction_at(
+        client, "nauvis", (-323.5, 11.5),
+    ) == "east"
+    assert "defines.direction.east" in client.command_text
+    assert "type='transport-belt'" in client.command_text
+
+
+def test_new_local_coal_mine_flows_toward_plastic(monkeypatch) -> None:
+    patch = resource_patches.ResourcePatch(
+        (-329.5, 10.5), (-369.5, 1.5), (-325.5, 43.5), 16_281_288,
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine",
+        lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        stage_chemical.resource_patches, "nearest_viable_patch",
+        lambda *_a: patch,
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_coal_compatible_mining_origins",
+        lambda *_a: [(-350.0, 12.0)],
+    )
+    monkeypatch.setattr(
+        stage_chemical, "choose_mining_origin",
+        lambda *_a, **_k: ((-350.0, 12.0), 2),
+    )
+
+    def direct_plan(origin, count, **kwargs):
+        captured.update(origin=origin, count=count, kwargs=kwargs)
+        return {"phases": []}, (-342.5, 12.5)
+
+    monkeypatch.setattr(stage_chemical, "direct_mine_plan", direct_plan)
+    monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
+    monkeypatch.setattr(stage_chemical, "_publish_output_chest", lambda _plan: None)
+    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical, "existing_mine_service_geometry",
+        lambda *_a, **_k: ((0.0, 0.0), ((-1.0, -1.0), (1.0, 1.0)),
+                            (0.0, 0.0), [(-348.5, 10.5)]),
+    )
+
+    result = stage_chemical.ensure_coal_mine(
+        object(), object(), "nauvis", "player", (-192.5, -91.0),
+        lambda *_a, **_k: None, lambda _message: None,
+        prefer_nearest_patch=True,
+    )
+
+    assert result is None
+    assert captured["origin"] == (-350.0, 12.0)
+    assert captured["count"] == 2
+    assert captured["kwargs"]["output_side"] == "east"
+    assert captured["kwargs"]["continuation_tiles"] == 0
+
+
 def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     calls: dict[str, object] = {}
     submitted: dict[str, object] = {}
