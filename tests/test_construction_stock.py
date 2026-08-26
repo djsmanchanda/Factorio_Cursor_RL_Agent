@@ -212,10 +212,15 @@ def test_starter_migration_caps_electronics_and_belt_components(monkeypatch) -> 
         builder, "_metal_starter_transition_complete", lambda *_args: False,
     )
 
-    for item in ("electronic-circuit", "splitter", "underground-belt"):
+    expected = {
+        "electronic-circuit": 5,
+        "splitter": 2,
+        "underground-belt": 5,
+    }
+    for item, cap in expected.items():
         assert builder.mall_reserve_for(
             object(), "nauvis", "player", item, 200,
-        ) == MallReserve(5, 5, None)
+        ) == MallReserve(cap, cap, None)
 
 
 def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> None:
@@ -239,6 +244,25 @@ def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> 
     assert captured["stock_target"] == 5
     assert captured["storage_limit"] == 5
     assert any("MALL STARTER CAP" in message for message in messages)
+
+
+def test_baseline_prep_cannot_expand_the_circuit_provider_past_its_cap(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+    monkeypatch.setattr(builder.live_base, "logistic_request_total", lambda *_args: 200)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_args: None)
+    monkeypatch.setattr(builder, "live_intermediate_demand", lambda *_args: 0.0)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_args: {})
+    monkeypatch.setattr(builder, "promoted_line_machine_count", lambda *_args, **_kwargs: None)
+
+    plan = builder._plan_line(
+        object(), "nauvis", "player", "electronic-circuit", lambda _message: None,
+        upgrade_bootstrap=False, stock_target=1, minimum_machines=1,
+        allow_promotion=False,
+    )
+
+    assert plan.mall_storage_limit == 5
 
 
 def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> None:

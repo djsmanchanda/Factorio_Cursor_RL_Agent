@@ -24,6 +24,7 @@ def direct_smelter_positions(
     *,
     pole_side: int = 1,
     drill_count: int = 1,
+    furnace_count: int = 1,
 ) -> dict[str, tuple[float, float]]:
     """Exact direct starter geometry, aligned to the primary drill output.
 
@@ -37,8 +38,10 @@ def direct_smelter_positions(
         raise ValueError(f"Unsupported starter direction {output_direction!r}")
     if pole_side not in {-1, 1}:
         raise ValueError("pole_side must be -1 or 1")
-    if drill_count not in {1, 2}:
+    if drill_count not in {1, 2} or furnace_count not in {1, 2}:
         raise ValueError("direct starter supports one or two drills")
+    if furnace_count > drill_count:
+        raise ValueError("direct starter cannot have more furnaces than drills")
     x, y = drill_position
     dx, dy = _DIRECTION_VECTORS[output_direction]
     # Perpendicular to the output axis. For a north-facing drill, pole_side=1
@@ -60,6 +63,19 @@ def direct_smelter_positions(
             furnace_x - 4 * px + 3 * dx,
             furnace_y - 4 * py + 3 * dy,
         )
+    if furnace_count == 2:
+        qx, qy = -px, -py
+        provider_x, provider_y = positions["provider"]
+        secondary_drill = (provider_x + 6 * qx, provider_y + 6 * qy)
+        positions.update({
+            "secondary_inserter": (provider_x + qx, provider_y + qy),
+            "secondary_furnace": (provider_x + 3 * qx, provider_y + 3 * qy),
+            "secondary_drill": secondary_drill,
+            "secondary_power": (
+                secondary_drill[0] + 2 * px + 2 * py * pole_side,
+                secondary_drill[1] + 2 * py - 2 * px * pole_side,
+            ),
+        })
     return positions
 
 
@@ -86,10 +102,12 @@ def generate_direct_smelter(
     }.get(recipe)
     if expected_ore != ore:
         raise ValueError(f"Direct smelter does not support {recipe!r} from {ore!r}")
-    drill_count = 2 if recipe == "stone-brick" else 1
+    drill_count = 2 if recipe in {"iron-plate", "stone-brick"} else 1
+    furnace_count = 2 if recipe == "iron-plate" else 1
     positions = direct_smelter_positions(
         drill_position, output_direction, pole_side=pole_side,
         drill_count=drill_count,
+        furnace_count=furnace_count,
     )
     actions = [
         {
@@ -115,7 +133,7 @@ def generate_direct_smelter(
                 "x": positions["secondary_drill"][0],
                 "y": positions["secondary_drill"][1],
             },
-            "direction": _direction_for_vector(px, py),
+                "direction": _direction_for_vector(px, py),
         }])
     actions.extend([
         {
@@ -141,6 +159,24 @@ def generate_direct_smelter(
             "position": {"x": positions["provider"][0], "y": positions["provider"][1]},
         },
     ])
+    if furnace_count == 2:
+        secondary_direction = _direction_for_vector(px, py)
+        actions.extend([{
+            "action_type": "place_ghost",
+            "entity": "electric-furnace",
+            "position": {
+                "x": positions["secondary_furnace"][0],
+                "y": positions["secondary_furnace"][1],
+            },
+        }, {
+            "action_type": "place_ghost",
+            "entity": "fast-inserter",
+            "position": {
+                "x": positions["secondary_inserter"][0],
+                "y": positions["secondary_inserter"][1],
+            },
+            "direction": _OPPOSITE_DIRECTION[secondary_direction],
+        }])
     return {
         "phases": [{"name": f"direct_{recipe}_starter", "actions": actions}],
         "starter_geometry": {
@@ -150,6 +186,7 @@ def generate_direct_smelter(
             "pole_side": pole_side,
             "drill_position": [drill_position[0], drill_position[1]],
             "drill_count": drill_count,
+            "furnace_count": furnace_count,
         },
     }
 

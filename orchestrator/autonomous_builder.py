@@ -1816,11 +1816,13 @@ def _serve_direct_plate_starter(
     emit: Callable[[str], None], *, submit: bool,
 ) -> Point:
     """Build or service the removable direct drill -> furnace starter."""
-    drill_count = 2 if recipe == "stone-brick" else 1
+    drill_count = 2 if recipe in {"iron-plate", "stone-brick"} else 1
+    furnace_count = 2 if recipe == "iron-plate" else 1
     positions = direct_smelter_positions(
         starter.drill_position, starter.output_direction,
         pole_side=starter.pole_side,
         drill_count=drill_count,
+        furnace_count=furnace_count,
     )
     plan = generate_direct_smelter(
         recipe, ore, starter.drill_position, starter.output_direction,
@@ -1835,10 +1837,11 @@ def _serve_direct_plate_starter(
             ),
         )
     area = _plan_area(plan, padding=10.0)
-    machines = [positions["drill"]]
-    if "secondary_drill" in positions:
-        machines.append(positions["secondary_drill"])
-    machines.append(positions["furnace"])
+    machines = [
+        positions[key] for key in (
+            "drill", "secondary_drill", "furnace", "secondary_furnace",
+        ) if key in positions
+    ]
     bring_stage_up(
         client, bridge, surface, force, f"direct starter for {recipe}",
         starter.drill_position, area, positions["power"], machines, emit,
@@ -1880,12 +1883,14 @@ def _bootstrap_direct_plate_line(
     )
     if site is None:
         raise StuckError(
-            f"no legal one-drill {recipe} starter fits on a {ore} patch within "
+            f"no legal direct {recipe} starter fits on a {ore} patch within "
             "the local search radius"
         )
-    drill_count = 2 if recipe == "stone-brick" else 1
+    drill_count = 2 if recipe in {"iron-plate", "stone-brick"} else 1
+    furnace_count = 2 if recipe == "iron-plate" else 1
     emit(
-        f"PLATE STARTER: {recipe} begins with {drill_count} drill(s) feeding one furnace "
+        f"PLATE STARTER: {recipe} begins with {drill_count} drill(s) feeding "
+        f"{furnace_count} furnace(s) "
         f"directly at {site.drill_position}; no belts, requesters, or bot haul"
     )
     if recipe in {"iron-plate", "copper-plate"}:
@@ -2485,8 +2490,13 @@ def _plan_line(
 ) -> _LinePlan:
     """Survey the item's current line and decide whether it should be promoted."""
     spec = LINE_RECIPES[item]
-    mall_storage_limit = max(stock_target, storage_limit or stock_target)
-    if not upgrade_bootstrap and storage_limit is None:
+    startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    mall_storage_limit = (
+        startup_cap
+        if not upgrade_bootstrap and startup_cap is not None
+        else max(stock_target, storage_limit or stock_target)
+    )
+    if not upgrade_bootstrap and storage_limit is None and startup_cap is None:
         mall_storage_limit += live_base.logistic_request_total(
             client, surface, force, item,
         )
@@ -2818,9 +2828,11 @@ MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
 _STARTUP_METAL_STARTERS_OBSERVED = False
 _STARTUP_MALL_LIMITS_RELEASED = False
 _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
-_STARTUP_MALL_ITEM_CAPS = frozenset({
-    "electronic-circuit", "splitter", "underground-belt",
-})
+_STARTUP_MALL_ITEM_CAPS = {
+    "electronic-circuit": 5,
+    "splitter": 2,
+    "underground-belt": 5,
+}
 _POST_STARTER_ONE_STACK_ITEMS = frozenset({"splitter", "underground-belt"})
 _STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
 
@@ -2834,6 +2846,17 @@ def _mall_request_multiplier(
     if not _metal_starter_transition_complete(client, surface, force):
         return 2
     return standard_mall_request_multiplier(spec["machine"], spec["craft_time"])
+
+
+def _startup_mall_item_cap(
+    client: RconClient, surface: str, force: str, item: str,
+) -> int | None:
+    """The active provider ceiling for parts that would drain starter metal."""
+    if item not in _STARTUP_MALL_ITEM_CAPS:
+        return None
+    if _metal_starter_transition_complete(client, surface, force):
+        return None
+    return _STARTUP_MALL_ITEM_CAPS[item]
 
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
@@ -4114,8 +4137,9 @@ def mall_reserve_for(
 ) -> MallReserve:
     """Reserve ahead while scarce; fill the chest once AM3 is self-produced."""
     transitioned = _metal_starter_transition_complete(client, surface, force)
-    if not transitioned and item in _STARTUP_MALL_ITEM_CAPS:
-        return MallReserve(5, 5, None)
+    startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    if startup_cap is not None:
+        return MallReserve(startup_cap, startup_cap, None)
     if transitioned and item in _POST_STARTER_ONE_STACK_ITEMS:
         stack_size = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
         return MallReserve(stack_size, stack_size, 1)
