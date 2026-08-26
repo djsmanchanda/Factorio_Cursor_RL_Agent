@@ -185,6 +185,14 @@ def fluid_network_segments(recipe: str, machine_count: int, origin_x: int = 0,
         segments.append({
             "fluid": net["fluid"], "separated_by_pump": False,
             "tiles": [(origin_x + c, origin_y + r) for c, r in tiles],
+            # These pairs connect underground, but each endpoint has only one
+            # exposed normal side. A later same-fluid route cannot reuse an
+            # endpoint as a surface corner or branch.
+            "tunnel_endpoints": [
+                ((origin_x + stub[0], origin_y + stub[1]),
+                 (origin_x + riser[0], origin_y + riser[1]))
+                for stub, riser in zip(net["stubs"], net["risers"])
+            ],
         })
     return segments
 

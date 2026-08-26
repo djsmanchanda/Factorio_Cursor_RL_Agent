@@ -139,6 +139,13 @@ def test_every_connection_tile_holds_a_pipe_of_the_right_network(recipe):
                         assert tile not in other_tiles
 
 
+def test_machine_row_segments_mark_directional_underground_endpoints():
+    segments = fluid_network_segments("basic-oil-processing", 1, -258, -108)
+    petroleum = next(segment for segment in segments if segment["fluid"] == "petroleum-gas")
+
+    assert petroleum["tunnel_endpoints"] == [((-254, -107), (-254, -109))]
+
+
 def test_processing_unit_acid_tile_is_the_centre_column_and_inserter_steps_aside():
     # Live-verified: an assembling machine's fluid box sits on its CENTRE
     # column, unlike the chemical plant's corner boxes -- so the item inserter

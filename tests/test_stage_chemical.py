@@ -43,9 +43,9 @@ def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
     assert pipe["position"] == {"x": -266.5, "y": -99.5}
 
 
-def test_requested_straight_shoreline_has_external_land_output() -> None:
+def test_requested_straight_shoreline_has_adjacent_land_output() -> None:
     site = {
-        "position": (-97.5, 15.5), "output": (-98, 13),
+        "position": (-97.5, 15.5), "output": (-98, 14),
         "resource": "water", "direction": "south",
     }
 
@@ -54,7 +54,49 @@ def test_requested_straight_shoreline_has_external_land_output() -> None:
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "pipe"
     )
-    assert pipe["position"] == {"x": -97.5, "y": 13.5}
+    assert pipe["position"] == {"x": -97.5, "y": 14.5}
+
+
+def test_petroleum_route_does_not_use_refinery_underground_as_a_corner() -> None:
+    """The oil-cell route must include the cardinal corner seen missing live."""
+    ox, oy = -258, -108
+    px, py = -282, -40
+    refinery = stage_chemical.generate_fluid_machine_row(
+        "basic-oil-processing", 1, ox, oy,
+    )
+    plastic = stage_chemical.generate_fluid_machine_row("plastic-bar", 2, px, py)
+    sulfur = stage_chemical.generate_fluid_machine_row("sulfur", 2, ox + 18, oy + 16)
+    plans = (refinery, plastic, sulfur)
+
+    source = stage_chemical.header_attachment(
+        "basic-oil-processing", "petroleum-gas", 1, ox, oy,
+    )["attach"]
+    targets = [
+        stage_chemical.header_attachment(
+            "plastic-bar", "petroleum-gas", 2, px, py,
+        )["attach"],
+        stage_chemical.header_attachment(
+            "sulfur", "petroleum-gas", 2, ox + 18, oy + 16,
+        )["attach"],
+    ]
+    foreign = (
+        stage_chemical.fluid_network_segments("basic-oil-processing", 1, ox, oy)
+        + stage_chemical.fluid_network_segments("plastic-bar", 2, px, py)
+        + stage_chemical.fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
+    )
+    hard = stage_chemical._planned_hard_tiles(*plans) - {source, *targets}
+
+    link, _segments, _crossed_water = stage_chemical._route_oil_fluid_link(
+        source, targets, "petroleum-gas", foreign=foreign, hard=hard,
+        terrain_water=set(), existing_tiles=[],
+    )
+    pipe_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for phase in link["phases"] for action in phase["actions"]
+        if action.get("entity") == "pipe"
+    }
+
+    assert (-252.5, -107.5) in pipe_positions
 
 
 def test_oil_cell_search_is_anchored_to_crude_not_the_base(monkeypatch) -> None:
@@ -223,7 +265,7 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     monkeypatch.setattr(
         stage_chemical.chemical_survey, "nearest_offshore_pump_site",
         lambda *_a: {
-            "position": (-97.5, 15.5), "output": (-98, 13),
+            "position": (-97.5, 15.5), "output": (-98, 14),
             "resource": "water", "direction": "south",
         },
     )
@@ -289,7 +331,7 @@ def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:
     ) is None
 
     assert "for side=-1,1" in client.command_text
-    assert "{'west',1,0,1.5,0.5,3,0}" in client.command_text
+    assert "{'west',1,0,1.5,0.5,2,0}" in client.command_text
 
 
 def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:

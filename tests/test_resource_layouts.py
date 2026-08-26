@@ -96,8 +96,8 @@ def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> No
         [(16, 21), (15, 21)],
     )
     water = generate_offshore_pump_source(
-        [{"position": (5.5, 30.5), "output": (7, 30), "direction": "west"}],
-        [(7, 30), (8, 30)],
+        [{"position": (5.5, 30.5), "output": (6, 30), "direction": "west"}],
+        [(6, 30), (7, 30)],
     )
 
     assert any(action["entity"] == "pumpjack" for action in actions(crude))
@@ -123,7 +123,7 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
         generate_pumpjack_source([site], [(20, -47)])
 
 
-def test_fluid_sources_reject_the_old_overlapping_output_tiles() -> None:
+def test_fluid_sources_reject_invalid_output_tiles() -> None:
     with pytest.raises(ValueError, match="rotated connector tile"):
         generate_pumpjack_source(
             [{"position": (-268.5, -98.5), "output": (-268, -100),
@@ -132,16 +132,16 @@ def test_fluid_sources_reject_the_old_overlapping_output_tiles() -> None:
         )
     with pytest.raises(ValueError, match="adjacent land-side tile"):
         generate_offshore_pump_source(
-            [{"position": (-97.5, 15.5), "output": (-98, 14),
+            [{"position": (-97.5, 15.5), "output": (-98, 13),
               "direction": "south"}],
-            [(-98, 14)],
+            [(-98, 13)],
         )
 
 
 def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
     plan = generate_offshore_pump_source(
-        [{"position": (20.5, 83.5), "output": (20, 81), "direction": "south"}],
-        [(20, 81)],
+        [{"position": (20.5, 83.5), "output": (20, 82), "direction": "south"}],
+        [(20, 82)],
     )
     assert not any(action["entity"] == "medium-electric-pole" for action in actions(plan))
     assert not any(action["entity"] == "substation" for action in actions(plan))

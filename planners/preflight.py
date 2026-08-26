@@ -17,7 +17,8 @@ from planners.infrastructure import (
 )
 from planners.infrastructure_geometry import boxes_overlap, chebyshev_distance, distance
 from planners.plan_validation import (
-    ENTITY_FOOTPRINTS, actions as _plan_actions, occupied_tile_indices,
+    ENTITY_FOOTPRINTS, actions as _plan_actions, is_verified_offshore_attachment,
+    occupied_tile_indices,
 )
 from planners.recipe_data import FORBIDDEN_FUEL_ENTITIES
 
@@ -116,7 +117,10 @@ def _check_footprint_overlap(placements):
         candidates = {index for cell in covered_cells for index in cells.get(cell, ())}
         for left_index in candidates:
             _, left, left_pos, left_size = indexed[left_index]
-            if boxes_overlap(left_pos, left_size, right_pos, right_size):
+            if (
+                boxes_overlap(left_pos, left_size, right_pos, right_size)
+                and not is_verified_offshore_attachment(left, right)
+            ):
                 overlaps.append((left_index, right_index))
         for cell in covered_cells:
             cells.setdefault(cell, []).append(right_index)

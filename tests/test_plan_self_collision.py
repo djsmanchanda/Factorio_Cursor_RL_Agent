@@ -18,11 +18,26 @@ from planners.plan_validation import (  # noqa: E402
     ENTITY_FOOTPRINTS,
     actions,
     entity_footprint_tiles,
+    is_verified_offshore_attachment,
     validate_build_plan,
 )
 
 _SCAFFOLDING = {"substation", "electric-energy-interface"}
 _SIZES = (1, 2, 3, 6, 12, 21, 50)
+
+
+def test_only_the_real_offshore_connector_overlap_is_excused() -> None:
+    pump = {
+        "entity": "offshore-pump", "position": {"x": -97.5, "y": 15.5},
+        "direction": "south",
+    }
+
+    assert is_verified_offshore_attachment(
+        pump, {"entity": "pipe", "position": {"x": -97.5, "y": 14.5}},
+    )
+    assert not is_verified_offshore_attachment(
+        pump, {"entity": "pipe", "position": {"x": -96.5, "y": 15.5}},
+    )
 
 
 def _line(machines: int, origin=(0, 0)) -> dict:

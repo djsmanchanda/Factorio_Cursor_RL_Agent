@@ -118,9 +118,9 @@ These names describe intended responsibilities, not permission to build speculat
   rather than after all pipe ghosts complete.
 - Offshore pumps require a straight orthogonal shoreline: water across the
   intake width, land across the output width, and the first pipe on the
-  immediately adjacent external land-side tile beyond the pump's 2x2
-  footprint. The Factorio entity direction faces into water, opposite its
-  land-side pipe output. Diagonal shoreline corners are not candidates.
+  immediately adjacent land-side connector tile. The Factorio entity direction
+  faces into water, opposite its land-side pipe output. Diagonal shoreline
+  corners are not candidates.
 - A product does not become a mine/refinery stage merely because its recipe has
   one raw-resource ingredient. Direct extraction is an explicit recipe role;
   assembler products such as landfill stay in the assembly path.

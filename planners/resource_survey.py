@@ -252,10 +252,10 @@ def _require_local(
 
 def _offshore_candidates(water_tiles: set[tuple[int, int]]) -> list[dict]:
     direction_specs = (
-        ("south", (0, -1), (0.5, -0.5), (0, -3)),
-        ("west", (1, 0), (1.5, 0.5), (3, 0)),
-        ("north", (0, 1), (0.5, 1.5), (0, 3)),
-        ("east", (-1, 0), (-0.5, 0.5), (-3, 0)),
+        ("south", (0, -1), (0.5, -0.5), (0, -2)),
+        ("west", (1, 0), (1.5, 0.5), (2, 0)),
+        ("north", (0, 1), (0.5, 1.5), (0, 2)),
+        ("east", (-1, 0), (-0.5, 0.5), (-2, 0)),
     )
     candidates = []
     for x, y in sorted(water_tiles, key=lambda point: (point[1], point[0])):

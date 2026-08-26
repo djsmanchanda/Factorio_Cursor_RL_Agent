@@ -27,6 +27,6 @@
   "coal_capacity_per_second": 1.5,
   "pumpjack_sites": [{"position": [18.5, -43.5], "output": [16, -43], "resource": "crude-oil", "capacity_per_second": 60.0, "direction": "west"}],
   "crude_pipe_tiles": [[16, -43]],
-  "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 81], "resource": "water", "capacity_per_second": 1200.0, "direction": "south"}],
-  "water_pipe_tiles": [[20, 81]]
+  "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 82], "resource": "water", "capacity_per_second": 1200.0, "direction": "south"}],
+  "water_pipe_tiles": [[20, 82]]
 }

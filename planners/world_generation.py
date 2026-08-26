@@ -82,8 +82,8 @@ def _electronics_world() -> dict:
         "coal_capacity_per_second": 1.5,
         "pumpjack_sites": [{"position": [20.5, -43.5], "output": [19, -46], "resource": "crude-oil", "capacity_per_second": 60.0, "direction": "north"}],
         "crude_pipe_tiles": [[19, -46]],
-        "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 81], "resource": "water", "capacity_per_second": 1200.0, "direction": "south"}],
-        "water_pipe_tiles": [[20, 81]],
+        "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 82], "resource": "water", "capacity_per_second": 1200.0, "direction": "south"}],
+        "water_pipe_tiles": [[20, 82]],
     }
 
 
@@ -104,7 +104,7 @@ def default_world_payload() -> dict:
         ],
         "crude_oil_spots": [{"id": "crude_primary", "position": [20.5, -43.5], "amount": 30_000_000}],
         "water_lake": {"x1": 14, "y1": 84, "x2": 27, "y2": 96, "tile": "water",
-                       "offshore_edge_candidates": [{"position": [20.5, 83.5], "output": [20, 81], "direction": "south"}]},
+                       "offshore_edge_candidates": [{"position": [20.5, 83.5], "output": [20, 82], "direction": "south"}]},
         "electronics_world": electronics,
         "starter_kit": {
             "power_source": {"entity": "electric-energy-interface", "position": [-160, -160]},

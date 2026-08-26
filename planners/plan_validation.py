@@ -74,6 +74,33 @@ def actions(plan: dict) -> Iterable[dict]:
         yield from phase.get("actions", [])
 
 
+def is_verified_offshore_attachment(left: dict, right: dict) -> bool:
+    """Whether a pipe occupies the real land-side connector of a pump.
+
+    The generic square footprint is intentionally conservative, but an
+    offshore pump's legal pipe connector lies inside that coarse 2x2 tile
+    box. Only this exact entity/direction/position relationship is exempt.
+    """
+    source, pipe = (
+        (left, right) if left.get("entity") == "offshore-pump" else (right, left)
+    )
+    if source.get("entity") != "offshore-pump" or pipe.get("entity") != "pipe":
+        return False
+    offsets = {
+        # The entity direction faces water; its pipe output is opposite.
+        "north": (0, 1), "east": (-1, 0),
+        "south": (0, -1), "west": (1, 0),
+    }
+    offset = offsets.get(source.get("direction", "north"))
+    if offset is None:
+        return False
+    position = source["position"]
+    return pipe.get("position") == {
+        "x": position["x"] + offset[0],
+        "y": position["y"] + offset[1],
+    }
+
+
 def validate_build_plan(plan: dict) -> None:
     schema = json.loads(
         (_REPO_ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8")
@@ -109,7 +136,10 @@ def validate_no_collisions(named_plans: list[tuple[str, dict]]) -> None:
         left_tiles = entity_footprint_tiles(left)
         for right_name, right in placements[index + 1:]:
             right_position = (right["position"]["x"], right["position"]["y"])
-            if left_tiles & entity_footprint_tiles(right):
+            if (
+                left_tiles & entity_footprint_tiles(right)
+                and not is_verified_offshore_attachment(left, right)
+            ):
                 raise ValueError(
                     f"Plan collision: {left_name} {left['entity']} at {left_position} overlaps "
                     f"{right_name} {right['entity']} at {right_position}"
