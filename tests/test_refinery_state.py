@@ -156,6 +156,70 @@ def test_removal_authorization_checks_the_exact_old_end_and_output(monkeypatch) 
     )
 
 
+def test_removal_authorization_allows_an_absent_old_output_adapter(monkeypatch) -> None:
+    """An interrupted build may leave the old End chest absent.
+
+    The executor's exact removal is then a no-op; the extension must be able
+    to install the new End/output adapter instead of abandoning iron growth.
+    """
+    old = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    delta = generate_managed_refinery_extension_plan(
+        "iron-plate", 6, 12, current_variant="basic",
+    )
+    signatures = _signatures(old)
+    missing_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in actions(delta) if action["action_type"] == "remove_entity"
+    }
+    for position in missing_positions:
+        signatures.pop(position)
+    monkeypatch.setattr(
+        live_base, "entity_signatures_at",
+        lambda _c, _s, _f, positions: {
+            position: signatures.get(position, {
+                "name": "NONE", "direction": None,
+                "input_priority": None, "output_priority": None,
+            })
+            for position in positions
+        },
+    )
+    state = refinery_state.infer_refinery_state(
+        "iron-plate", _furnaces(old), variant="basic",
+    )
+
+    refinery_state.assert_refinery_removals_owned(
+        object(), "nauvis", "player", state, delta,
+    )
+
+
+def test_removal_authorization_rejects_a_different_live_end_occupant(monkeypatch) -> None:
+    old = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    delta = generate_managed_refinery_extension_plan(
+        "iron-plate", 6, 12, current_variant="basic",
+    )
+    signatures = _signatures(old)
+    target = next(
+        action for action in actions(delta) if action["action_type"] == "remove_entity"
+    )
+    position = (target["position"]["x"], target["position"]["y"])
+    signatures[position] = {
+        "name": "steel-chest", "direction": 0,
+        "input_priority": None, "output_priority": None,
+    }
+    monkeypatch.setattr(
+        live_base, "entity_signatures_at",
+        lambda _c, _s, _f, positions: {position: signatures[position] for position in positions},
+    )
+    state = refinery_state.infer_refinery_state(
+        "iron-plate", _furnaces(old), variant="basic",
+    )
+
+    with pytest.raises(ValueError, match="not the planner-owned template"):
+        refinery_state.assert_refinery_removals_owned(
+            object(), "nauvis", "player", state, delta,
+        )
+
+
 class _RconOutput:
     def __init__(self, output: str):
         self.output = output

@@ -159,9 +159,25 @@ def assert_refinery_removals_owned(
         if action is None:
             raise ValueError("Refinery delta attempts to remove an unowned placement")
         expected.append(action)
-    _assert_live_actions(
-        client, surface, force, expected, f"{state.recipe} removable End",
+    actual = live_base.entity_signatures_at(
+        client, surface, force, [_action_position(action) for action in expected],
     )
+    mismatches = [
+        action for action in expected
+        # The executor removes only an exact same-name entity or ghost.  If an
+        # old End/output action is already absent, its removal is a no-op and
+        # the replacement plan can safely recreate the complete adapter.  A
+        # different live occupant (or changed orientation/configuration) must
+        # still fail closed: that could be somebody else's infrastructure.
+        if actual.get(_action_position(action), {}).get("name") != "NONE"
+        and not _matches_signature(action, actual.get(_action_position(action)))
+    ]
+    if mismatches:
+        first = mismatches[0]
+        raise ValueError(
+            f"{state.recipe} removable End is not the planner-owned template at "
+            f"{_action_position(first)}: expected {first['entity']}"
+        )
 
 
 def live_refinery_placements(
