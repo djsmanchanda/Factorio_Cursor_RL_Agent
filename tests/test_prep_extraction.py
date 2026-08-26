@@ -390,6 +390,33 @@ def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatc
     assert attempts == ["build"] and not pending
 
 
+def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatch) -> None:
+    attempts: list[str] = []
+    pending = {"iron-plate": {"transport-belt": 132}}
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items",
+        lambda *_args: {"transport-belt": 0},
+    )
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        autonomous_builder, "construction_supply_chain_is_scheduled",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_args, **_kwargs: attempts.append("build"),
+    )
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(),
+        {}, {"transport-belt": 132}, (0.0, 0.0), lambda _message: None,
+        pending_materials=pending, furnace_target=6,
+    )
+
+    assert attempts == ["build"]
+    assert pending == {}
+
+
 def test_fast_belts_wait_for_an_electric_furnace_producer(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(

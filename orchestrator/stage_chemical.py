@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
 from orchestrator.game_bridge import GameBridge
+from orchestrator.parts_mall import MaterialShortage
 from orchestrator.extraction_transport import (
     planned_footprint_tiles, preflight_ingredient_transport,
 )
@@ -18,8 +19,9 @@ from orchestrator.stage_extraction import (
 )
 from orchestrator.stage_services import (
     StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
-    _logistic_chest_positions, _submit,
-    _wait_for_ghosts, extend_power, extend_roboport_coverage, service_distance,
+    _ghost_materials, _logistic_chest_positions, _submit,
+    _wait_for_ghosts, construction_supply_chain_is_scheduled, extend_power,
+    extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
     _direct_single_belt_feed, _publish_output_chest, transport_grace_seconds,
@@ -198,11 +200,28 @@ def _filter_plan_actions(plan: dict, predicate: Callable[[dict], bool]) -> dict:
 
 def _submit_oil_cell_packets(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    packets: list[tuple[str, dict]], emit: Callable[[str], None],
+    packets: list[tuple[str, dict]], emit: Callable[[str], None], *,
+    after_packet: Callable[[str], None] | None = None,
 ) -> None:
     """Ghost independent oil packets as soon as each material chain is ready."""
     future = _merge(*(plan for _name, plan in packets))
     reserved = planned_footprint_tiles(future)
+    required = _ghost_materials(future)
+    available = live_base.available_items(client, surface, force)
+    unscheduled = {
+        item: count for item, count in required.items()
+        if available.get(item, 0) < count
+        and not construction_supply_chain_is_scheduled(
+            client, surface, force, item,
+        )
+    }
+    if unscheduled:
+        # Do not leave a remote district half-submitted. Once every missing
+        # item has a complete production chain, individual packets may be
+        # ghosted immediately and construction can overlap production.
+        raise MaterialShortage(
+            "chemical_oil_cell_packets", unscheduled, available,
+        )
     for name, packet in packets:
         landfill, construction = _separate_landfill_ghosts(packet)
         if landfill is not None:
@@ -239,6 +258,8 @@ def _submit_oil_cell_packets(
                 reserved_tiles=reserved,
             ),
         )
+        if after_packet is not None:
+            after_packet(name)
 
 
 def _connect_oil_cell_power(
@@ -705,8 +726,13 @@ def ensure_oil_cell(
     ]
     _submit_oil_cell_packets(
         client, bridge, surface, force, packets, emit,
+        after_packet=lambda name: (
+            _connect_oil_cell_power(
+                client, bridge, surface, force, plans, emit,
+            )
+            if name == "chemical_power_backbone" else None
+        ),
     )
-    _connect_oil_cell_power(client, bridge, surface, force, plans, emit)
 
     for name, plan, machine in (
         ("crude-oil source", crude_source, "pumpjack"),

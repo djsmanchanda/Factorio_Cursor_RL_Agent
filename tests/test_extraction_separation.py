@@ -322,6 +322,20 @@ def test_direct_mine_classifier_preserves_straight_collector_continuation() -> N
     assert mine.haul_head == (24.5, 20.5)
 
 
+def test_direct_mine_classifier_ignores_disconnected_same_row_belt() -> None:
+    entities = [
+        *(ExtractionEntity("drill", (x, 18.5), True) for x in (11.5, 14.5)),
+        *(ExtractionEntity("belt", (x + 0.5, 20.5), True) for x in range(7, 17)),
+        *(ExtractionEntity("belt", (x + 0.5, 20.5), True) for x in range(-288, -260)),
+    ]
+
+    mine = _classify_direct_mine(entities, (0.0, 0.0))
+
+    assert mine is not None
+    assert mine.output == (7.5, 20.5)
+    assert mine.haul_head == (16.5, 20.5)
+
+
 def test_direct_mine_classifier_marks_belt_only_ghosts_pending() -> None:
     entities = [
         ExtractionEntity("drill", (11.5, 18.5), True),

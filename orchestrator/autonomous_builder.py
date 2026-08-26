@@ -3464,8 +3464,22 @@ def _prep_plate_extraction(
     """
     available = live_base.available_items(client, surface, force)
     pending = (pending_materials or {}).get(short_plate)
-    if pending and any(available.get(item, 0) < count for item, count in pending.items()):
-        return False
+    missing_pending = {
+        item: count for item, count in (pending or {}).items()
+        if available.get(item, 0) < count
+    }
+    if missing_pending:
+        if not all(
+            construction_supply_chain_is_scheduled(
+                client, surface, force, item,
+            )
+            for item in missing_pending
+        ):
+            return False
+        emit(
+            f"  PLATE FOUNDATION PIPELINE READY: {short_plate} construction "
+            "items are being produced; releasing its coherent blueprint"
+        )
     if pending_materials is not None:
         pending_materials.pop(short_plate, None)
     plate_line = live_base.find_line(

@@ -289,8 +289,11 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
 
     monkeypatch.setattr(stage_chemical, "preflight_ingredient_transport", preflight)
 
-    def submit(_client, _bridge, _surface, _force, packets, _emit):
+    def submit(
+        _client, _bridge, _surface, _force, packets, _emit, *, after_packet,
+    ):
         submitted["packets"] = packets
+        submitted["after_packet"] = after_packet
 
     monkeypatch.setattr(stage_chemical, "_submit_oil_cell_packets", submit)
     monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
@@ -496,6 +499,10 @@ def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> Non
         lambda *_args, stage_coverage, **_kwargs: stage_coverage() or {"ok": True},
     )
     monkeypatch.setattr(stage_chemical, "_wait_for_ghosts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        stage_chemical.live_base, "available_items",
+        lambda *_args: {"chemical-plant": 1, "landfill": 1, "pipe": 1},
+    )
     machine = {"phases": [{"name": "machine", "actions": [{
         "action_type": "place_ghost", "entity": "chemical-plant",
         "position": {"x": 1.5, "y": 1.5},
@@ -515,6 +522,77 @@ def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> Non
 
     assert len(captured) == 3
     assert all((8, 4) in reserved for reserved in captured)
+
+
+def test_oil_packets_refuse_partial_submission_when_later_supply_is_missing(
+    monkeypatch,
+) -> None:
+    submitted: list[str] = []
+    packets = [
+        ("chemical_power_backbone", {"phases": [{"name": "power", "actions": [{
+            "action_type": "place_ghost", "entity": "substation",
+            "position": {"x": 0.0, "y": 0.0},
+        }]}]}),
+        ("chemical_water_pipeline", {"phases": [{"name": "water", "actions": [{
+            "action_type": "place_ghost", "entity": "pipe",
+            "position": {"x": 1.5, "y": 0.5},
+        }]}]}),
+    ]
+    monkeypatch.setattr(
+        stage_chemical.live_base, "available_items",
+        lambda *_args: {"substation": 1, "pipe": 0},
+    )
+    monkeypatch.setattr(
+        stage_chemical, "construction_supply_chain_is_scheduled",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_submit",
+        lambda *_args, **_kwargs: submitted.append(_args[4]),
+    )
+
+    with pytest.raises(stage_chemical.MaterialShortage):
+        stage_chemical._submit_oil_cell_packets(
+            object(), object(), "nauvis", "player", packets,
+            lambda _message: None,
+        )
+
+    assert submitted == []
+
+
+def test_oil_power_connects_before_later_packets(monkeypatch) -> None:
+    events: list[str] = []
+    packets = [
+        ("chemical_power_backbone", {"phases": [{"name": "power", "actions": [{
+            "action_type": "place_ghost", "entity": "substation",
+            "position": {"x": 0.0, "y": 0.0},
+        }]}]}),
+        ("chemical_machines", {"phases": [{"name": "machines", "actions": [{
+            "action_type": "place_ghost", "entity": "chemical-plant",
+            "position": {"x": 4.5, "y": 0.5},
+        }]}]}),
+    ]
+    monkeypatch.setattr(
+        stage_chemical.live_base, "available_items",
+        lambda *_args: {"substation": 1, "chemical-plant": 1},
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_submit",
+        lambda *_args, **_kwargs: events.append(_args[4]) or {"ok": True},
+    )
+
+    stage_chemical._submit_oil_cell_packets(
+        object(), object(), "nauvis", "player", packets,
+        lambda _message: None,
+        after_packet=lambda name: events.append(f"connected:{name}"),
+    )
+
+    assert events == [
+        "chemical_power_backbone",
+        "connected:chemical_power_backbone",
+        "chemical_machines",
+        "connected:chemical_machines",
+    ]
 
 
 def test_oil_power_scaffolds_connect_before_stage_waits(monkeypatch) -> None:
