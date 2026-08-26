@@ -3195,6 +3195,10 @@ def _ensure_mall_item(
     emit(f"--- parts mall: ensuring {item} production for {mode} {target} ---")
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
+        production_target = (
+            target if reserve.fill_chest or reserve.storage_count >= target
+            else reserve.storage_count
+        )
         if reserve.fill_chest:
             emit(
                 f"  MALL RESERVE: {item} is self-sufficient; removing its "
@@ -3205,9 +3209,14 @@ def _ensure_mall_item(
                 f"  MALL RESERVE: {item} will maintain {reserve.storage_count} "
                 f"({reserve.storage_stacks} stack(s)); this job needs {target}"
             )
+            if production_target < target:
+                emit(
+                    f"  MALL STARTER CAP: limiting {item} to "
+                    f"{production_target} until direct iron/copper starters retire"
+                )
         output = ensure_produced(
             client, bridge, surface, force, item, reference_point, emit,
-            upgrade_bootstrap=False, stock_target=target,
+            upgrade_bootstrap=False, stock_target=production_target,
             stock_gate_target=reserve.gate_target,
             storage_limit=reserve.storage_count,
             fill_provider=reserve.fill_chest,

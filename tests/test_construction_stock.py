@@ -97,7 +97,7 @@ def test_the_runner_waits_for_the_job_not_the_reserve() -> None:
     ensured = inspect.getsource(builder._ensure_mall_item)
     served = inspect.getsource(builder._serve_mall_task)
 
-    assert "stock_target=target" in ensured
+    assert "stock_target=production_target" in ensured
     assert "stock_gate_target=reserve.gate_target" in ensured
     assert "storage_limit=reserve.storage_count" in ensured
     assert "fill_provider=reserve.fill_chest" in ensured
@@ -216,6 +216,29 @@ def test_starter_migration_caps_electronics_and_belt_components(monkeypatch) -> 
         assert builder.mall_reserve_for(
             object(), "nauvis", "player", item, 200,
         ) == MallReserve(5, 5, None)
+
+
+def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> None:
+    """A five-item reserve must not be overwritten by the caller's job size."""
+    captured: dict[str, object] = {}
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "mall_reserve_for", lambda *_args: MallReserve(5, 5, None),
+    )
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "electronic-circuit", 200,
+        {}, (0.0, 0.0), messages.append, background=False,
+    )
+
+    assert (ready, output) == (True, None)
+    assert captured["stock_target"] == 5
+    assert captured["storage_limit"] == 5
+    assert any("MALL STARTER CAP" in message for message in messages)
 
 
 def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:
