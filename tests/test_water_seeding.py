@@ -46,10 +46,10 @@ def test_fixture_water_payload_matches_the_generated_world_lake() -> None:
 @pytest.mark.parametrize(
     ("direction", "expected"),
     [
-        ("north", (14, 84, 27, 96)),
-        ("south", (14, 71, 27, 83)),
-        ("east", (8, 77, 20, 90)),
-        ("west", (21, 77, 33, 90)),
+        ("north", (14, 71, 27, 83)),
+        ("south", (14, 84, 27, 96)),
+        ("east", (21, 77, 33, 90)),
+        ("west", (8, 77, 20, 90)),
     ],
 )
 def test_water_payload_rotates_the_lake_behind_the_pump(

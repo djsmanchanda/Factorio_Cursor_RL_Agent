@@ -66,7 +66,7 @@ def test_crude_and_water_are_explicit_and_offshore_edge_is_valid() -> None:
     assert lake["tile"] == "water"
     assert lake["x1"] <= site["position"][0] <= lake["x2"]
     assert site["position"][1] == lake["y1"] - 0.5
-    assert site["direction"] == "north"
+    assert site["direction"] == "south"
 
 
 def test_starter_kit_is_construction_only_and_contains_no_infinity() -> None:

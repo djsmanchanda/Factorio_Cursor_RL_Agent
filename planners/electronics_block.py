@@ -314,8 +314,8 @@ def _fluid_routes(
         water_direction = world.offshore_pump_sites[0].get("direction", "north")
         water_vector = direction_vectors[water_direction]
         water_from = (
-            water_output[0] + water_vector[0],
-            water_output[1] + water_vector[1],
+            water_output[0] - water_vector[0],
+            water_output[1] - water_vector[1],
         )
         water_to = [
             header_attachment("sulfur", "water", 2, 90, 108)["attach"],

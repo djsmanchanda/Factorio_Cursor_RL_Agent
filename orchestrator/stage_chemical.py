@@ -8,7 +8,9 @@ from collections.abc import Callable
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
 from orchestrator.game_bridge import GameBridge
-from orchestrator.extraction_transport import planned_footprint_tiles
+from orchestrator.extraction_transport import (
+    planned_footprint_tiles, preflight_ingredient_transport,
+)
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.stage_extraction import (
     candidate_mining_origins, choose_mining_origin, direct_mine_plan,
@@ -20,7 +22,7 @@ from orchestrator.stage_services import (
     _wait_for_ghosts, extend_power, extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
-    _publish_output_chest, _swap_infinity_chests, ensure_ingredient_transport,
+    _direct_single_belt_feed, _publish_output_chest, transport_grace_seconds,
 )
 from planners.fluid_layouts import (
     fluid_network_segments, generate_fluid_machine_row, header_attachment,
@@ -39,7 +41,8 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 ServiceStage = Callable[..., None]
-EnsureItem = Callable[[str], Point | None]
+
+_CHEMICAL_BELT_ROUTE_LIMIT = 400
 
 
 def _merge(*plans: dict) -> dict:
@@ -81,6 +84,20 @@ def _find_oil_cell_site(
     """Reserve the chemical district around crude oil, not around the base."""
     return live_base.find_clear_area(
         client, surface, oil_position, 42, 34, max_radius=80.0,
+        avoid_resources=True, resource_clearance=5,
+    )
+
+
+def _find_plastic_site(
+    client: RconClient, surface: str, refinery_centre: Point, coal_output: Point,
+) -> Point | None:
+    """Put plastic between its two persistent sources when they are separated."""
+    midpoint = (
+        (refinery_centre[0] + coal_output[0]) / 2,
+        (refinery_centre[1] + coal_output[1]) / 2,
+    )
+    return live_base.find_clear_area(
+        client, surface, midpoint, 12, 12, max_radius=60.0,
         avoid_resources=True, resource_clearance=5,
     )
 
@@ -307,17 +324,34 @@ def _coal_compatible_mining_origins(
 def ensure_coal_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage, emit: Callable[[str], None],
+    *, prefer_nearest_patch: bool = False,
 ) -> Point | None:
     try:
         retire_depleted_mines(client, bridge, surface, force, "coal", reference, emit)
     except RuntimeError as error:
         raise StuckError(str(error)) from error
     existing = extraction_state.find_resource_mine(client, surface, force, "coal", reference)
+    found = None
     if existing is not None:
-        if existing.pending:
-            raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
-        return existing.output
-    found = resource_patches.nearest_viable_patch(client, surface, "coal", reference)
+        if prefer_nearest_patch:
+            found = resource_patches.nearest_viable_patch(
+                client, surface, "coal", reference,
+            )
+        existing_distance = math.dist(existing.output, reference)
+        patch_distance = (
+            math.dist(found.nearest, reference) if found is not None else math.inf
+        )
+        if existing_distance <= patch_distance:
+            if existing.pending:
+                raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
+            return existing.output
+        emit(
+            f"  COAL DISTRICT: local patch at {found.nearest} is "
+            f"{patch_distance:.0f} tiles from chemical processing versus "
+            f"{existing_distance:.0f} for the existing mine at {existing.output}"
+        )
+    if found is None:
+        found = resource_patches.nearest_viable_patch(client, surface, "coal", reference)
     if found is None:
         raise StuckError("No coal patch found within the local 400-tile search")
     _nearest, patch_min, patch_max = found.nearest, found.minimum, found.maximum
@@ -419,15 +453,12 @@ def _route_oil_fluid_link(
 
 def ensure_oil_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    reference: Point, ensure_item: EnsureItem, service_stage: ServiceStage,
+    reference: Point, service_stage: ServiceStage,
     emit: Callable[[str], None],
 ) -> dict[str, Point] | None:
     existing = _existing_outputs(client, surface, force)
     if existing is not None:
         return existing
-    coal = ensure_item("coal")
-    if coal is None:
-        return None
     oil = live_base.nearest_resource(client, surface, "crude-oil", reference)
     if oil is None:
         raise StuckError("No crude-oil patch found within the local 400-tile search")
@@ -437,6 +468,19 @@ def ensure_oil_cell(
         raise StuckError("No ore-free 42x34 area found near the crude-oil source")
     ox, oy = round(cell[0]), round(cell[1])
     cell_centre = (ox + 21.0, oy + 17.0)
+    coal = ensure_coal_mine(
+        client, bridge, surface, force, cell_centre, service_stage, emit,
+        prefer_nearest_patch=True,
+    )
+    if coal is None:
+        return None
+    plastic_site = _find_plastic_site(client, surface, cell_centre, coal)
+    if plastic_site is None:
+        raise StuckError(
+            "No ore-free 12x12 plastic site found between the local coal mine "
+            "and oil refinery"
+        )
+    px, py = round(plastic_site[0]), round(plastic_site[1])
     water = chemical_survey.nearest_offshore_pump_site(
         client, surface, cell_centre,
     )
@@ -447,8 +491,12 @@ def ensure_oil_cell(
         f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
         f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
     )
+    emit(
+        f"  OIL DISTRICT: plastic at {(px, py)} between refinery "
+        f"{cell_centre} and local coal belt {coal}"
+    )
     refinery = generate_fluid_machine_row("basic-oil-processing", 1, ox, oy)
-    plastic = generate_fluid_machine_row("plastic-bar", 2, ox + 18, oy)
+    plastic = generate_fluid_machine_row("plastic-bar", 2, px, py)
     sulfur = generate_fluid_machine_row("sulfur", 2, ox + 18, oy + 16)
     crude_source = generate_pumpjack_source([oil_site], [oil_site["output"]])
     water_source = generate_offshore_pump_source([water], [water["output"]])
@@ -457,13 +505,13 @@ def ensure_oil_cell(
         for plan in (crude_source, water_source, refinery, plastic, sulfur)
     ]
     crude_source, water_source, refinery, plastic, sulfur = plans
-    plastic_feed = _swap_infinity_chests(plastic, {"coal": "logistic"})["coal"]
+    plastic_feed = _direct_single_belt_feed(plastic, "coal", "east")
     _publish_output_chest(plastic)
     _publish_output_chest(sulfur)
 
     crude_to = header_attachment("basic-oil-processing", "crude-oil", 1, ox, oy)["attach"]
     petroleum_from = header_attachment("basic-oil-processing", "petroleum-gas", 1, ox, oy)["attach"]
-    plastic_gas = header_attachment("plastic-bar", "petroleum-gas", 2, ox + 18, oy)["attach"]
+    plastic_gas = header_attachment("plastic-bar", "petroleum-gas", 2, px, py)["attach"]
     sulfur_gas = header_attachment("sulfur", "petroleum-gas", 2, ox + 18, oy + 16)["attach"]
     sulfur_water = header_attachment("sulfur", "water", 2, ox + 18, oy + 16)["attach"]
     endpoints = [oil_site["output"], water["output"], crude_to, petroleum_from,
@@ -502,7 +550,7 @@ def ensure_oil_cell(
             },
         ]
         + fluid_network_segments("basic-oil-processing", 1, ox, oy)
-        + fluid_network_segments("plastic-bar", 2, ox + 18, oy)
+        + fluid_network_segments("plastic-bar", 2, px, py)
         + fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
     )
     links = []
@@ -527,6 +575,19 @@ def ensure_oil_cell(
             raise StuckError(
                 f"{fluid} cannot be routed from {source} to {targets}: {error}"
             ) from error
+    route = preflight_ingredient_transport(
+        client, surface, force, "plastic-bar", "coal", coal, plastic_feed, 2,
+        max_belt_route_tiles=_CHEMICAL_BELT_ROUTE_LIMIT,
+        additional_blocked=planned_footprint_tiles(_merge(*plans, *links)),
+        mode="belt", destination_is_belt=True,
+        destination_belt_direction="east",
+    )
+    if route is None:
+        raise StuckError("plastic coal route unexpectedly selected logistics")
+    coal_actions, coal_belt_type = route
+    plastic["phases"].append({
+        "name": "bridge_coal_to_plastic-bar", "actions": coal_actions,
+    })
     _submit_oil_cell_plans(client, bridge, surface, force, plans, links, emit)
     _connect_oil_cell_power(client, bridge, surface, force, plans, emit)
 
@@ -543,9 +604,14 @@ def ensure_oil_cell(
             _substation(plan), machines, emit,
             logistic_chest_positions=_logistic_chest_positions(plan),
         )
-    coal_grace = ensure_ingredient_transport(
-        client, bridge, surface, force, "plastic-bar", "coal", coal,
-        plastic_feed, 2, emit,
+    coal_belt_tiles = sum(
+        1 for action in coal_actions
+        if "transport-belt" in action.get("entity", "")
+    )
+    coal_grace = transport_grace_seconds(coal_belt_type, coal_belt_tiles)
+    emit(
+        f"  plastic-bar: coal arrives by local {coal_belt_type} "
+        f"({coal_belt_tiles} belt tiles from {coal})"
     )
     stuck = _diagnose_machines(
         client, surface, _positions(plastic, "chemical-plant") + _positions(sulfur, "chemical-plant"),

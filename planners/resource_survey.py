@@ -252,10 +252,10 @@ def _require_local(
 
 def _offshore_candidates(water_tiles: set[tuple[int, int]]) -> list[dict]:
     direction_specs = (
-        ("north", (0, -1), (0.5, -0.5), (0, -3)),
-        ("east", (1, 0), (1.5, 0.5), (3, 0)),
-        ("south", (0, 1), (0.5, 1.5), (0, 3)),
-        ("west", (-1, 0), (-0.5, 0.5), (-3, 0)),
+        ("south", (0, -1), (0.5, -0.5), (0, -3)),
+        ("west", (1, 0), (1.5, 0.5), (3, 0)),
+        ("north", (0, 1), (0.5, 1.5), (0, 3)),
+        ("east", (-1, 0), (-0.5, 0.5), (-3, 0)),
     )
     candidates = []
     for x, y in sorted(water_tiles, key=lambda point: (point[1], point[0])):
@@ -416,13 +416,13 @@ def _shore_geometry_is_valid(candidate: Mapping, water_tiles: set[tuple[int, int
     direction = candidate["direction"]
     land = (floor(position[0]), floor(position[1]))
     output_tile = (floor(output[0]), floor(output[1]))
-    if direction == "north":
+    if direction == "south":
         intake = (land[0], land[1] + 1)
         path = {(land[0], y) for y in range(output_tile[1], land[1] + 1)}
-    elif direction == "east":
+    elif direction == "west":
         intake = (land[0] - 1, land[1])
         path = {(x, land[1]) for x in range(land[0], output_tile[0] + 1)}
-    elif direction == "south":
+    elif direction == "north":
         intake = (land[0], land[1] - 1)
         path = {(land[0], y) for y in range(land[1], output_tile[1] + 1)}
     else:

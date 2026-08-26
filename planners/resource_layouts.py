@@ -23,8 +23,10 @@ _PUMPJACK_OUTPUT_OFFSETS = {
 }
 
 _OFFSHORE_OUTPUT_OFFSETS = {
-    "north": (0, -2), "east": (2, 0),
-    "south": (0, 2), "west": (-2, 0),
+    # Factorio's offshore-pump direction points into the water. The pipe
+    # connector is on the opposite, landward side of the 2x2 footprint.
+    "north": (0, 2), "east": (-2, 0),
+    "south": (0, -2), "west": (2, 0),
 }
 
 ROW_POLE = "medium-electric-pole"

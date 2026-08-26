@@ -3074,10 +3074,6 @@ def ensure_produced(
     if item in {"plastic-bar", "sulfur"}:
         outputs = ensure_oil_cell(
             client, bridge, surface, force, reference_point,
-            lambda ingredient: ensure_produced(
-                client, bridge, surface, force, ingredient, reference_point, emit,
-                upgrade_bootstrap=upgrade_bootstrap,
-            ),
             bring_stage_up, emit,
         )
         return outputs[item] if outputs else None

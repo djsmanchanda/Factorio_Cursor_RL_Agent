@@ -87,7 +87,7 @@ def test_canonical_world_allocates_known_source_geometry_and_capacity() -> None:
     assert result["block_bounds"] == {key: float(value) for key, value in _MACRO_BLOCK.items()}
     assert result["offshore_pump_sites"][0] == {
         "position": [20.5, 83.5], "output": [20, 81],
-        "resource": "water", "capacity_per_second": 1200.0, "direction": "north",
+        "resource": "water", "capacity_per_second": 1200.0, "direction": "south",
     }
     ElectronicsWorldSpec.from_payload(result)
 

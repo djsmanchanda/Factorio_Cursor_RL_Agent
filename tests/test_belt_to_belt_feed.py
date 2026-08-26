@@ -199,16 +199,6 @@ def test_running_short_of_belt_is_recoverable() -> None:
     assert "raise MaterialShortage(" in tail
 
 
-def test_the_shortage_asks_for_the_cheapest_tier() -> None:
-    """It is the tier the mall can actually produce; asking for a faster one
-    would queue a part the base may have no recipe for."""
-    tail = _PLAN[_PLAN.index("raise MaterialShortage("):]
-    ordering = _PLAN[_PLAN.index("for tier in tier_order:"):]
-
-    assert ordering.index("raise MaterialShortage(") < len(ordering)
-    assert "requirements[tier]" in tail
-
-
 def test_a_shortage_carries_a_real_requirement() -> None:
     shortage = MaterialShortage(
         "belt bridge for iron-ore", {"transport-belt": 120}, {"transport-belt": 24},

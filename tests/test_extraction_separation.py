@@ -508,6 +508,51 @@ def test_coal_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatc
     stage_chemical.ensure_coal_mine(object(), object(), "nauvis", "player", (0, 0), service_stage, lambda _m: None)
     assert captured["logistic_chest_positions"] == []
 
+
+def test_oil_district_ignores_a_remote_existing_coal_mine(monkeypatch) -> None:
+    from orchestrator import stage_chemical
+
+    messages = []
+    remote = extraction_state.ResourceMine((24.5, -49.5), 2)
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine", lambda *_a: remote,
+    )
+    monkeypatch.setattr(
+        stage_chemical.resource_patches, "nearest_viable_patch",
+        lambda *_a, **_k: resource_patches.ResourcePatch(
+            (-340.0, 20.0), (-350.0, 10.0), (-330.0, 30.0), 500_000,
+        ),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_coal_compatible_mining_origins",
+        lambda *_a: [(-345.0, 15.0)],
+    )
+    monkeypatch.setattr(
+        stage_chemical, "choose_mining_origin",
+        lambda *_a, **_k: ((-345.0, 15.0), 2),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "direct_mine_plan",
+        lambda *_a, **_k: ({"phases": []}, (-350.5, 15.5)),
+    )
+    monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
+    monkeypatch.setattr(stage_chemical, "_publish_output_chest", lambda _plan: None)
+    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        stage_chemical, "existing_mine_service_geometry",
+        lambda *_a, **_k: ((0, 0), ((-1, -1), (1, 1)), (0, 0), []),
+    )
+
+    result = stage_chemical.ensure_coal_mine(
+        object(), object(), "nauvis", "player", (-237.0, -91.0),
+        lambda *_a, **_k: None, messages.append,
+        prefer_nearest_patch=True,
+    )
+
+    assert result is None
+    assert any("versus" in message for message in messages)
+
 def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     monkeypatch,
 ) -> None:

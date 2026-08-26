@@ -12,7 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import pytest
 
-from orchestrator import live_base, stage_chemical
+from orchestrator import extraction_state, live_base, resource_patches, stage_chemical
 from orchestrator.stage_services import _ghost_materials
 
 Point = tuple[float, float]
@@ -46,7 +46,7 @@ def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
 def test_requested_straight_shoreline_has_external_land_output() -> None:
     site = {
         "position": (-97.5, 15.5), "output": (-98, 13),
-        "resource": "water", "direction": "north",
+        "resource": "water", "direction": "south",
     }
 
     plan = stage_chemical.generate_offshore_pump_source([site], [site["output"]])
@@ -75,6 +75,103 @@ def test_oil_cell_search_is_anchored_to_crude_not_the_base(monkeypatch) -> None:
     assert captured["kwargs"]["max_radius"] == 80.0
 
 
+def test_plastic_site_is_surveyed_at_coal_refinery_midpoint(monkeypatch) -> None:
+    captured = {}
+
+    def find_clear(_client, _surface, near, width, height, **kwargs):
+        captured.update(near=near, width=width, height=height, kwargs=kwargs)
+        return (-305.0, -45.0)
+
+    monkeypatch.setattr(stage_chemical.live_base, "find_clear_area", find_clear)
+
+    result = stage_chemical._find_plastic_site(
+        object(), "nauvis", (-237.0, -91.0), (-340.0, 20.0),
+    )
+
+    assert result == (-305.0, -45.0)
+    assert captured["near"] == (-288.5, -35.5)
+    assert (captured["width"], captured["height"]) == (12, 12)
+
+
+def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+    submitted: dict[str, object] = {}
+    monkeypatch.setattr(stage_chemical, "_existing_outputs", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.live_base, "nearest_resource",
+        lambda *_a: ((-268.5, -98.5), 1_000_000),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_find_oil_cell_site", lambda *_a: (-258.0, -108.0),
+    )
+
+    def local_coal(*_args, **kwargs):
+        calls["coal_reference"] = _args[4]
+        calls["prefer_nearest_patch"] = kwargs["prefer_nearest_patch"]
+        return (-340.0, 20.0)
+
+    monkeypatch.setattr(stage_chemical, "ensure_coal_mine", local_coal)
+
+    def plastic_site(_client, _surface, refinery_centre, coal_output):
+        calls["plastic_inputs"] = (refinery_centre, coal_output)
+        return (-305.0, -45.0)
+
+    monkeypatch.setattr(stage_chemical, "_find_plastic_site", plastic_site)
+    monkeypatch.setattr(
+        stage_chemical.chemical_survey, "nearest_offshore_pump_site",
+        lambda *_a: {
+            "position": (-97.5, 15.5), "output": (-98, 13),
+            "resource": "water", "direction": "south",
+        },
+    )
+    monkeypatch.setattr(stage_chemical.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(stage_chemical.live_base, "water_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        stage_chemical, "_route_oil_fluid_link",
+        lambda *_a, **_k: ({"phases": [{"name": "fluid", "actions": []}]}, [], False),
+    )
+
+    def preflight(*args, **kwargs):
+        calls["preflight"] = (args, kwargs)
+        return ([{
+            "action_type": "place_ghost", "entity": "transport-belt",
+            "position": {"x": -320.5, "y": -20.5}, "direction": "east",
+        }], "transport-belt")
+
+    monkeypatch.setattr(stage_chemical, "preflight_ingredient_transport", preflight)
+
+    def submit(_client, _bridge, _surface, _force, plans, links, _emit):
+        submitted.update(plans=plans, links=links)
+
+    monkeypatch.setattr(stage_chemical, "_submit_oil_cell_plans", submit)
+    monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
+    monkeypatch.setattr(stage_chemical, "_diagnose_machines", lambda *_a, **_k: [])
+
+    result = stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        lambda *_a, **_k: None, lambda _m: None,
+    )
+
+    assert set(result) == {"plastic-bar", "sulfur"}
+    assert calls["coal_reference"] == (-237.0, -91.0)
+    assert calls["prefer_nearest_patch"] is True
+    assert calls["plastic_inputs"] == ((-237.0, -91.0), (-340.0, 20.0))
+    args, kwargs = calls["preflight"]
+    assert args[5:7] == ((-340.0, 20.0), (-306.5, -44.5))
+    assert kwargs["mode"] == "belt"
+    assert kwargs["destination_is_belt"] is True
+    all_actions = [
+        action for plan in submitted["plans"]
+        for phase in plan["phases"] for action in phase["actions"]
+    ]
+    assert not any(action.get("entity") == "requester-chest" for action in all_actions)
+    assert any(
+        action.get("entity") == "transport-belt"
+        and action.get("position") == {"x": -320.5, "y": -20.5}
+        for action in all_actions
+    )
+
+
 def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:
     class Client:
         command_text = ""
@@ -89,7 +186,7 @@ def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:
     ) is None
 
     assert "for side=-1,1" in client.command_text
-    assert "{'east',1,0,1.5,0.5,3,0}" in client.command_text
+    assert "{'west',1,0,1.5,0.5,3,0}" in client.command_text
 
 
 def test_landfill_is_separated_from_dependent_pipe_ghosts() -> None:

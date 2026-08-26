@@ -133,10 +133,10 @@ local function validate_lake(spec, resource_patches)
     validate_position(site.output, label .. ".output")
     if not DIRECTIONS[site.direction] then error(label .. " direction is invalid") end
     local x, y = site.position[1], site.position[2]
-    local on_edge = (site.direction == "north" and y == lake.y1 - 0.5 and x >= lake.x1 and x <= lake.x2)
-      or (site.direction == "south" and y == lake.y2 + 0.5 and x >= lake.x1 and x <= lake.x2)
-      or (site.direction == "west" and x == lake.x1 - 0.5 and y >= lake.y1 and y <= lake.y2)
-      or (site.direction == "east" and x == lake.x2 + 0.5 and y >= lake.y1 and y <= lake.y2)
+    local on_edge = (site.direction == "south" and y == lake.y1 - 0.5 and x >= lake.x1 and x <= lake.x2)
+      or (site.direction == "north" and y == lake.y2 + 0.5 and x >= lake.x1 and x <= lake.x2)
+      or (site.direction == "east" and x == lake.x1 - 0.5 and y >= lake.y1 and y <= lake.y2)
+      or (site.direction == "west" and x == lake.x2 + 0.5 and y >= lake.y1 and y <= lake.y2)
     if not on_edge then error(label .. " is not on the declared lake edge") end
   end
   return lake
