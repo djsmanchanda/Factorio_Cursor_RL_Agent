@@ -20,7 +20,7 @@ from orchestrator.build_decisions import (
     may_consume_stocked_inputs,
 )
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
-from orchestrator.construction_stock import MallReserve, mall_reserve
+from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
@@ -1425,6 +1425,8 @@ def _retire_standing_bootstrap_cells(
             f"BOOTSTRAP SWAP: full {recipe} system is healthy; retiring the "
             f"direct starter at {starter.drill_position}"
         )
+        if recipe in {"iron-plate", "copper-plate"}:
+            _release_metal_starter_limits_if_complete(client, surface, force)
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
     except Exception:  # survey unavailable (dry harness): no legacy cell to retire
@@ -1856,11 +1858,14 @@ def _bootstrap_direct_plate_line(
     recipe: str, reference_point: Point, emit: Callable[[str], None],
 ) -> Point:
     """Ensure one local direct plate or brick starter without bots or belts."""
+    global _STARTUP_METAL_STARTERS_OBSERVED
     ore = LINE_RECIPES[recipe]["ingredients"][0]
     standing = live_base.direct_plate_starter(
         client, surface, force, recipe, ore, reference_point,
     )
     if standing is not None:
+        if recipe in {"iron-plate", "copper-plate"}:
+            _STARTUP_METAL_STARTERS_OBSERVED = True
         emit(
             f"  PLATE STARTER: reusing the direct {recipe} stack at "
             f"{standing.drill_position}"
@@ -1882,6 +1887,8 @@ def _bootstrap_direct_plate_line(
         f"PLATE STARTER: {recipe} begins with {drill_count} drill(s) feeding one furnace "
         f"directly at {site.drill_position}; no belts, requesters, or bot haul"
     )
+    if recipe in {"iron-plate", "copper-plate"}:
+        _STARTUP_METAL_STARTERS_OBSERVED = True
     return _serve_direct_plate_starter(
         client, bridge, surface, force, recipe, ore, site, emit, submit=True,
     )
@@ -2791,6 +2798,17 @@ PERSISTENT_INTERMEDIATES = frozenset({
     "iron-stick", "steel-plate", "advanced-circuit", "steel-chest",
 })
 MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
+
+# The direct iron/copper stacks are deliberately temporary. Their tiny mall
+# ceilings protect the first plates from being converted into construction
+# components before the belt-fed metal systems take over.
+_STARTUP_METAL_STARTERS_OBSERVED = False
+_STARTUP_MALL_LIMITS_RELEASED = False
+_STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
+_STARTUP_MALL_ITEM_CAPS = frozenset({
+    "electronic-circuit", "splitter", "underground-belt",
+})
+_POST_STARTER_ONE_STACK_ITEMS = frozenset({"splitter", "underground-belt"})
 
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
@@ -3994,10 +4012,63 @@ def _advance_the_goal(
         return _SHORTAGE
 
 
+def _metal_starter_transition_complete(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether direct iron/copper stacks have yielded to full refineries."""
+    global _STARTUP_MALL_LIMITS_RELEASED, _STARTUP_MALL_LIMITS_FALLBACK_PROBED
+    if _STARTUP_MALL_LIMITS_RELEASED:
+        return True
+    if _STARTUP_METAL_STARTERS_OBSERVED:
+        return False
+    if _STARTUP_MALL_LIMITS_FALLBACK_PROBED:
+        return False
+    _STARTUP_MALL_LIMITS_FALLBACK_PROBED = True
+    try:
+        completed = all(
+            _direct_plate_foundation_ready(client, surface, force, recipe)
+            and live_base.direct_plate_starter(
+                client, surface, force, recipe,
+                LINE_RECIPES[recipe]["ingredients"][0], (3.0, -1.0),
+            ) is None
+            for recipe in ("iron-plate", "copper-plate")
+        )
+    except Exception:
+        return False
+    _STARTUP_MALL_LIMITS_RELEASED = completed
+    return completed
+
+
+def _release_metal_starter_limits_if_complete(
+    client: RconClient, surface: str, force: str,
+) -> None:
+    """Lift startup caps immediately after the second direct stack retires."""
+    global _STARTUP_MALL_LIMITS_RELEASED
+    if not _STARTUP_METAL_STARTERS_OBSERVED or _STARTUP_MALL_LIMITS_RELEASED:
+        return
+    try:
+        if all(
+            live_base.direct_plate_starter(
+                client, surface, force, recipe,
+                LINE_RECIPES[recipe]["ingredients"][0], (3.0, -1.0),
+            ) is None
+            for recipe in ("iron-plate", "copper-plate")
+        ):
+            _STARTUP_MALL_LIMITS_RELEASED = True
+    except Exception:
+        return
+
+
 def mall_reserve_for(
     client: RconClient, surface: str, force: str, item: str, target: int,
 ) -> MallReserve:
     """Reserve ahead while scarce; fill the chest once AM3 is self-produced."""
+    transitioned = _metal_starter_transition_complete(client, surface, force)
+    if not transitioned and item in _STARTUP_MALL_ITEM_CAPS:
+        return MallReserve(5, 5, None)
+    if transitioned and item in _POST_STARTER_ONE_STACK_ITEMS:
+        stack_size = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+        return MallReserve(stack_size, stack_size, 1)
     return mall_reserve(
         item,
         target,
@@ -4100,8 +4171,13 @@ def _open_the_run(
     time: the first check only knows the hardcoded recipes, and the point of
     loading is that the live force may know more.
     """
+    global _STARTUP_METAL_STARTERS_OBSERVED, _STARTUP_MALL_LIMITS_RELEASED
+    global _STARTUP_MALL_LIMITS_FALLBACK_PROBED
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     MANAGED_INTERMEDIATE_SOURCES.clear()
+    _STARTUP_METAL_STARTERS_OBSERVED = False
+    _STARTUP_MALL_LIMITS_RELEASED = False
+    _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
     machines = install_catalog_machines(catalog)

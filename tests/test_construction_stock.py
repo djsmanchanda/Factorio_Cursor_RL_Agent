@@ -207,6 +207,38 @@ def test_live_reserve_lifts_after_an_assembler_three_producer(monkeypatch) -> No
     ).fill_chest is True
 
 
+def test_starter_migration_caps_electronics_and_belt_components(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+
+    for item in ("electronic-circuit", "splitter", "underground-belt"):
+        assert builder.mall_reserve_for(
+            object(), "nauvis", "player", item, 200,
+        ) == MallReserve(5, 5, None)
+
+
+def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"splitter": 50, "underground-belt": 50},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+
+    for item in ("splitter", "underground-belt"):
+        assert builder.mall_reserve_for(
+            object(), "nauvis", "player", item, 200,
+        ) == MallReserve(50, 50, 1)
+    assert builder.mall_reserve_for(
+        object(), "nauvis", "player", "electronic-circuit", 200,
+    ) == builder.mall_reserve(
+        "electronic-circuit", 200, stack_sizes=builder.ITEM_STACK_SIZES,
+        mature=False,
+    )
+
+
 # --- the persisted-target trap ---------------------------------------------
 
 def test_a_persisted_target_never_outlives_the_mission_that_set_it() -> None:
