@@ -97,6 +97,7 @@ def request_multiplier(machine: str, craft_time: float) -> int:
 def recipe_logistic_section(
     recipe: str, ingredients: list[str], amounts: list[float],
     *, machine: str, craft_time: float, consumer: str | None = None,
+    multiplier_override: int | None = None,
 ) -> dict:
     """One labelled request group for the machines producing `recipe`.
 
@@ -105,10 +106,12 @@ def recipe_logistic_section(
     machine each set is for, and rebuilding one machine rewrites only its own
     section instead of accumulating onto whatever the chest already held.
     """
+    if multiplier_override is not None and multiplier_override < 1:
+        raise ValueError("Mall request multiplier must be positive")
     return {
         "group": recipe_group_name(recipe, consumer),
         "requests": recipe_group_requests(ingredients, amounts),
-        "multiplier": request_multiplier(machine, craft_time),
+        "multiplier": multiplier_override or request_multiplier(machine, craft_time),
     }
 
 
@@ -250,6 +253,7 @@ def generate_paired_mall_layout(
     set_recipe: bool = True,
     stock_gate_target: int | None = None,
     fill_chest: bool = False,
+    request_multiplier_override: int | None = None,
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -261,7 +265,7 @@ def generate_paired_mall_layout(
         raise ValueError("Paired mall side must be left or right")
     section = recipe_logistic_section(
         recipe, ingredients, amounts, machine=machine, craft_time=craft_time,
-        consumer=side,
+        consumer=side, multiplier_override=request_multiplier_override,
     )
     ox, oy = origin
     left = side == "left"

@@ -116,6 +116,7 @@ from planners.local_layout_planner import LocalLayoutPlanner
 from planners.mall_layout import (
     generate_compact_mall_request_update, generate_mall_provider_limit_update,
     generate_mall_stock_gate_update, generate_promoted_mall_retirement_plan,
+    request_multiplier as standard_mall_request_multiplier,
 )
 from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.recipe_data import (
@@ -2468,6 +2469,7 @@ class _LinePlan:
     production_target: int
     mall_storage_limit: int
     fill_provider: bool
+    mall_request_multiplier: int | None
     demand: float
     saturated: bool
     promoted_count: int | None
@@ -2489,6 +2491,9 @@ def _plan_line(
             client, surface, force, item,
         )
     existing = live_base.find_line(client, surface, force, item, spec["machine"])
+    mall_request_multiplier = _mall_request_multiplier(
+        client, surface, force, item, spec,
+    )
     demand = live_intermediate_demand(client, surface, force, item)
     # Every machine busy means this cell cannot go faster, whatever measured
     # demand says -- and measured demand is unreliable here precisely because
@@ -2534,6 +2539,7 @@ def _plan_line(
     return _LinePlan(
         existing=existing, spec=spec, production_target=stock_target,
         mall_storage_limit=mall_storage_limit, fill_provider=fill_provider,
+        mall_request_multiplier=mall_request_multiplier,
         demand=demand, saturated=saturated, promoted_count=promoted_count,
         promote_to_line=promote_to_line,
         at_size=existing is None or existing.machine_count >= minimum_machines,
@@ -2543,6 +2549,7 @@ def _plan_line(
 def _refresh_mall_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     plan: _LinePlan, emit: Callable[[str], None], *, upgrade_bootstrap: bool,
+    reference_point: Point = (3.0, -1.0),
     stock_gate_target: int | None = None,
 ) -> Point | None:
     """Re-apply a live mall cell's request group and provider limit.
@@ -2576,6 +2583,12 @@ def _refresh_mall_cell(
             )
 
     if existing and not _mineable(item):
+        if getattr(plan, "mall_request_multiplier", None) is not None and not upgrade_bootstrap:
+            refresh_paired_mall_requests(
+                client, bridge, surface, force, item,
+                list(existing.machine_positions), reference_point, emit,
+                request_multiplier_override=plan.mall_request_multiplier,
+            )
         mall_provider = _paired_mall_provider(
             client, surface, existing.machine_positions,
         )
@@ -2809,6 +2822,18 @@ _STARTUP_MALL_ITEM_CAPS = frozenset({
     "electronic-circuit", "splitter", "underground-belt",
 })
 _POST_STARTER_ONE_STACK_ITEMS = frozenset({"splitter", "underground-belt"})
+_STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
+
+
+def _mall_request_multiplier(
+    client: RconClient, surface: str, force: str, item: str, spec: dict,
+) -> int | None:
+    """Keep belt-component requester buffers small while starter metal is scarce."""
+    if item not in _STARTUP_MALL_REQUESTER_ITEMS:
+        return None
+    if not _metal_starter_transition_complete(client, surface, force):
+        return 2
+    return standard_mall_request_multiplier(spec["machine"], spec["craft_time"])
 
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
@@ -3061,6 +3086,7 @@ def _build_assembled_stage(
             bring_stage_up, emit, stock_target=mall_storage_limit,
             stock_gate_target=stock_gate_target,
             fill_chest=plan.fill_provider,
+            request_multiplier_override=plan.mall_request_multiplier,
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -3154,6 +3180,7 @@ def ensure_produced(
         client, bridge, surface, force, item, plan, emit,
         upgrade_bootstrap=upgrade_bootstrap,
         stock_gate_target=stock_gate_target,
+        reference_point=reference_point,
     )
     existing = plan.existing
     # An UNDER-SIZED line falls through to the build path: production prep asks

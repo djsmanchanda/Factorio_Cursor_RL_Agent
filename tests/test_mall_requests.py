@@ -136,6 +136,18 @@ def test_multiplier_tracks_crafting_speed_not_the_stock_target() -> None:
     assert small == large
 
 
+def test_requester_multiplier_can_be_reduced_during_bootstrap() -> None:
+    """Starter belt components must not reserve the normal ten-second buffer."""
+    spec = LINE_RECIPES["copper-cable"]
+    plan = generate_paired_mall_layout(
+        "copper-cable", spec["machine"], spec["ingredients"], spec["amounts"],
+        _ORIGIN, "left", craft_time=spec["craft_time"],
+        request_multiplier_override=2,
+    )
+
+    assert _requester(plan)["logistic_sections"][0]["multiplier"] == 2
+
+
 def test_replanning_a_half_is_identical_and_never_accumulates() -> None:
     """The old design merged onto whatever the chest already held, so a retry
     after a partial failure inflated the counts permanently."""

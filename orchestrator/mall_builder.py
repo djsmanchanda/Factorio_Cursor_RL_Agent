@@ -214,7 +214,7 @@ def rebuild_incomplete_mall_cell(
 def refresh_paired_mall_requests(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, machine_positions: list[Point], reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, request_multiplier_override: int | None = None,
 ) -> bool:
     """Migrate complete paired cells to one request section per machine."""
     spec = LINE_RECIPES[recipe]
@@ -229,6 +229,7 @@ def refresh_paired_mall_requests(
             origin, side, product_amount=spec.get("product_amount", 1),
             craft_time=spec["craft_time"],
             set_recipe=spec.get("set_recipe", True),
+            request_multiplier_override=request_multiplier_override,
         )
         action = next(
             action for phase in plan["phases"] for action in phase["actions"]
@@ -255,6 +256,7 @@ def build_compact_mall_stage(
     bring_stage_up: Callable, emit: Callable[[str], None], *, stock_target: int = 1,
     stock_gate_target: int | None = None,
     fill_chest: bool = False,
+    request_multiplier_override: int | None = None,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     spec = LINE_RECIPES[recipe]
@@ -279,6 +281,7 @@ def build_compact_mall_stage(
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
         stock_gate_target=stock_gate_target,
         fill_chest=fill_chest,
+        request_multiplier_override=request_multiplier_override,
     )
     plan["surface"], plan["force"] = surface, force
     machine = _slot_position(origin, side)

@@ -241,6 +241,26 @@ def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> 
     assert any("MALL STARTER CAP" in message for message in messages)
 
 
+def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+    spec = {"machine": "assembling-machine-2", "craft_time": 1.0}
+
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "splitter", spec,
+    ) == 2
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "electronic-circuit", spec,
+    ) is None
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "splitter", spec,
+    ) == 8
+
+
 def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
