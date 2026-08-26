@@ -554,6 +554,12 @@ def _place_new_mine(
         ),
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
+    if allow_unfunded_ghosts:
+        emit(
+            f"  BLUEPRINT EARMARK: {extraction.ore} mine is placed as ghosts; "
+            "construction continues while the mall fills the bill"
+        )
+        return
     stage_xs = [x for x, _y in machine_positions] + [extraction.ore_output[0]]
     stage_ys = [y for _x, y in machine_positions] + [extraction.ore_output[1]]
     area = (
@@ -1265,6 +1271,7 @@ def _prepare_initial_refinery(
     client: RconClient, surface: str, force: str, recipe: str,
     extraction, ore_output: Point, emit: Callable[[str], None], *,
     preflight_only: bool,
+    allow_unfunded_ghosts: bool = False,
 ) -> tuple[dict, dict | None, tuple[float, float], str, int]:
     """Preflight the refinery, route, landfill, bill, and planned mine together."""
     origin = extraction.smelter_origin
@@ -1362,9 +1369,22 @@ def _prepare_initial_refinery(
         "force": force,
         "phases": [phase for staged in combined_plans for phase in staged["phases"]],
     }
-    assert_affordable(
-        client, surface, force, combined, f"initial_{recipe}_system", emit,
-    )
+    try:
+        assert_affordable(
+            client, surface, force, combined, f"initial_{recipe}_system", emit,
+        )
+    except MaterialShortage as shortage:
+        if not allow_unfunded_ghosts or not all(
+            construction_supply_chain_is_scheduled(
+                client, surface, force, item,
+            )
+            for item in shortage.required
+        ):
+            raise
+        emit(
+            f"  BLUEPRINT EARMARK: coherent {recipe} mine/refinery foundation "
+            "has scheduled construction supply chains; placing ghosts now"
+        )
     belt_tiles = sum(
         1 for action in route_actions
         if "transport-belt" in action.get("entity", "")
@@ -1496,12 +1516,14 @@ def _build_initial_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, extraction, ore_output: Point, reference_point: Point,
     emit: Callable[[str], None], *, preflight_only: bool = False,
+    allow_unfunded_ghosts: bool = False,
 ) -> Point:
     """Build the first modular refinery with one continuous mine-to-ore belt."""
     del reference_point
     plan, foundation, provider, belt_type, belt_tiles = _prepare_initial_refinery(
         client, surface, force, recipe, extraction, ore_output, emit,
         preflight_only=preflight_only,
+        allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
     if foundation is not None:
         _place_plate_expansion_foundation(
@@ -1528,7 +1550,14 @@ def _build_initial_plate_smelter(
         stage_coverage=lambda: _ensure_plan_construction_coverage(
             client, bridge, surface, force, coverage_plan, emit,
         ),
+        allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
+    if allow_unfunded_ghosts:
+        emit(
+            f"  BLUEPRINT EARMARK: {recipe} refinery is placed as ghosts; "
+            "construction continues while the mall fills the bill"
+        )
+        return provider
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, plan,
         FURNACES_PER_MODULE,
@@ -1709,6 +1738,7 @@ def build_mining_stage(
             _build_initial_plate_smelter(
                 client, bridge, surface, force, recipe, extraction, ore_output,
                 reference_point, emit, preflight_only=True,
+                allow_unfunded_ghosts=earmark_unfunded,
             )
         except StuckError as error:
             # Genuinely foreign infrastructure at the surveyed site is not a
@@ -1749,6 +1779,7 @@ def build_mining_stage(
             provider = _build_initial_plate_smelter(
                 client, bridge, surface, force, recipe, extraction, ore_output,
                 reference_point, emit,
+                allow_unfunded_ghosts=earmark_unfunded,
             )
         except StuckError as error:
             if "intersects real infrastructure" not in str(error):
@@ -3201,11 +3232,11 @@ def _serve_background_mall_task(
         )
     return True
 
-# Cells whose recipes CONSUME belts wait behind the blueprint reserve: an
-# underground cell eats two belts per craft, and while construction ghosts
-# still need belts the producer must not compete with them for the same stock.
-# User standard, 2026-08-22: produced belts go to the active blueprint first;
-# the consumer resumes once stock recovers past the floor.
+# Cells whose recipes CONSUME belts wait behind the blueprint reserve once the
+# belt line is producing. A stalled starter is different: holding its only
+# belts hostage prevents the splitter/other first consumer that unlocks the
+# iron blueprint from ever being made. In that case one craft may draw from
+# stock; the normal reserve resumes with live belt output.
 _BELT_RESERVE_FLOORS = {
     "transport-belt": 50,
     "fast-transport-belt": 50,
@@ -3227,6 +3258,22 @@ def _belt_starved_consumer(
         if floor is None:
             continue
         held = stock.get(ingredient, 0)
+        ingredient_recipe = LINE_RECIPES.get(ingredient)
+        belt_line = None
+        if ingredient_recipe is not None:
+            try:
+                belt_line = live_base.find_line(
+                    client, surface, force, ingredient,
+                    str(ingredient_recipe["machine"]),
+                )
+            except Exception:  # dry harnesses may not provide line telemetry
+                belt_line = None
+        if (
+            ingredient == "transport-belt"
+            and belt_line is not None
+            and belt_line.working_count <= 0
+        ):
+            continue
         if held < floor + amount:
             return (
                 f"its recipe consumes {ingredient} and only {held} remain -- "
@@ -3482,6 +3529,7 @@ def _prep_plate_extraction(
         item: count for item, count in (pending or {}).items()
         if available.get(item, 0) < count
     }
+    pipeline_ready = False
     if missing_pending:
         if not all(
             construction_supply_chain_is_scheduled(
@@ -3490,6 +3538,7 @@ def _prep_plate_extraction(
             for item in missing_pending
         ):
             return False
+        pipeline_ready = True
         emit(
             f"  PLATE FOUNDATION PIPELINE READY: {short_plate} construction "
             "items are being produced; releasing its coherent blueprint"
@@ -3571,6 +3620,7 @@ def _prep_plate_extraction(
                 and plate_line is not None
                 and not bootstrap_line
             ),
+            earmark_unfunded=pipeline_ready,
             excluded_drill_positions=excluded_drill_positions,
         )
         if output_source is not None:

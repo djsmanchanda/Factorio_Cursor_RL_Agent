@@ -420,7 +420,7 @@ def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatc
 
 
 def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatch) -> None:
-    attempts: list[str] = []
+    attempts: list[dict] = []
     pending = {"iron-plate": {"transport-belt": 132}}
     monkeypatch.setattr(
         autonomous_builder.live_base, "available_items",
@@ -433,7 +433,7 @@ def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatc
     )
     monkeypatch.setattr(
         autonomous_builder, "build_mining_stage",
-        lambda *_args, **_kwargs: attempts.append("build"),
+        lambda *_args, **kwargs: attempts.append(kwargs),
     )
 
     assert autonomous_builder._prep_plate_extraction(
@@ -442,7 +442,8 @@ def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatc
         pending_materials=pending, furnace_target=6,
     )
 
-    assert attempts == ["build"]
+    assert len(attempts) == 1
+    assert attempts[0]["earmark_unfunded"] is True
     assert pending == {}
 
 

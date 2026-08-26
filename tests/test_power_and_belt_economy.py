@@ -63,6 +63,57 @@ def test_belt_cell_itself_is_never_gated_by_the_reserve(monkeypatch) -> None:
     ) is None
 
 
+def test_stalled_belt_starter_releases_one_consumer_craft(monkeypatch) -> None:
+    """A splitter must not wait for the 50-belt reserve before iron exists."""
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {"ingredients": ["transport-belt"], "amounts": [4],
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "transport-belt",
+        {"ingredients": ["iron-plate"], "amounts": [1],
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 28},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(working_count=0),
+    )
+
+    assert builder._belt_starved_consumer(
+        object(), "nauvis", "player", "splitter",
+    ) is None
+
+
+def test_live_belt_output_keeps_the_blueprint_reserve(monkeypatch) -> None:
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {"ingredients": ["transport-belt"], "amounts": [4],
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "transport-belt",
+        {"ingredients": ["iron-plate"], "amounts": [1],
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 28},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(working_count=1),
+    )
+
+    assert builder._belt_starved_consumer(
+        object(), "nauvis", "player", "splitter",
+    ) is not None
+
+
 def test_mall_task_defers_a_belt_starved_consumer(monkeypatch) -> None:
     deferred = []
 
