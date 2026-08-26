@@ -1,7 +1,6 @@
 # Path: tests/test_bootstrap_priorities.py
-# Purpose: The user standard of 2026-08-22 -- essential plate systems must not
-# starve on belt economy: spend stocked fast belts first, and stand up the
-# mall's transport-belt assembler before any mine consumes the reserve.
+# Purpose: Essential plate systems use the cold-start belt tier and stand up
+# the mall's transport-belt assembler before consuming its production.
 
 from types import SimpleNamespace
 
@@ -12,19 +11,18 @@ from orchestrator import live_base
 from orchestrator.parts_mall import MaterialShortage
 
 
-def test_essential_routes_spend_stocked_fast_belts_first(monkeypatch) -> None:
-    """The starter kit ships fast belts precisely for the opening mines; a
-    route that drains regular stock while fast sits unused is misplanned."""
+def test_essential_routes_use_the_cold_start_belt_tier(monkeypatch) -> None:
+    """Partial fast stock cannot make a foundation depend on a gated tier."""
     monkeypatch.setattr(
         builder.live_base, "available_items",
         lambda *_a: {"fast-transport-belt": 100, "transport-belt": 12},
     )
-    assert builder._essential_belt_type(object(), "nauvis", "player") == (
-        "fast-transport-belt"
-    )
+    assert builder._essential_belt_type(
+        object(), "nauvis", "player",
+    ) == "transport-belt"
 
 
-def test_essential_routes_revert_to_regular_when_fast_runs_out(monkeypatch) -> None:
+def test_essential_routes_stay_regular_when_fast_runs_out(monkeypatch) -> None:
     monkeypatch.setattr(
         builder.live_base, "available_items",
         lambda *_a: {"fast-transport-belt": 3, "transport-belt": 200},

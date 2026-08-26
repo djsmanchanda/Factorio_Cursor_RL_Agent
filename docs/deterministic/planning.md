@@ -57,6 +57,10 @@ These names describe intended responsibilities, not permission to build speculat
   iron, cable follows live copper, and circuits follow their live feeders.
   Intermediate requests never recursively choose or open a missing raw
   foundation. Stone, steel, oil, and later materials remain demand-driven.
+- Opening iron and copper foundations use regular belts throughout. Their
+  complete mine, haul, and refinery bill is queued against the working regular
+  belt producer; partial fast-belt stock cannot promote the blueprint into a
+  tier whose producer is still gated.
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.

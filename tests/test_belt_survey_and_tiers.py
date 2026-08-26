@@ -86,7 +86,7 @@ def test_modular_refinery_preflight_uses_the_shared_affordability_router() -> No
     assert "_plan_belt_transport(" in _PREFLIGHT
     assert "_route_belt_tiers(destination_is_belt)" in _PLAN
     assert "for tier in ordered:" in _PLAN
-    assert "if not short:" in _PLAN
+    assert "defer_required_tier_affordability" in _PLAN
 
 
 def test_refinery_preflight_reserves_template_belts_before_routing(monkeypatch) -> None:
@@ -104,6 +104,61 @@ def test_refinery_preflight_reserves_template_belts_before_routing(monkeypatch) 
     )
 
     assert captured["reserved_transport_belts"] == 7
+
+
+def test_foundation_preflight_forwards_one_required_tier(monkeypatch) -> None:
+    captured = {}
+
+    def route(*_args, **kwargs):
+        captured.update(kwargs)
+        return [], "transport-belt", False
+
+    monkeypatch.setattr(extraction_transport, "_plan_belt_transport", route)
+    extraction_transport.preflight_ingredient_transport(
+        object(), "nauvis", "player", "copper-plate", "copper-ore",
+        (10.5, 0.5), (30.5, 0.5), 6, max_belt_route_tiles=100,
+        mode="belt", destination_is_belt=True,
+        required_belt_type="transport-belt",
+        defer_required_tier_affordability=True,
+    )
+
+    assert captured["required_belt_type"] == "transport-belt"
+    assert captured["defer_required_tier_affordability"] is True
+
+
+def test_required_foundation_tier_does_not_promote_to_stocked_fast(
+    monkeypatch,
+) -> None:
+    actions = [
+        {"action_type": "place_ghost", "entity": "transport-belt",
+         "position": {"x": index + 0.5, "y": 0.5}, "direction": "east"}
+        for index in range(4)
+    ]
+    monkeypatch.setattr(
+        stage_transport, "_survey_belt_route",
+        lambda *_args, **_kwargs: (
+            None, (0.5, 0.5), set(), "west", "east",
+        ),
+    )
+    monkeypatch.setattr(
+        stage_transport, "_route_belt_actions",
+        lambda *_args, **_kwargs: [dict(action) for action in actions],
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "available_items",
+        lambda *_args: {"transport-belt": 0, "fast-transport-belt": 400},
+    )
+
+    planned, tier, _reused = stage_transport._plan_belt_transport(
+        object(), "nauvis", "player", "copper-ore",
+        (0.5, 0.5), (4.5, 0.5), reuse_existing=True,
+        max_belt_route_tiles=100, destination_is_belt=True,
+        required_belt_type="transport-belt",
+        defer_required_tier_affordability=True,
+    )
+
+    assert tier == "transport-belt"
+    assert {action["entity"] for action in planned} == {"transport-belt"}
 
 def test_direct_refinery_shortage_remains_recoverable(monkeypatch) -> None:
     shortage = MaterialShortage(

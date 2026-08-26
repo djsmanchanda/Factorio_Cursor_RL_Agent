@@ -1308,6 +1308,11 @@ def _prepare_initial_refinery(
         # the row is still ghosts and reads the head as a west terminal.
         through_flow_direction="east",
         destination_belt_direction="east",
+        # Opening metal foundations use the belt tier the cold-start mall can
+        # actually produce. Route geometry is priced now; the combined bill
+        # below decides when the whole mine/refinery blueprint is affordable.
+        required_belt_type=_DEFAULT_BELT,
+        defer_required_tier_affordability=True,
     )
     if route is None:
         raise StuckError(f"{recipe} direct ore route unexpectedly selected logistics")
@@ -1349,23 +1354,6 @@ def _prepare_initial_refinery(
     combined_plans = (
         [build_plan] if preflight_only and build_plan is not None else []
     ) + ([foundation] if foundation is not None else []) + [bill_plan]
-    # Spend the stocked fast tiers before the scarce regular ones: the mine
-    # scaffold already chose its tier by stock, and the refinery blueprint
-    # must follow the same economy or the base dies one regular belt short
-    # (live run of 2026-08-22 03:25).
-    try:
-        belt_stock = live_base.available_items(client, surface, force)
-        swapped = sum(
-            _prefer_stocked_belt_tiers(staged, belt_stock)
-            for staged in combined_plans
-        )
-        if swapped:
-            emit(
-                f"  BELT ECONOMY: upgraded {swapped} regular belt action(s) to "
-                "stocked fast tiers"
-            )
-    except Exception as error:  # economy upgrade is opportunistic
-        emit(f"  BELT ECONOMY skipped: {error}")
     combined = {
         "force": force,
         "phases": [phase for staged in combined_plans for phase in staged["phases"]],
@@ -1901,19 +1889,13 @@ def _essential_belt_type(
 ) -> str:
     """Belt tier for the FIRST mine/refinery systems.
 
-    Regular belts are the bootstrap's scarcest commodity -- run 5 spent nearly
-    every yellow belt on the iron scaffold and the copper system then could
-    not afford its own bridge. The starter kit ships fast belts for exactly
-    this phase: spend those first and save regular belts to seed the belt
-    mall cell. Falls back to regular once fast stock is gone, so the choice
-    self-balances as the base matures."""
-    available = live_base.available_items(client, surface, force)
-    if available.get("fast-transport-belt", 0) >= _ESSENTIAL_FAST_BELT_MIN:
-        return "fast-transport-belt"
+    The cold-start mall produces regular belts. Selecting fast belts from a
+    partial starter stock made the copper foundation demand 126 fast belts
+    while the fast-belt producer was intentionally gated, even after regular
+    belt production was healthy. Tier upgrades belong after both foundations.
+    """
+    del client, surface, force
     return _DEFAULT_BELT
-
-
-_ESSENTIAL_FAST_BELT_MIN = 40
 
 
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks

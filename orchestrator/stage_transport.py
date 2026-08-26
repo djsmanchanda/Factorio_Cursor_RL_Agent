@@ -580,6 +580,8 @@ def _plan_belt_transport(
     destination_belt_direction: str = "east",
     planned_belt_source: Point | None = None,
     through_flow_direction: str | None = None,
+    required_belt_type: str | None = None,
+    defer_required_tier_affordability: bool = False,
 ) -> tuple[list[dict], str, bool]:
     """Choose the first affordable legal tier after one shared geometry survey."""
     belt_source, route_source, blocked, entry_direction, exit_direction = (
@@ -599,11 +601,18 @@ def _plan_belt_transport(
         stock["transport-belt"] = max(
             0, stock.get("transport-belt", 0) - reserved_transport_belts,
         )
-    preferred = _choose_route_belt_tier(
-        stock, span, destination_is_belt=destination_is_belt,
-    )
     tier_order = _route_belt_tiers(destination_is_belt)
-    ordered = [preferred] + [tier for tier in tier_order if tier != preferred]
+    if required_belt_type is not None:
+        if required_belt_type not in tier_order:
+            raise ValueError(
+                f"{required_belt_type} is not a supported belt tier for this route"
+            )
+        ordered = [required_belt_type]
+    else:
+        preferred = _choose_route_belt_tier(
+            stock, span, destination_is_belt=destination_is_belt,
+        )
+        ordered = [preferred] + [tier for tier in tier_order if tier != preferred]
     shortfalls: list[str] = []
     requirements: dict[str, dict[str, int]] = {}
     route_error: ValueError | None = None
@@ -632,7 +641,7 @@ def _plan_belt_transport(
             for item, count in required.items()
             if stock.get(item, 0) < count
         }
-        if tier == "transport-belt" and short:
+        if required_belt_type is None and tier == "transport-belt" and short:
             actions = _mixed_belt_actions(actions, stock)
             required = {
                 action["entity"]: sum(
@@ -648,7 +657,9 @@ def _plan_belt_transport(
                 for item, count in required.items()
                 if stock.get(item, 0) < count
             }
-        if not short:
+        if not short or (
+            tier == required_belt_type and defer_required_tier_affordability
+        ):
             return actions, tier, belt_source is not None
         requirements[tier] = required
         shortfalls.append(
@@ -658,7 +669,7 @@ def _plan_belt_transport(
         )
     if not shortfalls and route_error is not None:
         raise StuckError(f"no belt route is available for this bridge: {route_error}")
-    for tier in tier_order:
+    for tier in ordered:
         if tier in requirements:
             raise MaterialShortage(
                 f"belt bridge for {ingredient}", requirements[tier], stock,
