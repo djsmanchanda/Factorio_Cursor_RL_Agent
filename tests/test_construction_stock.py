@@ -103,6 +103,38 @@ def test_the_runner_waits_for_the_job_not_the_reserve() -> None:
     assert "wait_for_stock" in served
 
 
+def test_producer_backed_job_releases_before_full_stock(monkeypatch) -> None:
+    task = type("Task", (), {"item": "pipe", "target": 408})()
+    targets = {"pipe": 408}
+    completed: list[str] = []
+    priorities = type("Priorities", (), {
+        "describe": lambda *_args: "pipe task",
+        "complete": lambda _self, item, _tick: completed.append(item),
+    })()
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: (True, (10.5, 10.5)),
+    )
+    monkeypatch.setattr(
+        builder, "construction_supply_chain_is_scheduled",
+        lambda *_a: True,
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 123)
+    monkeypatch.setattr(
+        builder, "wait_for_stock",
+        lambda *_a, **_k: pytest.fail("producer-backed task waited for full stock"),
+    )
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 100, targets,
+        priorities, (0.0, 0.0), lambda _message: None,
+    )
+
+    assert targets == {}
+    assert completed == ["pipe"]
+
+
 def test_background_reserve_starts_a_producer_without_waiting(monkeypatch) -> None:
     background = {"transport-belt": 200}
     blocking: dict[str, int] = {}

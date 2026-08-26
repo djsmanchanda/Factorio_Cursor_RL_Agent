@@ -29,6 +29,24 @@ class _Client:
         return self.reply
 
 
+def test_construction_polling_spends_one_wait_budget_per_window(monkeypatch) -> None:
+    readings = iter((3, 2, 1, 0))
+    client = type("Client", (), {
+        "command": lambda _self, _command: str(next(readings)),
+    })()
+    waits: list[str] = []
+    monkeypatch.setattr(stage_services, "consume_wait", waits.append)
+    monkeypatch.setattr(stage_services.time, "sleep", lambda _seconds: None)
+
+    remaining = stage_services._wait_for_ghosts(
+        client, "nauvis", "player", ((0.0, 0.0), (10.0, 10.0)),
+        timeout_seconds=30.0,
+    )
+
+    assert remaining == 0
+    assert waits == ["ghost_construction"]
+
+
 def test_coherent_earmark_submits_ghosts_despite_queued_shortage(monkeypatch) -> None:
     plan = {
         "force": "player",

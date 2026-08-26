@@ -57,8 +57,8 @@ def test_requested_straight_shoreline_has_adjacent_land_output() -> None:
     assert pipe["position"] == {"x": -97.5, "y": 14.5}
 
 
-def test_petroleum_route_does_not_use_refinery_underground_as_a_corner() -> None:
-    """The oil-cell route must include the cardinal corner seen missing live."""
+def test_separate_petroleum_packets_share_a_complete_network() -> None:
+    """Plastic first, then sulfur, must retain the missing live corner pipe."""
     ox, oy = -258, -108
     px, py = -282, -40
     refinery = stage_chemical.generate_fluid_machine_row(
@@ -71,30 +71,34 @@ def test_petroleum_route_does_not_use_refinery_underground_as_a_corner() -> None
     source = stage_chemical.header_attachment(
         "basic-oil-processing", "petroleum-gas", 1, ox, oy,
     )["attach"]
-    targets = [
+    targets = (
         stage_chemical.header_attachment(
             "plastic-bar", "petroleum-gas", 2, px, py,
         )["attach"],
         stage_chemical.header_attachment(
             "sulfur", "petroleum-gas", 2, ox + 18, oy + 16,
         )["attach"],
-    ]
+    )
     foreign = (
         stage_chemical.fluid_network_segments("basic-oil-processing", 1, ox, oy)
         + stage_chemical.fluid_network_segments("plastic-bar", 2, px, py)
         + stage_chemical.fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
     )
     hard = stage_chemical._planned_hard_tiles(*plans) - {source, *targets}
-
-    link, _segments, _crossed_water = stage_chemical._route_oil_fluid_link(
-        source, targets, "petroleum-gas", foreign=foreign, hard=hard,
-        terrain_water=set(), existing_tiles=[],
-    )
-    pipe_positions = {
-        (action["position"]["x"], action["position"]["y"])
-        for phase in link["phases"] for action in phase["actions"]
-        if action.get("entity") == "pipe"
-    }
+    pipe_positions: set[Point] = set()
+    for target in targets:
+        link, segments, _crossed_water = stage_chemical._route_oil_fluid_link(
+            source, [target], "petroleum-gas", foreign=foreign, hard=hard,
+            terrain_water=set(), existing_tiles=[],
+        )
+        foreign.extend(segments)
+        packet_positions = {
+            (action["position"]["x"], action["position"]["y"])
+            for phase in link["phases"] for action in phase["actions"]
+            if action.get("entity") == "pipe"
+        }
+        assert not pipe_positions & packet_positions
+        pipe_positions |= packet_positions
 
     assert (-252.5, -107.5) in pipe_positions
 
@@ -285,10 +289,10 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
 
     monkeypatch.setattr(stage_chemical, "preflight_ingredient_transport", preflight)
 
-    def submit(_client, _bridge, _surface, _force, plans, links, _emit):
-        submitted.update(plans=plans, links=links)
+    def submit(_client, _bridge, _surface, _force, packets, _emit):
+        submitted["packets"] = packets
 
-    monkeypatch.setattr(stage_chemical, "_submit_oil_cell_plans", submit)
+    monkeypatch.setattr(stage_chemical, "_submit_oil_cell_packets", submit)
     monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
     monkeypatch.setattr(stage_chemical, "_diagnose_machines", lambda *_a, **_k: [])
 
@@ -305,8 +309,19 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     assert args[5:7] == ((-340.0, 20.0), (-306.5, -44.5))
     assert kwargs["mode"] == "belt"
     assert kwargs["destination_is_belt"] is True
+    packets = submitted["packets"]
+    assert [name for name, _plan in packets] == [
+        "chemical_coal_belt",
+        "chemical_power_backbone",
+        "chemical_refinery_and_plastic_machines",
+        "chemical_crude_pipeline",
+        "chemical_plastic_petroleum_pipeline",
+        "chemical_sulfur_machines",
+        "chemical_sulfur_petroleum_pipeline",
+        "chemical_sulfur_water_pipeline",
+    ]
     all_actions = [
-        action for plan in submitted["plans"]
+        action for _name, plan in packets
         for phase in plan["phases"] for action in phase["actions"]
     ]
     assert not any(action.get("entity") == "requester-chest" for action in all_actions)
@@ -492,12 +507,13 @@ def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> Non
          "position": {"x": 8.5, "y": 4.5}},
     ]}]}
 
-    stage_chemical._submit_oil_cell_plans(
-        object(), object(), "nauvis", "player", [machine], [link],
+    stage_chemical._submit_oil_cell_packets(
+        object(), object(), "nauvis", "player",
+        [("chemical_machines", machine), ("chemical_pipeline", link)],
         lambda _message: None,
     )
 
-    assert len(captured) == 2
+    assert len(captured) == 3
     assert all((8, 4) in reserved for reserved in captured)
 
 

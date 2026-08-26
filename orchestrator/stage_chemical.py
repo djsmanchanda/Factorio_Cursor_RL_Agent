@@ -180,50 +180,65 @@ def _ensure_plan_construction_coverage(
     )
 
 
-def _submit_oil_cell_plans(
+_POWER_ENTITIES = frozenset({
+    "small-electric-pole", "medium-electric-pole", "big-electric-pole",
+    "substation",
+})
+
+
+def _filter_plan_actions(plan: dict, predicate: Callable[[dict], bool]) -> dict:
+    """Copy the phases whose actions match one construction packet."""
+    phases = []
+    for phase in plan["phases"]:
+        actions = [action for action in phase["actions"] if predicate(action)]
+        if actions:
+            phases.append({**phase, "actions": actions})
+    return {"phases": phases}
+
+
+def _submit_oil_cell_packets(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    plans: list[dict], links: list[dict], emit: Callable[[str], None],
+    packets: list[tuple[str, dict]], emit: Callable[[str], None],
 ) -> None:
-    """Submit landfill, wait for solid ground, then submit its pipe route."""
-    future = _merge(*plans, *links)
+    """Ghost independent oil packets as soon as each material chain is ready."""
+    future = _merge(*(plan for _name, plan in packets))
     reserved = planned_footprint_tiles(future)
-    landfill, fluid_links = _separate_landfill_ghosts(*links)
-    if landfill is None:
-        combined = _merge(*plans, *links)
-        combined["surface"], combined["force"] = surface, force
+    for name, packet in packets:
+        landfill, construction = _separate_landfill_ghosts(packet)
+        if landfill is not None:
+            landfill["surface"], landfill["force"] = surface, force
+            _submit(
+                client, bridge, surface, landfill, f"{name}_foundation", emit,
+                stage_coverage=lambda plan=landfill: _ensure_plan_construction_coverage(
+                    client, bridge, surface, force, plan, emit,
+                    reserved_tiles=reserved,
+                ),
+            )
+            remaining = _wait_for_ghosts(
+                client, surface, force, _area(landfill),
+                include_entity_ghosts=False,
+            )
+            if remaining:
+                raise StuckError(
+                    f"{name} landfill foundation has {remaining} ghost(s) "
+                    "remaining; refusing to place pipes on water"
+                )
+        if not construction["phases"]:
+            continue
+        construction["surface"], construction["force"] = surface, force
+        ghost_count = sum(
+            1 for phase in construction["phases"]
+            for action in phase["actions"]
+            if action.get("action_type") == "place_ghost"
+        )
+        emit(f"  OIL PACKET: releasing {name} ({ghost_count} ghost(s))")
         _submit(
-            client, bridge, surface, combined, "chemical_oil_cell", emit,
-            stage_coverage=lambda: _ensure_plan_construction_coverage(
-                client, bridge, surface, force, combined, emit,
+            client, bridge, surface, construction, name, emit,
+            stage_coverage=lambda plan=construction: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, plan, emit,
                 reserved_tiles=reserved,
             ),
         )
-        return
-    foundation = _merge(*plans, landfill)
-    foundation["surface"], foundation["force"] = surface, force
-    _submit(
-        client, bridge, surface, foundation, "chemical_oil_cell_foundation", emit,
-        stage_coverage=lambda: _ensure_plan_construction_coverage(
-            client, bridge, surface, force, foundation, emit,
-            reserved_tiles=reserved,
-        ),
-    )
-    remaining = _wait_for_ghosts(
-        client, surface, force, _area(landfill), include_entity_ghosts=False,
-    )
-    if remaining:
-        raise StuckError(
-            f"chemical_oil_cell landfill foundation has {remaining} ghost(s) remaining; "
-            "refusing to place pipe ghosts on water before the landfill is built"
-        )
-    fluid_links["surface"], fluid_links["force"] = surface, force
-    _submit(
-        client, bridge, surface, fluid_links, "chemical_oil_cell_fluid_links", emit,
-        stage_coverage=lambda: _ensure_plan_construction_coverage(
-            client, bridge, surface, force, fluid_links, emit,
-            reserved_tiles=reserved,
-        ),
-    )
 
 
 def _connect_oil_cell_power(
@@ -597,18 +612,31 @@ def ensure_oil_cell(
         + fluid_network_segments("plastic-bar", 2, px, py)
         + fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
     )
-    links = []
-    for source, targets, fluid, existing_tiles in (
-        (oil_site["output"], [crude_to], "crude-oil", [oil_site["output"]]),
-        (petroleum_from, [plastic_gas, sulfur_gas], "petroleum-gas", []),
-        (water["output"], [sulfur_water], "water", [water["output"]]),
+    links: list[tuple[str, dict]] = []
+    for link_name, source, targets, fluid, existing_tiles in (
+        (
+            "chemical_crude_pipeline", oil_site["output"], [crude_to],
+            "crude-oil", [oil_site["output"]],
+        ),
+        (
+            "chemical_plastic_petroleum_pipeline", petroleum_from,
+            [plastic_gas], "petroleum-gas", [],
+        ),
+        (
+            "chemical_sulfur_petroleum_pipeline", petroleum_from,
+            [sulfur_gas], "petroleum-gas", [],
+        ),
+        (
+            "chemical_sulfur_water_pipeline", water["output"],
+            [sulfur_water], "water", [water["output"]],
+        ),
     ):
         try:
             link, segments, crossed_water = _route_oil_fluid_link(
                 source, targets, fluid, foreign=foreign, hard=hard,
                 terrain_water=terrain_water, existing_tiles=existing_tiles,
             )
-            links.append(link)
+            links.append((link_name, link))
             foreign.extend(segments)
             if crossed_water:
                 emit(
@@ -622,17 +650,62 @@ def ensure_oil_cell(
     route = preflight_ingredient_transport(
         client, surface, force, "plastic-bar", "coal", coal, plastic_feed, 2,
         max_belt_route_tiles=_CHEMICAL_BELT_ROUTE_LIMIT,
-        additional_blocked=planned_footprint_tiles(_merge(*plans, *links)),
+        additional_blocked=planned_footprint_tiles(
+            _merge(*plans, *(link for _name, link in links))
+        ),
         mode="belt", destination_is_belt=True,
         destination_belt_direction="east",
     )
     if route is None:
         raise StuckError("plastic coal route unexpectedly selected logistics")
     coal_actions, coal_belt_type = route
-    plastic["phases"].append({
+    coal_plan = {"phases": [{
         "name": "bridge_coal_to_plastic-bar", "actions": coal_actions,
-    })
-    _submit_oil_cell_plans(client, bridge, surface, force, plans, links, emit)
+    }]}
+    power_plan = _merge(*(
+        _filter_plan_actions(
+            plan, lambda action: action.get("entity") in _POWER_ENTITIES,
+        )
+        for plan in plans
+    ))
+    unpowered = [
+        _filter_plan_actions(
+            plan, lambda action: action.get("entity") not in _POWER_ENTITIES,
+        )
+        for plan in plans
+    ]
+    crude_source_stage, water_source_stage, refinery_stage, plastic_stage, sulfur_stage = (
+        unpowered
+    )
+    link_packets = dict(links)
+    packets = [
+        ("chemical_coal_belt", coal_plan),
+        ("chemical_power_backbone", power_plan),
+        (
+            "chemical_refinery_and_plastic_machines",
+            _merge(crude_source_stage, refinery_stage, plastic_stage),
+        ),
+        ("chemical_crude_pipeline", link_packets["chemical_crude_pipeline"]),
+        (
+            "chemical_plastic_petroleum_pipeline",
+            link_packets["chemical_plastic_petroleum_pipeline"],
+        ),
+        (
+            "chemical_sulfur_machines",
+            _merge(water_source_stage, sulfur_stage),
+        ),
+        (
+            "chemical_sulfur_petroleum_pipeline",
+            link_packets["chemical_sulfur_petroleum_pipeline"],
+        ),
+        (
+            "chemical_sulfur_water_pipeline",
+            link_packets["chemical_sulfur_water_pipeline"],
+        ),
+    ]
+    _submit_oil_cell_packets(
+        client, bridge, surface, force, packets, emit,
+    )
     _connect_oil_cell_power(client, bridge, surface, force, plans, emit)
 
     for name, plan, machine in (

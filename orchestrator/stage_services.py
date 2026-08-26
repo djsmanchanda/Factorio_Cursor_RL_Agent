@@ -243,6 +243,18 @@ def _shortage_has_complete_supply_chains(
         return False
 
 
+def construction_supply_chain_is_scheduled(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    """Whether a construction item can keep arriving after ghosts are placed."""
+    try:
+        return _item_supply_chain_is_scheduled(
+            client, surface, force, item,
+        )
+    except (ValueError, live_base.TelemetryError):
+        return False
+
+
 def _submit(
     client: RconClient, bridge: GameBridge, surface: str, plan: dict, name: str,
     emit: Callable[[str], None], *, max_retries: int = 2,
@@ -375,7 +387,6 @@ def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[P
     started = time.monotonic()
     last_change = time.monotonic()
     while remaining and time.monotonic() < deadline:
-        consume_wait("ghost_construction_poll")
         time.sleep(poll_seconds)
         current = int(client.command("/sc " + lua).strip())
         if current != remaining:

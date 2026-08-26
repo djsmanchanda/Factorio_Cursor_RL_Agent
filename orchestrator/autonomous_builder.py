@@ -83,6 +83,7 @@ from orchestrator.stage_services import (
     _submit,
     _wait_for_ghosts,
     assert_affordable,
+    construction_supply_chain_is_scheduled,
     ensure_logistic_coverage,
     extend_power,
     extend_roboport_coverage,
@@ -3341,6 +3342,17 @@ def _serve_mall_task(
             emit(f"  PRIORITY DEFERRED: {item} behind its queued prerequisite")
         return
     if output is not None:
+        if construction_supply_chain_is_scheduled(
+            client, surface, force, item,
+        ):
+            emit(
+                f"  MALL PIPELINE READY: {item} and every prerequisite have "
+                "live production; releasing the blueprint while stock builds"
+            )
+            priorities.complete(item, live_base.game_tick(client))
+            mall_targets.pop(item, None)
+            return
+
         def expand_upstream() -> bool:
             upstream = expansion_target(
                 item, live_base.available_items(client, surface, force),

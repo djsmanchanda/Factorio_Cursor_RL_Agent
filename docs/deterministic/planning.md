@@ -116,6 +116,14 @@ These names describe intended responsibilities, not permission to build speculat
   activity waits on charging, never coverage geometry or production planning.
   Every local oil substation is connected as soon as the plan is submitted
   rather than after all pipe ghosts complete.
+- A remote chemical district is submitted as independently affordable packets:
+  coal belt, power backbone, refinery/plastic machines, crude pipeline, plastic
+  petroleum pipeline, sulfur machines, sulfur petroleum pipeline, and water
+  pipeline. Reserve the complete future footprint first, then release every
+  packet whose construction-item supply chain is active. Producers and bots run
+  concurrently; do not warehouse the complete district bill before ghosting it.
+  Construction polling spends one controller wait per window, not per sample,
+  and a visibly shrinking local backlog may use the existing progress extensions.
 - Offshore pumps require a straight orthogonal shoreline: water across the
   intake width, land across the output width, and the first pipe on the
   immediately adjacent land-side connector tile. The Factorio entity direction
