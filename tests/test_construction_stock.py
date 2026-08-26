@@ -261,6 +261,22 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     ) == 8
 
 
+def test_automation_science_waits_for_direct_metal_starter_retirement(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_args: None)
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="automation-science-pack waits for direct metal starter retirement",
+    ):
+        builder.ensure_produced(
+            object(), object(), "nauvis", "player", "automation-science-pack",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+
 def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,

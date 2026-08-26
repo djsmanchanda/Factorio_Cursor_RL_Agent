@@ -3170,6 +3170,20 @@ def ensure_produced(
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
+    if (
+        item == "automation-science-pack"
+        and not _metal_starter_transition_complete(client, surface, force)
+        and live_base.find_line(
+            client, surface, force, item, LINE_RECIPES[item]["machine"],
+        ) is None
+    ):
+        emit(
+            "  AUTOMATION SCIENCE GATE: waiting for direct iron/copper "
+            "starters to retire before placing the science assembler"
+        )
+        raise ProductionPrerequisiteDeferred(
+            "automation-science-pack waits for direct metal starter retirement"
+        )
     plan = _plan_line(
         client, surface, force, item, emit,
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,
