@@ -84,6 +84,8 @@ def test_iron_starter_site_and_identity_require_two_complete_lanes() -> None:
     assert site == expected
     assert "local dual=true" in survey_client.commands[0]
     assert "furnace_ok(sf)" in survey_client.commands[0]
+    assert "sx,sy=cp[1]+6*dx,cp[2]+6*dy" in survey_client.commands[0]
+    assert "local sf={cp[1]+3*dx,cp[2]+3*dy}" in survey_client.commands[0]
     assert "local dual=true" in site_client.commands[0]
     assert "can('electric-furnace',{cp[1]+3*dx,cp[2]+3*dy},nil,1.4)" in site_client.commands[0]
 

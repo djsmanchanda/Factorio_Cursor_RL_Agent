@@ -81,6 +81,8 @@ _ROBOPORT_SERVICE_AREAS = {
     "construction": (_ROBOPORT_CONSTRUCTION_RADIUS, False),
     "logistic": (_ROBOPORT_LOGISTIC_RADIUS, True),
 }
+_POWER_BRIDGE_SETTLE_SECONDS = 3.0
+_PENDING_POWER_BRIDGES: dict[tuple[str, str, int, int], float] = {}
 # Slack subtracted from a chain's final hop so tile rounding can never land it
 # a fraction outside the service radius it was placed to satisfy.
 _COVERAGE_MARGIN = 2.0
@@ -654,6 +656,19 @@ def extend_power(
     sibling plan's future footprint: an emergency pole must route around that
     footprint just as it would around built infrastructure.
     """
+    bridge_key = (
+        surface, force,
+        math.floor(near_position[0]), math.floor(near_position[1]),
+    )
+    pending_since = _PENDING_POWER_BRIDGES.pop(bridge_key, None)
+    waited_for_pending = pending_since is not None
+    if pending_since is not None:
+        remaining = _POWER_BRIDGE_SETTLE_SECONDS - (
+            time.monotonic() - pending_since
+        )
+        if remaining > 0:
+            consume_wait(f"power_bridge_settle@{near_position}")
+            time.sleep(remaining)
     own_network = live_base.pole_network_id(client, surface, near_position)
     target = live_base.nearest_powered_pole(
         client, surface, force, near_position, exclude_network_id=own_network,
@@ -662,9 +677,13 @@ def extend_power(
         # A bridge submission can race another stage: enough of the first
         # attempt may land to merge the networks before the retry surveys.
         # That is success, not a reason to tell the caller no repair occurred.
-        if _retried and own_network is not None and live_base.network_generation_kw(
-            client, surface, force, near_position,
-        ) > 0:
+        if (
+            (_retried or waited_for_pending)
+            and own_network is not None
+            and live_base.network_generation_kw(
+                client, surface, force, near_position,
+            ) > 0
+        ):
             emit(f"  power bridge already joined network {own_network} while retrying")
             return _power_extension_result(True, True, detailed=detailed)
         return _power_extension_result(False, False, detailed=detailed)
@@ -701,6 +720,7 @@ def extend_power(
          min(target_position[1], near_position[1]) - margin),
         (max(target_position[0], near_position[0]) + margin,
          max(target_position[1], near_position[1]) + margin),
+        include_resources=True,
     )
     blocked |= reserved_tiles or set()
     hookup_blocked = set(blocked)
@@ -751,6 +771,7 @@ def extend_power(
             detailed=detailed,
             _retried=True,
         )
+    _PENDING_POWER_BRIDGES[bridge_key] = time.monotonic()
     # Connectivity is not capacity: every run has browned out as stages
     # stacked onto the starter array. Top the network's generation up from
     # stocked solar while we are already holding its powered anchor.

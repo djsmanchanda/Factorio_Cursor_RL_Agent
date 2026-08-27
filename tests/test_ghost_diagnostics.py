@@ -394,7 +394,9 @@ def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) 
     from orchestrator import stage_services as ss
 
     network_ids = iter((3, 1))
-    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: next(network_ids))
+    monkeypatch.setattr(
+        ss.live_base, "pole_network_id", lambda *_a: next(network_ids),
+    )
     monkeypatch.setattr(ss.live_base, "nearest_powered_pole", lambda *_a, **_k: None)
     monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 166.7)
 
@@ -416,12 +418,18 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
         lambda *_a, **_k: ((0.0, 0.0), "medium-electric-pole"),
     )
     monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
-    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    occupied_options = []
+    monkeypatch.setattr(
+        ss.live_base, "occupied_tiles",
+        lambda *_a, **kwargs: occupied_options.append(kwargs) or set(),
+    )
     monkeypatch.setattr(
         ss, "_submit",
         lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
     )
-    monkeypatch.setattr(builder_module, "_top_up_solar_generation", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
 
     reserved = {(x, 0) for x in range(4, 21)}
     assert ss.extend_power(
@@ -434,6 +442,52 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
         for action in submitted[0]["phases"][0]["actions"]
     }
     assert not poles & reserved
+    assert occupied_options == [{"include_resources": True}]
+
+
+def test_repeated_power_remedy_waits_for_the_first_bridge_to_settle(
+    monkeypatch,
+) -> None:
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    ss._PENDING_POWER_BRIDGES.clear()
+    network_ids = iter((None, 7))
+    powered_poles = iter((((0.0, 0.0), "medium-electric-pole"), None))
+    submitted = []
+    clock = [100.0]
+
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: next(network_ids))
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: next(powered_poles),
+    )
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 167.0)
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+    )
+    monkeypatch.setattr(builder_module, "_top_up_solar_generation", lambda *_a, **_k: False)
+    monkeypatch.setattr(ss.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        ss.time, "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (24.0, 0.0),
+        lambda _message: None,
+    )
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (24.0, 0.0),
+        lambda _message: None,
+    )
+
+    assert len(submitted) == 1
+    assert clock[0] == 103.0
+    ss._PENDING_POWER_BRIDGES.clear()
 
 
 def test_remediation_extends_repeatedly_while_local_ghosts_fall(monkeypatch) -> None:
