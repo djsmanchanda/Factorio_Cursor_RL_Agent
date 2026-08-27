@@ -420,9 +420,11 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
 
     submitted = []
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    powered_options = []
     monkeypatch.setattr(
         ss.live_base, "nearest_powered_pole",
-        lambda *_a, **_k: ((0.0, 0.0), "medium-electric-pole"),
+        lambda *_a, **kwargs:
+            powered_options.append(kwargs) or ((0.0, 0.0), "medium-electric-pole"),
     )
     monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
     occupied_options = []
@@ -450,6 +452,10 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
     }
     assert not poles & reserved
     assert occupied_options == [{"include_resources": True}]
+    assert powered_options == [{
+        "exclude_network_id": None,
+        "avoid_resources": True,
+    }]
 
 
 def test_neighboring_power_remedy_waits_for_the_first_bridge_to_settle(

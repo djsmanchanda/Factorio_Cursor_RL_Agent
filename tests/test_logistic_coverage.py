@@ -465,6 +465,18 @@ def test_primary_power_bridge_prefers_generation_over_proximity() -> None:
     assert "if d<bd then bd=d;best=e.position;bname=e.name end end end;" in lua
 
 
+def test_primary_power_bridge_can_exclude_poles_inside_resource_patches() -> None:
+    client = _FakeRcon("8.0 -8.0 substation")
+
+    assert live_base.nearest_powered_pole(
+        client, "nauvis", "player", (40.0, 26.0),
+        avoid_resources=True,
+    ) == ((8.0, -8.0), "substation")
+    lua = client.commands[0]
+    assert "local avoid=true" in lua
+    assert "count_entities_filtered{type='resource',area=e.bounding_box}==0" in lua
+
+
 def test_network_generation_trusts_entity_output_over_interface_prototype() -> None:
     """Live 2026-08-22: the save's electric-energy-interface reported prototype
     8_333_333_333 kW while the entity actually produced 166.7 kW -- the lie

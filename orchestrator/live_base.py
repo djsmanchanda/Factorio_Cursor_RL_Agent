@@ -727,6 +727,7 @@ _GENERATOR_TYPES = (
 def nearest_powered_pole(
     client: RconClient, surface: str, force: str, near: Point,
     exclude_network_id: int | None = None,
+    *, avoid_resources: bool = False,
 ) -> tuple[Point, str] | None:
     """Pole on the primary generated network, closest within that network.
 
@@ -742,6 +743,7 @@ def nearest_powered_pole(
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local avoid=" + ("true" if avoid_resources else "false") + ";"
         "local generation={};"
         "for _,e in pairs(s.find_entities_filtered{force=f,type={" + _GENERATOR_TYPES + "}}) do "
         "local ok,id=pcall(function() return e.electric_network_id end);"
@@ -761,7 +763,9 @@ def nearest_powered_pole(
         "local best,bd,bname=nil,1e18,nil;"
         "for _,e in pairs(s.find_entities_filtered{type='electric-pole',force=f}) do "
         "local ok,id=pcall(function() return e.electric_network_id end);"
-        "if ok and id==selected then "
+        "local clear=true;if avoid then "
+        "clear=s.count_entities_filtered{type='resource',area=e.bounding_box}==0 end;"
+        "if ok and id==selected and clear then "
         "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
         "if d<bd then bd=d;best=e.position;bname=e.name end end end;"
         "if not best then rcon.print('NONE') return end;"

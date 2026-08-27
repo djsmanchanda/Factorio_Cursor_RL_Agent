@@ -669,6 +669,7 @@ def extend_power(
     own_network = live_base.pole_network_id(client, surface, near_position)
     target = live_base.nearest_powered_pole(
         client, surface, force, near_position, exclude_network_id=own_network,
+        avoid_resources=True,
     )
     if target is None:
         # A bridge submission can race another stage: enough of the first
