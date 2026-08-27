@@ -176,13 +176,19 @@ def test_plate_foundation_uses_copper_before_permitting_iron_growth(monkeypatch)
     copper_starter = autonomous_builder.live_base.DirectPlateStarter(
         (57.5, 26.5), "north", 1,
     )
+    stone_starter = autonomous_builder.live_base.DirectPlateStarter(
+        (54.5, -64.5), "north", 1, ((57.5, -67.5),),
+    )
     monkeypatch.setattr(
         autonomous_builder, "_direct_plate_foundation_ready",
         lambda *_args: _args[3] in ready,
     )
     monkeypatch.setattr(
         autonomous_builder.live_base, "direct_plate_starter",
-        lambda *_args: copper_starter,
+        lambda *_args: {
+            "copper-plate": copper_starter,
+            "stone-brick": stone_starter,
+        }.get(_args[3]),
     )
     monkeypatch.setattr(
         autonomous_builder, "_prep_plate_extraction",
@@ -249,7 +255,7 @@ def test_stone_foundation_excludes_both_temporary_starter_drills(
     )
     monkeypatch.setattr(
         autonomous_builder.live_base, "direct_plate_starter",
-        lambda *_args: stone,
+        lambda *_args: stone if _args[3] == "stone-brick" else None,
     )
     monkeypatch.setattr(
         autonomous_builder, "_prep_plate_extraction",
@@ -375,6 +381,61 @@ def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     cost a pass, not the run -- the ladder still climbs on demand."""
     assert "except (StuckError, ValueError)" in _PREP
     assert "PREP DEFERRED" in _PREP
+
+
+def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) -> None:
+    waits: list[float] = []
+    deferred: dict[str, int] = {}
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(autonomous_builder.time, "sleep", waits.append)
+    monkeypatch.setattr(autonomous_builder, "consume_wait", lambda *_a: None)
+
+    def pending(*_args, **_kwargs):
+        cause = autonomous_builder.stage_extraction.PendingSystemDeferred(
+            "pending off-ore smelter",
+        )
+        raise autonomous_builder.ProductionPrerequisiteDeferred(str(cause)) from cause
+
+    monkeypatch.setattr(autonomous_builder, "build_mining_stage", pending)
+
+    spent = autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(),
+        deferred, {}, (0.0, 0.0), lambda _message: None, furnace_target=6,
+    )
+
+    assert spent is True
+    assert deferred == {}
+    assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
+
+
+def test_earmarked_foundation_retires_starter_after_live_output(monkeypatch) -> None:
+    starter = autonomous_builder.live_base.DirectPlateStarter(
+        (17.5, -2.5), "north", 1, ((17.5, 9.5),),
+    )
+    retired: list[str] = []
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready",
+        lambda *_args: _args[-1] == "iron-plate",
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter",
+        lambda *_args: starter if _args[3] == "iron-plate" else None,
+    )
+    line = type("Line", (), {"working_count": 1, "produced_count": 0})()
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(
+        autonomous_builder, "_retire_standing_bootstrap_cells",
+        lambda *_args: retired.append(_args[4]),
+    )
+
+    spent = autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        lambda _message: None, {}, {},
+    )
+
+    assert spent is True
+    assert retired == ["iron-plate"]
 
 
 def test_plate_shortage_stops_later_plate_from_spending_belts() -> None:

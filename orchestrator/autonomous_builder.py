@@ -149,6 +149,7 @@ class ProductionPrerequisiteDeferred(RuntimeError):
 # This counts consecutive passes that chose the same task at the same
 # completion -- real progress moves one of them.
 _MAX_UNCHANGED_PASSES = 12
+_PENDING_FOUNDATION_POLL_SECONDS = 30.0
 
 
 # How long one logistic-coverage remedy may wait for a just-connected
@@ -3754,6 +3755,14 @@ def _prep_plate_extraction(
                 f"{output_source} for downstream logistic consumers"
             )
     except ProductionPrerequisiteDeferred as deferred:
+        if isinstance(deferred.__cause__, stage_extraction.PendingSystemDeferred):
+            emit(
+                f"  PREP CONSTRUCTING: {short_plate} foundation ghosts are "
+                "still being built; holding startup instead of advancing the goal"
+            )
+            consume_wait(f"pending_{short_plate}_foundation")
+            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+            return True
         deferred_targets[short_plate] = wanted_furnaces
         emit(f"  PREP DEFERRED: {short_plate} extraction -- {deferred}")
         _queue_electric_furnace_unlock(
@@ -3862,12 +3871,33 @@ def _prep_plate_foundation(
     """
     standing_starters: dict[str, live_base.DirectPlateStarter] = {}
     for plate in PLATE_FOUNDATION_BUILD_ORDER:
-        if _direct_plate_foundation_ready(client, surface, force, plate):
-            continue
         ore = LINE_RECIPES[plate]["ingredients"][0]
         starter = live_base.direct_plate_starter(
             client, surface, force, plate, ore, reference_point,
         )
+        if _direct_plate_foundation_ready(client, surface, force, plate):
+            if starter is None:
+                continue
+            line = live_base.find_line(
+                client, surface, force, plate, LINE_RECIPES[plate]["machine"],
+            )
+            healthy = bool(
+                line is not None
+                and (line.working_count > 0 or line.produced_count > 0)
+            )
+            if not healthy:
+                emit(
+                    f"  PLATE FOUNDATION CONSTRUCTING: {plate} is structurally "
+                    "complete but has not produced yet; keeping its starter"
+                )
+                consume_wait(f"healthy_{plate}_foundation")
+                time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+                return True
+            _retire_standing_bootstrap_cells(
+                client, bridge, surface, force, plate, ore,
+                reference_point, emit,
+            )
+            return True
         if starter is not None:
             standing_starters[plate] = starter
             continue
