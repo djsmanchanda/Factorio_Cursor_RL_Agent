@@ -336,6 +336,7 @@ def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None
     assert 'data-action="stop_console"' in html
     assert 'STOP_FACTORIO_SERVER' in javascript
     assert 'STOP_OPERATIONS_CONSOLE' in javascript
+    assert 'Restart the operations console to load Copy last run' in javascript
     assert 'data-action="restore_save"' not in html
     assert 'data-action="full_refresh"' not in html
 

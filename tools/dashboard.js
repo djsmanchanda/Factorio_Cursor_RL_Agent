@@ -288,7 +288,16 @@ document.querySelector('#copy-last-run').addEventListener('click', async event =
   const originalLabel = button.textContent;
   try {
     const response = await fetch('/api/logs/last-run', {cache: 'no-store'});
-    const data = await response.json();
+    const body = await response.text();
+    let data;
+    try {
+      data = JSON.parse(body);
+    } catch (parseError) {
+      if (response.status === 404 && body.trim() === 'not found') {
+        throw new Error('Restart the operations console to load Copy last run, then refresh this page.');
+      }
+      throw new Error(`Operations console returned an invalid response (HTTP ${response.status}).`);
+    }
     if (!response.ok) throw new Error(data.error || 'Last run is unavailable');
     await navigator.clipboard.writeText(data.text);
     button.textContent = 'Copied last run';
