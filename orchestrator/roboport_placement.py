@@ -61,6 +61,7 @@ def _local_chain_positions(
                 client, surface,
                 (point[0] - 2, point[1] - 2),
                 (point[0] + 2, point[1] + 2),
+                avoid_resources=True,
             )
         ), None)
         if chosen is None:
@@ -97,7 +98,8 @@ def _alternate_chain_positions(
     min_y = min([source[1], target[1], *[point[1] for point in ideals]]) - max_radius - 3
     max_y = max([source[1], target[1], *[point[1] for point in ideals]]) + max_radius + 3
     blocked = live_base.occupied_tiles(
-        client, surface, (min_x, min_y), (max_x, max_y), include_clutter=True,
+        client, surface, (min_x, min_y), (max_x, max_y),
+        include_clutter=True, include_resources=True,
     )
 
     def candidates(ideal: Point, radius: int) -> list[Point]:

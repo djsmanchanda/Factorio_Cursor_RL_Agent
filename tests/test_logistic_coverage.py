@@ -229,7 +229,8 @@ def test_chain_relocates_a_roboport_off_a_stage_footprint(monkeypatch) -> None:
     ideal = (17.0, 0.0)
     monkeypatch.setattr(
         live_base, "area_clear",
-        lambda _c, _s, lo, hi: ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2) != ideal,
+        lambda _c, _s, lo, hi, **_k:
+            ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2) != ideal,
     )
     placed = clear_chain_positions(
         None, "nauvis", (0.0, 0.0), (40.0, 0.0), [ideal],
@@ -253,6 +254,23 @@ def test_chain_relocates_off_pending_plan_footprints(monkeypatch) -> None:
     assert not (footprint_tile_indices(placed[0], 4) & reserved)
 
 
+def test_chain_relocates_roboports_off_resource_patches(monkeypatch) -> None:
+    options = []
+    monkeypatch.setattr(
+        live_base, "area_clear",
+        lambda *_a, **kwargs: options.append(kwargs) or True,
+    )
+
+    placed = clear_chain_positions(
+        None, "nauvis", (0.0, 0.0), (40.0, 0.0), [(17.0, 0.0)],
+        service_radius=25.0, service_square=True, link_distance=46.0,
+    )
+
+    assert placed
+    assert options
+    assert all(option.get("avoid_resources") is True for option in options)
+
+
 def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) -> None:
     """A 10-tile local failure must not terminate a remote coverage task.
 
@@ -268,8 +286,10 @@ def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) ->
         roboport_placement, "_local_chain_positions",
         lambda *_a, **_k: (_ for _ in ()).throw(ValueError("local blocked")),
     )
+    occupied_options = []
     monkeypatch.setattr(
-        live_base, "occupied_tiles", lambda *_a, **_k: blocked,
+        live_base, "occupied_tiles",
+        lambda *_a, **kwargs: occupied_options.append(kwargs) or blocked,
     )
 
     placed = clear_chain_positions(
@@ -285,6 +305,10 @@ def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) ->
         for previous, current in zip([(0.0, 0.0), *placed], placed)
     )
     assert math.dist(placed[-1], (100.0, 0.0)) <= _ROBOPORT_CONSTRUCTION_RADIUS
+    assert occupied_options == [{
+        "include_clutter": True,
+        "include_resources": True,
+    }]
 
 
 def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
