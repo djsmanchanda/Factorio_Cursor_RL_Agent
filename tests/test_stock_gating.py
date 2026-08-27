@@ -171,6 +171,7 @@ def test_real_build_uses_the_reserve_for_both_the_bar_and_gate(monkeypatch) -> N
         mall_storage_limit=1000,
         promote_to_line=False,
         fill_provider=False,
+        mall_request_multiplier=None,
         promoted_count=None,
     )
     monkeypatch.setattr(builder, "_ingredient_sources", lambda *_a, **_k: {})

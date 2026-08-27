@@ -2858,6 +2858,19 @@ def _startup_mall_item_cap(
         return None
     return _STARTUP_MALL_ITEM_CAPS[item]
 
+
+def _effective_mall_stock_gate(
+    client: RconClient, surface: str, force: str, item: str, *,
+    upgrade_bootstrap: bool, requested: int | None,
+) -> int | None:
+    """Apply scarce-metal caps to the assembler, not only its output chest."""
+    if upgrade_bootstrap:
+        return requested
+    startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    if startup_cap is None:
+        return requested
+    return startup_cap if requested is None else min(startup_cap, requested)
+
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
 ) -> bool:
@@ -3207,6 +3220,11 @@ def ensure_produced(
         raise ProductionPrerequisiteDeferred(
             "automation-science-pack waits for direct metal starter retirement"
         )
+    stock_gate_target = _effective_mall_stock_gate(
+        client, surface, force, item,
+        upgrade_bootstrap=upgrade_bootstrap,
+        requested=stock_gate_target,
+    )
     plan = _plan_line(
         client, surface, force, item, emit,
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,
@@ -4012,9 +4030,10 @@ def _prep_intermediate(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
         if line is not None and line.machine_count >= wanted:
-            refresh_paired_mall_requests(
-                client, bridge, surface, force, recipe,
-                list(line.machine_positions), reference_point, emit,
+            ensure_produced(
+                client, bridge, surface, force, recipe, reference_point, emit,
+                upgrade_bootstrap=False, stock_target=wanted,
+                minimum_machines=wanted, allow_promotion=False,
             )
             prepped.add(recipe)
             emit(f"  PREP READY: {recipe} has {line.machine_count}/{wanted} machine(s)")

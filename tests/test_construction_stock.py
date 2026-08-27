@@ -265,6 +265,58 @@ def test_baseline_prep_cannot_expand_the_circuit_provider_past_its_cap(monkeypat
     assert plan.mall_storage_limit == 5
 
 
+def test_starter_circuit_cap_is_applied_to_new_and_existing_assembler_gates(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+    observed: dict[str, int | None] = {}
+    line_plan = SimpleNamespace(existing=None, at_size=True, promote_to_line=False)
+    monkeypatch.setattr(builder, "_plan_line", lambda *_args, **_kwargs: line_plan)
+    monkeypatch.setattr(
+        builder, "_refresh_mall_cell",
+        lambda *_args, **kwargs: observed.setdefault(
+            "existing", kwargs["stock_gate_target"],
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_build_assembled_stage",
+        lambda *_args, **kwargs: observed.setdefault(
+            "new", kwargs["stock_gate_target"],
+        ),
+    )
+
+    builder.ensure_produced(
+        object(), object(), "nauvis", "player", "electronic-circuit",
+        (0.0, 0.0), lambda _message: None,
+        upgrade_bootstrap=False, stock_target=1, allow_promotion=False,
+    )
+
+    assert observed == {"existing": 5, "new": 5}
+
+
+def test_baseline_ready_cell_runs_the_central_gate_refresh(monkeypatch) -> None:
+    line = SimpleNamespace(machine_count=1)
+    observed: dict[str, object] = {}
+    monkeypatch.setattr(builder, "baseline_build_order", lambda: ["electronic-circuit"])
+    monkeypatch.setattr(builder, "_baseline_recipe_ready", lambda *_args: True)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_args: line)
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_args, **kwargs: observed.update(kwargs),
+    )
+
+    spent = builder._prep_intermediate(
+        object(), object(), "nauvis", "player", set(), {}, (0.0, 0.0),
+        lambda _message: None,
+    )
+
+    assert spent is True
+    assert observed["stock_target"] == 1
+    assert observed["upgrade_bootstrap"] is False
+
+
 def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: False,
