@@ -1,11 +1,15 @@
 # Path: tests/test_dashboard_server.py
 # Purpose: Protect the dashboard's local RCON-secret loading contract.
 
+import io
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from tools.dashboard_server import _rcon_password
+from tools import dashboard_server
+from tools.dashboard_server import DashboardHandler, _rcon_password
 
 
 def test_rcon_secret_file_overrides_command_line_password(tmp_path: Path) -> None:
@@ -23,3 +27,33 @@ def test_rcon_secret_file_fails_closed_when_empty_or_unreadable(tmp_path: Path) 
         _rcon_password(empty, "fallback-password")
     with pytest.raises(ValueError, match="unavailable"):
         _rcon_password(tmp_path / "missing", "fallback-password")
+
+
+def test_stop_console_endpoint_replies_before_shutting_down(monkeypatch) -> None:
+    payload = json.dumps({"confirmation": "STOP_OPERATIONS_CONSOLE"}).encode()
+    handler = object.__new__(DashboardHandler)
+    handler.path = "/api/actions/stop_console"
+    handler.headers = {
+        "X-Action-Token": "secret",
+        "Content-Length": str(len(payload)),
+    }
+    handler.action_token = "secret"
+    handler.rfile = io.BytesIO(payload)
+    replies: list[tuple[int, dict]] = []
+    shutdowns: list[str] = []
+    handler._json = lambda code, body: replies.append((code, body))
+    handler.server = SimpleNamespace(shutdown=lambda: shutdowns.append("shutdown"))
+
+    class ImmediateThread:
+        def __init__(self, *, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(dashboard_server.threading, "Thread", ImmediateThread)
+
+    handler.do_POST()
+
+    assert replies == [(202, {"accepted": True, "action": "stop_console"})]
+    assert shutdowns == ["shutdown"]

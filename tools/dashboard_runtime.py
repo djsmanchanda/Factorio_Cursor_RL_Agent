@@ -78,7 +78,7 @@ class OperationError(RuntimeError):
 class OperationManager:
     ACTIONS = {
         "deploy_mod", "restart_server", "stop_runner",
-        "fresh_campaign", "resume_runner",
+        "fresh_campaign", "resume_runner", "stop_factorio",
     }
 
     def __init__(self, config: DashboardConfig):
@@ -128,6 +128,8 @@ class OperationManager:
     def start(self, action: str, confirmation: str = "") -> None:
         if action not in self.ACTIONS:
             raise OperationError(f"Unknown action: {action}")
+        if action == "stop_factorio" and confirmation != "STOP_FACTORIO_SERVER":
+            raise OperationError("Stopping Factorio requires confirmation.")
         if not self._lock.acquire(blocking=False):
             raise OperationError(f"Another action is already running: {self._active}")
         self._active = action
@@ -148,6 +150,31 @@ class OperationManager:
             data = handle.read(256_000)
             new_offset = handle.tell()
         return {"text": data.decode("utf-8", errors="replace"), "offset": new_offset, "reset": reset}
+
+    def last_runner_run(self) -> dict:
+        """Return the newest complete runner block, including both boundary lines."""
+        try:
+            data = self.config.runner_log.read_bytes()
+        except FileNotFoundError:
+            raise OperationError("The runner log does not exist yet.") from None
+
+        lines = data.splitlines(keepends=True)
+        end_index = next(
+            (index for index in range(len(lines) - 1, -1, -1)
+             if lines[index].rstrip().endswith(b" RUN END")),
+            None,
+        )
+        if end_index is None:
+            raise OperationError("No completed runner run is available yet.")
+        start_index = next(
+            (index for index in range(end_index, -1, -1)
+             if b" RUN START:" in lines[index]),
+            None,
+        )
+        if start_index is None:
+            raise OperationError("The latest RUN END has no matching RUN START.")
+        text = b"".join(lines[start_index:end_index + 1]).decode("utf-8", errors="replace")
+        return {"text": text}
 
     def priorities(self) -> dict:
         path = self.config.priority_file
@@ -479,6 +506,11 @@ class OperationManager:
             self._run_native_campaign_manager("fresh")
             return
         raise OperationError("Fresh deterministic campaigns require the native Linux managers.")
+
+    def _stop_factorio(self) -> None:
+        """Stop the controller before terminating its Factorio server."""
+        self._stop_runner()
+        self._stop_server()
 
     def _full_refresh(self) -> None:
         self._stop_runner()

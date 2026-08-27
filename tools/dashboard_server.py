@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -134,6 +135,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except (ValueError, OperationError) as exc:
                 self._json(400, {"error": str(exc)})
             return
+        if request.path == "/api/logs/last-run":
+            try:
+                self._json(200, self.manager.last_runner_run())
+            except OperationError as exc:
+                self._json(404, {"error": str(exc)})
+            return
         if request.path == "/api/state":
             self._json(200, build_state(self.runs_dir))
             return
@@ -176,6 +183,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise OperationError("Request body must be an object.")
             action = request.path[len(prefix):]
+            if action == "stop_console":
+                if payload.get("confirmation") != "STOP_OPERATIONS_CONSOLE":
+                    raise OperationError("Stopping the operations console requires confirmation.")
+                self._json(202, {"accepted": True, "action": action})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
             self.manager.start(action, str(payload.get("confirmation", "")))
             self._json(202, {"accepted": True, "action": action})
         except (json.JSONDecodeError, OperationError) as exc:
@@ -245,7 +258,10 @@ def main() -> int:
         print(f"Cannot bind port {args.port}: {exc}\nPass --port to pick another.", file=sys.stderr)
         return 1
     print(f"Factorio operations dashboard: http://127.0.0.1:{args.port}/", flush=True)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
     return 0
 
 

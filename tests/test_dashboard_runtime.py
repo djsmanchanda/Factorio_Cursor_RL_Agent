@@ -321,7 +321,7 @@ def test_native_restore_uses_manager_reset_then_starts_server() -> None:
 def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None:
     assert dashboard_runtime.OperationManager.ACTIONS == {
         "deploy_mod", "restart_server", "stop_runner",
-        "fresh_campaign", "resume_runner",
+        "fresh_campaign", "resume_runner", "stop_factorio",
     }
     html = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.html").read_text()
     javascript = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.js").read_text()
@@ -331,8 +331,66 @@ def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None
     assert 'current world' in html.lower()
     assert 'without restoring the source save' in javascript
     assert 'START_FRESH_CAMPAIGN' in javascript
+    assert 'id="copy-last-run"' in html
+    assert 'data-action="stop_factorio"' in html
+    assert 'data-action="stop_console"' in html
+    assert 'STOP_FACTORIO_SERVER' in javascript
+    assert 'STOP_OPERATIONS_CONSOLE' in javascript
     assert 'data-action="restore_save"' not in html
     assert 'data-action="full_refresh"' not in html
+
+
+def test_last_runner_run_returns_newest_complete_boundary_block(tmp_path: Path) -> None:
+    log = tmp_path / "autonomous-run.log"
+    log.write_text(
+        "2026-08-28T10:00:00+05:30 RUN START: command=research target=one\n"
+        "2026-08-28T10:00:01+05:30 first\n"
+        "2026-08-28T10:00:02+05:30 RUN END\n"
+        "2026-08-28T11:00:00+05:30 RUN START: command=research target=two\n"
+        "2026-08-28T11:00:01+05:30 second\n"
+        "2026-08-28T11:00:02+05:30 RUN END\n"
+        "2026-08-28T12:00:00+05:30 RUN START: command=research target=active\n",
+        encoding="utf-8",
+    )
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(runner_log=log)
+
+    copied = manager.last_runner_run()["text"]
+
+    assert "target=two" in copied
+    assert "second" in copied
+    assert copied.startswith("2026-08-28T11:00:00+05:30 RUN START:")
+    assert copied.endswith("2026-08-28T11:00:02+05:30 RUN END\n")
+    assert "target=one" not in copied
+    assert "target=active" not in copied
+
+
+def test_last_runner_run_rejects_log_without_complete_run(tmp_path: Path) -> None:
+    log = tmp_path / "autonomous-run.log"
+    log.write_text("2026-08-28T12:00:00+05:30 RUN START: command=research\n", encoding="utf-8")
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(runner_log=log)
+
+    with pytest.raises(dashboard_runtime.OperationError, match="No completed"):
+        manager.last_runner_run()
+
+
+def test_stop_factorio_stops_runner_before_server() -> None:
+    manager = object.__new__(OperationManager)
+    events: list[str] = []
+    manager._stop_runner = lambda: events.append("runner")
+    manager._stop_server = lambda: events.append("server")
+
+    manager._stop_factorio()
+
+    assert events == ["runner", "server"]
+
+
+def test_stop_factorio_action_requires_explicit_confirmation() -> None:
+    manager = object.__new__(OperationManager)
+
+    with pytest.raises(dashboard_runtime.OperationError, match="requires confirmation"):
+        manager.start("stop_factorio")
 
 
 def test_fresh_campaign_invokes_atomic_native_campaign_manager(monkeypatch) -> None:

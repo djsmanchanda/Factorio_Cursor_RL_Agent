@@ -232,6 +232,12 @@ async function runAction(action) {
     if (!confirm('Stop the runner and restart the isolated Linux deterministic server?')) return;
   } else if (action === 'deploy_mod') {
     if (!confirm('Replace the isolated server and Linux GUI mod copies with the current repository Lua code? Restart the GUI client before joining.')) return;
+  } else if (action === 'stop_factorio') {
+    if (!confirm('Stop the Python runner and terminate the isolated Factorio server? The current save will be preserved.')) return;
+    confirmation = 'STOP_FACTORIO_SERVER';
+  } else if (action === 'stop_console') {
+    if (!confirm('Stop the operations console? Factorio and the runner will keep their current state.')) return;
+    confirmation = 'STOP_OPERATIONS_CONSOLE';
   }
   try {
     const response = await fetch(`/api/actions/${action}`, {
@@ -276,6 +282,22 @@ document.querySelector('#clear-view').addEventListener('click', () => {
 });
 document.querySelector('#copy-log').addEventListener('click', async () => {
   await navigator.clipboard.writeText(output.textContent);
+});
+document.querySelector('#copy-last-run').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const originalLabel = button.textContent;
+  try {
+    const response = await fetch('/api/logs/last-run', {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Last run is unavailable');
+    await navigator.clipboard.writeText(data.text);
+    button.textContent = 'Copied last run';
+  } catch (error) {
+    actionMessage.textContent = error.message;
+    button.textContent = 'Copy failed';
+  } finally {
+    setTimeout(() => { button.textContent = originalLabel; }, 1800);
+  }
 });
 
 refreshStatus();

@@ -102,9 +102,15 @@ a bounded Linux command—never PowerShell:
 |---|---|
 | Restart controller on current world | `manage_linux_deterministic_runner.sh restart` (preserves the world) |
 | Stop Python runner | `manage_linux_deterministic_runner.sh stop` |
+| Stop Factorio server | runner manager `stop`, then server manager `stop` |
+| Stop operations console | Gracefully shut down `tools/dashboard_server.py`; Factorio and the runner are unchanged |
 | Redeploy mod | `manage_linux_deterministic_server.sh deploy` (both project mods to server plus GUI copy) |
 | Restart server | `manage_linux_deterministic_server.sh stop`, then `start` |
 | Start fresh campaign | campaign manager `fresh`: runner stop, server stop, changed-mod deployment, verified reset, server start, manifest-gated controller start |
+
+The live-output toolbar's **Copy last run** control copies the newest complete
+runner session, including its `RUN START` and `RUN END` lines. It reads the
+runner log directly rather than copying only the currently rendered log window.
 
 The dashboard's **Research control** writes an ordered queue to
 `<server-data>/logs/research-queue.json`.  **Set target** replaces that queue;
