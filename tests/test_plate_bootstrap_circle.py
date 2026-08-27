@@ -374,3 +374,54 @@ def test_unproven_refinery_does_not_expand_its_mine(monkeypatch) -> None:
             object(), object(), "nauvis", "player", "copper-plate", (3.0, -1.0),
             lambda _message: None,
         )
+
+
+def test_unpowered_existing_mine_is_repaired_before_starvation_expansion(
+    monkeypatch,
+) -> None:
+    extraction = SimpleNamespace(
+        build_plan=None, expansion_positions=(), drill_count=6,
+        row_drill_count=3, expansion_step=-1, shared_belt_y=-11.5,
+        first_column_x=47.5, furnace_count=6, ore="iron-ore",
+        ore_output=(83.5, -11.5), smelter_origin=(95.0, 15.0),
+        mining_productivity_bonus=0.3, smelter_flow_direction="east",
+    )
+    furnace_positions = tuple((float(index), 0.0) for index in range(6))
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a, **_k: SimpleNamespace(
+            machine_count=6, working_count=1, machine_positions=furnace_positions,
+            produced_count=40,
+        ),
+    )
+    monkeypatch.setattr(builder.live_base, "find_idle_machine_row", lambda *_a, **_k: None)
+
+    def statuses(_client, _surface, positions):
+        if tuple(positions) == furnace_positions:
+            return {position: "no_ingredients" for position in furnace_positions}
+        return {tuple(position): "no_power" for position in positions}
+
+    monkeypatch.setattr(builder.live_base, "entity_statuses", statuses)
+    serviced = []
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan",
+        lambda *_a, **_k: serviced.append(True),
+    )
+    real_build = builder.build_mining_stage
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda *_a, **_k: pytest.fail("unpowered mine must not expand"),
+    )
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="mine power was repaired",
+    ):
+        real_build(
+            object(), object(), "nauvis", "player", "iron-plate", (3.0, -1.0),
+            lambda _message: None,
+        )
+
+    assert serviced == [True]

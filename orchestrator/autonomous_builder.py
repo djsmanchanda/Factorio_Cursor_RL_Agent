@@ -664,6 +664,43 @@ def _submit_mining_plan(
         )
 
 
+def _repair_unpowered_existing_mine(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    extraction, ore_output: Point, recipe: str,
+    emit: Callable[[str], None],
+) -> bool:
+    """Repair a standing mine before treating low furnace feed as capacity demand."""
+    if (
+        getattr(extraction, "build_plan", None) is not None
+        or getattr(extraction, "expansion_positions", ())
+    ):
+        return False
+    _origin, _area, _power, machines = existing_mine_service_geometry(
+        extraction.ore_output,
+        getattr(extraction, "row_drill_count", 0) or extraction.drill_count,
+        getattr(extraction, "expansion_step", -1),
+        shared_belt_y=getattr(
+            extraction, "shared_belt_y", extraction.ore_output[1],
+        ),
+        first_column_x=getattr(extraction, "first_column_x", None),
+    )
+    statuses = live_base.entity_statuses(client, surface, machines)
+    unpowered = [
+        position for position in machines
+        if statuses.get(tuple(position)) == "no_power"
+    ]
+    if not unpowered:
+        return False
+    emit(
+        f"  MINE POWER REPAIR: {len(unpowered)} {extraction.ore} drill(s) "
+        f"are unpowered; repairing the existing mine before expanding {recipe}"
+    )
+    _submit_mining_plan(
+        client, bridge, surface, force, extraction, ore_output, emit,
+    )
+    return True
+
+
 
 
 def _tile_bounds(tiles: set[tuple[int, int]]) -> tuple[Point, Point]:
@@ -1659,6 +1696,13 @@ def build_mining_stage(
         except Exception:  # survey unavailable (dry harness): guard passes
             starved = False
         if starved:
+            if _repair_unpowered_existing_mine(
+                client, bridge, surface, force, extraction,
+                extraction.ore_output, recipe, emit,
+            ):
+                raise ProductionPrerequisiteDeferred(
+                    f"{recipe} mine power was repaired; waiting for ore delivery"
+                )
             if line is None or getattr(line, "produced_count", 1) == 0:
                 emit(
                     f"  REFINERY STARTUP PENDING: {recipe} has {working}/"
