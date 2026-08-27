@@ -82,7 +82,7 @@ _ROBOPORT_SERVICE_AREAS = {
     "logistic": (_ROBOPORT_LOGISTIC_RADIUS, True),
 }
 _POWER_BRIDGE_SETTLE_SECONDS = 3.0
-_PENDING_POWER_BRIDGES: dict[tuple[str, str, int, int], float] = {}
+_PENDING_POWER_BRIDGES: dict[tuple[str, str], float] = {}
 # Slack subtracted from a chain's final hop so tile rounding can never land it
 # a fraction outside the service radius it was placed to satisfy.
 _COVERAGE_MARGIN = 2.0
@@ -656,10 +656,7 @@ def extend_power(
     sibling plan's future footprint: an emergency pole must route around that
     footprint just as it would around built infrastructure.
     """
-    bridge_key = (
-        surface, force,
-        math.floor(near_position[0]), math.floor(near_position[1]),
-    )
+    bridge_key = (surface, force)
     pending_since = _PENDING_POWER_BRIDGES.pop(bridge_key, None)
     waited_for_pending = pending_since is not None
     if pending_since is not None:

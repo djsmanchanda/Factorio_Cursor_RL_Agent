@@ -29,6 +29,13 @@ class _Client:
         return self.reply
 
 
+@pytest.fixture(autouse=True)
+def _clear_pending_power_bridges() -> None:
+    stage_services._PENDING_POWER_BRIDGES.clear()
+    yield
+    stage_services._PENDING_POWER_BRIDGES.clear()
+
+
 def test_construction_polling_spends_one_wait_budget_per_window(monkeypatch) -> None:
     readings = iter((3, 2, 1, 0))
     client = type("Client", (), {
@@ -445,7 +452,7 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
     assert occupied_options == [{"include_resources": True}]
 
 
-def test_repeated_power_remedy_waits_for_the_first_bridge_to_settle(
+def test_neighboring_power_remedy_waits_for_the_first_bridge_to_settle(
     monkeypatch,
 ) -> None:
     from orchestrator import autonomous_builder as builder_module
@@ -477,7 +484,7 @@ def test_repeated_power_remedy_waits_for_the_first_bridge_to_settle(
     )
 
     assert ss.extend_power(
-        object(), object(), "nauvis", "player", (24.0, 0.0),
+        object(), object(), "nauvis", "player", (30.0, 0.0),
         lambda _message: None,
     )
     assert ss.extend_power(
