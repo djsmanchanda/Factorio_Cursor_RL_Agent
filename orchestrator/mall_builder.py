@@ -20,6 +20,12 @@ Point = tuple[float, float]
 _CELL_PITCH = (11, 6)
 _CELL_COLUMNS = 3
 _CELL_ROWS = 8
+_PREFERRED_PAIRS = frozenset({
+    frozenset({"electronic-circuit", "copper-cable"}),
+})
+_INCOMPATIBLE_PAIRS = frozenset({
+    frozenset({"electronic-circuit", "transport-belt"}),
+})
 
 
 def _cell_origins(reference_point: Point) -> list[tuple[int, int]]:
@@ -42,6 +48,14 @@ def _related(existing_recipe: str | None, recipe: str) -> bool:
         existing_recipe in LINE_RECIPES[recipe]["ingredients"]
         or recipe in LINE_RECIPES[existing_recipe]["ingredients"]
     )
+
+
+def _preferred_pair(existing_recipe: str | None, recipe: str) -> bool:
+    return frozenset({existing_recipe, recipe}) in _PREFERRED_PAIRS
+
+
+def _incompatible_pair(existing_recipe: str | None, recipe: str) -> bool:
+    return frozenset({existing_recipe, recipe}) in _INCOMPATIBLE_PAIRS
 
 def _district_state(
     client: RconClient, surface: str, origins: list[tuple[int, int]],
@@ -97,6 +111,7 @@ def _choose_slot(
     """
     origins = _cell_origins(reference_point)
     states = _district_state(client, surface, origins)
+    preferred_open: list[tuple[tuple[int, int], str]] = []
     related_open: list[tuple[tuple[int, int], str]] = []
     other_open: list[tuple[tuple[int, int], str]] = []
     empty_origins: list[tuple[int, int]] = []
@@ -109,14 +124,21 @@ def _choose_slot(
                 continue
             occupied_recipe = left if left_present else right
             candidate = (origin, side)
-            (related_open if _related(occupied_recipe, recipe) else other_open).append(candidate)
+            if _incompatible_pair(occupied_recipe, recipe):
+                continue
+            if _preferred_pair(occupied_recipe, recipe):
+                preferred_open.append(candidate)
+            elif _related(occupied_recipe, recipe):
+                related_open.append(candidate)
+            else:
+                other_open.append(candidate)
         elif not left_present and not right_present and requester_name == "requester-chest":
             if _side_clear(client, surface, origin, "left"):
                 return origin, "left"
         elif not left_present and not right_present and requester_name == "-":
             empty_origins.append(origin)
-    if related_open or other_open:
-        return (related_open or other_open)[0]
+    if preferred_open or related_open or other_open:
+        return (preferred_open or related_open or other_open)[0]
     for origin in empty_origins:
         footprint_min = (origin[0] - 2, origin[1])
         footprint_max = (origin[0] + 12, origin[1] + 7)

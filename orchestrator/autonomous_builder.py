@@ -2886,6 +2886,8 @@ def _mall_request_multiplier(
     client: RconClient, surface: str, force: str, item: str, spec: dict,
 ) -> int | None:
     """Keep belt-component requester buffers small while starter metal is scarce."""
+    if item == "transport-belt":
+        return 30
     if item not in _STARTUP_MALL_REQUESTER_ITEMS:
         return None
     if not _metal_starter_transition_complete(client, surface, force):

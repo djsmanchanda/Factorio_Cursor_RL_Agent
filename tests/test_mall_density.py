@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from orchestrator import mall_builder  # noqa: E402
 from orchestrator.mall_builder import _CELL_PITCH  # noqa: E402
 from planners.mall_layout import generate_paired_mall_layout  # noqa: E402
 from planners.plan_validation import validate_no_collisions  # noqa: E402
@@ -48,3 +49,23 @@ def test_dense_mall_pitch_keeps_adjacent_cells_clear() -> None:
         ))
 
     validate_no_collisions(plans)
+
+
+def test_circuit_pairs_with_cable_and_not_transport_belt(monkeypatch) -> None:
+    reference = (3.0, -1.0)
+    circuit_cell, belt_cell, *_rest = mall_builder._cell_origins(reference)
+    states = {
+        origin: ("-", "-", "-")
+        for origin in mall_builder._cell_origins(reference)
+    }
+    states[circuit_cell] = ("electronic-circuit", "-", "requester-chest")
+    states[belt_cell] = ("iron-gear-wheel", "-", "requester-chest")
+    monkeypatch.setattr(mall_builder, "_district_state", lambda *_args: states)
+    monkeypatch.setattr(mall_builder, "_side_clear", lambda *_args: True)
+
+    assert mall_builder._choose_slot(
+        object(), "nauvis", "copper-cable", reference,
+    ) == (circuit_cell, "right")
+    assert mall_builder._choose_slot(
+        object(), "nauvis", "transport-belt", reference,
+    ) == (belt_cell, "right")

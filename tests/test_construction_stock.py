@@ -329,12 +329,18 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     assert builder._mall_request_multiplier(
         object(), "nauvis", "player", "electronic-circuit", spec,
     ) is None
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "transport-belt", spec,
+    ) == 30
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
     assert builder._mall_request_multiplier(
         object(), "nauvis", "player", "splitter", spec,
     ) == 8
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "transport-belt", spec,
+    ) == 30
 
 
 def test_automation_science_waits_for_direct_metal_starter_retirement(monkeypatch) -> None:
