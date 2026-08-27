@@ -64,7 +64,10 @@ def direct_smelter_positions(
             furnace_y - 4 * py + 3 * dy,
         )
     if furnace_count == 2:
-        qx, qy = -px, -py
+        # Keep the dual iron starter on one straight output axis. The two
+        # furnaces face the shared provider chest from opposite sides; the
+        # previous perpendicular lane created a needless right-angle feed.
+        qx, qy = dx, dy
         provider_x, provider_y = positions["provider"]
         secondary_drill = (provider_x + 6 * qx, provider_y + 6 * qy)
         positions.update({
@@ -160,7 +163,7 @@ def generate_direct_smelter(
         },
     ])
     if furnace_count == 2:
-        secondary_direction = _direction_for_vector(px, py)
+        secondary_direction = _direction_for_vector(-dx, -dy)
         actions.extend([{
             "action_type": "place_ghost",
             "entity": "electric-furnace",

@@ -71,9 +71,9 @@ def test_iron_starter_uses_two_direct_lanes_with_one_provider() -> None:
     )
     actions = plan["phases"][0]["actions"]
 
-    assert positions["secondary_drill"] == (67.5, 18.5)
-    assert positions["secondary_furnace"] == (64.5, 18.5)
-    assert positions["secondary_inserter"] == (62.5, 18.5)
+    assert positions["secondary_drill"] == (61.5, 12.5)
+    assert positions["secondary_furnace"] == (61.5, 15.5)
+    assert positions["secondary_inserter"] == (61.5, 17.5)
     assert sum(action["entity"] == "electric-mining-drill" for action in actions) == 2
     assert sum(action["entity"] == "electric-furnace" for action in actions) == 2
     assert sum(action["entity"] == "passive-provider-chest" for action in actions) == 1
