@@ -66,7 +66,7 @@ def test_stone_starter_site_and_identity_require_the_second_drill() -> None:
 
 
 def test_iron_starter_site_and_identity_require_two_complete_lanes() -> None:
-    response = "61.5 24.5 north 1 67.5 18.5"
+    response = "61.5 24.5 north 1 61.5 12.5"
     survey_client = _Client(response)
     site_client = _Client(response)
 
@@ -78,14 +78,14 @@ def test_iron_starter_site_and_identity_require_two_complete_lanes() -> None:
     )
 
     expected = live_base.DirectPlateStarter(
-        (61.5, 24.5), "north", 1, ((67.5, 18.5),),
+        (61.5, 24.5), "north", 1, ((61.5, 12.5),),
     )
     assert starter == expected
     assert site == expected
     assert "local dual=true" in survey_client.commands[0]
     assert "furnace_ok(sf)" in survey_client.commands[0]
     assert "local dual=true" in site_client.commands[0]
-    assert "can('electric-furnace',{cp[1]-3*px,cp[2]-3*py},nil,1.4)" in site_client.commands[0]
+    assert "can('electric-furnace',{cp[1]+3*dx,cp[2]+3*dy},nil,1.4)" in site_client.commands[0]
 
 
 def test_direct_starter_surveys_return_none_cleanly() -> None:

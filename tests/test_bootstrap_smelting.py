@@ -77,6 +77,12 @@ def test_iron_starter_uses_two_direct_lanes_with_one_provider() -> None:
     assert sum(action["entity"] == "electric-mining-drill" for action in actions) == 2
     assert sum(action["entity"] == "electric-furnace" for action in actions) == 2
     assert sum(action["entity"] == "passive-provider-chest" for action in actions) == 1
+    secondary = next(
+        action for action in actions
+        if action["entity"] == "electric-mining-drill"
+        and action["position"] == {"x": 61.5, "y": 12.5}
+    )
+    assert secondary["direction"] == "south"
 
 
 @pytest.mark.parametrize("direction", ["north", "east", "south", "west"])
