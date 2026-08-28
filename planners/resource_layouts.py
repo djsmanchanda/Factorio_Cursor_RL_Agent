@@ -131,6 +131,36 @@ def _power_scaffold(
     ] if include_row_poles else [])
 
 
+def mine_substation_positions(
+    drill_columns: list[float], belt_y: float, *, below_rows: bool = False,
+) -> list[tuple[float, float]]:
+    """Return one connected substation per paired six-drill mine module."""
+    columns = sorted(set(float(x) for x in drill_columns))
+    if not columns:
+        raise ValueError("Mine power grid needs at least one drill column")
+    vertical_offset = 4.5 if below_rows else -5.5
+    positions = []
+    for index in range(0, len(columns), 3):
+        group = columns[index:index + 3]
+        positions.append((
+            float(round(sum(group) / len(group))),
+            float(round(belt_y + vertical_offset)),
+        ))
+    return positions
+
+
+def _mine_substation_actions(
+    drill_columns: list[float], belt_y: float, *, below_rows: bool = False,
+) -> list[dict]:
+    return [
+        {"action_type": "place_entity", "entity": "substation",
+         "position": even_size_center(x, y)}
+        for x, y in mine_substation_positions(
+            drill_columns, belt_y, below_rows=below_rows,
+        )
+    ]
+
+
 def generate_coal_mine(
     drill_positions: list[tuple[float, float]],
     output_y: float,
@@ -395,9 +425,8 @@ def generate_parallel_mining_row_expansion(
         "position": {"x": merge_x, "y": source_belt_y},
     }
     plan = {"atomic": True, "phases": [
-        {"name": "parallel_mine_power", "actions": _power_scaffold(
-            (first_x - 2, parallel_belt_y - 4),
-            "electric-mining-drill", max(columns),
+        {"name": "parallel_mine_power", "actions": _mine_substation_actions(
+            columns, parallel_belt_y, below_rows=True,
         )},
         {"name": "parallel_mine_row", "actions": [
             {"action_type": "place_ghost", "entity": "electric-mining-drill",
@@ -420,6 +449,7 @@ def generate_parallel_mining_row_expansion(
 def generate_direct_mine_row_expansion(
     drill_positions: list[tuple[float, float]],
     shared_belt_y: float,
+    *, include_power: bool = True,
 ) -> dict:
     """Add a north-facing drill row that drops onto an existing belt."""
     if not drill_positions:
@@ -430,17 +460,19 @@ def generate_direct_mine_row_expansion(
     first_x = min(x for x, _ in drills)
     last_x = max(x for x, _ in drills)
     anchor = (first_x - 2, drills[0][1] + 4)
-    plan = {"phases": [
+    phases = ([
         {"name": "direct_mine_expansion_power", "actions": _power_scaffold(
             anchor, "electric-mining-drill", last_x,
             include_energy_interface=False,
         )},
+    ] if include_power else []) + [
         {"name": "direct_mine_expansion", "actions": [
             {"action_type": "place_ghost", "entity": "electric-mining-drill",
              "position": {"x": x, "y": y}, "direction": "north"}
             for x, y in drills
         ]},
-    ]}
+    ]
+    plan = {"phases": phases}
     validate_build_plan(plan)
     return plan
 
@@ -495,11 +527,9 @@ def generate_shared_belt_batch_expansion(
     # three belt tiles extend eastward from its centre; belt_direction is
     # purely the flow the ore travels toward the haul head.
     plan = {"phases": [
-        {"name": "shared_belt_batch_power", "actions": [
-            {"action_type": "place_ghost", "entity": ROW_POLE,
-             "position": {"x": x, "y": shared_belt_y + dy}}
-            for x in columns for dy in (-4, 4)
-        ]},
+        {"name": "shared_belt_batch_power", "actions": _mine_substation_actions(
+            columns, shared_belt_y,
+        )},
         {"name": "shared_belt_batch", "actions": [
             {"action_type": "place_ghost", "entity": "electric-mining-drill",
              "position": {"x": x, "y": shared_belt_y + dy},

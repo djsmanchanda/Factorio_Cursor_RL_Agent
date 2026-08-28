@@ -20,6 +20,7 @@ from planners.resource_layouts import (
     generate_shared_belt_batch_expansion,
     generate_shared_belt_column_expansion,
     generate_direct_mining_to_chest,
+    mine_substation_positions,
 )
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.zoning_geometry import MINING_APRON_TILES, Rect
@@ -91,7 +92,10 @@ def existing_mine_service_geometry(
     origin = (first_x - 1.5, belt_y - 0.5)
     area = ((min(first_x, output[0]) - 15, belt_y - 15),
             (max(last_x, output[0]) + 15, belt_y + 15))
-    return origin, area, (first_x - 6, belt_y - 4), drills
+    substation = mine_substation_positions(
+        sorted({x for x, _y in drills}), belt_y,
+    )[0]
+    return origin, area, substation, drills
 
 def adjacent_mining_positions(
     output: Point, drill_count: int, expansion_step: int = -1,
@@ -258,8 +262,17 @@ def direct_mine_plan(
         continuation_tiles=continuation_tiles or 0,
         include_side_tap=False,
     )
+    plan["phases"][0]["actions"] = [
+        {"action_type": "place_entity", "entity": "substation",
+         "position": {"x": x, "y": y}}
+        for x, y in mine_substation_positions(
+            [x for x, _y in upper], belt_anchor[1],
+        )
+    ]
     lower = [(x, belt_anchor[1] + 2) for x, _ in upper]
-    mirrored = generate_direct_mine_row_expansion(lower, belt_anchor[1])
+    mirrored = generate_direct_mine_row_expansion(
+        lower, belt_anchor[1], include_power=False,
+    )
     plan["phases"].extend(mirrored["phases"])
     return plan, belt_anchor
 

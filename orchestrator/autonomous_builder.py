@@ -70,6 +70,7 @@ from orchestrator.stage_extraction import (
     planned_smelter_count_for_drills,
     smelter_count_for_drills,
 )
+from planners.resource_layouts import mine_substation_positions
 from orchestrator.stage_recovery import repair_existing_ingredient_transport
 from orchestrator.stage_services import (
     StuckError,
@@ -592,7 +593,9 @@ def _reuse_expansion_row(
     row_y = machines[0][1]
     origin = (first_x - 1.5, row_y + 1.5)
     area = ((first_x - 15, row_y - 15), (extraction.ore_output[0] + 15, row_y + 15))
-    substation_position = (first_x - 6, row_y)
+    substation_position = mine_substation_positions(
+        sorted({x for x, _y in machines}), extraction.shared_belt_y,
+    )[0]
     emit(f"reusing completed adjacent {extraction.ore} expansion row")
     bring_stage_up(
         client, bridge, surface, force, f"expanded mine for {extraction.ore}",

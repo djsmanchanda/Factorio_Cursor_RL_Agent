@@ -52,6 +52,13 @@ These names describe intended responsibilities, not permission to build speculat
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   Mine, transport, and refinery capacity move as one coherent increment.
+- Managed paired mines own their power grid. One substation sits immediately
+  outside each three-column/six-drill module and directly wires adjacent mine
+  modules; its wires may cross the ore patch. Mine planning must not replace
+  this lattice with a generic medium-pole bridge or reserve the mine interior
+  against its own substations. A longitudinal 12-drill expansion adds its
+  second grid substation, while a splitter-fed parallel row adds matching lower
+  grid substations.
 - After all three starters, startup opens a direct six-furnace iron foundation,
   then copper, then stone-brick. Between those explicit raw steps, a standing
   intermediate may start only when every direct input is already working or

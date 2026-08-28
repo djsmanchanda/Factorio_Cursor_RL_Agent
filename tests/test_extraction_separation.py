@@ -77,17 +77,38 @@ def test_east_direct_mine_paves_a_bounded_straight_collector_continuation() -> N
     assert belts[-1]["position"] == {"x": output[0], "y": output[1]}
 
 
+def test_paired_mine_uses_one_substation_per_six_drills() -> None:
+    plan, _output = direct_mine_plan(
+        (40.0, -1.0), 3, belt_type="transport-belt",
+        inserter_type="inserter", output_side="east",
+    )
+    placed = actions(plan)
+    substations = [action for action in placed if action["entity"] == "substation"]
+
+    assert len(substations) == 1
+    assert not any(
+        action["entity"] in {"medium-electric-pole", "electric-energy-interface"}
+        for action in placed
+    )
+    substation = substations[0]["position"]
+    drills = [action["position"] for action in placed if action["entity"] == "electric-mining-drill"]
+    assert all(
+        max(abs(drill["x"] - substation["x"]), abs(drill["y"] - substation["y"])) <= 9
+        for drill in drills
+    )
+
+
 def test_parallel_row_expansion_declares_splitter_merge() -> None:
     from planners.resource_layouts import generate_parallel_mining_row_expansion
 
     plan = generate_parallel_mining_row_expansion(
         [44.5, 47.5, 50.5, 53.5, 56.5, 59.5], -1.5, merge_x=64.5,
     )
-    actions = list(plan["phases"][1]["actions"])
-    splitters = [action for action in actions if action["entity"] == "fast-splitter"]
-    tunnels = [action for action in actions if action["entity"] == "fast-underground-belt"]
-    removals = [action for action in actions if action["action_type"] == "remove_entity"]
-    belts = [action for action in actions if action["entity"] == "fast-transport-belt"]
+    phase_actions = list(plan["phases"][1]["actions"])
+    splitters = [action for action in phase_actions if action["entity"] == "fast-splitter"]
+    tunnels = [action for action in phase_actions if action["entity"] == "fast-underground-belt"]
+    removals = [action for action in phase_actions if action["action_type"] == "remove_entity"]
+    belts = [action for action in phase_actions if action["entity"] == "fast-transport-belt"]
     assert len(splitters) == 1
     assert plan["atomic"] is True
     assert removals == [{
@@ -96,9 +117,30 @@ def test_parallel_row_expansion_declares_splitter_merge() -> None:
     }]
     assert {action["underground_type"] for action in tunnels} == {"input", "output"}
     assert all(action["position"]["x"] % 1 == 0.5 for action in belts)
+    assert len([
+        action for action in actions(plan) if action["entity"] == "substation"
+    ]) == 2
+    assert not any(
+        action["entity"] in {"medium-electric-pole", "electric-energy-interface"}
+        for action in actions(plan)
+    )
     assert plan["parallel_merge"]["splitter"] == (
         splitters[0]["position"]["x"], splitters[0]["position"]["y"],
     )
+
+
+def test_longitudinal_mine_module_adds_one_substation_not_poles() -> None:
+    from planners.resource_layouts import generate_shared_belt_batch_expansion
+
+    plan = generate_shared_belt_batch_expansion(
+        [44.5, 47.5, 50.5], -1.5, belt_direction="east",
+    )
+    placed = actions(plan)
+
+    assert [action["entity"] for action in placed if action["entity"] == "substation"] == [
+        "substation",
+    ]
+    assert not any(action["entity"] == "medium-electric-pole" for action in placed)
 
 def test_planned_metal_refinery_stays_proportional_to_drills() -> None:
     assert planned_smelter_count_for_drills("iron-plate", 6, 0.30) == 6
@@ -958,7 +1000,7 @@ def test_real_builder_does_not_resubmit_a_reconciled_mine(monkeypatch) -> None:
         (0.0, 0.0), lambda _message: None,
     ) == (1.0, 2.0)
     assert serviced == [(
-        "existing mine for iron-ore", (5.5, 16.5),
+        "existing mine for iron-ore", (13.0, 15.0),
         ((14.5, 18.5), (11.5, 18.5), (14.5, 22.5), (11.5, 22.5)),
     )]
 
