@@ -114,6 +114,38 @@
       </div>
     </section>
 
+    <section class="panel helper-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">POST-RUN OBSERVER</p>
+          <h2>Helper Agent</h2>
+        </div>
+        <p id="helper-status" class="operation-state">UNREVIEWED</p>
+      </div>
+      <div class="helper-body">
+        <div id="helper-report">
+          <p class="helper-empty">Waiting for the newest post-run report.</p>
+        </div>
+        <div class="helper-feedback">
+          <textarea id="helper-comment" rows="3" placeholder="Optional review comment"></textarea>
+          <textarea id="helper-observations" rows="3" placeholder="Optional missed observations"></textarea>
+          <div class="helper-buttons">
+            <button id="helper-confirm">Confirm</button>
+            <button id="helper-partial">Partially correct</button>
+            <button id="helper-wrong">Wrong</button>
+            <button id="helper-missed">Missed something</button>
+          </div>
+          <div class="helper-buttons">
+            <input id="helper-skill-id" type="text" placeholder="Casebook skill ID">
+            <button id="helper-promote">Promote</button>
+            <button id="helper-demote">Demote</button>
+            <button id="helper-reject">Reject</button>
+          </div>
+          <p id="helper-message" class="action-message">No feedback recorded.</p>
+        </div>
+      </div>
+    </section>
+
     <section class="panel console-panel">
       <div class="panel-heading console-heading">
         <div>

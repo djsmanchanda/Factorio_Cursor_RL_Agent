@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HelperAgentFeedback",
+  "type": "object",
+  "required": [
+    "run_id", "verdict", "missed_issues", "corrections", "extra_observations",
+    "skill_actions", "comment", "created_at"
+  ],
+  "properties": {
+    "run_id": {"type": "string", "minLength": 1},
+    "verdict": {
+      "enum": ["confirmed", "partial", "wrong", "missed_something"]
+    },
+    "missed_issues": {"type": "array", "items": {"type": "string"}},
+    "corrections": {"type": "array", "items": {"type": "string"}},
+    "extra_observations": {"type": "array", "items": {"type": "string"}},
+    "skill_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "skill_id"],
+        "properties": {
+          "action": {"enum": ["promote", "demote", "reject"]},
+          "skill_id": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "comment": {"type": "string"},
+    "created_at": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HelperAgentCasePacket",
+  "type": "object",
+  "required": [
+    "schema_version", "run_id", "created_at", "commit", "save_hash",
+    "mod_tree_hash", "bootstrap_profile", "surface", "force", "target",
+    "mission_stage", "start_tick", "end_tick", "duration_seconds",
+    "terminal_class", "blockers", "telemetry", "log_excerpt", "source_log",
+    "mission_state", "blocker_events"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "commit": {"type": ["string", "null"]},
+    "save_hash": {"type": ["string", "null"]},
+    "mod_tree_hash": {"type": ["string", "null"]},
+    "bootstrap_profile": {"enum": ["reduced-v1", "supplied-v1", "unknown"]},
+    "surface": {"type": "string", "minLength": 1},
+    "force": {"type": "string", "minLength": 1},
+    "target": {"type": "string", "minLength": 1},
+    "mission_stage": {"type": "string", "minLength": 1},
+    "start_tick": {"type": ["integer", "null"], "minimum": 0},
+    "end_tick": {"type": ["integer", "null"], "minimum": 0},
+    "duration_seconds": {"type": "integer", "minimum": 0},
+    "terminal_class": {
+      "enum": ["completed", "stuck", "error", "aborted", "no_run_end"]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/blocker"}
+    },
+    "telemetry": {"type": "object"},
+    "log_excerpt": {
+      "type": "object",
+      "required": ["head_lines", "tail_lines", "matched_pattern_lines"],
+      "properties": {
+        "head_lines": {"type": "array", "items": {"type": "string"}},
+        "tail_lines": {"type": "array", "items": {"type": "string"}},
+        "matched_pattern_lines": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "source_log": {"type": "string", "minLength": 1},
+    "mission_state": {"type": "string", "minLength": 1},
+    "blocker_events": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "blocker": {
+      "type": "object",
+      "required": [
+        "blocker_id", "code", "classification", "state", "stage", "target",
+        "first_seen_tick", "last_seen_tick", "observed_at", "message",
+        "details"
+      ],
+      "properties": {
+        "blocker_id": {"type": "string", "minLength": 1},
+        "code": {"type": "string", "minLength": 1},
+        "classification": {"enum": ["bug", "intended_difficulty"]},
+        "state": {"type": "string", "minLength": 1},
+        "stage": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "first_seen_tick": {"type": ["integer", "null"]},
+        "last_seen_tick": {"type": ["integer", "null"]},
+        "observed_at": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "details": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

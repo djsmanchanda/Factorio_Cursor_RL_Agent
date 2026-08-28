@@ -57,6 +57,10 @@ ranking, and a disposable-only lab-circuit experiment.  The Python planner
 retains research-selection authority until a separately authorized and tested
 controller is promoted.
 
+The [Helper Agent plan](helper_agent.md) defines the implemented separate
+post-run observability layer for notable moments, feedback, and focused-edit
+briefings. It is not a controller and does not change planner authority.
+
 For long live-debugging campaigns, use the restart-safe
 [OpenCode campaign prompt](opencode_campaign_prompt.md) and its bounded
 last-ten-runs journal.

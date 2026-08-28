@@ -26,6 +26,7 @@ from orchestrator.autonomous_builder import StuckError, run
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mission_state import BOOTSTRAP_PROFILES, MissionStateLedger
 from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
+from helper_agent.packet_builder import build_case_packet, write_packet
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
 
@@ -395,6 +396,8 @@ def main(argv: list[str] | None = None) -> int:
     pid_path = log_path.with_name("autonomous-run.pid")
     termination_reason = "completed"
     mission_status = "completed"
+    mission_state_path: Path | None = None
+    blocker_events_path: Path | None = None
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
         mission_ledger: MissionStateLedger | None = None
@@ -520,6 +523,26 @@ def main(argv: list[str] | None = None) -> int:
                 termination_reason=termination_reason,
             )
             logger.emit("RUN END")
+            if mission_state_path is not None:
+                try:
+                    packet = build_case_packet(
+                        log_path=log_path,
+                        mission_state_path=mission_state_path,
+                        blocker_events_path=blocker_events_path,
+                        episode_manifest_path=getattr(args, "episode_manifest", None),
+                    )
+                    packet_path = write_packet(
+                        packet,
+                        Path.home() / ".local/share/factorio-rl/helper_agent/inbox",
+                    )
+                    logger.emit(
+                        f"HELPER AGENT: queued post-run review packet {packet_path}"
+                    )
+                except Exception as helper_error:
+                    logger.emit(
+                        "HELPER AGENT: could not queue post-run review packet: "
+                        f"{type(helper_error).__name__}: {helper_error}"
+                    )
             logger.close()
 
 

@@ -18,6 +18,13 @@ const researchMessage = document.querySelector('#research-message');
 const researchQueueCount = document.querySelector('#research-queue-count');
 const researchQueue = document.querySelector('#research-queue');
 const researchButtons = [researchSet, researchAppend];
+const helperReport = document.querySelector('#helper-report');
+const helperStatus = document.querySelector('#helper-status');
+const helperMessage = document.querySelector('#helper-message');
+const helperComment = document.querySelector('#helper-comment');
+const helperObservations = document.querySelector('#helper-observations');
+const helperSkillId = document.querySelector('#helper-skill-id');
+let latestHelperRun = null;
 const titles = {
   runner: 'Autonomous runner',
   control: 'Dashboard actions',
@@ -34,6 +41,127 @@ function setOnline(id, online, detail = '') {
   const element = document.querySelector(id);
   element.classList.toggle('online', online);
   element.title = detail;
+}
+
+function helperList(label, items) {
+  if (!items.length) return null;
+  const heading = document.createElement('h3');
+  heading.textContent = label;
+  const list = document.createElement('ul');
+  items.forEach(item => {
+    const entry = document.createElement('li');
+    entry.textContent = item;
+    list.append(entry);
+  });
+  const section = document.createElement('div');
+  section.append(heading, list);
+  return section;
+}
+
+function renderHelper(data) {
+  const report = data.latest;
+  if (!report) {
+    helperReport.replaceChildren();
+    const empty = document.createElement('p');
+    empty.className = 'helper-empty';
+    empty.textContent = 'No post-run report is available yet.';
+    helperReport.append(empty);
+    return;
+  }
+  latestHelperRun = report.run_id;
+  helperStatus.textContent = String(data.review_status || 'unreviewed').toUpperCase();
+  helperReport.replaceChildren();
+  const summary = document.createElement('div');
+  summary.className = 'helper-summary';
+  [
+    ['Run', report.run_id],
+    ['Outcome', report.terminal_outcome],
+    ['Stage', report.mission_stage],
+    ['Confidence', `${report.confidence} · ${report.status}`],
+  ].forEach(([label, value]) => {
+    const row = document.createElement('p');
+    const name = document.createElement('strong');
+    const detail = document.createElement('code');
+    name.textContent = `${label}: `;
+    detail.textContent = value;
+    row.append(name, detail);
+    summary.append(row);
+  });
+  const timeline = helperList('Timeline', [report.timeline_summary].filter(Boolean));
+  const moments = document.createElement('div');
+  moments.append(Object.assign(document.createElement('h3'), {textContent: 'Notable moments'}));
+  (report.notable_moments || []).forEach(moment => {
+    const card = document.createElement('article');
+    card.className = 'notable-moment';
+    const title = document.createElement('h4');
+    title.textContent = moment.title;
+    const body = document.createElement('dl');
+    const fields = [
+      ['What happened', moment.what_happened],
+      ['What was expected', moment.what_was_expected],
+      ['Possible cause', moment.cause],
+      ['Fix direction', moment.fix_direction],
+      ['Confidence', moment.confidence],
+      ['Evidence', moment.evidence],
+      ['Classification', moment.classification],
+      ['Review status', moment.review_status],
+    ];
+    fields.forEach(([key, value]) => {
+      const term = document.createElement('dt');
+      const detail = document.createElement('dd');
+      term.textContent = key;
+      detail.textContent = value;
+      body.append(term, detail);
+    });
+    card.append(title, body);
+    moments.append(card);
+  });
+  const evidence = helperList('Evidence', [
+    report.packet_path,
+  ].filter(Boolean));
+  const skills = helperList('Related skills', report.relevant_casebook_skills || []);
+  helperReport.append(summary, timeline, moments, evidence, skills);
+}
+
+async function refreshHelper() {
+  try {
+    const response = await fetch('/api/helper', {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Helper Agent request failed');
+    renderHelper(data);
+  } catch (error) {
+    helperStatus.textContent = 'OFFLINE';
+    helperMessage.textContent = error.message;
+  }
+}
+
+async function submitHelperFeedback(verdict, action = null) {
+  if (!latestHelperRun) {
+    helperMessage.textContent = 'No report is available for feedback.';
+    return;
+  }
+  const payload = {
+    run_id: latestHelperRun,
+    verdict,
+    missed_issues: helperObservations.value.split('\n').map(line => line.trim()).filter(Boolean),
+    corrections: [],
+    extra_observations: [],
+    skill_actions: action && helperSkillId.value.trim() ? [{action, skill_id: helperSkillId.value.trim()}] : [],
+    comment: helperComment.value,
+  };
+  try {
+    const response = await fetch('/api/actions/helper_feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Action-Token': token},
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Feedback was rejected');
+    helperMessage.textContent = `Feedback stored: ${verdict}.`;
+    await refreshHelper();
+  } catch (error) {
+    helperMessage.textContent = error.message;
+  }
 }
 
 async function refreshStatus() {
@@ -266,6 +394,16 @@ priorityTabs.forEach(button => button.addEventListener('click', () => {
   });
   renderPriorities(priorityItems);
 }));
+['confirm', 'partial', 'wrong', 'missed'].forEach(id => {
+  document.querySelector(`#helper-${id}`).addEventListener('click', () => {
+    submitHelperFeedback(id === 'missed' ? 'missed_something' : id);
+  });
+});
+['promote', 'demote', 'reject'].forEach(action => {
+  document.querySelector(`#helper-${action}`).addEventListener('click', () => {
+    submitHelperFeedback('partial', action);
+  });
+});
 document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
   document.querySelector('.tab.active').classList.remove('active');
   button.classList.add('active');
@@ -319,3 +457,5 @@ setInterval(refreshResearchQueue, 1500);
 setInterval(refreshResearchOptions, 3000);
 refreshResearchQueue();
 refreshResearchOptions();
+refreshHelper();
+setInterval(refreshHelper, 3000);

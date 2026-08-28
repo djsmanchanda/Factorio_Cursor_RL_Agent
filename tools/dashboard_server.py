@@ -141,6 +141,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except OperationError as exc:
                 self._json(404, {"error": str(exc)})
             return
+        if request.path == "/api/helper":
+            try:
+                self._json(200, self.manager.helper_agent())
+            except (OSError, ValueError) as exc:
+                self._json(500, {"error": str(exc)})
+            return
         if request.path == "/api/state":
             self._json(200, build_state(self.runs_dir))
             return
@@ -189,9 +195,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(202, {"accepted": True, "action": action})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
+            if action == "helper_feedback":
+                self._json(202, self.manager.submit_helper_feedback(payload))
+                return
             self.manager.start(action, str(payload.get("confirmation", "")))
             self._json(202, {"accepted": True, "action": action})
-        except (json.JSONDecodeError, OperationError) as exc:
+        except (json.JSONDecodeError, OperationError, ValueError) as exc:
             self._json(409, {"error": str(exc)})
 
     def log_message(self, format: str, *args) -> None:
@@ -229,6 +238,11 @@ def main() -> int:
         "--gui-mods", type=Path, default=Path.home() / ".factorio" / "mods",
         help="Linux GUI Factorio mods directory synchronized by native deploy.",
     )
+    parser.add_argument(
+        "--helper-root", type=Path,
+        default=Path.home() / ".local/share/factorio-rl/helper_agent",
+        help="Helper Agent mutable data root.",
+    )
     parser.add_argument("--technology", default="mining-productivity-4")
     args = parser.parse_args()
 
@@ -248,6 +262,7 @@ def main() -> int:
         runtime_root=args.runtime_root,
         python_bin=args.python_bin,
         gui_mods=args.gui_mods,
+        helper_root=args.helper_root,
     )
     DashboardHandler.runs_dir = args.runs_dir
     DashboardHandler.manager = OperationManager(config)

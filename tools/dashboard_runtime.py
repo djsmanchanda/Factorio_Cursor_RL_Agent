@@ -28,6 +28,7 @@ from orchestrator.research_queue import (
     ResearchQueueError, load_queue, merge_queue, validate_technology_list,
 )
 from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
+from helper_agent import dashboard as helper_dashboard
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
 
@@ -45,6 +46,7 @@ class DashboardConfig:
     server_manager: Path | None = None
     runner_manager: Path | None = None
     gui_mods: Path | None = None
+    helper_root: Path | None = None
 
     @property
     def script_output(self) -> Path:
@@ -69,6 +71,10 @@ class DashboardConfig:
     @property
     def server_save(self) -> Path:
         return self.server_data / "saves" / "mod_playground.zip"
+
+    @property
+    def helper_data_root(self) -> Path:
+        return self.helper_root or Path.home() / ".local/share/factorio-rl/helper_agent"
 
 
 class OperationError(RuntimeError):
@@ -175,6 +181,12 @@ class OperationManager:
             raise OperationError("The latest RUN END has no matching RUN START.")
         text = b"".join(lines[start_index:end_index + 1]).decode("utf-8", errors="replace")
         return {"text": text}
+
+    def helper_agent(self) -> dict:
+        return helper_dashboard.helper_view(self.config.helper_data_root)
+
+    def submit_helper_feedback(self, payload: dict) -> dict:
+        return helper_dashboard.submit_feedback(self.config.helper_data_root, payload)
 
     def priorities(self) -> dict:
         path = self.config.priority_file

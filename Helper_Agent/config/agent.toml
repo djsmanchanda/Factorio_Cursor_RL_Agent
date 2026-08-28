@@ -1,0 +1,16 @@
+# Path: Helper_Agent/config/agent.toml
+# Purpose: Local Helper Agent defaults; mutable state stays outside the repository.
+
+[paths]
+data_root = "~/.local/share/factorio-rl/helper_agent"
+
+[model]
+# Leave endpoint empty to use the deterministic fallback reviewer.
+endpoint = ""
+model = "local-lite"
+api_key_env = ""
+timeout_seconds = 60
+
+[review]
+max_notable_moments = 12
+max_log_lines = 160

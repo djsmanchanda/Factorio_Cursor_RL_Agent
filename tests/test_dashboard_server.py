@@ -57,3 +57,26 @@ def test_stop_console_endpoint_replies_before_shutting_down(monkeypatch) -> None
 
     assert replies == [(202, {"accepted": True, "action": "stop_console"})]
     assert shutdowns == ["shutdown"]
+
+
+def test_helper_feedback_validation_error_returns_conflict() -> None:
+    payload = json.dumps({"run_id": "missing"}).encode()
+    handler = object.__new__(DashboardHandler)
+    handler.path = "/api/actions/helper_feedback"
+    handler.headers = {
+        "X-Action-Token": "secret",
+        "Content-Length": str(len(payload)),
+    }
+    handler.action_token = "secret"
+    handler.rfile = io.BytesIO(payload)
+    handler.manager = SimpleNamespace(
+        submit_helper_feedback=lambda _payload: (_ for _ in ()).throw(
+            ValueError("feedback is invalid")
+        )
+    )
+    replies: list[tuple[int, dict]] = []
+    handler._json = lambda code, body: replies.append((code, body))
+
+    handler.do_POST()
+
+    assert replies == [(409, {"error": "feedback is invalid"})]

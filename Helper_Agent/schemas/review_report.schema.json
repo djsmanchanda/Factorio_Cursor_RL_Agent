@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HelperAgentReviewReport",
+  "type": "object",
+  "required": [
+    "schema_version", "run_id", "created_at", "model", "status",
+    "terminal_outcome", "mission_stage", "timeline_summary", "notable_moments",
+    "successful_workflows", "failed_workflows", "suspected_root_causes",
+    "missing_observations", "recommended_next_probe", "relevant_casebook_skills",
+    "confidence", "uncertainty", "review_status", "packet_path"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "status": {"enum": ["model_review", "fallback"]},
+    "terminal_outcome": {"type": "string", "minLength": 1},
+    "mission_stage": {"type": "string", "minLength": 1},
+    "timeline_summary": {"type": "string"},
+    "notable_moments": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/notableMoment"}
+    },
+    "successful_workflows": {"type": "array", "items": {"type": "string"}},
+    "failed_workflows": {"type": "array", "items": {"type": "string"}},
+    "suspected_root_causes": {"type": "array", "items": {"type": "string"}},
+    "missing_observations": {"type": "array", "items": {"type": "string"}},
+    "recommended_next_probe": {"type": "string", "minLength": 1},
+    "relevant_casebook_skills": {"type": "array", "items": {"type": "string"}},
+    "confidence": {"enum": ["low", "medium", "high"]},
+    "uncertainty": {"type": "string"},
+    "review_status": {"enum": ["unreviewed"]},
+    "packet_path": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "notableMoment": {
+      "type": "object",
+      "required": [
+        "title", "run_id", "time_tick", "what_happened", "what_was_expected",
+        "cause", "fix_direction", "confidence", "evidence", "classification",
+        "review_status"
+      ],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "run_id": {"type": "string", "minLength": 1},
+        "time_tick": {"type": "string", "minLength": 1},
+        "what_happened": {"type": "string"},
+        "what_was_expected": {"type": "string", "minLength": 1},
+        "cause": {"type": "string"},
+        "fix_direction": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["low", "medium", "high"]},
+        "evidence": {"type": "string", "minLength": 1},
+        "classification": {
+          "enum": ["bug", "intended_difficulty", "unclear", "operational"]
+        },
+        "review_status": {"enum": ["unreviewed"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}
