@@ -77,6 +77,17 @@ def test_east_direct_mine_paves_a_bounded_straight_collector_continuation() -> N
     assert belts[-1]["position"] == {"x": output[0], "y": output[1]}
 
 
+def test_refinery_site_keeps_a_growth_buffer_from_another_refinery() -> None:
+    reserved = (((100.0, 0.0), (118.0, 28.0)),)
+
+    assert not stage_extraction._keeps_refinery_clearance(
+        (120.0, 10.0), (144.0, 32.0), reserved,
+    )
+    assert stage_extraction._keeps_refinery_clearance(
+        (132.0, 10.0), (156.0, 32.0), reserved,
+    )
+
+
 def test_paired_mine_uses_one_substation_per_six_drills() -> None:
     plan, _output = direct_mine_plan(
         (40.0, -1.0), 3, belt_type="transport-belt",

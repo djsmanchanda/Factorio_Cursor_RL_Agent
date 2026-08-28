@@ -409,6 +409,39 @@ def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) ->
     assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "copper-plate mine power was repaired; waiting for ore delivery",
+        "copper-plate direct refinery has not produced yet",
+    ],
+)
+def test_foundation_recovery_holds_startup_instead_of_spinning_the_goal(
+    monkeypatch, reason: str,
+) -> None:
+    waits: list[float] = []
+    deferred: dict[str, int] = {}
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(autonomous_builder.time, "sleep", waits.append)
+    monkeypatch.setattr(autonomous_builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            autonomous_builder.ProductionPrerequisiteDeferred(reason),
+        ),
+    )
+
+    spent = autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "copper-plate", set(),
+        deferred, {}, (0.0, 0.0), lambda _message: None, furnace_target=6,
+    )
+
+    assert spent is True
+    assert deferred == {}
+    assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
+
+
 def test_earmarked_foundation_retires_starter_after_live_output(monkeypatch) -> None:
     starter = autonomous_builder.live_base.DirectPlateStarter(
         (17.5, -2.5), "north", 1, ((17.5, 9.5),),

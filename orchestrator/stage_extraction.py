@@ -31,6 +31,7 @@ ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
 LOCAL_MODE_MAX_LINK_TILES = 300.0
 RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
+REFINERY_SITE_CLEARANCE_TILES = 12.0
 
 
 class PendingSystemDeferred(ValueError):
@@ -59,6 +60,7 @@ class LocalExtractionPlan:
     shared_belt_y: float | None = None
     smelter_flow_direction: str = "east"
     first_column_x: float | None = None
+    smelter_reserved_area: tuple[Point, Point] | None = None
 
 
 def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
@@ -599,6 +601,25 @@ def _align_area_anchor(anchor: Point, bounds: Rect) -> Point:
     )
 
 
+def _keeps_refinery_clearance(
+    minimum: Point, maximum: Point,
+    reserved_areas: tuple[tuple[Point, Point], ...],
+) -> bool:
+    """Keep the next refinery's full growth block out of another's corridor."""
+    for reserved_min, reserved_max in reserved_areas:
+        horizontally_clear = (
+            maximum[0] + REFINERY_SITE_CLEARANCE_TILES <= reserved_min[0]
+            or minimum[0] >= reserved_max[0] + REFINERY_SITE_CLEARANCE_TILES
+        )
+        vertically_clear = (
+            maximum[1] + REFINERY_SITE_CLEARANCE_TILES <= reserved_min[1]
+            or minimum[1] >= reserved_max[1] + REFINERY_SITE_CLEARANCE_TILES
+        )
+        if not horizontally_clear and not vertically_clear:
+            return False
+    return True
+
+
 def plan_local_extraction(
     client: RconClient,
     surface: str,
@@ -612,6 +633,7 @@ def plan_local_extraction(
     reuse_existing: bool = True,
     belt_stock: int = 0,
     excluded_drill_positions: tuple[Point, ...] = (),
+    reserved_refinery_areas: tuple[tuple[Point, Point], ...] = (),
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
@@ -798,6 +820,18 @@ def plan_local_extraction(
             candidate = (
                 area_min[0] - bounds.min_x, area_min[1] - bounds.min_y,
             )
+            candidate_min = (
+                candidate[0] + bounds.min_x,
+                candidate[1] + bounds.min_y,
+            )
+            candidate_max = (
+                candidate[0] + bounds.max_x,
+                candidate[1] + bounds.max_y,
+            )
+            if not _keeps_refinery_clearance(
+                candidate_min, candidate_max, reserved_refinery_areas,
+            ):
+                continue
             feed = (
                 candidate[0] + feed_offset[0], candidate[1] + feed_offset[1],
             )
@@ -847,5 +881,15 @@ def plan_local_extraction(
         ),
         system_drill_target=(
             phase_target if not reuse_existing or not mines else system_before
+        ),
+        smelter_reserved_area=(
+            (
+                smelter_origin[0] + east_bounds.min_x,
+                smelter_origin[1] + east_bounds.min_y,
+            ),
+            (
+                smelter_origin[0] + east_bounds.max_x,
+                smelter_origin[1] + east_bounds.max_y,
+            ),
         ),
     )

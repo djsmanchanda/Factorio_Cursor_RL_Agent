@@ -165,6 +165,9 @@ _LOGISTIC_CHARGE_WAIT_SECONDS = 90.0
 # service envelope so it cannot occupy a reserved drill column on a later
 # expansion. The cache makes every remediation round reuse the same chest.
 _STAGE_DELIVERY_PROVIDERS: dict[tuple[str, str, str, Point], Point] = {}
+_REFINERY_SITE_RESERVATIONS: dict[
+    tuple[str, str, str], tuple[Point, Point],
+] = {}
 
 
 def _stage_delivery_anchor(
@@ -1743,6 +1746,12 @@ def build_mining_stage(
                 client, surface, force,
             ).get(belt_type, 0),
             excluded_drill_positions=excluded_drill_positions,
+            reserved_refinery_areas=tuple(
+                area for (reserved_surface, reserved_force, reserved_recipe), area
+                in _REFINERY_SITE_RESERVATIONS.items()
+                if (reserved_surface, reserved_force) == (surface, force)
+                and reserved_recipe != recipe
+            ),
         )
     except stage_extraction.PendingSystemDeferred as error:
         # The system serving this demand is still being built -- bots need
@@ -1754,6 +1763,11 @@ def build_mining_stage(
         raise ProductionPrerequisiteDeferred(str(error)) from error
     except ValueError as error:
         raise StuckError(str(error)) from error
+    reserved_area = getattr(extraction, "smelter_reserved_area", None)
+    if reserved_area is not None:
+        _REFINERY_SITE_RESERVATIONS[(surface, force, recipe)] = (
+            reserved_area
+        )
     if not expand:
         starved = False
         line = None
@@ -3897,6 +3911,17 @@ def _prep_plate_extraction(
             consume_wait(f"pending_{short_plate}_foundation")
             time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
             return True
+        if (
+            "mine power was repaired" in str(deferred)
+            or "direct refinery has not produced yet" in str(deferred)
+        ):
+            emit(
+                f"  PREP CONSTRUCTING: {short_plate} foundation is recovering "
+                "power or first output; holding startup instead of advancing the goal"
+            )
+            consume_wait(f"recovering_{short_plate}_foundation")
+            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+            return True
         deferred_targets[short_plate] = wanted_furnaces
         emit(f"  PREP DEFERRED: {short_plate} extraction -- {deferred}")
         _queue_electric_furnace_unlock(
@@ -4432,6 +4457,7 @@ def _open_the_run(
     global _STARTUP_MALL_LIMITS_FALLBACK_PROBED
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     MANAGED_INTERMEDIATE_SOURCES.clear()
+    _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False
     _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
