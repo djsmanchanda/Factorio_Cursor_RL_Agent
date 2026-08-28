@@ -22,9 +22,11 @@ _CELL_COLUMNS = 3
 _CELL_ROWS = 8
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
+    frozenset({"transport-belt", "copper-cable"}),
 })
 _INCOMPATIBLE_PAIRS = frozenset({
     frozenset({"electronic-circuit", "transport-belt"}),
+    frozenset({"copper-cable"}),
 })
 
 
