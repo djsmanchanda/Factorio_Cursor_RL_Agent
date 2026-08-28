@@ -343,20 +343,70 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     ) == 30
 
 
-def test_automation_science_waits_for_direct_metal_starter_retirement(monkeypatch) -> None:
+def test_automation_science_repairs_an_unhealthy_metal_transition(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: False,
     )
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_args: None)
+    monkeypatch.setattr(
+        builder, "_metal_science_transition_status",
+        lambda *_args: (
+            False,
+            {
+                "mode": "transition_health",
+                "districts": {
+                    "iron-plate": {
+                        "healthy": False,
+                        "remedy": "repair_power_or_transport",
+                    },
+                },
+            },
+        ),
+    )
+    repaired: list[str] = []
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda _c, _b, _s, _f, recipe, *_a, **_k: repaired.append(recipe),
+    )
 
     with pytest.raises(
         builder.ProductionPrerequisiteDeferred,
-        match="automation-science-pack waits for direct metal starter retirement",
+        match="applied repair_power_or_transport for iron-plate",
     ):
         builder.ensure_produced(
             object(), object(), "nauvis", "player", "automation-science-pack",
             (0.0, 0.0), lambda _message: None,
         )
+    assert repaired == ["iron-plate"]
+
+
+def test_automation_science_allows_measured_transition_before_retirement(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_science_transition_status",
+        lambda *_args: (
+            True,
+            {
+                "mode": "transition_health",
+                "districts": {
+                    "iron-plate": {"healthy": True},
+                    "copper-plate": {"healthy": True},
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "build_mining_stage",
+        lambda *_a, **_k: pytest.fail("healthy transition needs no remedy"),
+    )
+    messages: list[str] = []
+
+    builder._ensure_automation_science_transition(
+        object(), object(), "nauvis", "player", (0.0, 0.0), messages.append,
+    )
+
+    assert any("transition_health" in message for message in messages)
 
 
 def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:

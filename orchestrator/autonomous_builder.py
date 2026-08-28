@@ -3941,12 +3941,8 @@ def ensure_produced(
             client, surface, force, item, LINE_RECIPES[item]["machine"],
         ) is None
     ):
-        emit(
-            "  AUTOMATION SCIENCE GATE: waiting for direct iron/copper "
-            "starters to retire before placing the science assembler"
-        )
-        raise ProductionPrerequisiteDeferred(
-            "automation-science-pack waits for direct metal starter retirement"
+        _ensure_automation_science_transition(
+            client, bridge, surface, force, reference_point, emit,
         )
     stock_gate_target = _effective_mall_stock_gate(
         client, surface, force, item,
@@ -4926,6 +4922,132 @@ def _advance_the_goal(
             )
         )
         return _SHORTAGE
+
+
+def _metal_science_transition_status(
+    client: RconClient, surface: str, force: str,
+) -> tuple[bool, dict[str, object]]:
+    """Whether science can safely overlap final metal-starter retirement.
+
+    Measured output from the exact lifecycle-owned replacement is stronger
+    evidence than an unspent material reservation: it proves the complete
+    mine/refinery bill was funded, built, powered, and supplied. Full spatial
+    reservations and the exact six-furnace shape must still agree, so output
+    from an unrelated line cannot release the gate.
+    """
+    if _metal_starter_transition_complete(client, surface, force):
+        return True, {"mode": "starters_retired", "districts": {}}
+    districts: dict[str, dict[str, object]] = {}
+    for recipe in ("iron-plate", "copper-plate"):
+        state = _bootstrap_state(recipe)
+        foundation_ready = _direct_plate_foundation_ready(
+            client, surface, force, recipe,
+        )
+        measured_output = state.measured_output_count if state is not None else 0
+        if state is not None and state.replacement_actions:
+            try:
+                measured_output = max(
+                    _measured_bootstrap_replacement_output(
+                        client, surface, recipe, state,
+                    ),
+                    state.measured_output_count,
+                )
+            except Exception:
+                # Dry harnesses and an interrupted live survey may lack
+                # progress counters. Persisted monotonic output remains
+                # valid evidence, but absence is never guessed healthy.
+                measured_output = max(
+                    measured_output, state.measured_output_count,
+                )
+        elif state is None:
+            # Only unmanaged compatibility calls may use recipe-wide output.
+            # Managed episodes must prove output at the persisted replacement.
+            line = live_base.find_line(
+                client, surface, force, recipe,
+                LINE_RECIPES[recipe]["machine"],
+            )
+            measured_output = int(getattr(line, "produced_count", 0) or 0)
+        lifecycle_owned = bool(
+            state is not None
+            and state.lifecycle_state != "pioneer"
+            and set(state.reservations) == REQUIRED_RESERVATION_ROLES
+            and all(state.reservations.values())
+        )
+        # Direct calls without an episode ledger cannot persist ownership.
+        # Preserve that legacy path only after the physical replacement has
+        # produced; managed episodes require complete lifecycle reservations.
+        reservation_sufficient = lifecycle_owned or (
+            _BOOTSTRAP_DISTRICT_LEDGER is None and state is None
+        )
+        healthy = bool(
+            foundation_ready
+            and measured_output > 0
+            and reservation_sufficient
+        )
+        if not reservation_sufficient:
+            remedy = "reserve_district"
+        elif not foundation_ready:
+            remedy = "construct_replacement"
+        elif measured_output <= 0:
+            remedy = "repair_power_or_transport"
+        else:
+            remedy = "retire_pioneer"
+        districts[recipe] = {
+            "healthy": healthy,
+            "lifecycle_state": (
+                state.lifecycle_state if state is not None else "untracked"
+            ),
+            "reservation_sufficient": reservation_sufficient,
+            "foundation_ready": foundation_ready,
+            "measured_output_count": measured_output,
+            "remedy": remedy,
+        }
+    return all(
+        bool(district["healthy"]) for district in districts.values()
+    ), {"mode": "transition_health", "districts": districts}
+
+
+def _ensure_automation_science_transition(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Release science on healthy replacement output or act on one blocker."""
+    healthy, status = _metal_science_transition_status(
+        client, surface, force,
+    )
+    if healthy:
+        emit(
+            "  AUTOMATION SCIENCE TRANSITION: "
+            + json.dumps(status, sort_keys=True, separators=(",", ":"))
+        )
+        return
+    districts = status.get("districts", {})
+    blocked_recipe, blocked = next(
+        (recipe, detail)
+        for recipe, detail in districts.items()
+        if not detail["healthy"]
+    )
+    emit(
+        "  AUTOMATION SCIENCE TRANSITION BLOCKED: "
+        + json.dumps(
+            {"recipe": blocked_recipe, **blocked},
+            sort_keys=True, separators=(",", ":"),
+        )
+    )
+    try:
+        build_mining_stage(
+            client, bridge, surface, force, blocked_recipe,
+            reference_point, emit, require_direct=True,
+        )
+    except ProductionPrerequisiteDeferred as deferred:
+        raise ProductionPrerequisiteDeferred(
+            f"automation-science-pack is remedying {blocked_recipe} "
+            f"transition ({blocked['remedy']}): {deferred}"
+        ) from deferred
+    raise ProductionPrerequisiteDeferred(
+        f"automation-science-pack applied {blocked['remedy']} for "
+        f"{blocked_recipe}; resurveying transition health"
+    )
 
 
 def _metal_starter_transition_complete(

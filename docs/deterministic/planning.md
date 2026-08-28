@@ -54,6 +54,12 @@ These names describe intended responsibilities, not permission to build speculat
   reservation are canonical across retries. A retry may reconcile real entities
   and ghosts at that site, but must not resurvey a new refinery because the
   original block has become real or temporarily has no output.
+- Automation science may overlap final pioneer teardown only when both metal
+  replacements retain their full lifecycle reservations, match the exact
+  opening six-furnace module, and have measured output. Otherwise the gate
+  resumes the named district and reports whether it must reserve the district,
+  construct the replacement, or repair its power or transport. Starter absence
+  alone is not the readiness signal.
 - A migration is incomplete while any recognized starter chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:

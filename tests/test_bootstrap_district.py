@@ -196,6 +196,89 @@ def test_provisioning_retry_keeps_the_persisted_district_without_a_mine_plan(
     assert ledger.load("iron-plate") == state
 
 
+def test_science_transition_health_requires_owned_reservations_and_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = _ledger(tmp_path)
+    states = {}
+    for recipe, ore, offset in (
+        ("iron-plate", "iron-ore", 0.0),
+        ("copper-plate", "copper-ore", 30.0),
+    ):
+        ledger.record_pioneer(
+            recipe, ore, [_action("electric-furnace", 1.5 + offset, 2.5)],
+        )
+        states[recipe] = ledger.provision(
+            recipe, reservations=_reservations(),
+            replacement_origin=(20.0 + offset, 30.0),
+            replacement_provider=(34.5 + offset, 42.5),
+            replacement_furnaces=6,
+            replacement_actions=[
+                _action("electric-furnace", 20.5 + offset, 30.5),
+                _action("passive-provider-chest", 34.5 + offset, 42.5),
+            ],
+        )
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_bootstrap_state", states.get)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: pytest.fail("managed transition must use exact counters"),
+    )
+    output = {"iron-plate": 3, "copper-plate": 2}
+    monkeypatch.setattr(
+        builder, "_measured_bootstrap_replacement_output",
+        lambda _c, _s, recipe, _state: output[recipe],
+    )
+
+    healthy, status = builder._metal_science_transition_status(
+        object(), "nauvis", "player",
+    )
+
+    assert healthy
+    assert all(
+        district["reservation_sufficient"]
+        and district["measured_output_count"] > 0
+        for district in status["districts"].values()
+    )
+
+
+def test_science_transition_names_power_or_transport_remedy_before_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger, state = _provisioned(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _recipe: state)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: pytest.fail("unrelated line output is not transition proof"),
+    )
+    monkeypatch.setattr(
+        builder, "_measured_bootstrap_replacement_output", lambda *_a: 0,
+    )
+
+    healthy, status = builder._metal_science_transition_status(
+        object(), "nauvis", "player",
+    )
+
+    assert not healthy
+    assert status["districts"]["iron-plate"]["measured_output_count"] == 0
+    assert status["districts"]["iron-plate"]["remedy"] == (
+        "repair_power_or_transport"
+    )
+
+
 def test_controller_releases_pioneer_only_after_exact_replacement_output(
     tmp_path: Path, monkeypatch,
 ) -> None:
