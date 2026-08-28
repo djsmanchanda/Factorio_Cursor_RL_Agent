@@ -48,6 +48,22 @@ def test_collects_deduplicated_runs_from_live_and_archive(tmp_path: Path) -> Non
     assert runs[-1].fields["surface"] == "nauvis"
 
 
+def test_run_header_retains_bootstrap_profile_for_paired_comparison(tmp_path: Path) -> None:
+    live = tmp_path / "autonomous-run.log"
+    live.write_text(
+        _run(
+            "2026-08-22T10:00:00+05:30",
+            "mining-productivity-4 bootstrap_profile=supplied-v1",
+            "RUN END",
+        ),
+        encoding="utf-8",
+    )
+
+    run = collect_runs(live, tmp_path / "missing")[0]
+
+    assert run.fields["bootstrap_profile"] == "supplied-v1"
+
+
 def test_trend_reports_new_live_evidence_as_better(tmp_path: Path) -> None:
     live = tmp_path / "autonomous-run.log"
     live.write_text(

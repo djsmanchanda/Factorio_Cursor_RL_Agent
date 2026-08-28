@@ -96,12 +96,14 @@ def test_reset_writes_a_verified_episode_manifest(tmp_path: Path) -> None:
         "--source-save", str(source),
         "--episode-id", "episode-test",
         "--technology", "mining-productivity-4",
+        "--bootstrap-profile", "supplied-v1",
     ], check=True, capture_output=True, text=True)
 
     assert "reset isolated deterministic save" in result.stdout
     copied = root / "saves" / "mod_playground.zip"
     manifest = json.loads((root / "episode" / "current.json").read_text())
     assert manifest["episode_id"] == "episode-test"
+    assert manifest["bootstrap_profile"] == "supplied-v1"
     assert manifest["target_technology"] == "mining-productivity-4"
     assert manifest["source_save_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
     assert manifest["isolated_save_sha256"] == hashlib.sha256(copied.read_bytes()).hexdigest()

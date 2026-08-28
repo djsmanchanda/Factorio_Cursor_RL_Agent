@@ -24,6 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator.autonomous_builder import StuckError, run
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.mission_state import BOOTSTRAP_PROFILES, MissionStateLedger
 from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
@@ -144,6 +145,40 @@ def _patch_episode_manifest(path: Path | None, **fields: object) -> None:
     temporary.replace(path)
 
 
+def _episode_metadata(path: Path | None) -> dict[str, object]:
+    if path is None or not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _bootstrap_profile(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "bootstrap_profile", None)
+    manifest = _episode_metadata(getattr(args, "episode_manifest", None))
+    profile = explicit or manifest.get("bootstrap_profile") or "reduced-v1"
+    if profile not in BOOTSTRAP_PROFILES:
+        raise StuckError(
+            f"Unknown bootstrap profile {profile!r}",
+            code="invalid_bootstrap_profile",
+        )
+    return str(profile)
+
+
+def _save_provenance(path: Path | None) -> dict[str, object]:
+    manifest = _episode_metadata(path)
+    return {
+        key: manifest[key]
+        for key in (
+            "source_save", "source_save_sha256", "isolated_save",
+            "isolated_save_sha256", "baseline_world_fingerprint",
+        )
+        if key in manifest
+    }
+
+
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--surface", default="nauvis")
     parser.add_argument("--force", default="player")
@@ -166,25 +201,48 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
         "--episode-manifest", type=Path,
         help="Verified episode identity required for managed deterministic campaigns.",
     )
+    parser.add_argument(
+        "--bootstrap-profile", choices=BOOTSTRAP_PROFILES,
+        help="Supply contract for this run (default: manifest value, then reduced-v1).",
+    )
+    parser.add_argument(
+        "--mission-state-file", type=Path,
+        help="Atomic mission ledger (default: beside the autonomous run log).",
+    )
+    parser.add_argument(
+        "--blocker-events-file", type=Path,
+        help="Append-only typed blocker JSONL (default: beside the autonomous run log).",
+    )
 
 
 def _run_item(
     args: argparse.Namespace, item: str, emit: Callable[[str], None],
 ) -> dict:
-    return run(
-        item,
-        surface=args.surface,
-        force=args.force,
-        rcon_host=args.rcon_host,
-        rcon_port=args.rcon_port,
-        rcon_password=args.rcon_password,
-        script_output=args.script_output,
-        reference_point=tuple(args.reference_point),
-        max_iterations=args.max_iterations,
-        emit=emit,
-        mission_items=tuple(getattr(args, "mission_items", (item,))),
-        episode_id=getattr(args, "episode_id", None),
-    )
+    ledger = getattr(args, "mission_ledger", None)
+    if ledger is not None:
+        ledger.controller_started(item)
+    try:
+        result = run(
+            item,
+            surface=args.surface,
+            force=args.force,
+            rcon_host=args.rcon_host,
+            rcon_port=args.rcon_port,
+            rcon_password=args.rcon_password,
+            script_output=args.script_output,
+            reference_point=tuple(args.reference_point),
+            max_iterations=args.max_iterations,
+            emit=emit,
+            mission_items=tuple(getattr(args, "mission_items", (item,))),
+            episode_id=getattr(args, "episode_id", None),
+        )
+    except Exception:
+        if ledger is not None:
+            ledger.controller_finished(item, "failed")
+        raise
+    if ledger is not None:
+        ledger.controller_finished(item, "completed")
+    return result
 
 
 def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
@@ -196,6 +254,9 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
         command_timeout=30.0,
     )
     try:
+        ledger = getattr(args, "mission_ledger", None)
+        if ledger is not None:
+            ledger.transition("research_preflight", current_target=args.technology)
         emit(f"RESEARCH START: {args.technology} on {args.surface}/{args.force}")
         status = load_json(bridge.research_status(force=args.force, technology=args.technology))
         if not status.get("ok"):
@@ -237,6 +298,8 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
         for science_pack in science_packs:
             _run_item(args, science_pack, emit)
 
+        if ledger is not None:
+            ledger.transition("queueing_research", current_target=args.technology)
         queued = load_json(bridge.set_research(args.technology, force=args.force))
         if not queued.get("ok"):
             raise StuckError(f"Could not queue {args.technology}: {queued.get('error', queued)}")
@@ -248,6 +311,8 @@ def _research(args: argparse.Namespace, emit: Callable[[str], None]) -> int:
             f"current={final_status.get('current_research')} "
             f"progress={final_status.get('research_progress')}"
         )
+        if ledger is not None:
+            ledger.transition("research_queued", current_target=args.technology)
         return 0
     finally:
         bridge.close()
@@ -323,12 +388,15 @@ def main(argv: list[str] | None = None) -> int:
     args.episode_id = _validate_episode_manifest(
         getattr(args, "episode_manifest", None)
     )
+    args.bootstrap_profile = _bootstrap_profile(args)
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
     pid_path = log_path.with_name("autonomous-run.pid")
     termination_reason = "completed"
+    mission_status = "completed"
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
+        mission_ledger: MissionStateLedger | None = None
         heartbeat_stop = threading.Event()
 
         def _emit_heartbeat() -> None:
@@ -342,11 +410,13 @@ def main(argv: list[str] | None = None) -> int:
         logger.emit(
             f"RUN START: command={args.command} "
             f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
-            f"surface={args.surface} force={args.force} log={log_path}"
+            f"surface={args.surface} force={args.force} "
+            f"bootstrap_profile={args.bootstrap_profile} log={log_path}"
         )
         _patch_episode_manifest(
             getattr(args, "episode_manifest", None),
             started_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+            bootstrap_profile=args.bootstrap_profile,
         )
         if archived is not None:
             logger.emit(
@@ -354,6 +424,40 @@ def main(argv: list[str] | None = None) -> int:
                 f"to {archived.path}"
             )
         try:
+            target = getattr(
+                args, "item", getattr(args, "technology", "research-queue"),
+            )
+            manifest = _episode_metadata(getattr(args, "episode_manifest", None))
+            mission_state_path = (
+                args.mission_state_file
+                or log_path.with_name("deterministic-mission-state.json")
+            )
+            blocker_events_path = (
+                args.blocker_events_file
+                or log_path.with_name("deterministic-blockers.jsonl")
+            )
+            mission_ledger = MissionStateLedger(
+                mission_state_path,
+                blocker_events_path,
+                episode_id=args.episode_id,
+                bootstrap_profile=args.bootstrap_profile,
+                command=args.command,
+                target=target,
+                surface=args.surface,
+                force=args.force,
+                repository_revision=(
+                    str(manifest["repository_revision"])
+                    if manifest.get("repository_revision") else None
+                ),
+                save_provenance=_save_provenance(
+                    getattr(args, "episode_manifest", None)
+                ),
+            )
+            args.mission_ledger = mission_ledger
+            logger.emit(
+                f"MISSION STATE: profile={args.bootstrap_profile} "
+                f"ledger={mission_state_path} blockers={blocker_events_path}"
+            )
             if args.command == "produce":
                 _run_item(args, args.item, logger.emit)
                 return 0
@@ -363,15 +467,52 @@ def main(argv: list[str] | None = None) -> int:
         except StuckError as error:
             logger.emit(f"STUCK: {error}")
             termination_reason = str(error)
+            mission_status = "stuck"
+            if mission_ledger is not None:
+                try:
+                    blocker = mission_ledger.record_blocker(error)
+                    logger.emit(
+                        "BLOCKER: "
+                        + json.dumps(blocker, sort_keys=True, separators=(",", ":"))
+                    )
+                except Exception as telemetry_error:
+                    logger.emit(
+                        f"TELEMETRY ERROR: could not record blocker: {telemetry_error}"
+                    )
             return 2
         except Exception as error:
             logger.emit(f"ERROR: {type(error).__name__}: {error}")
             logger.exception()
             termination_reason = f"{type(error).__name__}: {error}"
+            mission_status = "error"
+            if mission_ledger is not None:
+                try:
+                    blocker = mission_ledger.record_blocker(
+                        error,
+                        code="unhandled_exception",
+                        classification="bug",
+                        state="failed",
+                        details={"exception_type": type(error).__name__},
+                    )
+                    logger.emit(
+                        "BLOCKER: "
+                        + json.dumps(blocker, sort_keys=True, separators=(",", ":"))
+                    )
+                except Exception as telemetry_error:
+                    logger.emit(
+                        f"TELEMETRY ERROR: could not record blocker: {telemetry_error}"
+                    )
             return 1
         finally:
             heartbeat_stop.set()
             heartbeat_thread.join(timeout=1.0)
+            if mission_ledger is not None:
+                try:
+                    mission_ledger.finish(mission_status)
+                except Exception as telemetry_error:
+                    logger.emit(
+                        f"TELEMETRY ERROR: could not finish mission ledger: {telemetry_error}"
+                    )
             _patch_episode_manifest(
                 getattr(args, "episode_manifest", None),
                 ended_at=datetime.now().astimezone().isoformat(timespec="seconds"),

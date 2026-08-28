@@ -4438,7 +4438,16 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
         f"{signature[0] or goal_item} has been at "
         f"{signature[1]}% with the same outstanding work each time. "
         "Something it needs cannot be built, and retrying is not "
-        f"finding it -- see the repeated reason above.{unbacked}"
+        f"finding it -- see the repeated reason above.{unbacked}",
+        code="no_progress",
+        classification="bug",
+        state="failed",
+        details={
+            "unchanged_passes": unchanged_passes,
+            "goal_item": goal_item,
+            "selected_task": signature[0],
+            "progress_percent": signature[1],
+        },
     )
 
 
@@ -4719,7 +4728,13 @@ def run(
             if position is not None:
                 emit(f"GOAL MET: {goal_item} is producing at {position}")
                 return {"ok": True, "iterations": iteration, "output_position": position}
-        raise StuckError(f"Did not reach a working {goal_item} line within {max_iterations} iterations")
+        raise StuckError(
+            f"Did not reach a working {goal_item} line within {max_iterations} iterations",
+            code="controller_iteration_limit",
+            classification="bug",
+            state="failed",
+            details={"goal_item": goal_item, "max_iterations": max_iterations},
+        )
     finally:
         end_run_budget()
         client.close()

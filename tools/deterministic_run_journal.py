@@ -16,7 +16,9 @@ from typing import Iterable, Mapping
 
 _TIMESTAMPED_LINE = re.compile(r"^(?P<timestamp>\S+) (?P<message>.*)$")
 _RUN_START = "RUN START:"
-_FIELD = re.compile(r"\b(?P<name>command|target|surface|force)=(?P<value>\S+)")
+_FIELD = re.compile(
+    r"\b(?P<name>command|target|surface|force|bootstrap_profile)=(?P<value>\S+)"
+)
 _PRIORITY = re.compile(r"PRIORITY: (?P<item>\S+).*completion=(?P<percent>\d+)%")
 _PLATE_SOURCE = re.compile(r"PLATE SOURCE: recorded (?P<item>\S+) provider")
 _GOAL = re.compile(r"GOAL MET: (?P<item>\S+)")

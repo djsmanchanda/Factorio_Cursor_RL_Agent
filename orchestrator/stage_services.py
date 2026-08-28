@@ -142,7 +142,25 @@ _BOT_THROUGHPUT_LIMIT = 3.0
 
 
 class StuckError(RuntimeError):
-    """The builder cannot proceed and needs a human decision -- never guessed silently."""
+    """A fail-closed controller stop with machine-readable blocker context."""
+
+    def __init__(
+        self, message: str, *, code: str = "untyped_stuck",
+        classification: str = "bug", state: str = "failed",
+        details: Mapping[str, object] | None = None,
+    ) -> None:
+        if classification not in {"bug", "intended_difficulty"}:
+            raise ValueError(f"Unknown blocker classification {classification!r}")
+        if state not in {
+            "planned", "constructing", "coverage_wait", "power_wait",
+            "supply_wait", "producing", "retiring", "retired", "failed",
+        }:
+            raise ValueError(f"Unknown blocker state {state!r}")
+        super().__init__(message)
+        self.code = code
+        self.classification = classification
+        self.state = state
+        self.details = dict(details or {})
 
 
 def validate_builder_target(

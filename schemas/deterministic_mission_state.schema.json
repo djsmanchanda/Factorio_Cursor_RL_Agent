@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "deterministic_mission_state.schema.json",
+  "title": "Deterministic Mission State 1",
+  "description": "Episode-scoped mission ledger spanning every per-target deterministic controller call.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "mission_id", "episode_id", "bootstrap_profile", "command",
+    "target", "surface", "force", "repository_revision", "save_provenance",
+    "status", "stage", "current_target", "attempt", "started_at",
+    "updated_at", "ended_at", "controllers", "blockers", "events"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "mission_id": { "$ref": "#/definitions/nonEmptyString" },
+    "episode_id": { "$ref": "#/definitions/nullableString" },
+    "bootstrap_profile": { "enum": ["reduced-v1", "supplied-v1"] },
+    "command": { "$ref": "#/definitions/nonEmptyString" },
+    "target": { "$ref": "#/definitions/nonEmptyString" },
+    "surface": { "$ref": "#/definitions/nonEmptyString" },
+    "force": { "$ref": "#/definitions/nonEmptyString" },
+    "repository_revision": { "$ref": "#/definitions/nullableString" },
+    "save_provenance": { "type": "object" },
+    "status": { "enum": ["running", "completed", "stuck", "error"] },
+    "stage": { "$ref": "#/definitions/nonEmptyString" },
+    "current_target": { "$ref": "#/definitions/nullableString" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "started_at": { "$ref": "#/definitions/nonEmptyString" },
+    "updated_at": { "$ref": "#/definitions/nonEmptyString" },
+    "ended_at": { "$ref": "#/definitions/nullableString" },
+    "controllers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "attempt", "status", "started_at", "ended_at"],
+        "properties": {
+          "target": { "$ref": "#/definitions/nonEmptyString" },
+          "attempt": { "type": "integer", "minimum": 1 },
+          "status": { "enum": ["running", "completed", "failed"] },
+          "started_at": { "$ref": "#/definitions/nonEmptyString" },
+          "ended_at": { "$ref": "#/definitions/nullableString" }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/blocker" }
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event", "at", "attempt"],
+        "properties": {
+          "event": { "$ref": "#/definitions/nonEmptyString" },
+          "at": { "$ref": "#/definitions/nonEmptyString" },
+          "attempt": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "definitions": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "nullableString": {
+      "anyOf": [{ "$ref": "#/definitions/nonEmptyString" }, { "type": "null" }]
+    },
+    "blocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blocker_id", "mission_id", "attempt", "observed_at", "code",
+        "classification", "state", "stage", "target", "message", "details"
+      ],
+      "properties": {
+        "blocker_id": { "$ref": "#/definitions/nonEmptyString" },
+        "mission_id": { "$ref": "#/definitions/nonEmptyString" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "observed_at": { "$ref": "#/definitions/nonEmptyString" },
+        "code": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "classification": { "enum": ["bug", "intended_difficulty"] },
+        "state": {
+          "enum": [
+            "planned", "constructing", "coverage_wait", "power_wait",
+            "supply_wait", "producing", "retiring", "retired", "failed"
+          ]
+        },
+        "stage": { "$ref": "#/definitions/nonEmptyString" },
+        "target": { "$ref": "#/definitions/nonEmptyString" },
+        "message": { "$ref": "#/definitions/nonEmptyString" },
+        "details": { "type": "object" }
+      }
+    }
+  }
+}

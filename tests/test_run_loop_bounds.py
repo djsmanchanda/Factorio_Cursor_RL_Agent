@@ -55,6 +55,9 @@ def test_the_abort_names_what_was_stuck_and_at_what_completion() -> None:
 
     assert "inserter" in str(raised.value)
     assert "45%" in str(raised.value)
+    assert raised.value.code == "no_progress"
+    assert raised.value.classification == "bug"
+    assert raised.value.details["progress_percent"] == 45
 
 
 def test_the_goal_item_is_named_when_no_task_was_selected() -> None:

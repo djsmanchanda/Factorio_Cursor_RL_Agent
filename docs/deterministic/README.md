@@ -60,3 +60,20 @@ controller is promoted.
 For long live-debugging campaigns, use the restart-safe
 [OpenCode campaign prompt](opencode_campaign_prompt.md) and its bounded
 last-ten-runs journal.
+
+## Mission evidence
+
+Every runner invocation declares a versioned bootstrap supply profile:
+`reduced-v1` for the current reduced-stock contract or `supplied-v1` for the
+control contract. Managed episode manifests carry the profile; direct runner
+calls may select it with `--bootstrap-profile` and otherwise default to
+`reduced-v1`.
+
+The runner persists one mission across its per-science-pack controller calls in
+`deterministic-mission-state.json`. The ledger records episode/save provenance,
+profile, mission stages, controller attempts, terminal status, and blockers.
+Each terminal blocker is also appended to `deterministic-blockers.jsonl` with a
+stable code, lifecycle state, target, and an explicit `bug` or
+`intended_difficulty` classification. Legacy untyped failures are classified as
+bugs until the originating stage supplies a narrower contract; they must not be
+silently counted as intended reduced-supply difficulty.

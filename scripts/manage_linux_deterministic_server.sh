@@ -16,6 +16,8 @@ Options:
   --source-save PATH    Required for bootstrap; copied once into the dedicated root.
   --episode-id ID       Episode identity written by reset (default: timestamp).
   --technology NAME     Research target recorded in the episode manifest.
+  --bootstrap-profile NAME
+                        Supply contract: reduced-v1 (default) or supplied-v1.
   --gui-mods PATH       Linux GUI Factorio mods directory (default: ~/.factorio/mods).
   --game-port PORT      Game port (default: 34199).
   --rcon-port PORT      Loopback RCON port (default: 27017).
@@ -54,6 +56,7 @@ READ_DATA=""
 SOURCE_SAVE=""
 EPISODE_ID=""
 TECHNOLOGY=""
+BOOTSTRAP_PROFILE="reduced-v1"
 GUI_MODS_PATH="$HOME/.factorio/mods"
 GAME_PORT=34199
 RCON_PORT=27017
@@ -67,6 +70,7 @@ while (($#)); do
     --source-save) SOURCE_SAVE="${2:?missing --source-save value}"; shift 2 ;;
     --episode-id) EPISODE_ID="${2:?missing --episode-id value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
+    --bootstrap-profile) BOOTSTRAP_PROFILE="${2:?missing --bootstrap-profile value}"; shift 2 ;;
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
@@ -83,6 +87,8 @@ esac
 require_port "game port" "$GAME_PORT"
 require_port "RCON port" "$RCON_PORT"
 [[ "$GAME_PORT" != "$RCON_PORT" ]] || die "game port and RCON port must differ"
+[[ "$BOOTSTRAP_PROFILE" == "reduced-v1" || "$BOOTSTRAP_PROFILE" == "supplied-v1" ]] \
+  || die "bootstrap profile must be reduced-v1 or supplied-v1"
 
 FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"
 READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"
@@ -255,6 +261,7 @@ write_episode_manifest() {
 {
   "schema_version": "1.0.0",
   "episode_id": "$EPISODE_ID",
+  "bootstrap_profile": "$BOOTSTRAP_PROFILE",
   "target_technology": "$TECHNOLOGY",
   "surface": "nauvis",
   "force": "player",
@@ -280,7 +287,9 @@ EOF
     "$DATA_ROOT/logs/deterministic-power-state.json" \
     "$DATA_ROOT/logs/deterministic-plan-reservations.jsonl" \
     "$DATA_ROOT/logs/deterministic-plan-reservations.json" \
-    "$DATA_ROOT/logs/autonomous-priorities.json"
+    "$DATA_ROOT/logs/autonomous-priorities.json" \
+    "$DATA_ROOT/logs/deterministic-mission-state.json" \
+    "$DATA_ROOT/logs/deterministic-blockers.jsonl"
 }
 
 reset_save() {
