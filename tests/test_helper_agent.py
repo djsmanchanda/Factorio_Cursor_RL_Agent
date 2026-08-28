@@ -118,6 +118,42 @@ def test_invalid_model_report_falls_back_instead_of_rejecting_packet(tmp_path: P
     assert "model_review_invalid" in ledger
 
 
+def test_model_request_supplies_review_schema_and_bounds_output(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "choices": [{"message": {"content": "{}"}}],
+            }).encode()
+
+    def fake_urlopen(request, *, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("helper_agent.review_service.urllib.request.urlopen", fake_urlopen)
+    service = ReviewService(
+        tmp_path, model_endpoint="http://model.invalid", model_name="test-model",
+    )
+
+    assert service._call_model({"run_id": "run-1"}, []) == {}
+    body = json.loads(captured["request"].data)
+    prompt = json.loads(body["messages"][1]["content"])
+
+    assert prompt["review_report_schema"]["title"] == "HelperAgentReviewReport"
+    assert body["max_tokens"] == 4096
+    assert "response_format" not in body
+
+
 def test_short_completed_run_without_blockers_has_valid_fallback_evidence(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
     packet["terminal_class"] = "completed"

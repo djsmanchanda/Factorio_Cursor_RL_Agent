@@ -5,11 +5,11 @@
 data_root = "~/.local/share/factorio-rl/helper_agent"
 
 [model]
-# Leave endpoint empty to use the deterministic fallback reviewer.
-endpoint = ""
-model = "local-lite"
+# Local Freetoken OpenAI-compatible endpoint. Unavailability falls back safely.
+endpoint = "http://127.0.0.1:1919/v1/chat/completions"
+model = "Qwen3.6-35B-A3B-NVFP4"
 api_key_env = ""
-timeout_seconds = 60
+timeout_seconds = 180
 
 [review]
 max_notable_moments = 12

@@ -19,9 +19,12 @@ Run the processor manually only to recover an older queue or diagnose startup:
 python3 -m helper_agent.cli process
 ```
 
-The command reviews every packet currently in the inbox. If no local model
-endpoint is configured, it writes a deterministic signature fallback report and
-marks the model review as missing.  It never blocks or restarts the runner.
+The command reviews every packet currently in the inbox. The repository default
+uses the local Freetoken OpenAI-compatible endpoint on port 1919 and supplies the
+complete review-report JSON schema to the model. If that endpoint is unavailable
+or returns invalid output, Helper Agent writes a deterministic signature fallback
+report and marks the model review as missing. It never blocks or restarts the
+runner.
 
 The operations console exposes the latest report and optional feedback controls.
 Original reports are not rewritten by feedback.  Feedback is appended to

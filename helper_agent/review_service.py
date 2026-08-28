@@ -89,7 +89,11 @@ class ReviewService:
         return self._persist_review(packet, report, path, processed)
 
     def _call_model(self, packet: Mapping[str, object], related: list[str]) -> dict | None:
-        prompt = json.dumps({"case_packet": packet, "relevant_casebook_skills": related}, indent=2)
+        prompt = json.dumps({
+            "case_packet": packet,
+            "relevant_casebook_skills": related,
+            "review_report_schema": _REVIEW_REPORT_SCHEMA,
+        }, indent=2)
         request = urllib.request.Request(
             self.model_endpoint,
             data=json.dumps({
@@ -99,6 +103,7 @@ class ReviewService:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.1,
+                "max_tokens": 4096,
             }).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
@@ -111,10 +116,22 @@ class ReviewService:
                 payload = json.loads(response.read().decode("utf-8"))
             content = payload["choices"][0]["message"]["content"]
             return json.loads(self._json_payload(content))
-        except (OSError, ValueError, KeyError, IndexError, urllib.error.URLError, json.JSONDecodeError):
+        except (
+            OSError, ValueError, KeyError, IndexError,
+            urllib.error.URLError, json.JSONDecodeError,
+        ) as error:
+            detail = f"{type(error).__name__}: {error}"
+            if isinstance(error, urllib.error.HTTPError):
+                try:
+                    body = error.read(2048).decode("utf-8", errors="replace")
+                except OSError:
+                    body = ""
+                if body:
+                    detail = f"{detail}; response={body}"
             self._append_ledger({
                 "event": "model_review_failed", "model": self.model_name,
-                "packet_hash": self._hash(packet), "fallback": True,
+                "packet_hash": self._hash(packet), "error": detail,
+                "fallback": True,
                 "created_at": _NOW(),
             })
             return None
