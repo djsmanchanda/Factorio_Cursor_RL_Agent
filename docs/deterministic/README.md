@@ -71,7 +71,11 @@ Every runner invocation declares a versioned bootstrap supply profile:
 `reduced-v1` for the current reduced-stock contract or `supplied-v1` for the
 control contract. Managed episode manifests carry the profile; direct runner
 calls may select it with `--bootstrap-profile` and otherwise default to
-`reduced-v1`.
+`reduced-v1`. The reduced profile contains one explicit finite exception: two
+requester chests are seeded into an existing connected provider before
+production prep, because the first compact producer and the requester-chest
+producer each reserve one before any mall assembler exists. The material
+ledger records this once per episode so later controllers cannot refill it.
 
 The runner persists one mission across its per-science-pack controller calls in
 `deterministic-mission-state.json`. The ledger records episode/save provenance,

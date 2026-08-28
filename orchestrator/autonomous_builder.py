@@ -24,6 +24,10 @@ from orchestrator.bootstrap_district import (
     BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
     REQUIRED_RESERVATION_ROLES,
 )
+from orchestrator.bootstrap_profiles import bootstrap_profile
+from orchestrator.bootstrap_supply import (
+    BootstrapSupplyError, ensure_bootstrap_supply,
+)
 from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
@@ -3535,7 +3539,7 @@ def _reserve_compact_mall_project(
             f"{project_id} needs {shortage[item]} {item} seed item(s) before "
             "its own producer can be constructed",
             code="producer_bootstrap_seed_shortage",
-            classification="intended_difficulty",
+            classification="bug",
             state="supply_wait",
             details={
                 "project_id": project_id,
@@ -5036,7 +5040,8 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
 def _open_the_run(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, bootstrap_profile_name: str,
+    reference_point: Point,
 ) -> tuple[dict[str, int], dict[str, int], PriorityList]:
     """Learn the force's real recipes, then announce what this run is aiming at.
 
@@ -5067,6 +5072,42 @@ def _open_the_run(
         "(redeploy the mod to enable tier selection)"
     )
     validate_builder_target(goal_item, surface, LINE_RECIPES)
+    profile = bootstrap_profile(bootstrap_profile_name)
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if profile.seed_stock:
+        if ledger is not None and ledger.bootstrap_supply_applied(profile.name):
+            emit(
+                f"BOOTSTRAP SUPPLY: profile={profile.name} v{profile.version} "
+                "finite seed was already applied for this episode"
+            )
+        else:
+            try:
+                supply = ensure_bootstrap_supply(
+                    client, surface, force, profile.seed_stock, reference_point,
+                )
+            except BootstrapSupplyError as error:
+                raise StuckError(
+                    str(error),
+                    code="bootstrap_profile_seed_failed",
+                    classification="bug",
+                    state="supply_wait",
+                    details={
+                        "bootstrap_profile": profile.name,
+                        "seed_stock": dict(profile.seed_stock),
+                    },
+                ) from error
+            if ledger is not None:
+                ledger.record_bootstrap_supply(
+                    profile.name, supply.targets, supply.inserted,
+                )
+            emit(
+                f"BOOTSTRAP SUPPLY: profile={profile.name} v{profile.version} "
+                + ", ".join(
+                    f"{item} target={target} before={supply.before.get(item, 0)} "
+                    f"inserted={supply.inserted.get(item, 0)}"
+                    for item, target in sorted(supply.targets.items())
+                )
+            )
     background_targets = mission_mall_targets(
         mission_items or (goal_item,), LINE_RECIPES,
     )
@@ -5185,7 +5226,8 @@ def run(
     try:
         mall_targets, background_targets, priorities = _open_the_run(
             client, bridge, surface, force, goal_item, mission_items,
-            script_output, emit,
+            script_output, emit, bootstrap_profile_name=bootstrap_profile,
+            reference_point=reference_point,
         )
         _restore_bootstrap_reservations()
         prepped: set[str] = set()

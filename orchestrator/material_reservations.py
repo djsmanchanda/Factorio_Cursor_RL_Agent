@@ -157,6 +157,7 @@ class MaterialReservationLedger:
         self.force = force
         self.revision = 0
         self.projects: dict[str, MaterialProject] = {}
+        self.bootstrap_supply: dict[str, dict[str, dict[str, int]]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -173,6 +174,20 @@ class MaterialReservationLedger:
             ):
                 raise MaterialReservationError("Material ledger scope does not match this run")
             self.revision = int(payload["revision"])
+            raw_supply = payload.get("bootstrap_supply", {})
+            if not isinstance(raw_supply, dict):
+                raise MaterialReservationError("Bootstrap supply must be an object")
+            self.bootstrap_supply = {
+                str(profile): {
+                    "targets": _counts(record["targets"], "bootstrap targets"),
+                    "inserted": {
+                        str(item): int(count)
+                        for item, count in record.get("inserted", {}).items()
+                        if int(count) > 0
+                    },
+                }
+                for profile, record in raw_supply.items()
+            }
             projects = tuple(
                 MaterialProject.from_dict(item) for item in payload.get("projects", ())
             )
@@ -192,6 +207,7 @@ class MaterialReservationLedger:
             "surface": self.surface,
             "force": self.force,
             "revision": self.revision,
+            "bootstrap_supply": self.bootstrap_supply,
             "projects": [
                 project.to_dict()
                 for project in sorted(
@@ -204,6 +220,29 @@ class MaterialReservationLedger:
             json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8",
         )
         temporary.replace(self.path)
+
+    def bootstrap_supply_applied(self, profile: str) -> bool:
+        return profile in self.bootstrap_supply
+
+    def record_bootstrap_supply(
+        self, profile: str, targets: Mapping[str, int], inserted: Mapping[str, int],
+    ) -> None:
+        if not profile:
+            raise MaterialReservationError("Bootstrap profile must be non-empty")
+        normalized_targets = _counts(targets, "bootstrap targets")
+        normalized_inserted = {
+            str(item): int(count)
+            for item, count in inserted.items()
+            if int(count) > 0
+        }
+        if set(normalized_inserted) - set(normalized_targets):
+            raise MaterialReservationError("Inserted bootstrap item is outside its targets")
+        self.bootstrap_supply[profile] = {
+            "targets": normalized_targets,
+            "inserted": dict(sorted(normalized_inserted.items())),
+        }
+        self.revision += 1
+        self._save()
 
     @staticmethod
     def _active(project: MaterialProject) -> bool:

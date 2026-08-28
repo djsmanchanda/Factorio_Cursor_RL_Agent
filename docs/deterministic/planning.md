@@ -108,6 +108,9 @@ These names describe intended responsibilities, not permission to build speculat
   existing requester, and restores its original recipe and request group after
   the seed is measured. Configuration is existing-entity-only and fails closed
   if the planner-owned cell has disappeared; it never creates a replacement.
+  This is recovery after the mall has duplicate cells, not the cold-start
+  source: `reduced-v1` supplies exactly two requester chests once per episode
+  before production prep, and the material ledger prevents replenishment.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may

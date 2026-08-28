@@ -93,6 +93,24 @@ def test_sources_rates_eta_and_lifecycle_persist_and_validate(tmp_path: Path) ->
     assert ledger.projects[project.project_id].state == "completed"
 
 
+def test_finite_bootstrap_supply_is_recorded_once_and_validates(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.record_bootstrap_supply(
+        "reduced-v1", {"requester-chest": 2}, {"requester-chest": 2},
+    )
+
+    assert ledger.bootstrap_supply_applied("reduced-v1")
+    resumed = _ledger(tmp_path)
+    assert resumed.bootstrap_supply == {
+        "reduced-v1": {
+            "targets": {"requester-chest": 2},
+            "inserted": {"requester-chest": 2},
+        },
+    }
+    payload = json.loads(ledger.path.read_text(encoding="utf-8"))
+    assert not list(Draft7Validator(SCHEMA).iter_errors(payload))
+
+
 def test_affordability_cannot_spend_stock_reserved_by_another_project(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -204,7 +222,9 @@ def test_parent_defers_and_promotes_prerequisite_before_cell_delivery(
     assert events[1][0:3] == ("defer", "passive-provider-chest", 500)
 
 
-def test_missing_self_seed_is_typed_intended_supply_wait(tmp_path: Path, monkeypatch) -> None:
+def test_missing_self_seed_after_profile_application_is_typed_bug(
+    tmp_path: Path, monkeypatch,
+) -> None:
     ledger = _ledger(tmp_path)
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
     monkeypatch.setattr(
@@ -225,7 +245,7 @@ def test_missing_self_seed_is_typed_intended_supply_wait(tmp_path: Path, monkeyp
         )
 
     assert raised.value.code == "producer_bootstrap_seed_shortage"
-    assert raised.value.classification == "intended_difficulty"
+    assert raised.value.classification == "bug"
     assert raised.value.state == "supply_wait"
 
 

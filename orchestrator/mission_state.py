@@ -10,8 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
+from orchestrator.bootstrap_profiles import BOOTSTRAP_PROFILES
 
-BOOTSTRAP_PROFILES = ("reduced-v1", "supplied-v1")
 MISSION_STATUSES = {"running", "completed", "stuck", "error"}
 _CODE_TOKEN = re.compile(r"[^a-z0-9_]+")
 

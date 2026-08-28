@@ -11,6 +11,23 @@
     "surface": { "$ref": "#/definitions/nonEmptyString" },
     "force": { "$ref": "#/definitions/nonEmptyString" },
     "revision": { "type": "integer", "minimum": 0 },
+    "bootstrap_supply": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targets", "inserted"],
+        "properties": {
+          "targets": {
+            "allOf": [
+              { "$ref": "#/definitions/counts" },
+              { "minProperties": 1 }
+            ]
+          },
+          "inserted": { "$ref": "#/definitions/counts" }
+        }
+      }
+    },
     "projects": {
       "type": "array",
       "items": { "$ref": "#/definitions/project" }
