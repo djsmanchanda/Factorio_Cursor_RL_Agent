@@ -602,6 +602,7 @@ local function execute_build_plan(authorization, build_plan)
     place_ghost = "project_more_ghosts",
     place_tile_ghost = "project_more_ghosts",
     place_entity = "place_core_infrastructure",
+    configure_entity = "place_core_infrastructure",
     remove_entity = "remove_entities"
   }
   -- Optional: target an existing surface/force (e.g. "nauvis"/"player") instead
@@ -730,7 +731,23 @@ local function execute_build_plan(authorization, build_plan)
         end
       end
 
-      if action.action_type == "place_tile_ghost" then
+      if action.action_type == "configure_entity" then
+        counts.attempted_entities = counts.attempted_entities + 1
+        local existing = find_exact_entity(surface, force, action.entity, position)
+        if not existing then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "configure_target_missing")
+        else
+          local configure_error = configure_created_entity(existing, action)
+          local mismatch = configure_error or configuration_error(existing, action, direction)
+          if mismatch then
+            counts.failed_entities = counts.failed_entities + 1
+            record_failure(phase, action, mismatch)
+          else
+            counts.already_present_entities = counts.already_present_entities + 1
+          end
+        end
+      elseif action.action_type == "place_tile_ghost" then
         counts.attempted_ghosts = counts.attempted_ghosts + 1
         local tile = surface.get_tile(position.x, position.y)
         local existing = find_exact_tile_ghost(surface, force, action.tile, position)

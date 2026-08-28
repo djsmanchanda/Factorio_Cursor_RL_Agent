@@ -227,3 +227,32 @@ def test_missing_self_seed_is_typed_intended_supply_wait(tmp_path: Path, monkeyp
     assert raised.value.code == "producer_bootstrap_seed_shortage"
     assert raised.value.classification == "intended_difficulty"
     assert raised.value.state == "supply_wait"
+
+
+def test_missing_self_seed_starts_a_borrowed_mall_producer(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder, "compact_mall_project_bill",
+        lambda *_a, **_k: {"requester-chest": 1},
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "_material_sources_and_rates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: "borrowed copper-cable cell is producing the seed",
+    )
+    plan = SimpleNamespace(
+        mall_storage_limit=2, fill_provider=False, mall_request_multiplier=None,
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="borrowed copper"):
+        builder._reserve_compact_mall_project(
+            object(), "nauvis", "player", "requester-chest", plan,
+            None, lambda _message: None,
+            bridge=object(), reference_point=(0.0, 0.0),
+        )
+
+    assert ledger.required_stock("requester-chest") == 1

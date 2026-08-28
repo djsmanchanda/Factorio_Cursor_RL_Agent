@@ -101,6 +101,13 @@ These names describe intended responsibilities, not permission to build speculat
   Producer reservations remain held through construction and release only
   after measured output; an impossible self-seed is a typed supply wait rather
   than a generic no-progress failure.
+- A compact producer that needs its own requester chest may borrow one duplicate
+  copper-cable or gear assembler long enough to make the aggregate requester
+  seed reserved by the ledger. The borrowed cell recursively makes missing
+  solid prerequisites first, adds a uniquely tagged ingredient section to its
+  existing requester, and restores its original recipe and request group after
+  the seed is measured. Configuration is existing-entity-only and fails closed
+  if the planner-owned cell has disappeared; it never creates a replacement.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may

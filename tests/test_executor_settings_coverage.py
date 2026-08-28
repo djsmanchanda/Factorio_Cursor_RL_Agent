@@ -89,6 +89,15 @@ def test_existing_entity_paths_use_the_shared_gate() -> None:
     assert "action.logistic_request or action.logistic_requests" not in _EXECUTOR
 
 
+def test_configuration_action_never_falls_back_to_entity_creation() -> None:
+    """Recipe loans must fail if their borrowed cell vanished mid-pass."""
+    start = _EXECUTOR.index('if action.action_type == "configure_entity" then')
+    end = _EXECUTOR.index('elseif action.action_type == "place_tile_ghost"', start)
+    branch = _EXECUTOR[start:end]
+    assert "configure_target_missing" in branch
+    assert "surface.create_entity" not in branch
+
+
 def test_the_schema_promises_no_action_field_the_executor_ignores() -> None:
     """`blueprint` sat in the schema for a capability the executor never had, so
     a plan could declare one and have it silently dropped -- the same silent

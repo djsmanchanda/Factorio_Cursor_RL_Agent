@@ -33,6 +33,7 @@
           "place_ghost",
           "place_tile_ghost",
           "place_entity",
+          "configure_entity",
           "remove_entity"
          ]
         },
@@ -292,6 +293,7 @@
             "enum": [
              "place_ghost",
              "place_entity",
+             "configure_entity",
              "remove_entity"
             ]
            }

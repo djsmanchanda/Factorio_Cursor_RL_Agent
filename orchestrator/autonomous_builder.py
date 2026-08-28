@@ -42,9 +42,17 @@ from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
 from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
+    locate_mall_cell,
     mall_cell_needs_rebuild,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
+)
+from orchestrator.mall_bootstrap import (
+    MallBootstrapLoan,
+    active_bootstrap_loans,
+    bootstrap_loan_plan,
+    next_bootstrap_step,
+    restore_bootstrap_loan_plan,
 )
 from orchestrator.material_reservations import (
     MaterialReservationLedger, set_active_material_ledger,
@@ -3341,10 +3349,147 @@ def _material_sources_and_rates(
     return sources, rates
 
 
+_BOOTSTRAP_LOAN_CANDIDATES = ("copper-cable", "iron-gear-wheel")
+
+
+def _bootstrap_loan_stock(
+    client: RconClient, surface: str, force: str, target_item: str,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Physical stock plus the share not reserved away from this producer."""
+    actual = live_base.available_items(client, surface, force)
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    usable = (
+        ledger.allocatable_stock(actual, claimant=_material_project_id(target_item))
+        if ledger is not None else dict(actual)
+    )
+    return actual, usable
+
+
+def _submit_bootstrap_loan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    loan: MallBootstrapLoan, emit: Callable[[str], None],
+) -> str:
+    actual, usable = _bootstrap_loan_stock(
+        client, surface, force, loan.target_item,
+    )
+    step = next_bootstrap_step(
+        loan.target_item, loan.target_count, usable, actual,
+    )
+    if step is None:
+        plan = restore_bootstrap_loan_plan(loan)
+        plan["surface"], plan["force"] = surface, force
+        _submit(
+            client, bridge, surface, plan,
+            f"restore_bootstrap_loan_{loan.target_item}", emit,
+        )
+        emit(
+            f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
+            f"{loan.machine_position}; {loan.target_count} {loan.target_item} "
+            "seed item(s) are now stocked"
+        )
+        return f"restored borrowed {loan.original_recipe} producer after seed completion"
+
+    if loan.current_recipe != step.recipe:
+        plan = bootstrap_loan_plan(loan, step)
+        plan["surface"], plan["force"] = surface, force
+        _submit(
+            client, bridge, surface, plan,
+            f"bootstrap_loan_{loan.target_item}", emit,
+        )
+        emit(
+            f"  MALL BOOTSTRAP LOAN: borrowed {loan.original_recipe} at "
+            f"{loan.machine_position} to make {step.recipe} through stock "
+            f"{step.target_count}; requester now asks for exactly "
+            f"{step.crafts} craft(s) of ingredients"
+        )
+    else:
+        emit(
+            f"  MALL BOOTSTRAP LOAN WAIT: {step.recipe} at {loan.machine_position} "
+            f"is making temporary stock through {step.target_count}"
+        )
+        _deliver_cell_ingredients(
+            client, bridge, surface, force, step.recipe,
+            loan.machine_position, emit,
+        )
+    return (
+        f"borrowed {loan.original_recipe} cell is producing temporary "
+        f"{step.recipe} for the {loan.target_item} seed"
+    )
+
+
+def _service_bootstrap_loan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    target_item: str, emit: Callable[[str], None],
+) -> str | None:
+    loans = active_bootstrap_loans(client, surface, force)
+    if len(loans) > 1:
+        raise StuckError(
+            f"Found {len(loans)} simultaneous mall bootstrap loans; only one "
+            "planner-owned cell may be borrowed at a time",
+            code="multiple_bootstrap_mall_loans",
+            classification="bug",
+            details={"loans": [loan.group for loan in loans]},
+        )
+    if not loans or loans[0].target_item != target_item:
+        return None
+    return _submit_bootstrap_loan(
+        client, bridge, surface, force, loans[0], emit,
+    )
+
+
+def _start_bootstrap_loan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    target_item: str, target_count: int, reference_point: Point,
+    emit: Callable[[str], None],
+) -> str | None:
+    existing = active_bootstrap_loans(client, surface, force)
+    if existing:
+        if len(existing) == 1 and existing[0].target_item == target_item:
+            return _submit_bootstrap_loan(
+                client, bridge, surface, force, existing[0], emit,
+            )
+        return None
+    for original_recipe in _BOOTSTRAP_LOAN_CANDIDATES:
+        spec = LINE_RECIPES.get(original_recipe)
+        if spec is None:
+            continue
+        line = live_base.find_line(
+            client, surface, force, original_recipe, str(spec["machine"]),
+        )
+        if line is None or line.machine_count < 2:
+            continue
+        for machine_position in reversed(line.machine_positions):
+            located = locate_mall_cell(machine_position, reference_point)
+            if located is None:
+                continue
+            origin, side = located
+            requester_position = (origin[0] + 4.5, origin[1] + 1.5)
+            machine = live_base.entity_at(client, surface, machine_position)
+            requester = live_base.entity_at(client, surface, requester_position)
+            if (
+                not machine or machine["name"] != "assembling-machine-2"
+                or not requester or requester["name"] != "requester-chest"
+            ):
+                continue
+            loan = MallBootstrapLoan(
+                original_recipe=original_recipe,
+                target_item=target_item,
+                target_count=target_count,
+                side=side,
+                requester_position=requester_position,
+                current_recipe=original_recipe,
+            )
+            return _submit_bootstrap_loan(
+                client, bridge, surface, force, loan, emit,
+            )
+    return None
+
+
 def _reserve_compact_mall_project(
     client: RconClient, surface: str, force: str, item: str,
     plan: _LinePlan, stock_gate_target: int | None,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, bridge: GameBridge | None = None,
+    reference_point: Point | None = None,
 ) -> None:
     """Protect the complete cell and its first craft before recursion starts."""
     ledger = _MATERIAL_RESERVATION_LEDGER
@@ -3378,6 +3523,13 @@ def _reserve_compact_mall_project(
         f"  MATERIAL PROJECT WAIT: {project_id} needs total stock "
         + ", ".join(f"{name}={count}" for name, count in shortage.items())
     )
+    if item in shortage and bridge is not None and reference_point is not None:
+        remedy = _start_bootstrap_loan(
+            client, bridge, surface, force, item, shortage[item],
+            reference_point, emit,
+        )
+        if remedy is not None:
+            raise ProductionPrerequisiteDeferred(remedy)
     if item in shortage and not _has_producer(client, surface, force, item):
         raise StuckError(
             f"{project_id} needs {shortage[item]} {item} seed item(s) before "
@@ -3723,6 +3875,12 @@ def ensure_produced(
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
+    if not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
+        loan_wait = _service_bootstrap_loan(
+            client, bridge, surface, force, item, emit,
+        )
+        if loan_wait is not None:
+            raise ProductionPrerequisiteDeferred(loan_wait)
     if (
         item == "automation-science-pack"
         and not _metal_starter_transition_complete(client, surface, force)
@@ -3780,6 +3938,7 @@ def ensure_produced(
         ):
             _reserve_compact_mall_project(
                 client, surface, force, item, plan, stock_gate_target, emit,
+                bridge=bridge, reference_point=reference_point,
             )
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
