@@ -118,6 +118,7 @@ class PriorityList:
             )
             self.items[item] = task
         task.target = max(task.target, target)
+        task.base_rating = 100
         task.status = "ready"
         task.reason = "blocking prerequisite"
         task.retry_tick = tick

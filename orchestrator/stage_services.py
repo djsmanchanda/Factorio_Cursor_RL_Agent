@@ -14,6 +14,7 @@ from core.science_recipe_graph import validate_current_builder_target
 from orchestrator.controller_budget import consume_plan_submission, consume_wait
 from orchestrator import extraction_state, live_base
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.material_reservations import active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
 from orchestrator.power_district import append_plan_reservation
@@ -22,7 +23,7 @@ from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import distance, l_route, step_points
 from planners.plan_validation import ENTITY_FOOTPRINTS
-from planners.recipe_data import LINE_RECIPES
+from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
@@ -186,9 +187,41 @@ def _ghost_materials(plan: dict) -> dict[str, int]:
     return required
 
 
+def _reservation_supply_estimates(
+    client: RconClient, surface: str, force: str,
+    required: Mapping[str, int], stock: Mapping[str, int],
+) -> tuple[dict[str, str | None], dict[str, float | None]]:
+    """Observe sources and rates for a project without scheduling new work."""
+    sources: dict[str, str | None] = {}
+    rates: dict[str, float | None] = {}
+    for item, count in required.items():
+        if stock.get(item, 0) >= count:
+            sources[item], rates[item] = "stock", None
+            continue
+        spec = LINE_RECIPES.get(item)
+        line = (
+            live_base.find_line(
+                client, surface, force, item, str(spec["machine"]),
+            )
+            if spec is not None else None
+        )
+        if line is None:
+            sources[item], rates[item] = None, None
+            continue
+        rate = (
+            line.working_count
+            * MACHINE_SPEEDS.get(str(spec["machine"]), 1.0)
+            * float(spec.get("product_amount", 1))
+            / max(float(spec["craft_time"]), 1e-9)
+        )
+        sources[item] = f"producer:{item}"
+        rates[item] = rate if rate > 0 else None
+    return sources, rates
+
+
 def assert_affordable(
     client: RconClient, surface: str, force: str, plan: dict, name: str,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], reserve_project: bool = False,
 ) -> None:
     """Refuse to place ghosts the base cannot pay for.
 
@@ -202,6 +235,39 @@ def assert_affordable(
     if not required:
         return
     stock = live_base.available_items(client, surface, force)
+    ledger = active_material_ledger()
+    if ledger is not None:
+        project = ledger.projects.get(name)
+        if project is not None and not ledger.project_is_active(name):
+            project = None
+        if reserve_project and (
+            project is None or dict(project.required) != required
+        ):
+            sources, rates = _reservation_supply_estimates(
+                client, surface, force, required, stock,
+            )
+            project = ledger.declare(
+                name, required, stock, source_producers=sources,
+                expected_rates=rates,
+            )
+        available = ledger.allocatable_stock(
+            stock, claimant=name if project is not None else None,
+        )
+        if project is not None:
+            short_targets = ledger.shortage_targets(name, stock)
+        else:
+            short_targets = {
+                item: stock.get(item, 0) + count - available.get(item, 0)
+                for item, count in required.items()
+                if available.get(item, 0) < count
+            }
+        if short_targets:
+            raise MaterialShortage(name, short_targets, stock)
+        emit(
+            f"  {name}: material reservation ok "
+            f"({sum(required.values())} ghost items allocated)"
+        )
+        return
     short = {
         item: count - stock.get(item, 0)
         for item, count in required.items()
@@ -302,8 +368,13 @@ def _submit(
     try:
         assert_affordable(
             client, surface, plan.get("force", "player"), plan, name, emit,
+            True,
         )
     except MaterialShortage as shortage:
+        ledger = active_material_ledger()
+        project = ledger.projects.get(name) if ledger is not None else None
+        if project is not None and project.hold_until_producing:
+            raise
         producer_backed = _shortage_has_complete_supply_chains(
             client, surface, plan.get("force", "player"), shortage,
         )
@@ -345,6 +416,13 @@ def _submit(
             script_output = getattr(bridge, "script_output", None)
             if script_output:
                 append_plan_reservation(script_output, name, plan)
+            ledger = active_material_ledger()
+            if ledger is not None:
+                ledger.mark_constructing(
+                    name, live_base.available_items(
+                        client, surface, plan.get("force", "player"),
+                    ),
+                )
             return report
         cleared_any = False
         blocking = []

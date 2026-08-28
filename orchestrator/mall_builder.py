@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import math
+from collections import Counter
 from collections.abc import Callable, Mapping
 
 from orchestrator import live_base, resource_patches
 from orchestrator.game_bridge import GameBridge
+from orchestrator.material_reservations import plan_material_bill
 from orchestrator.stage_services import StuckError, _submit
 from planners.mall_layout import generate_paired_mall_layout
 from planners.recipe_data import LINE_RECIPES
@@ -28,6 +31,30 @@ _INCOMPATIBLE_PAIRS = frozenset({
     frozenset({"electronic-circuit", "transport-belt"}),
     frozenset({"copper-cable"}),
 })
+
+
+def compact_mall_project_bill(
+    recipe: str, *, stock_target: int = 1,
+    stock_gate_target: int | None = None,
+    fill_chest: bool = False,
+    request_multiplier_override: int | None = None,
+) -> dict[str, int]:
+    """Complete standalone cell bill plus one craft of bootstrap ingredients."""
+    spec = LINE_RECIPES[recipe]
+    preview = generate_paired_mall_layout(
+        recipe, spec["machine"], spec["ingredients"], spec["amounts"],
+        (0, 0), "left", stock_target=stock_target,
+        product_amount=spec.get("product_amount", 1),
+        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        stock_gate_target=stock_gate_target, fill_chest=fill_chest,
+        request_multiplier_override=request_multiplier_override,
+    )
+    bill: Counter[str] = Counter(plan_material_bill(preview))
+    for ingredient, amount in zip(
+        spec["ingredients"], spec["amounts"], strict=True,
+    ):
+        bill[ingredient] += math.ceil(amount)
+    return dict(sorted(bill.items()))
 
 
 def _cell_origins(reference_point: Point) -> list[tuple[int, int]]:

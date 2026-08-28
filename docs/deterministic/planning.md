@@ -91,6 +91,16 @@ These names describe intended responsibilities, not permission to build speculat
   extraction. Collision, ownership, and duplicate-pending checks still run
   first, and missing items stay queued. A supply-starved refinery triggers
   mine or transport repair, never an isolated furnace block.
+- Construction stock is allocated through an episode-scoped material ledger.
+  Every named project records its complete item bill, current reservation,
+  source producer, expected rate, and ETA. A compact producer reserves its
+  whole standalone cell plus one recipe craft before it recursively schedules
+  prerequisites; nested producers therefore protect every requester/provider
+  chest needed to reach first output. Starter caps limit idle inventory only:
+  a blocking project raises its producer target to the exact scheduled bill.
+  Producer reservations remain held through construction and release only
+  after measured output; an impossible self-seed is a typed supply wait rather
+  than a generic no-progress failure.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may

@@ -41,10 +41,13 @@ from orchestrator.controller_budget import (
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
 from orchestrator.mall_builder import (
-    build_compact_mall_stage,
+    build_compact_mall_stage, compact_mall_project_bill,
     mall_cell_needs_rebuild,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
+)
+from orchestrator.material_reservations import (
+    MaterialReservationLedger, set_active_material_ledger,
 )
 from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
@@ -173,6 +176,7 @@ _REFINERY_SITE_RESERVATIONS: dict[
     tuple[str, str, str], tuple[Point, Point],
 ] = {}
 _BOOTSTRAP_DISTRICT_LEDGER: BootstrapDistrictLedger | None = None
+_MATERIAL_RESERVATION_LEDGER: MaterialReservationLedger | None = None
 
 
 def _bootstrap_lifecycle_stuck(
@@ -3301,6 +3305,102 @@ def _has_producer(
     return line is not None and line.machine_count > 0
 
 
+def _material_project_id(item: str) -> str:
+    return f"paired_mall_{item}"
+
+
+def _material_sources_and_rates(
+    client: RconClient, surface: str, force: str,
+    bill: Mapping[str, int], stock: Mapping[str, int],
+) -> tuple[dict[str, str | None], dict[str, float | None]]:
+    """Describe how each reserved item can arrive, without creating work."""
+    sources: dict[str, str | None] = {}
+    rates: dict[str, float | None] = {}
+    for item, required in bill.items():
+        if stock.get(item, 0) >= required:
+            sources[item], rates[item] = "stock", None
+            continue
+        spec = LINE_RECIPES.get(item)
+        if spec is None:
+            sources[item], rates[item] = None, None
+            continue
+        line = live_base.find_line(
+            client, surface, force, item, str(spec["machine"]),
+        )
+        if line is None:
+            sources[item], rates[item] = None, None
+            continue
+        speed = MACHINE_SPEEDS.get(str(spec["machine"]), 1.0)
+        rate = (
+            line.working_count * speed
+            * float(spec.get("product_amount", 1))
+            / max(float(spec["craft_time"]), 1e-9)
+        )
+        sources[item] = f"producer:{item}"
+        rates[item] = rate if rate > 0 else None
+    return sources, rates
+
+
+def _reserve_compact_mall_project(
+    client: RconClient, surface: str, force: str, item: str,
+    plan: _LinePlan, stock_gate_target: int | None,
+    emit: Callable[[str], None],
+) -> None:
+    """Protect the complete cell and its first craft before recursion starts."""
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return
+    project_id = _material_project_id(item)
+    bill = compact_mall_project_bill(
+        item, stock_target=plan.mall_storage_limit,
+        stock_gate_target=stock_gate_target,
+        fill_chest=plan.fill_provider,
+        request_multiplier_override=plan.mall_request_multiplier,
+    )
+    stock = live_base.available_items(client, surface, force)
+    sources, rates = _material_sources_and_rates(
+        client, surface, force, bill, stock,
+    )
+    project = ledger.declare(
+        project_id, bill, stock, target_item=item,
+        source_producers=sources, expected_rates=rates,
+        priority=100, hold_until_producing=True,
+    )
+    shortage = ledger.shortage_targets(project_id, stock)
+    emit(
+        f"  MATERIAL PROJECT: {project_id} state={project.state} "
+        f"bill=" + ",".join(f"{name}:{count}" for name, count in bill.items())
+    )
+    if not shortage:
+        emit(f"  MATERIAL PROJECT READY: {project_id} has its complete startup bill")
+        return
+    emit(
+        f"  MATERIAL PROJECT WAIT: {project_id} needs total stock "
+        + ", ".join(f"{name}={count}" for name, count in shortage.items())
+    )
+    if item in shortage and not _has_producer(client, surface, force, item):
+        raise StuckError(
+            f"{project_id} needs {shortage[item]} {item} seed item(s) before "
+            "its own producer can be constructed",
+            code="producer_bootstrap_seed_shortage",
+            classification="intended_difficulty",
+            state="supply_wait",
+            details={
+                "project_id": project_id,
+                "item": item,
+                "required_stock": shortage[item],
+                "available_stock": stock.get(item, 0),
+                "bill": bill,
+            },
+        )
+    raise MaterialShortage(project_id, shortage, stock)
+
+
+def _complete_material_producer(item: str) -> None:
+    if _MATERIAL_RESERVATION_LEDGER is not None:
+        _MATERIAL_RESERVATION_LEDGER.complete(_material_project_id(item))
+
+
 def _ingredient_sources(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan, *,
@@ -3575,6 +3675,7 @@ def ensure_produced(
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
     if item in MANAGED_INTERMEDIATE_SOURCES:
+        _complete_material_producer(item)
         return MANAGED_INTERMEDIATE_SOURCES[item]
     if item == "steel-plate":
         minimum_machines = max(minimum_machines, STEEL_BASELINE_FURNACES)
@@ -3654,6 +3755,10 @@ def ensure_produced(
         reference_point=reference_point,
     )
     existing = plan.existing
+    if existing and (
+        existing.working_count > 0 or getattr(existing, "produced_count", 0) > 0
+    ):
+        _complete_material_producer(item)
     # An UNDER-SIZED line falls through to the build path: production prep asks
     # for a standing number of machines, and a line that exists with fewer than
     # that is not finished being built.
@@ -3668,6 +3773,14 @@ def ensure_produced(
             mall_provider=mall_provider, upgrade_bootstrap=upgrade_bootstrap,
         )
     if not _mineable(item):
+        if (
+            not upgrade_bootstrap
+            and not getattr(plan, "promote_to_line", False)
+            and getattr(plan, "spec", LINE_RECIPES[item]).get("set_recipe", True)
+        ):
+            _reserve_compact_mall_project(
+                client, surface, force, item, plan, stock_gate_target, emit,
+            )
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
@@ -3697,6 +3810,34 @@ def _ensure_mall_item(
             target if reserve.fill_chest or reserve.storage_count >= target
             else reserve.storage_count
         )
+        if not background and target > production_target:
+            emit(
+                f"  SCHEDULED BILL OVERRIDE: {item} idle cap "
+                f"{production_target} -> blocking project demand {target}"
+            )
+            production_target = target
+            reserve = MallReserve(
+                max(reserve.gate_target or 0, target),
+                max(reserve.storage_count, target),
+                reserve.storage_stacks,
+                reserve.fill_chest,
+            )
+        ledger_target = (
+            _MATERIAL_RESERVATION_LEDGER.required_stock(item)
+            if _MATERIAL_RESERVATION_LEDGER is not None else 0
+        )
+        if ledger_target > production_target:
+            emit(
+                f"  MATERIAL RESERVATION OVERRIDE: {item} idle cap "
+                f"{production_target} -> scheduled bill {ledger_target}"
+            )
+            production_target = ledger_target
+            reserve = MallReserve(
+                max(reserve.gate_target or 0, ledger_target),
+                max(reserve.storage_count, ledger_target),
+                reserve.storage_stacks,
+                reserve.fill_chest,
+            )
         if reserve.fill_chest:
             emit(
                 f"  MALL RESERVE: {item} is self-sufficient; removing its "
@@ -3902,30 +4043,40 @@ def _serve_mall_task(
         emit(f"  PRIORITY DEFERRED: {item}; {starved_on}")
         return
     emit(priorities.describe(task, tick))
-    other_pending = {
-        other for other, tgt in mall_targets.items() if other != item
-        and live_base.available_items(client, surface, force).get(other, 0) < tgt
-    }
     ready, output = _ensure_mall_item(
         client, bridge, surface, force, item, target, mall_targets,
         reference_point, emit, background=False,
     )
     if not ready:
-        if _deliver_cell_ingredients(
-            client, bridge, surface, force, item, reference_point, emit,
-        ):
-            return
+        stock = live_base.available_items(client, surface, force)
+        other_pending = {
+            other for other, target in mall_targets.items()
+            if other != item and stock.get(other, 0) < target
+        }
         if other_pending:
             # This item depends on prerequisites still queued beside it.
             # Serving it again first would re-queue the same numbers every
             # pass while they starve behind it in the ranking (live runs
             # 11/16: landfill outranked the belts and chests it demanded).
             # Yield the rank until they are satisfied.
+            tick_now = live_base.game_tick(client)
+            for prerequisite in sorted(other_pending):
+                priorities.promote(
+                    prerequisite, mall_targets[prerequisite], tick_now,
+                )
             priorities.defer(
-                item, live_base.game_tick(client),
+                item, tick_now,
                 "waiting on its own queued prerequisite",
             )
-            emit(f"  PRIORITY DEFERRED: {item} behind its queued prerequisite")
+            emit(
+                f"  PRIORITY DEFERRED: {item} behind reserved prerequisite(s) "
+                + ", ".join(sorted(other_pending))
+            )
+            return
+        if _deliver_cell_ingredients(
+            client, bridge, surface, force, item, reference_point, emit,
+        ):
+            return
         return
     if output is not None:
         if construction_supply_chain_is_scheduled(
@@ -4345,15 +4496,20 @@ def _prep_plate_foundation(
             f"PLATE FOUNDATION: establishing {plate} "
             f"({PLATE_FOUNDATION_FURNACES[plate]} furnaces) before expansion"
         )
+        starter = standing_starters.get(plate)
+        excluded_positions = (
+            (
+                starter.drill_position,
+                *starter.additional_drill_positions,
+            )
+            if starter is not None else ()
+        )
         return _prep_plate_extraction(
             client, bridge, surface, force, plate, prepped,
             deferred_targets, mall_targets, reference_point, emit,
             background_targets, pending_materials,
             furnace_target=PLATE_FOUNDATION_FURNACES[plate],
-            excluded_drill_positions=(
-                standing_starters[plate].drill_position,
-                *standing_starters[plate].additional_drill_positions,
-            ),
+            excluded_drill_positions=excluded_positions,
         )
     return False
 
@@ -4845,7 +5001,7 @@ def run(
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
     genuinely stuck (raises StuckError rather than guessing)."""
-    global _BOOTSTRAP_DISTRICT_LEDGER
+    global _BOOTSTRAP_DISTRICT_LEDGER, _MATERIAL_RESERVATION_LEDGER
     validate_builder_target(goal_item, surface, LINE_RECIPES)
     _BOOTSTRAP_DISTRICT_LEDGER = (
         BootstrapDistrictLedger(
@@ -4854,6 +5010,13 @@ def run(
         )
         if episode_id else None
     )
+    _MATERIAL_RESERVATION_LEDGER = (
+        MaterialReservationLedger(
+            script_output, episode_id=episode_id, surface=surface, force=force,
+        )
+        if episode_id else None
+    )
+    set_active_material_ledger(_MATERIAL_RESERVATION_LEDGER)
     client = RconClient(rcon_host, rcon_port, rcon_password)
     bridge = GameBridge(
         script_output=Path(script_output), host=rcon_host, port=rcon_port,
@@ -5014,6 +5177,8 @@ def run(
         )
     finally:
         _BOOTSTRAP_DISTRICT_LEDGER = None
+        _MATERIAL_RESERVATION_LEDGER = None
+        set_active_material_ledger(None)
         end_run_budget()
         client.close()
         bridge.close()

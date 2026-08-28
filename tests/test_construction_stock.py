@@ -223,8 +223,8 @@ def test_starter_migration_caps_electronics_and_belt_components(monkeypatch) -> 
         ) == MallReserve(cap, cap, None)
 
 
-def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> None:
-    """A five-item reserve must not be overwritten by the caller's job size."""
+def test_blocking_project_bill_overrides_the_starter_idle_cap(monkeypatch) -> None:
+    """Caps limit idle stock, never the exact bill of scheduled construction."""
     captured: dict[str, object] = {}
     messages: list[str] = []
     monkeypatch.setattr(
@@ -241,9 +241,9 @@ def test_starter_migration_cap_controls_the_compact_cell_target(monkeypatch) -> 
     )
 
     assert (ready, output) == (True, None)
-    assert captured["stock_target"] == 5
-    assert captured["storage_limit"] == 5
-    assert any("MALL STARTER CAP" in message for message in messages)
+    assert captured["stock_target"] == 200
+    assert captured["storage_limit"] == 200
+    assert any("SCHEDULED BILL OVERRIDE" in message for message in messages)
 
 
 def test_baseline_prep_cannot_expand_the_circuit_provider_past_its_cap(monkeypatch) -> None:

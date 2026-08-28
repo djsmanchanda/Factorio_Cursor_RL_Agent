@@ -271,6 +271,31 @@ def test_stone_foundation_excludes_both_temporary_starter_drills(
     )
 
 
+def test_foundation_resurvey_survives_a_just_retired_starter(monkeypatch) -> None:
+    """A transient second survey may lose readiness after the starter is gone."""
+    copper_checks = iter((True, False))
+
+    def ready(*args):
+        plate = args[3]
+        return next(copper_checks) if plate == "copper-plate" else True
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(autonomous_builder, "_direct_plate_foundation_ready", ready)
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter", lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_prep_plate_extraction",
+        lambda *_args, **kwargs: captured.update(kwargs) or True,
+    )
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        lambda _message: None, {}, {},
+    )
+    assert captured["excluded_drill_positions"] == ()
+
+
 def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -> None:
     line = type("Line", (), {
         "machine_count": 6,
