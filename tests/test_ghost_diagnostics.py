@@ -144,6 +144,40 @@ def test_unfunded_blueprint_requires_the_complete_solid_supply_chain(monkeypatch
     )
 
 
+def test_material_remedy_reuses_one_local_provider_chest(monkeypatch) -> None:
+    """A recurring ghost shortage must not build one chest per retry."""
+    provider = (50.5, -12.5)
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 20},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "network_item_count", lambda *_a: 0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "nearest_container", lambda *_a, **_k: provider,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transfer_stock", lambda *_a: 16,
+    )
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: pytest.fail("must reuse chest"),
+    )
+    coverage: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage",
+        lambda *_a, **_k: coverage.extend(_a[4]) or False,
+    )
+
+    acted = builder._apply_remedy(
+        object(), object(), "nauvis", "player", "mine", "materials:transport-belt:1",
+        "ghost belt needs one", (50.0, -12.0), (54.0, -17.0), [], [], None,
+        lambda _message: None,
+    )
+
+    assert acted
+    assert coverage == [provider]
+
+
 def test_producer_backed_shortage_places_blueprint_without_explicit_override(
     monkeypatch,
 ) -> None:
@@ -601,6 +635,7 @@ def test_missing_feed_on_a_mall_cell_rebuilds_instead_of_dying(monkeypatch) -> N
         promoted_count=None,
         promote_to_line=False,
         at_size=True,
+        mall_request_multiplier=1,
     )
 
     result = builder._repair_stalled_line(

@@ -1608,6 +1608,7 @@ def pending_ghost_count(
 def nearest_container(
     client: RconClient, surface: str, force: str, near: Point,
     names: Sequence[str] = ("passive-provider-chest", "steel-chest"),
+    *, max_distance: float | None = None,
 ) -> Point | None:
     """Nearest output chest to a line's machines.
 
@@ -1627,7 +1628,10 @@ def nearest_container(
     if raw == "NONE":
         return None
     x, y = raw.split()
-    return (float(x), float(y))
+    position = (float(x), float(y))
+    if max_distance is not None and math.dist(position, near) > max_distance:
+        return None
+    return position
 
 
 def entity_statuses(

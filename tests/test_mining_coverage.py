@@ -71,3 +71,34 @@ def test_new_mine_extends_coverage_to_full_blueprint_before_submit(monkeypatch) 
     assert [value for kind, value in events if kind == "coverage"] == [(48.0, -70.0)]
     kinds = [kind for kind, _value in events]
     assert kinds.index("affordable") < kinds.index("coverage") < kinds.index("submit")
+
+
+def test_earmarked_mine_connects_its_real_substation(monkeypatch) -> None:
+    plan = {"phases": [{"name": "mine", "actions": [
+        {"action_type": "place_entity", "entity": "substation",
+         "position": {"x": 48.0, "y": -70.0}},
+        {"action_type": "place_ghost", "entity": "electric-mining-drill",
+         "position": {"x": 50.5, "y": -67.5}},
+    ]}]}
+    extraction = SimpleNamespace(
+        mine_origin=(52.0, -66.0), build_plan=plan, ore="iron-ore",
+        ore_output=(49.5, -65.5),
+    )
+    monkeypatch.setattr(autonomous_builder, "_publish_output_chest", lambda _plan: None)
+    monkeypatch.setattr(autonomous_builder, "_submit", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "entity_status_name",
+        lambda *_a: "no_power",
+    )
+    connected = []
+    monkeypatch.setattr(
+        autonomous_builder, "extend_power",
+        lambda *_a, **_k: connected.append(_a[4]) or True,
+    )
+
+    autonomous_builder._place_new_mine(
+        object(), object(), "nauvis", "player", extraction,
+        lambda _message: None, allow_unfunded_ghosts=True,
+    )
+
+    assert connected == [(48.0, -70.0)]

@@ -311,35 +311,48 @@ def _apply_remedy(
         except Exception:  # survey hiccup: reservations may still clear alone
             local_count = None
         if local_count is not None and local_count < required:
-            spots = live_base.chained_clear_spots(
-                client, surface,
-                [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
-                origin,
+            delivery = live_base.nearest_container(
+                client, surface, force, origin,
+                names=("passive-provider-chest",), max_distance=12.0,
             )
-            chest_spot = next((s for s in spots if s[0] == "passive-provider-chest"), None)
-            if chest_spot is not None:
+            if delivery is None:
+                spots = live_base.chained_clear_spots(
+                    client, surface, [("passive-provider-chest", 1)], origin,
+                )
+                chest_spot = next(
+                    (spot for spot in spots if spot[0] == "passive-provider-chest"),
+                    None,
+                )
+                if chest_spot is None:
+                    return False
+                delivery = (chest_spot[1], chest_spot[2])
                 plan = {"phases": [{
                     "name": f"deliver_{item}",
                     "actions": [
                         {"action_type": "place_entity",
                          "entity": "passive-provider-chest",
-                         "position": {"x": chest_spot[1], "y": chest_spot[2]}},
+                         "position": {"x": delivery[0], "y": delivery[1]}},
                     ],
                 }]}
                 plan["surface"], plan["force"] = surface, force
                 _submit(client, bridge, surface, plan,
                         f"deliver_{item}", emit)
-                moved = live_base.transfer_stock(
-                    client, surface, item,
-                    max(required * 2, required + 10),
-                    (chest_spot[1], chest_spot[2]),
-                )
-                emit(
-                    f"  MATERIAL DELIVERY: moved {moved} {item} from base "
-                    f"stock into this stage's network at {origin}"
-                )
-                acted = True
-                return True
+            # The provider must be in the stage's actual logistic network.
+            # Construction coverage alone only lets bots place the chest; it
+            # does not let them take items from it. Reusing this one provider
+            # prevents each diagnostic pass from building another chest.
+            ensure_logistic_coverage(
+                client, bridge, surface, force, [delivery], emit,
+            )
+            moved = live_base.transfer_stock(
+                client, surface, item,
+                max(required * 8, 16), delivery,
+            )
+            emit(
+                f"  MATERIAL DELIVERY: moved {moved} {item} from base stock "
+                f"into the existing stage provider at {delivery}"
+            )
+            return True
         # ``available_items`` sees the whole force, while the ghost probe sees
         # only the target logistic network. A zero network count with stock in
         # the base is often temporary: other construction ghosts have reserved
@@ -558,6 +571,17 @@ def _place_new_mine(
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
     if allow_unfunded_ghosts:
+        # The substation is intentionally placed as a real service anchor even
+        # when the rest of the mine is ghosts. Do not defer its connection:
+        # otherwise the drills finish later on an isolated grid and the first
+        # recovery pass has to rebuild their construction supply around them.
+        if live_base.entity_status_name(
+            client, surface, substation_position,
+        ) in {"no_power", "low_power"}:
+            extend_power(
+                client, bridge, surface, force, substation_position, emit,
+                reserved_tiles=planned_footprint_tiles(plan),
+            )
         emit(
             f"  BLUEPRINT EARMARK: {extraction.ore} mine is placed as ghosts; "
             "construction continues while the mall fills the bill"
@@ -1561,7 +1585,7 @@ def _build_initial_plate_smelter(
     recipe: str, extraction, ore_output: Point, reference_point: Point,
     emit: Callable[[str], None], *, preflight_only: bool = False,
     allow_unfunded_ghosts: bool = False,
-) -> Point:
+) -> Point | None:
     """Build the first modular refinery with one continuous mine-to-ore belt."""
     del reference_point
     plan, foundation, provider, belt_type, belt_tiles = _prepare_initial_refinery(
@@ -1589,6 +1613,27 @@ def _build_initial_plate_smelter(
         # infrastructure, and staging them for a plan that is never submitted
         # is exactly the wasted-chain failure this ordering exists to prevent.
         return provider
+    # An earmarked refinery still needs one real power anchor. The rest of the
+    # plan can remain ghosts while belts arrive, but a ghost-only power pole
+    # leaves completed furnaces on an isolated network forever.
+    if allow_unfunded_ghosts and live_base.available_items(
+        client, surface, force,
+    ).get("medium-electric-pole", 0) > 0:
+        target = max(FURNACES_PER_MODULE, extraction.furnace_count)
+        interface = refinery_interfaces(
+            target,
+            origin_x=extraction.smelter_origin[0],
+            origin_y=extraction.smelter_origin[1], variant="basic",
+        )
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                if (
+                    action.get("entity") == "medium-electric-pole"
+                    and (action["position"]["x"], action["position"]["y"])
+                    == interface.power_anchor
+                ):
+                    action["action_type"] = "place_entity"
+                    break
     _submit(
         client, bridge, surface, plan, f"modular_{recipe}_refinery", emit,
         stage_coverage=lambda: _ensure_plan_construction_coverage(
@@ -1597,11 +1642,30 @@ def _build_initial_plate_smelter(
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
     if allow_unfunded_ghosts:
+        # The provider chest is a future logistic endpoint, so cover it before
+        # the first bot has an item to deliver. A construction-only chain was
+        # the reason the furnace block could be built but never supplied.
+        ensure_logistic_coverage(
+            client, bridge, surface, force, [provider], emit,
+        )
+        target = max(FURNACES_PER_MODULE, extraction.furnace_count)
+        interface = refinery_interfaces(
+            target,
+            origin_x=extraction.smelter_origin[0],
+            origin_y=extraction.smelter_origin[1], variant="basic",
+        )
+        if live_base.entity_status_name(
+            client, surface, interface.power_anchor,
+        ) in {"no_power", "low_power"}:
+            extend_power(
+                client, bridge, surface, force, interface.power_anchor, emit,
+                reserved_tiles=planned_footprint_tiles(plan),
+            )
         emit(
             f"  BLUEPRINT EARMARK: {recipe} refinery is placed as ghosts; "
             "construction continues while the mall fills the bill"
         )
-        return provider
+        return None
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, plan,
         FURNACES_PER_MODULE,

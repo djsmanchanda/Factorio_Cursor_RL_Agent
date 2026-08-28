@@ -760,6 +760,53 @@ def test_initial_refinery_keeps_the_mine_transaction_planned_on_build_pass(
     assert captured["kwargs"]["planned_belt_source"] == (6.5, -2.5)
 
 
+def test_earmarked_initial_refinery_is_not_advertised_before_it_is_built(
+    monkeypatch,
+) -> None:
+    extraction = SimpleNamespace(
+        smelter_origin=(20.0, -10.0), furnace_count=6, ore="iron-ore",
+    )
+    monkeypatch.setattr(
+        builder, "preflight_ingredient_transport", lambda *_a, **_k: ([], "transport-belt"),
+    )
+    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"medium-electric-pole": 1})
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: submitted.append(_a[3]),
+    )
+    coverage: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage",
+        lambda *_a, **_k: coverage.extend(_a[4]) or False,
+    )
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "no_power")
+    powered: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        builder, "extend_power", lambda *_a, **_k: powered.append(_a[4]) or True,
+    )
+    monkeypatch.setattr(
+        builder, "_bring_modular_refinery_up", lambda *_a, **_k: pytest.fail("must stay asynchronous"),
+    )
+
+    output = builder._build_initial_plate_smelter(
+        object(), object(), "nauvis", "player", "iron-plate", extraction,
+        (5.5, -2.5), (0.0, 0.0), lambda _message: None,
+        allow_unfunded_ghosts=True,
+    )
+
+    interface = refinery_interfaces(6, origin_x=20, origin_y=-10, variant="basic")
+    assert output is None
+    assert coverage == [interface.provider]
+    assert powered == [interface.power_anchor]
+    assert any(
+        action["entity"] == "medium-electric-pole"
+        and action["action_type"] == "place_entity"
+        for action in actions(submitted[0])
+    )
+
+
 def test_bootstrap_retirement_removes_the_mine_logistic_intake(monkeypatch) -> None:
     monkeypatch.setattr(
         builder.live_base, "bootstrap_cell_origins",
