@@ -49,6 +49,15 @@ Helper Agent is separate from the deterministic controller, the RL training
 runtime, and the operations console. It may read runtime evidence, but it must
 not mutate the save, server, mod deployment, runner, or factory.
 
+The automatic review path is event-driven and inference-only. The runner queues
+a packet at `RUN END`, and the review service sends that bounded packet directly
+to the local Freetoken OpenAI-compatible model endpoint. It does not invoke the
+Hermes API server, cron scheduler, recurring loop, or automation blueprints.
+Hermes API sessions retain agent tools, while polling and session-local
+automation do not improve this one-event/one-review lifecycle. A specialized
+`Helper_Agent/AGENTS.md` remains defense in depth for intentional interactive
+Hermes use, not the enforcement mechanism for automatic reviews.
+
 ## Goals
 
 1. Produce a bounded post-run review without requiring the user to read the
@@ -78,6 +87,7 @@ The implementation source can live in a repository-local sidecar directory:
 
 ```text
 Helper_Agent/
+  AGENTS.md
   README.md
   schemas/
     case_packet.schema.json

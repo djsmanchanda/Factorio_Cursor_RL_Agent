@@ -10,4 +10,7 @@ code, saves, mods, Git state, or the live Factorio/runner state.  Its output is
 advisory only.
 
 See `docs/deterministic/helper_agent.md` for the repository contract and
-`docs/OPERATIONS.md` for lifecycle and command details.
+`docs/OPERATIONS.md` for lifecycle and command details. `AGENTS.md` supplies a
+second, Helper-Agent-specific safety boundary if an operator intentionally uses
+this directory as a Hermes workdir; the automatic processor remains an
+inference-only Freetoken client.

@@ -95,6 +95,7 @@ def test_fallback_review_schema_valid_and_silence_remains_unreviewed(tmp_path: P
     assert report["status"] == "fallback"
     assert report["review_status"] == "unreviewed"
     assert report["notable_moments"][0]["classification"] == "intended_difficulty"
+    assert report["notable_moments"][0]["fix_direction"].startswith("Category:")
     assert report["packet_path"].endswith(path.name)
     assert (tmp_path / "processed" / path.name).is_file()
     assert (report_path.with_suffix(".md")).exists()
@@ -151,7 +152,16 @@ def test_model_request_supplies_review_schema_and_bounds_output(
 
     assert prompt["review_report_schema"]["title"] == "HelperAgentReviewReport"
     assert body["max_tokens"] == 4096
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert "response_format" not in body
+    system_prompt = body["messages"][0]["content"]
+    normalized_prompt = " ".join(system_prompt.split())
+    assert "Review exactly one bounded case packet" in normalized_prompt
+    assert "Apply this order to the supplied packet only" in normalized_prompt
+    assert "Never call tools, schedule work, retry" in normalized_prompt
+    assert "Co-occurrence and sequence alone do not prove causality" in normalized_prompt
+    assert "Start every `fix_direction` with `Category:`" in normalized_prompt
+    assert "Provide seed stock or adjust the bootstrap profile" in normalized_prompt
 
 
 def test_short_completed_run_without_blockers_has_valid_fallback_evidence(tmp_path: Path) -> None:

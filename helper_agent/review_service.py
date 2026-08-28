@@ -22,7 +22,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SIDEcar_ROOT = _REPO_ROOT / "Helper_Agent"
 _CASE_PACKET_SCHEMA = json.loads((_SIDEcar_ROOT / "schemas" / "case_packet.schema.json").read_text("utf-8"))
 _REVIEW_REPORT_SCHEMA = json.loads((_SIDEcar_ROOT / "schemas" / "review_report.schema.json").read_text("utf-8"))
-_SYSTEM_PROMPT = (_SIDEcar_ROOT / "config" / "prompts" / "review_system_prompt.md").read_text("utf-8")
+_PROMPT_ROOT = _SIDEcar_ROOT / "config" / "prompts"
+_SYSTEM_PROMPT = "\n\n".join(
+    path.read_text("utf-8").strip()
+    for path in (
+        _PROMPT_ROOT / "review_system_prompt.md",
+        _PROMPT_ROOT / "observation_rubric.md",
+    )
+)
 _RUN_TEMPLATE = (_SIDEcar_ROOT / "templates" / "run_review.md").read_text("utf-8")
 _MOMENT_TEMPLATE = (_SIDEcar_ROOT / "templates" / "notable_moment.md").read_text("utf-8")
 _NOW = lambda: datetime.now().astimezone().isoformat(timespec="seconds")
@@ -104,6 +111,7 @@ class ReviewService:
                 ],
                 "temperature": 0.1,
                 "max_tokens": 4096,
+                "chat_template_kwargs": {"enable_thinking": False},
             }).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
@@ -159,7 +167,7 @@ class ReviewService:
                 "what_happened": f"Typed blocker {blocker.get('code', 'unknown')}: {blocker.get('message', '')}",
                 "what_was_expected": "The deterministic mission would progress without this blocking state.",
                 "cause": "The runner recorded this typed blocker; the bounded packet does not establish a deeper cause.",
-                "fix_direction": "Add or inspect typed telemetry around the planner stage before choosing a focused fix.",
+                "fix_direction": "Category: planner telemetry; typed stage context needs focused review.",
                 "confidence": "high" if blocker.get("classification") == "bug" else "medium",
                 "evidence": f"{blocker.get('observed_at', '')} {blocker.get('message', '')}".strip(),
                 "classification": blocker.get("classification", "bug"),
@@ -180,7 +188,7 @@ class ReviewService:
                 "what_happened": f"The run ended with terminal_class={terminal}.",
                 "what_was_expected": "The intended mission outcome is documented before action is taken.",
                 "cause": "No typed blocker is present in the bounded packet; deeper cause is not established.",
-                "fix_direction": "Capture structured telemetry for the terminal transition before proposing a change.",
+                "fix_direction": "Category: terminal-transition telemetry; structured evidence is missing.",
                 "confidence": "low" if terminal == "completed" else "medium",
                 "evidence": evidence,
                 "classification": "unclear",
@@ -217,7 +225,7 @@ class ReviewService:
             "failed_workflows": failed_workflows,
             "suspected_root_causes": [f"typed blocker: {item.get('code', 'unknown')}" for item in blockers],
             "missing_observations": missing or ["No additional missing observation is required by the fallback reviewer."],
-            "recommended_next_probe": "Enable structured tick telemetry for the terminal transition and blockers.",
+            "recommended_next_probe": "Structured tick telemetry for the terminal transition and blockers.",
             "relevant_casebook_skills": related,
             "confidence": "medium" if blockers else "low",
             "uncertainty": "This is a deterministic fallback summary, not a local-model diagnosis.",
