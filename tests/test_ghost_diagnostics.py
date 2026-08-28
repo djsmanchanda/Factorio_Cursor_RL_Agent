@@ -452,6 +452,9 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
     )
     monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
     monkeypatch.setattr(ss.live_base, "occupied_tiles", fake_occupied)
+    monkeypatch.setattr(
+        ss.live_base, "network_generation_kw", lambda *_a: 167.0,
+    )
 
     acted = ss.extend_power(
         object(), object(), "nauvis", "player", (45.0, -66.0),
@@ -499,6 +502,9 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
         lambda *_a, **kwargs: occupied_options.append(kwargs) or set(),
     )
     monkeypatch.setattr(
+        ss.live_base, "network_generation_kw", lambda *_a: 167.0,
+    )
+    monkeypatch.setattr(
         ss, "_submit",
         lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
     )
@@ -522,6 +528,71 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
         "exclude_network_id": None,
         "avoid_resources": True,
     }]
+
+
+def test_power_bridge_retries_when_placed_chain_is_still_disconnected(
+    monkeypatch,
+) -> None:
+    """A successful placement report is not proof of electrical continuity."""
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submissions: list[dict] = []
+    messages: list[str] = []
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((89.5, -68.5), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(
+        ss.live_base, "entity_at",
+        lambda *_a: {"name": "roboport"},
+    )
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    observed_generation = iter((0.0, 167.0))
+    monkeypatch.setattr(
+        ss.live_base, "network_generation_kw",
+        lambda *_a: next(observed_generation),
+    )
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submissions.append(plan),
+    )
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (136.0, -67.0),
+        messages.append,
+    )
+
+    assert len(submissions) == 2
+    assert any("remained electrically disconnected" in message for message in messages)
+
+
+def test_disconnected_roboport_is_repaired_again_on_a_later_survey(
+    monkeypatch,
+) -> None:
+    """An attempted repair must not suppress a still-live power fault."""
+    from orchestrator import stage_services as ss
+
+    repairs: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        ss.live_base, "roboports_needing_power",
+        lambda *_a: [((136.0, -67.0), "low_power")],
+    )
+    monkeypatch.setattr(
+        ss, "extend_power",
+        lambda _c, _b, _s, _f, position, _emit: repairs.append(position) or True,
+    )
+
+    for _ in range(2):
+        ss._repair_existing_roboport_power(
+            object(), object(), "nauvis", "player", lambda _message: None,
+        )
+
+    assert repairs == [(136.0, -67.0), (136.0, -67.0)]
 
 
 def test_neighboring_power_remedy_waits_for_the_first_bridge_to_settle(

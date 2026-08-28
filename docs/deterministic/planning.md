@@ -137,6 +137,11 @@ These names describe intended responsibilities, not permission to build speculat
 - A position inside a pole's supply area is not evidence that a power bridge
   was built. Capacity planning distinguishes existing coverage from a submitted
   network bridge and keeps measuring the actual connected grid.
+- Emergency pole chains are planned at Factorio's actual half-tile medium-pole
+  centres, and every adjacent edge is checked against the shorter endpoint's
+  wire reach before submission. A successful placement report is still not
+  connectivity evidence: the repaired target must observe generation, and a
+  disconnected roboport remains eligible for repair on every later survey.
 - The base has one primary electric grid: every new pole, substation, roboport,
   mine, and production district connects to the highest-generation network.
   Capacity telemetry measures that same network, never a nearer island.

@@ -21,7 +21,7 @@ from orchestrator.power_district import append_plan_reservation
 from orchestrator.roboport_placement import clear_chain_positions
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
-from planners.infrastructure_geometry import distance, l_route, step_points
+from planners.infrastructure_geometry import distance, l_route
 from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.sandbox_infrastructure import build_layout_authorization
@@ -98,9 +98,6 @@ _ROBOPORT_WAVE_GENERATION_KW = 100_000.0
 # coverage geometry. Ports are direct infrastructure and each receives a power
 # bridge before the next production plan is judged on construction progress.
 _ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
-# Avoid laying the same emergency power bridge repeatedly while a newly
-# connected roboport is still charging and reports low_power.
-_REPAIRED_ROBOPORT_POWER: set[Point] = set()
 # Every chest type that is inert unless it is inside a logistic supply area.
 _LOGISTIC_CHEST_ENTITIES = frozenset({
     "active-provider-chest", "buffer-chest", "passive-provider-chest",
@@ -608,7 +605,40 @@ def _await_built_status(
 def _power_bridge_hops(
     start: Point, end: Point, spacing: float, blocked: set[tuple[int, int]],
 ) -> list[Point]:
-    """Shortest deterministic pole chain whose pole footprints avoid blockers."""
+    """Shortest deterministic pole chain whose real centres avoid blockers.
+
+    Medium poles snap to half-tile centres. Generic rounded route points can
+    therefore move another half tile on each axis when Factorio places them;
+    the live copper bridge from (89.5, -68.5) to (98.5, -67.5) became a
+    9-by-1 diagonal and silently exceeded the nine-tile wire reach. Generate
+    the actual half-tile centres here so route scoring and wire geometry agree
+    with the entities that will exist.
+    """
+
+    def pole_centre(point: Point) -> Point:
+        return (math.floor(point[0]) + 0.5, math.floor(point[1]) + 0.5)
+
+    def leg_hops(
+        leg_start: Point, leg_end: Point, *, include_end: bool,
+    ) -> list[Point]:
+        span = distance(leg_start, leg_end)
+        if span == 0:
+            return []
+        ux = (leg_end[0] - leg_start[0]) / span
+        uy = (leg_end[1] - leg_start[1]) / span
+        points = [
+            pole_centre((
+                leg_start[0] + ux * spacing * step,
+                leg_start[1] + uy * spacing * step,
+            ))
+            for step in range(1, int(span // spacing) + 1)
+        ]
+        snapped_end = pole_centre(leg_end)
+        points = [point for point in points if point != snapped_end]
+        if include_end:
+            points.append(snapped_end)
+        return list(dict.fromkeys(points))
+
     horizontal = l_route(start, end)
     vertical = [start, (start[0], end[1]), end]
     routes = [horizontal, vertical]
@@ -625,16 +655,11 @@ def _power_bridge_hops(
         route = [point for index, point in enumerate(route)
                  if index == 0 or point != route[index - 1]]
         hops: list[Point] = []
-        for leg_start, leg_end in zip(route, route[1:]):
-            hops.extend(step_points(leg_start, leg_end, spacing))
-        # step_points ROUNDS the endpoint it appends, so a destination on a .5
-        # coordinate never compared equal to `end` and was never dropped. The
-        # chain then put a pole on the very entity it was routing to, that tile
-        # counted as a collision, and every candidate route was rejected with
-        # "no unobstructed power route is available" -- while the real route was
-        # perfectly clear.
-        if hops and hops[-1] == (round(end[0]), round(end[1])):
-            hops.pop()
+        legs = list(zip(route, route[1:]))
+        for index, (leg_start, leg_end) in enumerate(legs):
+            hops.extend(leg_hops(
+                leg_start, leg_end, include_end=index < len(legs) - 1,
+            ))
         hops = list(dict.fromkeys(hops))
         collisions = sum((math.floor(x), math.floor(y)) in blocked for x, y in hops)
         length = sum(distance(a, b) for a, b in zip(route, route[1:]))
@@ -685,7 +710,11 @@ def _searched_bridge_hops(
                 chain.append((float(cursor[0]), float(cursor[1])))
                 cursor = came[cursor]
             chain.reverse()
-            return [hop for hop in chain[1:] if hop != (float(goal[0]), float(goal[1]))]
+            return [
+                (math.floor(hop[0]) + 0.5, math.floor(hop[1]) + 0.5)
+                for hop in chain[1:]
+                if hop != goal
+            ]
         for dx, dy in steps:
             nxt = (node[0] + dx, node[1] + dy)
             if not (min_x <= nxt[0] <= max_x and min_y <= nxt[1] <= max_y):
@@ -805,8 +834,19 @@ def extend_power(
              f"generation -- bridging to {target_name} at {target_position}")
     # The first hop is limited by the shorter endpoint reach (small poles
     # reach only 7.5 tiles); later medium-pole hops inherit that safe spacing.
-    target_wire = POLE_SPECS.get(target_name, POLE_SPECS["medium-electric-pole"])["wire"]
-    spacing = min(POLE_SPECS["medium-electric-pole"]["wire"], target_wire) - 1
+    target_wire = POLE_SPECS.get(
+        target_name, POLE_SPECS["medium-electric-pole"],
+    )["wire"]
+    endpoint_wire = POLE_SPECS["medium-electric-pole"]["wire"]
+    if own_network is not None and consumer is not None:
+        endpoint_wire = POLE_SPECS.get(
+            consumer["name"], POLE_SPECS["medium-electric-pole"],
+        )["wire"]
+    spacing = min(
+        POLE_SPECS["medium-electric-pole"]["wire"],
+        target_wire,
+        endpoint_wire,
+    ) - 1
     margin = 132.0
     blocked = live_base.occupied_tiles(
         client, surface,
@@ -842,6 +882,26 @@ def extend_power(
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")
+    chain_positions = [target_position, *hops]
+    chain_names = [target_name, *(["medium-electric-pole"] * len(hops))]
+    if own_network is not None:
+        chain_positions.append(endpoint)
+        chain_names.append(
+            consumer["name"] if consumer is not None else "medium-electric-pole"
+        )
+    for left, right, left_name, right_name in zip(
+        chain_positions, chain_positions[1:], chain_names, chain_names[1:],
+    ):
+        wire_reach = min(
+            POLE_SPECS.get(left_name, POLE_SPECS["medium-electric-pole"])["wire"],
+            POLE_SPECS.get(right_name, POLE_SPECS["medium-electric-pole"])["wire"],
+        )
+        if distance(left, right) > wire_reach:
+            raise StuckError(
+                f"planned power bridge edge {left}->{right} is "
+                f"{distance(left, right):.2f} tiles, beyond {wire_reach:.2f} "
+                "tile wire reach"
+            )
     actions = [
         {"action_type": "place_entity", "entity": "medium-electric-pole", "position": {"x": x, "y": y}}
         for x, y in hops
@@ -864,6 +924,25 @@ def extend_power(
             reserved_tiles=reserved_tiles,
             detailed=detailed,
             _retried=True,
+        )
+    generation = live_base.network_generation_kw(
+        client, surface, force, near_position,
+    )
+    if generation is None or generation <= 0:
+        if not _retried:
+            emit(
+                "  power bridge placement remained electrically disconnected "
+                "-- resurveying and retrying once"
+            )
+            return extend_power(
+                client, bridge, surface, force, near_position, emit,
+                reserved_tiles=reserved_tiles,
+                detailed=detailed,
+                _retried=True,
+            )
+        raise StuckError(
+            f"power bridge at {near_position} remained disconnected after "
+            "placement and one fresh retry"
         )
     _PENDING_POWER_BRIDGES[bridge_key] = time.monotonic()
     # Connectivity is not capacity: every run has browned out as stages
@@ -934,14 +1013,11 @@ def _repair_existing_roboport_power(
     for position, status in live_base.roboports_needing_power(
         client, surface, force
     ):
-        if position in _REPAIRED_ROBOPORT_POWER:
-            continue
         emit(f"  existing roboport at {position} is {status} -- connecting it")
         if not extend_power(client, bridge, surface, force, position, emit):
             raise StuckError(
                 f"existing roboport at {position} cannot be powered"
             )
-        _REPAIRED_ROBOPORT_POWER.add(position)
 
 def _await_roboport_charge(
     client: RconClient, surface: str, force: str,
@@ -1052,7 +1128,6 @@ def extend_roboport_coverage(
                         f"roboport at {position} cannot be powered; it would provide no "
                         f"{purpose} coverage"
                     )
-                _REPAIRED_ROBOPORT_POWER.add(position)
         if client is not None or wave_start + _ROBOPORT_WAVE < len(placed):
             _await_roboport_charge(client, surface, force, nearest, wave, emit)
     return True

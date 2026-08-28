@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import sys
 from pathlib import Path
 
@@ -214,3 +215,23 @@ def test_power_bridge_detours_around_occupied_tiles() -> None:
         ((right[0] - left[0]) ** 2 + (right[1] - left[1]) ** 2) ** 0.5 <= 7.5
         for left, right in zip(chain, chain[1:])
     )
+
+
+def test_power_bridge_uses_factorio_pole_centres_within_wire_reach() -> None:
+    """The 04:28 copper bridge snapped an integer plan another half tile."""
+    start = (89.5, -68.5)
+    end = (132.5, -67.5)
+
+    hops = _power_bridge_hops(start, end, 8.0, set())
+    chain = [start, *hops, end]
+
+    assert hops
+    assert all(
+        x % 1 == 0.5 and y % 1 == 0.5
+        for x, y in hops
+    )
+    assert all(
+        math.dist(left, right) <= 9.0
+        for left, right in zip(chain, chain[1:])
+    )
+    assert (98.5, -67.5) not in hops
