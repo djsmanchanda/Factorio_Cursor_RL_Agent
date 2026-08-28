@@ -32,8 +32,10 @@ class _Client:
 @pytest.fixture(autouse=True)
 def _clear_pending_power_bridges() -> None:
     stage_services._PENDING_POWER_BRIDGES.clear()
+    builder._STAGE_DELIVERY_PROVIDERS.clear()
     yield
     stage_services._PENDING_POWER_BRIDGES.clear()
+    builder._STAGE_DELIVERY_PROVIDERS.clear()
 
 
 def test_construction_polling_spends_one_wait_budget_per_window(monkeypatch) -> None:
@@ -176,6 +178,36 @@ def test_material_remedy_reuses_one_local_provider_chest(monkeypatch) -> None:
 
     assert acted
     assert coverage == [provider]
+
+
+def test_mine_material_delivery_stays_outside_its_growth_envelope(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 20},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(builder.live_base, "nearest_container", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder.live_base, "chained_clear_spots",
+        lambda _client, _surface, _placements, start: [
+            ("passive-provider-chest", start[0], start[1]),
+        ],
+    )
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: submitted.append(_a[3]),
+    )
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a, **_k: False)
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *_a: 16)
+    area = ((35.0, -27.0), (100.0, 3.0))
+
+    builder._apply_remedy(
+        object(), object(), "nauvis", "player", "existing mine for iron-ore",
+        "materials:transport-belt:1", "ghost belt needs one", (50.0, -12.0),
+        (54.0, -17.0), [], [], area, lambda _message: None,
+    )
+
+    position = submitted[0]["phases"][0]["actions"][0]["position"]
+    assert (position["x"], position["y"]) == (32.0, -30.0)
 
 
 def test_producer_backed_shortage_places_blueprint_without_explicit_override(

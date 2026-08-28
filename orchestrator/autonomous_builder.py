@@ -160,6 +160,21 @@ _PENDING_FOUNDATION_POLL_SECONDS = 30.0
 # burned all six rounds on nothing, and killed the run (live, 2026-08-22).
 _LOGISTIC_CHARGE_WAIT_SECONDS = 90.0
 
+# A construction-material provider may be needed while an earmarked mine's
+# own logistic inventory is empty. Keep that temporary chest outside the mine
+# service envelope so it cannot occupy a reserved drill column on a later
+# expansion. The cache makes every remediation round reuse the same chest.
+_STAGE_DELIVERY_PROVIDERS: dict[tuple[str, str, str, Point], Point] = {}
+
+
+def _stage_delivery_anchor(
+    name: str, origin: Point, area: tuple[Point, Point] | None,
+) -> Point:
+    if area is None or "mine" not in name:
+        return origin
+    minimum, _maximum = area
+    return (minimum[0] - 3.0, minimum[1] - 3.0)
+
 
 def _wait_for_logistic_service(
     client: RconClient, surface: str, force: str,
@@ -311,13 +326,18 @@ def _apply_remedy(
         except Exception:  # survey hiccup: reservations may still clear alone
             local_count = None
         if local_count is not None and local_count < required:
-            delivery = live_base.nearest_container(
-                client, surface, force, origin,
-                names=("passive-provider-chest",), max_distance=12.0,
-            )
+            key = (surface, force, name, origin)
+            delivery_anchor = _stage_delivery_anchor(name, origin, area)
+            delivery = _STAGE_DELIVERY_PROVIDERS.get(key)
+            if delivery is None:
+                delivery = live_base.nearest_container(
+                    client, surface, force, delivery_anchor,
+                    names=("passive-provider-chest",), max_distance=8.0,
+                )
             if delivery is None:
                 spots = live_base.chained_clear_spots(
-                    client, surface, [("passive-provider-chest", 1)], origin,
+                    client, surface, [("passive-provider-chest", 1)],
+                    delivery_anchor,
                 )
                 chest_spot = next(
                     (spot for spot in spots if spot[0] == "passive-provider-chest"),
@@ -337,6 +357,7 @@ def _apply_remedy(
                 plan["surface"], plan["force"] = surface, force
                 _submit(client, bridge, surface, plan,
                         f"deliver_{item}", emit)
+            _STAGE_DELIVERY_PROVIDERS[key] = delivery
             # The provider must be in the stage's actual logistic network.
             # Construction coverage alone only lets bots place the chest; it
             # does not let them take items from it. Reusing this one provider
