@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-from helper_agent import config, dashboard, feedback
+from helper_agent import cli, config, dashboard, feedback
 from helper_agent.brief import generate_brief
 from helper_agent.packet_builder import build_case_packet, write_packet
 from helper_agent.review_service import ReviewService
+from tools import autonomous_run
 
 
 def _write_run(log: Path) -> None:
@@ -128,6 +130,101 @@ def test_short_completed_run_without_blockers_has_valid_fallback_evidence(tmp_pa
 
     assert report["status"] == "fallback"
     assert report["notable_moments"][0]["evidence"]
+
+
+def test_process_inbox_uses_a_runtime_lock(tmp_path: Path) -> None:
+    packet = _packet(tmp_path)
+    write_packet(packet, tmp_path / "inbox")
+
+    results = ReviewService(tmp_path).process_inbox()
+
+    assert len(results) == 1
+    assert (tmp_path / "state" / "processor.lock").is_file()
+
+
+def test_detached_processor_uses_current_python_and_runtime_log(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    launched: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        launched["command"] = command
+        launched.update(kwargs)
+        return SimpleNamespace(pid=4321)
+
+    monkeypatch.setattr(cli.subprocess, "Popen", fake_popen)
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
+
+    assert cli.launch_processor(tmp_path) == "pid=4321"
+    assert launched["command"] == [
+        cli.sys.executable, "-m", "helper_agent.cli",
+        "--data-root", str(tmp_path), "process",
+    ]
+    assert launched["cwd"] == config.REPO_ROOT
+    assert launched["stdin"] is cli.subprocess.DEVNULL
+    assert launched["stderr"] is cli.subprocess.STDOUT
+    assert (tmp_path / "state" / "processor.log").is_file()
+
+
+def test_systemd_runner_launches_processor_in_an_independent_unit(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    launched: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        launched["command"] = command
+        launched.update(kwargs)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setenv("INVOCATION_ID", "runner-service")
+    monkeypatch.setattr(cli.os, "getpid", lambda: 321)
+    monkeypatch.setattr(cli.time, "time_ns", lambda: 654)
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    identity = cli.launch_processor(tmp_path)
+
+    assert identity == "unit=factorio-rl-helper-agent-321-654.service"
+    assert launched["check"] is True
+    assert launched["command"][:6] == [
+        "systemd-run", "--user", "--quiet", "--collect",
+        "--unit=factorio-rl-helper-agent-321-654.service",
+        f"--working-directory={config.REPO_ROOT}",
+    ]
+    assert launched["command"][-6:] == [
+        cli.sys.executable, "-m", "helper_agent.cli",
+        "--data-root", str(tmp_path), "process",
+    ]
+
+
+def test_runner_queues_packet_and_launches_processor(tmp_path: Path, monkeypatch) -> None:
+    packet = {"run_id": "run-1"}
+    queued = tmp_path / "inbox" / "run-1.json"
+    launched: list[Path] = []
+    messages: list[str] = []
+    monkeypatch.setattr(autonomous_run, "build_case_packet", lambda **_kwargs: packet)
+    monkeypatch.setattr(
+        autonomous_run, "write_packet", lambda value, inbox: queued,
+    )
+    monkeypatch.setattr(
+        autonomous_run, "launch_helper_agent_processor",
+        lambda data_root: launched.append(data_root) or "pid=9876",
+    )
+
+    result = autonomous_run._queue_helper_agent_review(
+        log_path=tmp_path / "run.log",
+        mission_state_path=tmp_path / "mission.json",
+        blocker_events_path=tmp_path / "blockers.jsonl",
+        episode_manifest_path=None,
+        emit=messages.append,
+        data_root=tmp_path,
+    )
+
+    assert result == queued
+    assert launched == [tmp_path]
+    assert messages == [
+        f"HELPER AGENT: queued post-run review packet {queued}",
+        "HELPER AGENT: started post-run processor pid=9876",
+    ]
 
 
 def test_feedback_is_append_only_and_can_promote_skill(tmp_path: Path) -> None:

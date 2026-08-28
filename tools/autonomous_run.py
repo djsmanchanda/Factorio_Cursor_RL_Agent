@@ -26,6 +26,7 @@ from orchestrator.autonomous_builder import StuckError, run
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mission_state import BOOTSTRAP_PROFILES, MissionStateLedger
 from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
+from helper_agent.cli import launch_processor as launch_helper_agent_processor
 from helper_agent.packet_builder import build_case_packet, write_packet
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
@@ -51,6 +52,33 @@ class _RunLogger:
 
     def close(self) -> None:
         self._file.close()
+
+
+def _queue_helper_agent_review(
+    *, log_path: Path, mission_state_path: Path,
+    blocker_events_path: Path | None, episode_manifest_path: Path | None,
+    emit: Callable[[str], None], data_root: Path | None = None,
+) -> Path:
+    """Queue one bounded packet and start its asynchronous review worker."""
+    packet = build_case_packet(
+        log_path=log_path,
+        mission_state_path=mission_state_path,
+        blocker_events_path=blocker_events_path,
+        episode_manifest_path=episode_manifest_path,
+    )
+    helper_root = data_root or Path.home() / ".local/share/factorio-rl/helper_agent"
+    packet_path = write_packet(packet, helper_root / "inbox")
+    emit(f"HELPER AGENT: queued post-run review packet {packet_path}")
+    try:
+        processor_identity = launch_helper_agent_processor(helper_root)
+    except (OSError, subprocess.SubprocessError) as error:
+        emit(
+            "HELPER AGENT: packet queued but processor launch failed: "
+            f"{type(error).__name__}: {error}"
+        )
+    else:
+        emit(f"HELPER AGENT: started post-run processor {processor_identity}")
+    return packet_path
 
 
 def _sha256(path: Path) -> str:
@@ -525,18 +553,12 @@ def main(argv: list[str] | None = None) -> int:
             logger.emit("RUN END")
             if mission_state_path is not None:
                 try:
-                    packet = build_case_packet(
+                    _queue_helper_agent_review(
                         log_path=log_path,
                         mission_state_path=mission_state_path,
                         blocker_events_path=blocker_events_path,
                         episode_manifest_path=getattr(args, "episode_manifest", None),
-                    )
-                    packet_path = write_packet(
-                        packet,
-                        Path.home() / ".local/share/factorio-rl/helper_agent/inbox",
-                    )
-                    logger.emit(
-                        f"HELPER AGENT: queued post-run review packet {packet_path}"
+                        emit=logger.emit,
                     )
                 except Exception as helper_error:
                     logger.emit(

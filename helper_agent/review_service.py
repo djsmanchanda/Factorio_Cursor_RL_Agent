@@ -9,9 +9,10 @@ import os
 import re
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import BinaryIO, Callable, Iterator, Mapping
 
 import jsonschema
 
@@ -37,17 +38,18 @@ class ReviewService:
         self.model_timeout_seconds = 60
 
     def process_inbox(self) -> list[tuple[str, str]]:
-        results: list[tuple[str, str]] = []
-        for path in sorted(self.directories["inbox"].glob("*.json")):
-            try:
-                report_path = self.process_packet(path)
-                results.append((path.name, str(report_path)))
-            except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as error:
-                self._append_ledger({
-                    "event": "packet_rejected", "packet": str(path),
-                    "error": str(error), "created_at": _NOW(),
-                })
-        return results
+        with _processor_lock(self.directories["state"] / "processor.lock"):
+            results: list[tuple[str, str]] = []
+            for path in sorted(self.directories["inbox"].glob("*.json")):
+                try:
+                    report_path = self.process_packet(path)
+                    results.append((path.name, str(report_path)))
+                except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as error:
+                    self._append_ledger({
+                        "event": "packet_rejected", "packet": str(path),
+                        "error": str(error), "created_at": _NOW(),
+                    })
+            return results
 
     def process_packet(self, path: Path) -> Path:
         packet = json.loads(path.read_text(encoding="utf-8"))
@@ -255,6 +257,46 @@ class ReviewService:
         return hashlib.sha256(
             json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+
+
+@contextmanager
+def _processor_lock(path: Path) -> Iterator[None]:
+    """Serialize detached processors without leaving stale lock ownership."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        _lock_file(handle)
+        try:
+            yield
+        finally:
+            _unlock_file(handle)
+
+
+def _lock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        if handle.read(1) == b"":
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(handle: BinaryIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def render_report(report: Mapping[str, object]) -> str:

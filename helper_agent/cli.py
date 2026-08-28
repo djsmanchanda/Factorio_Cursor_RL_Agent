@@ -4,10 +4,50 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from helper_agent import brief, config
 from helper_agent.review_service import ReviewService
+
+
+def launch_processor(data_root: Path) -> str:
+    """Launch an independent processor without blocking the runner."""
+    directories = config.ensure_runtime(data_root)
+    command = [
+        sys.executable, "-m", "helper_agent.cli",
+        "--data-root", str(data_root), "process",
+    ]
+    output_path = directories["state"] / "processor.log"
+    if os.environ.get("INVOCATION_ID"):
+        unit = f"factorio-rl-helper-agent-{os.getpid()}-{time.time_ns()}.service"
+        subprocess.run([
+            "systemd-run", "--user", "--quiet", "--collect",
+            f"--unit={unit}",
+            f"--working-directory={config.REPO_ROOT}",
+            f"--property=StandardOutput=append:{output_path}",
+            f"--property=StandardError=append:{output_path}",
+            *command,
+        ], check=True)
+        return f"unit={unit}"
+    kwargs: dict[str, object] = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    else:
+        kwargs["start_new_session"] = True
+    with output_path.open("ab") as output:
+        process = subprocess.Popen(
+            command,
+            cwd=config.REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            **kwargs,
+        )
+    return f"pid={process.pid}"
 
 
 def main(argv: list[str] | None = None) -> int:
