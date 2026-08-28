@@ -195,10 +195,10 @@ def test_controller_releases_pioneer_only_after_exact_replacement_output(
     monkeypatch.setattr(
         builder.live_base, "bootstrap_cell_origins", lambda *_a, **_k: [],
     )
-    submissions: list[str] = []
+    retirements: list[str] = []
     monkeypatch.setattr(
-        builder, "_submit",
-        lambda _c, _b, _s, _p, name, _e, **_k: submissions.append(name),
+        builder, "retire_entities_via_bots",
+        lambda _c, _b, _s, _f, _p, label, _e, **_k: retirements.append(label),
     )
     monkeypatch.setattr(
         builder, "_release_metal_starter_limits_if_complete", lambda *_a: None,
@@ -211,7 +211,7 @@ def test_controller_releases_pioneer_only_after_exact_replacement_output(
 
     state = ledger.load("iron-plate")
     assert removed == 1
-    assert submissions == ["retire_direct_iron-plate_starter"]
+    assert retirements == ["direct_iron-plate_starter"]
     assert state is not None and state.lifecycle_state == "released"
     assert state.measured_output_count == 3
 
@@ -231,7 +231,7 @@ def test_controller_keeps_pioneer_when_replacement_has_not_produced(
     )
     monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
     monkeypatch.setattr(
-        builder, "_submit",
+        builder, "retire_entities_via_bots",
         lambda *_a, **_k: (_ for _ in ()).throw(
             AssertionError("unvalidated pioneer must not be removed")
         ),

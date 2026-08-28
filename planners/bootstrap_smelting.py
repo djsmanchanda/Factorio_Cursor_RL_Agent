@@ -206,7 +206,7 @@ def retire_direct_smelter_plan(
     """Remove the starter's production stack after its direct replacement works.
 
     Its medium pole is deliberately retained: by migration time it may be part
-    of the parent grid or construction coverage, while the other four entities
+    of the parent grid or construction coverage, while the production entities
     are uniquely owned by the recorded starter geometry.
     """
     plan = generate_direct_smelter(

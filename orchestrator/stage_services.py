@@ -391,7 +391,7 @@ def _submit(
     if stage_coverage is not None:
         stage_coverage()
     authorization = build_layout_authorization([(name, plan)])
-    # Removal-only plans (bootstrap cell retirement) place nothing by design;
+    # Removal-only replacement plans place nothing by design;
     # the executor counts only place actions, so demanding attempted
     # placements here killed every retirement with "silent churn" after the
     # removals had already run (live run of 2026-08-24 15:16).

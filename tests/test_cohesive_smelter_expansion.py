@@ -827,10 +827,11 @@ def test_bootstrap_retirement_removes_the_mine_logistic_intake(monkeypatch) -> N
         return None
 
     monkeypatch.setattr(builder.live_base, "entity_at", entity_at)
-    submissions = []
+    retirements = []
     monkeypatch.setattr(
-        builder, "_submit",
-        lambda _c, _b, _s, plan, name, _e, **_k: submissions.append((name, plan)),
+        builder, "retire_entities_via_bots",
+        lambda _c, _b, _s, _f, plan, label, _e, **_k:
+            retirements.append((label, plan)),
     )
 
     removed = builder._retire_standing_bootstrap_cells(
@@ -839,11 +840,11 @@ def test_bootstrap_retirement_removes_the_mine_logistic_intake(monkeypatch) -> N
     )
 
     assert removed == 1
-    assert [name for name, _plan in submissions] == [
-        "retire_logistic_copper-plate_cell",
-        "retire_copper-ore_logistic_intake",
+    assert [label for label, _plan in retirements] == [
+        "legacy_logistic_copper-plate_starter",
+        "legacy_copper-ore_logistic_intake",
     ]
-    intake_actions = submissions[1][1]["phases"][0]["actions"]
+    intake_actions = retirements[1][1]["phases"][0]["actions"]
     assert {(action["entity"], tuple(action["position"].values()))
             for action in intake_actions} == {
         ("fast-inserter", (89.5, -40.5)),
@@ -864,10 +865,11 @@ def test_direct_starter_retires_only_after_the_full_refinery_is_healthy(
     monkeypatch.setattr(
         builder.live_base, "bootstrap_cell_origins", lambda *_a, **_k: [],
     )
-    submissions = []
+    retirements = []
     monkeypatch.setattr(
-        builder, "_submit",
-        lambda _c, _b, _s, plan, name, _e, **_k: submissions.append((name, plan)),
+        builder, "retire_entities_via_bots",
+        lambda _c, _b, _s, _f, plan, label, _e, **_k:
+            retirements.append((label, plan)),
     )
 
     removed = builder._retire_standing_bootstrap_cells(
@@ -876,10 +878,10 @@ def test_direct_starter_retires_only_after_the_full_refinery_is_healthy(
     )
 
     assert removed == 1
-    assert [name for name, _plan in submissions] == [
-        "retire_direct_copper-plate_starter",
+    assert [label for label, _plan in retirements] == [
+        "direct_copper-plate_starter",
     ]
-    assert {action["entity"] for action in submissions[0][1]["phases"][0]["actions"]} == {
+    assert {action["entity"] for action in retirements[0][1]["phases"][0]["actions"]} == {
         "electric-mining-drill", "electric-furnace",
         "fast-inserter", "passive-provider-chest",
     }

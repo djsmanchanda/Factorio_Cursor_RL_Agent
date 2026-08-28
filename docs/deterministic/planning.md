@@ -44,8 +44,11 @@ These names describe intended responsibilities, not permission to build speculat
 - Migration is build -> validate -> retire. The bootstrap remains intact until
   the direct mine, continuous ore belt, refinery, power, and plate output are
   built and observed healthy. Only then may the starter drill, furnace,
-  inserter, and provider chest be removed. Its grid pole may remain as shared
-  service infrastructure. Legacy requester cells are recognized only so old
+  inserter, and provider chest receive exact deconstruction orders. Retirement
+  waits for construction bots to recover those entities and their contents into
+  logistics; it must never destroy them. Its grid pole may remain as shared
+  service infrastructure. Legacy requester cells and their recognized mine-side
+  intake follow the same recoverable teardown, but are recognized only so old
   saves can retire them; new starts must not create one.
 - A migration is incomplete while any recognized starter chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.

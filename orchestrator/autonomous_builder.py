@@ -70,6 +70,9 @@ from orchestrator.intermediate_scaling import (
 )
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity
+from orchestrator.recoverable_retirement import (
+    RecoverableRetirementError, retire_entities_via_bots,
+)
 from orchestrator.extraction_transport import (
     planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
 )
@@ -1775,14 +1778,21 @@ def _retire_standing_bootstrap_cells(
             pole_side=starter.pole_side,
         )
         plan["surface"], plan["force"] = surface, force
-        _submit(
-            client, bridge, surface, plan,
-            f"retire_direct_{recipe}_starter", emit,
-        )
+        try:
+            retire_entities_via_bots(
+                client, bridge, surface, force, plan,
+                f"direct_{recipe}_starter", emit,
+            )
+        except RecoverableRetirementError as error:
+            raise StuckError(
+                str(error), code="starter_deconstruction_failed",
+                classification="bug", state="retiring",
+                details={"recipe": recipe, "starter_kind": "direct"},
+            ) from error
         removed += 1
         emit(
-            f"BOOTSTRAP SWAP: full {recipe} system is healthy; retiring the "
-            f"direct starter at {starter.drill_position}"
+            f"BOOTSTRAP SWAP: full {recipe} system is healthy; construction "
+            f"bots recovered the direct starter at {starter.drill_position}"
         )
         if recipe in {"iron-plate", "copper-plate"}:
             _release_metal_starter_limits_if_complete(client, surface, force)
@@ -1808,8 +1818,17 @@ def _retire_standing_bootstrap_cells(
         origin = (round(spot[0] - 1.5), round(spot[1] - 3.5))
         plan = retire_logistic_smelter_plan(recipe, ore, origin)
         plan["surface"], plan["force"] = surface, force
-        _submit(client, bridge, surface, plan,
-                f"retire_logistic_{recipe}_cell", emit)
+        try:
+            retire_entities_via_bots(
+                client, bridge, surface, force, plan,
+                f"legacy_logistic_{recipe}_starter", emit,
+            )
+        except RecoverableRetirementError as error:
+            raise StuckError(
+                str(error), code="starter_deconstruction_failed",
+                classification="bug", state="retiring",
+                details={"recipe": recipe, "starter_kind": "legacy_logistic"},
+            ) from error
         removed += 1
         legacy_removed += 1
     if legacy_removed:
@@ -1874,13 +1893,23 @@ def _retire_standing_bootstrap_cells(
                     "actions": intake_actions,
                 }],
             }
-            _submit(
-                client, bridge, surface, intake_plan,
-                f"retire_{ore}_logistic_intake", emit,
-            )
+            try:
+                retire_entities_via_bots(
+                    client, bridge, surface, force, intake_plan,
+                    f"legacy_{ore}_logistic_intake", emit,
+                )
+            except RecoverableRetirementError as error:
+                raise StuckError(
+                    str(error), code="starter_deconstruction_failed",
+                    classification="bug", state="retiring",
+                    details={
+                        "recipe": recipe,
+                        "starter_kind": "legacy_logistic_intake",
+                    },
+                ) from error
         emit(
             f"BOOTSTRAP SWAP COMPLETE: direct {recipe} refinery is healthy; "
-            f"removed {legacy_removed} legacy requester cell(s) and their recognized "
+            f"recovered {legacy_removed} legacy requester cell(s) and their recognized "
             "mine-side logistic intake"
         )
     return removed
