@@ -235,6 +235,7 @@ def _run_item(
             emit=emit,
             mission_items=tuple(getattr(args, "mission_items", (item,))),
             episode_id=getattr(args, "episode_id", None),
+            bootstrap_profile=getattr(args, "bootstrap_profile", "reduced-v1"),
         )
     except Exception:
         if ledger is not None:

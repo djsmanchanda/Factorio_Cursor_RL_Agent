@@ -20,6 +20,10 @@ from orchestrator.build_decisions import (
     may_consume_stocked_inputs,
 )
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
+from orchestrator.bootstrap_district import (
+    BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
+    REQUIRED_RESERVATION_ROLES,
+)
 from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
@@ -119,7 +123,7 @@ from planners.mall_layout import (
     generate_mall_stock_gate_update, generate_promoted_mall_retirement_plan,
     request_multiplier as standard_mall_request_multiplier,
 )
-from planners.plan_validation import ENTITY_FOOTPRINTS
+from planners.plan_validation import ENTITY_FOOTPRINTS, actions as plan_actions
 from planners.recipe_data import (
     BELT_TIERS,
     LINE_RECIPES,
@@ -168,6 +172,183 @@ _STAGE_DELIVERY_PROVIDERS: dict[tuple[str, str, str, Point], Point] = {}
 _REFINERY_SITE_RESERVATIONS: dict[
     tuple[str, str, str], tuple[Point, Point],
 ] = {}
+_BOOTSTRAP_DISTRICT_LEDGER: BootstrapDistrictLedger | None = None
+
+
+def _bootstrap_lifecycle_stuck(
+    recipe: str, error: BootstrapLifecycleError,
+) -> StuckError:
+    return StuckError(
+        f"{recipe} bootstrap district lifecycle is contradictory: {error}",
+        code="bootstrap_lifecycle_conflict",
+        classification="bug",
+        state="failed",
+        details={"recipe": recipe, "reason": str(error)},
+    )
+
+
+def _placement_actions(plan: dict) -> tuple[dict, ...]:
+    return tuple(
+        action for action in plan_actions(plan)
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+    )
+
+
+def _area_tiles(area: tuple[Point, Point]) -> frozenset[tuple[int, int]]:
+    minimum, maximum = area
+    return frozenset(
+        (x, y)
+        for x in range(math.floor(minimum[0]), math.ceil(maximum[0]))
+        for y in range(math.floor(minimum[1]), math.ceil(maximum[1]))
+    )
+
+
+def _bootstrap_state(recipe: str) -> BootstrapDistrictState | None:
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return None
+    try:
+        return _BOOTSTRAP_DISTRICT_LEDGER.load(recipe)
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _bootstrap_owned_actions(
+    recipe: str, furnace_count: int,
+) -> tuple[dict, ...]:
+    state = _bootstrap_state(recipe)
+    if state is None or state.replacement_furnaces != furnace_count:
+        return ()
+    return state.replacement_actions
+
+
+def _measured_bootstrap_replacement_output(
+    client: RconClient, surface: str, recipe: str,
+    state: BootstrapDistrictState,
+) -> int:
+    machine = LINE_RECIPES[recipe]["machine"]
+    positions = tuple(
+        (float(action["position"]["x"]), float(action["position"]["y"]))
+        for action in state.replacement_actions
+        if action.get("entity") == machine
+    )
+    counters = live_base.progress_counters(client, surface, positions)
+    return sum(int(value // 1000) for value in counters.values())
+
+
+def _record_bootstrap_pioneer(recipe: str, ore: str, plan: dict) -> None:
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return
+    try:
+        _BOOTSTRAP_DISTRICT_LEDGER.record_pioneer(
+            recipe, ore, _placement_actions(plan),
+        )
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _record_bootstrap_provisioning(
+    recipe: str, extraction, replacement_plan: dict,
+    system_plan: dict, route_actions: Sequence[dict], provider: Point,
+) -> None:
+    """Reserve the complete future district before construction can spend it."""
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return
+    state = _bootstrap_state(recipe)
+    if state is None or state.lifecycle_state == "released":
+        return
+    if state.lifecycle_state not in {"pioneer", "provisioning"}:
+        expected = extraction.smelter_origin
+        if state.replacement_origin != expected:
+            error = BootstrapLifecycleError(
+                f"{recipe} replacement moved from {state.replacement_origin} to {expected}"
+            )
+            raise _bootstrap_lifecycle_stuck(recipe, error) from error
+        return
+    build_plan = getattr(extraction, "build_plan", None)
+    mine_growth = frozenset(
+        tuple(tile) for tile in (build_plan or {}).get("reserved_tiles", ())
+    )
+    if not mine_growth and build_plan is not None:
+        mine_growth = frozenset(planned_footprint_tiles(build_plan))
+    if not mine_growth:
+        mine_origin = getattr(extraction, "mine_origin", (0.0, 0.0))
+        mine_growth = frozenset({(math.floor(mine_origin[0]), math.floor(mine_origin[1]))})
+    refinery_area = getattr(extraction, "smelter_reserved_area", None)
+    refinery_growth = (
+        _area_tiles(refinery_area)
+        if refinery_area is not None
+        else frozenset(planned_footprint_tiles(replacement_plan))
+    )
+    route_plan = {"phases": [{"name": "route", "actions": list(route_actions)}]}
+    transport_service = frozenset(planned_footprint_tiles(route_plan))
+    if not transport_service:
+        transport_service = frozenset(planned_footprint_tiles(system_plan))
+    district_envelope = mine_growth | refinery_growth | transport_service
+    reservations = {
+        "mine_growth": mine_growth,
+        "refinery_growth": refinery_growth,
+        "transport_service": transport_service,
+        # Power and roboport placement can move within the district as terrain
+        # and network reach change. Reserve their service corridor, not one
+        # guessed pole/port coordinate.
+        "power_service": district_envelope,
+        "roboport_service": district_envelope,
+    }
+    if set(reservations) != REQUIRED_RESERVATION_ROLES:
+        raise AssertionError("bootstrap reservation roles drifted")
+    target = max(FURNACES_PER_MODULE, extraction.furnace_count)
+    try:
+        _BOOTSTRAP_DISTRICT_LEDGER.provision(
+            recipe,
+            reservations=reservations,
+            replacement_origin=extraction.smelter_origin,
+            replacement_provider=provider,
+            replacement_furnaces=target,
+            replacement_actions=_placement_actions(replacement_plan),
+        )
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _record_bootstrap_replacement(
+    recipe: str, plan: dict, provider: Point, furnace_count: int,
+) -> None:
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return
+    try:
+        _BOOTSTRAP_DISTRICT_LEDGER.update_replacement(
+            recipe,
+            replacement_provider=provider,
+            replacement_furnaces=furnace_count,
+            replacement_actions=_placement_actions(plan),
+        )
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _restore_bootstrap_reservations() -> None:
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return
+    try:
+        states = _BOOTSTRAP_DISTRICT_LEDGER.states()
+    except (OSError, BootstrapLifecycleError) as error:
+        wrapped = (
+            error if isinstance(error, BootstrapLifecycleError)
+            else BootstrapLifecycleError(str(error))
+        )
+        raise _bootstrap_lifecycle_stuck("persisted", wrapped) from error
+    for state in states:
+        tiles = state.reservations.get("refinery_growth", frozenset())
+        if not tiles:
+            continue
+        minimum = (float(min(x for x, _ in tiles)), float(min(y for _, y in tiles)))
+        maximum = (
+            float(max(x for x, _ in tiles) + 1),
+            float(max(y for _, y in tiles) + 1),
+        )
+        _REFINERY_SITE_RESERVATIONS[(state.surface, state.force, state.recipe)] = (
+            minimum, maximum,
+        )
 
 
 def _stage_delivery_anchor(
@@ -1159,7 +1340,15 @@ def _extend_plate_smelter(
     try:
         assert_refinery_removals_owned(client, surface, force, state, delta)
     except ValueError as error:
-        raise StuckError(str(error)) from error
+        raise StuckError(
+            str(error), code="refinery_ownership_mismatch",
+            classification="bug", state="failed",
+            details={
+                "recipe": recipe,
+                "current_furnaces": state.furnace_count,
+                "target_furnaces": target_machines,
+            },
+        ) from error
     delta["surface"], delta["force"] = surface, force
     emit(
         f"SMELTER COHESION: expanding {recipe} at {origin} from "
@@ -1167,6 +1356,9 @@ def _extend_plate_smelter(
     )
     _prepare_replacement_services(
         client, bridge, surface, force, full, delta, emit,
+    )
+    _record_bootstrap_replacement(
+        recipe, full, interface.provider, target_machines,
     )
     _submit(
         client, bridge, surface, delta, f"extend_{recipe}_refinery", emit,
@@ -1201,7 +1393,15 @@ def _assert_atomic_plate_expansion_affordable(
             client, surface, force, state, smelter_delta,
         )
     except ValueError as error:
-        raise StuckError(str(error)) from error
+        raise StuckError(
+            str(error), code="refinery_ownership_mismatch",
+            classification="bug", state="failed",
+            details={
+                "recipe": recipe,
+                "current_furnaces": state.furnace_count,
+                "target_furnaces": target_machines,
+            },
+        ) from error
     foundation = _plate_expansion_foundation(
         client, surface, force, recipe, smelter_delta,
         own_action_positions=_planned_entity_positions(
@@ -1299,7 +1499,11 @@ def _cohesive_smelter_target(
     if not positions:
         return None, None
     try:
-        existing = recover_managed_refinery(client, surface, force, recipe, positions)
+        owned_actions = _bootstrap_owned_actions(recipe, len(positions))
+        existing = recover_managed_refinery(
+            client, surface, force, recipe, positions,
+            **({"owned_actions": owned_actions} if owned_actions else {}),
+        )
     except ValueError as error:
         # A direct line can have expansion furnaces already placed (or ghosts
         # still waiting for their recipe) beside it.  The old recovery path
@@ -1314,8 +1518,10 @@ def _cohesive_smelter_target(
         existing = None
         for candidate in candidates:
             try:
+                owned_actions = _bootstrap_owned_actions(recipe, len(candidate))
                 existing = recover_managed_refinery(
                     client, surface, force, recipe, candidate,
+                    **({"owned_actions": owned_actions} if owned_actions else {}),
                 )
                 break
             except ValueError:
@@ -1373,6 +1579,7 @@ def _prepare_initial_refinery(
     plan = generate_managed_refinery_plan(
         recipe, target, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
+    replacement_plan = json.loads(json.dumps(plan))
     interface = refinery_interfaces(
         target, origin_x=origin[0], origin_y=origin[1], variant=variant,
     )
@@ -1422,6 +1629,10 @@ def _prepare_initial_refinery(
         "name": f"bridge_{extraction.ore}_to_{recipe}",
         "actions": route_actions,
     })
+    _record_bootstrap_provisioning(
+        recipe, extraction, replacement_plan, plan, route_actions,
+        interface.provider,
+    )
     ore_interface_tiles = {
         (math.floor(ore_output[0]), math.floor(ore_output[1])),
         (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
@@ -1494,12 +1705,54 @@ def _retire_standing_bootstrap_cells(
     so an old save can migrate without opening another temporary path.
     """
     removed = 0
+    ledger = _BOOTSTRAP_DISTRICT_LEDGER
+    lifecycle = _bootstrap_state(recipe)
     try:
         starter = live_base.direct_plate_starter(
             client, surface, force, recipe, ore, ore_output,
         )
     except Exception:  # survey unavailable (dry harness): legacy path still runs
         starter = None
+    if lifecycle is not None:
+        assert ledger is not None
+        if starter is None and lifecycle.lifecycle_state == "retiring":
+            try:
+                lifecycle = ledger.mark_released(recipe)
+            except BootstrapLifecycleError as error:
+                raise _bootstrap_lifecycle_stuck(recipe, error) from error
+            emit(
+                f"BOOTSTRAP DISTRICT: {recipe} pioneer absence verified; "
+                "lifecycle released"
+            )
+        elif starter is not None:
+            if lifecycle.lifecycle_state == "released":
+                error = BootstrapLifecycleError(
+                    f"released {recipe} district still contains its pioneer"
+                )
+                raise _bootstrap_lifecycle_stuck(recipe, error) from error
+            measured = _measured_bootstrap_replacement_output(
+                client, surface, recipe, lifecycle,
+            )
+            if measured <= 0:
+                emit(
+                    f"BOOTSTRAP DISTRICT: {recipe} replacement has no measured "
+                    "output; keeping its pioneer"
+                )
+                consume_wait(f"measured_{recipe}_replacement_output")
+                return 0
+            try:
+                if lifecycle.lifecycle_state == "pioneer":
+                    raise BootstrapLifecycleError(
+                        f"{recipe} pioneer cannot retire before replacement provisioning"
+                    )
+                if lifecycle.lifecycle_state == "provisioning":
+                    lifecycle = ledger.mark_validating(
+                        recipe, measured,
+                    )
+                if lifecycle.lifecycle_state == "validating":
+                    lifecycle = ledger.mark_retiring(recipe)
+            except BootstrapLifecycleError as error:
+                raise _bootstrap_lifecycle_stuck(recipe, error) from error
     if starter is not None:
         plan = retire_direct_smelter_plan(
             recipe, ore, starter.drill_position, starter.output_direction,
@@ -1517,6 +1770,19 @@ def _retire_standing_bootstrap_cells(
         )
         if recipe in {"iron-plate", "copper-plate"}:
             _release_metal_starter_limits_if_complete(client, surface, force)
+        if lifecycle is not None:
+            try:
+                remaining = live_base.direct_plate_starter(
+                    client, surface, force, recipe, ore, ore_output,
+                )
+                if remaining is None:
+                    lifecycle = ledger.mark_released(recipe)
+                    emit(
+                        f"BOOTSTRAP DISTRICT: {recipe} pioneer absence verified; "
+                        "lifecycle released"
+                    )
+            except BootstrapLifecycleError as error:
+                raise _bootstrap_lifecycle_stuck(recipe, error) from error
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
     except Exception:  # survey unavailable (dry harness): no legacy cell to retire
@@ -2000,6 +2266,7 @@ def _serve_direct_plate_starter(
     )
     if stuck:
         raise StuckError(f"direct starter for {recipe} built but not healthy: {stuck}")
+    _record_bootstrap_pioneer(recipe, ore, plan)
     UNBACKED_DRAWS.discard(recipe)
     return positions["provider"]
 
@@ -4042,7 +4309,7 @@ def _prep_plate_foundation(
             )
             healthy = bool(
                 line is not None
-                and (line.working_count > 0 or line.produced_count > 0)
+                and line.produced_count > 0
             )
             if not healthy:
                 emit(
@@ -4573,11 +4840,20 @@ def run(
     max_iterations: int = 20, emit: Callable[[str], None] = print,
     mission_items: tuple[str, ...] = (),
     episode_id: str | None = None,
+    bootstrap_profile: str = "reduced-v1",
 ) -> dict:
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
     genuinely stuck (raises StuckError rather than guessing)."""
+    global _BOOTSTRAP_DISTRICT_LEDGER
     validate_builder_target(goal_item, surface, LINE_RECIPES)
+    _BOOTSTRAP_DISTRICT_LEDGER = (
+        BootstrapDistrictLedger(
+            script_output, episode_id=episode_id, surface=surface, force=force,
+            bootstrap_profile=bootstrap_profile,
+        )
+        if episode_id else None
+    )
     client = RconClient(rcon_host, rcon_port, rcon_password)
     bridge = GameBridge(
         script_output=Path(script_output), host=rcon_host, port=rcon_port,
@@ -4589,6 +4865,7 @@ def run(
             client, bridge, surface, force, goal_item, mission_items,
             script_output, emit,
         )
+        _restore_bootstrap_reservations()
         prepped: set[str] = set()
         deferred_plate_targets: dict[str, int] = {}
         pending_plate_materials: dict[str, dict[str, int]] = {}
@@ -4736,6 +5013,7 @@ def run(
             details={"goal_item": goal_item, "max_iterations": max_iterations},
         )
     finally:
+        _BOOTSTRAP_DISTRICT_LEDGER = None
         end_run_budget()
         client.close()
         bridge.close()

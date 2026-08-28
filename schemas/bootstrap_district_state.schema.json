@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bootstrap_district_state.schema.json",
+  "title": "Bootstrap District State 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "episode_id", "surface", "force", "bootstrap_profile",
+    "recipe", "ore", "district_id", "lifecycle_state", "pioneer_actions",
+    "reservations", "replacement_origin", "replacement_provider",
+    "replacement_furnaces", "replacement_actions", "measured_output_count",
+    "revision", "history"
+  ],
+  "allOf": [{
+    "if": {
+      "properties": { "lifecycle_state": { "not": { "const": "pioneer" } } },
+      "required": ["lifecycle_state"]
+    },
+    "then": {
+      "properties": {
+        "reservations": {
+          "required": [
+            "mine_growth", "refinery_growth", "transport_service",
+            "power_service", "roboport_service"
+          ]
+        }
+      }
+    }
+  }],
+  "properties": {
+    "version": { "const": 1 },
+    "episode_id": { "$ref": "#/definitions/nonEmptyString" },
+    "surface": { "$ref": "#/definitions/nonEmptyString" },
+    "force": { "$ref": "#/definitions/nonEmptyString" },
+    "bootstrap_profile": { "enum": ["reduced-v1", "supplied-v1"] },
+    "recipe": { "$ref": "#/definitions/nonEmptyString" },
+    "ore": { "$ref": "#/definitions/nonEmptyString" },
+    "district_id": { "$ref": "#/definitions/nonEmptyString" },
+    "lifecycle_state": {
+      "enum": ["pioneer", "provisioning", "validating", "retiring", "released"]
+    },
+    "pioneer_actions": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/action" } },
+    "reservations": {
+      "type": "object",
+      "properties": {
+        "mine_growth": { "$ref": "#/definitions/tileSet" },
+        "refinery_growth": { "$ref": "#/definitions/tileSet" },
+        "transport_service": { "$ref": "#/definitions/tileSet" },
+        "power_service": { "$ref": "#/definitions/tileSet" },
+        "roboport_service": { "$ref": "#/definitions/tileSet" }
+      },
+      "additionalProperties": false
+    },
+    "replacement_origin": { "$ref": "#/definitions/nullablePoint" },
+    "replacement_provider": { "$ref": "#/definitions/nullablePoint" },
+    "replacement_furnaces": { "type": "integer", "minimum": 0 },
+    "replacement_actions": { "type": "array", "items": { "$ref": "#/definitions/action" } },
+    "measured_output_count": { "type": "integer", "minimum": 0 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["revision", "event", "from", "to"],
+        "properties": {
+          "revision": { "type": "integer", "minimum": 1 },
+          "event": { "$ref": "#/definitions/nonEmptyString" },
+          "from": { "anyOf": [{ "type": "null" }, { "enum": ["pioneer", "provisioning", "validating", "retiring", "released"] }] },
+          "to": { "enum": ["pioneer", "provisioning", "validating", "retiring", "released"] }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "definitions": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "number": { "type": "number" },
+    "point": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/definitions/number" } },
+    "nullablePoint": { "anyOf": [{ "$ref": "#/definitions/point" }, { "type": "null" }] },
+    "tile": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer" } },
+    "tileSet": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "#/definitions/tile" }
+    },
+    "action": {
+      "type": "object",
+      "required": ["action_type", "entity", "position"],
+      "properties": {
+        "action_type": { "enum": ["place_entity", "place_ghost"] },
+        "entity": { "$ref": "#/definitions/nonEmptyString" },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

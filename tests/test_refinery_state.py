@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,37 @@ def test_removal_authorization_checks_the_exact_old_end_and_output(monkeypatch) 
     )
 
 
+def test_removal_authorization_uses_persisted_owned_actions(monkeypatch) -> None:
+    old = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    delta = generate_managed_refinery_extension_plan(
+        "iron-plate", 6, 12, current_variant="basic",
+    )
+    signatures = _signatures(old)
+    monkeypatch.setattr(
+        live_base, "entity_signatures_at",
+        lambda _c, _s, _f, positions: {position: signatures[position] for position in positions},
+    )
+    state = replace(
+        refinery_state.infer_refinery_state(
+            "iron-plate", _furnaces(old), variant="basic",
+        ),
+        owned_actions=tuple(
+            action for action in actions(old)
+            if action["action_type"] in {"place_entity", "place_ghost"}
+        ),
+    )
+    monkeypatch.setattr(
+        refinery_state, "generate_managed_refinery_plan",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("persisted ownership must replace regenerated inference")
+        ),
+    )
+
+    refinery_state.assert_refinery_removals_owned(
+        object(), "nauvis", "player", state, delta,
+    )
+
+
 def test_removal_authorization_allows_an_absent_old_output_adapter(monkeypatch) -> None:
     """An interrupted build may leave the old End chest absent.
 
@@ -241,6 +273,8 @@ def test_batch_signature_survey_parses_entities_and_missing_slots() -> None:
     assert found[(1.0, 2.0)]["direction"] == 4
     assert found[(3.0, 4.0)]["name"] == "NONE"
     assert "math.abs(candidate.position.x-p[1])<0.01" in client.commands[0]
+    assert "candidate.type~='logistic-robot'" in client.commands[0]
+    assert "e=e or ghost" in client.commands[0]
 
 
 def test_live_recovery_accepts_regular_belt_bootstrap_variant(monkeypatch) -> None:

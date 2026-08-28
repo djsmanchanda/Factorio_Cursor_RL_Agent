@@ -455,7 +455,7 @@ def test_earmarked_foundation_retires_starter_after_live_output(monkeypatch) -> 
         autonomous_builder.live_base, "direct_plate_starter",
         lambda *_args: starter if _args[3] == "iron-plate" else None,
     )
-    line = type("Line", (), {"working_count": 1, "produced_count": 0})()
+    line = type("Line", (), {"working_count": 1, "produced_count": 1})()
     monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: line)
     monkeypatch.setattr(
         autonomous_builder, "_retire_standing_bootstrap_cells",

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from orchestrator import live_base
 from planners.plan_validation import actions as plan_actions
@@ -28,6 +28,7 @@ class ManagedRefineryState:
     machine_positions: tuple[Point, ...]
     interfaces: RefineryInterfaces
     variant: str = "standard"
+    owned_actions: tuple[dict, ...] = ()
 
     @property
     def furnace_count(self) -> int:
@@ -99,7 +100,7 @@ def _assert_live_actions(
 
 def recover_managed_refinery(
     client: RconClient, surface: str, force: str, recipe: str,
-    machine_positions: tuple[Point, ...],
+    machine_positions: tuple[Point, ...], *, owned_actions: tuple[dict, ...] = (),
 ) -> ManagedRefineryState:
     """Recover a block from its furnace lattice and stable splitter signature.
 
@@ -130,7 +131,7 @@ def recover_managed_refinery(
             first_error = first_error or normalized
             candidates.append(normalized)
             continue
-        return state
+        return replace(state, owned_actions=owned_actions)
     raise first_error or (candidates[-1] if candidates else ValueError(
         f"{recipe} refinery has no approved template variant"
     ))
@@ -141,13 +142,17 @@ def assert_refinery_removals_owned(
     state: ManagedRefineryState, delta: dict,
 ) -> None:
     """Authorize a delta only when every removal still matches the old template."""
-    full = generate_managed_refinery_plan(
-        state.recipe, state.furnace_count,
-        origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
-    )
+    if state.owned_actions:
+        source_actions = state.owned_actions
+    else:
+        full = generate_managed_refinery_plan(
+            state.recipe, state.furnace_count,
+            origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
+        )
+        source_actions = tuple(plan_actions(full))
     owned = {
         (action["entity"], _action_position(action)): action
-        for action in plan_actions(full)
+        for action in source_actions
     }
     removals = [
         action for action in plan_actions(delta)
@@ -186,12 +191,16 @@ def live_refinery_placements(
     """Return only live entities that still match the recovered old plan."""
     if not hasattr(client, "command"):
         return set()
-    full = generate_managed_refinery_plan(
-        state.recipe, state.furnace_count,
-        origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
-    )
+    if state.owned_actions:
+        source_actions = state.owned_actions
+    else:
+        full = generate_managed_refinery_plan(
+            state.recipe, state.furnace_count,
+            origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
+        )
+        source_actions = tuple(plan_actions(full))
     expected = [
-        action for action in plan_actions(full)
+        action for action in source_actions
         if action["action_type"] in {"place_entity", "place_ghost"}
     ]
     actual = live_base.entity_signatures_at(
