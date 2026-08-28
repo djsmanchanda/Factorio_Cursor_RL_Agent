@@ -31,7 +31,7 @@ ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
 LOCAL_MODE_MAX_LINK_TILES = 300.0
 RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
-REFINERY_SITE_CLEARANCE_TILES = 12.0
+REFINERY_SITE_CLEARANCE_TILES = 10.0
 
 
 class PendingSystemDeferred(ValueError):
@@ -634,6 +634,7 @@ def plan_local_extraction(
     belt_stock: int = 0,
     excluded_drill_positions: tuple[Point, ...] = (),
     reserved_refinery_areas: tuple[tuple[Point, Point], ...] = (),
+    owned_smelter_origin: Point | None = None,
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
     ore = LINE_RECIPES[recipe]["ingredients"][0]
@@ -642,8 +643,12 @@ def plan_local_extraction(
         excluded_drill_positions,
     )
     observed = mines[0] if mines else None
-    if observed is not None and extraction_state.pending_plate_smelter(
-        client, surface, force, ore, observed.output
+    if (
+        observed is not None
+        and owned_smelter_origin is None
+        and extraction_state.pending_plate_smelter(
+            client, surface, force, ore, observed.output
+        )
     ):
         raise PendingSystemDeferred(
             f"A pending off-ore smelter already exists near {observed.output}; "
@@ -799,13 +804,44 @@ def plan_local_extraction(
         east_bounds.max_x - east_bounds.min_x,
         east_bounds.max_y - east_bounds.min_y,
     )
-    smelter_origin = None
+    smelter_origin = owned_smelter_origin
     smelter_flow_direction = "east"
     candidates: list[
         tuple[bool, bool, float, float, float, str, Point]
     ] = []
-    for anchor in smelter_search_anchors(
-        patch_min, patch_max, footprint, reference_point, ore_output,
+    if smelter_origin is not None:
+        owned_min = (
+            smelter_origin[0] + east_bounds.min_x,
+            smelter_origin[1] + east_bounds.min_y,
+        )
+        owned_max = (
+            smelter_origin[0] + east_bounds.max_x,
+            smelter_origin[1] + east_bounds.max_y,
+        )
+        if not _keeps_refinery_clearance(
+            owned_min, owned_max, reserved_refinery_areas,
+        ):
+            raise ValueError(
+                f"Owned {recipe} refinery at {smelter_origin} conflicts with "
+                "another reserved refinery district"
+            )
+        owned_feed = (
+            smelter_origin[0] + feed_offset[0],
+            smelter_origin[1] + feed_offset[1],
+        )
+        if (
+            abs(owned_feed[0] - ore_output[0])
+            + abs(owned_feed[1] - ore_output[1])
+            > LOCAL_MODE_MAX_LINK_TILES
+        ):
+            raise ValueError(
+                f"Owned {recipe} refinery at {smelter_origin} exceeds the "
+                f"{LOCAL_MODE_MAX_LINK_TILES:.0f}-tile local-mode link limit"
+            )
+    for anchor in (
+        () if smelter_origin is not None else smelter_search_anchors(
+            patch_min, patch_max, footprint, reference_point, ore_output,
+        )
     ):
         for direction, (bounds, feed_offset, output_offset) in geometries.items():
             oriented_anchor = _align_area_anchor(anchor, bounds)

@@ -50,6 +50,10 @@ These names describe intended responsibilities, not permission to build speculat
   service infrastructure. Legacy requester cells and their recognized mine-side
   intake follow the same recoverable teardown, but are recognized only so old
   saves can retire them; new starts must not create one.
+- Once provisioning records a replacement origin, that origin and its complete
+  reservation are canonical across retries. A retry may reconcile real entities
+  and ghosts at that site, but must not resurvey a new refinery because the
+  original block has become real or temporarily has no output.
 - A migration is incomplete while any recognized starter chest or furnace
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
@@ -83,10 +87,11 @@ These names describe intended responsibilities, not permission to build speculat
   an owned refinery extension, place and power a connected replacement outside
   the future footprint before removing the old port. Production infrastructure
   remains authoritative and must be routed around or reported as a conflict.
-- Preserve a bounded straight collector beyond the first drill row before the
-  haul may turn. Expand longitudinally first; if that owned corridor is full
-  or blocked, add a parallel collector through an explicit splitter instead
-  of opening a duplicate mine.
+- End an east-flow collector immediately beyond its drill row, then route from
+  that stable haul head. Longitudinal expansion owns the reserved corridor west
+  of the head; it must not buy an unused eastward belt tail. If the owned west
+  corridor is full or blocked, add a parallel collector through an explicit
+  splitter instead of opening a duplicate mine.
 - Furnace expansion must include enough mine and transport capacity to feed
   it. Any coherent demanded mine/refinery expansion may be placed as pending
   ghosts before every construction item is stocked only when every missing

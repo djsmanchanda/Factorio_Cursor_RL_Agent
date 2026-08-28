@@ -84,6 +84,35 @@ def test_packet_builder_extracts_bounded_evidence_and_typed_blocker(tmp_path: Pa
     assert any("STUCK:" in line for line in packet["log_excerpt"]["matched_pattern_lines"])
 
 
+def test_packet_builder_preserves_unprefixed_traceback_frames(tmp_path: Path) -> None:
+    packet = _packet(tmp_path)
+    log = Path(packet["source_log"])
+    log.write_text(
+        "2026-08-28T10:00:00+05:30 RUN START: command=research "
+        "target=mining-productivity-4 surface=nauvis force=player "
+        "bootstrap_profile=reduced-v1 log=/tmp/run.log\n"
+        "2026-08-28T10:00:10+05:30 ERROR: TypeError: bad origin\n"
+        "Traceback (most recent call last):\n"
+        "  File \"orchestrator/autonomous_builder.py\", line 291, in provision\n"
+        "    mine_origin[0]\n"
+        "TypeError: 'NoneType' object is not subscriptable\n"
+        "2026-08-28T10:00:15+05:30 RUN END\n",
+        encoding="utf-8",
+    )
+
+    rebuilt = build_case_packet(log_path=log)
+
+    assert any(
+        "autonomous_builder.py" in line
+        for line in rebuilt["log_excerpt"]["tail_lines"]
+        or rebuilt["log_excerpt"]["head_lines"]
+    )
+    assert any(
+        "TypeError: 'NoneType'" in line
+        for line in rebuilt["log_excerpt"]["matched_pattern_lines"]
+    )
+
+
 def test_fallback_review_schema_valid_and_silence_remains_unreviewed(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
     inbox = tmp_path / "inbox"

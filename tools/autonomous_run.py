@@ -242,6 +242,15 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
         "--blocker-events-file", type=Path,
         help="Append-only typed blocker JSONL (default: beside the autonomous run log).",
     )
+    helper = parser.add_mutually_exclusive_group()
+    helper.add_argument(
+        "--helper-agent-data-root", type=Path,
+        help="Write Helper Agent packets to this isolated data root.",
+    )
+    helper.add_argument(
+        "--no-helper-agent-review", action="store_true",
+        help="Do not queue a post-run Helper Agent review (intended for tests).",
+    )
 
 
 def _run_item(
@@ -551,7 +560,10 @@ def main(argv: list[str] | None = None) -> int:
                 termination_reason=termination_reason,
             )
             logger.emit("RUN END")
-            if mission_state_path is not None:
+            if (
+                mission_state_path is not None
+                and not getattr(args, "no_helper_agent_review", False)
+            ):
                 try:
                     _queue_helper_agent_review(
                         log_path=log_path,
@@ -559,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
                         blocker_events_path=blocker_events_path,
                         episode_manifest_path=getattr(args, "episode_manifest", None),
                         emit=logger.emit,
+                        data_root=getattr(args, "helper_agent_data_root", None),
                     )
                 except Exception as helper_error:
                     logger.emit(

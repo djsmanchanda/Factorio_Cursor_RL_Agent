@@ -84,7 +84,7 @@ def test_refinery_site_keeps_a_growth_buffer_from_another_refinery() -> None:
         (120.0, 10.0), (144.0, 32.0), reserved,
     )
     assert stage_extraction._keeps_refinery_clearance(
-        (132.0, 10.0), (156.0, 32.0), reserved,
+        (128.0, 10.0), (152.0, 32.0), reserved,
     )
 
 
@@ -512,6 +512,43 @@ def test_plan_local_extraction_reports_a_pending_system_as_deferred(monkeypatch)
             None, "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
             belt_type="transport-belt", inserter_type="inserter",
         )
+
+
+def test_owned_refinery_origin_resumes_through_pending_ghosts(monkeypatch) -> None:
+    _patch_and_rates(monkeypatch, existing=ResourceMine(
+        output=(49.5, -65.5), drill_count=3,
+    ))
+    monkeypatch.setattr(
+        extraction_state, "pending_plate_smelter", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        live_base, "find_clear_area",
+        lambda *_args, **_kwargs: pytest.fail("owned site must not be resurveyed"),
+    )
+
+    planned = plan_local_extraction(
+        None, "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+        belt_type="transport-belt", inserter_type="inserter",
+        owned_smelter_origin=(88.0, -100.0),
+    )
+
+    assert planned.smelter_origin == (88.0, -100.0)
+    assert planned.build_plan is None
+
+
+def test_default_east_collector_ends_after_the_drill_head() -> None:
+    plan, output = direct_mine_plan(
+        (40.0, -1.0), 3, belt_type="transport-belt",
+        inserter_type="inserter", output_side="east",
+    )
+
+    assert output == (49.5, -0.5)
+    belt_xs = [
+        action["position"]["x"]
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "transport-belt"
+    ]
+    assert max(belt_xs) == output[0]
 
 def _patch_and_rates(monkeypatch, *, existing: ResourceMine | None = None) -> None:
     monkeypatch.setattr(

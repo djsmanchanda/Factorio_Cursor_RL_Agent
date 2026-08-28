@@ -28,6 +28,8 @@ _MATCHERS = tuple(
         r"\bRESEARCH READINESS:", r"\bCONTROLLER", r"\bPRIORITY:",
         r"\bSUPPLY", r"\bPOWER", r"\bCOVERAGE", r"\bGOAL MET:",
         r"\bRESEARCH QUEUED:", r"\bRUN HEARTBEAT",
+        r"^Traceback \(most recent call last\):", r'^\s+File "',
+        r"^[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception):",
     )
 )
 _MAX_LOG_LINES = 160
@@ -59,10 +61,10 @@ def _read_jsonl(path: Path | None) -> list[dict]:
 
 
 def _latest_complete_run(log_path: Path) -> tuple[list[tuple[datetime, str, str]], bool]:
-    """Return the newest complete timestamped run block and whether it ended."""
+    """Return the newest complete run block, including raw traceback lines."""
     lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    parsed: list[tuple[datetime, str, str]] = []
-    for line in lines:
+    timestamped: list[tuple[int, datetime, str, str]] = []
+    for index, line in enumerate(lines):
         match = _TIMESTAMP.match(line)
         if match is None:
             continue
@@ -70,22 +72,40 @@ def _latest_complete_run(log_path: Path) -> tuple[list[tuple[datetime, str, str]
             timestamp = datetime.fromisoformat(match.group("timestamp"))
         except ValueError:
             continue
-        parsed.append((timestamp, match.group("message"), line))
+        timestamped.append((index, timestamp, match.group("message"), line))
     end_index = next(
-        (index for index in range(len(parsed) - 1, -1, -1)
-         if parsed[index][1] == "RUN END"),
+        (index for index in range(len(timestamped) - 1, -1, -1)
+         if timestamped[index][2] == "RUN END"),
         None,
     )
     if end_index is None:
         return [], False
     start_index = next(
         (index for index in range(end_index, -1, -1)
-         if "RUN START:" in parsed[index][1]),
+         if "RUN START:" in timestamped[index][2]),
         None,
     )
     if start_index is None:
         return [], False
-    return parsed[start_index:end_index + 1], True
+    raw_start = timestamped[start_index][0]
+    raw_end = timestamped[end_index][0]
+    current_timestamp = timestamped[start_index][1]
+    run: list[tuple[datetime, str, str]] = []
+    for line in lines[raw_start:raw_end + 1]:
+        match = _TIMESTAMP.match(line)
+        if match is not None:
+            try:
+                current_timestamp = datetime.fromisoformat(match.group("timestamp"))
+            except ValueError:
+                pass
+            else:
+                run.append((current_timestamp, match.group("message"), line))
+                continue
+        # Python tracebacks are intentionally unprefixed by _RunLogger. Keep
+        # them inside the bounded run excerpt instead of silently discarding
+        # the only source location for an unhandled exception.
+        run.append((current_timestamp, line, line))
+    return run, True
 
 
 def _bounded(lines: list[str]) -> dict[str, list[str]]:

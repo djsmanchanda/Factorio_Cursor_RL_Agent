@@ -149,6 +149,7 @@ def test_runner_records_controller_failure_as_structured_blocker(
         "--mission-state-file", str(mission_path),
         "--blocker-events-file", str(blocker_path),
         "--bootstrap-profile", "reduced-v1",
+        "--no-helper-agent-review",
     ])
 
     payload = json.loads(mission_path.read_text(encoding="utf-8"))

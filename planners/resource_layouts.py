@@ -32,11 +32,11 @@ _OFFSHORE_OUTPUT_OFFSETS = {
 
 ROW_POLE = "medium-electric-pole"
 
-# Keep the first collector straight for a bounded reserve before a refinery
-# haul is allowed to turn.  Twenty-four tiles puts the continuation near the
-# 115..120 coordinates seen in the early iron layout without reserving an
-# unbounded corridor on every patch.
-DIRECT_EAST_CONTINUATION_TILES = 24
+# East-flow mines expand west into their reserved drill corridor, so the haul
+# head needs no speculative eastward tail. The old 24-tile tail was left over
+# from the opposite growth model and made nearby refineries route around an
+# empty belt extension before they could turn toward their ore input.
+DIRECT_EAST_CONTINUATION_TILES = 0
 
 _SPLITTER_FOR_BELT = {
     "transport-belt": "splitter",

@@ -275,7 +275,7 @@ def _record_bootstrap_provisioning(
     state = _bootstrap_state(recipe)
     if state is None or state.lifecycle_state == "released":
         return
-    if state.lifecycle_state not in {"pioneer", "provisioning"}:
+    if state.lifecycle_state != "pioneer":
         expected = extraction.smelter_origin
         if state.replacement_origin != expected:
             error = BootstrapLifecycleError(
@@ -2049,6 +2049,13 @@ def build_mining_stage(
     # machines are available can strand the entire supply chain.
     try:
         belt_type = _essential_belt_type(client, surface, force)
+        bootstrap = _bootstrap_state(recipe)
+        owned_smelter_origin = (
+            bootstrap.replacement_origin
+            if bootstrap is not None
+            and bootstrap.lifecycle_state != "pioneer"
+            else None
+        )
         extraction = plan_local_extraction(
             client, surface, force, recipe, reference_point, 3,
             belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
@@ -2057,6 +2064,7 @@ def build_mining_stage(
                 client, surface, force,
             ).get(belt_type, 0),
             excluded_drill_positions=excluded_drill_positions,
+            owned_smelter_origin=owned_smelter_origin,
             reserved_refinery_areas=tuple(
                 area for (reserved_surface, reserved_force, reserved_recipe), area
                 in _REFINERY_SITE_RESERVATIONS.items()
@@ -2116,7 +2124,13 @@ def build_mining_stage(
                 raise ProductionPrerequisiteDeferred(
                     f"{recipe} mine power was repaired; waiting for ore delivery"
                 )
-            if line is None or getattr(line, "produced_count", 1) == 0:
+            resuming_provisioning = (
+                bootstrap is not None
+                and bootstrap.lifecycle_state == "provisioning"
+            )
+            if (
+                line is None or getattr(line, "produced_count", 1) == 0
+            ) and not resuming_provisioning:
                 emit(
                     f"  REFINERY STARTUP PENDING: {recipe} has {working}/"
                     f"{len(positions)} furnace(s) fed but no completed plates; "
@@ -2126,21 +2140,27 @@ def build_mining_stage(
                 raise ProductionPrerequisiteDeferred(
                     f"{recipe} direct refinery has not produced yet"
                 )
-            # A standing refinery that is mostly UNFED is an ore-supply
-            # problem, not a capacity one (live run 15 built 24 stone
-            # furnaces fed for three). User standard: keep the proper module
-            # and grow ITS OWN mine instead -- one more drill row behind the
-            # existing line feeds what the furnaces already draw.
-            emit(
-                f"  ORE STARVATION: {recipe} refinery runs at "
-                f"{working}/{len(positions)} furnace(s) fed -- expanding its "
-                "own mine by one phase instead of adding capacity"
-            )
-            return build_mining_stage(
-                client, bridge, surface, force, recipe,
-                reference_point, emit, expand=True,
-                excluded_drill_positions=excluded_drill_positions,
-            )
+            if resuming_provisioning:
+                emit(
+                    f"BOOTSTRAP DISTRICT: resuming {recipe} replacement at "
+                    f"its reserved origin {bootstrap.replacement_origin}"
+                )
+            else:
+                # A standing refinery that is mostly UNFED is an ore-supply
+                # problem, not a capacity one (live run 15 built 24 stone
+                # furnaces fed for three). User standard: keep the proper module
+                # and grow ITS OWN mine instead -- one more drill row behind the
+                # existing line feeds what the furnaces already draw.
+                emit(
+                    f"  ORE STARVATION: {recipe} refinery runs at "
+                    f"{working}/{len(positions)} furnace(s) fed -- expanding its "
+                    "own mine by one phase instead of adding capacity"
+                )
+                return build_mining_stage(
+                    client, bridge, surface, force, recipe,
+                    reference_point, emit, expand=True,
+                    excluded_drill_positions=excluded_drill_positions,
+                )
     bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
     if (
         bootstrap_cap is not None

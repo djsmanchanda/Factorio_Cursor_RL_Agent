@@ -178,6 +178,24 @@ def test_controller_reserves_future_district_before_initial_build(
     )
 
 
+def test_provisioning_retry_keeps_the_persisted_district_without_a_mine_plan(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger, state = _provisioned(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    extraction = SimpleNamespace(
+        build_plan=None, mine_origin=None, smelter_origin=state.replacement_origin,
+        smelter_reserved_area=((20.0, 30.0), (40.0, 50.0)), furnace_count=6,
+    )
+
+    builder._record_bootstrap_provisioning(
+        "iron-plate", extraction, {"phases": []}, {"phases": []}, [],
+        state.replacement_provider,
+    )
+
+    assert ledger.load("iron-plate") == state
+
+
 def test_controller_releases_pioneer_only_after_exact_replacement_output(
     tmp_path: Path, monkeypatch,
 ) -> None:

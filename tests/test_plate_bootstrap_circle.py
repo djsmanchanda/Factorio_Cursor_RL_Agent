@@ -376,6 +376,52 @@ def test_unproven_refinery_does_not_expand_its_mine(monkeypatch) -> None:
         )
 
 
+def test_provisioning_refinery_resumes_its_owned_plan_instead_of_expanding(
+    monkeypatch,
+) -> None:
+    extraction = SimpleNamespace(
+        build_plan=None, drill_count=6, furnace_count=6, ore="stone",
+        ore_output=(49.5, -65.5), smelter_origin=(88.0, -100.0),
+        mining_productivity_bonus=0.0, smelter_flow_direction="east",
+    )
+    positions = tuple((float(index), 0.0) for index in range(6))
+    lifecycle = SimpleNamespace(
+        lifecycle_state="provisioning", replacement_origin=(88.0, -100.0),
+    )
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: lifecycle)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a, **_k: SimpleNamespace(
+            machine_positions=positions, produced_count=0,
+        ),
+    )
+    monkeypatch.setattr(builder.live_base, "find_idle_machine_row", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder.live_base, "entity_statuses",
+        lambda *_a, **_k: {position: "no_ingredients" for position in positions},
+    )
+    monkeypatch.setattr(builder, "_repair_unpowered_existing_mine", lambda *_a: False)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (None, None))
+    monkeypatch.setattr(builder, "_submit_mining_plan", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a, **_k: 0)
+    builds = []
+    monkeypatch.setattr(
+        builder, "_build_initial_plate_smelter",
+        lambda *_a, **kwargs: builds.append(kwargs.get("preflight_only", False))
+        or (103.5, -85.5),
+    )
+
+    provider = builder.build_mining_stage(
+        object(), object(), "nauvis", "player", "stone-brick", (3.0, -1.0),
+        lambda _message: None,
+    )
+
+    assert provider == (103.5, -85.5)
+    assert builds == [True, False]
+
+
 def test_unpowered_existing_mine_is_repaired_before_starvation_expansion(
     monkeypatch,
 ) -> None:

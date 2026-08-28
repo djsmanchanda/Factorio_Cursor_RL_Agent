@@ -502,6 +502,8 @@ Focused tests should cover:
 1. Packet extraction from representative real logs.
 2. Terminal classification.
 3. Bounded log excerpting.
+   Unprefixed Python traceback frames between `ERROR` and `RUN END` remain in
+   the excerpt and matched evidence instead of being discarded as non-events.
 4. Schema validation and rejection of malformed model output.
 5. Markdown rendering.
 6. Console listing and detail views.
@@ -511,7 +513,8 @@ Focused tests should cover:
 10. Focused-edit brief generation.
 
 Integration tests should use archived logs as fixtures. They should not require
-a live Factorio server.
+a live Factorio server or write into the production Helper Agent data root;
+runner-level tests disable review queueing or provide an isolated data root.
 
 ## Acceptance criteria
 
