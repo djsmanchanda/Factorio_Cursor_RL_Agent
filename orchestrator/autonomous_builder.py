@@ -126,6 +126,7 @@ from orchestrator.stage_transport import (
     relocate_blocking_poles,
     transport_grace_seconds,
 )
+from orchestrator.work_state import WorkStateSignal
 from planners.bootstrap_smelting import (
     direct_smelter_positions,
     generate_direct_smelter,
@@ -163,8 +164,18 @@ _DEFAULT_MACHINE_COUNT = 2
 _FAST_BELT_IRON_CAPACITY = 24
 
 
-class ProductionPrerequisiteDeferred(RuntimeError):
+class ProductionPrerequisiteDeferred(WorkStateSignal):
     """A construction item must wait for a cheaper upstream capacity phase."""
+
+    def __init__(
+        self, message: str, *, code: str = "production_prerequisite_deferred",
+        classification: str = "intended_difficulty", state: str = "planned",
+        details: Mapping[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            message, code=code, classification=classification,
+            state=state, details=details,
+        )
 
 # A livelock re-selects the same task and gets the same result forever.
 # max_iterations never bounded it: `iteration` only advances on goal work,
@@ -254,6 +265,31 @@ def _bootstrap_owned_transport_tiles(
     return set(state.reservations.get("transport_service", frozenset()))
 
 
+def _bootstrap_owned_transport_route(
+    recipe: str, replacement_origin: Point, source: Point,
+) -> tuple[dict, ...] | None:
+    """Return the first exact route on a provisioning retry, or fail closed."""
+    state = _bootstrap_state(recipe)
+    if (
+        state is None
+        or state.lifecycle_state != "provisioning"
+        or state.replacement_origin != replacement_origin
+    ):
+        return None
+    if state.transport_source is None or not state.transport_actions:
+        error = BootstrapLifecycleError(
+            f"{recipe} provisioning predates exact transport ownership; "
+            "refusing to infer and duplicate its route"
+        )
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+    if state.transport_source != source:
+        error = BootstrapLifecycleError(
+            f"{recipe} transport source moved from {state.transport_source} to {source}"
+        )
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+    return tuple(json.loads(json.dumps(action)) for action in state.transport_actions)
+
+
 def _measured_bootstrap_replacement_output(
     client: RconClient, surface: str, recipe: str,
     state: BootstrapDistrictState,
@@ -338,6 +374,8 @@ def _record_bootstrap_provisioning(
             replacement_provider=provider,
             replacement_furnaces=target,
             replacement_actions=_placement_actions(replacement_plan),
+            transport_source=extraction.ore_output,
+            transport_actions=route_actions,
         )
     except BootstrapLifecycleError as error:
         raise _bootstrap_lifecycle_stuck(recipe, error) from error
@@ -1566,7 +1604,9 @@ def _cohesive_smelter_target(
                 "the existing blueprint instead of expanding its mine"
             )
             raise ProductionPrerequisiteDeferred(
-                f"{recipe} refinery has incomplete furnace modules"
+                f"{recipe} refinery has incomplete furnace modules",
+                code="refinery_module_construction",
+                state="constructing",
             ) from error
         ignored = len(set(positions) - set(existing.machine_positions))
         if ignored:
@@ -1630,36 +1670,45 @@ def _prepare_initial_refinery(
             (math.floor(ore_output[0]), math.floor(ore_output[1])),
             (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
         }
-    owned_transport_tiles = _bootstrap_owned_transport_tiles(recipe, origin)
-    route = preflight_ingredient_transport(
-        client, surface, force, recipe, extraction.ore,
-        ore_output, interface.ore_inputs[0], target,
-        max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
-        additional_blocked=planned_blocked,
-        mode="belt", destination_is_belt=True,
-        reserved_transport_belts=reserved_transport_belts,
-        # The mine is part of this same transaction on both the survey and
-        # build pass; otherwise the build pass mistakes our fresh terminal for
-        # an existing one and preserves an unusable exit direction.
-        planned_belt_source=(
-            (ore_output[0] + 1, ore_output[1])
-            if build_plan is not None else None
-        ),
-        # Managed collectors flow east by design (direct_mine_plan
-        # output_side="east"); the position heuristic cannot know that while
-        # the row is still ghosts and reads the head as a west terminal.
-        through_flow_direction="east",
-        destination_belt_direction="east",
-        # Opening metal foundations use the belt tier the cold-start mall can
-        # actually produce. Route geometry is priced now; the combined bill
-        # below decides when the whole mine/refinery blueprint is affordable.
-        required_belt_type=_DEFAULT_BELT,
-        defer_required_tier_affordability=True,
-        owned_transport_tiles=owned_transport_tiles,
-    )
-    if route is None:
-        raise StuckError(f"{recipe} direct ore route unexpectedly selected logistics")
-    route_actions, belt_type = route
+    owned_route = _bootstrap_owned_transport_route(recipe, origin, ore_output)
+    if owned_route is not None:
+        route_actions = list(owned_route)
+        belt_type = _DEFAULT_BELT
+        emit(
+            f"BOOTSTRAP TRANSPORT: reusing {len(route_actions)} exact owned "
+            f"action(s) from mine output {ore_output}"
+        )
+    else:
+        owned_transport_tiles = _bootstrap_owned_transport_tiles(recipe, origin)
+        route = preflight_ingredient_transport(
+            client, surface, force, recipe, extraction.ore,
+            ore_output, interface.ore_inputs[0], target,
+            max_belt_route_tiles=int(LOCAL_MODE_MAX_LINK_TILES),
+            additional_blocked=planned_blocked,
+            mode="belt", destination_is_belt=True,
+            reserved_transport_belts=reserved_transport_belts,
+            # The mine is part of this same transaction on both the survey and
+            # build pass; otherwise the build pass mistakes our fresh terminal for
+            # an existing one and preserves an unusable exit direction.
+            planned_belt_source=(
+                (ore_output[0] + 1, ore_output[1])
+                if build_plan is not None else None
+            ),
+            # Managed collectors flow east by design (direct_mine_plan
+            # output_side="east"); the position heuristic cannot know that while
+            # the row is still ghosts and reads the head as a west terminal.
+            through_flow_direction="east",
+            destination_belt_direction="east",
+            # Opening metal foundations use the belt tier the cold-start mall can
+            # actually produce. Route geometry is priced now; the combined bill
+            # below decides when the whole mine/refinery blueprint is affordable.
+            required_belt_type=_DEFAULT_BELT,
+            defer_required_tier_affordability=True,
+            owned_transport_tiles=owned_transport_tiles,
+        )
+        if route is None:
+            raise StuckError(f"{recipe} direct ore route unexpectedly selected logistics")
+        route_actions, belt_type = route
     plan["phases"].append({
         "name": f"bridge_{extraction.ore}_to_{recipe}",
         "actions": route_actions,
@@ -2095,7 +2144,10 @@ def build_mining_stage(
         # opened a duplicate system, and its preflight collided with the
         # first system's own ore bridge.
         emit(f"PLATE SYSTEM PENDING: {error}")
-        raise ProductionPrerequisiteDeferred(str(error)) from error
+        raise ProductionPrerequisiteDeferred(
+            str(error), code=error.code, classification=error.classification,
+            state=error.state, details=error.details,
+        ) from error
     except ValueError as error:
         raise StuckError(str(error)) from error
     reserved_area = getattr(extraction, "smelter_reserved_area", None)
@@ -2138,7 +2190,11 @@ def build_mining_stage(
                 extraction.ore_output, recipe, emit,
             ):
                 raise ProductionPrerequisiteDeferred(
-                    f"{recipe} mine power was repaired; waiting for ore delivery"
+                    f"{recipe} mine power was repaired; waiting for ore delivery",
+                    code="mine_power_repair_wait",
+                    classification="bug",
+                    state="power_wait",
+                    details={"recipe": recipe, "ore": extraction.ore},
                 )
             resuming_provisioning = (
                 bootstrap is not None
@@ -2154,7 +2210,10 @@ def build_mining_stage(
                     "opening another mine phase"
                 )
                 raise ProductionPrerequisiteDeferred(
-                    f"{recipe} direct refinery has not produced yet"
+                    f"{recipe} direct refinery has not produced yet",
+                    code="refinery_first_output_wait",
+                    state="producing",
+                    details={"recipe": recipe},
                 )
             if resuming_provisioning:
                 emit(
@@ -2190,7 +2249,10 @@ def build_mining_stage(
         )
         raise ProductionPrerequisiteDeferred(
             f"{recipe} expansion waits for electric-furnace production after "
-            f"the {bootstrap_cap}-furnace bootstrap cap"
+            f"the {bootstrap_cap}-furnace bootstrap cap",
+            code="electric_furnace_supply_wait",
+            state="supply_wait",
+            details={"recipe": recipe, "bootstrap_cap": bootstrap_cap},
         )
     existing_smelter, cohesive_target = _cohesive_smelter_target(
         client, surface, force, recipe, extraction, expand, emit,
@@ -4545,23 +4607,14 @@ def _prep_plate_extraction(
                 f"{output_source} for downstream logistic consumers"
             )
     except ProductionPrerequisiteDeferred as deferred:
-        if isinstance(deferred.__cause__, stage_extraction.PendingSystemDeferred):
+        if deferred.state in {
+            "constructing", "coverage_wait", "power_wait", "producing",
+        }:
             emit(
-                f"  PREP CONSTRUCTING: {short_plate} foundation ghosts are "
-                "still being built; holding startup instead of advancing the goal"
+                f"  PREP {deferred.state.upper()}: {short_plate} foundation -- "
+                f"{deferred}; holding startup instead of advancing the goal"
             )
-            consume_wait(f"pending_{short_plate}_foundation")
-            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
-            return True
-        if (
-            "mine power was repaired" in str(deferred)
-            or "direct refinery has not produced yet" in str(deferred)
-        ):
-            emit(
-                f"  PREP CONSTRUCTING: {short_plate} foundation is recovering "
-                "power or first output; holding startup instead of advancing the goal"
-            )
-            consume_wait(f"recovering_{short_plate}_foundation")
+            consume_wait(f"{deferred.state}_{short_plate}_foundation")
             time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
             return True
         deferred_targets[short_plate] = wanted_furnaces
@@ -5058,11 +5111,21 @@ def _ensure_automation_science_transition(
     except ProductionPrerequisiteDeferred as deferred:
         raise ProductionPrerequisiteDeferred(
             f"automation-science-pack is remedying {blocked_recipe} "
-            f"transition ({blocked['remedy']}): {deferred}"
+            f"transition ({blocked['remedy']}): {deferred}",
+            code=deferred.code,
+            classification=deferred.classification,
+            state=deferred.state,
+            details={
+                "recipe": blocked_recipe, "remedy": blocked["remedy"],
+                **deferred.details,
+            },
         ) from deferred
     raise ProductionPrerequisiteDeferred(
         f"automation-science-pack applied {blocked['remedy']} for "
-        f"{blocked_recipe}; resurveying transition health"
+        f"{blocked_recipe}; resurveying transition health",
+        code="bootstrap_transition_resurvey",
+        state="constructing",
+        details={"recipe": blocked_recipe, "remedy": blocked["remedy"]},
     )
 
 

@@ -362,7 +362,7 @@ def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
     )
 
 
-def test_direct_mine_classifier_preserves_straight_collector_continuation() -> None:
+def test_direct_mine_classifier_does_not_adopt_its_downstream_route() -> None:
     entities = [
         *(ExtractionEntity("drill", (x, 18.5), True) for x in (11.5, 14.5)),
         *(ExtractionEntity("drill", (x, 22.5), True) for x in (11.5, 14.5)),
@@ -372,7 +372,7 @@ def test_direct_mine_classifier_preserves_straight_collector_continuation() -> N
     mine = _classify_direct_mine(entities, (0.0, 0.0))
 
     assert mine is not None
-    assert mine.haul_head == (24.5, 20.5)
+    assert mine.haul_head == (16.5, 20.5)
 
 
 def test_direct_mine_classifier_ignores_disconnected_same_row_belt() -> None:
@@ -822,7 +822,9 @@ def test_planner_refuses_duplicate_pending_smelter(monkeypatch) -> None:
         lambda *_args: pytest.fail("pending smelter must stop before site search"),
     )
 
-    with pytest.raises(ValueError, match="pending off-ore smelter"):
+    with pytest.raises(
+        stage_extraction.PendingSystemDeferred, match="pending off-ore smelter",
+    ):
         plan_local_extraction(
             object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
             belt_type="fast-transport-belt", inserter_type="fast-inserter",

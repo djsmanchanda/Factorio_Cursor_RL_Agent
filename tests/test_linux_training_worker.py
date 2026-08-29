@@ -27,7 +27,7 @@ def test_linux_worker_uses_isolated_direct_paths_without_windows_bridge() -> Non
     source = MANAGER.read_text(encoding="utf-8")
 
     assert 'STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/training"' in source
-    assert 'RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.14"' in source
+    assert 'RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.17"' in source
     assert 'FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"' in source
     assert 'READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"' in source
     assert 'write-data=$DATA_ROOT' in source

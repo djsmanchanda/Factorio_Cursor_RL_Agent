@@ -87,6 +87,8 @@ class BootstrapDistrictState:
     replacement_provider: Point | None = None
     replacement_furnaces: int = 0
     replacement_actions: tuple[dict, ...] = ()
+    transport_source: Point | None = None
+    transport_actions: tuple[dict, ...] = ()
     measured_output_count: int = 0
     revision: int = 1
     history: tuple[dict, ...] = ()
@@ -110,6 +112,11 @@ class BootstrapDistrictState:
             raise BootstrapLifecycleError("Bootstrap district requires owned pioneer actions")
         _canonical_actions(self.pioneer_actions)
         _canonical_actions(self.replacement_actions)
+        _canonical_actions(self.transport_actions)
+        if bool(self.transport_source) != bool(self.transport_actions):
+            raise BootstrapLifecycleError(
+                "Bootstrap transport source and actions must be persisted together"
+            )
         if self.lifecycle_state != "pioneer":
             if self.replacement_origin is None or self.replacement_provider is None:
                 raise BootstrapLifecycleError("Provisioned bootstrap district requires replacement geometry")
@@ -143,6 +150,8 @@ class BootstrapDistrictState:
             "replacement_provider": list(self.replacement_provider) if self.replacement_provider else None,
             "replacement_furnaces": self.replacement_furnaces,
             "replacement_actions": list(self.replacement_actions),
+            "transport_source": list(self.transport_source) if self.transport_source else None,
+            "transport_actions": list(self.transport_actions),
             "measured_output_count": self.measured_output_count,
             "revision": self.revision,
             "history": list(self.history),
@@ -178,6 +187,11 @@ class BootstrapDistrictState:
                 ),
                 replacement_furnaces=int(payload["replacement_furnaces"]),
                 replacement_actions=_canonical_actions(payload["replacement_actions"]),
+                transport_source=(
+                    _point(payload["transport_source"])
+                    if payload.get("transport_source") is not None else None
+                ),
+                transport_actions=_canonical_actions(payload.get("transport_actions", ())),
                 measured_output_count=int(payload["measured_output_count"]),
                 revision=int(payload["revision"]),
                 history=tuple(payload.get("history", ())),
@@ -324,11 +338,18 @@ class BootstrapDistrictLedger:
         replacement_origin: Point, replacement_provider: Point,
         replacement_furnaces: int,
         replacement_actions: Sequence[Mapping[str, object]],
+        transport_source: Point | None = None,
+        transport_actions: Sequence[Mapping[str, object]] = (),
     ) -> BootstrapDistrictState:
         state = self.load(recipe)
         if state is None:
             raise BootstrapLifecycleError(f"{recipe} replacement cannot precede its pioneer")
         owned = _canonical_actions(replacement_actions)
+        owned_transport = _canonical_actions(transport_actions)
+        if bool(transport_source) != bool(owned_transport):
+            raise BootstrapLifecycleError(
+                "Bootstrap transport source and actions must be provisioned together"
+            )
         if state.replacement_origin not in {None, replacement_origin}:
             raise BootstrapLifecycleError(
                 f"{recipe} replacement site changed after its footprint was reserved"
@@ -347,6 +368,8 @@ class BootstrapDistrictLedger:
             and state.replacement_provider == replacement_provider
             and state.replacement_furnaces == replacement_furnaces
             and state.replacement_actions == owned
+            and state.transport_source == transport_source
+            and state.transport_actions == owned_transport
         ):
             return state
         return self._transition(
@@ -356,6 +379,8 @@ class BootstrapDistrictLedger:
             replacement_provider=replacement_provider,
             replacement_furnaces=replacement_furnaces,
             replacement_actions=owned,
+            transport_source=transport_source,
+            transport_actions=owned_transport,
         )
 
     def mark_validating(self, recipe: str, measured_output_count: int) -> BootstrapDistrictState:

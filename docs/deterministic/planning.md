@@ -50,10 +50,12 @@ These names describe intended responsibilities, not permission to build speculat
   service infrastructure. Legacy requester cells and their recognized mine-side
   intake follow the same recoverable teardown, but are recognized only so old
   saves can retire them; new starts must not create one.
-- Once provisioning records a replacement origin, that origin and its complete
-  reservation are canonical across retries. A retry may reconcile real entities
-  and ghosts at that site, but must not resurvey a new refinery because the
-  original block has become real or temporarily has no output.
+- Once provisioning records a replacement origin, mine haul head, exact
+  transport actions, and complete reservation, those identities are canonical
+  across retries. A retry reconciles the same entities and ghosts; it must not
+  extend the collector through its own haul route, re-route around that route,
+  or resurvey a new refinery because the original block has become real or
+  temporarily has no output.
 - Automation science may overlap final pioneer teardown only when both metal
   replacements retain their full lifecycle reservations, match the exact
   opening six-furnace module, and have measured output. Otherwise the gate
@@ -193,6 +195,14 @@ These names describe intended responsibilities, not permission to build speculat
 - A test may claim migration success only from the complete lifecycle outcome,
   including teardown. Mocked helper calls and source-text assertions are not
   acceptance evidence.
+
+## Work-state taxonomy
+
+All nonterminal waits and terminal blockers use the shared states `planned`,
+`constructing`, `coverage_wait`, `power_wait`, `supply_wait`, `producing`,
+`retiring`, `retired`, and `failed`. Each signal also carries a stable code,
+details, and either `bug` or `intended_difficulty`; controller decisions inspect
+those fields instead of matching human-readable log text.
 
 These are also useful RL priors and reward features. They are not a catalog the learned policy must copy.
 

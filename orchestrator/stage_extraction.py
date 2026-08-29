@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
+from orchestrator.work_state import WorkStateSignal
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.smelter_block import (
     FURNACES_PER_MODULE, REFINERY_GENERATION_1_CAPACITIES,
@@ -34,12 +35,18 @@ RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 REFINERY_SITE_CLEARANCE_TILES = 10.0
 
 
-class PendingSystemDeferred(ValueError):
+class PendingSystemDeferred(WorkStateSignal):
     """A plate system for this ore is still constructing; demand must wait.
 
-    Subclasses ValueError because a pending system is a bounded planning
-    refusal, but lets callers distinguish WAIT for it (construction clears
-    itself in minutes) from treat-as-stuck."""
+    The typed state lets callers wait for construction without matching prose."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            code="pending_system_construction",
+            classification="intended_difficulty",
+            state="constructing",
+        )
 
 
 @dataclass(frozen=True)

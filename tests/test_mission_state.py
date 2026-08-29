@@ -11,6 +11,7 @@ from jsonschema import Draft7Validator
 
 from orchestrator.mission_state import MissionStateLedger
 from orchestrator.stage_services import StuckError
+from orchestrator.work_state import WORK_CLASSIFICATIONS, WORK_STATES
 from tools.autonomous_run import _bootstrap_profile
 
 
@@ -105,6 +106,13 @@ def test_untyped_stuck_defaults_to_bug_instead_of_claiming_difficulty(tmp_path: 
     assert blocker["code"] == "untyped_stuck"
     assert blocker["classification"] == "bug"
     assert blocker["state"] == "failed"
+
+
+def test_mission_schema_uses_the_canonical_work_taxonomy() -> None:
+    blocker = SCHEMA["definitions"]["blocker"]["properties"]
+
+    assert set(blocker["state"]["enum"]) == WORK_STATES
+    assert set(blocker["classification"]["enum"]) == WORK_CLASSIFICATIONS
 
 
 def test_bootstrap_profile_prefers_cli_then_manifest_then_reduced_default(

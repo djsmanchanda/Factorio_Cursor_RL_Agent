@@ -197,12 +197,11 @@ def _classify_direct_mines(
             drill_xs = sorted({position[0] for position in row_drills})
             output_x = min(component)
             required_end = max(drill_xs) + 2
-            # Only the contiguous component beneath these drills belongs to
-            # this mine. A remote coal haul on the same y-coordinate must not
-            # move an iron district hundreds of tiles away.
+            # The drill row defines the collector; downstream haul belts do
+            # not. Extending this boundary through every contiguous belt made
+            # a provisioning retry adopt its own route as new mine geometry,
+            # move the haul head, and submit a parallel replacement route.
             collector_end = required_end
-            while collector_end + 1 in component_xs:
-                collector_end += 1
             required_belts = [
                 (output_x + offset, belt_y)
                 for offset in range(round(collector_end - output_x) + 1)

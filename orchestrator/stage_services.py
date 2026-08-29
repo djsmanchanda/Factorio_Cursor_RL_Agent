@@ -19,6 +19,7 @@ from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
 from orchestrator.power_district import append_plan_reservation
 from orchestrator.roboport_placement import clear_chain_positions
+from orchestrator.work_state import WorkStateSignal
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import distance, l_route
@@ -139,7 +140,7 @@ _LOGISTIC_REQUEST = 100
 _BOT_THROUGHPUT_LIMIT = 3.0
 
 
-class StuckError(RuntimeError):
+class StuckError(WorkStateSignal):
     """A fail-closed controller stop with machine-readable blocker context."""
 
     def __init__(
@@ -147,18 +148,10 @@ class StuckError(RuntimeError):
         classification: str = "bug", state: str = "failed",
         details: Mapping[str, object] | None = None,
     ) -> None:
-        if classification not in {"bug", "intended_difficulty"}:
-            raise ValueError(f"Unknown blocker classification {classification!r}")
-        if state not in {
-            "planned", "constructing", "coverage_wait", "power_wait",
-            "supply_wait", "producing", "retiring", "retired", "failed",
-        }:
-            raise ValueError(f"Unknown blocker state {state!r}")
-        super().__init__(message)
-        self.code = code
-        self.classification = classification
-        self.state = state
-        self.details = dict(details or {})
+        super().__init__(
+            message, code=code, classification=classification,
+            state=state, details=details,
+        )
 
 
 def validate_builder_target(

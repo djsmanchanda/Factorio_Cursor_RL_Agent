@@ -61,6 +61,8 @@ def _provisioned(tmp_path: Path):
             _action("electric-furnace", 20.5, 30.5),
             _action("passive-provider-chest", 34.5, 42.5),
         ],
+        transport_source=(10.5, 10.5),
+        transport_actions=[_action("transport-belt", 10.5, 10.5)],
     )
     return ledger, state
 
@@ -104,6 +106,8 @@ def test_pioneer_and_provisioning_are_restart_idempotent(tmp_path: Path) -> None
             _action("electric-furnace", 20.5, 30.5),
             _action("passive-provider-chest", 34.5, 42.5),
         ],
+        transport_source=(10.5, 10.5),
+        transport_actions=[_action("transport-belt", 10.5, 10.5)],
     )
 
     assert same.revision == first.revision
@@ -151,6 +155,7 @@ def test_controller_reserves_future_district_before_initial_build(
         },
         smelter_reserved_area=((20.0, 30.0), (40.0, 50.0)),
         smelter_origin=(20.0, 30.0), mine_origin=(0.5, 0.5), furnace_count=6,
+        ore_output=(10.5, 10.5),
     )
     replacement = {"phases": [{"name": "refinery", "actions": [
         _action("electric-furnace", 20.5, 30.5),
@@ -171,6 +176,8 @@ def test_controller_reserves_future_district_before_initial_build(
     assert state.reservations["mine_growth"] == frozenset({(0, 0), (1, 0)})
     assert (20, 30) in state.reservations["refinery_growth"]
     assert (10, 10) in state.reservations["transport_service"]
+    assert state.transport_source == (10.5, 10.5)
+    assert state.transport_actions[0]["entity"] == "transport-belt"
     assert any(
         action["entity"] == "passive-provider-chest"
         and action["position"] == {"x": 34.5, "y": 42.5}
@@ -194,6 +201,24 @@ def test_provisioning_retry_keeps_the_persisted_district_without_a_mine_plan(
     )
 
     assert ledger.load("iron-plate") == state
+
+
+def test_provisioning_retry_reuses_exact_route_and_rejects_a_shifted_head(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger, state = _provisioned(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+
+    route = builder._bootstrap_owned_transport_route(
+        "iron-plate", state.replacement_origin, state.transport_source,
+    )
+
+    assert route == state.transport_actions
+    with pytest.raises(builder.StuckError) as failure:
+        builder._bootstrap_owned_transport_route(
+            "iron-plate", state.replacement_origin, (11.5, 10.5),
+        )
+    assert failure.value.code == "bootstrap_lifecycle_conflict"
 
 
 def test_science_transition_health_requires_owned_reservations_and_output(

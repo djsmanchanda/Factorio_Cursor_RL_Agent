@@ -70,6 +70,7 @@ If progress is still being made, do not declare the system stuck merely because 
 - Propose bold ideas when they can materially improve the work.
 - Be careful with destructive actions the user did not explicitly request.
 - Prefer focused tests that protect behavior. Avoid repetitive test slop and broad suites when a narrow test proves the change.
+- Keep test output token-efficient: use quiet/count output and short tracebacks by default, run focused tests before broad suites, and report only the summary plus actionable failure excerpts. Preserve enough diagnostics to debug a failure; redirect unusually verbose tool output to a temporary artifact instead of streaming it into the conversation.
 - Use concise comments to explain intent or non-obvious use, not every line. Keep comments current.
 - Add a brief path/purpose comment at the start of human-authored files when the format supports comments.
 - Keep responses compact: outcome, evidence, required next action.

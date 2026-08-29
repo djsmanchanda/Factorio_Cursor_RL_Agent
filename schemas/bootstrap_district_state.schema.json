@@ -55,6 +55,8 @@
     "replacement_provider": { "$ref": "#/definitions/nullablePoint" },
     "replacement_furnaces": { "type": "integer", "minimum": 0 },
     "replacement_actions": { "type": "array", "items": { "$ref": "#/definitions/action" } },
+    "transport_source": { "$ref": "#/definitions/nullablePoint" },
+    "transport_actions": { "type": "array", "items": { "$ref": "#/definitions/action" } },
     "measured_output_count": { "type": "integer", "minimum": 0 },
     "revision": { "type": "integer", "minimum": 1 },
     "history": {

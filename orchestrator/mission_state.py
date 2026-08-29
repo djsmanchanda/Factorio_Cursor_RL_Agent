@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from orchestrator.bootstrap_profiles import BOOTSTRAP_PROFILES
+from orchestrator.work_state import WORK_CLASSIFICATIONS, WORK_STATES
 
 MISSION_STATUSES = {"running", "completed", "stuck", "error"}
 _CODE_TOKEN = re.compile(r"[^a-z0-9_]+")
@@ -175,12 +176,9 @@ class MissionStateLedger:
             getattr(error, "classification", "bug")
         )
         state = state or str(getattr(error, "state", "failed"))
-        if classification not in {"bug", "intended_difficulty"}:
+        if classification not in WORK_CLASSIFICATIONS:
             classification = "bug"
-        if state not in {
-            "planned", "constructing", "coverage_wait", "power_wait",
-            "supply_wait", "producing", "retiring", "retired", "failed",
-        }:
+        if state not in WORK_STATES:
             state = "failed"
         merged_details = dict(getattr(error, "details", {}) or {})
         merged_details.update(details or {})

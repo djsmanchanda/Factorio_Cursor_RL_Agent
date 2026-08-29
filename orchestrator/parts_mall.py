@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Mapping
 
 from orchestrator import live_base
+from orchestrator.work_state import WorkStateSignal
 from tools.rcon_client import RconClient
 
 
@@ -90,7 +91,7 @@ def mission_mall_targets(
     return {item: count for item, count in targets.items() if item in recipes}
 
 
-class MaterialShortage(RuntimeError):
+class MaterialShortage(WorkStateSignal):
     """A build plan can proceed after the base manufactures more stock."""
 
     def __init__(
@@ -103,7 +104,16 @@ class MaterialShortage(RuntimeError):
             f"{item}: need {target}, short {target - self.available.get(item, 0)}"
             for item, target in sorted(self.required.items())
         )
-        super().__init__(f"{stage} needs material the base does not have -- {detail}")
+        super().__init__(
+            f"{stage} needs material the base does not have -- {detail}",
+            code="material_shortage",
+            classification="intended_difficulty",
+            state="supply_wait",
+            details={
+                "stage": stage, "required": self.required,
+                "available": self.available,
+            },
+        )
 
 
 def add_demands(targets: dict[str, int], shortage: MaterialShortage) -> None:

@@ -26,7 +26,7 @@ The systems may share contracts and validated primitives. They must not share mu
 ## Common entry points
 
 ```powershell
-# Run repository tests
+# Run repository tests (compact output is configured in pytest.ini)
 python -m pytest
 
 # Generate offline scenarios

@@ -420,7 +420,10 @@ def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) ->
         cause = autonomous_builder.stage_extraction.PendingSystemDeferred(
             "pending off-ore smelter",
         )
-        raise autonomous_builder.ProductionPrerequisiteDeferred(str(cause)) from cause
+        raise autonomous_builder.ProductionPrerequisiteDeferred(
+            str(cause), code=cause.code, classification=cause.classification,
+            state=cause.state,
+        ) from cause
 
     monkeypatch.setattr(autonomous_builder, "build_mining_stage", pending)
 
@@ -435,14 +438,17 @@ def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) ->
 
 
 @pytest.mark.parametrize(
-    "reason",
+    "reason,state",
     [
-        "copper-plate mine power was repaired; waiting for ore delivery",
-        "copper-plate direct refinery has not produced yet",
+        (
+            "copper-plate mine power was repaired; waiting for ore delivery",
+            "power_wait",
+        ),
+        ("copper-plate direct refinery has not produced yet", "producing"),
     ],
 )
 def test_foundation_recovery_holds_startup_instead_of_spinning_the_goal(
-    monkeypatch, reason: str,
+    monkeypatch, reason: str, state: str,
 ) -> None:
     waits: list[float] = []
     deferred: dict[str, int] = {}
@@ -453,7 +459,7 @@ def test_foundation_recovery_holds_startup_instead_of_spinning_the_goal(
     monkeypatch.setattr(
         autonomous_builder, "build_mining_stage",
         lambda *_a, **_k: (_ for _ in ()).throw(
-            autonomous_builder.ProductionPrerequisiteDeferred(reason),
+            autonomous_builder.ProductionPrerequisiteDeferred(reason, state=state),
         ),
     )
 

@@ -85,3 +85,8 @@ stable code, lifecycle state, target, and an explicit `bug` or
 `intended_difficulty` classification. Legacy untyped failures are classified as
 bugs until the originating stage supplies a narrower contract; they must not be
 silently counted as intended reduced-supply difficulty.
+
+Deferred work and terminal blockers share the same typed lifecycle contract.
+Supply, construction, coverage, power, first-output, retirement, and failure
+states therefore remain comparable even when their human-readable messages
+change.

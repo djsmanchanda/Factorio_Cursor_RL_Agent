@@ -680,25 +680,24 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
         smelter_origin=(20.0, -10.0), furnace_count=2, ore="iron-ore",
     )
     transport_tiles = frozenset({(10, 10), (11, 10)})
+    owned_route = ({
+        "action_type": "place_ghost", "entity": "transport-belt",
+        "position": {"x": 10.5, "y": 10.5}, "direction": "east",
+    },)
     monkeypatch.setattr(
         builder, "_bootstrap_state",
         lambda _recipe: SimpleNamespace(
             lifecycle_state="provisioning",
             replacement_origin=(20.0, -10.0),
             reservations={"transport_service": transport_tiles},
+            transport_source=(5.5, -2.5), transport_actions=owned_route,
         ),
     )
 
-    def preflight(*args, **kwargs):
-        captured["source"] = args[5]
-        captured["feed"] = args[6]
-        captured["kwargs"] = kwargs
-        return ([{
-            "action_type": "place_ghost", "entity": "transport-belt",
-            "position": {"x": 10.5, "y": 10.5}, "direction": "east",
-        }], "transport-belt")
-
-    monkeypatch.setattr(builder, "preflight_ingredient_transport", preflight)
+    monkeypatch.setattr(
+        builder, "preflight_ingredient_transport",
+        lambda *_a, **_k: pytest.fail("owned route must not be replanned"),
+    )
     monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
     monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_plan_construction_coverage", lambda *_a: None)
@@ -721,14 +720,9 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     )
 
     interface = refinery_interfaces(6, origin_x=20, origin_y=-10, variant="basic")
-    assert captured["source"] == (5.5, -2.5)
-    assert captured["feed"] == interface.ore_inputs[0]
-    assert captured["kwargs"]["destination_is_belt"] is True
-    assert captured["kwargs"]["destination_belt_direction"] == "east"
-    assert captured["kwargs"]["reserved_transport_belts"] > 0
-    assert captured["kwargs"]["owned_transport_tiles"] == set(transport_tiles)
     assert output == interface.provider
     assert order == ["submit", "healthy", "retire"]
+    assert owned_route[0] in actions(captured["plan"])
     assert any(
         action["entity"] == "passive-provider-chest"
         for action in actions(captured["plan"])

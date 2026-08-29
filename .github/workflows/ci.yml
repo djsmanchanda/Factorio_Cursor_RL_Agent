@@ -38,7 +38,7 @@ jobs:
         run: pip install lupa
 
       - name: Run test suite
-        run: python -m pytest -q
+        run: python -m pytest
 
   lua:
     name: lua syntax
