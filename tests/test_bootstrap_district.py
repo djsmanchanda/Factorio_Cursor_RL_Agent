@@ -114,6 +114,20 @@ def test_pioneer_and_provisioning_are_restart_idempotent(tmp_path: Path) -> None
     assert resumed.states() == (same,)
 
 
+def test_submitted_replacement_is_restart_persistent_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    ledger, provisioned = _provisioned(tmp_path)
+
+    submitted = ledger.mark_replacement_submitted("iron-plate")
+    repeated = _ledger(tmp_path).mark_replacement_submitted("iron-plate")
+
+    assert submitted.replacement_submitted
+    assert submitted.revision == provisioned.revision + 1
+    assert repeated == submitted
+    assert submitted.history[-1]["event"] == "replacement_submitted"
+
+
 def test_persisted_replacement_site_cannot_move(tmp_path: Path) -> None:
     ledger, _state = _provisioned(tmp_path)
 

@@ -184,6 +184,8 @@ class ProductionPrerequisiteDeferred(WorkStateSignal):
 # completion -- real progress moves one of them.
 _MAX_UNCHANGED_PASSES = 12
 _PENDING_FOUNDATION_POLL_SECONDS = 30.0
+_GAME_TICKS_PER_SECOND = 60.0
+_MAX_PRIORITY_SLEEP_SECONDS = 30.0
 
 
 # How long one logistic-coverage remedy may wait for a just-connected
@@ -395,6 +397,74 @@ def _record_bootstrap_replacement(
         )
     except BootstrapLifecycleError as error:
         raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _mark_bootstrap_replacement_submitted(recipe: str) -> None:
+    """Commit the point after which retries reconcile instead of resubmit."""
+    if _BOOTSTRAP_DISTRICT_LEDGER is None:
+        return
+    try:
+        _BOOTSTRAP_DISTRICT_LEDGER.mark_replacement_submitted(recipe)
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _submitted_bootstrap_plan(state: BootstrapDistrictState) -> dict:
+    """Rebuild the exact owned system view used only for live diagnosis."""
+    return {
+        "surface": state.surface,
+        "force": state.force,
+        "phases": [
+            {
+                "name": f"owned_{state.recipe}_replacement",
+                "actions": [json.loads(json.dumps(action))
+                            for action in state.replacement_actions],
+            },
+            {
+                "name": f"owned_{state.ore}_transport",
+                "actions": [json.loads(json.dumps(action))
+                            for action in state.transport_actions],
+            },
+        ],
+    }
+
+
+def _reconcile_submitted_bootstrap_replacement(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    state: BootstrapDistrictState, emit: Callable[[str], None],
+) -> Point:
+    """Finish and validate one submitted district without billing it again."""
+    if (
+        state.replacement_origin is None
+        or state.replacement_provider is None
+        or state.transport_source is None
+    ):
+        raise _bootstrap_lifecycle_stuck(
+            state.recipe,
+            BootstrapLifecycleError(
+                f"{state.recipe} submitted replacement lacks persisted geometry"
+            ),
+        )
+    plan = _submitted_bootstrap_plan(state)
+    belt_tiles = sum(
+        1 for action in state.transport_actions
+        if "transport-belt" in action.get("entity", "")
+    )
+    emit(
+        f"BOOTSTRAP DISTRICT: reconciling submitted {state.recipe} replacement; "
+        "checking construction, coverage, power, transport, and measured output"
+    )
+    _bring_modular_refinery_up(
+        client, bridge, surface, force, state.recipe, plan,
+        state.replacement_furnaces, state.replacement_origin, emit,
+        feed_grace_seconds=transport_grace_seconds(_DEFAULT_BELT, belt_tiles),
+        variant="basic",
+    )
+    _retire_standing_bootstrap_cells(
+        client, bridge, surface, force, state.recipe, state.ore,
+        state.transport_source, emit,
+    )
+    return state.replacement_provider
 
 
 def _restore_bootstrap_reservations() -> None:
@@ -2041,6 +2111,7 @@ def _build_initial_plate_smelter(
         ),
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
+    _mark_bootstrap_replacement_submitted(recipe)
     if allow_unfunded_ghosts:
         # The provider chest is a future logistic endpoint, so cover it before
         # the first bot has an item to deliver. A construction-only chain was
@@ -2236,6 +2307,15 @@ def build_mining_stage(
                     reference_point, emit, expand=True,
                     excluded_drill_positions=excluded_drill_positions,
                 )
+    if (
+        not expand
+        and bootstrap is not None
+        and bootstrap.lifecycle_state == "provisioning"
+        and getattr(bootstrap, "replacement_submitted", False)
+    ):
+        return _reconcile_submitted_bootstrap_replacement(
+            client, bridge, surface, force, bootstrap, emit,
+        )
     bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
     if (
         bootstrap_cap is not None
@@ -5417,12 +5497,17 @@ def _serve_ready_pass(
         return _SHORTAGE
     if mall_targets:
         wait_ticks = priorities.wait_ticks(mall_targets, tick)
+        wait_seconds = min(
+            _MAX_PRIORITY_SLEEP_SECONDS,
+            max(1.0, (wait_ticks or 60) / _GAME_TICKS_PER_SECOND),
+        )
         emit(
             "PRIORITY WAIT: all unfinished construction tasks are deferred; "
-            f"next review in {wait_ticks or 60} ticks"
+            f"next review in {wait_ticks or 60} ticks "
+            f"({wait_seconds:.0f}s bounded sleep)"
         )
         consume_wait("priority_defer")
-        time.sleep(5)
+        time.sleep(wait_seconds)
         return _SHORTAGE
     emit(f"--- checking {goal_item} before background reserves ---")
     goal_result = _advance_the_goal(

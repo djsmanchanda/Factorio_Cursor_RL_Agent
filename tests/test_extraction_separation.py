@@ -42,6 +42,12 @@ def _entities(plan: dict) -> list[str]:
     ]
 
 
+def _clear_areas_at(position):
+    return lambda _client, _surface, anchors, *_a, **_k: {
+        anchor: position for anchor in anchors
+    }
+
+
 def test_direct_mine_plan_contains_drills_and_egress_but_no_furnaces() -> None:
     plan, output = direct_mine_plan(
         (10, 20), 3,
@@ -296,6 +302,20 @@ def test_clear_area_scans_each_region_once_regardless_of_candidate_count() -> No
         max_radius=60.0, avoid_resources=True, resource_clearance=5.0,
     )
 
+    assert len(client.issued("collision_mask='water_tile'")) == 1
+    assert len(client.issued("out[#out+1]=math.floor(e.position.x)")) == 1
+
+
+def test_clear_area_batch_scans_once_for_every_refinery_anchor() -> None:
+    client = _AreaRcon()
+    anchors = [(80.0, 80.0), (140.0, 80.0), (80.0, 140.0)]
+
+    resolved = live_base.find_clear_areas(
+        client, "nauvis", anchors, 13.0, 9.0,
+        max_radius=60.0, avoid_resources=True, resource_clearance=5.0,
+    )
+
+    assert set(resolved) == set(anchors)
     assert len(client.issued("collision_mask='water_tile'")) == 1
     assert len(client.issued("out[#out+1]=math.floor(e.position.x)")) == 1
 
@@ -661,13 +681,14 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     monkeypatch,
 ) -> None:
     _patch_and_rates(monkeypatch)
-    clear_calls: list[tuple] = []
+    batch_calls: list[tuple] = []
+    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (0.0, 0.0))
 
-    def find_clear(*args, **kwargs):
-        clear_calls.append((args, kwargs))
-        return (0.0, 0.0) if len(clear_calls) == 1 else (80.0, 80.0)
+    def find_clear_areas(*args, **kwargs):
+        batch_calls.append((args, kwargs))
+        return {anchor: (80.0, 80.0) for anchor in args[2]}
 
-    monkeypatch.setattr(live_base, "find_clear_area", find_clear)
+    monkeypatch.setattr(live_base, "find_clear_areas", find_clear_areas)
     monkeypatch.setattr(
         "orchestrator.stage_extraction.choose_mining_origin",
         lambda *_args: ((10.0, 20.0), 2),
@@ -679,12 +700,12 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     )
 
     assert planned.smelter_origin == (81.0, 80.0)
-    assert clear_calls[1][1] == {
+    assert batch_calls[0][1] == {
         "max_radius": 60.0,
         "avoid_resources": True,
         "resource_clearance": 5.0,
     }
-    assert clear_calls[1][0][3:5] == (54.0, 25.0)
+    assert batch_calls[0][0][3:5] == (54.0, 25.0)
     layout = generate_managed_refinery_plan(
         "iron-plate", 48, origin_x=planned.smelter_origin[0],
         origin_y=planned.smelter_origin[1],
@@ -713,6 +734,7 @@ def test_foundation_plans_six_drills_beside_but_not_from_the_starter(
     monkeypatch.setattr(extraction_state, "find_resource_mines", mines)
     monkeypatch.setattr(extraction_state, "resource_drill_count", count)
     monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
     monkeypatch.setattr(
         "orchestrator.stage_extraction.choose_mining_origin",
         lambda *_args: ((10.0, 20.0), 3),
@@ -734,7 +756,7 @@ def test_foundation_plans_six_drills_beside_but_not_from_the_starter(
 
 def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:
     _patch_and_rates(monkeypatch, existing=ResourceMine((18.5, 20.5), 2))
-    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
 
     planned = plan_local_extraction(
         object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
@@ -753,7 +775,7 @@ def test_full_straight_corridor_uses_parallel_splitter_band(monkeypatch) -> None
         growth_direction=-1,
     )
     _patch_and_rates(monkeypatch, existing=mine)
-    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
     monkeypatch.setattr(live_base, "drill_siting_conflicts", lambda *_a: [])
 
     planned = plan_local_extraction(
@@ -782,7 +804,7 @@ def test_planner_resumes_matching_mine_ghosts_instead_of_duplicating(
         "orchestrator.stage_extraction.adjacent_mine_row_state",
         lambda *_args: "partial",
     )
-    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
 
     planned = plan_local_extraction(
         object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
@@ -801,7 +823,7 @@ def test_planner_services_non_pending_partial_mine_row(monkeypatch) -> None:
         "orchestrator.stage_extraction.adjacent_mine_row_state",
         lambda *_args: "partial",
     )
-    monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (80.0, 80.0))
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
 
     planned = plan_local_extraction(
         object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
@@ -833,7 +855,7 @@ def test_planner_refuses_duplicate_pending_smelter(monkeypatch) -> None:
 def test_planner_fails_closed_beyond_local_mode_link_limit(monkeypatch) -> None:
     _patch_and_rates(monkeypatch, existing=ResourceMine((18.5, 20.5), 2))
     monkeypatch.setattr(
-        live_base, "find_clear_area", lambda *_a, **_k: (1000.0, 1000.0),
+        live_base, "find_clear_areas", _clear_areas_at((1000.0, 1000.0)),
     )
 
     with pytest.raises(ValueError, match="CityPlanner rail handoff"):

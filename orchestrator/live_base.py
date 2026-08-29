@@ -442,6 +442,16 @@ def find_clear_area(
     cannot touch a patch, and siting with ``avoid_resources`` is looking for
     ore-free land, so in practice it is asked rarely or never.
     """
+    return find_clear_areas(
+        client, surface, [near], width, height,
+        max_radius=max_radius, step=step, avoid_resources=avoid_resources,
+        resource_clearance=resource_clearance,
+    )[near]
+
+
+def _clear_area_candidates(
+    near: Point, *, max_radius: float, step: float,
+) -> list[Point]:
     candidates: list[tuple[float, Point]] = []
     radius = 0.0
     while radius <= max_radius:
@@ -453,11 +463,45 @@ def find_clear_area(
         radius += step
         if len(candidates) > 40:
             break
-    if not candidates:
-        return None
-    ordered = [candidate for _distance, candidate in sorted(candidates, key=lambda item: item[0])]
-    region_min = (min(c[0] for c in ordered), min(c[1] for c in ordered))
-    region_max = (max(c[0] for c in ordered) + width, max(c[1] for c in ordered) + height)
+    return [
+        candidate for _distance, candidate
+        in sorted(candidates, key=lambda item: item[0])
+    ]
+
+
+def find_clear_areas(
+    client: RconClient, surface: str, near_points: Sequence[Point],
+    width: float, height: float, *, max_radius: float = 200.0,
+    step: float = 10.0, avoid_resources: bool = False,
+    resource_clearance: float = 0.0,
+) -> dict[Point, Point | None]:
+    """Resolve several clear-area anchors from one terrain/resource survey.
+
+    Refinery siting compares six anchors around one patch. Surveying the same
+    broad land once per anchor made the first copper district spend minutes in
+    read-only Lua. Candidate order and legality stay identical; only the shared
+    evidence collection is consolidated here.
+    """
+    ordered_by_anchor = {
+        near: _clear_area_candidates(
+            near, max_radius=max_radius, step=step,
+        )
+        for near in near_points
+    }
+    all_candidates = [
+        candidate for ordered in ordered_by_anchor.values()
+        for candidate in ordered
+    ]
+    if not all_candidates:
+        return {near: None for near in near_points}
+    region_min = (
+        min(candidate[0] for candidate in all_candidates),
+        min(candidate[1] for candidate in all_candidates),
+    )
+    region_max = (
+        max(candidate[0] for candidate in all_candidates) + width,
+        max(candidate[1] for candidate in all_candidates) + height,
+    )
     occupied = occupied_tiles(
         client, surface, region_min, region_max, include_clutter=True,
     )
@@ -471,25 +515,39 @@ def find_clear_area(
         )
         if avoid_resources else set()
     )
-    for candidate in ordered:
-        candidate_max = (candidate[0] + width, candidate[1] + height)
-        box = _box_tiles(candidate, candidate_max)
-        if box & occupied:
-            continue
-        if avoid_resources:
-            reserved_box = (
-                candidate[0] - resource_clearance, candidate[1] - resource_clearance,
-            )
-            reserved_box_max = (
-                candidate_max[0] + resource_clearance, candidate_max[1] + resource_clearance,
-            )
-            if _box_tiles(reserved_box, reserved_box_max, margin=1) & reserved_region:
-                if resource_patches.box_has_reserved_patch(
-                    client, surface, reserved_box, reserved_box_max,
-                ):
-                    continue
-        return candidate
-    return None
+    resolved: dict[Point, Point | None] = {}
+    reservation_cache: dict[tuple[Point, Point], bool] = {}
+    for near, ordered in ordered_by_anchor.items():
+        resolved[near] = None
+        for candidate in ordered:
+            candidate_max = (candidate[0] + width, candidate[1] + height)
+            box = _box_tiles(candidate, candidate_max)
+            if box & occupied:
+                continue
+            if avoid_resources:
+                reserved_box = (
+                    candidate[0] - resource_clearance,
+                    candidate[1] - resource_clearance,
+                )
+                reserved_box_max = (
+                    candidate_max[0] + resource_clearance,
+                    candidate_max[1] + resource_clearance,
+                )
+                if _box_tiles(
+                    reserved_box, reserved_box_max, margin=1,
+                ) & reserved_region:
+                    cache_key = (reserved_box, reserved_box_max)
+                    reserved = reservation_cache.get(cache_key)
+                    if reserved is None:
+                        reserved = resource_patches.box_has_reserved_patch(
+                            client, surface, reserved_box, reserved_box_max,
+                        )
+                        reservation_cache[cache_key] = reserved
+                    if reserved:
+                        continue
+            resolved[near] = candidate
+            break
+    return resolved
 
 
 def _box_tiles(

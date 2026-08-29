@@ -845,19 +845,28 @@ def plan_local_extraction(
                 f"Owned {recipe} refinery at {smelter_origin} exceeds the "
                 f"{LOCAL_MODE_MAX_LINK_TILES:.0f}-tile local-mode link limit"
             )
-    for anchor in (
-        () if smelter_origin is not None else smelter_search_anchors(
+    anchors = (
+        [] if smelter_origin is not None else smelter_search_anchors(
             patch_min, patch_max, footprint, reference_point, ore_output,
         )
-    ):
+    )
+    aligned_anchors = {
+        anchor: _align_area_anchor(anchor, east_bounds)
+        for anchor in anchors
+    }
+    clear_areas = live_base.find_clear_areas(
+        client, surface, list(aligned_anchors.values()),
+        footprint[0], footprint[1],
+        max_radius=60.0, avoid_resources=True,
+        resource_clearance=MINING_APRON_TILES,
+    ) if anchors else {}
+    for anchor in anchors:
         for direction, (bounds, feed_offset, output_offset) in geometries.items():
-            oriented_anchor = _align_area_anchor(anchor, bounds)
-            area_min = live_base.find_clear_area(
-                client, surface, oriented_anchor,
-                bounds.max_x - bounds.min_x, bounds.max_y - bounds.min_y,
-                max_radius=60.0, avoid_resources=True,
-                resource_clearance=MINING_APRON_TILES,
-            )
+            oriented_anchor = aligned_anchors[anchor]
+            # The current refinery geometry has one eastbound orientation, so
+            # oriented_anchor is the same point used by the shared survey. If
+            # another geometry returns, keep its alignment explicit here.
+            area_min = clear_areas.get(oriented_anchor)
             if area_min is None:
                 continue
             candidate = (

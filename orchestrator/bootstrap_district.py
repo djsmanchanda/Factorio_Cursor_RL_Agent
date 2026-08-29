@@ -89,6 +89,7 @@ class BootstrapDistrictState:
     replacement_actions: tuple[dict, ...] = ()
     transport_source: Point | None = None
     transport_actions: tuple[dict, ...] = ()
+    replacement_submitted: bool = False
     measured_output_count: int = 0
     revision: int = 1
     history: tuple[dict, ...] = ()
@@ -116,6 +117,10 @@ class BootstrapDistrictState:
         if bool(self.transport_source) != bool(self.transport_actions):
             raise BootstrapLifecycleError(
                 "Bootstrap transport source and actions must be persisted together"
+            )
+        if self.replacement_submitted and self.lifecycle_state == "pioneer":
+            raise BootstrapLifecycleError(
+                "A pioneer-only bootstrap district cannot have a submitted replacement"
             )
         if self.lifecycle_state != "pioneer":
             if self.replacement_origin is None or self.replacement_provider is None:
@@ -152,6 +157,7 @@ class BootstrapDistrictState:
             "replacement_actions": list(self.replacement_actions),
             "transport_source": list(self.transport_source) if self.transport_source else None,
             "transport_actions": list(self.transport_actions),
+            "replacement_submitted": self.replacement_submitted,
             "measured_output_count": self.measured_output_count,
             "revision": self.revision,
             "history": list(self.history),
@@ -192,6 +198,7 @@ class BootstrapDistrictState:
                     if payload.get("transport_source") is not None else None
                 ),
                 transport_actions=_canonical_actions(payload.get("transport_actions", ())),
+                replacement_submitted=bool(payload.get("replacement_submitted", False)),
                 measured_output_count=int(payload["measured_output_count"]),
                 revision=int(payload["revision"]),
                 history=tuple(payload.get("history", ())),
@@ -393,6 +400,27 @@ class BootstrapDistrictLedger:
             state, "validating", "replacement_output_measured",
             measured_output_count=max(state.measured_output_count, measured_output_count),
         )
+
+    def mark_replacement_submitted(self, recipe: str) -> BootstrapDistrictState:
+        """Persist the boundary between planning and live reconciliation."""
+        state = self.load(recipe)
+        if state is None or state.lifecycle_state == "pioneer":
+            raise BootstrapLifecycleError(
+                f"{recipe} replacement cannot be submitted before provisioning"
+            )
+        if state.replacement_submitted:
+            return state
+        return self._save(replace(
+            state,
+            replacement_submitted=True,
+            revision=state.revision + 1,
+            history=(*state.history, {
+                "revision": state.revision + 1,
+                "event": "replacement_submitted",
+                "from": state.lifecycle_state,
+                "to": state.lifecycle_state,
+            }),
+        ))
 
     def mark_retiring(self, recipe: str) -> BootstrapDistrictState:
         state = self.load(recipe)

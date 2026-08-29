@@ -130,3 +130,27 @@ def test_bots_building_resets_the_livelock_bound() -> None:
 def test_a_repeated_signature_with_no_ground_progress_accumulates() -> None:
     assert _livelock_step(False, False, 3) == 4
     assert _livelock_step(True, False, 3) == 0
+
+
+@pytest.mark.parametrize(("wait_ticks", "expected_seconds"), [
+    (3507, 30.0),
+    (291, 291 / 60),
+    (0, 1.0),
+])
+def test_priority_wait_sleeps_to_due_tick_without_busy_polling(
+    monkeypatch, wait_ticks: int, expected_seconds: float,
+) -> None:
+    slept = []
+    priorities = type("Priorities", (), {
+        "wait_ticks": lambda self, _targets, _tick: wait_ticks,
+    })()
+    monkeypatch.setattr(autonomous_builder.time, "sleep", slept.append)
+
+    result = autonomous_builder._serve_ready_pass(
+        object(), object(), "nauvis", "player", None, 0,
+        {"splitter": 3}, {}, priorities, (0.0, 0.0),
+        "automation-science-pack", lambda _message: None,
+    )
+
+    assert result is autonomous_builder._SHORTAGE
+    assert slept == [expected_seconds]

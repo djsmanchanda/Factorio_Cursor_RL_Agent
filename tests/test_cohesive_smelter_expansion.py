@@ -16,6 +16,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator import live_base, refinery_state  # noqa: E402
+from orchestrator.bootstrap_district import (  # noqa: E402
+    BootstrapDistrictLedger, REQUIRED_RESERVATION_ROLES,
+)
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from orchestrator.stage_services import StuckError  # noqa: E402
 from planners.plan_validation import actions  # noqa: E402
@@ -706,6 +709,10 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
         lambda *_a, **_k: (captured.update(plan=_a[3]), order.append("submit")),
     )
     monkeypatch.setattr(
+        builder, "_mark_bootstrap_replacement_submitted",
+        lambda _recipe: order.append("submitted"),
+    )
+    monkeypatch.setattr(
         builder, "_bring_modular_refinery_up",
         lambda *_a, **_k: order.append("healthy"),
     )
@@ -721,12 +728,75 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
 
     interface = refinery_interfaces(6, origin_x=20, origin_y=-10, variant="basic")
     assert output == interface.provider
-    assert order == ["submit", "healthy", "retire"]
+    assert order == ["submit", "submitted", "healthy", "retire"]
     assert owned_route[0] in actions(captured["plan"])
     assert any(
         action["entity"] == "passive-provider-chest"
         for action in actions(captured["plan"])
     )
+
+
+def test_submitted_bootstrap_reconciles_without_replanning_or_resubmitting(
+    tmp_path, monkeypatch,
+) -> None:
+    ledger = BootstrapDistrictLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-1", surface="nauvis", force="player",
+        bootstrap_profile="reduced-v1",
+    )
+    ledger.record_pioneer(
+        "copper-plate", "copper-ore", [{
+            "action_type": "place_ghost", "entity": "electric-furnace",
+            "position": {"x": 1.5, "y": 2.5},
+        }],
+    )
+    reservations = {
+        role: frozenset({(index, 10)})
+        for index, role in enumerate(sorted(REQUIRED_RESERVATION_ROLES))
+    }
+    ledger.provision(
+        "copper-plate", reservations=reservations,
+        replacement_origin=(20.0, 30.0), replacement_provider=(34.5, 42.5),
+        replacement_furnaces=6,
+        replacement_actions=[{
+            "action_type": "place_ghost", "entity": "electric-furnace",
+            "position": {"x": 20.5, "y": 30.5},
+        }],
+        transport_source=(10.5, 10.5),
+        transport_actions=[{
+            "action_type": "place_ghost", "entity": "transport-belt",
+            "position": {"x": 10.5, "y": 10.5}, "direction": "east",
+        }],
+    )
+    state = ledger.mark_replacement_submitted("copper-plate")
+    extraction = SimpleNamespace(
+        build_plan=None, expansion_positions=(), smelter_reserved_area=None,
+        smelter_origin=state.replacement_origin, ore_output=state.transport_source,
+        ore="copper-ore", row_drill_count=0, drill_count=0,
+    )
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _recipe: state)
+    monkeypatch.setattr(builder, "_essential_belt_type", lambda *_a: "transport-belt")
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_idle_machine_row", lambda *_a, **_k: None)
+    reconciled = []
+    monkeypatch.setattr(
+        builder, "_reconcile_submitted_bootstrap_replacement",
+        lambda *_a: reconciled.append(_a[4]) or state.replacement_provider,
+    )
+    monkeypatch.setattr(
+        builder, "_build_initial_plate_smelter",
+        lambda *_a, **_k: pytest.fail("submitted replacement must not be replayed"),
+    )
+
+    output = builder.build_mining_stage(
+        object(), object(), "nauvis", "player", "copper-plate",
+        (0.0, 0.0), lambda _message: None,
+    )
+
+    assert output == state.replacement_provider
+    assert reconciled == [state]
 
 
 def test_initial_refinery_keeps_the_mine_transaction_planned_on_build_pass(
