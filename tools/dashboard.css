@@ -145,7 +145,11 @@ code { color: #efaa6c; }
   .connection-cluster { justify-items: start; }
   .game-address { text-align: left; }
   main { grid-template-columns: 1fr; }
-  .controls, .priority-panel, .research-panel, .helper-panel, .console-panel { grid-column: 1; grid-row: auto; }
+  .controls { grid-column: 1; grid-row: 1; }
+  .console-panel { grid-column: 1; grid-row: 2; }
+  .research-panel { grid-column: 1; grid-row: 3; }
+  .priority-panel { grid-column: 1; grid-row: 4; }
+  .helper-panel { grid-column: 1; grid-row: 5; }
   pre { height: 480px; }
 }
 @media (max-width: 560px) {
