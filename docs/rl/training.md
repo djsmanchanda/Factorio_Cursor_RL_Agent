@@ -61,7 +61,7 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 ### Native Linux workers
 
 On native Linux, workers use the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.14` with its matching
+`~/.local/share/factorio-rl/runtime/factorio-2.1.17` with its matching
 read-data root and isolated writable roots. They do not use `wsl.exe`, Windows
 bridge directories, or a real-base save. Start with one disposable worker and
 one logical slot; increase capacity only after the documented five-minute UPS

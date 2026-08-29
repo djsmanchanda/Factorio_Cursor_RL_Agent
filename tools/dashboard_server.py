@@ -231,7 +231,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--runtime-root", type=Path,
-        default=Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.14",
+        default=Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.17",
     )
     parser.add_argument("--python-bin", type=Path, default=sys.executable)
     parser.add_argument(

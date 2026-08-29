@@ -45,7 +45,7 @@ shift || true
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
-RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.14"
+RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.17"
 GUI_MODS_PATH="$HOME/.factorio/mods"
 PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 SOURCE_SAVE=""

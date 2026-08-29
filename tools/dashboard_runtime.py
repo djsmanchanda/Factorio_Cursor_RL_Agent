@@ -633,7 +633,7 @@ class OperationManager:
             "--source-save", str(self.config.source_save),
             "--root", str(self.config.server_data),
             "--runtime-root", str(getattr(self.config, "runtime_root", None)
-                                  or Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.14"),
+                                  or Path.home() / ".local/share/factorio-rl/runtime/factorio-2.1.17"),
             "--gui-mods", str(self.config.gui_mods),
             "--python", str(getattr(self.config, "python_bin", None) or sys.executable),
             "--technology", self.config.technology,

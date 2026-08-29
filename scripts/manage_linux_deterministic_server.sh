@@ -10,7 +10,7 @@ usage: manage_linux_deterministic_server.sh {bootstrap|deploy|deploy-if-required
 
 Options:
   --root PATH           Dedicated server state (default: ~/.local/share/factorio-rl/deterministic).
-  --runtime-root PATH   Private Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.14).
+  --runtime-root PATH   Private Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.17).
   --factorio-bin PATH   Factorio executable (defaults below --runtime-root).
   --read-data PATH      Factorio read-data directory (defaults below --runtime-root).
   --source-save PATH    Required for bootstrap; copied once into the dedicated root.
@@ -50,7 +50,7 @@ fi
 shift || true
 
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
-RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.14"
+RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.17"
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""

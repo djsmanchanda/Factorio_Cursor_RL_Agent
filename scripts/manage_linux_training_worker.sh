@@ -13,7 +13,7 @@ Options:
   --slots-per-worker N   Logical training slots per runtime (default: 1, max: 80).
   --stagger-seconds N    Delay between worker actions (default: 2).
   --root PATH            Native worker-state root (default: ~/.local/share/factorio-rl/training).
-  --runtime-root PATH    Private headless Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.14).
+  --runtime-root PATH    Private headless Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.17).
   --factorio-bin PATH    Native Factorio executable (defaults below --runtime-root).
   --read-data PATH       Factorio read-data root (defaults below --runtime-root).
   --source-save PATH     Copy this disposable seed save during bootstrap.
@@ -45,7 +45,7 @@ WORKER_COUNT=1
 SLOTS_PER_WORKER=1
 STAGGER_SECONDS=2
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/training"
-RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.14"
+RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.17"
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
