@@ -71,6 +71,36 @@ def _direct_belt_entry(
     return entry_direction
 
 
+def _release_owned_destination_approach(
+    client: RconClient, surface: str, feed_position: Point,
+    blocked: set[tuple[int, int]], belt_direction: str,
+    owned_transport_tiles: set[tuple[int, int]] | None,
+) -> None:
+    """Reuse a persisted district route only where its live flow still agrees.
+
+    A provisioning retry surveys its already-built route as occupied.  The two
+    inline tiles immediately upstream of the refinery are legal to release only
+    when the district ledger reserved them and they still hold belts flowing
+    into the destination.  Everything else remains authoritative occupancy.
+    """
+    if not owned_transport_tiles or belt_direction not in {"east", "west"}:
+        return
+    entry_direction = opposite(belt_direction)
+    vx, vy = DIRECTION_VECTORS[entry_direction]
+    for step in (1, 2):
+        tile = (
+            math.floor(feed_position[0] + vx * step),
+            math.floor(feed_position[1] + vy * step),
+        )
+        if tile not in owned_transport_tiles:
+            continue
+        position = (tile[0] + 0.5, tile[1] + 0.5)
+        if live_base.transport_belt_direction_at(
+            client, surface, position,
+        ) == belt_direction:
+            blocked.discard(tile)
+
+
 def _through_belt_source(
     client: RconClient, surface: str, ingredient: str, provider: Point, *,
     upstream_shift: int = 1,
@@ -437,6 +467,7 @@ def _survey_belt_route(
     destination_is_belt: bool, destination_belt_direction: str,
     planned_belt_source: Point | None,
     through_flow_direction: str | None = None,
+    owned_transport_tiles: set[tuple[int, int]] | None = None,
 ) -> tuple[Point | None, Point, set[tuple[int, int]], str, str]:
     """Survey the exact source/endpoint geometry before pricing belt tiers."""
     belt_source = _through_belt_source(
@@ -517,6 +548,10 @@ def _survey_belt_route(
         ) or _clear_side(route_source, direction, blocked)
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
     if destination_is_belt:
+        _release_owned_destination_approach(
+            client, surface, feed_position, blocked,
+            destination_belt_direction, owned_transport_tiles,
+        )
         entry_direction = _direct_belt_entry(
             feed_position, blocked, destination_belt_direction,
         )
@@ -582,6 +617,7 @@ def _plan_belt_transport(
     through_flow_direction: str | None = None,
     required_belt_type: str | None = None,
     defer_required_tier_affordability: bool = False,
+    owned_transport_tiles: set[tuple[int, int]] | None = None,
 ) -> tuple[list[dict], str, bool]:
     """Choose the first affordable legal tier after one shared geometry survey."""
     belt_source, route_source, blocked, entry_direction, exit_direction = (
@@ -592,6 +628,7 @@ def _plan_belt_transport(
             destination_belt_direction=destination_belt_direction,
             planned_belt_source=planned_belt_source,
             through_flow_direction=through_flow_direction,
+            owned_transport_tiles=owned_transport_tiles,
         )
     )
     span = int(abs(route_source[0] - feed_position[0])

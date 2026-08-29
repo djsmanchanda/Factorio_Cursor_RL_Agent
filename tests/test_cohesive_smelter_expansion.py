@@ -679,6 +679,15 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     extraction = SimpleNamespace(
         smelter_origin=(20.0, -10.0), furnace_count=2, ore="iron-ore",
     )
+    transport_tiles = frozenset({(10, 10), (11, 10)})
+    monkeypatch.setattr(
+        builder, "_bootstrap_state",
+        lambda _recipe: SimpleNamespace(
+            lifecycle_state="provisioning",
+            replacement_origin=(20.0, -10.0),
+            reservations={"transport_service": transport_tiles},
+        ),
+    )
 
     def preflight(*args, **kwargs):
         captured["source"] = args[5]
@@ -717,6 +726,7 @@ def test_initial_refinery_uses_head_on_ore_belt_and_provider_side_tap(monkeypatc
     assert captured["kwargs"]["destination_is_belt"] is True
     assert captured["kwargs"]["destination_belt_direction"] == "east"
     assert captured["kwargs"]["reserved_transport_belts"] > 0
+    assert captured["kwargs"]["owned_transport_tiles"] == set(transport_tiles)
     assert output == interface.provider
     assert order == ["submit", "healthy", "retire"]
     assert any(

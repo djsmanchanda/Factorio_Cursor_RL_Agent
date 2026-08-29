@@ -403,6 +403,87 @@ def test_reuse_survey_does_not_hide_foreign_belt_families(monkeypatch) -> None:
     assert (4, 0) in blocked
 
 
+def test_provisioning_retry_reuses_its_live_inline_approach(monkeypatch) -> None:
+    """The 2026-08-29 copper retry found its own eastbound route at the
+    refinery entrance and rejected it as occupied.  A persisted reservation
+    plus matching live direction is enough ownership evidence to reuse it."""
+    source = (130.5, -76.5)
+    feed = (143.5, -76.5)
+    approach = {(141, -77), (142, -77)}
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source", lambda *_a, **_k: source,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_a, **_k: set(approach),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at",
+        lambda _c, _s, position: (
+            {"type": "transport-belt", "name": "transport-belt"}
+            if position == source else None
+        ),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "transport_belt_direction_at",
+        lambda _c, _s, position: (
+            "east" if (math.floor(position[0]), math.floor(position[1])) in approach
+            else None
+        ),
+    )
+
+    _belt_source, _route, blocked, entry, _exit = (
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "copper-ore", source, feed,
+            reuse_existing=True, additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=None, through_flow_direction="east",
+            owned_transport_tiles=approach,
+        )
+    )
+
+    assert entry == "west"
+    assert not approach & blocked
+
+
+@pytest.mark.parametrize(
+    ("owned", "live_direction"),
+    [
+        (set(), "east"),
+        ({(141, -77), (142, -77)}, "west"),
+    ],
+)
+def test_inline_approach_reuse_fails_closed_without_exact_ownership_and_flow(
+    monkeypatch, owned, live_direction,
+) -> None:
+    source = (130.5, -76.5)
+    feed = (143.5, -76.5)
+    approach = {(141, -77), (142, -77)}
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source", lambda *_a, **_k: source,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_a, **_k: set(approach),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "transport_belt_direction_at",
+        lambda *_a: live_direction,
+    )
+
+    with pytest.raises(StuckError, match="inline direct-belt approach"):
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "copper-ore", source, feed,
+            reuse_existing=True, additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=None, through_flow_direction="east",
+            owned_transport_tiles=owned,
+        )
+
+
 def test_the_cheapest_tier_is_a_real_belt_the_agent_can_build() -> None:
     from planners.recipe_data import LINE_RECIPES
 

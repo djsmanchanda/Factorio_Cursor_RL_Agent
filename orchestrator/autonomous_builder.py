@@ -240,6 +240,20 @@ def _bootstrap_owned_actions(
     return state.replacement_actions
 
 
+def _bootstrap_owned_transport_tiles(
+    recipe: str, replacement_origin: Point,
+) -> set[tuple[int, int]]:
+    """Exact route reservation available to a matching provisioning retry."""
+    state = _bootstrap_state(recipe)
+    if (
+        state is None
+        or state.lifecycle_state != "provisioning"
+        or state.replacement_origin != replacement_origin
+    ):
+        return set()
+    return set(state.reservations.get("transport_service", frozenset()))
+
+
 def _measured_bootstrap_replacement_output(
     client: RconClient, surface: str, recipe: str,
     state: BootstrapDistrictState,
@@ -1616,6 +1630,7 @@ def _prepare_initial_refinery(
             (math.floor(ore_output[0]), math.floor(ore_output[1])),
             (math.floor(ore_output[0] + 1), math.floor(ore_output[1])),
         }
+    owned_transport_tiles = _bootstrap_owned_transport_tiles(recipe, origin)
     route = preflight_ingredient_transport(
         client, surface, force, recipe, extraction.ore,
         ore_output, interface.ore_inputs[0], target,
@@ -1640,6 +1655,7 @@ def _prepare_initial_refinery(
         # below decides when the whole mine/refinery blueprint is affordable.
         required_belt_type=_DEFAULT_BELT,
         defer_required_tier_affordability=True,
+        owned_transport_tiles=owned_transport_tiles,
     )
     if route is None:
         raise StuckError(f"{recipe} direct ore route unexpectedly selected logistics")
