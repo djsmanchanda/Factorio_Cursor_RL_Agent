@@ -142,8 +142,18 @@ These names describe intended responsibilities, not permission to build speculat
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking
-  bill was made. After the metal transition, a rotating splitter batch may
-  fill one stack; other low-demand batches keep at most two optional spares.
+  bill was made. After both metal districts validate and release their
+  pioneers, the controller fills one stack of electronic circuits followed by
+  one stack of splitters before opening the stone district. This replenishes
+  the construction stock consumed by iron/copper while the rotating slot is
+  still available; other low-demand batches keep at most two optional spares.
+  Monotonic loan craft progress counts as controller progress even when bots
+  consume each output before it can accumulate in provider stock.
+- Pending mall batches are peers unless one appears in the selected item's
+  recipe closure or declared compact-cell bill. A drill batch must therefore
+  continue while splitter and inserter batches are also queued; treating every
+  peer as a prerequisite creates a false circular wait around the single
+  rotating assembler.
 - Iron gears and copper cable are permanent mall anchors. Recipe loans may
   borrow only a duplicate, leaving at least one assembler on each recipe.
   Before a saturated transport-belt cell promotes to a six-machine shared

@@ -3628,7 +3628,10 @@ _STARTUP_MALL_ITEM_CAPS = {
     "splitter": 2,
     "underground-belt": 5,
 }
-_POST_STARTER_ONE_STACK_ITEMS = frozenset({"splitter", "underground-belt"})
+_POST_STARTER_ONE_STACK_ITEMS = frozenset({
+    "electronic-circuit", "splitter", "underground-belt",
+})
+_POST_METAL_STACK_RESERVES = ("electronic-circuit", "splitter")
 _STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
 
 
@@ -3725,6 +3728,7 @@ _MALL_RECIPE_ANCHORS = {
     "copper-cable": 1,
 }
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
+_BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 
 
 def _bootstrap_loan_stock(
@@ -3793,6 +3797,7 @@ def _submit_bootstrap_loan(
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
     preempt_for: str | None = None,
 ) -> str:
+    global _BOOTSTRAP_LOAN_PROGRESS_REVISION
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
     )
@@ -3921,6 +3926,7 @@ def _submit_bootstrap_loan(
         time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
         after = _bootstrap_loan_products_finished(client, surface, loan)
         if after is not None and products_finished is not None and after > products_finished:
+            _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
             emit(
                 f"  MALL BOOTSTRAP LOAN PROGRESS: {step.recipe} craft count "
                 f"advanced {products_finished} -> {after}"
@@ -5084,9 +5090,14 @@ def _serve_mall_task(
     )
     if not ready:
         stock = live_base.available_items(client, surface, force)
+        actual_prerequisites = _queued_mall_prerequisites(item)
         other_pending = {
             other for other, target in mall_targets.items()
-            if other != item and stock.get(other, 0) < target
+            if (
+                other != item
+                and other in actual_prerequisites
+                and stock.get(other, 0) < target
+            )
         }
         if other_pending:
             # This item depends on prerequisites still queued beside it.
@@ -5212,6 +5223,29 @@ def _serve_mall_task(
         priorities.complete(item, live_base.game_tick(client))
         mall_targets.pop(item, None)
     return
+
+
+def _queued_mall_prerequisites(item: str) -> set[str]:
+    """Recipe and declared cell-bill prerequisites that may outrank ``item``.
+
+    Unrelated construction batches are peers, not prerequisites. Treating every
+    queued item as a dependency made drills wait for splitters while splitters
+    simultaneously waited for the active drill loan.
+    """
+    pending = list(LINE_RECIPES.get(item, {}).get("ingredients", ()))
+    prerequisites: set[str] = set()
+    while pending:
+        ingredient = str(pending.pop())
+        if ingredient in prerequisites or ingredient == item:
+            continue
+        prerequisites.add(ingredient)
+        pending.extend(LINE_RECIPES.get(ingredient, {}).get("ingredients", ()))
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is not None:
+        project = ledger.projects.get(_material_project_id(item))
+        if project is not None:
+            prerequisites.update(project.required)
+    return prerequisites
 
 
 def _electric_furnace_producer_started(
@@ -5788,6 +5822,42 @@ def _prep_core_mall(
     return False
 
 
+def _prep_post_metal_stack_reserves(
+    client: RconClient, surface: str, force: str,
+    prepped: set[str], mall_targets: dict[str, int],
+    emit: Callable[[str], None],
+) -> bool:
+    """Queue circuits, then splitters, before opening the stone district.
+
+    The opening iron/copper projects consume their small finite splitter batch.
+    Refilling only after stone requests drills is too late: the one rotating
+    assembler may already be loaned to drills when splitters are requested.
+    """
+    if not _metal_starter_transition_complete(client, surface, force):
+        return False
+    stock = live_base.available_items(client, surface, force)
+    for item in _POST_METAL_STACK_RESERVES:
+        key = f"_post_metal_stack:{item}"
+        if key in prepped:
+            continue
+        target = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+        if int(stock.get(item, 0)) >= target:
+            prepped.add(key)
+            emit(
+                f"  POST-METAL RESERVE READY: {item} has one full stack "
+                f"({target})"
+            )
+            continue
+        if mall_targets.get(item, 0) < target:
+            mall_targets[item] = target
+            emit(
+                f"  POST-METAL RESERVE: iron/copper transition is complete; "
+                f"stocking {item} to one full stack ({target}) before stone"
+            )
+        return True
+    return False
+
+
 # `None` already means "built one stage, re-survey", so a shortage needs its own
 # answer -- it must NOT advance the iteration count, since nothing was tried.
 _SHORTAGE = object()
@@ -6137,6 +6207,7 @@ def _open_the_run(
     """
     global _STARTUP_METAL_STARTERS_OBSERVED, _STARTUP_MALL_LIMITS_RELEASED
     global _STARTUP_MALL_LIMITS_FALLBACK_PROBED
+    global _BOOTSTRAP_LOAN_PROGRESS_REVISION
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     resource_patches.clear_patch_cache()
     MANAGED_INTERMEDIATE_SOURCES.clear()
@@ -6144,6 +6215,7 @@ def _open_the_run(
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False
     _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
+    _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
     catalog = load_json(bridge.export_recipe_catalog(force=force))
     learned = install_catalog_line_recipes(catalog)
     machines = install_catalog_machines(catalog)
@@ -6328,6 +6400,7 @@ def run(
         last_signature: tuple | None = None
         last_ghost_count: int | None = None
         last_items_total: int | None = None
+        last_loan_progress_revision = _BOOTSTRAP_LOAN_PROGRESS_REVISION
         last_generation_check_tick = -_GENERATION_CHECK_INTERVAL_TICKS
         unchanged_passes = 0
         iteration = 0
@@ -6355,16 +6428,21 @@ def run(
             stock_grew = (
                 last_items_total is not None and items_now > last_items_total
             )
+            loan_progressed = (
+                _BOOTSTRAP_LOAN_PROGRESS_REVISION
+                > last_loan_progress_revision
+            )
             unchanged_passes = _livelock_step(
                 last_signature is None or _outstanding_work_signature(signature)
                 != _outstanding_work_signature(last_signature),
                 (last_ghost_count is not None and ghosts_now < last_ghost_count)
-                or stock_grew,
+                or stock_grew or loan_progressed,
                 unchanged_passes,
             )
             last_signature = signature
             last_ghost_count = ghosts_now
             last_items_total = items_now
+            last_loan_progress_revision = _BOOTSTRAP_LOAN_PROGRESS_REVISION
             _refuse_to_spin(unchanged_passes, signature, goal_item)
             # Generation is mission infrastructure, not a side effect of
             # bridges: live run 36 (2026-08-23) burned its whole iteration
@@ -6386,6 +6464,18 @@ def run(
                 client, bridge, surface, force, prepped, mall_targets,
                 reference_point, emit,
             ):
+                continue
+            if _prep_post_metal_stack_reserves(
+                client, surface, force, prepped, mall_targets, emit,
+            ):
+                # This is a strict transition reserve, not opportunistic
+                # background stock. Serve it before the stone district can
+                # borrow the rotating slot for drills or inserters.
+                _serve_ready_pass(
+                    client, bridge, surface, force, task, tick, mall_targets,
+                    background_targets, priorities, reference_point,
+                    goal_item, emit,
+                )
                 continue
             # Establish iron, then copper, through the only startup path that
             # may create their extraction systems. Between those steps the

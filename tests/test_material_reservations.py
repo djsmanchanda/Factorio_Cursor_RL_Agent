@@ -204,6 +204,11 @@ def test_parent_defers_and_promotes_prerequisite_before_cell_delivery(
         targets["steel-chest"] = 1
         return False, None
 
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["steel-chest", "electronic-circuit"],
+        "amounts": [1, 3], "product_amount": 1, "craft_time": 0.5,
+    })
     monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
     monkeypatch.setattr(builder, "_ensure_mall_item", ensure)
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
@@ -220,6 +225,63 @@ def test_parent_defers_and_promotes_prerequisite_before_cell_delivery(
 
     assert events[0] == ("promote", "steel-chest", 1, 500)
     assert events[1][0:3] == ("defer", "passive-provider-chest", 500)
+
+
+def test_unrelated_queued_batches_are_not_reported_as_prerequisites(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+
+    prerequisites = builder._queued_mall_prerequisites("electric-mining-drill")
+
+    assert {
+        "electronic-circuit", "copper-cable", "iron-gear-wheel", "iron-plate",
+    } <= prerequisites
+    assert "splitter" not in prerequisites
+    assert "inserter" not in prerequisites
+
+
+def test_active_drill_batch_is_not_deferred_behind_splitter_and_inserter(
+    monkeypatch,
+) -> None:
+    task = SimpleNamespace(item="electric-mining-drill", target=6)
+    targets = {"electric-mining-drill": 6, "splitter": 3, "inserter": 12}
+    events: list[tuple] = []
+
+    class Priorities:
+        def describe(self, *_args):
+            return "drill"
+
+        def promote(self, *args):
+            events.append(("promote", *args))
+
+        def defer(self, *args, **_kwargs):
+            events.append(("defer", *args))
+
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_args: None)
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item", lambda *_args, **_kwargs: (False, None),
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_args: {})
+    monkeypatch.setattr(
+        builder, "_deliver_cell_ingredients", lambda *_args, **_kwargs: False,
+    )
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 100, targets,
+        Priorities(), (0.0, 0.0), lambda _message: None,
+    )
+
+    assert events == []
 
 
 def test_missing_self_seed_after_profile_application_is_typed_bug(
@@ -454,6 +516,7 @@ def test_active_loan_polls_once_and_reports_monotonic_progress(monkeypatch) -> N
     monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
     monkeypatch.setattr(builder, "consume_wait", waits.append)
     monkeypatch.setattr(builder.time, "sleep", sleeps.append)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_LOAN_PROGRESS_REVISION", 7)
 
     result = builder._submit_bootstrap_loan(
         object(), object(), "nauvis", "player", loan, messages.append,
@@ -462,6 +525,7 @@ def test_active_loan_polls_once_and_reports_monotonic_progress(monkeypatch) -> N
     assert "producing temporary splitter" in result
     assert waits == ["bootstrap_loan_splitter"]
     assert sleeps == [builder._BOOTSTRAP_LOAN_POLL_SECONDS]
+    assert builder._BOOTSTRAP_LOAN_PROGRESS_REVISION == 8
     assert any("craft count advanced 42 -> 43" in message for message in messages)
 
 

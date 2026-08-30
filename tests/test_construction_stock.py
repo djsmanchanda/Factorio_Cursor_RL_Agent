@@ -405,25 +405,24 @@ def test_automation_science_allows_measured_transition_before_retirement(
     assert any("transition_health" in message for message in messages)
 
 
-def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> None:
+def test_transition_reserves_use_one_stack_after_starter_migration(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
     monkeypatch.setattr(
-        builder, "ITEM_STACK_SIZES", {"splitter": 50, "underground-belt": 50},
+        builder, "ITEM_STACK_SIZES", {
+            "electronic-circuit": 200, "splitter": 50,
+            "underground-belt": 50,
+        },
     )
     monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
 
-    for item in ("splitter", "underground-belt"):
+    for item in ("electronic-circuit", "splitter", "underground-belt"):
         assert builder.mall_reserve_for(
             object(), "nauvis", "player", item, 200,
-        ) == MallReserve(50, 50, 1)
-    assert builder.mall_reserve_for(
-        object(), "nauvis", "player", "electronic-circuit", 200,
-    ) == builder.mall_reserve(
-        "electronic-circuit", 200, stack_sizes=builder.ITEM_STACK_SIZES,
-        mature=False,
-    )
+        ) == MallReserve(
+            builder.ITEM_STACK_SIZES[item], builder.ITEM_STACK_SIZES[item], 1,
+        )
 
 
 def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
@@ -440,6 +439,45 @@ def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
     assert builder._rationed_mall_spare_target(
         object(), "nauvis", "player", "splitter", 3,
     ) == 50
+
+
+def test_post_metal_reserve_queues_circuits_then_splitters(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"electronic-circuit": 200, "splitter": 50},
+    )
+    stock = {"electronic-circuit": 199, "splitter": 0}
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_args: dict(stock),
+    )
+    prepped: set[str] = set()
+    targets: dict[str, int] = {}
+    messages: list[str] = []
+
+    assert builder._prep_post_metal_stack_reserves(
+        object(), "nauvis", "player", prepped, targets, messages.append,
+    )
+    assert targets == {"electronic-circuit": 200}
+
+    stock["electronic-circuit"] = 200
+    targets.clear()
+    assert builder._prep_post_metal_stack_reserves(
+        object(), "nauvis", "player", prepped, targets, messages.append,
+    )
+    assert targets == {"splitter": 50}
+
+    stock["splitter"] = 50
+    targets.clear()
+    assert not builder._prep_post_metal_stack_reserves(
+        object(), "nauvis", "player", prepped, targets, messages.append,
+    )
+    assert prepped == {
+        "_post_metal_stack:electronic-circuit",
+        "_post_metal_stack:splitter",
+    }
+    assert any("before stone" in message for message in messages)
 
 
 def test_rotating_machine_batch_keeps_two_bounded_spares(monkeypatch) -> None:
