@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from orchestrator import autonomous_builder, live_base
 
 
@@ -60,6 +62,8 @@ def test_new_mine_extends_coverage_to_full_blueprint_before_submit(monkeypatch) 
     monkeypatch.setattr(autonomous_builder, "_submit", fake_submit)
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(live_base, "pole_network_id", lambda *_args: 8)
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_args: 167.0)
 
     client = SimpleNamespace(command=lambda _command: "")
     autonomous_builder._place_new_mine(
@@ -86,9 +90,15 @@ def test_earmarked_mine_connects_its_real_substation(monkeypatch) -> None:
     )
     monkeypatch.setattr(autonomous_builder, "_publish_output_chest", lambda _plan: None)
     monkeypatch.setattr(autonomous_builder, "_submit", lambda *_a, **_k: None)
+    network_ids = iter((8, 8))
+    generation = iter((0.0, 167.0))
     monkeypatch.setattr(
-        autonomous_builder.live_base, "entity_status_name",
-        lambda *_a: "no_power",
+        autonomous_builder.live_base, "pole_network_id",
+        lambda *_a: next(network_ids),
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "network_generation_kw",
+        lambda *_a: next(generation),
     )
     connected = []
     monkeypatch.setattr(
@@ -102,3 +112,20 @@ def test_earmarked_mine_connects_its_real_substation(monkeypatch) -> None:
     )
 
     assert connected == [(48.0, -70.0)]
+
+
+def test_power_anchor_repair_requires_generated_network_after_bridge(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(live_base, "pole_network_id", lambda *_a: 8)
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 0.0)
+    monkeypatch.setattr(autonomous_builder, "extend_power", lambda *_a, **_k: True)
+
+    with pytest.raises(autonomous_builder.StuckError) as failure:
+        autonomous_builder._ensure_power_anchor_on_generated_network(
+            object(), object(), "nauvis", "player", (48.0, -70.0),
+            "copper-ore mine", lambda _message: None,
+        )
+
+    assert failure.value.code == "stage_power_connection_failed"
+    assert failure.value.state == "power_wait"

@@ -385,3 +385,39 @@ def test_controller_keeps_pioneer_when_replacement_has_not_produced(
     state = ledger.load("iron-plate")
     assert removed == 0
     assert state is not None and state.lifecycle_state == "provisioning"
+
+
+def test_pioneer_cannot_adopt_nearby_refinery_or_enter_retirement(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.record_pioneer(
+        "stone-brick", "stone", [_action("electric-furnace", 54.5, -67.5)],
+    )
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: pytest.fail("a pioneer district has no replacement line"),
+    )
+
+    assert not builder._direct_plate_foundation_ready(
+        object(), "nauvis", "player", "stone-brick",
+    )
+
+    starter = builder.live_base.DirectPlateStarter((54.5, -67.5), "north", 1)
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter", lambda *_a, **_k: starter,
+    )
+    monkeypatch.setattr(
+        builder, "_measured_bootstrap_replacement_output",
+        lambda *_a: pytest.fail("pioneer state has no replacement to measure"),
+    )
+
+    with pytest.raises(builder.StuckError) as failure:
+        builder._retire_standing_bootstrap_cells(
+            object(), object(), "nauvis", "player", "stone-brick", "stone",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert failure.value.code == "bootstrap_lifecycle_conflict"
+    assert "before replacement provisioning" in str(failure.value)

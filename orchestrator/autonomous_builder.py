@@ -432,6 +432,58 @@ def _submitted_bootstrap_plan(state: BootstrapDistrictState) -> dict:
     }
 
 
+def _ensure_power_anchor_on_generated_network(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    position: Point, label: str, emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
+) -> None:
+    """Require the exact planned pole to belong to a generating network.
+
+    Entity status is not sufficient evidence: a pole on an isolated network
+    can report an ordinary status while every machine it serves is unpowered.
+    """
+    network_id = live_base.pole_network_id(client, surface, position)
+    generation = (
+        live_base.network_generation_kw(client, surface, force, position)
+        if network_id is not None else None
+    )
+    if generation is not None and generation > 0:
+        return
+    emit(
+        f"  POWER ANCHOR REPAIR: {label} at {position} is not connected "
+        "to a generating network"
+    )
+    acted = extend_power(
+        client, bridge, surface, force, position, emit,
+        reserved_tiles=reserved_tiles,
+    )
+    verified_network = live_base.pole_network_id(client, surface, position)
+    verified_generation = (
+        live_base.network_generation_kw(client, surface, force, position)
+        if verified_network is not None else None
+    )
+    if (
+        not acted or verified_network is None
+        or verified_generation is None or verified_generation <= 0
+    ):
+        raise StuckError(
+            f"{label} power anchor at {position} remained outside a "
+            "generating network after repair",
+            code="stage_power_connection_failed", classification="bug",
+            state="power_wait",
+            details={
+                "label": label,
+                "position": [position[0], position[1]],
+                "network_id": verified_network,
+                "generation_kw": verified_generation,
+            },
+        )
+    emit(
+        f"  POWER ANCHOR VERIFIED: {label} joined generated network "
+        f"{verified_network}"
+    )
+
+
 def _reconcile_submitted_bootstrap_replacement(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     state: BootstrapDistrictState, emit: Callable[[str], None],
@@ -987,13 +1039,11 @@ def _place_new_mine(
         # when the rest of the mine is ghosts. Do not defer its connection:
         # otherwise the drills finish later on an isolated grid and the first
         # recovery pass has to rebuild their construction supply around them.
-        if live_base.entity_status_name(
-            client, surface, substation_position,
-        ) in {"no_power", "low_power"}:
-            extend_power(
-                client, bridge, surface, force, substation_position, emit,
-                reserved_tiles=planned_footprint_tiles(plan),
-            )
+        _ensure_power_anchor_on_generated_network(
+            client, bridge, surface, force, substation_position,
+            f"{extraction.ore} mine", emit,
+            reserved_tiles=planned_footprint_tiles(plan),
+        )
         emit(
             f"  BLUEPRINT EARMARK: {extraction.ore} mine is placed as ghosts; "
             "construction continues while the mall fills the bill"
@@ -1009,6 +1059,11 @@ def _place_new_mine(
         client, bridge, surface, force, f"mining stage for {extraction.ore}",
         (ox, oy), area, substation_position, machine_positions, emit,
         logistic_chest_positions=_logistic_chest_positions(plan),
+    )
+    _ensure_power_anchor_on_generated_network(
+        client, bridge, surface, force, substation_position,
+        f"{extraction.ore} mine", emit,
+        reserved_tiles=planned_footprint_tiles(plan),
     )
     stuck = _diagnose_machines(
         client, surface, machine_positions, emit, bridge=bridge, force=force,
@@ -1508,6 +1563,10 @@ def _bring_modular_refinery_up(
         origin, _plan_area(plan), interface.power_anchor, machines, emit,
         logistic_chest_positions=[interface.provider],
     )
+    _ensure_power_anchor_on_generated_network(
+        client, bridge, surface, force, interface.power_anchor,
+        f"modular refinery for {recipe}", emit, reserved_tiles=reserved,
+    )
     stuck = _diagnose_machines(
         client, surface, machines, emit, grace_seconds=feed_grace_seconds,
         bridge=bridge, force=force,
@@ -1964,6 +2023,11 @@ def _retire_standing_bootstrap_cells(
                     f"released {recipe} district still contains its pioneer"
                 )
                 raise _bootstrap_lifecycle_stuck(recipe, error) from error
+            if lifecycle.lifecycle_state == "pioneer":
+                error = BootstrapLifecycleError(
+                    f"{recipe} pioneer cannot retire before replacement provisioning"
+                )
+                raise _bootstrap_lifecycle_stuck(recipe, error) from error
             measured = _measured_bootstrap_replacement_output(
                 client, surface, recipe, lifecycle,
             )
@@ -1975,10 +2039,6 @@ def _retire_standing_bootstrap_cells(
                 consume_wait(f"measured_{recipe}_replacement_output")
                 return 0
             try:
-                if lifecycle.lifecycle_state == "pioneer":
-                    raise BootstrapLifecycleError(
-                        f"{recipe} pioneer cannot retire before replacement provisioning"
-                    )
                 if lifecycle.lifecycle_state == "provisioning":
                     lifecycle = ledger.mark_validating(
                         recipe, measured,
@@ -2207,13 +2267,11 @@ def _build_initial_plate_smelter(
             origin_y=extraction.smelter_origin[1], variant="basic",
             vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
         )
-        if live_base.entity_status_name(
-            client, surface, interface.power_anchor,
-        ) in {"no_power", "low_power"}:
-            extend_power(
-                client, bridge, surface, force, interface.power_anchor, emit,
-                reserved_tiles=planned_footprint_tiles(plan),
-            )
+        _ensure_power_anchor_on_generated_network(
+            client, bridge, surface, force, interface.power_anchor,
+            f"modular refinery for {recipe}", emit,
+            reserved_tiles=planned_footprint_tiles(plan),
+        )
         emit(
             f"  BLUEPRINT EARMARK: {recipe} refinery is placed as ghosts; "
             "construction continues while the mall fills the bill"
@@ -5078,6 +5136,32 @@ def _direct_plate_foundation_ready(
     excluding requester bootstrap geometry; a recipe-only count retriggered
     iron growth before copper existed in the 2026-08-25 19:12 run.
     """
+    lifecycle = _bootstrap_state(recipe)
+    if lifecycle is not None:
+        # A district owns exact replacement positions. Never merge nearby idle
+        # furnaces: that let the stone pioneer adopt copper's six-furnace block
+        # and enter retirement before stone provisioning had even begun.
+        if lifecycle.lifecycle_state == "pioneer":
+            return False
+        machine = LINE_RECIPES[recipe]["machine"]
+        positions = tuple(
+            (float(action["position"]["x"]), float(action["position"]["y"]))
+            for action in lifecycle.replacement_actions
+            if action.get("entity") == machine
+        )
+        required = PLATE_FOUNDATION_FURNACES[recipe]
+        if len(positions) < required:
+            return False
+        if any(
+            not (
+                (entity := live_base.entity_at(client, surface, position))
+                and entity.get("name") == machine
+            )
+            for position in positions
+        ):
+            return False
+        return bool(_complete_six_furnace_candidates(tuple(sorted(positions))))
+
     line = live_base.find_line(
         client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
     )

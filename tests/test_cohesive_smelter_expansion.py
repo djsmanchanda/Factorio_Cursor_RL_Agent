@@ -855,7 +855,14 @@ def test_earmarked_initial_refinery_is_not_advertised_before_it_is_built(
         builder, "ensure_logistic_coverage",
         lambda *_a, **_k: coverage.extend(_a[4]) or False,
     )
-    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "no_power")
+    network_ids = iter((8, 8))
+    generation = iter((0.0, 167.0))
+    monkeypatch.setattr(
+        builder.live_base, "pole_network_id", lambda *_a: next(network_ids),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "network_generation_kw", lambda *_a: next(generation),
+    )
     powered: list[tuple[float, float]] = []
     monkeypatch.setattr(
         builder, "extend_power", lambda *_a, **_k: powered.append(_a[4]) or True,
