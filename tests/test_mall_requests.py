@@ -61,6 +61,30 @@ def test_both_halves_label_the_same_chest_differently() -> None:
     assert left["logistic_sections"][0]["group"] != right["logistic_sections"][0]["group"]
 
 
+def test_bootstrap_right_half_can_share_the_left_provider() -> None:
+    spec = LINE_RECIPES["advanced-circuit"]
+    plan = generate_paired_mall_layout(
+        "advanced-circuit", spec["machine"], spec["ingredients"],
+        spec["amounts"], _ORIGIN, "right", stock_target=1,
+        craft_time=spec["craft_time"], shared_provider=True,
+    )
+    actions = plan["phases"][0]["actions"]
+    provider = next(
+        action for action in actions
+        if action["entity"] == "passive-provider-chest"
+    )
+    output = next(
+        action for action in actions
+        if action.get("entity", "").endswith("inserter")
+        and action["position"] == {"x": 105.5, "y": 100.5}
+    )
+
+    assert provider["position"] == {"x": 104.5, "y": 100.5}
+    assert provider["inventory_limit"]["fill_chest"] is True
+    assert output["direction"] == "east"
+    assert not list(_SCHEMA.iter_errors(plan))
+
+
 @pytest.mark.parametrize("recipe", ["copper-cable", "iron-gear-wheel"])
 def test_two_matching_halves_each_contribute_their_own_request(recipe: str) -> None:
     left_chest = _requester(_half(recipe, "left"))

@@ -182,6 +182,14 @@ def test_compact_bill_includes_cell_entities_and_first_recipe_craft(
     assert bill["steel-chest"] == 1
     assert bill["electronic-circuit"] == 3
 
+    shared_right = compact_mall_project_bill(
+        "test-provider", side="right", shared_provider=True,
+    )
+    assert shared_right["assembling-machine-2"] == 1
+    assert "requester-chest" not in shared_right
+    assert "passive-provider-chest" not in shared_right
+    assert "substation" not in shared_right
+
 
 def test_parent_defers_and_promotes_prerequisite_before_cell_delivery(
     monkeypatch,
@@ -326,6 +334,10 @@ def test_missing_self_seed_starts_a_borrowed_mall_producer(
         builder, "_start_bootstrap_loan",
         lambda *_a, **_k: "borrowed copper-cable cell is producing the seed",
     )
+    monkeypatch.setattr(
+        builder, "preview_mall_allocation",
+        lambda *_a: ((35, 31), "left"),
+    )
     plan = SimpleNamespace(
         mall_storage_limit=2, fill_provider=False, mall_request_multiplier=None,
     )
@@ -343,8 +355,19 @@ def test_missing_self_seed_starts_a_borrowed_mall_producer(
 def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
     monkeypatch,
 ) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "oil-refinery", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-plate"],
+        "amounts": [15], "craft_time": 8.0, "product_amount": 1,
+        "set_recipe": True,
+    })
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable",
+        lambda *_a: (False, {"assembling-machine-2": 1}),
+    )
     started = []
     monkeypatch.setattr(
         builder, "_start_bootstrap_loan",
@@ -364,6 +387,89 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
         "oil-refinery", 1, {"spare_target_count": 3},
     )]
     assert any("mixed provider contents are expected" in line for line in messages)
+
+
+def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [10], "craft_time": 2.0, "product_amount": 1,
+        "set_recipe": True,
+    })
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable",
+        lambda *_a: (True, {}),
+    )
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: pytest.fail("affordable demand should own a slot"),
+    )
+    messages: list[str] = []
+
+    assert not builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+    assert builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS == {
+        "electric-mining-drill",
+    }
+    assert any("10-assembler pool" in message for message in messages)
+
+
+def test_bootstrap_shared_output_retrofit_queues_its_exact_bill(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [
+        {"action_type": "place_entity", "entity": "passive-provider-chest"},
+        {"action_type": "place_entity", "entity": "fast-inserter"},
+    ]}]}
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(
+        builder, "next_shared_provider_retrofit_plan",
+        lambda *_a: ("advanced-circuit", (35, 31), plan),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"passive-provider-chest": 1},
+    )
+    targets: dict[str, int] = {}
+
+    assert not builder._retrofit_bootstrap_mall_outputs(
+        object(), object(), "nauvis", "player", targets,
+        (3.0, -1.0), lambda _message: None,
+    )
+    assert targets == {"fast-inserter": 1}
+
+
+def test_bootstrap_shared_output_retrofits_once_funded(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [
+        {"action_type": "place_entity", "entity": "passive-provider-chest"},
+        {"action_type": "place_entity", "entity": "fast-inserter"},
+    ]}]}
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(
+        builder, "next_shared_provider_retrofit_plan",
+        lambda *_a: ("advanced-circuit", (35, 31), plan),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"passive-provider-chest": 1, "fast-inserter": 1},
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+
+    assert builder._retrofit_bootstrap_mall_outputs(
+        object(), object(), "nauvis", "player", {},
+        (3.0, -1.0), lambda _message: None,
+    )
+    assert submitted == ["retrofit_shared_mall_advanced-circuit_35_31"]
 
 
 def test_new_rationed_target_services_and_restores_the_active_loan(

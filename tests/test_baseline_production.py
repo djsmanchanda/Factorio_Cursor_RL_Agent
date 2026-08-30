@@ -11,6 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 from orchestrator.baseline_production import (  # noqa: E402
     BASELINE_MACHINES,
     BASELINE_PLATES,
+    BOOTSTRAP_MALL_SLOT_TARGET,
     CHEMICAL_BOOTSTRAP_LADDER,
     CORE_MALL_PRODUCERS,
     PLATE_FOUNDATION_BUILD_ORDER,
@@ -134,6 +135,7 @@ def test_reduced_supply_chemical_capabilities_have_one_explicit_order() -> None:
         "assembling-machine-2", "fast-inserter", "passive-provider-chest",
         "requester-chest", "substation",
     )
+    assert BOOTSTRAP_MALL_SLOT_TARGET == 10
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)

@@ -307,6 +307,12 @@ def bootstrap_loan_plan(
         requester["clear_logistic_groups"].append(loan.group)
     provider = generate_mall_provider_limit_update(
         step.recipe, loan.provider_position, step.target_count,
+        # A borrowed provider can still contain several stacks from its
+        # original recipe. Lowering its bar to the new recipe's one-slot target
+        # can strand the bar behind those stacks and block every new output.
+        # Keep it open only during the loan; restoration reapplies the normal
+        # cap for the original recipe.
+        fill_chest=True,
     )["phases"][0]["actions"][0]
     return {"phases": [{
         "name": f"bootstrap_loan_{step.recipe}",

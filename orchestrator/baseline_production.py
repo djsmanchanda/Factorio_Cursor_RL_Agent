@@ -82,6 +82,12 @@ CORE_MALL_PRODUCERS = (
     "substation",
 )
 
+# Bootstrap may own more than the six standing prep assemblers when another
+# complete cell half is affordable. Ten recovered the useful pre-plastic
+# parallelism seen before finite-stock rationing, without making every demand
+# an unconditional permanent mall allocation.
+BOOTSTRAP_MALL_SLOT_TARGET = 10
+
 RATIONED_MALL_BATCH_ITEMS = frozenset({
     *CORE_MALL_PRODUCERS,
     "splitter",

@@ -254,6 +254,7 @@ def generate_paired_mall_layout(
     stock_gate_target: int | None = None,
     fill_chest: bool = False,
     request_multiplier_override: int | None = None,
+    shared_provider: bool = False,
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -271,7 +272,10 @@ def generate_paired_mall_layout(
     left = side == "left"
     machine_x = ox + (1.5 if left else 7.5)
     input_x = ox + (3.5 if left else 5.5)
-    provider_y = oy + (0.5 if left else 2.5)
+    # During reduced-supply bootstrap the second half may share the upper
+    # provider. Both output inserters then flank that chest, saving the passive
+    # chest that would otherwise prevent useful temporary capacity.
+    provider_y = oy + (0.5 if left or shared_provider else 2.5)
     output_x = ox + (3.5 if left else 5.5)
     # Inserters face the tile they pick up from. The requester is between the
     # two machines: the left machine picks up east and the right picks up west.
@@ -314,6 +318,7 @@ def generate_paired_mall_layout(
         {"action_type": "place_entity", "entity": "passive-provider-chest",
          "position": {"x": ox + 4.5, "y": provider_y},
          "inventory_limit": _inventory_limit(
-             recipe, stock_target, fill_chest=fill_chest)},
+             recipe, stock_target,
+             fill_chest=fill_chest or shared_provider)},
     ]
     return {"phases": [{"name": f"paired_mall_{recipe}", "actions": actions}]}

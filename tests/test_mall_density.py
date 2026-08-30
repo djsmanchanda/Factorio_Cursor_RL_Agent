@@ -86,3 +86,47 @@ def test_cables_split_between_circuits_and_transport_belts(monkeypatch) -> None:
     assert mall_builder._choose_slot(
         object(), "nauvis", "copper-cable", reference,
     ) == (belt_cell, "left")
+
+
+def test_shared_output_right_half_gets_one_permanent_provider(monkeypatch) -> None:
+    reference = (3.0, -1.0)
+    origin, *_rest = mall_builder._cell_origins(reference)
+    states = {
+        cell: ("-", "-", "-")
+        for cell in mall_builder._cell_origins(reference)
+    }
+    states[origin] = ("copper-cable", "advanced-circuit", "requester-chest")
+    upper = (origin[0] + 4.5, origin[1] + 0.5)
+    lower = (origin[0] + 4.5, origin[1] + 2.5)
+    old_output = (origin[0] + 5.5, origin[1] + 0.5)
+    entities = {
+        upper: {"name": "passive-provider-chest"},
+        old_output: {"name": "fast-inserter"},
+    }
+    monkeypatch.setattr(mall_builder, "_district_state", lambda *_a: states)
+    monkeypatch.setattr(
+        mall_builder.live_base, "entity_at",
+        lambda _c, _s, position: entities.get(position),
+    )
+
+    assert mall_builder.mall_slot_uses_shared_provider(
+        object(), "nauvis", (origin[0] + 1.5, origin[1] + 1.5), reference,
+    )
+
+    candidate = mall_builder.next_shared_provider_retrofit_plan(
+        object(), "nauvis", "player", reference,
+    )
+
+    assert candidate is not None
+    recipe, chosen_origin, plan = candidate
+    actions = plan["phases"][0]["actions"]
+    assert (recipe, chosen_origin) == ("advanced-circuit", origin)
+    assert actions[0] == {
+        "action_type": "remove_entity", "entity": "fast-inserter",
+        "position": {"x": old_output[0], "y": old_output[1]},
+    }
+    assert any(
+        action.get("entity") == "passive-provider-chest"
+        and action["position"] == {"x": lower[0], "y": lower[1]}
+        for action in actions
+    )

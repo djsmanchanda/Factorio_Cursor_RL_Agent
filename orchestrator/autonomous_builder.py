@@ -31,6 +31,7 @@ from orchestrator.bootstrap_supply import (
 from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
+    BOOTSTRAP_MALL_SLOT_TARGET,
     CHEMICAL_BOOTSTRAP_LADDER, CORE_MALL_PRODUCERS,
     PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
     RATIONED_MALL_BATCH_ITEMS,
@@ -50,6 +51,10 @@ from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
     locate_mall_cell,
     mall_cell_needs_rebuild,
+    mall_slot_count,
+    mall_slot_uses_shared_provider,
+    next_shared_provider_retrofit_plan,
+    preview_mall_allocation,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
 )
@@ -61,7 +66,7 @@ from orchestrator.mall_bootstrap import (
     restore_bootstrap_loan_plan,
 )
 from orchestrator.material_reservations import (
-    MaterialReservationLedger, set_active_material_ledger,
+    MaterialReservationLedger, plan_material_bill, set_active_material_ledger,
 )
 from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
@@ -3248,7 +3253,7 @@ def _paired_mall_provider(
 ) -> Point | None:
     """Find the provider assigned to one machine in a paired mall cell."""
     for machine_x, machine_y in machine_positions:
-        for requester_dx, provider_dy in ((3, -1), (-3, 1)):
+        for requester_dx, provider_dy in ((3, -1), (-3, 1), (-3, -1)):
             requester = (machine_x + requester_dx, machine_y)
             requester_entity = live_base.entity_at(client, surface, requester)
             if not requester_entity or requester_entity["name"] != "requester-chest":
@@ -3275,6 +3280,7 @@ class _LinePlan:
     promoted_count: int | None
     promote_to_line: bool
     at_size: bool
+    shared_provider: bool = False
 
 
 def _plan_line(
@@ -3282,6 +3288,7 @@ def _plan_line(
     emit: Callable[[str], None], *, upgrade_bootstrap: bool, stock_target: int,
     minimum_machines: int, allow_promotion: bool,
     storage_limit: int | None = None, fill_provider: bool = False,
+    shared_provider: bool = False,
 ) -> _LinePlan:
     """Survey the item's current line and decide whether it should be promoted."""
     spec = LINE_RECIPES[item]
@@ -3348,6 +3355,7 @@ def _plan_line(
         demand=demand, saturated=saturated, promoted_count=promoted_count,
         promote_to_line=promote_to_line,
         at_size=existing is None or existing.machine_count >= minimum_machines,
+        shared_provider=shared_provider,
     )
 
 
@@ -3398,15 +3406,21 @@ def _refresh_mall_cell(
             client, surface, existing.machine_positions,
         )
         if mall_provider is not None and not upgrade_bootstrap:
+            shared_output = any(
+                mall_slot_uses_shared_provider(
+                    client, surface, position, reference_point,
+                )
+                for position in existing.machine_positions
+            )
             capacity = (
                 "the full chest"
-                if plan.fill_provider
+                if plan.fill_provider or shared_output
                 else str(mall_storage_limit)
             )
             emit(f"  MALL RESERVE: {item} provider at {mall_provider} holds {capacity}")
             limit_plan = generate_mall_provider_limit_update(
                 item, mall_provider, mall_storage_limit,
-                fill_chest=plan.fill_provider,
+                fill_chest=plan.fill_provider or shared_output,
             )
             limit_plan["surface"], limit_plan["force"] = surface, force
             _submit(
@@ -3729,6 +3743,7 @@ _MALL_RECIPE_ANCHORS = {
 }
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
+_BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 
 
 def _bootstrap_loan_stock(
@@ -4055,6 +4070,13 @@ def _start_bootstrap_loan(
             if located is None:
                 continue
             origin, side = located
+            if mall_slot_uses_shared_provider(
+                client, surface, machine_position, reference_point,
+            ):
+                # The companion recipe still owns this provider. Borrowing
+                # either half would mix a third product into the same chest and
+                # make safe restoration ambiguous.
+                continue
             requester_position = (origin[0] + 4.5, origin[1] + 1.5)
             machine = live_base.entity_at(client, surface, machine_position)
             requester = live_base.entity_at(client, surface, requester_position)
@@ -4178,11 +4200,17 @@ def _reserve_compact_mall_project(
     if ledger is None:
         return
     project_id = _material_project_id(item)
+    allocation = (
+        preview_mall_allocation(client, surface, item, reference_point)
+        if reference_point is not None else None
+    )
     bill = compact_mall_project_bill(
         item, stock_target=plan.mall_storage_limit,
         stock_gate_target=stock_gate_target,
         fill_chest=plan.fill_provider,
         request_multiplier_override=plan.mall_request_multiplier,
+        side=allocation[1] if allocation is not None else "left",
+        shared_provider=getattr(plan, "shared_provider", False),
     )
     stock = live_base.available_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
@@ -4474,6 +4502,7 @@ def _build_assembled_stage(
             stock_gate_target=stock_gate_target,
             fill_chest=plan.fill_provider,
             request_multiplier_override=plan.mall_request_multiplier,
+            shared_provider=getattr(plan, "shared_provider", False),
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -4676,6 +4705,11 @@ def ensure_produced(
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,
         minimum_machines=minimum_machines, allow_promotion=allow_promotion,
         storage_limit=storage_limit, fill_provider=fill_provider,
+        shared_provider=(
+            not upgrade_bootstrap
+            and item in _BOOTSTRAP_SHARED_PROVIDER_ITEMS
+            and not _core_mall_ready(client, surface, force)
+        ),
     )
     mall_provider = _refresh_mall_cell(
         client, bridge, surface, force, item, plan, emit,
@@ -4744,6 +4778,64 @@ def _core_mall_ready(
     )
 
 
+def _retrofit_bootstrap_mall_outputs(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Give one shared-output right half its permanent provider each pass."""
+    candidate = next_shared_provider_retrofit_plan(
+        client, surface, force, reference_point,
+    )
+    if candidate is None:
+        return False
+    recipe, origin, plan = candidate
+    stock = live_base.available_items(client, surface, force)
+    project_id = (
+        f"retrofit_shared_mall_{recipe}_{origin[0]}_{origin[1]}"
+    )
+    bill = plan_material_bill(plan)
+    if _MATERIAL_RESERVATION_LEDGER is not None:
+        sources, rates = _material_sources_and_rates(
+            client, surface, force, bill, stock,
+        )
+        _MATERIAL_RESERVATION_LEDGER.declare(
+            project_id, bill, stock, target_item=recipe,
+            source_producers=sources, expected_rates=rates,
+            priority=95, hold_until_producing=True,
+        )
+        shortage = _MATERIAL_RESERVATION_LEDGER.shortage_targets(
+            project_id, stock,
+        )
+    else:
+        shortage = {
+            item: required for item, required in bill.items()
+            if stock.get(item, 0) < required
+        }
+    if shortage:
+        for item, target in shortage.items():
+            mall_targets[item] = max(mall_targets.get(item, 0), target)
+        emit(
+            f"  MALL RETROFIT WAIT: {recipe} at {origin} reserves "
+            + ", ".join(
+                f"{item}={target}" for item, target in sorted(shortage.items())
+            )
+            + " before separating its shared output"
+        )
+        return False
+    _submit(
+        client, bridge, surface, plan,
+        project_id, emit,
+    )
+    if _MATERIAL_RESERVATION_LEDGER is not None:
+        _MATERIAL_RESERVATION_LEDGER.complete(project_id)
+    emit(
+        f"  MALL RETROFIT: {recipe} at {origin} now has its own provider; "
+        "the bootstrap-shared chest remains with the other half"
+    )
+    return True
+
+
 def _rationed_mall_spare_target(
     client: RconClient, surface: str, force: str, item: str, required: int,
 ) -> int:
@@ -4760,6 +4852,39 @@ def _rationed_mall_spare_target(
     if reserve.storage_count <= required:
         return required
     return min(reserve.storage_count, required + _RATIONED_MALL_EXTRA_SPARES)
+
+
+def _bootstrap_demand_cell_affordable(
+    client: RconClient, surface: str, force: str, item: str, target: int,
+    reference_point: Point,
+) -> tuple[bool, dict[str, int]]:
+    """Whether one more shared-output cell can be funded without stealing."""
+    if mall_slot_count(
+        client, surface, reference_point,
+    ) >= BOOTSTRAP_MALL_SLOT_TARGET:
+        return False, {}
+    allocation = preview_mall_allocation(
+        client, surface, item, reference_point,
+    )
+    if allocation is None:
+        return False, {}
+    _origin, side = allocation
+    bill = compact_mall_project_bill(
+        item, stock_target=max(1, target), side=side, shared_provider=True,
+    )
+    stock = live_base.available_items(client, surface, force)
+    available = (
+        _MATERIAL_RESERVATION_LEDGER.allocatable_stock(
+            stock, claimant=_material_project_id(item),
+        )
+        if _MATERIAL_RESERVATION_LEDGER is not None else stock
+    )
+    shortage = {
+        ingredient: required
+        for ingredient, required in bill.items()
+        if available.get(ingredient, 0) < required
+    }
+    return not shortage, shortage
 
 
 def _rationed_mall_batch(
@@ -4780,6 +4905,31 @@ def _rationed_mall_batch(
     stock = live_base.available_items(client, surface, force)
     if stock.get(item, 0) >= target:
         return False
+    active = active_bootstrap_loans(client, surface, force)
+    if not active:
+        spec = LINE_RECIPES[item]
+        existing = live_base.find_line(
+            client, surface, force, item, str(spec["machine"]),
+        )
+        if existing is not None and existing.machine_count > 0:
+            return False
+        affordable, shortage = _bootstrap_demand_cell_affordable(
+            client, surface, force, item, target, reference_point,
+        )
+        if affordable:
+            _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
+            emit(
+                f"  BOOTSTRAP MALL CAPACITY: assigning a demand-owned {item} "
+                f"slot within the {BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool; "
+                "paired halves share one passive provider"
+            )
+            return False
+        if shortage:
+            emit(
+                f"  BOOTSTRAP MALL CAPACITY WAIT: {item} cannot claim another "
+                "slot without consuming reserved "
+                + ", ".join(sorted(shortage))
+            )
     spare_target = _rationed_mall_spare_target(
         client, surface, force, item, target,
     )
@@ -6213,6 +6363,7 @@ def _open_the_run(
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     resource_patches.clear_patch_cache()
     MANAGED_INTERMEDIATE_SOURCES.clear()
+    _BOOTSTRAP_SHARED_PROVIDER_ITEMS.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False
@@ -6521,6 +6672,11 @@ def run(
                     reference_point, emit,
                 ):
                     continue
+            elif _retrofit_bootstrap_mall_outputs(
+                client, bridge, surface, force, mall_targets,
+                reference_point, emit,
+            ):
+                continue
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a
             # starved plate line just starves too.

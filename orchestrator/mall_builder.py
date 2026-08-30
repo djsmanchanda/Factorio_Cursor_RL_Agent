@@ -38,23 +38,143 @@ def compact_mall_project_bill(
     stock_gate_target: int | None = None,
     fill_chest: bool = False,
     request_multiplier_override: int | None = None,
+    side: str = "left",
+    shared_provider: bool = False,
 ) -> dict[str, int]:
-    """Complete standalone cell bill plus one craft of bootstrap ingredients."""
+    """Incremental cell-half bill plus one craft of bootstrap ingredients."""
     spec = LINE_RECIPES[recipe]
     preview = generate_paired_mall_layout(
         recipe, spec["machine"], spec["ingredients"], spec["amounts"],
-        (0, 0), "left", stock_target=stock_target,
+        (0, 0), side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
         request_multiplier_override=request_multiplier_override,
+        shared_provider=shared_provider,
     )
     bill: Counter[str] = Counter(plan_material_bill(preview))
+    if side == "right":
+        # The cell's centre requester and substation already belong to its
+        # first half. A bootstrap-shared right half also reuses that half's
+        # provider, so none of those entities belongs in its incremental bill.
+        bill["requester-chest"] -= 1
+        bill["substation"] -= 1
+        if shared_provider:
+            bill["passive-provider-chest"] -= 1
     for ingredient, amount in zip(
         spec["ingredients"], spec["amounts"], strict=True,
     ):
         bill[ingredient] += math.ceil(amount)
-    return dict(sorted(bill.items()))
+    return dict(sorted(
+        (item, count) for item, count in bill.items() if count > 0
+    ))
+
+
+def mall_slot_count(
+    client: RconClient, surface: str, reference_point: Point,
+) -> int:
+    """Live or ghosted paired-mall assembler slots already committed."""
+    states = _district_state(client, surface, _cell_origins(reference_point))
+    return sum(
+        recipe != "-"
+        for left, right, _requester in states.values()
+        for recipe in (left, right)
+    )
+
+
+def preview_mall_allocation(
+    client: RconClient, surface: str, recipe: str, reference_point: Point,
+) -> tuple[tuple[int, int], str] | None:
+    """Expose the allocator's next stable cell half for exact bill pricing."""
+    return _choose_slot(client, surface, recipe, reference_point)
+
+
+def mall_slot_uses_shared_provider(
+    client: RconClient, surface: str, machine_position: Point,
+    reference_point: Point,
+) -> bool:
+    """Whether this slot belongs to a cell whose two halves share output."""
+    located = locate_mall_cell(machine_position, reference_point)
+    if located is None:
+        return False
+    origin, _side = located
+    upper = live_base.entity_at(
+        client, surface, (origin[0] + 4.5, origin[1] + 0.5),
+    )
+    lower = live_base.entity_at(
+        client, surface, (origin[0] + 4.5, origin[1] + 2.5),
+    )
+    shared_output = live_base.entity_at(
+        client, surface, (origin[0] + 5.5, origin[1] + 0.5),
+    )
+    return bool(
+        upper and upper["name"] == "passive-provider-chest"
+        and lower is None
+        and shared_output
+        and shared_output.get("name", "").endswith("inserter")
+    )
+
+
+def next_shared_provider_retrofit_plan(
+    client: RconClient, surface: str, force: str, reference_point: Point,
+) -> tuple[str, tuple[int, int], dict] | None:
+    """Move one bootstrap right-half output onto its permanent own provider."""
+    origins = _cell_origins(reference_point)
+    states = _district_state(client, surface, origins)
+    for origin in origins:
+        _left, right, _requester = states[origin]
+        if right not in LINE_RECIPES:
+            continue
+        machine = _slot_position(origin, "right")
+        if not mall_slot_uses_shared_provider(
+            client, surface, machine, reference_point,
+        ):
+            continue
+        old_output_position = (origin[0] + 5.5, origin[1] + 0.5)
+        old_output = live_base.entity_at(client, surface, old_output_position)
+        if old_output is None:
+            continue
+        spec = LINE_RECIPES[right]
+        permanent = generate_paired_mall_layout(
+            right, spec["machine"], spec["ingredients"], spec["amounts"],
+            origin, "right", stock_target=1,
+            product_amount=spec.get("product_amount", 1),
+            craft_time=spec["craft_time"],
+            set_recipe=spec.get("set_recipe", True),
+        )
+        actions = permanent["phases"][0]["actions"]
+        new_output = next(
+            action for action in actions
+            if action.get("entity", "").endswith("inserter")
+            and action["position"] == {
+                "x": origin[0] + 5.5, "y": origin[1] + 2.5,
+            }
+        )
+        new_provider = next(
+            action for action in actions
+            if action.get("entity") == "passive-provider-chest"
+        )
+        plan = {
+            "surface": surface,
+            "force": force,
+            "phases": [{
+                "name": f"retrofit_shared_mall_{right}",
+                "actions": [
+                    {
+                        "action_type": "remove_entity",
+                        "entity": old_output["name"],
+                        "position": {
+                            "x": old_output_position[0],
+                            "y": old_output_position[1],
+                        },
+                    },
+                    new_output,
+                    new_provider,
+                ],
+            }],
+        }
+        return right, origin, plan
+    return None
 
 
 def _cell_origins(reference_point: Point) -> list[tuple[int, int]]:
@@ -308,6 +428,7 @@ def build_compact_mall_stage(
     stock_gate_target: int | None = None,
     fill_chest: bool = False,
     request_multiplier_override: int | None = None,
+    shared_provider: bool = False,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     spec = LINE_RECIPES[recipe]
@@ -333,11 +454,13 @@ def build_compact_mall_stage(
         stock_gate_target=stock_gate_target,
         fill_chest=fill_chest,
         request_multiplier_override=request_multiplier_override,
+        shared_provider=shared_provider,
     )
     plan["surface"], plan["force"] = surface, force
     machine = _slot_position(origin, side)
     provider = (
-        origin[0] + 4.5, origin[1] + (0.5 if side == "left" else 2.5),
+        origin[0] + 4.5,
+        origin[1] + (0.5 if side == "left" or shared_provider else 2.5),
     )
     substation = (origin[0] + 4.0, origin[1] + 5.0)
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")

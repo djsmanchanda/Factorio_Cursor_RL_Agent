@@ -111,6 +111,11 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
     assert requester["logistic_sections"][0]["group"].startswith(
         "mall-bootstrap:v3:"
     )
+    provider = next(
+        action for action in actions
+        if action["entity"] == "passive-provider-chest"
+    )
+    assert provider["inventory_limit"]["fill_chest"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 
@@ -126,6 +131,11 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
     assert actions.index(requester) < actions.index(machine)
     assert machine["recipe"] == "copper-cable"
     assert machine["clear_logistic_condition"] is True
+    provider = next(
+        action for action in actions
+        if action["entity"] == "passive-provider-chest"
+    )
+    assert "fill_chest" not in provider["inventory_limit"]
     assert not list(SCHEMA.iter_errors(plan))
 
 
