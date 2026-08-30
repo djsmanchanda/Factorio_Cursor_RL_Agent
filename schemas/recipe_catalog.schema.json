@@ -19,6 +19,29 @@
     "1.2.0"
    ]
   },
+  "fixture_provenance": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "fixture_schema_version",
+    "game_version",
+    "surface",
+    "force",
+    "export_command",
+    "export_tick"
+   ],
+   "properties": {
+    "fixture_schema_version": { "const": "1.0.0" },
+    "game_version": {
+     "type": "string",
+     "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "surface": { "type": "string", "minLength": 1 },
+    "force": { "type": "string", "minLength": 1 },
+    "export_command": { "type": "string", "minLength": 1 },
+    "export_tick": { "type": "integer", "minimum": 0 }
+   }
+  },
   "force": {
    "type": "string",
    "minLength": 1

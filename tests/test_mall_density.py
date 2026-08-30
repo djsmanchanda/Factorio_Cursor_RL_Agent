@@ -3,13 +3,9 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from orchestrator import mall_builder  # noqa: E402
 from orchestrator.mall_builder import _CELL_PITCH  # noqa: E402
 from planners.mall_layout import generate_paired_mall_layout  # noqa: E402

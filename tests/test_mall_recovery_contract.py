@@ -1,18 +1,12 @@
-# Path: tests/test_live_mall_recovery.py
-# Purpose: Prove live paired-mall cells are classified by their topology instead of mistaken for belt-fed lines.
+# Path: tests/test_mall_recovery_contract.py
+# Purpose: Prove paired-mall survey responses are classified by topology using fakes.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from orchestrator import autonomous_builder as builder  # noqa: E402
-from orchestrator import mall_builder  # noqa: E402
+from orchestrator import autonomous_builder as builder
+from orchestrator import mall_builder
 
 
 def test_complete_matching_pair_migrates_to_two_request_sections(

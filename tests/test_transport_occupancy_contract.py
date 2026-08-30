@@ -1,5 +1,5 @@
-# Path: tests/test_live_transport_occupancy.py
-# Purpose: Protect bounded live transport occupancy and belt-reach telemetry.
+# Path: tests/test_transport_occupancy_contract.py
+# Purpose: Protect transport occupancy parsing and belt-reach contracts with fake RCON.
 
 from __future__ import annotations
 

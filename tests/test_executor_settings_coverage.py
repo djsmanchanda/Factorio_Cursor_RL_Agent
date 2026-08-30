@@ -5,13 +5,9 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 _EXECUTOR = (REPO_ROOT / "factorio_mod" / "layout_executor.lua").read_text(encoding="utf-8")
 _SECTIONS = (REPO_ROOT / "factorio_mod" / "logistic_sections.lua").read_text(encoding="utf-8")
 _SCHEMA = json.loads(

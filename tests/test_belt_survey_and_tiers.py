@@ -11,9 +11,6 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from orchestrator import extraction_transport, stage_transport  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from orchestrator.stage_services import StuckError, _BRIDGE_SURVEY_MARGIN  # noqa: E402

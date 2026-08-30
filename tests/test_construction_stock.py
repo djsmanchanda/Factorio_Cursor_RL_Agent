@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import inspect
-import sys
 import tempfile
 from types import SimpleNamespace
 from pathlib import Path
@@ -12,9 +11,6 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator.construction_stock import (  # noqa: E402
     BULK_CONSTRUCTION_ITEMS,

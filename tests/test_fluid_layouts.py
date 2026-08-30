@@ -9,15 +9,11 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from core.fluid_systems import MAX_UNDERGROUND_SPAN, validate_network_purity
 from planners.fluid_layouts import (
     FLUID_RECIPES,
@@ -219,7 +215,8 @@ def test_doctored_row_that_moves_two_fluids_together_raises():
     water = next(s for s in segments if s["fluid"] == "water")
     gas = next(s for s in segments if s["fluid"] == "petroleum-gas")
     # Slide the whole gas network one tile west: its stubs land directly beside
-    # the water stubs, which is the unrecoverable mixing case from docs/23.
+    # the water stubs, the unrecoverable mixing case recorded in
+    # docs/archive/legacy-canonical/23_fluid_systems.md.
     gas["tiles"] = [(x - 1, y) for x, y in gas["tiles"]]
     with pytest.raises(ValueError, match="Fluid mixing"):
         validate_network_purity([water, gas])

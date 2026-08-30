@@ -1,5 +1,5 @@
 # Path: tests/test_recipe_catalog_contract.py
-# Purpose: Hold every LINE_RECIPES entry to the real Factorio 2.0 recipe data exported from the live player force.
+# Purpose: Hold LINE_RECIPES to a versioned, provenanced game export.
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from core.recipe_dag import validate_recipe_catalog
 from planners.recipe_data import (
     LINE_MAX_INGREDIENTS,
     LINE_RECIPES,
@@ -53,6 +54,22 @@ SMELTING = {name for name, spec in LINE_RECIPES.items() if spec["machine"] == "e
 ASSEMBLED = sorted(set(LINE_RECIPES) - SMELTING)
 
 
+def test_recipe_fixture_records_export_provenance() -> None:
+    """Fixture freshness must be judgeable without trusting a stale comment."""
+    payload = json.loads(CATALOG.read_text(encoding="utf-8"))
+    validate_recipe_catalog(payload)
+    provenance = payload["fixture_provenance"]
+
+    assert provenance == {
+        "fixture_schema_version": "1.0.0",
+        "game_version": "2.0.77",
+        "surface": "nauvis",
+        "force": payload["force"],
+        "export_command": "/export_recipe_catalog player",
+        "export_tick": payload["tick"],
+    }
+
+
 @pytest.mark.parametrize("name", ASSEMBLED)
 def test_line_recipe_matches_the_live_game_recipe(name: str) -> None:
     """Ingredients, amounts, output count and craft time must equal the real
@@ -93,7 +110,8 @@ def test_line_recipe_machine_can_craft_its_category(name: str) -> None:
 
 # Recipes whose chain is NOT yet resolvable by orchestrator/autonomous_builder,
 # because it passes through an intermediate that needs a fluid stage the real-base
-# builder cannot build yet (plan item C in docs/30). They are kept in LINE_RECIPES
+# builder cannot build yet (plan item C in
+# docs/archive/legacy-canonical/30_codex_brief_realbase_autonomy.md). They are kept in LINE_RECIPES
 # because the synthetic-sandbox pipeline supplies those fluids by other means.
 # This is a recorded gap, not a passing case -- delete an entry from this set the
 # moment its chain really does resolve.
@@ -108,7 +126,10 @@ def test_every_ingredient_is_producible_or_raw(name: str) -> None:
     resource; an ingredient that is neither in LINE_RECIPES nor mineable is a
     dead end that only surfaces mid-build as a StuckError."""
     if name in FLUID_BLOCKED_CHAINS:
-        pytest.skip(f"{name} is a known fluid-blocked chain (docs/30 item C)")
+        pytest.skip(
+            f"{name} is a known fluid-blocked chain "
+            "(archived real-base autonomy brief, item C)"
+        )
     raw = _raw_resources()
     for ingredient in LINE_RECIPES[name]["ingredients"]:
         assert ingredient in LINE_RECIPES or ingredient in raw, (

@@ -10,22 +10,10 @@ from types import SimpleNamespace
 import pytest
 
 from planners.electronics_world import load_electronics_world_spec
+from tests.support.fakes import RecordingSeedBridge
 from tools.electronics_execution import _mutated, _seed_water, water_seeding_payload
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
-
-
-class FakeBridge:
-    def __init__(self) -> None:
-        self.seed_calls: list[dict] = []
-
-    def seed_water_lakes(self, payload: dict, timeout: float = 120.0) -> dict:
-        self.seed_calls.append(payload)
-        tiles = sum(
-            (lake["x2"] - lake["x1"] + 1) * (lake["y2"] - lake["y1"] + 1)
-            for lake in payload["water_lakes"]
-        )
-        return {"tick": 0, "ok": True, "seeded_water_tiles": tiles}
 
 
 def test_fixture_water_payload_matches_the_generated_world_lake() -> None:
@@ -75,7 +63,7 @@ def test_water_payload_rejects_unknown_direction() -> None:
 
 def test_seed_water_uses_bridge_and_reports_mutation() -> None:
     world = load_electronics_world_spec(_FIXTURE)
-    bridge = FakeBridge()
+    bridge = RecordingSeedBridge()
     messages: list[str] = []
 
     report = _seed_water(bridge, world, messages.append)

@@ -4,16 +4,12 @@
 from __future__ import annotations
 
 import inspect
-import sys
 
 import pytest
 from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator import live_base, stage_transport  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402

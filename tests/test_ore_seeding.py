@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from planners.electronics_world import load_electronics_world_spec
+from tests.support.fakes import RecordingSeedBridge
 from tools.electronics_execution import (
     ElectronicsExecutionError,
     drill_footprints_covered,
@@ -22,24 +23,6 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 @pytest.fixture(scope="module")
 def world():
     return load_electronics_world_spec(_FIXTURE)
-
-
-class FakeBridge:
-    """No live game: records the /seed_ore_patches call and returns a
-    scripted report, mirroring the mod's seed_ore_patches command."""
-
-    def __init__(self):
-        self.seed_calls: list[dict] = []
-
-    def seed_ore_patches(self, payload: dict, timeout: float = 120.0) -> dict:
-        self.seed_calls.append(payload)
-        seeded_by_resource: dict[str, int] = {}
-        seeded = 0
-        for patch in payload["ore_patches"]:
-            tiles = (int(patch["x2"]) - int(patch["x1"]) + 1) * (int(patch["y2"]) - int(patch["y1"]) + 1)
-            seeded += tiles
-            seeded_by_resource[patch["item"]] = seeded_by_resource.get(patch["item"], 0) + tiles
-        return {"tick": 0, "ok": True, "seeded_ore_tiles": seeded, "seeded_by_resource": seeded_by_resource}
 
 
 def _patch_rect(patch: dict) -> tuple[float, float, float, float]:
@@ -130,7 +113,7 @@ def test_seed_ore_uses_fake_bridge_and_reports_per_resource(world):
     surface per-resource seeded counts."""
     from tools.electronics_execution import _seed_ore
 
-    bridge = FakeBridge()
+    bridge = RecordingSeedBridge()
     messages: list[str] = []
     report = _seed_ore(bridge, world, messages.append)
 
@@ -154,7 +137,7 @@ def test_seed_ore_refuses_uncovered_drill(world):
         coal_drill_positions=((9999.5, 9999.5),),
     )
 
-    bridge = FakeBridge()
+    bridge = RecordingSeedBridge()
     with pytest.raises(ElectronicsExecutionError):
         _seed_ore(bridge, tampered, lambda _msg: None)
     assert bridge.seed_calls == []

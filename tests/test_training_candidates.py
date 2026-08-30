@@ -3,6 +3,8 @@
 
 import math
 
+import pytest
+
 from planners.plan_validation import actions, validate_build_plan
 from training.candidates import mining_delivery_candidates
 from training.canonical import plan_hash
@@ -13,10 +15,41 @@ from training.scenarios.mining_delivery import (
 )
 
 
-def test_one_hundred_scenarios_compile_two_valid_candidates_each():
+@pytest.fixture(scope="module")
+def candidate_catalog():
+    """Build each exhaustive seed once for every assertion in this module."""
+    rows = []
     for seed in range(100):
         scenario = generate_mining_delivery_scenario(seed)
-        candidates = mining_delivery_candidates(scenario)
+        rows.append((scenario, tuple(mining_delivery_candidates(scenario))))
+    return tuple(rows)
+
+
+@pytest.fixture(scope="module")
+def staged_candidate_catalog():
+    """Share the expensive staged plans across geometry and obstacle checks."""
+    rows = []
+    for seed in range(100):
+        scenario = generate_staged_mining_delivery_scenario(
+            seed, (5.0, 15.0, 30.0),
+        )
+        for stage in scenario["objective"]["stages"]:
+            rows.append((
+                scenario,
+                stage,
+                tuple(mining_delivery_candidates(
+                    scenario,
+                    target_rate_per_tick=stage["target_rate_per_tick"],
+                    sink_fixture_ids=tuple(stage["destination_fixture_ids"]),
+                )),
+            ))
+    return tuple(rows)
+
+
+def test_one_hundred_scenarios_compile_two_valid_candidates_each(
+    candidate_catalog,
+):
+    for scenario, candidates in candidate_catalog:
         assert len(candidates) == 2
         assert len({candidate["plan_hash"] for candidate in candidates}) == 2
         for candidate in candidates:
@@ -89,11 +122,12 @@ def test_candidate_catalog_is_seed_deterministic():
     assert mining_delivery_candidates(scenario) == mining_delivery_candidates(scenario)
 
 
-def test_candidates_anchor_the_first_pole_inside_power_source_coverage():
-    for seed in range(100):
-        scenario = generate_mining_delivery_scenario(seed)
+def test_candidates_anchor_the_first_pole_inside_power_source_coverage(
+    candidate_catalog,
+):
+    for scenario, candidates in candidate_catalog:
         source = next(item for item in scenario["fixtures"] if item["kind"] == "power_source")
-        for candidate in mining_delivery_candidates(scenario):
+        for candidate in candidates:
             first = next(
                 action["position"] for action in actions(candidate["plan"])
                 if action["entity"] == "medium-electric-pole"
@@ -101,10 +135,11 @@ def test_candidates_anchor_the_first_pole_inside_power_source_coverage():
             assert math.dist(source["position"], (first["x"], first["y"])) <= 3.5
 
 
-def test_candidates_supply_the_delivery_inserter_as_well_as_drills():
-    for seed in range(100):
-        scenario = generate_mining_delivery_scenario(seed)
-        for candidate in mining_delivery_candidates(scenario):
+def test_candidates_supply_the_delivery_inserter_as_well_as_drills(
+    candidate_catalog,
+):
+    for scenario, candidates in candidate_catalog:
+        for candidate in candidates:
             planned = list(actions(candidate["plan"]))
             poles = [action["position"] for action in planned if action["entity"] == "medium-electric-pole"]
             consumers = [
@@ -129,53 +164,43 @@ def test_high_demand_stress_scenarios_remain_legal_when_compact_capacity_is_exce
             validate_build_plan(candidate["plan"])
 
 
-def test_staged_drill_prefixes_fill_both_sides_of_collection_belt_evenly():
-    for seed in range(100):
-        scenario = generate_staged_mining_delivery_scenario(seed, (5.0, 15.0, 30.0))
+def test_staged_drill_prefixes_fill_both_sides_of_collection_belt_evenly(
+    staged_candidate_catalog,
+):
+    for _scenario, _stage, candidates in staged_candidate_catalog:
+        for candidate in candidates:
+            drills = [
+                action for action in actions(candidate["plan"])
+                if action["entity"] == "electric-mining-drill"
+            ]
+            facing_counts = {
+                direction: sum(drill["direction"] == direction for drill in drills)
+                for direction in ("north", "south")
+            }
+            drills_per_x = {}
+            for drill in drills:
+                x = drill["position"]["x"]
+                drills_per_x[x] = drills_per_x.get(x, 0) + 1
 
-        for stage in scenario["objective"]["stages"]:
-            candidates = mining_delivery_candidates(
-                scenario,
-                target_rate_per_tick=stage["target_rate_per_tick"],
-                sink_fixture_ids=tuple(stage["destination_fixture_ids"]),
-            )
-            for candidate in candidates:
-                drills = [
-                    action for action in actions(candidate["plan"])
-                    if action["entity"] == "electric-mining-drill"
-                ]
-                facing_counts = {
-                    direction: sum(drill["direction"] == direction for drill in drills)
-                    for direction in ("north", "south")
-                }
-                drills_per_x = {}
-                for drill in drills:
-                    x = drill["position"]["x"]
-                    drills_per_x[x] = drills_per_x.get(x, 0) + 1
-
-                assert abs(facing_counts["north"] - facing_counts["south"]) <= 1
-                assert set(drills_per_x.values()) <= {1, 2}
-                assert sum(count == 1 for count in drills_per_x.values()) <= 1
+            assert abs(facing_counts["north"] - facing_counts["south"]) <= 1
+            assert set(drills_per_x.values()) <= {1, 2}
+            assert sum(count == 1 for count in drills_per_x.values()) <= 1
 
 
-def test_staged_routes_turn_around_protected_obstacle_fields():
-    for seed in range(100):
-        scenario = generate_staged_mining_delivery_scenario(seed, (5.0, 15.0, 30.0))
+def test_staged_routes_turn_around_protected_obstacle_fields(
+    staged_candidate_catalog,
+):
+    for scenario, _stage, candidates in staged_candidate_catalog:
         obstacle_tiles = {
             (x, y)
             for obstacle in scenario["obstacles"]
             for x in range(obstacle["bounds"]["x1"], obstacle["bounds"]["x2"] + 1)
             for y in range(obstacle["bounds"]["y1"], obstacle["bounds"]["y2"] + 1)
         }
-        for stage in scenario["objective"]["stages"]:
-            for candidate in mining_delivery_candidates(
-                scenario,
-                target_rate_per_tick=stage["target_rate_per_tick"],
-                sink_fixture_ids=tuple(stage["destination_fixture_ids"]),
-            ):
-                assert candidate["features"]["turn_count"] >= 3
-                assert candidate["features"]["route_excess_tiles"] > 0
-                assert not {
-                    (math.floor(action["position"]["x"]), math.floor(action["position"]["y"]))
-                    for action in actions(candidate["plan"])
-                } & obstacle_tiles
+        for candidate in candidates:
+            assert candidate["features"]["turn_count"] >= 3
+            assert candidate["features"]["route_excess_tiles"] > 0
+            assert not {
+                (math.floor(action["position"]["x"]), math.floor(action["position"]["y"]))
+                for action in actions(candidate["plan"])
+            } & obstacle_tiles

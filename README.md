@@ -12,6 +12,7 @@ This repository develops a learning system that improves factory decisions throu
 - [Training and autoresearch](docs/rl/training.md)
 - [Deterministic runtime](docs/deterministic/README.md)
 - [Live operations](docs/factorio_operations.md)
+- [Tiered test suites](docs/testing.md)
 
 ## Runtime boundaries
 
@@ -26,7 +27,10 @@ The systems may share contracts and validated primitives. They must not share mu
 ## Common entry points
 
 ```powershell
-# Run repository tests (compact output is configured in pytest.ini)
+# Run the per-change safety gate (compact output is configured in pytest.ini)
+python -m pytest -m fast
+
+# Run every test, including slow and integration coverage
 python -m pytest
 
 # Generate offline scenarios

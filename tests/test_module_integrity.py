@@ -10,11 +10,17 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGES = ("core", "orchestrator", "planners", "tools")
+PACKAGES = (
+    "core", "helper_agent", "orchestrator", "planners", "tools", "training",
+)
 MODULES = sorted(
     path
     for package in PACKAGES
     for path in (ROOT / package).rglob("*.py")
+    if "__pycache__" not in path.parts
+)
+TEST_MODULES = sorted(
+    path for path in (ROOT / "tests").rglob("*.py")
     if "__pycache__" not in path.parts
 )
 
@@ -59,3 +65,16 @@ def test_module_calls_only_names_it_can_resolve(path: Path) -> None:
     }
     missing = sorted(called - defined)
     assert not missing, f"{path.relative_to(ROOT)} calls undefined name(s): {missing}"
+
+
+def test_tests_rely_on_configured_pythonpath_instead_of_mutating_sys_path() -> None:
+    forbidden = tuple("sys.path." + action for action in ("insert", "append"))
+    offenders = [
+        path.relative_to(ROOT)
+        for path in TEST_MODULES
+        if any(
+            token in path.read_text(encoding="utf-8")
+            for token in forbidden
+        )
+    ]
+    assert not offenders, f"test modules mutate sys.path: {offenders}"

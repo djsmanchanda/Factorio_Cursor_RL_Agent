@@ -5,15 +5,11 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from core.capacity_phasing_policy import evaluate_capacity_phasing
 from core.phase_advance_evaluator import propose_phase_advance
 from core.progress_state import build_progress_state, _derive_committed_capacity

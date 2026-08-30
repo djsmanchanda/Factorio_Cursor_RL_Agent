@@ -4,16 +4,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from planners.mall_layout import (  # noqa: E402
     generate_mall_stock_gate_update, generate_paired_mall_layout,

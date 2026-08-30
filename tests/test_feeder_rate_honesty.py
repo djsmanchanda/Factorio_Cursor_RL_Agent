@@ -3,15 +3,11 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from planners import recipe_data  # noqa: E402
 from planners.recipe_data import (  # noqa: E402
     FEEDER_RATES,
@@ -76,6 +72,7 @@ def test_nothing_sizes_off_the_raw_ceiling() -> None:
 
 def test_the_seam_is_where_a_live_measurement_lands() -> None:
     """A measured tier is applied by removing it from one frozenset, so the
-    procedure in docs/21 has somewhere to put its answer."""
+    procedure in docs/archive/legacy-canonical/21_external_game_knowledge.md
+    has somewhere to put its answer."""
     assert isinstance(UNMEASURED_FEEDER_RATES, frozenset)
     assert feeder_rate.__module__ == recipe_data.__name__

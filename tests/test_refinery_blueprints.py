@@ -4,16 +4,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections import Counter
 from pathlib import Path
 
 from jsonschema import Draft7Validator
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from planners.refinery_blueprints import (  # noqa: E402
     decoded_template, template_actions, template_name,
 )

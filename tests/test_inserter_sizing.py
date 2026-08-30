@@ -3,15 +3,11 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from planners.recipe_data import (  # noqa: E402
     FEED_HEADROOM,
     feeder_rate,
@@ -82,7 +78,8 @@ def test_every_line_recipe_can_size_itself() -> None:
 
 
 def test_stack_inserters_are_never_selected_automatically() -> None:
-    """docs/21 records stack inserters as Gleba-only production, so demand alone
+    """The archived external-game-knowledge reference records stack inserters
+    as Gleba-only production, so demand alone
     must not conjure one onto Nauvis."""
     assert inserter_for_demand(10_000) == "bulk-inserter"
     assert all(_chosen(recipe) != "stack-inserter" for recipe in LINE_RECIPES)
