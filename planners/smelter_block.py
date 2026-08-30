@@ -159,6 +159,25 @@ def _phase(name: str, actions: list[dict]) -> dict:
     return {"name": name, "actions": actions}
 
 
+def _vertical_mirror_actions(actions: Iterable[dict], origin_y: float) -> list[dict]:
+    """Reflect a refinery north/south while keeping its growth anchor fixed."""
+    mirrored: list[dict] = []
+    direction_flip = {"north": "south", "south": "north"}
+    priority_flip = {"left": "right", "right": "left"}
+    for original in actions:
+        action = json.loads(json.dumps(original))
+        position = action.get("position")
+        if position is not None:
+            position["y"] = 2 * origin_y - position["y"]
+        if action.get("direction") in direction_flip:
+            action["direction"] = direction_flip[action["direction"]]
+        for field in ("input_priority", "output_priority"):
+            if action.get(field) in priority_flip:
+                action[field] = priority_flip[action[field]]
+        mirrored.append(action)
+    return mirrored
+
+
 def generate_refinery_plan(
     recipe: str,
     furnaces: int,
@@ -169,6 +188,7 @@ def generate_refinery_plan(
     start_variant: str | None = None,
     middle_variant: str | None = None,
     end_variant: str | None = None,
+    vertical_mirror: bool = False,
 ) -> dict:
     """Build Start, zero or more Middle rows, then one End merge."""
     shape = block_shape(furnaces)
@@ -202,6 +222,11 @@ def generate_refinery_plan(
             ),
         )
     )
+    if vertical_mirror:
+        phases = [
+            _phase(phase["name"], _vertical_mirror_actions(phase["actions"], origin_y))
+            for phase in phases
+        ]
     plan = {"phases": phases}
     validate_build_plan(plan)
     return plan
@@ -238,6 +263,7 @@ def generate_refinery_extension_plan(
     origin_y: float = 0,
     current_variant: str = "standard",
     target_variant: str | None = None,
+    vertical_mirror: bool = False,
 ) -> dict:
     """Retire the old End, or replace a bootstrap variant before expanding."""
     if new_furnaces <= current_furnaces:
@@ -245,11 +271,11 @@ def generate_refinery_extension_plan(
     target_variant = target_variant or current_variant
     old_plan = generate_refinery_plan(
         recipe, current_furnaces, origin_x=origin_x, origin_y=origin_y,
-        variant=current_variant,
+        variant=current_variant, vertical_mirror=vertical_mirror,
     )
     new_plan = generate_refinery_plan(
         recipe, new_furnaces, origin_x=origin_x, origin_y=origin_y,
-        variant=target_variant,
+        variant=target_variant, vertical_mirror=vertical_mirror,
     )
     old = list(plan_actions(old_plan))
     new = list(plan_actions(new_plan))
@@ -295,7 +321,7 @@ def generate_refinery_extension_plan(
 
 def refinery_interfaces(
     furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
-    variant: str = "standard",
+    variant: str = "standard", vertical_mirror: bool = False,
 ) -> RefineryInterfaces:
     """Return the exact external positions defined by one template variant."""
     shape = block_shape(furnaces)
@@ -313,13 +339,22 @@ def refinery_interfaces(
                          (terminal_x, end_y + 10.5))
     else:
         raise ValueError(f"Unknown refinery variant {variant!r}")
-    return RefineryInterfaces(
+    interfaces = RefineryInterfaces(
         ore_inputs=ore_inputs, plate_outputs=plate_outputs,
         provider=(
             terminal_x + 1,
             end_y + (11.5 if variant == "basic" else 12.5),
         ),
         power_anchor=(terminal_x - 2, end_y + 12.5),
+    )
+    if not vertical_mirror:
+        return interfaces
+    mirror = lambda point: (point[0], 2 * origin_y - point[1])
+    return RefineryInterfaces(
+        ore_inputs=tuple(mirror(point) for point in interfaces.ore_inputs),
+        plate_outputs=tuple(mirror(point) for point in interfaces.plate_outputs),
+        provider=mirror(interfaces.provider),
+        power_anchor=mirror(interfaces.power_anchor),
     )
 
 
@@ -335,7 +370,7 @@ def _output_adapter_inserter(recipe: str, furnaces: int, variant: str) -> str:
 
 def _output_adapter_actions(
     furnaces: int, *, origin_x: float, origin_y: float, variant: str,
-    recipe: str,
+    recipe: str, vertical_mirror: bool = False,
 ) -> list[dict]:
     interface = refinery_interfaces(
         furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
@@ -358,21 +393,25 @@ def _output_adapter_actions(
         {"action_type": "place_ghost", "entity": "medium-electric-pole",
          "position": {"x": interface.power_anchor[0], "y": interface.power_anchor[1]}},
     ])
-    return actions
+    return (
+        _vertical_mirror_actions(actions, origin_y)
+        if vertical_mirror else actions
+    )
 
 def generate_managed_refinery_plan(
     recipe: str, furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
-    variant: str = "standard",
+    variant: str = "standard", vertical_mirror: bool = False,
 ) -> dict:
     """Add a non-blocking provider side tap to the approved refinery block."""
     plan = generate_refinery_plan(
         recipe, furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
+        vertical_mirror=vertical_mirror,
     )
     plan["phases"].append(_phase(
         f"refinery_output_{recipe}",
         _output_adapter_actions(
             furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
-            recipe=recipe,
+            recipe=recipe, vertical_mirror=vertical_mirror,
         ),
     ))
     validate_build_plan(plan)
@@ -383,6 +422,7 @@ def generate_managed_refinery_extension_plan(
     recipe: str, current_furnaces: int, new_furnaces: int, *,
     origin_x: float = 0, origin_y: float = 0,
     current_variant: str = "standard", target_variant: str | None = None,
+    vertical_mirror: bool = False,
 ) -> dict:
     """Move the planner-owned provider tap with End or variant migration."""
     target_variant = target_variant or current_variant
@@ -390,14 +430,17 @@ def generate_managed_refinery_extension_plan(
         recipe, current_furnaces, new_furnaces,
         origin_x=origin_x, origin_y=origin_y,
         current_variant=current_variant, target_variant=target_variant,
+        vertical_mirror=vertical_mirror,
     )
     old = _output_adapter_actions(
         current_furnaces, origin_x=origin_x, origin_y=origin_y,
         variant=current_variant, recipe=recipe,
+        vertical_mirror=vertical_mirror,
     )
     new = _output_adapter_actions(
         new_furnaces, origin_x=origin_x, origin_y=origin_y,
         variant=target_variant, recipe=recipe,
+        vertical_mirror=vertical_mirror,
     )
     old_keys, new_keys = {_action_key(a) for a in old}, {_action_key(a) for a in new}
     removals = [_removal_action(a) for a in old if _action_key(a) not in new_keys]

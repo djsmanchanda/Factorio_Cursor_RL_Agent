@@ -401,8 +401,22 @@ def _submit(
                 f"{name}: execution attempted zero placements; refusing silent churn"
             )
         if report.get("ok"):
-            emit(f"{name}: placed {report['succeeded_placements']} actions "
-                 f"({report['placed_ghosts']} ghosts, {report['placed_entities']} entities)")
+            if expected_placements:
+                emit(
+                    f"{name}: placed {report['succeeded_placements']} actions "
+                    f"({report['placed_ghosts']} ghosts, "
+                    f"{report['placed_entities']} entities)"
+                )
+            else:
+                configured = sum(
+                    action.get("action_type") == "configure_entity"
+                    for phase in plan.get("phases", [])
+                    for action in phase.get("actions", [])
+                )
+                emit(
+                    f"{name}: applied {configured} configuration action(s); "
+                    "no placements required"
+                )
             script_output = getattr(bridge, "script_output", None)
             if script_output:
                 append_plan_reservation(script_output, name, plan)

@@ -47,12 +47,51 @@ PLATE_FOUNDATION_FURNACES = {
     "stone-brick": 6,
 }
 
-# Steel is slow enough that one electric furnace is only a bootstrap token:
-# 0.125 plate/s while consuming 0.625 iron plate/s. Six furnaces make the
-# first useful construction line, and twelve iron furnaces leave half of the
-# opening iron checkpoint available for belts, gears, and other consumers.
-STEEL_BASELINE_FURNACES = 6
-STEEL_IRON_CAPACITY_FLOOR = 12
+# Steel is itself a bootstrap ingredient for advanced machines. One furnace
+# beside the iron provider is enough to start that dependency chain; demand
+# may expand it after the first steel is demonstrably produced.
+STEEL_BASELINE_FURNACES = 1
+STEEL_IRON_CAPACITY_FLOOR = 1
+
+# The reduced-supply chemical bootstrap is a capability ladder, not a recursive
+# free-for-all. Each producer must reach first output before the controller may
+# consume scarce machines to open the next rung. Plastic and sulfur name live
+# fluid stages; the other entries name ordinary mall producers.
+CHEMICAL_BOOTSTRAP_LADDER = (
+    "pipe",
+    "steel-plate",
+    "chemical-plant",
+    "oil-refinery",
+    "offshore-pump",
+    "pumpjack",
+    "plastic-bar",
+    "advanced-circuit",
+    "sulfur",
+    "sulfuric-acid",
+)
+
+# A normal mall is allowed to dedicate one cell per recipe only after these
+# five cell-building items have their own live producers. Before that point,
+# finite construction batches borrow an existing baseline mall assembler and
+# share its provider chest; the loan is restored after the requested batch.
+CORE_MALL_PRODUCERS = (
+    "assembling-machine-2",
+    "fast-inserter",
+    "passive-provider-chest",
+    "requester-chest",
+    "substation",
+)
+
+RATIONED_MALL_BATCH_ITEMS = frozenset({
+    *CORE_MALL_PRODUCERS,
+    "splitter",
+    "electric-furnace",
+    "electric-mining-drill",
+    "chemical-plant",
+    "oil-refinery",
+    "offshore-pump",
+    "pumpjack",
+})
 
 # Before the electric-furnace mall chain is alive, extraction is deliberately
 # bounded. These are ceilings, not promises to build every line immediately:

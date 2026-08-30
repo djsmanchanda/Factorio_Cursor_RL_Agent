@@ -231,3 +231,36 @@ def test_basic_to_standard_expansion_replaces_bootstrap_before_growth() -> None:
         action["entity"] == "fast-transport-belt"
         for action in plan["phases"][2]["actions"]
     )
+
+
+def test_vertical_mirror_puts_the_ore_input_on_the_opposite_side() -> None:
+    normal = refinery_interfaces(6, variant="basic")
+    mirrored = refinery_interfaces(6, variant="basic", vertical_mirror=True)
+    plan = generate_managed_refinery_plan(
+        "stone-brick", 6, variant="basic", vertical_mirror=True,
+    )
+
+    assert mirrored.ore_inputs == tuple(
+        (x, -y) for x, y in normal.ore_inputs
+    )
+    assert mirrored.provider == (normal.provider[0], -normal.provider[1])
+    assert any(
+        action.get("direction") == "south"
+        for action in _placements(plan)
+        if action.get("direction") in {"north", "south"}
+    )
+
+
+def test_mirrored_expansion_grows_north_without_flipping_back() -> None:
+    old = refinery_interfaces(30, vertical_mirror=True)
+    new = refinery_interfaces(31, vertical_mirror=True)
+    extension = generate_managed_refinery_extension_plan(
+        "iron-plate", 30, 31, vertical_mirror=True,
+    )
+
+    assert new.provider[1] < old.provider[1]
+    assert any(
+        action.get("entity") == "passive-provider-chest"
+        and action.get("position") == {"x": new.provider[0], "y": new.provider[1]}
+        for action in actions(extension)
+    )

@@ -18,6 +18,7 @@ from orchestrator.autonomous_builder import (  # noqa: E402
     _MAX_UNCHANGED_PASSES,
     _heaviest_source,
     _livelock_step,
+    _outstanding_work_signature,
     _pass_signature,
     _refuse_to_spin,
 )
@@ -98,6 +99,20 @@ def test_the_signature_does_not_depend_on_dict_or_set_ordering() -> None:
     """Two passes that differ only in iteration order are the same pass."""
     assert _pass_signature(_Task("i", 1), {"a": 1, "b": 2}, {"x", "y"}) == \
         _pass_signature(_Task("i", 1), {"b": 2, "a": 1}, {"y", "x"})
+
+
+def test_alternating_tasks_do_not_hide_unchanged_outstanding_work() -> None:
+    advanced = _pass_signature(
+        _Task("advanced-circuit", 0),
+        {"advanced-circuit": 1, "steel-plate": 5}, set(),
+    )
+    steel = _pass_signature(
+        _Task("steel-plate", 0),
+        {"advanced-circuit": 1, "steel-plate": 5}, set(),
+    )
+
+    assert advanced != steel
+    assert _outstanding_work_signature(advanced) == _outstanding_work_signature(steel)
 
 
 def test_a_line_sites_beside_its_single_input() -> None:

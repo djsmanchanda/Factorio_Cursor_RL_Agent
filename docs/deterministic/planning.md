@@ -88,9 +88,9 @@ These names describe intended responsibilities, not permission to build speculat
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.
-- The first persistent steel line is six furnaces, placed beside and belt-fed
-  from iron. It waits for at least the 12-furnace/12-drill iron checkpoint so
-  steel cannot consume the entire iron line while belts and gears are starved.
+- Steel begins as one electric furnace beside and belt-fed from the persistent
+  iron provider. This produces the first construction steel without reserving
+  six scarce furnaces; measured demand may expand it only after first output.
 - Planner-owned roboports are movable service infrastructure. When one blocks
   an owned refinery extension, place and power a connected replacement outside
   the future footprint before removing the old port. Production infrastructure
@@ -127,6 +127,14 @@ These names describe intended responsibilities, not permission to build speculat
   This is recovery after the mall has duplicate cells, not the cold-start
   source: `reduced-v1` supplies exactly two requester chests once per episode
   before production prep, and the material ledger prevents replenishment.
+- Reduced supply begins with a rationed mall. Until assembling-machine-2,
+  fast-inserter, passive-provider-chest, requester-chest, and substation each
+  have independent production, low-demand construction items are finite
+  batches made by a recoverable recipe loan in an existing mall assembler.
+  The loan changes the existing requester group and output gate, may mix the
+  temporary product with earlier contents in the same provider, and restores
+  the original recipe and requests after the batch. Permanent one-recipe mall
+  slots resume only after those five core producers are live.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may
@@ -150,7 +158,12 @@ These names describe intended responsibilities, not permission to build speculat
 - Multiple consumers of one resource require an explicit splitter/manifold and
   throughput budget. Independent belts may not overwrite or reverse the same
   collector head.
-- Oil refining, plastic, and sulfur form a source-local district. Site the
+- Oil refining, plastic, and sulfur form a source-local district. Its bootstrap
+  capabilities advance in one measured order: pipe, steel, chemical plant,
+  oil refinery, offshore pump, pumpjack, plastic, advanced circuit, sulfur,
+  then sulfuric acid. Plastic is validated before the sulfur/water branch is
+  attached; the controller must not ghost both product branches as one opaque
+  startup bill. Site the
   chemical block near the selected crude-oil source, rotate the pumpjack toward
   that block, and start the pipe on the exact external tile beyond the complete
   3x3 pumpjack footprint before extending a long power, construction, or pipe

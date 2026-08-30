@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Mapping
@@ -27,6 +28,9 @@ _MATCHERS = tuple(
         r"\bSTUCK:", r"\bERROR:", r"\bBLOCKER:", r"\bMISSION STATE:",
         r"\bRESEARCH READINESS:", r"\bCONTROLLER", r"\bPRIORITY:",
         r"\bSUPPLY", r"\bPOWER", r"\bCOVERAGE", r"\bGOAL MET:",
+        r"\bSURVEY (?:START|END):", r"\bSMELTER", r"\bBLUEPRINT",
+        r"\bMALL DEMAND:", r"\bMATERIAL PROJECT", r"\bCHEMICAL LADDER:",
+        r"\bRATIONED MALL:",
         r"\bRESEARCH QUEUED:", r"\bRUN HEARTBEAT",
         r"^Traceback \(most recent call last\):", r'^\s+File "',
         r"^[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception):",
@@ -173,12 +177,59 @@ def _repository_revision() -> str | None:
         return None
 
 
+def _decision_summary(events: list[dict]) -> dict:
+    """Compact semantic signals for deterministic fallback review."""
+    messages = [str(event.get("message", "")) for event in events]
+    priorities = [
+        message.split("PRIORITY:", 1)[1].strip().split()[0]
+        for message in messages if "PRIORITY:" in message
+    ]
+    survey_seconds: list[tuple[float, str]] = []
+    for message in messages:
+        if "SURVEY END:" not in message or "elapsed=" not in message:
+            continue
+        try:
+            elapsed = float(message.rsplit("elapsed=", 1)[1].rstrip("s"))
+        except ValueError:
+            continue
+        survey_seconds.append((elapsed, message))
+    repeated = Counter(
+        message for message in messages
+        if not message.startswith("RUN HEARTBEAT")
+    )
+    return {
+        "event_count": len(events),
+        "priority_counts": dict(sorted(Counter(priorities).items())),
+        "priority_tail": priorities[-12:],
+        "alternating_priority_cycle": (
+            len(priorities[-8:]) == 8
+            and len(set(priorities[-8:])) == 2
+            and all(
+                priorities[-8:][index] == priorities[-8:][index % 2]
+                for index in range(8)
+            )
+        ),
+        "slowest_surveys": [
+            {"elapsed_seconds": elapsed, "message": message}
+            for elapsed, message in sorted(survey_seconds, reverse=True)[:5]
+        ],
+        "zero_placement_reports": sum(
+            "placed 0 actions" in message for message in messages
+        ),
+        "repeated_messages": [
+            {"count": count, "message": message}
+            for message, count in repeated.most_common(8) if count > 1
+        ],
+    }
+
+
 def build_case_packet(
     *,
     log_path: Path,
     mission_state_path: Path | None = None,
     blocker_events_path: Path | None = None,
     episode_manifest_path: Path | None = None,
+    structured_events_path: Path | None = None,
     created_at: str | None = None,
 ) -> dict:
     """Build the newest complete run's bounded post-run evidence packet."""
@@ -194,6 +245,7 @@ def build_case_packet(
     mission_id = mission.get("mission_id")
     attempt = mission.get("attempt")
     blocker_records = _read_jsonl(blocker_events_path)
+    structured_events = _read_jsonl(structured_events_path)
     blocker_source = blocker_records or mission.get("blockers") or []
     raw_blockers = _current_run_blockers(
         blocker_source, mission_id=mission_id, attempt=attempt,
@@ -246,6 +298,9 @@ def build_case_packet(
                     "termination_reason", "baseline_verified",
                 ) if manifest.get(key) is not None
             },
+            "decision_summary": _decision_summary(structured_events),
+            "structured_events": str(structured_events_path.resolve())
+            if structured_events_path is not None else None,
         },
         "log_excerpt": _bounded([line for _, _, line in run]),
         "source_log": str(log_path.resolve()),

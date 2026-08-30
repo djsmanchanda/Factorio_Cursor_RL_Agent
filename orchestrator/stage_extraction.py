@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -66,6 +67,7 @@ class LocalExtractionPlan:
     system_drill_target: int = 0
     shared_belt_y: float | None = None
     smelter_flow_direction: str = "east"
+    smelter_vertical_mirror: bool = False
     first_column_x: float | None = None
     smelter_reserved_area: tuple[Point, Point] | None = None
 
@@ -566,20 +568,24 @@ def _refinery_site_score(
 
 def _smelter_layout_geometry(
     recipe: str, machine_count: int, belt_type: str, inserter_type: str,
-    flow_direction: str = "east",
+    flow_direction: str = "east", vertical_mirror: bool = False,
 ) -> tuple[Rect, Point, Point]:
     """Exact modular bounds plus direct ore-belt and provider interfaces."""
     del belt_type, inserter_type
     if flow_direction != "east":
         raise ValueError("The approved modular refinery blueprint is eastbound")
-    plan = generate_managed_refinery_plan(recipe, machine_count)
+    plan = generate_managed_refinery_plan(
+        recipe, machine_count, vertical_mirror=vertical_mirror,
+    )
     retained = list(actions(plan))
     extents = []
     for action in retained:
         size = ENTITY_FOOTPRINTS.get(action["entity"], 1)
         x, y = action["position"]["x"], action["position"]["y"]
         extents.append((x - size / 2, y - size / 2, x + size / 2, y + size / 2))
-    interface = refinery_interfaces(machine_count)
+    interface = refinery_interfaces(
+        machine_count, vertical_mirror=vertical_mirror,
+    )
     return (
         Rect(
             min(box[0] for box in extents), min(box[1] for box in extents),
@@ -642,17 +648,35 @@ def plan_local_extraction(
     excluded_drill_positions: tuple[Point, ...] = (),
     reserved_refinery_areas: tuple[tuple[Point, Point], ...] = (),
     owned_smelter_origin: Point | None = None,
+    owned_smelter_vertical_mirror: bool = False,
+    defer_pending_owned_refinery: bool = False,
+    observe: Callable[[str], None] | None = None,
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
+    def surveyed(label: str, operation):
+        started = time.monotonic()
+        if observe is not None:
+            observe(f"SURVEY START: {recipe} {label}")
+        result = operation()
+        if observe is not None:
+            observe(
+                f"SURVEY END: {recipe} {label} "
+                f"elapsed={time.monotonic() - started:.2f}s"
+            )
+        return result
+
     ore = LINE_RECIPES[recipe]["ingredients"][0]
-    mines = extraction_state.find_resource_mines(
-        client, surface, force, ore, reference_point,
-        excluded_drill_positions,
+    mines = surveyed(
+        "existing_mines",
+        lambda: extraction_state.find_resource_mines(
+            client, surface, force, ore, reference_point,
+            excluded_drill_positions,
+        ),
     )
     observed = mines[0] if mines else None
     if (
         observed is not None
-        and owned_smelter_origin is None
+        and (owned_smelter_origin is None or defer_pending_owned_refinery)
         and extraction_state.pending_plate_smelter(
             client, surface, force, ore, observed.output
         )
@@ -661,8 +685,11 @@ def plan_local_extraction(
             f"A pending off-ore smelter already exists near {observed.output}; "
             "refusing to submit a duplicate line"
         )
-    system_before = extraction_state.resource_drill_count(
-        client, surface, force, ore, excluded_drill_positions,
+    system_before = surveyed(
+        "drill_capacity",
+        lambda: extraction_state.resource_drill_count(
+            client, surface, force, ore, excluded_drill_positions,
+        ),
     )
     phase_target = extraction_capacity.next_drill_phase(system_before)
     if not reuse_existing and phase_target is None:
@@ -674,7 +701,13 @@ def plan_local_extraction(
     active = extraction_capacity.expandable_mine(mines) if not reuse_existing else None
     survey_mine = active or observed
     survey_near = survey_mine.output if survey_mine is not None else reference_point
-    found = resource_patches.patch_for_extraction(client, surface, ore, survey_near, active=survey_mine is not None)
+    found = surveyed(
+        "resource_patch",
+        lambda: resource_patches.patch_for_extraction(
+            client, surface, ore, survey_near,
+            active=survey_mine is not None,
+        ),
+    )
     if found is None:
         raise ValueError(
             f"No {ore} found within survey radius of {survey_near} -- "
@@ -797,33 +830,41 @@ def plan_local_extraction(
     furnace_count = planned_smelter_count_for_drills(
         recipe, drill_count, productivity,
     )
-    current_bounds, feed_offset, output_offset = _smelter_layout_geometry(
-        recipe, furnace_count, belt_type, inserter_type, "east",
-    )
-    maximum_bounds, _maximum_feed, _maximum_output = _smelter_layout_geometry(
-        recipe, REFINERY_GENERATION_1_CAPACITIES[-1], belt_type, inserter_type,
-        "east",
-    )
-    del current_bounds
-    geometries = {"east": (maximum_bounds, feed_offset, output_offset)}
-    east_bounds = geometries["east"][0]
+    geometries = {}
+    for vertical_mirror in (False, True):
+        _current_bounds, feed_offset, output_offset = _smelter_layout_geometry(
+            recipe, furnace_count, belt_type, inserter_type, "east",
+            vertical_mirror,
+        )
+        maximum_bounds, _maximum_feed, _maximum_output = _smelter_layout_geometry(
+            recipe, REFINERY_GENERATION_1_CAPACITIES[-1], belt_type,
+            inserter_type, "east", vertical_mirror,
+        )
+        geometries[vertical_mirror] = (
+            maximum_bounds, feed_offset, output_offset,
+        )
+    default_bounds = geometries[False][0]
     footprint = (
-        east_bounds.max_x - east_bounds.min_x,
-        east_bounds.max_y - east_bounds.min_y,
+        default_bounds.max_x - default_bounds.min_x,
+        default_bounds.max_y - default_bounds.min_y,
     )
     smelter_origin = owned_smelter_origin
     smelter_flow_direction = "east"
+    smelter_vertical_mirror = owned_smelter_vertical_mirror
     candidates: list[
-        tuple[bool, bool, float, float, float, str, Point]
+        tuple[bool, bool, float, float, float, str, bool, Point]
     ] = []
     if smelter_origin is not None:
+        owned_bounds, owned_feed_offset, _owned_output = geometries[
+            smelter_vertical_mirror
+        ]
         owned_min = (
-            smelter_origin[0] + east_bounds.min_x,
-            smelter_origin[1] + east_bounds.min_y,
+            smelter_origin[0] + owned_bounds.min_x,
+            smelter_origin[1] + owned_bounds.min_y,
         )
         owned_max = (
-            smelter_origin[0] + east_bounds.max_x,
-            smelter_origin[1] + east_bounds.max_y,
+            smelter_origin[0] + owned_bounds.max_x,
+            smelter_origin[1] + owned_bounds.max_y,
         )
         if not _keeps_refinery_clearance(
             owned_min, owned_max, reserved_refinery_areas,
@@ -833,8 +874,8 @@ def plan_local_extraction(
                 "another reserved refinery district"
             )
         owned_feed = (
-            smelter_origin[0] + feed_offset[0],
-            smelter_origin[1] + feed_offset[1],
+            smelter_origin[0] + owned_feed_offset[0],
+            smelter_origin[1] + owned_feed_offset[1],
         )
         if (
             abs(owned_feed[0] - ore_output[0])
@@ -851,21 +892,22 @@ def plan_local_extraction(
         )
     )
     aligned_anchors = {
-        anchor: _align_area_anchor(anchor, east_bounds)
-        for anchor in anchors
+        (anchor, vertical_mirror): _align_area_anchor(
+            anchor, geometries[vertical_mirror][0],
+        )
+        for anchor in anchors for vertical_mirror in geometries
     }
-    clear_areas = live_base.find_clear_areas(
-        client, surface, list(aligned_anchors.values()),
-        footprint[0], footprint[1],
-        max_radius=60.0, avoid_resources=True,
-        resource_clearance=MINING_APRON_TILES,
+    clear_areas = surveyed(
+        "clear_refinery_sites",
+        lambda: live_base.find_clear_areas(
+            client, surface, list(dict.fromkeys(aligned_anchors.values())),
+            footprint[0], footprint[1], max_radius=60.0,
+            avoid_resources=True, resource_clearance=MINING_APRON_TILES,
+        ),
     ) if anchors else {}
     for anchor in anchors:
-        for direction, (bounds, feed_offset, output_offset) in geometries.items():
-            oriented_anchor = aligned_anchors[anchor]
-            # The current refinery geometry has one eastbound orientation, so
-            # oriented_anchor is the same point used by the shared survey. If
-            # another geometry returns, keep its alignment explicit here.
+        for vertical_mirror, (bounds, feed_offset, output_offset) in geometries.items():
+            oriented_anchor = aligned_anchors[(anchor, vertical_mirror)]
             area_min = clear_areas.get(oriented_anchor)
             if area_min is None:
                 continue
@@ -898,13 +940,14 @@ def plan_local_extraction(
             if input_tiles <= LOCAL_MODE_MAX_LINK_TILES:
                 candidates.append((
                     *site_score,
-                    direction,
+                    "east",
+                    vertical_mirror,
                     candidate,
                 ))
     if candidates:
         (
             _input_wrong_way, _output_wrong_way, _total, _output, _input,
-            smelter_flow_direction, smelter_origin,
+            smelter_flow_direction, smelter_vertical_mirror, smelter_origin,
         ) = min(candidates)
     if smelter_origin is None:
         raise ValueError(
@@ -926,6 +969,7 @@ def plan_local_extraction(
         expansion_step=expansion_step,
         system_drill_count_before=system_before,
         smelter_flow_direction=smelter_flow_direction,
+        smelter_vertical_mirror=smelter_vertical_mirror,
         first_column_x=first_column_x,
         shared_belt_y=(
             (existing or active).shared_belt_y if (existing or active) is not None
@@ -936,12 +980,12 @@ def plan_local_extraction(
         ),
         smelter_reserved_area=(
             (
-                smelter_origin[0] + east_bounds.min_x,
-                smelter_origin[1] + east_bounds.min_y,
+                smelter_origin[0] + geometries[smelter_vertical_mirror][0].min_x,
+                smelter_origin[1] + geometries[smelter_vertical_mirror][0].min_y,
             ),
             (
-                smelter_origin[0] + east_bounds.max_x,
-                smelter_origin[1] + east_bounds.max_y,
+                smelter_origin[0] + geometries[smelter_vertical_mirror][0].max_x,
+                smelter_origin[1] + geometries[smelter_vertical_mirror][0].max_y,
             ),
         ),
     )

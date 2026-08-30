@@ -11,6 +11,7 @@ Point = tuple[float, float]
 
 MINIMUM_NEW_PATCH_RESOURCE = 200_000
 RETIRE_ACTIVE_PATCH_RESOURCE = 100_000
+_PATCH_CACHE: dict[tuple, ResourcePatch | None] = {}
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,12 @@ def nearest_patch(
     """Return the nearest eight-way contiguous patch meeting the amount floor."""
     if minimum_amount < 0:
         raise ValueError("minimum_amount cannot be negative")
+    key = (
+        id(client), surface, resource, float(near[0]), float(near[1]),
+        float(search_radius), int(minimum_amount),
+    )
+    if key in _PATCH_CACHE:
+        return _PATCH_CACHE[key]
     min_x, min_y = near[0] - search_radius, near[1] - search_radius
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
     lua = (
@@ -62,17 +69,35 @@ def nearest_patch(
     )
     raw = client.command("/sc " + lua).strip()
     if raw == "NONE":
+        _PATCH_CACHE[key] = None
         return None
     fields = raw.split()
     if len(fields) != 7:
         raise ValueError(f"Resource patch survey returned an invalid response: {raw}")
     x, y, minx, miny, maxx, maxy, amount = fields
-    return ResourcePatch(
+    result = ResourcePatch(
         (float(x), float(y)),
         (float(minx), float(miny)),
         (float(maxx), float(maxy)),
         int(float(amount)),
     )
+    _PATCH_CACHE[key] = result
+    return result
+
+
+def clear_patch_cache() -> None:
+    """Clear run-scoped resource survey results."""
+    _PATCH_CACHE.clear()
+
+
+def invalidate_patch_cache(
+    client: RconClient, surface: str, resource: str | None = None,
+) -> None:
+    """Forget observations affected by a newly submitted mine."""
+    prefix = (id(client), surface)
+    for key in list(_PATCH_CACHE):
+        if key[:2] == prefix and (resource is None or key[2] == resource):
+            _PATCH_CACHE.pop(key, None)
 
 
 def patch_for_extraction(

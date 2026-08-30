@@ -728,6 +728,37 @@ def entity_status_name(client: RconClient, surface: str, position: Point) -> str
     return None if raw == "NONE" else raw
 
 
+def nearest_entity_site(
+    client: RconClient, surface: str, force: str, name: str, near: Point,
+) -> dict | None:
+    """Nearest built/ghost entity centre and cardinal direction.
+
+    Chemical-stage recovery needs the connector orientation of an existing
+    offshore pump. Returning the observed direction keeps that recovery tied
+    to live geometry instead of re-running shoreline selection and opening a
+    second water source.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local best=nil;local bd=1e18;"
+        "local entities=s.find_entities_filtered{name='" + name + "',force=f};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
+        "if g.ghost_name=='" + name + "' then table.insert(entities,g) end end;"
+        "for _,e in pairs(entities) do local d=(e.position.x-nx)^2+(e.position.y-ny)^2;"
+        "if d<bd then bd=d;best=e end end;"
+        "if not best then rcon.print('NONE') return end;"
+        "local names={[defines.direction.north]='north',[defines.direction.east]='east',"
+        "[defines.direction.south]='south',[defines.direction.west]='west'};"
+        "rcon.print(best.position.x..' '..best.position.y..' '..(names[best.direction] or 'north'))"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    x, y, direction = raw.split()
+    return {"position": (float(x), float(y)), "direction": direction}
+
+
 # A find_entities_filtered position+radius query matches an entity's CENTRE, not
 # its footprint, so a lookup by planned position misses a pole the game centred
 # elsewhere. A 2x2 substation planned on a .5 coordinate lands 0.707 tiles away;

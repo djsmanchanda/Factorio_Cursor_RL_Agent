@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from orchestrator import extraction_state, live_base, stage_extraction
+from orchestrator import extraction_state, live_base, resource_patches, stage_extraction
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
@@ -31,7 +31,9 @@ from orchestrator.bootstrap_supply import (
 from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
+    CHEMICAL_BOOTSTRAP_LADDER, CORE_MALL_PRODUCERS,
     PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
+    RATIONED_MALL_BATCH_ITEMS,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
     demand_adjusted_plate_draw, drill_phase_for_draw,
     smelter_count_for_draw, STEEL_BASELINE_FURNACES,
@@ -82,6 +84,7 @@ from orchestrator.refinery_state import (
 )
 from orchestrator.stage_chemical import (
     ensure_battery_cell, ensure_coal_mine, ensure_oil_cell,
+    ensure_sulfuric_acid_cell,
 )
 from orchestrator.stage_extraction import (
     LOCAL_MODE_MAX_LINK_TILES, existing_mine_service_geometry,
@@ -446,6 +449,30 @@ def _reconcile_submitted_bootstrap_replacement(
             ),
         )
     plan = _submitted_bootstrap_plan(state)
+    normal_provider = refinery_interfaces(
+        state.replacement_furnaces,
+        origin_x=state.replacement_origin[0],
+        origin_y=state.replacement_origin[1],
+        variant="basic",
+    ).provider
+    mirrored_provider = refinery_interfaces(
+        state.replacement_furnaces,
+        origin_x=state.replacement_origin[0],
+        origin_y=state.replacement_origin[1],
+        variant="basic", vertical_mirror=True,
+    ).provider
+    if state.replacement_provider == normal_provider:
+        vertical_mirror = False
+    elif state.replacement_provider == mirrored_provider:
+        vertical_mirror = True
+    else:
+        raise _bootstrap_lifecycle_stuck(
+            state.recipe,
+            BootstrapLifecycleError(
+                f"{state.recipe} persisted provider {state.replacement_provider} "
+                "matches neither approved refinery orientation"
+            ),
+        )
     belt_tiles = sum(
         1 for action in state.transport_actions
         if "transport-belt" in action.get("entity", "")
@@ -458,7 +485,7 @@ def _reconcile_submitted_bootstrap_replacement(
         client, bridge, surface, force, state.recipe, plan,
         state.replacement_furnaces, state.replacement_origin, emit,
         feed_grace_seconds=transport_grace_seconds(_DEFAULT_BELT, belt_tiles),
-        variant="basic",
+        variant="basic", vertical_mirror=vertical_mirror,
     )
     _retire_standing_bootstrap_cells(
         client, bridge, surface, force, state.recipe, state.ore,
@@ -524,6 +551,33 @@ def _wait_for_logistic_service(
     return False
 
 
+def _wait_for_construction_network(
+    client: RconClient, surface: str, force: str,
+    area: tuple[Point, Point] | None, emit: Callable[[str], None],
+) -> bool:
+    """Wait once for a geometrically covering roboport to become usable."""
+    if area is None:
+        return False
+    initial = live_base.ghost_blockages(client, surface, force, area)
+    initial_outside = sum(
+        ghost.get("reason") == "out_of_construction_range" for ghost in initial
+    )
+    deadline = time.monotonic() + _LOGISTIC_CHARGE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(3.0)
+        current = live_base.ghost_blockages(client, surface, force, area)
+        outside = sum(
+            ghost.get("reason") == "out_of_construction_range" for ghost in current
+        )
+        if len(current) < len(initial) or outside < initial_outside:
+            return True
+    emit(
+        "    geometrically covering roboport made no construction progress after "
+        f"{_LOGISTIC_CHARGE_WAIT_SECONDS:.0f}s -- returning to diagnosis"
+    )
+    return False
+
+
 def _apply_remedy(
     client: RconClient, bridge: GameBridge, surface: str, force: str, name: str,
     remedy: str, description: str, origin: Point, substation_position: Point,
@@ -550,6 +604,14 @@ def _apply_remedy(
         acted = extend_roboport_coverage(
             client, bridge, surface, force, coverage_target, emit,
         )
+    elif remedy == "coverage_charge_wait":
+        emit(
+            "    construction coverage is already present geometrically -- "
+            "waiting for the covering roboport/network instead of placing another"
+        )
+        acted = _wait_for_construction_network(
+            client, surface, force, area, emit,
+        )
     elif remedy == "logistic_coverage":
         # Unlike a power gap, this one CAN clear without the remedy doing
         # anything: a roboport that was just connected still has to charge
@@ -572,8 +634,12 @@ def _apply_remedy(
             acted = _wait_for_logistic_service(
                 client, surface, force, list(logistic_chest_positions), emit,
             )
-    elif remedy == "roboport_power":
-        nearest = live_base.nearest_roboport(client, surface, force, origin)
+    elif remedy == "roboport_power" or remedy.startswith("roboport_power_at:"):
+        if remedy.startswith("roboport_power_at:"):
+            _, x, y = remedy.split(":", 2)
+            nearest = (float(x), float(y))
+        else:
+            nearest = live_base.nearest_roboport(client, surface, force, origin)
         if nearest is not None and not extend_power(
             client, bridge, surface, force, nearest, emit,
         ):
@@ -1024,6 +1090,9 @@ def _submit_mining_plan(
     allow_unfunded_ghosts: bool = False,
 ) -> None:
     """Place a freshly planned mine and work it up, or service an existing one."""
+    submitted_new_capacity = bool(
+        extraction.build_plan is not None or extraction.expansion_positions
+    )
     if extraction.build_plan is not None:
         _place_new_mine(
             client, bridge, surface, force, extraction, emit,
@@ -1034,6 +1103,10 @@ def _submit_mining_plan(
     else:
         _service_legacy_mine(
             client, bridge, surface, force, extraction, ore_output, emit,
+        )
+    if submitted_new_capacity:
+        resource_patches.invalidate_patch_cache(
+            client, surface, extraction.ore,
         )
 
 
@@ -1408,11 +1481,12 @@ def _bring_modular_refinery_up(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, plan: dict, furnace_count: int, origin: Point,
     emit: Callable[[str], None], *, feed_grace_seconds: float = 0.0,
-    variant: str = "standard",
+    variant: str = "standard", vertical_mirror: bool = False,
 ) -> None:
     """Power, cover, and diagnose the complete modular refinery footprint."""
     interface = refinery_interfaces(
         furnace_count, origin_x=origin[0], origin_y=origin[1], variant=variant,
+        vertical_mirror=vertical_mirror,
     )
     machines = _modular_machine_positions(plan, recipe)
     reserved = planned_footprint_tiles(plan)
@@ -1457,11 +1531,11 @@ def _extend_plate_smelter(
     target_variant = state.variant
     full = generate_managed_refinery_plan(
         recipe, target_machines, origin_x=origin[0], origin_y=origin[1],
-        variant=target_variant,
+        variant=target_variant, vertical_mirror=state.vertical_mirror,
     )
     interface = refinery_interfaces(
         target_machines, origin_x=origin[0], origin_y=origin[1],
-        variant=target_variant,
+        variant=target_variant, vertical_mirror=state.vertical_mirror,
     )
     if target_machines <= state.furnace_count:
         emit(
@@ -1471,12 +1545,14 @@ def _extend_plate_smelter(
         _bring_modular_refinery_up(
             client, bridge, surface, force, recipe, full,
             target_machines, origin, emit, variant=target_variant,
+            vertical_mirror=state.vertical_mirror,
         )
         return interface.provider
     delta = generate_managed_refinery_extension_plan(
         recipe, state.furnace_count, target_machines,
         origin_x=origin[0], origin_y=origin[1],
         current_variant=state.variant, target_variant=target_variant,
+        vertical_mirror=state.vertical_mirror,
     )
     try:
         assert_refinery_removals_owned(client, surface, force, state, delta)
@@ -1508,6 +1584,7 @@ def _extend_plate_smelter(
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, full,
         target_machines, origin, emit, variant=target_variant,
+        vertical_mirror=state.vertical_mirror,
     )
     return interface.provider
 
@@ -1528,6 +1605,7 @@ def _assert_atomic_plate_expansion_affordable(
         recipe, state.furnace_count, target_machines,
         origin_x=state.origin[0], origin_y=state.origin[1],
         current_variant=state.variant, target_variant=target_variant,
+        vertical_mirror=state.vertical_mirror,
     )
     try:
         assert_refinery_removals_owned(
@@ -1721,10 +1799,12 @@ def _prepare_initial_refinery(
     variant = "basic"
     plan = generate_managed_refinery_plan(
         recipe, target, origin_x=origin[0], origin_y=origin[1], variant=variant,
+        vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
     )
     replacement_plan = json.loads(json.dumps(plan))
     interface = refinery_interfaces(
         target, origin_x=origin[0], origin_y=origin[1], variant=variant,
+        vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
     )
     emit(
         f"modular refinery for {recipe}: building basic Start + End at {origin} "
@@ -2094,6 +2174,7 @@ def _build_initial_plate_smelter(
             target,
             origin_x=extraction.smelter_origin[0],
             origin_y=extraction.smelter_origin[1], variant="basic",
+            vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
         )
         for phase in plan["phases"]:
             for action in phase["actions"]:
@@ -2124,6 +2205,7 @@ def _build_initial_plate_smelter(
             target,
             origin_x=extraction.smelter_origin[0],
             origin_y=extraction.smelter_origin[1], variant="basic",
+            vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
         )
         if live_base.entity_status_name(
             client, surface, interface.power_anchor,
@@ -2143,6 +2225,7 @@ def _build_initial_plate_smelter(
         extraction.smelter_origin, emit,
         feed_grace_seconds=transport_grace_seconds(belt_type, belt_tiles),
         variant="basic",
+        vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
     )
     _retire_standing_bootstrap_cells(
         client, bridge, surface, force, recipe, extraction.ore,
@@ -2192,6 +2275,18 @@ def build_mining_stage(
             and bootstrap.lifecycle_state != "pioneer"
             else None
         )
+        owned_smelter_vertical_mirror = False
+        if owned_smelter_origin is not None and bootstrap is not None:
+            mirrored_provider = refinery_interfaces(
+                getattr(bootstrap, "replacement_furnaces", 6),
+                origin_x=owned_smelter_origin[0],
+                origin_y=owned_smelter_origin[1], variant="basic",
+                vertical_mirror=True,
+            ).provider
+            owned_smelter_vertical_mirror = (
+                getattr(bootstrap, "replacement_provider", None)
+                == mirrored_provider
+            )
         extraction = plan_local_extraction(
             client, surface, force, recipe, reference_point, 3,
             belt_type=belt_type, inserter_type=_DEFAULT_INSERTER,
@@ -2201,6 +2296,9 @@ def build_mining_stage(
             ).get(belt_type, 0),
             excluded_drill_positions=excluded_drill_positions,
             owned_smelter_origin=owned_smelter_origin,
+            owned_smelter_vertical_mirror=owned_smelter_vertical_mirror,
+            defer_pending_owned_refinery=expand,
+            observe=emit,
             reserved_refinery_areas=tuple(
                 area for (reserved_surface, reserved_force, reserved_recipe), area
                 in _REFINERY_SITE_RESERVATIONS.items()
@@ -2363,7 +2461,8 @@ def build_mining_stage(
     )
     ore_output = extraction.ore_output
     emit(
-        f"{recipe} refinery flow is {extraction.smelter_flow_direction}bound: "
+        f"{recipe} refinery flow is {extraction.smelter_flow_direction}bound"
+        f"{' with a vertical mirror' if getattr(extraction, 'smelter_vertical_mirror', False) else ''}: "
         f"input faces mine output {ore_output}; output favors downstream "
         f"reference {reference_point}"
     )
@@ -3560,7 +3659,7 @@ def _material_sources_and_rates(
     return sources, rates
 
 
-_BOOTSTRAP_LOAN_CANDIDATES = ("copper-cable", "iron-gear-wheel")
+_BOOTSTRAP_LOAN_PREFERRED = ("copper-cable", "iron-gear-wheel")
 
 
 def _bootstrap_loan_stock(
@@ -3641,8 +3740,12 @@ def _service_bootstrap_loan(
             classification="bug",
             details={"loans": [loan.group for loan in loans]},
         )
-    if not loans or loans[0].target_item != target_item:
+    if not loans:
         return None
+    if loans[0].target_item != target_item:
+        return _submit_bootstrap_loan(
+            client, bridge, surface, force, loans[0], emit,
+        )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loans[0], emit,
     )
@@ -3660,14 +3763,28 @@ def _start_bootstrap_loan(
                 client, bridge, surface, force, existing[0], emit,
             )
         return None
-    for original_recipe in _BOOTSTRAP_LOAN_CANDIDATES:
+    stock = live_base.available_items(client, surface, force)
+    recipes = [
+        recipe for recipe, spec in LINE_RECIPES.items()
+        if recipe != target_item
+        and spec.get("set_recipe", True)
+        and spec.get("machine") == "assembling-machine-2"
+        and not spec.get("fluid_ingredients")
+    ]
+    recipes.sort(key=lambda recipe: (
+        recipe not in _BOOTSTRAP_LOAN_PREFERRED,
+        -int(stock.get(recipe, 0)),
+        recipe,
+    ))
+    candidates: list[tuple[int, int, str, Point, tuple[int, int], str]] = []
+    for original_recipe in recipes:
         spec = LINE_RECIPES.get(original_recipe)
         if spec is None:
             continue
         line = live_base.find_line(
             client, surface, force, original_recipe, str(spec["machine"]),
         )
-        if line is None or line.machine_count < 2:
+        if line is None:
             continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
@@ -3682,18 +3799,30 @@ def _start_bootstrap_loan(
                 or not requester or requester["name"] != "requester-chest"
             ):
                 continue
-            loan = MallBootstrapLoan(
-                original_recipe=original_recipe,
-                target_item=target_item,
-                target_count=target_count,
-                side=side,
-                requester_position=requester_position,
-                current_recipe=original_recipe,
-            )
-            return _submit_bootstrap_loan(
-                client, bridge, surface, force, loan, emit,
-            )
-    return None
+            # Prefer an actually spare duplicate. A sole producer may still be
+            # rationed when it has already accumulated stock; its recipe and
+            # request group are restored as soon as the finite batch completes.
+            spare_rank = 0 if line.machine_count >= 2 else 1
+            stock_rank = 0 if stock.get(original_recipe, 0) > 0 else 1
+            candidates.append((
+                spare_rank, stock_rank, original_recipe, machine_position,
+                origin, side,
+            ))
+    if not candidates:
+        return None
+    _spare, _stocked, original_recipe, _machine, origin, side = min(candidates)
+    requester_position = (origin[0] + 4.5, origin[1] + 1.5)
+    loan = MallBootstrapLoan(
+        original_recipe=original_recipe,
+        target_item=target_item,
+        target_count=target_count,
+        side=side,
+        requester_position=requester_position,
+        current_recipe=original_recipe,
+    )
+    return _submit_bootstrap_loan(
+        client, bridge, surface, force, loan, emit,
+    )
 
 
 def _reserve_compact_mall_project(
@@ -3908,7 +4037,7 @@ def _build_assembled_stage(
         )
         if min(iron_furnaces, iron_drills) < STEEL_IRON_CAPACITY_FLOOR:
             emit(
-                "  STEEL CAPACITY GATE: six steel furnaces need the shared "
+                "  STEEL CAPACITY GATE: the steel starter needs the shared "
                 f"iron line at {STEEL_IRON_CAPACITY_FLOOR} furnaces and drills "
                 f"(have {iron_furnaces}/{iron_drills}); expanding iron first"
             )
@@ -3917,7 +4046,8 @@ def _build_assembled_stage(
                 emit, expand=iron_furnaces > 0,
             )
             raise ProductionPrerequisiteDeferred(
-                "steel-plate waits for the 12-furnace/12-drill iron checkpoint"
+                f"steel-plate waits for the {STEEL_IRON_CAPACITY_FLOOR}-furnace/"
+                f"{STEEL_IRON_CAPACITY_FLOOR}-drill iron starter checkpoint"
             )
         existing_count = existing.machine_count if existing is not None else 0
         missing = max(0, STEEL_BASELINE_FURNACES - existing_count)
@@ -3932,7 +4062,7 @@ def _build_assembled_stage(
         MANAGED_INTERMEDIATE_SOURCES[item] = output
         emit(
             f"  PERSISTENT INTERMEDIATE: steel-plate now has its "
-            f"{STEEL_BASELINE_FURNACES}-furnace baseline beside the iron source"
+            f"{STEEL_BASELINE_FURNACES}-furnace starter beside the iron provider"
         )
         return
     if promote_to_line:
@@ -4026,6 +4156,90 @@ def _iron_capacity_for_fast_belts(
     )
     return furnaces, drills
 
+
+_CHEMICAL_BATCH_TARGETS = {
+    "chemical-plant": 2,
+    "oil-refinery": 1,
+    "offshore-pump": 1,
+    "pumpjack": 1,
+}
+
+
+def _chemical_capability_started(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    if item == "sulfuric-acid":
+        line = live_base.find_line(
+            client, surface, force, item, "chemical-plant",
+        )
+        return line is not None and (
+            line.working_count > 0 or line.produced_count > 0
+        )
+    if item in _CHEMICAL_BATCH_TARGETS and not _core_mall_ready(
+        client, surface, force,
+    ):
+        stock = live_base.available_items(client, surface, force)
+        return stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]
+    return _production_started(client, surface, force, item)
+
+
+def _ensure_chemical_ladder_predecessor(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    item: str, reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Advance at most one missing rung before constructing `item`."""
+    if item in CHEMICAL_BOOTSTRAP_LADDER:
+        stop = CHEMICAL_BOOTSTRAP_LADDER.index(item)
+    elif item in {"battery", "processing-unit"}:
+        stop = len(CHEMICAL_BOOTSTRAP_LADDER)
+    else:
+        return
+    for predecessor in CHEMICAL_BOOTSTRAP_LADDER[:stop]:
+        if _chemical_capability_started(
+            client, surface, force, predecessor,
+        ):
+            continue
+        target = _CHEMICAL_BATCH_TARGETS.get(predecessor)
+        emit(
+            f"  CHEMICAL LADDER: {item} waits at {predecessor} "
+            f"({stop}/{len(CHEMICAL_BOOTSTRAP_LADDER)} rungs required)"
+        )
+        if target is not None and not _core_mall_ready(
+            client, surface, force,
+        ):
+            remedy = _start_bootstrap_loan(
+                client, bridge, surface, force, predecessor, target,
+                reference_point, emit,
+            )
+            if remedy is None:
+                raise StuckError(
+                    f"chemical ladder cannot borrow a mall cell for {predecessor}",
+                    code="chemical_ladder_no_borrower",
+                    classification="bug",
+                    state="supply_wait",
+                    details={"item": item, "predecessor": predecessor},
+                )
+            raise ProductionPrerequisiteDeferred(
+                remedy,
+                code="chemical_capability_batch",
+                state="supply_wait",
+                details={
+                    "target": item, "rung": predecessor,
+                    "required_stock": target,
+                },
+            )
+        ensure_produced(
+            client, bridge, surface, force, predecessor, reference_point, emit,
+            upgrade_bootstrap=False, stock_target=max(1, target or 1),
+            allow_promotion=False,
+        )
+        raise ProductionPrerequisiteDeferred(
+            f"chemical ladder is establishing {predecessor} before {item}",
+            code="chemical_capability_wait",
+            state="producing",
+            details={"target": item, "rung": predecessor},
+        )
+
 def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], *,
@@ -4040,6 +4254,9 @@ def ensure_produced(
     if item in MANAGED_INTERMEDIATE_SOURCES:
         _complete_material_producer(item)
         return MANAGED_INTERMEDIATE_SOURCES[item]
+    _ensure_chemical_ladder_predecessor(
+        client, bridge, surface, force, item, reference_point, emit,
+    )
     if item == "steel-plate":
         minimum_machines = max(minimum_machines, STEEL_BASELINE_FURNACES)
     if item == "fast-transport-belt":
@@ -4075,9 +4292,14 @@ def ensure_produced(
     if item in {"plastic-bar", "sulfur"}:
         outputs = ensure_oil_cell(
             client, bridge, surface, force, reference_point,
-            bring_stage_up, emit,
+            bring_stage_up, emit, target_output=item,
         )
         return outputs[item] if outputs else None
+    if item == "sulfuric-acid":
+        return ensure_sulfuric_acid_cell(
+            client, bridge, surface, force, reference_point,
+            bring_stage_up, emit,
+        )
     if item == "battery":
         return ensure_battery_cell(
             client, bridge, surface, force, reference_point,
@@ -4157,6 +4379,53 @@ def ensure_produced(
     return None
 
 
+def _core_mall_ready(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether the mall can now afford permanent one-recipe cell ownership."""
+    return all(
+        _production_started(client, surface, force, item)
+        for item in CORE_MALL_PRODUCERS
+    )
+
+
+def _rationed_mall_batch(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    item: str, target: int, reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Make a finite construction batch in a borrowed cell when necessary.
+
+    Returns True while the caller should keep the demand queued. The provider
+    may temporarily contain products from more than one recipe; stock surveys,
+    not chest identity, decide when the batch is complete.
+    """
+    if item not in RATIONED_MALL_BATCH_ITEMS or _core_mall_ready(
+        client, surface, force,
+    ):
+        return False
+    stock = live_base.available_items(client, surface, force)
+    if stock.get(item, 0) >= target:
+        return False
+    remedy = _start_bootstrap_loan(
+        client, bridge, surface, force, item, target, reference_point, emit,
+    )
+    if remedy is None:
+        raise StuckError(
+            f"rationed mall needs a borrowable assembler to batch {item} "
+            f"through stock {target}",
+            code="rationed_mall_no_borrower",
+            classification="bug",
+            state="supply_wait",
+            details={"item": item, "target": target},
+        )
+    emit(
+        f"  RATIONED MALL: {item} is a finite batch until core cell producers "
+        f"are live; mixed provider contents are expected ({remedy})"
+    )
+    return True
+
+
 def _ensure_mall_item(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, mall_targets: dict[str, int],
@@ -4170,6 +4439,20 @@ def _ensure_mall_item(
         )
     mode = "background reserve" if background else "stock target"
     emit(f"--- parts mall: ensuring {item} production for {mode} {target} ---")
+    if _rationed_mall_batch(
+        client, bridge, surface, force, item, target, reference_point, emit,
+    ):
+        return False, None
+    if (
+        item in RATIONED_MALL_BATCH_ITEMS
+        and not _core_mall_ready(client, surface, force)
+        and live_base.available_items(client, surface, force).get(item, 0) >= target
+    ):
+        emit(
+            f"  RATIONED MALL READY: {item} batch has reached {target}; "
+            "no permanent cell consumed"
+        )
+        return True, None
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
         production_target = (
@@ -5043,6 +5326,45 @@ def _prep_intermediate(
     return False
 
 
+def _prep_core_mall(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    prepped: set[str], mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Promote the rationed mall into five self-sustaining core cells."""
+    for item in CORE_MALL_PRODUCERS:
+        key = f"_core_mall:{item}"
+        if key in prepped:
+            continue
+        if _production_started(client, surface, force, item):
+            prepped.add(key)
+            emit(f"  CORE MALL READY: {item} has independent production")
+            return True
+        emit(f"--- core mall promotion: permanent {item} producer ---")
+        try:
+            ensure_produced(
+                client, bridge, surface, force, item, reference_point, emit,
+                upgrade_bootstrap=False, stock_target=1,
+                minimum_machines=1, allow_promotion=False,
+            )
+        except MaterialShortage as shortage:
+            add_demands(mall_targets, shortage)
+            emit(
+                f"  CORE MALL WAIT: {item} reserves its complete cell; "
+                "rationed batches will make "
+                + ", ".join(
+                    f"{name}={count}"
+                    for name, count in sorted(shortage.required.items())
+                )
+            )
+            return False
+        except ProductionPrerequisiteDeferred as deferred:
+            emit(f"  CORE MALL BATCH: {item} waits while {deferred}")
+            return True
+        return True
+    return False
+
+
 # `None` already means "built one stage, re-survey", so a shortage needs its own
 # answer -- it must NOT advance the iteration count, since nothing was tried.
 _SHORTAGE = object()
@@ -5324,6 +5646,17 @@ def _pass_signature(
     )
 
 
+def _outstanding_work_signature(signature: tuple) -> tuple:
+    """Decision-independent work identity used by the livelock guard.
+
+    Alternating between two blocked tasks is still one unchanged work state.
+    Keeping task/progress in `_pass_signature` preserves useful terminal
+    diagnostics while this projection prevents the selection order from
+    resetting the no-progress counter.
+    """
+    return signature[2:]
+
+
 def _livelock_step(
     signature_changed: bool, construction_progressed: bool,
     unchanged_passes: int,
@@ -5382,6 +5715,7 @@ def _open_the_run(
     global _STARTUP_METAL_STARTERS_OBSERVED, _STARTUP_MALL_LIMITS_RELEASED
     global _STARTUP_MALL_LIMITS_FALLBACK_PROBED
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
+    resource_patches.clear_patch_cache()
     MANAGED_INTERMEDIATE_SOURCES.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
@@ -5585,19 +5919,22 @@ def run(
             )
             ghosts_now = live_base.pending_ghost_count(client, surface, force)
             target_stock_now = live_base.available_items(client, surface, force)
-            relevant_mission_items = mission_items or (goal_item,)
+            relevant_mission_items = set(mission_items or (goal_item,))
+            relevant_mission_items.update(mall_targets)
+            relevant_mission_items.update(background_targets)
             items_now = sum(
                 int(target_stock_now.get(item, 0))
                 for item in relevant_mission_items
             )
-            # Only growth in the target's own stock counts as progress. A
-            # growing total inventory can belong to unrelated mall work and
-            # must not mask a blocked research target.
+            # Count only stock tied to declared outstanding work. This includes
+            # mall/core bootstrap batches: their growth is real progress, while
+            # unrelated inventory accumulation still cannot mask a deadlock.
             stock_grew = (
                 last_items_total is not None and items_now > last_items_total
             )
             unchanged_passes = _livelock_step(
-                signature != last_signature,
+                last_signature is None or _outstanding_work_signature(signature)
+                != _outstanding_work_signature(last_signature),
                 (last_ghost_count is not None and ghosts_now < last_ghost_count)
                 or stock_grew,
                 unchanged_passes,
@@ -5659,6 +5996,16 @@ def run(
                 reference_point, emit,
             ):
                 continue
+            # Reduced stock cannot afford one permanent cell for every
+            # construction item. Borrow existing assemblers for finite batches
+            # until the five entities needed to build more mall slots each
+            # have an independent producer.
+            if not _core_mall_ready(client, surface, force):
+                if _prep_core_mall(
+                    client, bridge, surface, force, prepped, mall_targets,
+                    reference_point, emit,
+                ):
+                    continue
             # Extraction second: it is the expensive half -- 14 drills against
             # the prep set's two assemblers -- and an intermediate built over a
             # starved plate line just starves too.

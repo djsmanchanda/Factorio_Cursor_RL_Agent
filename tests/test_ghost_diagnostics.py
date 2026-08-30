@@ -96,6 +96,35 @@ def test_coherent_earmark_submits_ghosts_despite_queued_shortage(monkeypatch) ->
     assert reports == [plan]
 
 
+def test_configuration_only_plan_is_not_logged_as_zero_placement_churn(
+    monkeypatch,
+) -> None:
+    plan = {"force": "player", "phases": [{"actions": [{
+        "action_type": "configure_entity", "entity": "requester-chest",
+        "position": {"x": 10.5, "y": 20.5}, "clear_logistic_groups": ["old"],
+    }]}]}
+    bridge = type("Bridge", (), {
+        "build_layout": lambda *_a: {
+            "ok": True, "attempted_placements": 0,
+            "succeeded_placements": 0, "placed_ghosts": 0,
+            "placed_entities": 0,
+        },
+    })()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    messages = []
+
+    stage_services._submit(
+        object(), bridge, "nauvis", plan, "request_update", messages.append,
+    )
+
+    assert messages == [
+        "request_update: applied 1 configuration action(s); no placements required"
+    ]
+
+
 def test_explicit_earmark_cannot_bypass_a_missing_supply_chain(monkeypatch) -> None:
     plan = {"force": "player", "phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "pipe",

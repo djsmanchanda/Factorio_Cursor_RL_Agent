@@ -12,6 +12,7 @@ from orchestrator.stage_services import (
     _DEFAULT_BELT,
     _ROBOPORT_CONSTRUCTION_RADIUS,
     _ROBOPORT_LOGISTIC_RADIUS,
+    service_distance,
 )
 from tools.rcon_client import RconClient
 
@@ -127,6 +128,34 @@ def _diagnose_blockage(
             reason = str(ghost.get("reason", "pending"))
             position = ghost["position"]
             if reason == "out_of_construction_range":
+                covering = [
+                    port for port in live_base.roboport_positions(
+                        client, surface, force,
+                    )
+                    if service_distance(
+                        port, tuple(position), square=False,
+                    ) <= _ROBOPORT_CONSTRUCTION_RADIUS
+                ]
+                if covering:
+                    nearest_covering = min(
+                        covering, key=lambda port: math.dist(port, position),
+                    )
+                    status = live_base.entity_status_name(
+                        client, surface, nearest_covering,
+                    )
+                    if status == "no_power":
+                        return (
+                            f"ghost {ghost.get('entity', 'entity')} at {position} "
+                            f"is geometrically covered by unpowered roboport "
+                            f"{nearest_covering}",
+                            f"roboport_power_at:{nearest_covering[0]}:{nearest_covering[1]}",
+                        )
+                    return (
+                        f"ghost {ghost.get('entity', 'entity')} at {position} is "
+                        f"inside roboport {nearest_covering}'s construction area, "
+                        "but that network is not active yet",
+                        "coverage_charge_wait",
+                    )
                 return (
                     f"ghost {ghost.get('entity', 'entity')} at {position} is outside "
                     f"construction coverage ({_ROBOPORT_CONSTRUCTION_RADIUS:.0f}-tile radius)",

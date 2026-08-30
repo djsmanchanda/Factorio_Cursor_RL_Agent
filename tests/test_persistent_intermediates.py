@@ -126,11 +126,11 @@ def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):
 
     assert builder.MANAGED_INTERMEDIATE_SOURCES == {"steel-plate": (9.5, 8.5)}
     assert calls[0][0][6] == (1.5, 2.5)
-    assert calls[0][1]["machine_count"] == 6
+    assert calls[0][1]["machine_count"] == 1
     assert calls[0][1]["allow_logistic_inputs"] is False
 
 
-def test_existing_single_steel_furnace_adds_only_five(monkeypatch):
+def test_existing_single_steel_furnace_completes_the_starter(monkeypatch):
     monkeypatch.setattr(
         builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (4.5, 5.5)},
     )
@@ -153,10 +153,10 @@ def test_existing_single_steel_furnace_adds_only_five(monkeypatch):
         lambda _message: None, plan, None, upgrade_bootstrap=False,
     )
 
-    assert calls[0][1]["machine_count"] == 5
+    assert calls == []
 
 
-def test_steel_expands_iron_before_building_six_furnaces(monkeypatch):
+def test_one_furnace_steel_starter_uses_the_opening_iron_line(monkeypatch):
     monkeypatch.setattr(
         builder, "_ingredient_sources", lambda *_args, **_kwargs: {"iron-plate": (4.5, 5.5)},
     )
@@ -168,23 +168,23 @@ def test_steel_expands_iron_before_building_six_furnaces(monkeypatch):
         builder, "build_mining_stage",
         lambda *args, **kwargs: expansions.append((args, kwargs)),
     )
+    builds = []
     monkeypatch.setattr(
         builder, "build_conversion_stage",
-        lambda *_args, **_kwargs: pytest.fail("steel built before iron capacity"),
+        lambda *_args, **kwargs: builds.append(kwargs) or (9.5, 8.5),
     )
     plan = SimpleNamespace(
         existing=None, spec={"machine": "electric-furnace"},
         promote_to_line=False, promoted_count=None, mall_storage_limit=1,
     )
 
-    with pytest.raises(builder.ProductionPrerequisiteDeferred):
-        builder._build_assembled_stage(
-            object(), object(), "nauvis", "player", "steel-plate", (0.0, 0.0),
-            lambda _message: None, plan, None, upgrade_bootstrap=False,
-        )
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "steel-plate", (0.0, 0.0),
+        lambda _message: None, plan, None, upgrade_bootstrap=False,
+    )
 
-    assert expansions[0][0][4] == "iron-plate"
-    assert expansions[0][1]["expand"] is True
+    assert expansions == []
+    assert builds[0]["machine_count"] == 1
 
 
 def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):

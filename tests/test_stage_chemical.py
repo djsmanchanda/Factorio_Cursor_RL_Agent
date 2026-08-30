@@ -53,6 +53,10 @@ def test_battery_row_has_real_item_and_acid_feeds() -> None:
 def test_real_builder_delegates_battery_to_the_chemical_stage(monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(
+        autonomous_builder, "_ensure_chemical_ladder_predecessor",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
         autonomous_builder, "ensure_battery_cell",
         lambda *args: calls.append(args[4]) or (12.5, 13.5),
     )
@@ -374,9 +378,10 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     result = stage_chemical.ensure_oil_cell(
         object(), object(), "nauvis", "player", (3.0, -1.0),
         lambda *_a, **_k: None, lambda _m: None,
+        target_output="plastic-bar",
     )
 
-    assert set(result) == {"plastic-bar", "sulfur"}
+    assert set(result) == {"plastic-bar"}
     assert calls["coal_reference"] == (-237.0, -91.0)
     assert calls["prefer_nearest_patch"] is True
     assert calls["plastic_inputs"] == ((-237.0, -91.0), (-340.0, 20.0))
@@ -391,9 +396,6 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
         "chemical_refinery_and_plastic_machines",
         "chemical_crude_pipeline",
         "chemical_plastic_petroleum_pipeline",
-        "chemical_sulfur_machines",
-        "chemical_sulfur_petroleum_pipeline",
-        "chemical_sulfur_water_pipeline",
     ]
     all_actions = [
         action for _name, plan in packets
@@ -405,6 +407,27 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
         and action.get("position") == {"x": -320.5, "y": -20.5}
         for action in all_actions
     )
+
+
+def test_sulfur_extends_the_healthy_plastic_district(monkeypatch) -> None:
+    plastic = {"plastic-bar": (-304.5, -37.5)}
+    monkeypatch.setattr(stage_chemical, "_existing_outputs", lambda *_a: plastic)
+    calls = []
+    monkeypatch.setattr(
+        stage_chemical, "_extend_sulfur_stage",
+        lambda *_args: calls.append(_args[-1]) or {
+            **plastic, "sulfur": (-234.5, -80.5),
+        },
+    )
+
+    result = stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (0.0, 0.0),
+        lambda *_a, **_k: None, lambda _message: None,
+        target_output="sulfur",
+    )
+
+    assert result["sulfur"] == (-234.5, -80.5)
+    assert calls == [plastic]
 
 
 def test_offshore_survey_requires_straight_shore_and_adjacent_output() -> None:

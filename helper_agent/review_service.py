@@ -159,15 +159,35 @@ class ReviewService:
         blockers = [item for item in packet.get("blockers", []) if isinstance(item, Mapping)]
         terminal = str(packet.get("terminal_class", "no_run_end"))
         moments: list[dict] = []
+        telemetry = packet.get("telemetry", {})
+        decision = telemetry.get("decision_summary", {}) if isinstance(telemetry, Mapping) else {}
         for blocker in blockers[:8]:
+            iteration_cycle = (
+                blocker.get("code") == "controller_iteration_limit"
+                and isinstance(decision, Mapping)
+                and decision.get("alternating_priority_cycle") is True
+            )
             moments.append({
-                "title": f"{blocker.get('code', 'unknown')} blocker",
+                "title": (
+                    "Alternating priority livelock"
+                    if iteration_cycle else f"{blocker.get('code', 'unknown')} blocker"
+                ),
                 "run_id": run_id,
                 "time_tick": str(blocker.get("observed_at", "unknown")),
                 "what_happened": f"Typed blocker {blocker.get('code', 'unknown')}: {blocker.get('message', '')}",
                 "what_was_expected": "The deterministic mission would progress without this blocking state.",
-                "cause": "The runner recorded this typed blocker; the bounded packet does not establish a deeper cause.",
-                "fix_direction": "Category: planner telemetry; typed stage context needs focused review.",
+                "cause": (
+                    "Two tasks alternated without changing the outstanding-work state, "
+                    "so task identity kept the old no-progress detector from accumulating."
+                    if iteration_cycle else
+                    "The runner recorded this typed blocker; the bounded packet does not establish a deeper cause."
+                ),
+                "fix_direction": (
+                    "Category: controller livelock; compare outstanding work independently "
+                    "of the selected task and report the repeating cycle."
+                    if iteration_cycle else
+                    "Category: planner telemetry; typed stage context needs focused review."
+                ),
                 "confidence": "high" if blocker.get("classification") == "bug" else "medium",
                 "evidence": f"{blocker.get('observed_at', '')} {blocker.get('message', '')}".strip(),
                 "classification": blocker.get("classification", "bug"),
@@ -197,7 +217,6 @@ class ReviewService:
         missing = []
         if packet.get("start_tick") is None or packet.get("end_tick") is None:
             missing.append("Structured start and end game ticks are unavailable.")
-        telemetry = packet.get("telemetry", {})
         mission = telemetry.get("mission", {}) if isinstance(telemetry, Mapping) else {}
         controllers = mission.get("controllers", []) if isinstance(mission, Mapping) else []
         if not isinstance(controllers, list):
@@ -223,7 +242,16 @@ class ReviewService:
                 if isinstance(controller, Mapping) and controller.get("status") == "completed"
             ],
             "failed_workflows": failed_workflows,
-            "suspected_root_causes": [f"typed blocker: {item.get('code', 'unknown')}" for item in blockers],
+            "suspected_root_causes": [
+                (
+                    "alternating priorities masked unchanged outstanding work"
+                    if item.get("code") == "controller_iteration_limit"
+                    and isinstance(decision, Mapping)
+                    and decision.get("alternating_priority_cycle") is True
+                    else f"typed blocker: {item.get('code', 'unknown')}"
+                )
+                for item in blockers
+            ],
             "missing_observations": missing or ["No additional missing observation is required by the fallback reviewer."],
             "recommended_next_probe": "Structured tick telemetry for the terminal transition and blockers.",
             "relevant_casebook_skills": related,

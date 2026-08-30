@@ -28,6 +28,7 @@ class ManagedRefineryState:
     machine_positions: tuple[Point, ...]
     interfaces: RefineryInterfaces
     variant: str = "standard"
+    vertical_mirror: bool = False
     owned_actions: tuple[dict, ...] = ()
 
     @property
@@ -37,6 +38,7 @@ class ManagedRefineryState:
 
 def infer_refinery_state(
     recipe: str, positions: tuple[Point, ...], *, variant: str = "standard",
+    vertical_mirror: bool = False,
 ) -> ManagedRefineryState:
     """Infer only the exact rectangular furnace lattice produced by the templates."""
     if not positions:
@@ -47,9 +49,14 @@ def infer_refinery_state(
     if len(xs) % 2 or len(ys) % 3:
         raise ValueError(f"{recipe} furnaces do not form complete six-furnace modules")
     columns, rows = len(xs) // 2, len(ys) // 3
-    origin = (xs[0] - 3.5, ys[0] - 4.5)
+    origin = (
+        xs[0] - 3.5,
+        ys[-1] + 4.5 if vertical_mirror else ys[0] - 4.5,
+    )
     expected_xs = [origin[0] + 3.5 + index * 6 for index in range(columns * 2)]
-    expected_ys = [origin[1] + 4.5 + index * 3 for index in range(rows * 3)]
+    y_step = -3 if vertical_mirror else 3
+    expected_ys = [origin[1] + (-4.5 if vertical_mirror else 4.5) + index * y_step
+                   for index in range(rows * 3)]
     expected = {(x, y) for x in expected_xs for y in expected_ys}
     if set(unique) != expected:
         raise ValueError(f"{recipe} furnaces are not one contiguous managed block")
@@ -60,8 +67,9 @@ def infer_refinery_state(
         recipe, origin, shape, unique,
         refinery_interfaces(
             len(unique), origin_x=origin[0], origin_y=origin[1], variant=variant,
+            vertical_mirror=vertical_mirror,
         ),
-        variant,
+        variant, vertical_mirror,
     )
 
 
@@ -112,26 +120,34 @@ def recover_managed_refinery(
     candidates = []
     first_error: ValueError | None = None
     for variant in ("standard", "basic"):
-        state = infer_refinery_state(recipe, machine_positions, variant=variant)
-        plan = generate_managed_refinery_plan(
-            recipe, state.furnace_count,
-            origin_x=state.origin[0], origin_y=state.origin[1], variant=variant,
-        )
-        signature = [
-            action for action in plan_actions(plan)
-            if action["action_type"] in {"place_entity", "place_ghost"}
-            and action.get("entity", "").endswith("splitter")
-        ]
-        try:
-            _assert_live_actions(
-                client, surface, force, signature, f"{recipe} refinery",
+        for vertical_mirror in (False, True):
+            state = infer_refinery_state(
+                recipe, machine_positions, variant=variant,
+                vertical_mirror=vertical_mirror,
             )
-        except (KeyError, ValueError) as error:
-            normalized = error if isinstance(error, ValueError) else ValueError(str(error))
-            first_error = first_error or normalized
-            candidates.append(normalized)
-            continue
-        return replace(state, owned_actions=owned_actions)
+            plan = generate_managed_refinery_plan(
+                recipe, state.furnace_count,
+                origin_x=state.origin[0], origin_y=state.origin[1],
+                variant=variant, vertical_mirror=vertical_mirror,
+            )
+            signature = [
+                action for action in plan_actions(plan)
+                if action["action_type"] in {"place_entity", "place_ghost"}
+                and action.get("entity", "").endswith("splitter")
+            ]
+            try:
+                _assert_live_actions(
+                    client, surface, force, signature, f"{recipe} refinery",
+                )
+            except (KeyError, ValueError) as error:
+                normalized = (
+                    error if isinstance(error, ValueError)
+                    else ValueError(str(error))
+                )
+                first_error = first_error or normalized
+                candidates.append(normalized)
+                continue
+            return replace(state, owned_actions=owned_actions)
     raise first_error or (candidates[-1] if candidates else ValueError(
         f"{recipe} refinery has no approved template variant"
     ))
@@ -148,6 +164,7 @@ def assert_refinery_removals_owned(
         full = generate_managed_refinery_plan(
             state.recipe, state.furnace_count,
             origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
+            vertical_mirror=state.vertical_mirror,
         )
         source_actions = tuple(plan_actions(full))
     owned = {
@@ -197,6 +214,7 @@ def live_refinery_placements(
         full = generate_managed_refinery_plan(
             state.recipe, state.furnace_count,
             origin_x=state.origin[0], origin_y=state.origin[1], variant=state.variant,
+            vertical_mirror=state.vertical_mirror,
         )
         source_actions = tuple(plan_actions(full))
     expected = [

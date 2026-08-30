@@ -27,6 +27,7 @@ _ACTION_PERMISSIONS = {
     "place_ghost": "project_more_ghosts",
     "place_tile_ghost": "project_more_ghosts",
     "place_entity": "place_core_infrastructure",
+    "configure_entity": "place_core_infrastructure",
     "remove_entity": "remove_entities",
 }
 

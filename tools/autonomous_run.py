@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from copy import copy
 from datetime import datetime
@@ -39,11 +40,42 @@ class _RunLogger:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self._file = path.open("a", encoding="utf-8", buffering=1)
+        self.events_path = path.with_name("deterministic-events.jsonl")
+        self._events = self.events_path.open("a", encoding="utf-8", buffering=1)
+        self._started = time.monotonic()
+        self._sequence = 0
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _event_type(message: str) -> str:
+        prefix = message.lstrip().split(":", 1)[0].lower().replace(" ", "_")
+        known = {
+            "run_start", "run_end", "run_heartbeat", "priority", "blocker",
+            "stuck", "error", "goal_met", "survey_start", "survey_end",
+            "material_project", "mall_demand", "chemical_ladder",
+            "rationed_mall", "core_mall_ready",
+        }
+        return prefix if prefix in known else "controller_event"
 
     def emit(self, message: str) -> None:
-        line = f"{datetime.now().astimezone().isoformat(timespec='seconds')} {message}"
-        print(line, flush=True)
-        print(line, file=self._file, flush=True)
+        observed = datetime.now().astimezone().isoformat(timespec="seconds")
+        line = f"{observed} {message}"
+        with self._lock:
+            self._sequence += 1
+            event = {
+                "schema_version": 1,
+                "sequence": self._sequence,
+                "observed_at": observed,
+                "elapsed_seconds": round(time.monotonic() - self._started, 3),
+                "event_type": self._event_type(message),
+                "message": message,
+            }
+            print(line, flush=True)
+            print(line, file=self._file, flush=True)
+            print(
+                json.dumps(event, sort_keys=True, separators=(",", ":")),
+                file=self._events, flush=True,
+            )
 
     def exception(self) -> None:
         traceback.print_exc()
@@ -52,12 +84,14 @@ class _RunLogger:
 
     def close(self) -> None:
         self._file.close()
+        self._events.close()
 
 
 def _queue_helper_agent_review(
     *, log_path: Path, mission_state_path: Path,
     blocker_events_path: Path | None, episode_manifest_path: Path | None,
     emit: Callable[[str], None], data_root: Path | None = None,
+    structured_events_path: Path | None = None,
 ) -> Path:
     """Queue one bounded packet and start its asynchronous review worker."""
     packet = build_case_packet(
@@ -65,6 +99,7 @@ def _queue_helper_agent_review(
         mission_state_path=mission_state_path,
         blocker_events_path=blocker_events_path,
         episode_manifest_path=episode_manifest_path,
+        structured_events_path=structured_events_path,
     )
     helper_root = data_root or Path.home() / ".local/share/factorio-rl/helper_agent"
     packet_path = write_packet(packet, helper_root / "inbox")
@@ -570,6 +605,7 @@ def main(argv: list[str] | None = None) -> int:
                         mission_state_path=mission_state_path,
                         blocker_events_path=blocker_events_path,
                         episode_manifest_path=getattr(args, "episode_manifest", None),
+                        structured_events_path=logger.events_path,
                         emit=logger.emit,
                         data_root=getattr(args, "helper_agent_data_root", None),
                     )

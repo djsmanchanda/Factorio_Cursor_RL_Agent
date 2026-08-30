@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 from orchestrator.baseline_production import (  # noqa: E402
     BASELINE_MACHINES,
     BASELINE_PLATES,
+    CHEMICAL_BOOTSTRAP_LADDER,
+    CORE_MALL_PRODUCERS,
     PLATE_FOUNDATION_BUILD_ORDER,
     PLATE_FOUNDATION_FURNACES,
     baseline_build_order,
@@ -122,8 +124,20 @@ def test_copper_is_already_covered_by_the_opening_row() -> None:
 
 
 def test_steel_baseline_preserves_shared_iron_capacity() -> None:
-    assert STEEL_BASELINE_FURNACES == 6
-    assert STEEL_IRON_CAPACITY_FLOOR == 12
+    assert STEEL_BASELINE_FURNACES == 1
+    assert STEEL_IRON_CAPACITY_FLOOR == 1
+
+
+def test_reduced_supply_chemical_capabilities_have_one_explicit_order() -> None:
+    assert CHEMICAL_BOOTSTRAP_LADDER == (
+        "pipe", "steel-plate", "chemical-plant", "oil-refinery",
+        "offshore-pump", "pumpjack", "plastic-bar", "advanced-circuit",
+        "sulfur", "sulfuric-acid",
+    )
+    assert CORE_MALL_PRODUCERS == (
+        "assembling-machine-2", "fast-inserter", "passive-provider-chest",
+        "requester-chest", "substation",
+    )
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)

@@ -276,3 +276,36 @@ def test_missing_self_seed_starts_a_borrowed_mall_producer(
         )
 
     assert ledger.required_stock("requester-chest") == 1
+
+
+def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    started = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a: started.append((_a[4], _a[5])) or "borrowed gear cell",
+    )
+    messages = []
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "oil-refinery", 1,
+        (0.0, 0.0), messages.append,
+    )
+    assert started == [("oil-refinery", 1)]
+    assert any("mixed provider contents are expected" in line for line in messages)
+
+
+def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a: pytest.fail("self-sustaining mall must not borrow a cell"),
+    )
+
+    assert not builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "pumpjack", 1,
+        (0.0, 0.0), lambda _message: None,
+    )

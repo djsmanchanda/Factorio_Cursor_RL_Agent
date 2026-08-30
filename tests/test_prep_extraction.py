@@ -615,7 +615,7 @@ def test_fast_belts_expand_iron_after_furnace_production_starts(monkeypatch) -> 
 def test_bootstrap_furnace_caps_match_the_early_resource_policy() -> None:
     assert BOOTSTRAP_FURNACE_CAPS == {
         "iron-plate": 12, "copper-plate": 6,
-        "stone-brick": 6, "steel-plate": 6,
+        "stone-brick": 6, "steel-plate": 1,
     }
 
 

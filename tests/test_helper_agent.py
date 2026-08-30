@@ -84,6 +84,19 @@ def test_packet_builder_extracts_bounded_evidence_and_typed_blocker(tmp_path: Pa
     assert any("STUCK:" in line for line in packet["log_excerpt"]["matched_pattern_lines"])
 
 
+def test_run_logger_writes_compact_structured_events(tmp_path: Path) -> None:
+    logger = autonomous_run._RunLogger(tmp_path / "autonomous-run.log")
+    logger.emit("PRIORITY: steel-plate rating=45/100")
+    logger.close()
+
+    event = json.loads(
+        (tmp_path / "deterministic-events.jsonl").read_text(encoding="utf-8")
+    )
+    assert event["event_type"] == "priority"
+    assert event["sequence"] == 1
+    assert event["message"].startswith("PRIORITY: steel-plate")
+
+
 def test_packet_builder_preserves_unprefixed_traceback_frames(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
     log = Path(packet["source_log"])
