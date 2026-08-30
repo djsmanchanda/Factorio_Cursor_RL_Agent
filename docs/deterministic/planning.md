@@ -139,6 +139,18 @@ These names describe intended responsibilities, not permission to build speculat
   batch services the active loan through measured completion and restoration,
   defers the new batch, and retries it on the next pass; a busy or completed
   prior loan is never classified as an absence of borrowable capacity.
+  Every loan persists both its blocking bill and an optional spare ceiling:
+  it may keep producing useful extras while the slot is idle, but a competing
+  batch preempts it as soon as monotonic craft progress proves the blocking
+  bill was made. After the metal transition, a rotating splitter batch may
+  fill one stack; other low-demand batches keep at most two optional spares.
+- Iron gears and copper cable are permanent mall anchors. Recipe loans may
+  borrow only a duplicate, leaving at least one assembler on each recipe.
+  Before a saturated transport-belt cell promotes to a six-machine shared
+  line, the dynamic mall allocator borrows the second cable cell: its requester
+  first makes any missing gears, then switches to belts, while the two baseline
+  gear assemblers and one cable assembler remain assigned. The loan restores
+  the cable recipe when its reserve is full or another batch needs the slot.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may

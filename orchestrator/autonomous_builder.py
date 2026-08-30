@@ -3339,7 +3339,7 @@ def _plan_line(
         )
         emit(
             f"  INTERMEDIATE PROMOTION: {item} -- {why}; "
-            f"building a shared {promoted_count}-machine line instead of another mall cell"
+            f"capacity escalation candidate is a shared {promoted_count}-machine line"
         )
     return _LinePlan(
         existing=existing, spec=spec, production_target=stock_target,
@@ -3719,6 +3719,12 @@ def _material_sources_and_rates(
 
 
 _BOOTSTRAP_LOAN_PREFERRED = ("copper-cable", "iron-gear-wheel")
+_RATIONED_MALL_EXTRA_SPARES = 2
+_MALL_RECIPE_ANCHORS = {
+    "iron-gear-wheel": 1,
+    "copper-cable": 1,
+}
+_DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 
 
 def _bootstrap_loan_stock(
@@ -3744,22 +3750,91 @@ def _bootstrap_loan_products_finished(
     return int(counter // 1000) if counter is not None else None
 
 
+def _bootstrap_loan_minimum_crafts(
+    loan: MallBootstrapLoan, step, actual: Mapping[str, int],
+) -> int:
+    """Crafts needed for the bill, excluding optional spare production."""
+    if step.recipe != loan.target_item:
+        return step.crafts
+    missing = max(0, loan.target_count - int(actual.get(loan.target_item, 0)))
+    product_amount = max(
+        1, math.floor(float(LINE_RECIPES[step.recipe].get("product_amount", 1))),
+    )
+    return math.ceil(missing / product_amount)
+
+
+def _bootstrap_loan_minimum_fulfilled(
+    loan: MallBootstrapLoan, actual: Mapping[str, int],
+    products_finished: int | None,
+) -> bool:
+    if int(actual.get(loan.target_item, 0)) >= loan.target_count:
+        return True
+    if (
+        loan.production_target > loan.target_count
+        and loan.step_minimum_crafts == 0
+    ):
+        # V3 spare-phase metadata persists that the blocking bill completed,
+        # even while the borrowed cell is making a prerequisite for extras.
+        return True
+    return bool(
+        loan.step_recipe == loan.target_item
+        and loan.step_baseline_finished is not None
+        and loan.step_minimum_crafts is not None
+        and products_finished is not None
+        and (
+            products_finished - loan.step_baseline_finished
+            >= loan.step_minimum_crafts
+        )
+    )
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    loan: MallBootstrapLoan, emit: Callable[[str], None],
+    loan: MallBootstrapLoan, emit: Callable[[str], None], *,
+    preempt_for: str | None = None,
 ) -> str:
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
     )
-    step = next_bootstrap_step(
-        loan.target_item, loan.target_count, usable, actual,
-    )
     products_finished = (
         _bootstrap_loan_products_finished(client, surface, loan)
-        if step is not None else None
+        if loan.step_recipe is not None else None
+    )
+    minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
+        loan, actual, products_finished,
+    )
+    planning_target = (
+        loan.production_target if minimum_fulfilled else loan.target_count
+    )
+    step = next_bootstrap_step(
+        loan.target_item, planning_target, usable, actual,
+    )
+    if step is not None and products_finished is None:
+        products_finished = _bootstrap_loan_products_finished(
+            client, surface, loan,
+        )
+    preempted = bool(
+        preempt_for is not None
+        and preempt_for != loan.target_item
+        and minimum_fulfilled
+    )
+    if preempted:
+        emit(
+            f"  MALL BOOTSTRAP LOAN PREEMPT: {loan.target_item} fulfilled its "
+            f"required {loan.target_count}; releasing spare production through "
+            f"{loan.production_target} for {preempt_for}"
+        )
+        step = None
+    starting_spare_phase = bool(
+        step is not None
+        and minimum_fulfilled
+        and loan.production_target > loan.target_count
+        and loan.step_recipe == step.recipe
+        and loan.step_required_crafts == loan.step_minimum_crafts
     )
     if (
         step is not None
+        and not starting_spare_phase
         and step.recipe == loan.target_item
         and loan.step_recipe == step.recipe
         and loan.step_baseline_finished is not None
@@ -3788,16 +3863,20 @@ def _submit_bootstrap_loan(
         )
         emit(
             f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
-            f"{loan.machine_position}; {loan.target_count} {loan.target_item} "
-            "seed item(s) are now stocked"
+            f"{loan.machine_position}; {loan.target_item} required "
+            f"{loan.target_count}, spare ceiling {loan.production_target}"
         )
-        return f"restored borrowed {loan.original_recipe} producer after seed completion"
+        return (
+            f"restored borrowed {loan.original_recipe} producer after "
+            + ("spare production was preempted" if preempted else "seed completion")
+        )
 
     if (
         loan.current_recipe != step.recipe
         or loan.step_recipe != step.recipe
         or loan.step_baseline_finished is None
         or loan.step_required_crafts is None
+        or starting_spare_phase
     ):
         if products_finished is None:
             raise StuckError(
@@ -3812,6 +3891,10 @@ def _submit_bootstrap_loan(
             )
         plan = bootstrap_loan_plan(
             loan, step, baseline_finished=products_finished,
+            minimum_crafts=(
+                0 if minimum_fulfilled
+                else _bootstrap_loan_minimum_crafts(loan, step, actual)
+            ),
         )
         plan["surface"], plan["force"] = surface, force
         _submit(
@@ -3822,7 +3905,8 @@ def _submit_bootstrap_loan(
             f"  MALL BOOTSTRAP LOAN: borrowed {loan.original_recipe} at "
             f"{loan.machine_position} to make {step.recipe} through stock "
             f"{step.target_count}; requester now asks for exactly "
-            f"{step.crafts} craft(s) of ingredients"
+            f"{step.crafts} craft(s) of ingredients; bill minimum is "
+            f"{loan.target_count} {loan.target_item}"
         )
     else:
         emit(
@@ -3889,6 +3973,7 @@ def _service_bootstrap_loan(
     if loans[0].target_item != target_item:
         return _submit_bootstrap_loan(
             client, bridge, surface, force, loans[0], emit,
+            preempt_for=target_item,
         )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loans[0], emit,
@@ -3898,7 +3983,8 @@ def _service_bootstrap_loan(
 def _start_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_item: str, target_count: int, reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, spare_target_count: int | None = None,
+    allowed_original_recipes: frozenset[str] | None = None,
 ) -> str | None:
     existing = active_bootstrap_loans(client, surface, force)
     if existing:
@@ -3923,11 +4009,16 @@ def _start_bootstrap_loan(
         # borrow the cell for ``target_item``.
         return _submit_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
+            preempt_for=target_item if loan.target_item != target_item else None,
         )
     stock = live_base.available_items(client, surface, force)
     recipes = [
         recipe for recipe, spec in LINE_RECIPES.items()
         if recipe != target_item
+        and (
+            allowed_original_recipes is None
+            or recipe in allowed_original_recipes
+        )
         and spec.get("set_recipe", True)
         and spec.get("machine") == "assembling-machine-2"
         and not spec.get("fluid_ingredients")
@@ -3947,6 +4038,11 @@ def _start_bootstrap_loan(
         )
         if line is None:
             continue
+        anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
+        if line.machine_count <= anchor_minimum:
+            # Gear and cable are the bootstrap mall's feedstock anchors. A
+            # recipe loan may use a duplicate, never the last producer.
+            continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
             if located is None:
@@ -3960,9 +4056,8 @@ def _start_bootstrap_loan(
                 or not requester or requester["name"] != "requester-chest"
             ):
                 continue
-            # Prefer an actually spare duplicate. A sole producer may still be
-            # rationed when it has already accumulated stock; its recipe and
-            # request group are restored as soon as the finite batch completes.
+            # Prefer an actually spare duplicate. Non-anchor recipes may still
+            # lend a stocked sole producer; anchor recipes were filtered above.
             spare_rank = 0 if line.machine_count >= 2 else 1
             stock_rank = 0 if stock.get(original_recipe, 0) > 0 else 1
             candidates.append((
@@ -3977,6 +4072,7 @@ def _start_bootstrap_loan(
         original_recipe=original_recipe,
         target_item=target_item,
         target_count=target_count,
+        spare_target_count=max(target_count, spare_target_count or target_count),
         side=side,
         requester_position=requester_position,
         current_recipe=original_recipe,
@@ -3984,6 +4080,84 @@ def _start_bootstrap_loan(
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loan, emit,
     )
+
+
+def _allocate_dynamic_belt_capacity(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    item: str, reference_point: Point, emit: Callable[[str], None],
+    plan: _LinePlan, required_target: int,
+) -> bool:
+    """Borrow one duplicate cable cell before building a six-machine belt line.
+
+    The loan planner recursively makes missing gears first, so the same spare
+    machine temporarily reinforces gears and then switches to belts. The two
+    baseline gear machines stay in place, and borrowing one of the two cable
+    machines leaves the required permanent cable anchor.
+    """
+    if (
+        item != "transport-belt"
+        or not plan.promote_to_line
+        or plan.existing is None
+    ):
+        return False
+    loans = active_bootstrap_loans(client, surface, force)
+    if loans:
+        return bool(
+            len(loans) == 1
+            and loans[0].target_item == item
+            and loans[0].original_recipe in _DYNAMIC_BELT_BORROWERS
+        )
+    anchor_counts: dict[str, int] = {}
+    for recipe in _MALL_RECIPE_ANCHORS:
+        spec = LINE_RECIPES[recipe]
+        line = live_base.find_line(
+            client, surface, force, recipe, str(spec["machine"]),
+        )
+        anchor_counts[recipe] = line.machine_count if line is not None else 0
+    missing_anchor = next(
+        (
+            recipe for recipe, count in anchor_counts.items()
+            if count < BASELINE_MACHINES[recipe]
+        ),
+        None,
+    )
+    if missing_anchor is not None:
+        emit(
+            f"  DYNAMIC MALL WAIT: belt backlog needs the baseline "
+            f"{missing_anchor} pair before a cell can be borrowed"
+        )
+        ensure_produced(
+            client, bridge, surface, force, missing_anchor, reference_point,
+            emit, upgrade_bootstrap=False,
+            stock_target=max(1, plan.production_target),
+            minimum_machines=BASELINE_MACHINES[missing_anchor],
+            allow_promotion=False,
+        )
+        raise ProductionPrerequisiteDeferred(
+            f"dynamic belt allocation is preserving the {missing_anchor} anchor",
+            code="dynamic_mall_anchor_wait", state="constructing",
+            details={"item": item, "anchor": missing_anchor},
+        )
+    spare_target = max(plan.production_target, plan.mall_storage_limit)
+    remedy = _start_bootstrap_loan(
+        client, bridge, surface, force, item, required_target,
+        reference_point, emit, spare_target_count=spare_target,
+        allowed_original_recipes=_DYNAMIC_BELT_BORROWERS,
+    )
+    if remedy is None:
+        raise StuckError(
+            "large transport-belt backlog has two cable producers but no "
+            "borrowable paired mall cell",
+            code="dynamic_mall_no_borrower", classification="bug",
+            state="supply_wait",
+            details={"item": item, "anchors": anchor_counts},
+        )
+    emit(
+        "  DYNAMIC MALL ALLOCATION: borrowed one duplicate copper-cable cell "
+        f"for belts through {spare_target}; missing gears are produced first, "
+        "while two gear assemblers and one cable assembler remain assigned"
+    )
+    return True
 
 
 def _reserve_compact_mall_project(
@@ -4407,7 +4581,7 @@ def ensure_produced(
     upgrade_bootstrap: bool = True, stock_target: int = 1,
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
-    fill_provider: bool = False,
+    fill_provider: bool = False, blocking_stock_target: int | None = None,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -4507,6 +4681,19 @@ def ensure_produced(
         existing.working_count > 0 or getattr(existing, "produced_count", 0) > 0
     ):
         _complete_material_producer(item)
+    if (
+        existing
+        and plan.at_size
+        and not upgrade_bootstrap
+        and _allocate_dynamic_belt_capacity(
+            client, bridge, surface, force, item, reference_point, emit, plan,
+            max(1, blocking_stock_target or plan.production_target),
+        )
+    ):
+        return _serve_healthy_line(
+            client, bridge, surface, force, item, reference_point, emit,
+            plan, mall_provider, upgrade_bootstrap=upgrade_bootstrap,
+        )
     # An UNDER-SIZED line falls through to the build path: production prep asks
     # for a standing number of machines, and a line that exists with fewer than
     # that is not finished being built.
@@ -4550,6 +4737,24 @@ def _core_mall_ready(
     )
 
 
+def _rationed_mall_spare_target(
+    client: RconClient, surface: str, force: str, item: str, required: int,
+) -> int:
+    """Bound optional rotating-slot output without delaying its current bill."""
+    reserve = mall_reserve_for(client, surface, force, item, required)
+    if (
+        item == "splitter"
+        and _metal_starter_transition_complete(client, surface, force)
+    ):
+        # Once both permanent metal districts are live, keeping one complete
+        # splitter stack is affordable and prevents every mine module from
+        # reopening the same tiny batch.
+        return max(required, reserve.storage_count)
+    if reserve.storage_count <= required:
+        return required
+    return min(reserve.storage_count, required + _RATIONED_MALL_EXTRA_SPARES)
+
+
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
@@ -4568,8 +4773,12 @@ def _rationed_mall_batch(
     stock = live_base.available_items(client, surface, force)
     if stock.get(item, 0) >= target:
         return False
+    spare_target = _rationed_mall_spare_target(
+        client, surface, force, item, target,
+    )
     remedy = _start_bootstrap_loan(
         client, bridge, surface, force, item, target, reference_point, emit,
+        spare_target_count=spare_target,
     )
     if remedy is None:
         active = active_bootstrap_loans(client, surface, force)
@@ -4597,7 +4806,8 @@ def _rationed_mall_batch(
         )
     emit(
         f"  RATIONED MALL: {item} is a finite batch until core cell producers "
-        f"are live; mixed provider contents are expected ({remedy})"
+        f"are live; required={target}, spare ceiling={spare_target}, mixed "
+        f"provider contents are expected ({remedy})"
     )
     return True
 
@@ -4683,7 +4893,7 @@ def _ensure_mall_item(
             upgrade_bootstrap=False, stock_target=production_target,
             stock_gate_target=reserve.gate_target,
             storage_limit=reserve.storage_count,
-            fill_provider=reserve.fill_chest,
+            fill_provider=reserve.fill_chest, blocking_stock_target=target,
         )
     except ProductionPrerequisiteDeferred as deferred:
         emit(f"  MALL DEFERRED: {deferred}")

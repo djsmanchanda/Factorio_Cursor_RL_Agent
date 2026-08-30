@@ -350,6 +350,8 @@ def test_last_runner_run_returns_newest_complete_boundary_block(tmp_path: Path) 
         "RUN START: ts=2026-08-28T11:00:00+05:30 command=research target=two\n"
         "+1s second\n"
         "+2s RUN END\n"
+        "+2s HELPER AGENT: queued post-run review packet /tmp/two.json\n"
+        "+2s HELPER AGENT: started post-run processor unit=two.service\n"
         "RUN START: ts=2026-08-28T12:00:00+05:30 command=research target=active\n",
         encoding="utf-8",
     )
@@ -361,9 +363,29 @@ def test_last_runner_run_returns_newest_complete_boundary_block(tmp_path: Path) 
     assert "target=two" in copied
     assert "second" in copied
     assert copied.startswith("RUN START: ts=2026-08-28T11:00:00+05:30")
-    assert copied.endswith("+2s RUN END\n")
+    assert "+2s RUN END\n" in copied
+    assert copied.endswith("+2s HELPER AGENT: started post-run processor unit=two.service\n")
     assert "target=one" not in copied
     assert "target=active" not in copied
+
+
+def test_last_runner_run_accepts_legacy_boundaries_and_helper_postscript(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "autonomous-run.log"
+    log.write_text(
+        "2026-08-28T10:00:00+05:30 RUN START: command=research target=legacy\n"
+        "2026-08-28T10:00:02+05:30 RUN END\n"
+        "2026-08-28T10:00:02+05:30 HELPER AGENT: queued packet\n",
+        encoding="utf-8",
+    )
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(runner_log=log)
+
+    copied = manager.last_runner_run()["text"]
+
+    assert copied.startswith("2026-08-28T10:00:00+05:30 RUN START:")
+    assert copied.endswith("HELPER AGENT: queued packet\n")
 
 
 def test_last_runner_run_rejects_log_without_complete_run(tmp_path: Path) -> None:

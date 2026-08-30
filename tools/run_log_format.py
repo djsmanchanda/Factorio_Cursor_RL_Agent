@@ -52,3 +52,18 @@ def is_run_start_line(line: str | bytes) -> bool:
     if isinstance(line, bytes):
         return line.startswith(b"RUN START: ts=") or b" RUN START:" in line
     return line.startswith("RUN START: ts=") or " RUN START:" in line
+
+
+def is_run_end_line(line: str | bytes) -> bool:
+    """Recognize compact, legacy, and unprefixed terminal boundaries."""
+    stripped = line.rstrip()
+    if isinstance(stripped, bytes):
+        return stripped == b"RUN END" or stripped.endswith(b" RUN END")
+    return stripped == "RUN END" or stripped.endswith(" RUN END")
+
+
+def is_helper_agent_line(line: str | bytes) -> bool:
+    """Recognize post-run Helper Agent handoff messages in either time format."""
+    if isinstance(line, bytes):
+        return line.startswith(b"HELPER AGENT:") or b" HELPER AGENT:" in line
+    return line.startswith("HELPER AGENT:") or " HELPER AGENT:" in line

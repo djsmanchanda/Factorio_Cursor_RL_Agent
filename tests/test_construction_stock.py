@@ -430,6 +430,36 @@ def test_belt_components_use_one_stack_after_starter_migration(monkeypatch) -> N
     )
 
 
+def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"splitter": 50},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+
+    assert builder._rationed_mall_spare_target(
+        object(), "nauvis", "player", "splitter", 3,
+    ) == 50
+
+
+def test_rotating_machine_batch_keeps_two_bounded_spares(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "mall_reserve_for",
+        lambda *_args: MallReserve(50, 50, 1),
+    )
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+
+    assert builder._rationed_mall_spare_target(
+        object(), "nauvis", "player", "oil-refinery", 1,
+    ) == 3
+
+
 # --- the persisted-target trap ---------------------------------------------
 
 def test_a_persisted_target_never_outlives_the_mission_that_set_it() -> None:

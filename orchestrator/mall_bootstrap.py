@@ -21,6 +21,7 @@ Point = tuple[float, float]
 _LOAN_PREFIX = "mall-bootstrap:"
 _LOAN_V1_PREFIX = f"{_LOAN_PREFIX}v1:"
 _LOAN_V2_PREFIX = f"{_LOAN_PREFIX}v2:"
+_LOAN_V3_PREFIX = f"{_LOAN_PREFIX}v3:"
 
 
 @dataclass(frozen=True)
@@ -33,9 +34,15 @@ class MallBootstrapLoan:
     side: str
     requester_position: Point
     current_recipe: str
+    spare_target_count: int | None = None
     step_recipe: str | None = None
     step_baseline_finished: int | None = None
     step_required_crafts: int | None = None
+    step_minimum_crafts: int | None = None
+
+    @property
+    def production_target(self) -> int:
+        return max(self.target_count, self.spare_target_count or self.target_count)
 
     @property
     def group(self) -> str:
@@ -43,23 +50,28 @@ class MallBootstrapLoan:
             self.step_recipe is None
             or self.step_baseline_finished is None
             or self.step_required_crafts is None
+            or self.step_minimum_crafts is None
         ):
             return bootstrap_loan_group(
                 self.original_recipe, self.target_item, self.target_count, self.side,
             )
         return (
-            f"{_LOAN_V2_PREFIX}{self.original_recipe}:{self.target_item}:"
-            f"{self.target_count}:{self.side}:{self.step_recipe}:"
-            f"{self.step_baseline_finished}:{self.step_required_crafts}"
+            f"{_LOAN_V3_PREFIX}{self.original_recipe}:{self.target_item}:"
+            f"{self.target_count}:{self.production_target}:{self.side}:"
+            f"{self.step_recipe}:{self.step_baseline_finished}:"
+            f"{self.step_required_crafts}:{self.step_minimum_crafts}"
         )
 
     def starting_step(
         self, recipe: str, baseline_finished: int, required_crafts: int,
+        minimum_crafts: int,
     ) -> "MallBootstrapLoan":
         return replace(
             self, current_recipe=recipe, step_recipe=recipe,
+            spare_target_count=self.production_target,
             step_baseline_finished=max(0, int(baseline_finished)),
             step_required_crafts=max(1, int(required_crafts)),
+            step_minimum_crafts=max(0, int(minimum_crafts)),
         )
 
     @property
@@ -94,36 +106,56 @@ def bootstrap_loan_group(
 
 def parse_bootstrap_loan_group(
     group: str,
-) -> tuple[str, str, int, str, str | None, int | None, int | None] | None:
+) -> tuple[
+    str, str, int, int | None, str, str | None, int | None, int | None,
+    int | None,
+] | None:
     if group.startswith(_LOAN_V1_PREFIX):
         fields = group[len(_LOAN_V1_PREFIX):].split(":")
         if len(fields) != 4:
             return None
         original, target, raw_count, side = fields
-        step, raw_baseline, raw_required = None, None, None
+        raw_spare = None
+        step, raw_baseline, raw_required, raw_minimum = None, None, None, None
     elif group.startswith(_LOAN_V2_PREFIX):
         fields = group[len(_LOAN_V2_PREFIX):].split(":")
         if len(fields) != 7:
             return None
         original, target, raw_count, side, step, raw_baseline, raw_required = fields
+        raw_spare, raw_minimum = None, None
+    elif group.startswith(_LOAN_V3_PREFIX):
+        fields = group[len(_LOAN_V3_PREFIX):].split(":")
+        if len(fields) != 9:
+            return None
+        (
+            original, target, raw_count, raw_spare, side, step,
+            raw_baseline, raw_required, raw_minimum,
+        ) = fields
     else:
         return None
     try:
         count = int(raw_count)
+        spare = int(raw_spare) if raw_spare is not None else None
         baseline = int(raw_baseline) if raw_baseline is not None else None
         required = int(raw_required) if raw_required is not None else None
+        minimum = int(raw_minimum) if raw_minimum is not None else None
     except ValueError:
         return None
     if (
         not original or not target or count < 1
+        or (spare is not None and spare < count)
         or side not in {"left", "right"}
         or (step is not None and (
             not step or baseline is None or baseline < 0
             or required is None or required < 1
+            or (group.startswith(_LOAN_V3_PREFIX)
+                and (minimum is None or minimum < 0 or minimum > required))
         ))
     ):
         return None
-    return original, target, count, side, step, baseline, required
+    return (
+        original, target, count, spare, side, step, baseline, required, minimum,
+    )
 
 
 def _temporary_assembler_recipe(item: str) -> bool:
@@ -210,17 +242,22 @@ def active_bootstrap_loans(
         parsed = parse_bootstrap_loan_group(group)
         if parsed is None:
             continue
-        original, target, count, side, step, baseline, required = parsed
+        (
+            original, target, count, spare, side, step, baseline, required,
+            minimum,
+        ) = parsed
         loans.append(MallBootstrapLoan(
             original_recipe=original,
             target_item=target,
             target_count=count,
+            spare_target_count=spare,
             side=side,
             requester_position=(float(raw_x), float(raw_y)),
             current_recipe=left_recipe if side == "left" else right_recipe,
             step_recipe=step,
             step_baseline_finished=baseline,
             step_required_crafts=required,
+            step_minimum_crafts=minimum,
         ))
     return tuple(loans)
 
@@ -231,10 +268,13 @@ def _as_configuration(action: dict) -> dict:
 
 def bootstrap_loan_plan(
     loan: MallBootstrapLoan, step: MallBootstrapStep, *,
-    baseline_finished: int = 0,
+    baseline_finished: int = 0, minimum_crafts: int | None = None,
 ) -> dict:
     """Retarget the borrowed machine, requester ingredients, gate, and output."""
-    active = loan.starting_step(step.recipe, baseline_finished, step.crafts)
+    active = loan.starting_step(
+        step.recipe, baseline_finished, step.crafts,
+        step.crafts if minimum_crafts is None else minimum_crafts,
+    )
     spec = LINE_RECIPES[step.recipe]
     requests = recipe_group_requests(spec["ingredients"], spec["amounts"])
     machine = {

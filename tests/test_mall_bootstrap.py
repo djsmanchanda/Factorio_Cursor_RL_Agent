@@ -102,7 +102,7 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
     assert requester["logistic_sections"][0]["multiplier"] == 2
     assert requester["clear_logistic_groups"] == [_loan().group]
     assert requester["logistic_sections"][0]["group"].startswith(
-        "mall-bootstrap:v2:"
+        "mall-bootstrap:v3:"
     )
     assert not list(SCHEMA.iter_errors(plan))
 
@@ -154,3 +154,19 @@ def test_active_v2_loan_recovers_step_baseline_for_consumed_output() -> None:
             step_baseline_finished=41, step_required_crafts=3,
         ),
     )
+
+
+def test_active_v3_loan_recovers_required_and_spare_thresholds() -> None:
+    class Client:
+        def command(self, _command: str) -> str:
+            return (
+                "mall-bootstrap:v3:copper-cable:splitter:3:50:left:splitter:"
+                "41:50:3|39.5|38.5|splitter|transport-belt"
+            )
+
+    loan = active_bootstrap_loans(Client(), "nauvis", "player")[0]
+
+    assert loan.target_count == 3
+    assert loan.production_target == 50
+    assert loan.step_required_crafts == 50
+    assert loan.step_minimum_crafts == 3

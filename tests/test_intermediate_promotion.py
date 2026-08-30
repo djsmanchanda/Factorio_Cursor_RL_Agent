@@ -145,3 +145,72 @@ def test_promoted_line_expands_raw_input_before_building_downstream(monkeypatch)
     )
 
     assert expanded == ["iron-plate"]
+
+
+def test_large_belt_backlog_borrows_duplicate_cable_before_shared_line(
+    monkeypatch,
+) -> None:
+    existing = SimpleNamespace(machine_count=1)
+    plan = SimpleNamespace(
+        existing=existing, promote_to_line=True,
+        production_target=200, mall_storage_limit=400,
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+
+    def line(_client, _surface, _force, recipe, _machine):
+        if recipe in {"iron-gear-wheel", "copper-cable"}:
+            return SimpleNamespace(machine_count=2)
+        return None
+
+    monkeypatch.setattr(builder.live_base, "find_line", line)
+    started: list[tuple[str, int, dict]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **kwargs: started.append((_a[4], _a[5], kwargs))
+        or "borrowed duplicate cable cell",
+    )
+    messages: list[str] = []
+
+    assert builder._allocate_dynamic_belt_capacity(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (0.0, 0.0), messages.append, plan, 120,
+    )
+    assert started == [(
+        "transport-belt", 120, {
+            "spare_target_count": 400,
+            "allowed_original_recipes": frozenset({"copper-cable"}),
+        },
+    )]
+    assert any("two gear assemblers" in message for message in messages)
+
+
+def test_dynamic_belt_capacity_builds_missing_anchor_instead_of_six_line(
+    monkeypatch,
+) -> None:
+    plan = SimpleNamespace(
+        existing=SimpleNamespace(machine_count=1), promote_to_line=True,
+        production_target=200, mall_storage_limit=400,
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+
+    def line(_client, _surface, _force, recipe, _machine):
+        count = {"iron-gear-wheel": 1, "copper-cable": 2}.get(recipe)
+        return SimpleNamespace(machine_count=count) if count else None
+
+    monkeypatch.setattr(builder.live_base, "find_line", line)
+    ensured: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_a, **kwargs: ensured.append((_a[4], kwargs)),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as raised:
+        builder._allocate_dynamic_belt_capacity(
+            object(), object(), "nauvis", "player", "transport-belt",
+            (0.0, 0.0), lambda _message: None, plan, 120,
+        )
+
+    assert raised.value.code == "dynamic_mall_anchor_wait"
+    assert ensured[0][0] == "iron-gear-wheel"
+    assert ensured[0][1]["minimum_machines"] == 2
+    assert ensured[0][1]["allow_promotion"] is False

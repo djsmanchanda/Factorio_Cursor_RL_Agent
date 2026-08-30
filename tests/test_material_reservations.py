@@ -286,7 +286,11 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
     started = []
     monkeypatch.setattr(
         builder, "_start_bootstrap_loan",
-        lambda *_a: started.append((_a[4], _a[5])) or "borrowed gear cell",
+        lambda *_a, **_k: started.append((_a[4], _a[5], _k))
+        or "borrowed gear cell",
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a: 3,
     )
     messages = []
 
@@ -294,7 +298,9 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
         object(), object(), "nauvis", "player", "oil-refinery", 1,
         (0.0, 0.0), messages.append,
     )
-    assert started == [("oil-refinery", 1)]
+    assert started == [(
+        "oil-refinery", 1, {"spare_target_count": 3},
+    )]
     assert any("mixed provider contents are expected" in line for line in messages)
 
 
@@ -321,8 +327,11 @@ def test_new_rationed_target_services_and_restores_the_active_loan(
     )
     monkeypatch.setattr(
         builder, "_submit_bootstrap_loan",
-        lambda *_a: submitted.append(_a[4])
+        lambda *_a, **_k: submitted.append(_a[4])
         or "restored borrowed copper-cable producer after seed completion",
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a: 8,
     )
 
     assert builder._rationed_mall_batch(
@@ -365,7 +374,9 @@ def test_completed_prior_loan_is_restored_before_the_new_batch(
         (0.0, 0.0), messages.append,
     )
 
-    assert result == "restored borrowed copper-cable producer after seed completion"
+    assert result == (
+        "restored borrowed copper-cable producer after spare production was preempted"
+    )
     assert submitted[0][0] == "restore_bootstrap_loan_splitter"
     machine = submitted[0][1]["phases"][0]["actions"][0]
     assert machine["recipe"] == "copper-cable"
@@ -488,6 +499,160 @@ def test_loan_gate_rechecks_stock_after_the_poll(monkeypatch) -> None:
     assert "producing temporary splitter" in result
 
 
+def test_competing_batch_preempts_optional_spares_after_minimum_crafts(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, spare_target_count=50, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+        step_recipe="splitter", step_baseline_finished=40,
+        step_required_crafts=50, step_minimum_crafts=3,
+    )
+    stock = {"iron-plate": 100, "splitter": 0}
+    submitted: list[str] = []
+    messages: list[str] = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 43,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert "spare production was preempted" in result
+    assert submitted == ["restore_bootstrap_loan_splitter"]
+    assert any("LOAN PREEMPT" in message for message in messages)
+
+
+def test_active_batch_keeps_making_spares_without_a_competitor(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, spare_target_count=50, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+        step_recipe="splitter", step_baseline_finished=40,
+        step_required_crafts=50, step_minimum_crafts=3,
+    )
+    stock = {"iron-plate": 100, "splitter": 3}
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 43,
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan, lambda _message: None,
+    )
+
+    assert "producing temporary splitter" in result
+
+
+def test_optional_spares_do_not_expand_prerequisites_before_blocking_bill(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-gear-wheel"],
+        "amounts": [1], "product_amount": 1, "craft_time": 1.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-gear-wheel", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, spare_target_count=50, side="left",
+        requester_position=(50.5, 32.5), current_recipe="copper-cable",
+    )
+    stock = {"iron-plate": 100, "iron-gear-wheel": 0, "splitter": 0}
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 10,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    actions = submitted[0]["phases"][0]["actions"]
+    machine = next(
+        action for action in actions
+        if action["entity"] == "assembling-machine-2"
+    )
+    requester = next(
+        action for action in actions if action["entity"] == "requester-chest"
+    )
+    assert machine["recipe"] == "iron-gear-wheel"
+    assert requester["logistic_sections"][0]["multiplier"] == 3
+
+
+def test_completed_bill_enters_durable_spare_phase(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, spare_target_count=50, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+        step_recipe="splitter", step_baseline_finished=40,
+        step_required_crafts=3, step_minimum_crafts=3,
+    )
+    stock = {"iron-plate": 100, "splitter": 0}
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 43,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    actions = submitted[0]["phases"][0]["actions"]
+    requester = next(
+        action for action in actions if action["entity"] == "requester-chest"
+    )
+    group = requester["logistic_sections"][0]["group"]
+    assert group.endswith(":splitter:43:50:0")
+
+
 def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(
@@ -499,3 +664,27 @@ def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
         object(), object(), "nauvis", "player", "pumpjack", 1,
         (0.0, 0.0), lambda _message: None,
     )
+
+
+def test_recipe_loan_never_borrows_the_last_gear_or_cable_machine(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"iron-gear-wheel": 100, "copper-cable": 100},
+    )
+
+    def line(_client, _surface, _force, recipe, _machine):
+        if recipe not in {"iron-gear-wheel", "copper-cable"}:
+            return None
+        return SimpleNamespace(
+            machine_count=1, machine_positions=((10.5, 10.5),),
+        )
+
+    monkeypatch.setattr(builder.live_base, "find_line", line)
+
+    assert builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "splitter", 2,
+        (0.0, 0.0), lambda _message: None,
+    ) is None

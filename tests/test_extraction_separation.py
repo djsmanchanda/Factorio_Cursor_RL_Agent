@@ -898,6 +898,10 @@ def test_real_builder_submits_ore_then_calls_modular_refinery(
     )
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        autonomous_builder, "_ensure_power_anchor_on_generated_network",
+        lambda *_a, **_k: None,
+    )
 
     def build_modular(*args, **_kwargs):
         conversion["recipe"] = args[4]
@@ -949,6 +953,10 @@ def test_new_mine_relocates_poles_off_collector_before_submission(
     )
     monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        autonomous_builder, "_ensure_power_anchor_on_generated_network",
+        lambda *_a, **_k: None,
+    )
 
     autonomous_builder._place_new_mine(
         client, object(), "nauvis", "player", extraction, lambda _message: None,

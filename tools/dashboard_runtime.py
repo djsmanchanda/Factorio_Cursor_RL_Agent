@@ -28,7 +28,9 @@ from orchestrator.research_queue import (
     ResearchQueueError, load_queue, merge_queue, validate_technology_list,
 )
 from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
-from tools.run_log_format import is_run_start_line
+from tools.run_log_format import (
+    is_helper_agent_line, is_run_end_line, is_run_start_line,
+)
 from helper_agent import dashboard as helper_dashboard
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
@@ -168,7 +170,7 @@ class OperationManager:
         lines = data.splitlines(keepends=True)
         end_index = next(
             (index for index in range(len(lines) - 1, -1, -1)
-             if lines[index].rstrip().endswith(b" RUN END")),
+             if is_run_end_line(lines[index])),
             None,
         )
         if end_index is None:
@@ -180,7 +182,19 @@ class OperationManager:
         )
         if start_index is None:
             raise OperationError("The latest RUN END has no matching RUN START.")
-        text = b"".join(lines[start_index:end_index + 1]).decode("utf-8", errors="replace")
+        copy_end = end_index
+        for index in range(end_index + 1, len(lines)):
+            if is_run_start_line(lines[index]):
+                break
+            if is_helper_agent_line(lines[index]):
+                copy_end = index
+                continue
+            if lines[index].strip():
+                break
+            copy_end = index
+        text = b"".join(lines[start_index:copy_end + 1]).decode(
+            "utf-8", errors="replace",
+        )
         return {"text": text}
 
     def helper_agent(self) -> dict:
