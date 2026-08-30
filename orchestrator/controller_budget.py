@@ -22,11 +22,18 @@ class ControlBudget:
     remediations: int = 0
     waits: int = 0
     diagnoses: int = 0
+    progress_credits: int = 0
 
     def begin_pass(self) -> None:
         if self.passes >= self.max_passes:
             raise BudgetExhausted(f"control pass budget exhausted at {self.passes} passes")
         self.passes += 1
+
+    def credit_progress_pass(self) -> None:
+        """Do not spend the control-loop limit on an observably productive pass."""
+        if self.passes > 0:
+            self.passes -= 1
+            self.progress_credits += 1
 
     def consume_plan(self, name: str) -> None:
         if self.plans >= self.max_plans:

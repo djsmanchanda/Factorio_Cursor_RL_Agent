@@ -3359,6 +3359,20 @@ def _plan_line(
     )
 
 
+def _submit_mall_refresh_once(
+    signature: tuple[object, ...], action: Callable[[], object],
+) -> bool:
+    """Apply unchanged mall maintenance once per run and configuration."""
+    if signature in _MALL_REFRESH_SIGNATURES:
+        return False
+    result = action()
+    # A paired-request refresh returns False while its topology is incomplete;
+    # leave that case retryable. Plan submission helpers return None on success.
+    if result is not False:
+        _MALL_REFRESH_SIGNATURES.add(signature)
+    return True
+
+
 def _refresh_mall_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     plan: _LinePlan, emit: Callable[[str], None], *, upgrade_bootstrap: bool,
@@ -3390,17 +3404,31 @@ def _refresh_mall_cell(
                 product_amount=spec.get("product_amount", 1),
             )
             request_plan["surface"], request_plan["force"] = surface, force
-            _submit(
-                client, bridge, surface, request_plan,
-                f"compact_mall_requests_{item}", emit,
+            _submit_mall_refresh_once(
+                (
+                    "compact_requests", surface, force, item,
+                    machine_position, plan.production_target,
+                ),
+                lambda: _submit(
+                    client, bridge, surface, request_plan,
+                    f"compact_mall_requests_{item}", emit,
+                ),
             )
 
     if existing and not _mineable(item):
         if getattr(plan, "mall_request_multiplier", None) is not None and not upgrade_bootstrap:
-            refresh_paired_mall_requests(
-                client, bridge, surface, force, item,
-                list(existing.machine_positions), reference_point, emit,
-                request_multiplier_override=plan.mall_request_multiplier,
+            machine_positions = tuple(existing.machine_positions)
+            _submit_mall_refresh_once(
+                (
+                    "paired_requests", surface, force, item,
+                    machine_positions, reference_point,
+                    plan.mall_request_multiplier,
+                ),
+                lambda: refresh_paired_mall_requests(
+                    client, bridge, surface, force, item,
+                    list(machine_positions), reference_point, emit,
+                    request_multiplier_override=plan.mall_request_multiplier,
+                ),
             )
         mall_provider = _paired_mall_provider(
             client, surface, existing.machine_positions,
@@ -3417,24 +3445,44 @@ def _refresh_mall_cell(
                 if plan.fill_provider or shared_output
                 else str(mall_storage_limit)
             )
-            emit(f"  MALL RESERVE: {item} provider at {mall_provider} holds {capacity}")
             limit_plan = generate_mall_provider_limit_update(
                 item, mall_provider, mall_storage_limit,
                 fill_chest=plan.fill_provider or shared_output,
             )
             limit_plan["surface"], limit_plan["force"] = surface, force
-            _submit(
-                client, bridge, surface, limit_plan,
-                f"mall_provider_limit_{item}", emit,
+            shared_or_fill = plan.fill_provider or shared_output
+
+            def refresh_provider_limit() -> None:
+                emit(
+                    f"  MALL RESERVE: {item} provider at {mall_provider} "
+                    f"holds {capacity}"
+                )
+                _submit(
+                    client, bridge, surface, limit_plan,
+                    f"mall_provider_limit_{item}", emit,
+                )
+
+            _submit_mall_refresh_once(
+                (
+                    "provider_limit", surface, force, item, mall_provider,
+                    mall_storage_limit, shared_or_fill,
+                ),
+                refresh_provider_limit,
             )
             gate_plan = generate_mall_stock_gate_update(
                 item, spec["machine"], list(existing.machine_positions),
                 stock_gate_target,
             )
             gate_plan["surface"], gate_plan["force"] = surface, force
-            _submit(
-                client, bridge, surface, gate_plan,
-                f"mall_stock_gate_{item}", emit,
+            _submit_mall_refresh_once(
+                (
+                    "stock_gate", surface, force, item,
+                    tuple(existing.machine_positions), stock_gate_target,
+                ),
+                lambda: _submit(
+                    client, bridge, surface, gate_plan,
+                    f"mall_stock_gate_{item}", emit,
+                ),
             )
     return mall_provider
 
@@ -3744,6 +3792,9 @@ _MALL_RECIPE_ANCHORS = {
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
+_MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
+_PARALLEL_BOOTSTRAP_RESERVE_ITEMS = frozenset({"electronic-circuit", "splitter"})
+_PARALLEL_BOOTSTRAP_BACKLOG_SECONDS = 60.0
 
 
 def _bootstrap_loan_stock(
@@ -3881,6 +3932,10 @@ def _submit_bootstrap_loan(
             client, bridge, surface, plan,
             f"restore_bootstrap_loan_{loan.target_item}", emit,
         )
+        # The borrowed machine's normal requester and gate were replaced by
+        # the loan. Its restored recipe must be eligible for one fresh
+        # maintenance submission on the next survey.
+        _MALL_REFRESH_SIGNATURES.clear()
         emit(
             f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
             f"{loan.machine_position}; {loan.target_item} required "
@@ -3921,6 +3976,7 @@ def _submit_bootstrap_loan(
             client, bridge, surface, plan,
             f"bootstrap_loan_{loan.target_item}", emit,
         )
+        _MALL_REFRESH_SIGNATURES.clear()
         emit(
             f"  MALL BOOTSTRAP LOAN: borrowed {loan.original_recipe} at "
             f"{loan.machine_position} to make {step.recipe} through stock "
@@ -4887,6 +4943,56 @@ def _bootstrap_demand_cell_affordable(
     return not shortage, shortage
 
 
+def _bootstrap_reserve_machine_target(
+    client: RconClient, surface: str, force: str, item: str, target: int,
+    reference_point: Point, emit: Callable[[str], None], *, background: bool,
+) -> int:
+    """Fund a second temporary producer when a transition reserve is slow.
+
+    The ten-slot bootstrap pool is capacity, not just recipe coverage. Once a
+    producer exists, a blocking one-stack circuit or splitter reserve may use
+    one additional shared-output slot when its remaining backlog exceeds a
+    minute. Exact cell materials and the pool limit remain hard gates.
+    """
+    if (
+        background
+        or item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS
+        or _core_mall_ready(client, surface, force)
+        or not _metal_starter_transition_complete(client, surface, force)
+        or target < ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+    ):
+        return 1
+    spec = LINE_RECIPES[item]
+    existing = live_base.find_line(
+        client, surface, force, item, str(spec["machine"]),
+    )
+    existing_count = existing.machine_count if existing is not None else 0
+    if existing_count != 1:
+        return max(1, existing_count)
+    stock = live_base.available_items(client, surface, force)
+    outstanding = max(0, target - int(stock.get(item, 0)))
+    backlog = backlog_seconds(item, outstanding, existing_count)
+    if backlog <= _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS:
+        return existing_count
+    affordable, shortage = _bootstrap_demand_cell_affordable(
+        client, surface, force, item, target, reference_point,
+    )
+    if not affordable:
+        if shortage:
+            emit(
+                f"  DYNAMIC MALL CAPACITY WAIT: a second {item} producer "
+                "would consume reserved " + ", ".join(sorted(shortage))
+            )
+        return existing_count
+    _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
+    emit(
+        f"  DYNAMIC MALL CAPACITY: {item} has {backlog:.0f}s of blocking "
+        f"backlog; funding 2 producers within the "
+        f"{BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool"
+    )
+    return 2
+
+
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
@@ -5030,6 +5136,10 @@ def _ensure_mall_item(
                 reserve.storage_stacks,
                 reserve.fill_chest,
             )
+        minimum_machines = _bootstrap_reserve_machine_target(
+            client, surface, force, item, production_target, reference_point,
+            emit, background=background,
+        )
         if reserve.fill_chest:
             emit(
                 f"  MALL RESERVE: {item} is self-sufficient; removing its "
@@ -5051,6 +5161,7 @@ def _ensure_mall_item(
             stock_gate_target=reserve.gate_target,
             storage_limit=reserve.storage_count,
             fill_provider=reserve.fill_chest, blocking_stock_target=target,
+            minimum_machines=minimum_machines,
         )
     except ProductionPrerequisiteDeferred as deferred:
         emit(f"  MALL DEFERRED: {deferred}")
@@ -6364,6 +6475,7 @@ def _open_the_run(
     resource_patches.clear_patch_cache()
     MANAGED_INTERMEDIATE_SOURCES.clear()
     _BOOTSTRAP_SHARED_PROVIDER_ITEMS.clear()
+    _MALL_REFRESH_SIGNATURES.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False
@@ -6585,11 +6697,26 @@ def run(
                 _BOOTSTRAP_LOAN_PROGRESS_REVISION
                 > last_loan_progress_revision
             )
-            unchanged_passes = _livelock_step(
-                last_signature is None or _outstanding_work_signature(signature)
-                != _outstanding_work_signature(last_signature),
+            signature_changed = (
+                last_signature is None
+                or _outstanding_work_signature(signature)
+                != _outstanding_work_signature(last_signature)
+            )
+            construction_progressed = (
                 (last_ghost_count is not None and ghosts_now < last_ghost_count)
-                or stock_grew or loan_progressed,
+                or stock_grew or loan_progressed
+            )
+            # max_iterations bounds unproductive controller decisions. A
+            # healthy one-second wait must not kill a run while its reserved
+            # stack is visibly growing or bots are consuming ghosts.
+            if (
+                construction_progressed
+                or (last_signature is not None and signature_changed)
+            ):
+                budget.credit_progress_pass()
+            unchanged_passes = _livelock_step(
+                signature_changed,
+                construction_progressed,
                 unchanged_passes,
             )
             last_signature = signature
@@ -6723,11 +6850,16 @@ def run(
                 emit(f"GOAL MET: {goal_item} is producing at {position}")
                 return {"ok": True, "iterations": iteration, "output_position": position}
         raise StuckError(
-            f"Did not reach a working {goal_item} line within {max_iterations} iterations",
+            f"Did not reach a working {goal_item} line within "
+            f"{max_iterations} non-progress control passes",
             code="controller_iteration_limit",
             classification="bug",
             state="failed",
-            details={"goal_item": goal_item, "max_iterations": max_iterations},
+            details={
+                "goal_item": goal_item,
+                "max_non_progress_passes": max_iterations,
+                "progress_credits": budget.progress_credits,
+            },
         )
     finally:
         _BOOTSTRAP_DISTRICT_LEDGER = None

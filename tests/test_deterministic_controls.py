@@ -43,6 +43,22 @@ def test_every_control_pass_is_counted_before_a_continue_branch() -> None:
         end_run_budget()
 
 
+def test_observed_progress_refunds_the_control_pass_limit() -> None:
+    budget = begin_run_budget(2)
+    try:
+        budget.begin_pass()
+        budget.credit_progress_pass()
+
+        assert budget.passes == 0
+        assert budget.progress_credits == 1
+        budget.begin_pass()
+        budget.begin_pass()
+        with pytest.raises(BudgetExhausted, match="pass budget"):
+            budget.begin_pass()
+    finally:
+        end_run_budget()
+
+
 def test_plan_submissions_are_individually_bounded() -> None:
     begin_run_budget(1, plans_per_pass=2)
     try:

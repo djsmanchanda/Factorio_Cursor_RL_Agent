@@ -225,6 +225,34 @@ def _decision_summary(events: list[dict]) -> dict:
     }
 
 
+def _current_run_events(events: list[dict]) -> list[dict]:
+    """Scope an append-only event stream to its newest completed run."""
+    def event_kind(event: Mapping[str, object]) -> str:
+        event_type = str(event.get("type") or event.get("event_type") or "")
+        message = str(event.get("message", ""))
+        if event_type == "run_start" or "RUN START:" in message:
+            return "start"
+        if event_type == "run_end" or message == "RUN END":
+            return "end"
+        return ""
+
+    end_index = next(
+        (index for index in range(len(events) - 1, -1, -1)
+         if event_kind(events[index]) == "end"),
+        None,
+    )
+    if end_index is None:
+        end_index = len(events) - 1
+    start_index = next(
+        (index for index in range(end_index, -1, -1)
+         if event_kind(events[index]) == "start"),
+        None,
+    )
+    if start_index is None:
+        return events
+    return events[start_index:end_index + 1]
+
+
 def build_case_packet(
     *,
     log_path: Path,
@@ -247,7 +275,7 @@ def build_case_packet(
     mission_id = mission.get("mission_id")
     attempt = mission.get("attempt")
     blocker_records = _read_jsonl(blocker_events_path)
-    structured_events = _read_jsonl(structured_events_path)
+    structured_events = _current_run_events(_read_jsonl(structured_events_path))
     blocker_source = blocker_records or mission.get("blockers") or []
     raw_blockers = _current_run_blockers(
         blocker_source, mission_id=mission_id, attempt=attempt,

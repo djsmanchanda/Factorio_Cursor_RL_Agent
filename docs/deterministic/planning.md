@@ -147,8 +147,18 @@ These names describe intended responsibilities, not permission to build speculat
   one stack of splitters before opening the stone district. This replenishes
   the construction stock consumed by iron/copper while the rotating slot is
   still available; other low-demand batches keep at most two optional spares.
+  When either blocking stack has more than one minute of measured backlog, an
+  existing one-machine producer may claim a second reservation-funded slot in
+  the ten-assembler bootstrap pool. The extra cell still needs its exact bill
+  and shared provider; it is capacity allocation, not free starter supply.
   Monotonic loan craft progress counts as controller progress even when bots
   consume each output before it can accumulate in provider stock.
+- The controller's outer pass limit counts non-progress decisions. A pass is
+  credited back when required stock grows, pending ghosts fall, a recipe loan
+  advances, or the outstanding-work state changes. The consecutive unchanged
+  pass guard remains the tighter detector for real contradictions. Unchanged
+  mall requester, provider-limit, and stock-gate configurations are submitted
+  once per run and refreshed after any recipe-loan reconfiguration.
 - Pending mall batches are peers unless one appears in the selected item's
   recipe closure or declared compact-cell bill. A drill batch must therefore
   continue while splitter and inserter batches are also queued; treating every

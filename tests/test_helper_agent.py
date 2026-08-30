@@ -139,6 +139,33 @@ def test_decision_summary_retains_recent_mall_loan_transitions() -> None:
     ]
 
 
+def test_packet_decision_summary_uses_only_the_newest_structured_run(
+    tmp_path: Path,
+) -> None:
+    log = tmp_path / "autonomous-run.log"
+    events = tmp_path / "deterministic-events.jsonl"
+    _write_run(log)
+    records = [
+        {"event_type": "run_start", "message": "RUN START: old"},
+        {"event_type": "priority", "message": "PRIORITY: old-item rating=1"},
+        {"event_type": "run_end", "message": "RUN END"},
+        {"type": "run_start", "message": "RUN START: current"},
+        {"type": "priority", "message": "PRIORITY: splitter rating=45"},
+        {"type": "priority", "message": "PRIORITY: splitter rating=46"},
+        {"type": "run_end", "message": "RUN END"},
+    ]
+    events.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    packet = build_case_packet(log_path=log, structured_events_path=events)
+    summary = packet["telemetry"]["decision_summary"]
+
+    assert summary["event_count"] == 4
+    assert summary["priority_counts"] == {"splitter": 2}
+
+
 def test_fallback_explains_an_active_loan_handoff_blocker(tmp_path: Path) -> None:
     packet = _packet(tmp_path)
     packet["blockers"] = [{

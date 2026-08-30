@@ -92,3 +92,72 @@ def test_upgrade_call_still_detects_the_paired_mall_provider(monkeypatch) -> Non
     )
 
     assert found == provider
+
+
+def test_unchanged_mall_maintenance_is_submitted_once_per_run(monkeypatch) -> None:
+    machines = ((50.5, 32.5), (56.5, 32.5))
+    provider = (53.5, 31.5)
+    plan = SimpleNamespace(
+        existing=SimpleNamespace(machine_positions=machines),
+        spec={"machine": "assembling-machine-2"},
+        production_target=50,
+        mall_storage_limit=50,
+        fill_provider=False,
+        mall_request_multiplier=15,
+    )
+    refreshed = []
+    submitted = []
+    monkeypatch.setattr(builder, "_MALL_REFRESH_SIGNATURES", set())
+    monkeypatch.setattr(builder, "_mineable", lambda _item: False)
+    monkeypatch.setattr(
+        builder, "refresh_paired_mall_requests",
+        lambda *_args, **_kwargs: refreshed.append(True) or True,
+    )
+    monkeypatch.setattr(builder, "_paired_mall_provider", lambda *_a: provider)
+    monkeypatch.setattr(
+        builder, "mall_slot_uses_shared_provider", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_args, **_kwargs: submitted.append(_args[4]),
+    )
+
+    for _ in range(2):
+        builder._refresh_mall_cell(
+            object(), object(), "nauvis", "player", "splitter", plan,
+            lambda _message: None, upgrade_bootstrap=False,
+            stock_gate_target=50,
+        )
+
+    assert refreshed == [True]
+    assert submitted == ["mall_provider_limit_splitter", "mall_stock_gate_splitter"]
+
+
+def test_long_blocking_reserve_can_fund_a_second_bootstrap_producer(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(machine_count=1),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"electronic-circuit": 0},
+    )
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a: 180.0)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (True, {}),
+    )
+
+    wanted = builder._bootstrap_reserve_machine_target(
+        object(), "nauvis", "player", "electronic-circuit", 200,
+        (3.0, -1.0), lambda _message: None, background=False,
+    )
+
+    assert wanted == 2
+    assert "electronic-circuit" in builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS

@@ -96,4 +96,6 @@ Human runner logs write one second-precision absolute timestamp in the
 times such as `+15s`. Structured decision JSONL uses schema `v=2`, with `ts`
 only on the first event and compact `seq`, `dt`, `type`, and `message` fields.
 Readers accept both this format and archived logs that repeat an ISO timestamp
-on every line.
+on every line. Helper Agent summaries scope the append-only structured event
+file to the newest completed run, so priorities and zero-placement counts from
+older episodes cannot contaminate the current diagnosis.
