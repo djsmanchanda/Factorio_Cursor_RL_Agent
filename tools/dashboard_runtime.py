@@ -28,6 +28,7 @@ from orchestrator.research_queue import (
     ResearchQueueError, load_queue, merge_queue, validate_technology_list,
 )
 from tools.runner_log_retention import archive_runner_sessions, archive_stale_runner_files
+from tools.run_log_format import is_run_start_line
 from helper_agent import dashboard as helper_dashboard
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
@@ -174,7 +175,7 @@ class OperationManager:
             raise OperationError("No completed runner run is available yet.")
         start_index = next(
             (index for index in range(end_index, -1, -1)
-             if b" RUN START:" in lines[index]),
+             if is_run_start_line(lines[index])),
             None,
         )
         if start_index is None:

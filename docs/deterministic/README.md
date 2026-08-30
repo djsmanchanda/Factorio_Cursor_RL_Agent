@@ -90,3 +90,10 @@ Deferred work and terminal blockers share the same typed lifecycle contract.
 Supply, construction, coverage, power, first-output, retirement, and failure
 states therefore remain comparable even when their human-readable messages
 change.
+
+Human runner logs write one second-precision absolute timestamp in the
+`RUN START: ts=...` header, then prefix later messages with whole-second elapsed
+times such as `+15s`. Structured decision JSONL uses schema `v=2`, with `ts`
+only on the first event and compact `seq`, `dt`, `type`, and `message` fields.
+Readers accept both this format and archived logs that repeat an ISO timestamp
+on every line.

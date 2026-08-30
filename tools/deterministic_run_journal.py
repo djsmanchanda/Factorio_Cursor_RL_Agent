@@ -7,14 +7,19 @@ import argparse
 import json
 import os
 import re
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Mapping
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-_TIMESTAMPED_LINE = re.compile(r"^(?P<timestamp>\S+) (?P<message>.*)$")
+from tools.run_log_format import parse_timed_run_log_line
+
 _RUN_START = "RUN START:"
 _FIELD = re.compile(
     r"\b(?P<name>command|target|surface|force|bootstrap_profile)=(?P<value>\S+)"
@@ -65,15 +70,14 @@ def collect_runs(log_path: Path, archive_dir: Path) -> list[Run]:
 
 def _parse_runs(text: str) -> list[Run]:
     parsed: list[tuple[datetime, str]] = []
+    run_started_at: datetime | None = None
     for line in text.splitlines():
-        match = _TIMESTAMPED_LINE.match(line)
-        if match is None:
+        timed = parse_timed_run_log_line(line, run_started_at=run_started_at)
+        if timed is None:
             continue
-        try:
-            timestamp = datetime.fromisoformat(match.group("timestamp"))
-        except ValueError:
-            continue
-        parsed.append((timestamp, match.group("message")))
+        if _RUN_START in timed.message:
+            run_started_at = timed.timestamp
+        parsed.append((timed.timestamp, timed.message))
 
     runs: list[Run] = []
     current: list[tuple[datetime, str]] = []

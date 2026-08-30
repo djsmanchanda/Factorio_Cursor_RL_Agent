@@ -17,11 +17,11 @@ from tools import autonomous_run
 def _write_run(log: Path) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(
-        "2026-08-28T10:00:00+05:30 RUN START: command=research target=mining-productivity-4 "
+        "RUN START: ts=2026-08-28T10:00:00+05:30 command=research target=mining-productivity-4 "
         "surface=nauvis force=player bootstrap_profile=reduced-v1 log=/tmp/run.log\n"
-        "2026-08-28T10:00:05+05:30 MISSION STATE: profile=reduced-v1 ledger=/tmp/mission\n"
-        "2026-08-28T10:00:10+05:30 STUCK: construction supply shortage\n"
-        "2026-08-28T10:00:15+05:30 RUN END\n",
+        "+5s MISSION STATE: profile=reduced-v1 ledger=/tmp/mission\n"
+        "+10s STUCK: construction supply shortage\n"
+        "+15s RUN END\n",
         encoding="utf-8",
     )
 
@@ -79,22 +79,50 @@ def test_packet_builder_extracts_bounded_evidence_and_typed_blocker(tmp_path: Pa
     assert packet["duration_seconds"] == 15
     assert len(packet["blockers"]) == 1
     assert packet["blockers"][0]["code"] == "construction_supply_shortage"
-    assert "RUN START: command=research" in packet["log_excerpt"]["head_lines"][0]
+    assert packet["log_excerpt"]["head_lines"][0].startswith("RUN START: ts=")
+    assert "command=research" in packet["log_excerpt"]["head_lines"][0]
     assert "RUN END" in packet["log_excerpt"]["head_lines"][-1]
     assert any("STUCK:" in line for line in packet["log_excerpt"]["matched_pattern_lines"])
 
 
 def test_run_logger_writes_compact_structured_events(tmp_path: Path) -> None:
     logger = autonomous_run._RunLogger(tmp_path / "autonomous-run.log")
+    logger.emit("RUN START: command=research target=mining-productivity-4")
     logger.emit("PRIORITY: steel-plate rating=45/100")
     logger.close()
 
-    event = json.loads(
-        (tmp_path / "deterministic-events.jsonl").read_text(encoding="utf-8")
+    human_lines = (tmp_path / "autonomous-run.log").read_text(encoding="utf-8").splitlines()
+    assert human_lines[0].startswith("RUN START: ts=")
+    assert "." not in human_lines[0].split(" ts=", 1)[1].split()[0]
+    assert human_lines[1].startswith("+0s PRIORITY:")
+
+    events = [
+        json.loads(line) for line in
+        (tmp_path / "deterministic-events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["type"] == "run_start"
+    assert events[0]["seq"] == 1
+    assert events[0]["dt"] == 0
+    assert "ts" in events[0]
+    assert events[1]["type"] == "priority"
+    assert events[1]["seq"] == 2
+    assert "ts" not in events[1]
+    assert events[1]["message"].startswith("PRIORITY: steel-plate")
+
+
+def test_packet_builder_still_reads_legacy_absolute_timestamps(tmp_path: Path) -> None:
+    log = tmp_path / "autonomous-run.log"
+    log.write_text(
+        "2026-08-28T10:00:00+05:30 RUN START: command=research target=legacy "
+        "surface=nauvis force=player bootstrap_profile=reduced-v1\n"
+        "2026-08-28T10:00:15+05:30 RUN END\n",
+        encoding="utf-8",
     )
-    assert event["event_type"] == "priority"
-    assert event["sequence"] == 1
-    assert event["message"].startswith("PRIORITY: steel-plate")
+
+    packet = build_case_packet(log_path=log)
+
+    assert packet["target"] == "legacy"
+    assert packet["duration_seconds"] == 15
 
 
 def test_decision_summary_retains_recent_mall_loan_transitions() -> None:
@@ -136,15 +164,15 @@ def test_packet_builder_preserves_unprefixed_traceback_frames(tmp_path: Path) ->
     packet = _packet(tmp_path)
     log = Path(packet["source_log"])
     log.write_text(
-        "2026-08-28T10:00:00+05:30 RUN START: command=research "
+        "RUN START: ts=2026-08-28T10:00:00+05:30 command=research "
         "target=mining-productivity-4 surface=nauvis force=player "
         "bootstrap_profile=reduced-v1 log=/tmp/run.log\n"
-        "2026-08-28T10:00:10+05:30 ERROR: TypeError: bad origin\n"
+        "+10s ERROR: TypeError: bad origin\n"
         "Traceback (most recent call last):\n"
         "  File \"orchestrator/autonomous_builder.py\", line 291, in provision\n"
         "    mine_origin[0]\n"
         "TypeError: 'NoneType' object is not subscriptable\n"
-        "2026-08-28T10:00:15+05:30 RUN END\n",
+        "+15s RUN END\n",
         encoding="utf-8",
     )
 

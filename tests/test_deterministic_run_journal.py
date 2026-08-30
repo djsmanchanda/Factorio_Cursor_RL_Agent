@@ -8,12 +8,10 @@ from tools.deterministic_run_journal import collect_runs, render, summarize, tre
 
 def _run(start: str, target: str, *events: str) -> str:
     lines = [
-        f"{start} RUN START: command=research target={target} surface=nauvis force=player"
+        f"RUN START: ts={start} command=research target={target} surface=nauvis force=player"
     ]
-    minute = int(start[14:16])
     for index, event in enumerate(events, start=1):
-        timestamp = start[:14] + f"{minute + index:02d}" + start[16:]
-        lines.append(f"{timestamp} {event}")
+        lines.append(f"+{index}s {event}")
     return "\n".join(lines) + "\n"
 
 
@@ -46,6 +44,20 @@ def test_collects_deduplicated_runs_from_live_and_archive(tmp_path: Path) -> Non
 
     assert len(runs) == 2
     assert runs[-1].fields["surface"] == "nauvis"
+
+
+def test_collects_legacy_absolute_timestamp_runs(tmp_path: Path) -> None:
+    live = tmp_path / "autonomous-run.log"
+    live.write_text(
+        "2026-08-22T10:00:00+05:30 RUN START: command=research target=legacy\n"
+        "2026-08-22T10:00:02+05:30 RUN END\n",
+        encoding="utf-8",
+    )
+
+    run = collect_runs(live, tmp_path / "missing")[0]
+
+    assert run.fields["target"] == "legacy"
+    assert run.duration_seconds == 2
 
 
 def test_run_header_retains_bootstrap_profile_for_paired_comparison(tmp_path: Path) -> None:

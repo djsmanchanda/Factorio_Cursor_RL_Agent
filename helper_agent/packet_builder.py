@@ -13,13 +13,14 @@ from typing import Mapping
 
 import jsonschema
 
+from tools.run_log_format import parse_timed_run_log_line
+
 _SIDEcar_ROOT = Path(__file__).resolve().parents[1] / "Helper_Agent"
 CASE_PACKET_SCHEMA = json.loads(
     (_SIDEcar_ROOT / "schemas" / "case_packet.schema.json").read_text("utf-8"),
 )
 
 
-_TIMESTAMP = re.compile(r"^(?P<timestamp>\S+) (?P<message>.*)$")
 _FIELD = re.compile(
     r"\b(?P<name>command|target|surface|force|bootstrap_profile)=(?P<value>\S+)"
 )
@@ -68,15 +69,16 @@ def _latest_complete_run(log_path: Path) -> tuple[list[tuple[datetime, str, str]
     """Return the newest complete run block, including raw traceback lines."""
     lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
     timestamped: list[tuple[int, datetime, str, str]] = []
+    parsed_by_index: dict[int, tuple[datetime, str]] = {}
+    run_started_at: datetime | None = None
     for index, line in enumerate(lines):
-        match = _TIMESTAMP.match(line)
-        if match is None:
+        parsed = parse_timed_run_log_line(line, run_started_at=run_started_at)
+        if parsed is None:
             continue
-        try:
-            timestamp = datetime.fromisoformat(match.group("timestamp"))
-        except ValueError:
-            continue
-        timestamped.append((index, timestamp, match.group("message"), line))
+        if "RUN START:" in parsed.message:
+            run_started_at = parsed.timestamp
+        parsed_by_index[index] = (parsed.timestamp, parsed.message)
+        timestamped.append((index, parsed.timestamp, parsed.message, line))
     end_index = next(
         (index for index in range(len(timestamped) - 1, -1, -1)
          if timestamped[index][2] == "RUN END"),
@@ -95,16 +97,12 @@ def _latest_complete_run(log_path: Path) -> tuple[list[tuple[datetime, str, str]
     raw_end = timestamped[end_index][0]
     current_timestamp = timestamped[start_index][1]
     run: list[tuple[datetime, str, str]] = []
-    for line in lines[raw_start:raw_end + 1]:
-        match = _TIMESTAMP.match(line)
-        if match is not None:
-            try:
-                current_timestamp = datetime.fromisoformat(match.group("timestamp"))
-            except ValueError:
-                pass
-            else:
-                run.append((current_timestamp, match.group("message"), line))
-                continue
+    for index in range(raw_start, raw_end + 1):
+        line = lines[index]
+        if index in parsed_by_index:
+            current_timestamp, message = parsed_by_index[index]
+            run.append((current_timestamp, message, line))
+            continue
         # Python tracebacks are intentionally unprefixed by _RunLogger. Keep
         # them inside the bounded run excerpt instead of silently discarding
         # the only source location for an unhandled exception.

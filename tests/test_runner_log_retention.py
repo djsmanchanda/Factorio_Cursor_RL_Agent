@@ -24,10 +24,16 @@ def dashboard_tmp_path() -> Iterator[Path]:
 
 
 def _session(number: int) -> bytes:
+    if number % 2:
+        return (
+            f"2026-08-0{number}T10:00:00+05:30 RUN START: command=produce target=item-{number}\n"
+            f"2026-08-0{number}T10:00:01+05:30 event {number}\n"
+            f"2026-08-0{number}T10:00:02+05:30 RUN END\n"
+        ).encode()
     return (
-        f"2026-08-0{number}T10:00:00+05:30 RUN START: command=produce target=item-{number}\n"
-        f"2026-08-0{number}T10:00:01+05:30 event {number}\n"
-        f"2026-08-0{number}T10:00:02+05:30 RUN END\n"
+        f"RUN START: ts=2026-08-0{number}T10:00:00+05:30 command=produce target=item-{number}\n"
+        f"+1s event {number}\n"
+        "+2s RUN END\n"
     ).encode()
 
 

@@ -344,13 +344,13 @@ def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None
 def test_last_runner_run_returns_newest_complete_boundary_block(tmp_path: Path) -> None:
     log = tmp_path / "autonomous-run.log"
     log.write_text(
-        "2026-08-28T10:00:00+05:30 RUN START: command=research target=one\n"
-        "2026-08-28T10:00:01+05:30 first\n"
-        "2026-08-28T10:00:02+05:30 RUN END\n"
-        "2026-08-28T11:00:00+05:30 RUN START: command=research target=two\n"
-        "2026-08-28T11:00:01+05:30 second\n"
-        "2026-08-28T11:00:02+05:30 RUN END\n"
-        "2026-08-28T12:00:00+05:30 RUN START: command=research target=active\n",
+        "RUN START: ts=2026-08-28T10:00:00+05:30 command=research target=one\n"
+        "+1s first\n"
+        "+2s RUN END\n"
+        "RUN START: ts=2026-08-28T11:00:00+05:30 command=research target=two\n"
+        "+1s second\n"
+        "+2s RUN END\n"
+        "RUN START: ts=2026-08-28T12:00:00+05:30 command=research target=active\n",
         encoding="utf-8",
     )
     manager = object.__new__(OperationManager)
@@ -360,15 +360,18 @@ def test_last_runner_run_returns_newest_complete_boundary_block(tmp_path: Path) 
 
     assert "target=two" in copied
     assert "second" in copied
-    assert copied.startswith("2026-08-28T11:00:00+05:30 RUN START:")
-    assert copied.endswith("2026-08-28T11:00:02+05:30 RUN END\n")
+    assert copied.startswith("RUN START: ts=2026-08-28T11:00:00+05:30")
+    assert copied.endswith("+2s RUN END\n")
     assert "target=one" not in copied
     assert "target=active" not in copied
 
 
 def test_last_runner_run_rejects_log_without_complete_run(tmp_path: Path) -> None:
     log = tmp_path / "autonomous-run.log"
-    log.write_text("2026-08-28T12:00:00+05:30 RUN START: command=research\n", encoding="utf-8")
+    log.write_text(
+        "RUN START: ts=2026-08-28T12:00:00+05:30 command=research\n",
+        encoding="utf-8",
+    )
     manager = object.__new__(OperationManager)
     manager.config = SimpleNamespace(runner_log=log)
 

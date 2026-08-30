@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-_RUN_START_MARKER = b" RUN START:"
+from tools.run_log_format import is_run_start_line
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ def _session_starts(data: bytes) -> list[int]:
     starts: list[int] = []
     offset = 0
     for line in data.splitlines(keepends=True):
-        if _RUN_START_MARKER in line:
+        if is_run_start_line(line):
             starts.append(offset)
         offset += len(line)
     return starts

@@ -59,17 +59,22 @@ class _RunLogger:
 
     def emit(self, message: str) -> None:
         observed = datetime.now().astimezone().isoformat(timespec="seconds")
-        line = f"{observed} {message}"
         with self._lock:
             self._sequence += 1
+            elapsed = int(time.monotonic() - self._started)
+            if self._sequence == 1 and message.startswith("RUN START:"):
+                line = f"RUN START: ts={observed}{message.removeprefix('RUN START:')}"
+            else:
+                line = f"+{elapsed}s {message}"
             event = {
-                "schema_version": 1,
-                "sequence": self._sequence,
-                "observed_at": observed,
-                "elapsed_seconds": round(time.monotonic() - self._started, 3),
-                "event_type": self._event_type(message),
+                "v": 2,
+                "seq": self._sequence,
+                "dt": elapsed,
+                "type": self._event_type(message),
                 "message": message,
             }
+            if self._sequence == 1:
+                event["ts"] = observed
             print(line, flush=True)
             print(line, file=self._file, flush=True)
             print(
@@ -482,13 +487,13 @@ def main(argv: list[str] | None = None) -> int:
         heartbeat_thread = threading.Thread(
             target=_emit_heartbeat, name="runner-heartbeat", daemon=True,
         )
-        heartbeat_thread.start()
         logger.emit(
             f"RUN START: command={args.command} "
             f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
             f"surface={args.surface} force={args.force} "
             f"bootstrap_profile={args.bootstrap_profile} log={log_path}"
         )
+        heartbeat_thread.start()
         _patch_episode_manifest(
             getattr(args, "episode_manifest", None),
             started_at=datetime.now().astimezone().isoformat(timespec="seconds"),
