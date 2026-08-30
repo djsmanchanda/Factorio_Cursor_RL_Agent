@@ -412,10 +412,71 @@ local function configuration_error(entity, action, direction)
   return nil
 end
 
+local function position_inside_box(position, box)
+  return position.x >= box.left_top.x and position.x <= box.right_bottom.x
+    and position.y >= box.left_top.y and position.y <= box.right_bottom.y
+end
+
+local function return_feeding_inserter_hands(entity)
+  -- Changing an assembler recipe while its input inserter is holding an old
+  -- ingredient leaves that inserter permanently waiting for destination
+  -- space. Return the held stack to the pickup chest first, conserving every
+  -- item. This is deliberately part of the same executor action as set_recipe
+  -- so the simulation cannot refill the hand between recovery and the switch.
+  local box = entity.bounding_box
+  local search = {
+    { box.left_top.x - 3, box.left_top.y - 3 },
+    { box.right_bottom.x + 3, box.right_bottom.y + 3 }
+  }
+  for _, inserter in pairs(entity.surface.find_entities_filtered({
+    area = search, type = "inserter", force = entity.force
+  })) do
+    local drop = inserter.drop_position
+    local held = inserter.held_stack
+    if drop and position_inside_box(drop, box)
+      and held and held.valid_for_read then
+      local source = entity.surface.find_entities_filtered({
+        position = inserter.pickup_position,
+        type = { "container", "logistic-container" },
+        force = entity.force,
+        limit = 1
+      })[1]
+      if not source then
+        return "recipe_switch_held_stack_source_missing"
+      end
+      local original_count = held.count
+      local stack = { name = held.name, count = original_count }
+      local quality_ok, quality = pcall(function() return held.quality end)
+      if quality_ok and quality then stack.quality = quality.name end
+      local insert_ok, inserted = pcall(function() return source.insert(stack) end)
+      if not insert_ok then
+        return "recipe_switch_held_stack_return_failed"
+      end
+      inserted = tonumber(inserted) or 0
+      if inserted >= original_count then
+        held.clear()
+      elseif inserted > 0 then
+        held.count = original_count - inserted
+      end
+      if inserted < original_count then
+        return "recipe_switch_held_stack_return_incomplete:inserted="
+          .. inserted .. ",required=" .. original_count
+      end
+    end
+  end
+  return nil
+end
+
 local function configure_created_entity(entity, action)
   if action.recipe then
-    local ok = pcall(function() entity.set_recipe(action.recipe) end)
-    if not ok then return "recipe_set_failed" end
+    local actual, read_error = recipe_name(entity)
+    if read_error then return read_error end
+    if actual ~= action.recipe then
+      local recovery_error = return_feeding_inserter_hands(entity)
+      if recovery_error then return recovery_error end
+      local ok = pcall(function() entity.set_recipe(action.recipe) end)
+      if not ok then return "recipe_set_failed" end
+    end
   end
   if action.input_priority then
     local ok = pcall(function() entity.splitter_input_priority = action.input_priority end)

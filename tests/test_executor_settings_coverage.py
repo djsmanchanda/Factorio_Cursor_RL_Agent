@@ -94,6 +94,23 @@ def test_configuration_action_never_falls_back_to_entity_creation() -> None:
     assert "surface.create_entity" not in branch
 
 
+def test_recipe_switch_returns_feeding_inserter_stack_before_set_recipe() -> None:
+    """Rotating mall cells must not retain an ingredient from the old recipe."""
+    start = _EXECUTOR.index("local function configure_created_entity")
+    end = _EXECUTOR.index("local function", start + 1)
+    branch = _EXECUTOR[start:end]
+
+    assert "actual ~= action.recipe" in branch
+    assert branch.index("return_feeding_inserter_hands(entity)") < branch.index(
+        "entity.set_recipe(action.recipe)"
+    )
+    recovery_start = _EXECUTOR.index("local function return_feeding_inserter_hands")
+    recovery_end = _EXECUTOR.index("local function", recovery_start + 1)
+    recovery = _EXECUTOR[recovery_start:recovery_end]
+    assert "source.insert(stack)" in recovery
+    assert "held.clear()" in recovery
+
+
 def test_the_schema_promises_no_action_field_the_executor_ignores() -> None:
     """`blueprint` sat in the schema for a capability the executor never had, so
     a plan could declare one and have it silently dropped -- the same silent

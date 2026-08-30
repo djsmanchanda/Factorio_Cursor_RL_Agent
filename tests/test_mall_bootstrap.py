@@ -100,7 +100,14 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         {"name": "electronic-circuit", "count": 2},
     ]
     assert requester["logistic_sections"][0]["multiplier"] == 2
-    assert requester["clear_logistic_groups"] == [_loan().group]
+    assert requester["clear_logistic_groups"] == [
+        "mall:copper-cable",
+        "mall:copper-cable:right",
+        _loan().group,
+    ]
+    assert actions.index(requester) < actions.index(next(
+        action for action in actions if action["entity"] == "assembling-machine-2"
+    ))
     assert requester["logistic_sections"][0]["group"].startswith(
         "mall-bootstrap:v3:"
     )
@@ -116,6 +123,7 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
 
     assert requester["clear_logistic_groups"] == [_loan().group]
     assert requester["logistic_sections"][0]["group"] == "mall:copper-cable:right"
+    assert actions.index(requester) < actions.index(machine)
     assert machine["recipe"] == "copper-cable"
     assert machine["clear_logistic_condition"] is True
     assert not list(SCHEMA.iter_errors(plan))

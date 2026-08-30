@@ -3921,6 +3921,7 @@ def _submit_bootstrap_loan(
         _deliver_cell_ingredients(
             client, bridge, surface, force, step.recipe,
             loan.machine_position, emit,
+            loan.requester_position,
         )
         consume_wait(f"bootstrap_loan_{loan.target_item}")
         time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
@@ -4993,6 +4994,7 @@ def _belt_starved_consumer(
 def _deliver_cell_ingredients(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, near: Point, emit: Callable[[str], None],
+    requester_position: Point | None = None,
 ) -> bool:
     """Ship a stalled mall cell's ingredients from base stock to its network.
 
@@ -5009,7 +5011,7 @@ def _deliver_cell_ingredients(
         for ingredient, amount in zip(
             spec["ingredients"], spec["amounts"], strict=True,
         ):
-            chest = live_base.requester_requesting(
+            chest = requester_position or live_base.requester_requesting(
                 client, surface, ingredient, near,
             )
             if chest is None:

@@ -110,6 +110,29 @@ def test_cell_delivery_does_not_submit_when_an_existing_transfer_is_empty(
     assert submitted == []
 
 
+def test_cell_delivery_can_pin_a_rotating_loan_to_its_exact_requester(
+    monkeypatch,
+) -> None:
+    requesters: list[tuple[float, float]] = []
+    monkeypatch.setattr(
+        builder.live_base, "requester_requesting",
+        lambda *_a: pytest.fail("an explicit loan requester needs no search"),
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "nearest_container",
+        lambda _c, _s, _f, chest, **_k: requesters.append(chest) or (52.5, 32.5),
+    )
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *_a: 1)
+
+    assert _deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "electronic-circuit",
+        (47.5, 32.5), lambda _message: None,
+        requester_position=(50.5, 32.5),
+    ) is True
+    assert requesters == [(50.5, 32.5), (50.5, 32.5)]
+
+
 def _chest(x: float, y: float, entity: str = "requester-chest") -> dict:
     return {"action_type": "place_ghost", "entity": entity, "position": {"x": x, "y": y}}
 

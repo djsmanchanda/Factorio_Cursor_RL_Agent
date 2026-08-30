@@ -440,7 +440,10 @@ def test_completed_prior_loan_is_restored_before_the_new_batch(
         "restored borrowed copper-cable producer after spare production was preempted"
     )
     assert submitted[0][0] == "restore_bootstrap_loan_splitter"
-    machine = submitted[0][1]["phases"][0]["actions"][0]
+    machine = next(
+        action for action in submitted[0][1]["phases"][0]["actions"]
+        if action["entity"] == "assembling-machine-2"
+    )
     assert machine["recipe"] == "copper-cable"
     assert any("LOAN RESTORED" in message for message in messages)
 

@@ -295,15 +295,22 @@ def bootstrap_loan_plan(
             "requests": requests,
             "multiplier": max(1, step.crafts),
         }],
+        # Stop requesting the borrowed recipe before its assembler changes.
+        # The executor processes actions in order and returns any ingredient
+        # already held by the feeding inserter to this chest before set_recipe.
+        "clear_logistic_groups": [
+            recipe_group_name(loan.original_recipe),
+            recipe_group_name(loan.original_recipe, loan.side),
+        ],
     }
     if active.group != loan.group:
-        requester["clear_logistic_groups"] = [loan.group]
+        requester["clear_logistic_groups"].append(loan.group)
     provider = generate_mall_provider_limit_update(
         step.recipe, loan.provider_position, step.target_count,
     )["phases"][0]["actions"][0]
     return {"phases": [{
         "name": f"bootstrap_loan_{step.recipe}",
-        "actions": [machine, requester, _as_configuration(provider)],
+        "actions": [requester, machine, _as_configuration(provider)],
     }]}
 
 
@@ -323,15 +330,6 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
         "actions": [
             {
                 "action_type": "configure_entity",
-                "entity": "assembling-machine-2",
-                "position": {
-                    "x": loan.machine_position[0], "y": loan.machine_position[1],
-                },
-                "recipe": loan.original_recipe,
-                "clear_logistic_condition": True,
-            },
-            {
-                "action_type": "configure_entity",
                 "entity": "requester-chest",
                 "position": {
                     "x": loan.requester_position[0], "y": loan.requester_position[1],
@@ -341,6 +339,15 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
                 # removed, or restoring one borrower would rewrite its peers.
                 "clear_logistic_groups": [loan.group],
                 "logistic_sections": [requester_section],
+            },
+            {
+                "action_type": "configure_entity",
+                "entity": "assembling-machine-2",
+                "position": {
+                    "x": loan.machine_position[0], "y": loan.machine_position[1],
+                },
+                "recipe": loan.original_recipe,
+                "clear_logistic_condition": True,
             },
             _as_configuration(provider),
         ],
