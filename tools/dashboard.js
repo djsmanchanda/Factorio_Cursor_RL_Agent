@@ -197,13 +197,13 @@ async function refreshLog() {
       if (output.textContent === 'Waiting for log output…' || !clearedAtOffset) {
         if (!clearedAtOffset) output.textContent = '';
       }
-      output.textContent += data.text;
+      output.append(document.createTextNode(data.text));
       if (follow.checked) output.scrollTop = output.scrollHeight;
     }
     offset = data.offset;
     clearedAtOffset = true;
   } catch (error) {
-    output.textContent += `\n[dashboard] ${error.message}\n`;
+    output.append(document.createTextNode(`\n[dashboard] ${error.message}\n`));
   }
 }
 
