@@ -100,7 +100,10 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         {"name": "electronic-circuit", "count": 2},
     ]
     assert requester["logistic_sections"][0]["multiplier"] == 2
-    assert "clear_logistic_groups" not in requester
+    assert requester["clear_logistic_groups"] == [_loan().group]
+    assert requester["logistic_sections"][0]["group"].startswith(
+        "mall-bootstrap:v2:"
+    )
     assert not list(SCHEMA.iter_errors(plan))
 
 
@@ -131,5 +134,23 @@ def test_active_loan_is_recovered_from_requester_tag() -> None:
             original_recipe="copper-cable", target_item="requester-chest",
             target_count=2, side="right", requester_position=(39.5, 32.5),
             current_recipe="advanced-circuit",
+        ),
+    )
+
+
+def test_active_v2_loan_recovers_step_baseline_for_consumed_output() -> None:
+    class Client:
+        def command(self, _command: str) -> str:
+            return (
+                "mall-bootstrap:v2:copper-cable:splitter:3:left:splitter:41:3|"
+                "39.5|38.5|splitter|transport-belt"
+            )
+
+    assert active_bootstrap_loans(Client(), "nauvis", "player") == (
+        MallBootstrapLoan(
+            original_recipe="copper-cable", target_item="splitter",
+            target_count=3, side="left", requester_position=(39.5, 38.5),
+            current_recipe="splitter", step_recipe="splitter",
+            step_baseline_finished=41, step_required_crafts=3,
         ),
     )

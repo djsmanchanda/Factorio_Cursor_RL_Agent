@@ -187,6 +187,7 @@ class ProductionPrerequisiteDeferred(WorkStateSignal):
 # completion -- real progress moves one of them.
 _MAX_UNCHANGED_PASSES = 12
 _PENDING_FOUNDATION_POLL_SECONDS = 30.0
+_BOOTSTRAP_LOAN_POLL_SECONDS = 5.0
 _GAME_TICKS_PER_SECOND = 60.0
 _MAX_PRIORITY_SLEEP_SECONDS = 30.0
 
@@ -3733,6 +3734,16 @@ def _bootstrap_loan_stock(
     return actual, usable
 
 
+def _bootstrap_loan_products_finished(
+    client: RconClient, surface: str, loan: MallBootstrapLoan,
+) -> int | None:
+    """Read the borrowed assembler's monotonic craft count."""
+    counter = live_base.progress_counters(
+        client, surface, [loan.machine_position],
+    ).get(loan.machine_position)
+    return int(counter // 1000) if counter is not None else None
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None],
@@ -3743,6 +3754,31 @@ def _submit_bootstrap_loan(
     step = next_bootstrap_step(
         loan.target_item, loan.target_count, usable, actual,
     )
+    products_finished = (
+        _bootstrap_loan_products_finished(client, surface, loan)
+        if step is not None else None
+    )
+    if (
+        step is not None
+        and step.recipe == loan.target_item
+        and loan.step_recipe == step.recipe
+        and loan.step_baseline_finished is not None
+        and loan.step_required_crafts is not None
+        and products_finished is not None
+        and (
+            products_finished - loan.step_baseline_finished
+            >= loan.step_required_crafts
+        )
+    ):
+        # Construction bots may consume the finite batch as quickly as it is
+        # made. The monotonic craft count is durable fulfillment evidence even
+        # when the requested idle stock can never accumulate simultaneously.
+        emit(
+            f"  MALL BOOTSTRAP LOAN FULFILLED: {loan.target_item} produced "
+            f"{products_finished - loan.step_baseline_finished} craft(s); "
+            "construction may already have consumed them"
+        )
+        step = None
     if step is None:
         plan = restore_bootstrap_loan_plan(loan)
         plan["surface"], plan["force"] = surface, force
@@ -3757,8 +3793,26 @@ def _submit_bootstrap_loan(
         )
         return f"restored borrowed {loan.original_recipe} producer after seed completion"
 
-    if loan.current_recipe != step.recipe:
-        plan = bootstrap_loan_plan(loan, step)
+    if (
+        loan.current_recipe != step.recipe
+        or loan.step_recipe != step.recipe
+        or loan.step_baseline_finished is None
+        or loan.step_required_crafts is None
+    ):
+        if products_finished is None:
+            raise StuckError(
+                f"bootstrap loan target at {loan.machine_position} has no "
+                "craft-progress counter",
+                code="mall_loan_machine_missing", classification="bug",
+                state="failed",
+                details={
+                    "target_item": loan.target_item,
+                    "machine_position": list(loan.machine_position),
+                },
+            )
+        plan = bootstrap_loan_plan(
+            loan, step, baseline_finished=products_finished,
+        )
         plan["surface"], plan["force"] = surface, force
         _submit(
             client, bridge, surface, plan,
@@ -3779,6 +3833,38 @@ def _submit_bootstrap_loan(
             client, bridge, surface, force, step.recipe,
             loan.machine_position, emit,
         )
+        consume_wait(f"bootstrap_loan_{loan.target_item}")
+        time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
+        after = _bootstrap_loan_products_finished(client, surface, loan)
+        if after is not None and products_finished is not None and after > products_finished:
+            emit(
+                f"  MALL BOOTSTRAP LOAN PROGRESS: {step.recipe} craft count "
+                f"advanced {products_finished} -> {after}"
+            )
+        elif live_base.entity_status_name(
+            client, surface, loan.machine_position,
+        ) == "disabled_by_control_behavior":
+            # Re-read after the bounded poll. The machine may have reached its
+            # gate during the sleep, and prerequisite steps gate their own
+            # recipe rather than the loan's final target item.
+            refreshed_actual, _ = _bootstrap_loan_stock(
+                client, surface, force, loan.target_item,
+            )
+            available = refreshed_actual.get(step.recipe, 0)
+            if available < step.target_count:
+                raise StuckError(
+                    f"bootstrap loan step {step.recipe} is disabled below its "
+                    f"stock target {step.target_count}",
+                    code="mall_loan_gate_mismatch", classification="bug",
+                    state="supply_wait",
+                    details={
+                        "target_item": loan.target_item,
+                        "step_target_count": step.target_count,
+                        "available_stock": available,
+                        "machine_position": list(loan.machine_position),
+                        "step_recipe": step.recipe,
+                    },
+                )
     return (
         f"borrowed {loan.original_recipe} cell is producing temporary "
         f"{step.recipe} for the {loan.target_item} seed"
@@ -5233,6 +5319,17 @@ def _prep_plate_foundation(
             return True
         if starter is not None:
             standing_starters[plate] = starter
+            continue
+        lifecycle = _bootstrap_state(plate)
+        if lifecycle is not None and lifecycle.lifecycle_state == "released":
+            error = BootstrapLifecycleError(
+                f"released {plate} replacement is no longer a complete real "
+                "foundation; refusing to recreate its pioneer"
+            )
+            raise _bootstrap_lifecycle_stuck(plate, error) from error
+        if lifecycle is not None and lifecycle.lifecycle_state != "pioneer":
+            # Provisioning/validation owns recovery of the persisted district.
+            # Opening another temporary producer would violate that ownership.
             continue
         try:
             _bootstrap_direct_plate_line(

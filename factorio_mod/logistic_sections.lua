@@ -51,11 +51,15 @@ end
 -- Trailing slots are cleared, not left behind: a section rewritten to a shorter
 -- request list would otherwise keep asking for whatever the longer list held.
 function M.write_section_slots(section, requests)
+  -- Factorio may retain a linked group's previous slot value when set_slot()
+  -- rewrites it in place. Clear the complete section first, then write the
+  -- exact new recipe bill; live loan handoff otherwise kept iron gears where
+  -- the next electronic-circuit step required iron plate.
+  for index = 1, section.filters_count do
+    section.clear_slot(index)
+  end
   for index, request in ipairs(requests) do
     section.set_slot(index, { value = request.name, min = request.count })
-  end
-  for index = #requests + 1, section.filters_count do
-    section.clear_slot(index)
   end
 end
 
@@ -64,7 +68,13 @@ function M.clear_logistic_groups(entity, groups)
   if not sections then error("no_logistic_sections") end
   for _, group in ipairs(groups) do
     local section = M.find_section_by_group(sections, group)
-    if section then M.write_section_slots(section, {}) end
+    if section then
+      -- Detach the local section from its named shared group before emptying
+      -- it. Leaving the old mall-bootstrap tag behind made later borrowers
+      -- recover stale identity from the same requester chest.
+      section.group = ""
+      M.write_section_slots(section, {})
+    end
   end
 end
 

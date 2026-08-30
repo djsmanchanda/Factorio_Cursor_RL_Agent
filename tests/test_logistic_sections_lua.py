@@ -166,19 +166,38 @@ def test_a_shorter_rewrite_clears_the_slots_it_no_longer_uses(lua) -> None:
     assert cleared == "nilnil"
 
 
-def test_clearing_a_group_empties_it_without_removing_the_section(lua) -> None:
-    slots, still_there = lua.eval("""(function()
+def test_rewrite_clears_linked_slots_before_setting_the_new_recipe(lua) -> None:
+    operations = lua.eval("""(function()
+        local section = stub.new_section("mall:x")
+        M.write_section_slots(section, {
+            {name = "iron-gear-wheel", count = 4},
+            {name = "electronic-circuit", count = 2},
+        })
+        section.log = {}
+        M.write_section_slots(section, {
+            {name = "iron-plate", count = 5},
+            {name = "copper-cable", count = 6},
+        })
+        return table.concat(section.log, ",")
+    end)()""")
+
+    assert operations == "clear:1,clear:2,set:1,set:2"
+
+
+def test_clearing_a_group_detaches_and_empties_its_section(lua) -> None:
+    slots, still_there, group = lua.eval("""(function()
         local holder = stub.new_sections({"mall:pipe"})
         M.write_section_slots(holder.sections[1], {{name = "iron-plate", count = 4}})
         local entity = { get_logistic_sections = function() return holder end }
         M.clear_logistic_groups(entity, {"mall:pipe"})
         local count = 0
         for _ in pairs(holder.sections[1].slots) do count = count + 1 end
-        return count, #holder.sections
+        return count, #holder.sections, holder.sections[1].group
     end)()""")
 
     assert slots == 0
     assert still_there == 1
+    assert group == ""
 
 
 def test_clearing_an_absent_group_is_not_an_error(lua) -> None:

@@ -372,6 +372,122 @@ def test_completed_prior_loan_is_restored_before_the_new_batch(
     assert any("LOAN RESTORED" in message for message in messages)
 
 
+def test_consumed_loan_output_is_fulfilled_by_monotonic_craft_count(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-plate", "transport-belt"],
+        "amounts": [5, 5, 4], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left", requester_position=(50.5, 32.5),
+        current_recipe="splitter", step_recipe="splitter",
+        step_baseline_finished=40, step_required_crafts=3,
+    )
+    ingredients = {
+        item: 100 for item in builder.LINE_RECIPES["splitter"]["ingredients"]
+    }
+    stock = {**ingredients, "splitter": 0}
+    submitted: list[str] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 43,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan, messages.append,
+    )
+
+    assert result == "restored borrowed copper-cable producer after seed completion"
+    assert submitted == ["restore_bootstrap_loan_splitter"]
+    assert any("LOAN FULFILLED" in message for message in messages)
+
+
+def test_active_loan_polls_once_and_reports_monotonic_progress(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-plate", "transport-belt"],
+        "amounts": [5, 5, 4], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left", requester_position=(50.5, 32.5),
+        current_recipe="splitter", step_recipe="splitter",
+        step_baseline_finished=40, step_required_crafts=3,
+    )
+    ingredients = {
+        item: 100 for item in builder.LINE_RECIPES["splitter"]["ingredients"]
+    }
+    # Two of the original three outputs still exist. The current stock bill is
+    # only one, but the durable loan must still require all three crafts.
+    stock = {**ingredients, "splitter": 2}
+    counters = iter((42, 43))
+    waits: list[str] = []
+    sleeps: list[float] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: next(counters),
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "consume_wait", waits.append)
+    monkeypatch.setattr(builder.time, "sleep", sleeps.append)
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan, messages.append,
+    )
+
+    assert "producing temporary splitter" in result
+    assert waits == ["bootstrap_loan_splitter"]
+    assert sleeps == [builder._BOOTSTRAP_LOAN_POLL_SECONDS]
+    assert any("craft count advanced 42 -> 43" in message for message in messages)
+
+
+def test_loan_gate_rechecks_stock_after_the_poll(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 1.0,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left", requester_position=(50.5, 32.5),
+        current_recipe="splitter", step_recipe="splitter",
+        step_baseline_finished=40, step_required_crafts=3,
+    )
+    stock_reads = iter((
+        ({"iron-plate": 100, "splitter": 0},) * 2,
+        ({"iron-plate": 100, "splitter": 3},) * 2,
+    ))
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: next(stock_reads))
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 40,
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name",
+        lambda *_a: "disabled_by_control_behavior",
+    )
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan, lambda _message: None,
+    )
+
+    assert "producing temporary splitter" in result
+
+
 def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(

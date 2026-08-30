@@ -85,6 +85,35 @@ def test_lifecycle_persists_full_footprint_and_releases_after_output(
     assert ledger.load("iron-plate") == state
 
 
+def test_released_district_never_recreates_its_pioneer(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger, _state = _provisioned(tmp_path)
+    ledger.mark_validating("iron-plate", measured_output_count=3)
+    ledger.mark_retiring("iron-plate")
+    ledger.mark_released("iron-plate")
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_direct_plate_line",
+        lambda *_a: pytest.fail("released district must not recreate a pioneer"),
+    )
+
+    with pytest.raises(builder.StuckError) as failure:
+        builder._prep_plate_foundation(
+            object(), object(), "nauvis", "player", set(), {}, {},
+            (0.0, 0.0), lambda _message: None, {}, {},
+        )
+
+    assert failure.value.code == "bootstrap_lifecycle_conflict"
+    assert "refusing to recreate its pioneer" in str(failure.value)
+
+
 def test_retirement_cannot_skip_measured_replacement_output(tmp_path: Path) -> None:
     ledger, _state = _provisioned(tmp_path)
 

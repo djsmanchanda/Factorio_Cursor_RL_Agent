@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping
 
 from planners.mall_layout import (
@@ -18,7 +18,9 @@ from planners.stock_gating import stock_gate
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
-_LOAN_PREFIX = "mall-bootstrap:v1:"
+_LOAN_PREFIX = "mall-bootstrap:"
+_LOAN_V1_PREFIX = f"{_LOAN_PREFIX}v1:"
+_LOAN_V2_PREFIX = f"{_LOAN_PREFIX}v2:"
 
 
 @dataclass(frozen=True)
@@ -31,11 +33,33 @@ class MallBootstrapLoan:
     side: str
     requester_position: Point
     current_recipe: str
+    step_recipe: str | None = None
+    step_baseline_finished: int | None = None
+    step_required_crafts: int | None = None
 
     @property
     def group(self) -> str:
-        return bootstrap_loan_group(
-            self.original_recipe, self.target_item, self.target_count, self.side,
+        if (
+            self.step_recipe is None
+            or self.step_baseline_finished is None
+            or self.step_required_crafts is None
+        ):
+            return bootstrap_loan_group(
+                self.original_recipe, self.target_item, self.target_count, self.side,
+            )
+        return (
+            f"{_LOAN_V2_PREFIX}{self.original_recipe}:{self.target_item}:"
+            f"{self.target_count}:{self.side}:{self.step_recipe}:"
+            f"{self.step_baseline_finished}:{self.step_required_crafts}"
+        )
+
+    def starting_step(
+        self, recipe: str, baseline_finished: int, required_crafts: int,
+    ) -> "MallBootstrapLoan":
+        return replace(
+            self, current_recipe=recipe, step_recipe=recipe,
+            step_baseline_finished=max(0, int(baseline_finished)),
+            step_required_crafts=max(1, int(required_crafts)),
         )
 
     @property
@@ -64,24 +88,42 @@ def bootstrap_loan_group(
     if side not in {"left", "right"} or target_count < 1:
         raise ValueError("Bootstrap mall loan needs a valid side and positive target")
     return (
-        f"{_LOAN_PREFIX}{original_recipe}:{target_item}:{target_count}:{side}"
+        f"{_LOAN_V1_PREFIX}{original_recipe}:{target_item}:{target_count}:{side}"
     )
 
 
-def parse_bootstrap_loan_group(group: str) -> tuple[str, str, int, str] | None:
-    if not group.startswith(_LOAN_PREFIX):
+def parse_bootstrap_loan_group(
+    group: str,
+) -> tuple[str, str, int, str, str | None, int | None, int | None] | None:
+    if group.startswith(_LOAN_V1_PREFIX):
+        fields = group[len(_LOAN_V1_PREFIX):].split(":")
+        if len(fields) != 4:
+            return None
+        original, target, raw_count, side = fields
+        step, raw_baseline, raw_required = None, None, None
+    elif group.startswith(_LOAN_V2_PREFIX):
+        fields = group[len(_LOAN_V2_PREFIX):].split(":")
+        if len(fields) != 7:
+            return None
+        original, target, raw_count, side, step, raw_baseline, raw_required = fields
+    else:
         return None
-    fields = group[len(_LOAN_PREFIX):].split(":")
-    if len(fields) != 4:
-        return None
-    original, target, raw_count, side = fields
     try:
         count = int(raw_count)
+        baseline = int(raw_baseline) if raw_baseline is not None else None
+        required = int(raw_required) if raw_required is not None else None
     except ValueError:
         return None
-    if not original or not target or count < 1 or side not in {"left", "right"}:
+    if (
+        not original or not target or count < 1
+        or side not in {"left", "right"}
+        or (step is not None and (
+            not step or baseline is None or baseline < 0
+            or required is None or required < 1
+        ))
+    ):
         return None
-    return original, target, count, side
+    return original, target, count, side, step, baseline, required
 
 
 def _temporary_assembler_recipe(item: str) -> bool:
@@ -168,7 +210,7 @@ def active_bootstrap_loans(
         parsed = parse_bootstrap_loan_group(group)
         if parsed is None:
             continue
-        original, target, count, side = parsed
+        original, target, count, side, step, baseline, required = parsed
         loans.append(MallBootstrapLoan(
             original_recipe=original,
             target_item=target,
@@ -176,6 +218,9 @@ def active_bootstrap_loans(
             side=side,
             requester_position=(float(raw_x), float(raw_y)),
             current_recipe=left_recipe if side == "left" else right_recipe,
+            step_recipe=step,
+            step_baseline_finished=baseline,
+            step_required_crafts=required,
         ))
     return tuple(loans)
 
@@ -185,9 +230,11 @@ def _as_configuration(action: dict) -> dict:
 
 
 def bootstrap_loan_plan(
-    loan: MallBootstrapLoan, step: MallBootstrapStep,
+    loan: MallBootstrapLoan, step: MallBootstrapStep, *,
+    baseline_finished: int = 0,
 ) -> dict:
     """Retarget the borrowed machine, requester ingredients, gate, and output."""
+    active = loan.starting_step(step.recipe, baseline_finished, step.crafts)
     spec = LINE_RECIPES[step.recipe]
     requests = recipe_group_requests(spec["ingredients"], spec["amounts"])
     machine = {
@@ -204,11 +251,13 @@ def bootstrap_loan_plan(
             "x": loan.requester_position[0], "y": loan.requester_position[1],
         },
         "logistic_sections": [{
-            "group": loan.group,
+            "group": active.group,
             "requests": requests,
             "multiplier": max(1, step.crafts),
         }],
     }
+    if active.group != loan.group:
+        requester["clear_logistic_groups"] = [loan.group]
     provider = generate_mall_provider_limit_update(
         step.recipe, loan.provider_position, step.target_count,
     )["phases"][0]["actions"][0]
