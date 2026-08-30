@@ -135,6 +135,10 @@ These names describe intended responsibilities, not permission to build speculat
   temporary product with earlier contents in the same provider, and restores
   the original recipe and requests after the batch. Permanent one-recipe mall
   slots resume only after those five core producers are live.
+  Exactly one recipe loan may be active at a time. A request for a different
+  batch services the active loan through measured completion and restoration,
+  defers the new batch, and retries it on the next pass; a busy or completed
+  prior loan is never classified as an absence of borrowable capacity.
 - The same complete-chain condition applies to every other coherent blueprint.
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may
@@ -144,6 +148,10 @@ These names describe intended responsibilities, not permission to build speculat
   not recoverable capacity. Recovery may adopt only an exact planner-shaped
   six-furnace module; until a direct refinery has produced plates, repair its
   power/transport path instead of expanding its mine or selecting another site.
+- New paired-mine siting has one global candidate budget across every possible
+  future-reserve size. Each candidate row is surveyed once, then its supported
+  reserve is measured; reserve fallback must not restart the same live RCON
+  scan. The complete operation emits one timed `new_mine_site` survey event.
 - A position inside a pole's supply area is not evidence that a power bridge
   was built. Capacity planning distinguishes existing coverage from a submitted
   network bridge and keeps measuring the actual connected grid.

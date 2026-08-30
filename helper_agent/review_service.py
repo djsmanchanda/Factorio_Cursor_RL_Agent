@@ -167,10 +167,24 @@ class ReviewService:
                 and isinstance(decision, Mapping)
                 and decision.get("alternating_priority_cycle") is True
             )
+            loan_shortage = blocker.get("code") == "rationed_mall_no_borrower"
+            details = blocker.get("details", {})
+            if not isinstance(details, Mapping):
+                details = {}
+            active_loans = details.get("active_loans", [])
+            loan_handoff_blocked = (
+                loan_shortage and isinstance(active_loans, list)
+                and bool(active_loans)
+            )
             moments.append({
                 "title": (
                     "Alternating priority livelock"
-                    if iteration_cycle else f"{blocker.get('code', 'unknown')} blocker"
+                    if iteration_cycle else
+                    "Bootstrap mall loan handoff failed"
+                    if loan_handoff_blocked else
+                    "No eligible rationed-mall borrower"
+                    if loan_shortage else
+                    f"{blocker.get('code', 'unknown')} blocker"
                 ),
                 "run_id": run_id,
                 "time_tick": str(blocker.get("observed_at", "unknown")),
@@ -180,12 +194,24 @@ class ReviewService:
                     "Two tasks alternated without changing the outstanding-work state, "
                     "so task identity kept the old no-progress detector from accumulating."
                     if iteration_cycle else
+                    "A different recipe loan remained active when the next finite batch "
+                    "was requested; the controller treated a serial handoff as no capacity."
+                    if loan_handoff_blocked else
+                    "No active loan remained and the planner found no eligible owned "
+                    "assembler/requester cell for the finite batch."
+                    if loan_shortage else
                     "The runner recorded this typed blocker; the bounded packet does not establish a deeper cause."
                 ),
                 "fix_direction": (
                     "Category: controller livelock; compare outstanding work independently "
                     "of the selected task and report the repeating cycle."
                     if iteration_cycle else
+                    "Category: bootstrap loan lifecycle; complete or restore the active "
+                    "loan, then defer and retry the new batch instead of terminating."
+                    if loan_handoff_blocked else
+                    "Category: bootstrap capacity; report candidate rejection reasons and "
+                    "schedule a core mall cell or another eligible borrower."
+                    if loan_shortage else
                     "Category: planner telemetry; typed stage context needs focused review."
                 ),
                 "confidence": "high" if blocker.get("classification") == "bug" else "medium",
@@ -248,6 +274,8 @@ class ReviewService:
                     if item.get("code") == "controller_iteration_limit"
                     and isinstance(decision, Mapping)
                     and decision.get("alternating_priority_cycle") is True
+                    else "rationed mall exhausted eligible borrower capacity"
+                    if item.get("code") == "rationed_mall_no_borrower"
                     else f"typed blocker: {item.get('code', 'unknown')}"
                 )
                 for item in blockers

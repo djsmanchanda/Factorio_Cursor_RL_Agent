@@ -682,6 +682,7 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
 ) -> None:
     _patch_and_rates(monkeypatch)
     batch_calls: list[tuple] = []
+    messages: list[str] = []
     monkeypatch.setattr(live_base, "find_clear_area", lambda *_a, **_k: (0.0, 0.0))
 
     def find_clear_areas(*args, **kwargs):
@@ -697,9 +698,15 @@ def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     planned = plan_local_extraction(
         object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
         belt_type="fast-transport-belt", inserter_type="fast-inserter",
+        observe=messages.append,
     )
 
     assert planned.smelter_origin == (81.0, 80.0)
+    assert "SURVEY START: iron-plate new_mine_site" in messages
+    assert any(
+        message.startswith("SURVEY END: iron-plate new_mine_site elapsed=")
+        for message in messages
+    )
     assert batch_calls[0][1] == {
         "max_radius": 60.0,
         "avoid_resources": True,
@@ -1142,6 +1149,37 @@ def test_choose_mining_origin_honors_bulk_resource_prefilter() -> None:
 
     assert picked == ((0.0, 0.0), 2)
     assert len(clear_calls) == 1
+
+
+def test_reserve_search_has_one_global_candidate_budget() -> None:
+    """Reserve fallback must not restart the same 300 live probes for every
+    smaller reserve size, as the reduced-v1 copper siting run did."""
+    probes = 0
+
+    def never_clear(*_args):
+        nonlocal probes
+        probes += 1
+        return False
+
+    picked = stage_extraction.choose_mining_origin_with_reserve(
+        (12.5, -1.5), (17.5, -26.5), (47.5, 23.5), 3, 12,
+        never_clear, lambda _centres: True,
+    )
+
+    assert picked is None
+    assert probes == 300
+
+
+def test_reserve_search_keeps_the_largest_supported_nearest_row() -> None:
+    picked = stage_extraction.choose_mining_origin_with_reserve(
+        (0.0, 0.0), (-1.0, -1.0), (6.0, 2.0), 2, 2,
+        lambda *_a: True,
+        # Two opening columns plus one reserve column fit; the second reserve
+        # would put the final drill pair beyond this synthetic patch slice.
+        lambda centres: len(centres) <= 6,
+    )
+
+    assert picked == ((0.0, 0.0), 1)
 
 
 def test_coal_candidates_are_prefiltered_by_one_bulk_survey(monkeypatch) -> None:

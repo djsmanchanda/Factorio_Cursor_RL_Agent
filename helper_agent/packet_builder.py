@@ -30,7 +30,7 @@ _MATCHERS = tuple(
         r"\bSUPPLY", r"\bPOWER", r"\bCOVERAGE", r"\bGOAL MET:",
         r"\bSURVEY (?:START|END):", r"\bSMELTER", r"\bBLUEPRINT",
         r"\bMALL DEMAND:", r"\bMATERIAL PROJECT", r"\bCHEMICAL LADDER:",
-        r"\bRATIONED MALL:",
+        r"\bRATIONED MALL:", r"\bMALL BOOTSTRAP LOAN",
         r"\bRESEARCH QUEUED:", r"\bRUN HEARTBEAT",
         r"^Traceback \(most recent call last\):", r'^\s+File "',
         r"^[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception):",
@@ -213,6 +213,10 @@ def _decision_summary(events: list[dict]) -> dict:
             {"elapsed_seconds": elapsed, "message": message}
             for elapsed, message in sorted(survey_seconds, reverse=True)[:5]
         ],
+        "mall_loan_tail": [
+            message for message in messages
+            if "MALL BOOTSTRAP LOAN" in message
+        ][-8:],
         "zero_placement_reports": sum(
             "placed 0 actions" in message for message in messages
         ),

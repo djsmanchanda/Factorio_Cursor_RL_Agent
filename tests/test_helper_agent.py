@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from helper_agent import cli, config, dashboard, feedback
 from helper_agent.brief import generate_brief
-from helper_agent.packet_builder import build_case_packet, write_packet
+from helper_agent.packet_builder import _decision_summary, build_case_packet, write_packet
 from helper_agent.review_service import ReviewService
 from tools import autonomous_run
 
@@ -95,6 +95,41 @@ def test_run_logger_writes_compact_structured_events(tmp_path: Path) -> None:
     assert event["event_type"] == "priority"
     assert event["sequence"] == 1
     assert event["message"].startswith("PRIORITY: steel-plate")
+
+
+def test_decision_summary_retains_recent_mall_loan_transitions() -> None:
+    summary = _decision_summary([
+        {"message": "  MALL BOOTSTRAP LOAN: borrowed cable for splitter"},
+        {"message": "  MALL BOOTSTRAP LOAN HANDOFF: drills wait for splitter"},
+        {"message": "  MALL BOOTSTRAP LOAN RESTORED: copper-cable"},
+    ])
+
+    assert summary["mall_loan_tail"] == [
+        "  MALL BOOTSTRAP LOAN: borrowed cable for splitter",
+        "  MALL BOOTSTRAP LOAN HANDOFF: drills wait for splitter",
+        "  MALL BOOTSTRAP LOAN RESTORED: copper-cable",
+    ]
+
+
+def test_fallback_explains_an_active_loan_handoff_blocker(tmp_path: Path) -> None:
+    packet = _packet(tmp_path)
+    packet["blockers"] = [{
+        **packet["blockers"][0],
+        "code": "rationed_mall_no_borrower",
+        "details": {
+            "item": "electric-mining-drill",
+            "target": 6,
+            "available_stock": 5,
+            "active_loans": [{"target_item": "splitter"}],
+        },
+    }]
+
+    report = ReviewService(tmp_path)._fallback_report(packet, [])
+
+    assert report["notable_moments"][0]["title"] == (
+        "Bootstrap mall loan handoff failed"
+    )
+    assert "serial handoff" in report["notable_moments"][0]["cause"]
 
 
 def test_packet_builder_preserves_unprefixed_traceback_frames(tmp_path: Path) -> None:

@@ -3758,11 +3758,28 @@ def _start_bootstrap_loan(
 ) -> str | None:
     existing = active_bootstrap_loans(client, surface, force)
     if existing:
-        if len(existing) == 1 and existing[0].target_item == target_item:
-            return _submit_bootstrap_loan(
-                client, bridge, surface, force, existing[0], emit,
+        if len(existing) > 1:
+            raise StuckError(
+                f"Found {len(existing)} simultaneous mall bootstrap loans; "
+                "only one planner-owned cell may be borrowed at a time",
+                code="multiple_bootstrap_mall_loans",
+                classification="bug",
+                details={"loans": [loan.group for loan in existing]},
             )
-        return None
+        loan = existing[0]
+        if loan.target_item != target_item:
+            emit(
+                f"  MALL BOOTSTRAP LOAN HANDOFF: {target_item} waits while "
+                f"the active {loan.target_item} batch at {loan.machine_position} "
+                "is completed and restored"
+            )
+        # A different target is a serial handoff, not evidence that no cell is
+        # borrowable. Service the one durable loan first; once its finite stock
+        # exists this call restores the original recipe and the next pass may
+        # borrow the cell for ``target_item``.
+        return _submit_bootstrap_loan(
+            client, bridge, surface, force, loan, emit,
+        )
     stock = live_base.available_items(client, surface, force)
     recipes = [
         recipe for recipe, spec in LINE_RECIPES.items()
@@ -4411,13 +4428,28 @@ def _rationed_mall_batch(
         client, bridge, surface, force, item, target, reference_point, emit,
     )
     if remedy is None:
+        active = active_bootstrap_loans(client, surface, force)
         raise StuckError(
             f"rationed mall needs a borrowable assembler to batch {item} "
             f"through stock {target}",
             code="rationed_mall_no_borrower",
             classification="bug",
             state="supply_wait",
-            details={"item": item, "target": target},
+            details={
+                "item": item,
+                "target": target,
+                "available_stock": stock.get(item, 0),
+                "active_loans": [
+                    {
+                        "original_recipe": loan.original_recipe,
+                        "target_item": loan.target_item,
+                        "target_count": loan.target_count,
+                        "current_recipe": loan.current_recipe,
+                        "machine_position": list(loan.machine_position),
+                    }
+                    for loan in active
+                ],
+            },
         )
     emit(
         f"  RATIONED MALL: {item} is a finite batch until core cell producers "

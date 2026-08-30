@@ -298,6 +298,80 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
     assert any("mixed provider contents are expected" in line for line in messages)
 
 
+def test_new_rationed_target_services_and_restores_the_active_loan(
+    monkeypatch,
+) -> None:
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable",
+        target_item="splitter",
+        target_count=3,
+        side="left",
+        requester_position=(50.5, 32.5),
+        current_recipe="splitter",
+    )
+    submitted = []
+    messages: list[str] = []
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"electric-mining-drill": 5, "splitter": 10},
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan,),
+    )
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a: submitted.append(_a[4])
+        or "restored borrowed copper-cable producer after seed completion",
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert submitted == [loan]
+    assert any("LOAN HANDOFF" in message for message in messages)
+    assert not any("no borrowable assembler" in message for message in messages)
+
+
+def test_completed_prior_loan_is_restored_before_the_new_batch(
+    monkeypatch,
+) -> None:
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable",
+        target_item="splitter",
+        target_count=3,
+        side="left",
+        requester_position=(50.5, 32.5),
+        current_recipe="splitter",
+    )
+    submitted: list[tuple[str, dict]] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan,),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock",
+        lambda *_a: ({"splitter": 10}, {"splitter": 10}),
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e: submitted.append((name, plan)),
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert result == "restored borrowed copper-cable producer after seed completion"
+    assert submitted[0][0] == "restore_bootstrap_loan_splitter"
+    machine = submitted[0][1]["phases"][0]["actions"][0]
+    assert machine["recipe"] == "copper-cable"
+    assert any("LOAN RESTORED" in message for message in messages)
+
+
 def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(

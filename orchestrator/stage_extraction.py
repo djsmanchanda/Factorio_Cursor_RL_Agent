@@ -221,6 +221,52 @@ def _supported_pair_reserve(
             high = candidate - 1
     return best
 
+
+def choose_mining_origin_with_reserve(
+    preferred: Point,
+    patch_min: Point,
+    patch_max: Point,
+    machine_count: int,
+    maximum_reserve: int,
+    area_is_clear: Callable[[Point, Point], bool],
+    footprint_has_resource: Callable[[list[Point]], bool],
+    *,
+    max_candidates: int = 300,
+) -> tuple[Point, int] | None:
+    """Choose the nearest row with the largest supported future reserve.
+
+    Each candidate origin is visited once. The previous descending reserve
+    loop restarted the same 300-candidate live survey for every reserve size;
+    the reduced-v1 copper patch therefore spent about 162 seconds repeating
+    identical RCON probes before reaching the same six-drill row.
+    """
+    best: tuple[Point, int] | None = None
+    for probes, origin in enumerate(candidate_mining_origins(
+        preferred, patch_min, patch_max, machine_count,
+    ), start=1):
+        if probes > max_candidates:
+            break
+        ox, oy = origin
+        if not area_is_clear(
+            (ox - 6, oy - 5), (ox + machine_count * 3 + 4, oy + 7),
+        ):
+            continue
+        if not footprint_has_resource(
+            paired_mining_drill_positions(origin, machine_count),
+        ):
+            continue
+        reserve = _supported_pair_reserve(
+            origin, machine_count, maximum_reserve,
+            area_is_clear, footprint_has_resource,
+        )
+        if best is None or reserve > best[1]:
+            best = (origin, reserve)
+        # Candidate ordering already encodes proximity. No later candidate can
+        # beat the maximum reserve or win its nearest-candidate tie.
+        if reserve == maximum_reserve:
+            return best
+    return best
+
 def direct_mine_plan(
     origin: Point,
     machine_count: int,
@@ -322,23 +368,17 @@ def _new_direct_mine(
     # Reserve the corridor *west* of the initial row.  The east end is the
     # permanent haul head, so reserving east made phase 2 place drills on the
     # first outbound belt tile (live iron mine: x=25.5).
-    selected = None
-    reserved_columns = 0
-    for reserve in range(maximum_reserve, -1, -1):
-        candidate = choose_mining_origin(
-            preferred, patch_min, patch_max, row_drill_count,
-            area_is_clear, footprint_has_resource, reserve,
-        )
-        if candidate is not None:
-            selected, reserved_columns = candidate, reserve
-            break
+    selected = choose_mining_origin_with_reserve(
+        preferred, patch_min, patch_max, row_drill_count, maximum_reserve,
+        area_is_clear, footprint_has_resource,
+    )
     if selected is None:
         raise PendingSystemDeferred(
             f"No clear position near the {ore} patch at {nearest_tile} "
             "puts every drill on ore -- the patch is saturated by standing "
             "infrastructure; expansion defers instead of bulldozing it"
         )
-    selected_origin, row_drill_count = selected
+    selected_origin, reserved_columns = selected
     # `selected_origin` is the west edge of a fully verified strip.  Start at
     # its east edge so every future column extends west, away from the head.
     origin = (
@@ -820,9 +860,12 @@ def plan_local_extraction(
                     "district instead of opening a duplicate mine or refinery."
                 )
     else:
-        mine_origin, drill_count, build_plan, ore_output = _new_direct_mine(
-            client, surface, ore, nearest_tile, patch_min, patch_max,
-            machine_count, belt_type, inserter_type, belt_stock,
+        mine_origin, drill_count, build_plan, ore_output = surveyed(
+            "new_mine_site",
+            lambda: _new_direct_mine(
+                client, surface, ore, nearest_tile, patch_min, patch_max,
+                machine_count, belt_type, inserter_type, belt_stock,
+            ),
         )
         row_drill_count = drill_count // 2
         expansion_step = -1
