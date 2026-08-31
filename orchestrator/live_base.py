@@ -619,6 +619,36 @@ def entity_names_at(
     return names
 
 
+def live_entity_positions(
+    client: RconClient, surface: str, force: str, entity_name: str,
+    positions: Sequence[Point],
+) -> frozenset[Point]:
+    """Return exact positions occupied by one real force-owned entity type.
+
+    Generic position surveys can see an item-request proxy or another
+    short-lived auxiliary entity before the machine sharing its centre.  A
+    lifecycle identity check must instead ask Factorio for the expected live
+    entity directly; ghosts deliberately do not satisfy this observation.
+    """
+    if not positions:
+        return frozenset()
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for i,p in ipairs({" + literal + "}) do local found=false;"
+        "for _,e in pairs(s.find_entities_filtered{position=p,radius=0.4,"
+        "name='" + entity_name + "',force=f}) do "
+        "if e.type~='entity-ghost' and math.abs(e.position.x-p[1])<0.01 and "
+        "math.abs(e.position.y-p[2])<0.01 then found=true break end end;"
+        "if found then out[#out+1]=i end end;rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    return frozenset(
+        tuple(positions[int(index) - 1])
+        for index in raw.split(",") if index
+    )
+
+
 def transport_belt_direction_at(
     client: RconClient, surface: str, position: Point,
 ) -> str | None:

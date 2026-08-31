@@ -142,18 +142,36 @@ def test_released_foundation_stays_ready_during_a_partial_later_expansion(
     }
     monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
     monkeypatch.setattr(
-        builder.live_base, "entity_names_at",
-        lambda _client, _surface, positions: {
-            position: (
-                "electric-furnace" if position in live_positions else None
-            )
-            for position in positions
-        },
+        builder.live_base, "live_entity_positions",
+        lambda _client, _surface, _force, _name, _positions: frozenset(
+            live_positions
+        ),
     )
 
     assert builder._direct_plate_foundation_ready(
         object(), "nauvis", "player", "iron-plate",
     )
+
+
+def test_live_entity_positions_filters_for_the_expected_real_entity() -> None:
+    class Client:
+        query = ""
+
+        def command(self, query: str) -> str:
+            self.query = query
+            return "1,3"
+
+    client = Client()
+    positions = ((20.5, 30.5), (20.5, 33.5), (20.5, 36.5))
+
+    found = builder.live_base.live_entity_positions(
+        client, "nauvis", "player", "electric-furnace", positions,
+    )
+
+    assert found == frozenset((positions[0], positions[2]))
+    assert "name='electric-furnace'" in client.query
+    assert "force=f" in client.query
+    assert "e.type~='entity-ghost'" in client.query
 
 
 def test_retirement_cannot_skip_measured_replacement_output(tmp_path: Path) -> None:

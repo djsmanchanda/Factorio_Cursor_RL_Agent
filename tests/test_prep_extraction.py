@@ -498,6 +498,64 @@ def test_earmarked_foundation_retires_starter_after_live_output(monkeypatch) -> 
     assert retired == ["iron-plate"]
 
 
+def test_submitted_foundation_reconciles_before_structural_readiness(
+    tmp_path, monkeypatch,
+) -> None:
+    ledger = autonomous_builder.BootstrapDistrictLedger(
+        tmp_path, episode_id="episode-1", surface="nauvis", force="player",
+        bootstrap_profile="reduced-v1",
+    )
+    action = {
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 20.5, "y": 30.5},
+    }
+    ledger.record_pioneer("iron-plate", "iron-ore", [action])
+    ledger.provision(
+        "iron-plate",
+        reservations={
+            role: frozenset({(index, 0)})
+            for index, role in enumerate(
+                sorted(autonomous_builder.REQUIRED_RESERVATION_ROLES)
+            )
+        },
+        replacement_origin=(20.0, 30.0),
+        replacement_provider=(34.5, 42.5), replacement_furnaces=6,
+        replacement_actions=[action], transport_source=(10.5, 10.5),
+        transport_actions=[{
+            "action_type": "place_ghost", "entity": "transport-belt",
+            "position": {"x": 10.5, "y": 10.5},
+        }],
+    )
+    ledger.mark_replacement_submitted("iron-plate")
+    monkeypatch.setattr(
+        autonomous_builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger,
+    )
+    starter = autonomous_builder.live_base.DirectPlateStarter(
+        (17.5, -2.5), "north", 1,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter",
+        lambda *_args: starter if _args[3] == "iron-plate" else None,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready",
+        lambda *_args: pytest.fail(
+            "submitted construction must reconcile before furnace counting"
+        ),
+    )
+    reconciled: list[str] = []
+    monkeypatch.setattr(
+        autonomous_builder, "_reconcile_submitted_bootstrap_replacement",
+        lambda *_args: reconciled.append(_args[4].recipe) or (34.5, 42.5),
+    )
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        lambda _message: None, {}, {},
+    )
+    assert reconciled == ["iron-plate"]
+
+
 def test_plate_shortage_stops_later_plate_from_spending_belts() -> None:
     """The first blocked plate must not let the other baseline plate submit."""
     assert "plate in pending_plate_materials" in _LOOP

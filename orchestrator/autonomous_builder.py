@@ -6081,11 +6081,10 @@ def _live_bootstrap_replacement_furnaces(
         for action in lifecycle.replacement_actions
         if action.get("entity") == machine
     )
-    names = live_base.entity_names_at(client, surface, owned)
-    return tuple(
-        position for position in owned
-        if names.get(position) == machine
+    live_positions = live_base.live_entity_positions(
+        client, surface, lifecycle.force, machine, owned,
     )
+    return tuple(position for position in owned if position in live_positions)
 
 
 def _direct_plate_foundation_ready(
@@ -6160,6 +6159,21 @@ def _prep_plate_foundation(
         starter = live_base.direct_plate_starter(
             client, surface, force, plate, ore, reference_point,
         )
+        lifecycle = _bootstrap_state(plate)
+        if (
+            lifecycle is not None
+            and lifecycle.lifecycle_state in {
+                "provisioning", "validating", "retiring",
+            }
+            and lifecycle.replacement_submitted
+        ):
+            # Real furnace bodies may finish before their ore route and output
+            # support.  Structural readiness must not bypass the persisted
+            # construction reconciliation and spin on a zero output counter.
+            _reconcile_submitted_bootstrap_replacement(
+                client, bridge, surface, force, lifecycle, emit,
+            )
+            return True
         if _direct_plate_foundation_ready(client, surface, force, plate):
             if starter is None:
                 continue
@@ -6186,7 +6200,6 @@ def _prep_plate_foundation(
         if starter is not None:
             standing_starters[plate] = starter
             continue
-        lifecycle = _bootstrap_state(plate)
         if lifecycle is not None and lifecycle.lifecycle_state == "released":
             error = BootstrapLifecycleError(
                 f"released {plate} replacement is no longer a complete real "
