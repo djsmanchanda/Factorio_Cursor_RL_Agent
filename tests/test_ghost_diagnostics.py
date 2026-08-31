@@ -181,6 +181,9 @@ def test_material_remedy_reuses_one_local_provider_chest(monkeypatch) -> None:
         builder.live_base, "network_item_count", lambda *_a: 0,
     )
     monkeypatch.setattr(
+        builder.live_base, "transferable_item_count", lambda *_a: 20,
+    )
+    monkeypatch.setattr(
         builder.live_base, "nearest_container", lambda *_a, **_k: provider,
     )
     monkeypatch.setattr(
@@ -210,6 +213,9 @@ def test_mine_material_delivery_stays_outside_its_growth_envelope(monkeypatch) -
         builder.live_base, "available_items", lambda *_a: {"transport-belt": 20},
     )
     monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_item_count", lambda *_a: 20,
+    )
     monkeypatch.setattr(builder.live_base, "nearest_container", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder.live_base, "chained_clear_spots",
@@ -233,6 +239,64 @@ def test_mine_material_delivery_stays_outside_its_growth_envelope(monkeypatch) -
 
     position = submitted[0]["phases"][0]["actions"][0]["position"]
     assert (position["x"], position["y"]) == (32.0, -30.0)
+
+
+def test_refinery_material_delivery_stays_outside_its_plan_area(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 20},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_item_count", lambda *_a: 20,
+    )
+    monkeypatch.setattr(builder.live_base, "nearest_container", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder.live_base, "chained_clear_spots",
+        lambda _client, _surface, _placements, start: [
+            ("passive-provider-chest", start[0], start[1]),
+        ],
+    )
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: submitted.append(_a[3]),
+    )
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a, **_k: False)
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *_a: 16)
+    area = ((80.0, 0.0), (125.0, 45.0))
+
+    builder._apply_remedy(
+        object(), object(), "nauvis", "player",
+        "modular refinery for iron-plate", "materials:transport-belt:1",
+        "ghost belt needs one", (79.5, 16.5), (95.0, 15.0), [], [],
+        area, lambda _message: None,
+    )
+
+    position = submitted[0]["phases"][0]["actions"][0]["position"]
+    assert (position["x"], position["y"]) == (77.0, -3.0)
+
+
+def test_material_remedy_does_not_place_an_empty_stage_provider(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 20},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_item_count", lambda *_a: 0,
+    )
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: pytest.fail("must not place chest"),
+    )
+    messages: list[str] = []
+
+    acted = builder._apply_remedy(
+        object(), object(), "nauvis", "player",
+        "modular refinery for iron-plate", "materials:transport-belt:1",
+        "ghost belt needs one", (79.5, 16.5), (95.0, 15.0), [], [],
+        ((80.0, 0.0), (125.0, 45.0)), messages.append,
+    )
+
+    assert not acted
+    assert any("waiting instead of placing an empty stage chest" in m for m in messages)
 
 
 def test_producer_backed_shortage_places_blueprint_without_explicit_override(

@@ -84,6 +84,38 @@ def test_cohesive_target_merges_starved_furnaces_and_rounds_modules(monkeypatch)
     assert target == 36
 
 
+def test_refinery_recovery_ignores_disconnected_recipe_less_block(monkeypatch) -> None:
+    """A direct copper starter must not adopt a starved iron module nearby."""
+    visible = SimpleNamespace(machine_positions=((57.5, 26.5),))
+    foreign = _furnaces(generate_managed_refinery_plan(
+        "iron-plate", 6, origin_x=95.0, origin_y=15.0, variant="basic",
+    ))
+    idle = SimpleNamespace(machine_positions=foreign)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: visible)
+    monkeypatch.setattr(
+        builder.live_base, "find_idle_machine_row", lambda *_a, **_k: idle,
+    )
+    captured: list[tuple[tuple[float, float], ...]] = []
+
+    def reject_unmanaged(_client, _surface, _force, _recipe, positions, **_kwargs):
+        captured.append(tuple(sorted(positions)))
+        raise ValueError("not a complete managed module")
+
+    monkeypatch.setattr(builder, "recover_managed_refinery", reject_unmanaged)
+    extraction = SimpleNamespace(
+        smelter_origin=(82.0, -79.0), system_drill_count_before=0,
+        drill_count=6, mining_productivity_bonus=0.0, ore="copper-ore",
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder._cohesive_smelter_target(
+            object(), "nauvis", "player", "copper-plate", extraction, True,
+            lambda _message: None,
+        )
+
+    assert captured == [((57.5, 26.5),)]
+
+
 def test_cohesive_target_keeps_valid_block_when_partial_expansion_is_nearby(
     monkeypatch,
 ) -> None:
@@ -125,7 +157,9 @@ def test_cohesive_target_keeps_valid_block_when_partial_expansion_is_nearby(
 
     assert recovered == state
     assert target == 12
-    assert len(calls) == 2
+    # Disconnected recipe-less machines are filtered before recovery, so the
+    # valid recipe-visible block succeeds on the first ownership check.
+    assert len(calls) == 1
 
 
 def test_cohesive_target_defers_an_incomplete_visible_refinery(monkeypatch) -> None:

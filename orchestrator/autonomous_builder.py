@@ -207,10 +207,10 @@ _MAX_PRIORITY_SLEEP_SECONDS = 30.0
 # burned all six rounds on nothing, and killed the run (live, 2026-08-22).
 _LOGISTIC_CHARGE_WAIT_SECONDS = 90.0
 
-# A construction-material provider may be needed while an earmarked mine's
-# own logistic inventory is empty. Keep that temporary chest outside the mine
-# service envelope so it cannot occupy a reserved drill column on a later
-# expansion. The cache makes every remediation round reuse the same chest.
+# A construction-material provider may be needed while an earmarked stage's
+# own logistic inventory is empty. Keep that temporary chest outside the full
+# stage area so it cannot occupy a reserved mine or refinery expansion tile.
+# The cache makes every remediation round reuse the same chest.
 _STAGE_DELIVERY_PROVIDERS: dict[tuple[str, str, str, Point], Point] = {}
 _REFINERY_SITE_RESERVATIONS: dict[
     tuple[str, str, str], tuple[Point, Point],
@@ -592,9 +592,9 @@ def _restore_bootstrap_reservations() -> None:
 
 
 def _stage_delivery_anchor(
-    name: str, origin: Point, area: tuple[Point, Point] | None,
+    _name: str, origin: Point, area: tuple[Point, Point] | None,
 ) -> Point:
-    if area is None or "mine" not in name:
+    if area is None:
         return origin
     minimum, _maximum = area
     return (minimum[0] - 3.0, minimum[1] - 3.0)
@@ -789,6 +789,16 @@ def _apply_remedy(
         except Exception:  # survey hiccup: reservations may still clear alone
             local_count = None
         if local_count is not None and local_count < required:
+            transferable = live_base.transferable_item_count(
+                client, surface, force, item,
+            )
+            if transferable < required:
+                emit(
+                    f"    {item} exists in force stock ({stock[item]}) but only "
+                    f"{transferable} is in transferable provider/storage stock; "
+                    "waiting instead of placing an empty stage chest"
+                )
+                return False
             key = (surface, force, name, origin)
             delivery_anchor = _stage_delivery_anchor(name, origin, area)
             delivery = _STAGE_DELIVERY_PROVIDERS.get(key)
@@ -1870,10 +1880,21 @@ def _refinery_machine_positions(
         anchor, radius=150.0,
     )
     idle_positions = set(idle.machine_positions) if idle is not None else set()
-    positions = tuple(sorted(visible | idle_positions))
-    if idle_positions - visible:
+    # Recipe-less furnaces are ambiguous: every starved plate block looks the
+    # same.  Merge only idle machines that complete a six-furnace template
+    # containing at least one recipe-visible machine.  A structurally perfect
+    # but wholly disconnected block may belong to another plate recipe (live
+    # copper startup adopted the unfinished iron refinery from 41 tiles away).
+    connected_idle: set[Point] = set()
+    for candidate in _complete_six_furnace_candidates(
+        tuple(sorted(visible | idle_positions)),
+    ):
+        if visible.intersection(candidate):
+            connected_idle.update(set(candidate).intersection(idle_positions))
+    positions = tuple(sorted(visible | connected_idle))
+    if connected_idle - visible:
         emit(
-            f"SMELTER RECOVERY: merged {len(idle_positions - visible)} starved "
+            f"SMELTER RECOVERY: merged {len(connected_idle - visible)} starved "
             f"{recipe} furnace(s) into the managed block survey"
         )
     return positions
@@ -2526,16 +2547,10 @@ def build_mining_stage(
                 client, surface, force, recipe,
                 LINE_RECIPES[recipe]["machine"],
             )
-            positions: set[Point] = set()
-            if line is not None:
-                positions |= set(line.machine_positions)
-            idle_row = live_base.find_idle_machine_row(
-                client, surface, force, recipe,
-                LINE_RECIPES[recipe]["machine"],
-                extraction.smelter_origin, radius=150.0,
-            )
-            if idle_row is not None:
-                positions |= set(idle_row.machine_positions)
+            positions = set(_refinery_machine_positions(
+                client, surface, force, recipe, line,
+                extraction.smelter_origin, emit,
+            ))
             if len(positions) >= FURNACES_PER_MODULE:
                 statuses = live_base.entity_statuses(
                     client, surface, sorted(positions),

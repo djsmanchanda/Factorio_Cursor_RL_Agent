@@ -1327,6 +1327,31 @@ def available_items(client: RconClient, surface: str, force: str) -> dict[str, i
     return counts
 
 
+def transferable_item_count(
+    client: RconClient, surface: str, force: str, item: str,
+) -> int:
+    """Items an emergency stage provider may relocate without stealing WIP.
+
+    ``available_items`` intentionally counts every force-owned chest because it
+    is the construction budget.  Stage delivery is narrower: requester and
+    buffer contents already belong to an active consumer, so ``transfer_stock``
+    only draws from ordinary, passive-provider, and storage containers.  Use
+    the same source contract before placing a temporary destination chest.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local total=0;"
+        "for _,c in pairs(s.find_entities_filtered{"
+        "type={'container','logistic-container'},force=f}) do "
+        "local mode=nil;pcall(function() mode=c.prototype.logistic_mode end);"
+        "if mode==nil or mode=='passive-provider' or mode=='storage' then "
+        "local inv=c.get_inventory(defines.inventory.chest);"
+        "if inv then total=total+inv.get_item_count('" + item + "') end end end;"
+        "rcon.print(tostring(total))"
+    )
+    return int(_sc(client, lua))
+
+
 def roboports_needing_power(
     client: RconClient, surface: str, force: str,
 ) -> list[tuple[Point, str]]:
