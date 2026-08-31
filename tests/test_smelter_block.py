@@ -19,6 +19,7 @@ from planners.smelter_block import (  # noqa: E402
     refinery_interfaces,
     REFINERY_CAPACITY_SCHEDULES,
     scheduled_refinery_target,
+    split_managed_refinery_extension_plan,
 )
 
 
@@ -157,6 +158,32 @@ def test_managed_output_taps_the_end_without_blocking_either_plate_belt() -> Non
     )
     assert _at(plan, *interface.provider)[0]["entity"] == "passive-provider-chest"
     assert interface.provider not in interface.plate_outputs
+
+
+def test_managed_extension_keeps_old_provider_until_growth_is_complete() -> None:
+    delta = generate_managed_refinery_extension_plan(
+        "iron-plate", 6, 12, current_variant="basic", target_variant="basic",
+    )
+    growth, cutover = split_managed_refinery_extension_plan(delta, "iron-plate")
+    old_provider = refinery_interfaces(6, variant="basic").provider
+    new_provider = refinery_interfaces(12, variant="basic").provider
+
+    growth_actions = list(actions(growth))
+    cutover_actions = list(actions(cutover))
+    assert growth_actions
+    assert not any(action["action_type"] == "remove_entity" for action in growth_actions)
+    assert any(
+        action["action_type"] == "remove_entity"
+        and action["entity"] == "passive-provider-chest"
+        and (action["position"]["x"], action["position"]["y"]) == old_provider
+        for action in cutover_actions
+    )
+    assert any(
+        action["action_type"] == "place_ghost"
+        and action["entity"] == "passive-provider-chest"
+        and (action["position"]["x"], action["position"]["y"]) == new_provider
+        for action in growth_actions
+    )
 
 
 def test_managed_expansion_moves_the_output_tap_to_the_new_end() -> None:

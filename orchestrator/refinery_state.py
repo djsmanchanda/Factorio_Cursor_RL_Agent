@@ -229,3 +229,20 @@ def live_refinery_placements(
         for action in expected
         if _matches_signature(action, actual.get(_action_position(action)))
     }
+
+
+def missing_refinery_placements(
+    client: RconClient, surface: str, force: str, plan: dict,
+) -> tuple[dict, ...]:
+    """Return exact refinery placements absent as both entities and ghosts."""
+    expected = [
+        action for action in plan_actions(plan)
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+    ]
+    actual = live_base.entity_signatures_at(
+        client, surface, force, [_action_position(action) for action in expected],
+    )
+    return tuple(
+        action for action in expected
+        if not _matches_signature(action, actual.get(_action_position(action)))
+    )

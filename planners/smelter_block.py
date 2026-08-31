@@ -450,3 +450,60 @@ def generate_managed_refinery_extension_plan(
     plan["phases"] = [phase for phase in plan["phases"] if phase["actions"]]
     validate_build_plan(plan)
     return plan
+
+
+def split_managed_refinery_extension_plan(
+    plan: dict, recipe: str,
+) -> tuple[dict, dict]:
+    """Separate safe growth from the output/End cutover.
+
+    Construction bots may take minutes to satisfy a large extension.  Removing
+    the old End and provider in the same submission therefore interrupts the
+    only live plate source while the new belts are still ghosts.  The growth
+    packet contains every non-conflicting addition, including the new provider;
+    the cutover packet contains every removal and every replacement on a
+    removed tile. Callers must observe the growth packet built before
+    submitting the cutover packet.
+    """
+    phases = plan.get("phases", [])
+    removals = [
+        action for phase in phases for action in phase.get("actions", [])
+        if action.get("action_type") == "remove_entity"
+    ]
+    removal_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in removals
+    }
+    growth_actions: list[dict] = []
+    cutover_additions: list[dict] = []
+    for phase in phases:
+        for action in phase.get("actions", []):
+            if action.get("action_type") == "remove_entity":
+                continue
+            position = action.get("position", {})
+            key = (position.get("x"), position.get("y"))
+            if key in removal_positions:
+                cutover_additions.append(action)
+            else:
+                growth_actions.append(action)
+
+    metadata = {key: value for key, value in plan.items() if key != "phases"}
+    growth = {
+        **metadata,
+        "phases": ([
+            _phase(f"prepare_refinery_growth_{recipe}", growth_actions),
+        ] if growth_actions else []),
+    }
+    cutover_phases = []
+    if removals:
+        cutover_phases.append(_phase(f"retire_refinery_cutover_{recipe}", removals))
+    if cutover_additions:
+        cutover_phases.append(
+            _phase(f"finish_refinery_cutover_{recipe}", cutover_additions),
+        )
+    cutover = {**metadata, "phases": cutover_phases}
+    if growth_actions:
+        validate_build_plan(growth)
+    if cutover_phases:
+        validate_build_plan(cutover)
+    return growth, cutover

@@ -85,7 +85,8 @@ from orchestrator.extraction_transport import (
 )
 from orchestrator.refinery_state import (
     ManagedRefineryState, assert_refinery_removals_owned,
-    live_refinery_placements, recover_managed_refinery,
+    infer_refinery_state, live_refinery_placements,
+    missing_refinery_placements, recover_managed_refinery,
 )
 from orchestrator.stage_chemical import (
     ensure_battery_cell, ensure_coal_mine, ensure_oil_cell,
@@ -164,6 +165,7 @@ from planners.recipe_data import (
 from planners.smelter_block import (
     FURNACES_PER_MODULE, generate_managed_refinery_extension_plan,
     generate_managed_refinery_plan, refinery_interfaces, scheduled_refinery_target,
+    split_managed_refinery_extension_plan,
 )
 from tools.rcon_client import RconClient
 
@@ -1584,14 +1586,60 @@ def _bring_modular_refinery_up(
         raise StuckError(f"modular refinery for {recipe} built but not healthy: {stuck}")
 
 
+def _committed_refinery_state(
+    recipe: str, observed: ManagedRefineryState, target_machines: int,
+) -> ManagedRefineryState:
+    """Recover the pre-cutover owner while growth ghosts become real.
+
+    Once all new furnaces are built, live recovery can see the target lattice
+    even though the old output adapter is intentionally still serving plates.
+    The district ledger is the durable commit marker for that in-between state.
+    """
+    lifecycle = _bootstrap_state(recipe)
+    if (
+        lifecycle is None
+        or lifecycle.replacement_origin != observed.origin
+        or lifecycle.replacement_furnaces <= 0
+        or lifecycle.replacement_furnaces >= target_machines
+        or not lifecycle.replacement_actions
+    ):
+        return observed
+    machine = LINE_RECIPES[recipe]["machine"]
+    positions = tuple(sorted(
+        (float(action["position"]["x"]), float(action["position"]["y"]))
+        for action in lifecycle.replacement_actions
+        if action.get("entity") == machine
+        and action.get("action_type") in {"place_entity", "place_ghost"}
+    ))
+    if len(positions) != lifecycle.replacement_furnaces:
+        raise StuckError(
+            f"{recipe} district ledger owns {lifecycle.replacement_furnaces} "
+            f"furnaces but records {len(positions)} placements",
+            code="refinery_ownership_ledger_mismatch",
+            classification="bug", state="failed",
+            details={
+                "recipe": recipe,
+                "replacement_furnaces": lifecycle.replacement_furnaces,
+                "recorded_placements": len(positions),
+            },
+        )
+    committed = infer_refinery_state(
+        recipe, positions, variant=observed.variant,
+        vertical_mirror=observed.vertical_mirror,
+    )
+    return replace(committed, owned_actions=lifecycle.replacement_actions)
+
+
 def _extend_plate_smelter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, state: ManagedRefineryState, target_machines: int,
     ore_output: Point, emit: Callable[[str], None], *,
     allow_unfunded_ghosts: bool = False,
 ) -> Point:
-    """Expand one recovered block by migrating its planner-owned End/output cap."""
+    """Build refinery growth completely before an atomic output cutover."""
     del ore_output
+    observed_furnaces = state.furnace_count
+    state = _committed_refinery_state(recipe, state, target_machines)
     origin = state.origin
     # Keep the cheaper bootstrap geometry while it grows. Migrating a basic
     # starter block to the standard two-row interface adds belts on its old
@@ -1637,15 +1685,75 @@ def _extend_plate_smelter(
     delta["surface"], delta["force"] = surface, force
     emit(
         f"SMELTER COHESION: expanding {recipe} at {origin} from "
-        f"{state.furnace_count} to {target_machines}; retire End, add Repeat, finish End"
+        f"{state.furnace_count} to {target_machines}; build growth, then cut over End/provider"
     )
+    growth, cutover = split_managed_refinery_extension_plan(delta, recipe)
     _prepare_replacement_services(
-        client, bridge, surface, force, full, delta, emit,
+        client, bridge, surface, force, full, growth, emit,
     )
-    _submit(
-        client, bridge, surface, delta, f"extend_{recipe}_refinery", emit,
-        allow_unfunded_ghosts=allow_unfunded_ghosts,
+    if growth.get("phases"):
+        missing = missing_refinery_placements(
+            client, surface, force, growth,
+        )
+        if missing:
+            _submit(
+                client, bridge, surface, growth,
+                f"prepare_{recipe}_refinery_growth", emit,
+                allow_unfunded_ghosts=allow_unfunded_ghosts,
+            )
+        remaining = _wait_for_ghosts(
+            client, surface, force, _plan_area(growth, padding=0.0),
+        )
+        if remaining:
+            emit(
+                f"SMELTER CUTOVER WAIT: {recipe} has {remaining} growth "
+                f"ghost(s); keeping the {state.furnace_count}-furnace provider live"
+            )
+            raise ProductionPrerequisiteDeferred(
+                f"{recipe} refinery growth must finish before its provider moves",
+                code="refinery_growth_construction_wait", state="constructing",
+                details={
+                    "recipe": recipe,
+                    "committed_furnaces": state.furnace_count,
+                    "observed_furnaces": observed_furnaces,
+                    "target_furnaces": target_machines,
+                    "remaining_ghosts": remaining,
+                },
+            )
+        absent = missing_refinery_placements(
+            client, surface, force, growth,
+        )
+        if absent:
+            first = absent[0]
+            raise StuckError(
+                f"{recipe} refinery growth lost {len(absent)} placement(s) "
+                f"before cutover; first is {first['entity']} at "
+                f"{tuple(first['position'].values())}",
+                code="refinery_growth_incomplete", classification="bug",
+                state="failed",
+                details={"recipe": recipe, "missing_placements": len(absent)},
+            )
+    # This check is deliberately repeated immediately before cutover: growth
+    # may take minutes, and no old adapter may be removed if ownership drifted.
+    try:
+        assert_refinery_removals_owned(client, surface, force, state, cutover)
+    except ValueError as error:
+        raise StuckError(
+            str(error), code="refinery_ownership_mismatch",
+            classification="bug", state="failed",
+            details={
+                "recipe": recipe,
+                "current_furnaces": state.furnace_count,
+                "target_furnaces": target_machines,
+            },
+        ) from error
+    cutover_name = f"cutover_{recipe}_refinery_output"
+    # A producer-backed promise is enough for harmless growth ghosts, but not
+    # for the destructive output handoff. Warehouse the exact cutover bill.
+    assert_affordable(
+        client, surface, force, cutover, cutover_name, emit, True,
     )
+    _submit(client, bridge, surface, cutover, cutover_name, emit)
     # A rejected material preflight has not changed the live district. Persist
     # larger ownership only after the executor accepts its delta; recording it
     # first made a released 12-furnace district falsely claim 24 missing units.
@@ -3893,10 +4001,28 @@ def _bootstrap_loan_minimum_fulfilled(
     )
 
 
+def _restore_bootstrap_loan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    loan: MallBootstrapLoan, emit: Callable[[str], None], *, reason: str,
+) -> None:
+    """Restore the borrowed cell before another dependency may claim it."""
+    plan = restore_bootstrap_loan_plan(loan)
+    plan["surface"], plan["force"] = surface, force
+    _submit(
+        client, bridge, surface, plan,
+        f"restore_bootstrap_loan_{loan.target_item}", emit,
+    )
+    _MALL_REFRESH_SIGNATURES.clear()
+    emit(
+        f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
+        f"{loan.machine_position}; {reason}"
+    )
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
-    preempt_for: str | None = None,
+    preempt_for: str | None = None, reference_point: Point | None = None,
 ) -> str:
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION
     actual, usable = _bootstrap_loan_stock(
@@ -3960,21 +4086,35 @@ def _submit_bootstrap_loan(
             "construction may already have consumed them"
         )
         step = None
-    if step is None:
-        plan = restore_bootstrap_loan_plan(loan)
-        plan["surface"], plan["force"] = surface, force
-        _submit(
-            client, bridge, surface, plan,
-            f"restore_bootstrap_loan_{loan.target_item}", emit,
+    if step is not None:
+        predecessor = _missing_chemical_ladder_predecessor(
+            client, surface, force, step.recipe,
         )
-        # The borrowed machine's normal requester and gate were replaced by
-        # the loan. Its restored recipe must be eligible for one fresh
-        # maintenance submission on the next survey.
-        _MALL_REFRESH_SIGNATURES.clear()
-        emit(
-            f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
-            f"{loan.machine_position}; {loan.target_item} required "
-            f"{loan.target_count}, spare ceiling {loan.production_target}"
+        if predecessor is not None:
+            _restore_bootstrap_loan(
+                client, bridge, surface, force, loan, emit,
+                reason=(
+                    f"chemical handoff from {step.recipe} to missing "
+                    f"{predecessor}"
+                ),
+            )
+            emit(
+                f"  CHEMICAL LADDER HANDOFF: restored {loan.original_recipe} "
+                f"before establishing {predecessor}; {step.recipe} is not "
+                "admitted on zero upstream production"
+            )
+            _ensure_chemical_ladder_predecessor(
+                client, bridge, surface, force, step.recipe,
+                reference_point or loan.machine_position, emit,
+            )
+            raise AssertionError("missing chemical predecessor did not defer")
+    if step is None:
+        _restore_bootstrap_loan(
+            client, bridge, surface, force, loan, emit,
+            reason=(
+                f"{loan.target_item} required {loan.target_count}, "
+                f"spare ceiling {loan.production_target}"
+            ),
         )
         return (
             f"restored borrowed {loan.original_recipe} producer after "
@@ -4070,7 +4210,8 @@ def _submit_bootstrap_loan(
 
 def _service_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    target_item: str, emit: Callable[[str], None],
+    target_item: str, reference_point: Point,
+    emit: Callable[[str], None],
 ) -> str | None:
     loans = active_bootstrap_loans(client, surface, force)
     if len(loans) > 1:
@@ -4086,10 +4227,11 @@ def _service_bootstrap_loan(
     if loans[0].target_item != target_item:
         return _submit_bootstrap_loan(
             client, bridge, surface, force, loans[0], emit,
-            preempt_for=target_item,
+            preempt_for=target_item, reference_point=reference_point,
         )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loans[0], emit,
+        reference_point=reference_point,
     )
 
 
@@ -4123,6 +4265,7 @@ def _start_bootstrap_loan(
         return _submit_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
             preempt_for=target_item if loan.target_item != target_item else None,
+            reference_point=reference_point,
         )
     stock = live_base.available_items(client, surface, force)
     recipes = [
@@ -4199,6 +4342,7 @@ def _start_bootstrap_loan(
     )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loan, emit,
+        reference_point=reference_point,
     )
 
 
@@ -4645,22 +4789,43 @@ def _chemical_capability_started(
     return _production_started(client, surface, force, item)
 
 
-def _ensure_chemical_ladder_predecessor(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    item: str, reference_point: Point, emit: Callable[[str], None],
-) -> None:
-    """Advance at most one missing rung before constructing `item`."""
+def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
     if item in CHEMICAL_BOOTSTRAP_LADDER:
         stop = CHEMICAL_BOOTSTRAP_LADDER.index(item)
     elif item in {"battery", "processing-unit"}:
         stop = len(CHEMICAL_BOOTSTRAP_LADDER)
     else:
-        return
-    for predecessor in CHEMICAL_BOOTSTRAP_LADDER[:stop]:
-        if _chemical_capability_started(
+        return ()
+    return CHEMICAL_BOOTSTRAP_LADDER[:stop]
+
+
+def _missing_chemical_ladder_predecessor(
+    client: RconClient, surface: str, force: str, item: str,
+) -> str | None:
+    return next((
+        predecessor
+        for predecessor in _chemical_ladder_predecessors(item)
+        if not _chemical_capability_started(
             client, surface, force, predecessor,
-        ):
-            continue
+        )
+    ), None)
+
+
+def _ensure_chemical_ladder_predecessor(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    item: str, reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Advance at most one missing rung before constructing `item`."""
+    predecessors = _chemical_ladder_predecessors(item)
+    if not predecessors:
+        return
+    predecessor = _missing_chemical_ladder_predecessor(
+        client, surface, force, item,
+    )
+    if predecessor is None:
+        return
+    stop = len(predecessors)
+    if predecessor is not None:
         target = _CHEMICAL_BATCH_TARGETS.get(predecessor)
         emit(
             f"  CHEMICAL LADDER: {item} waits at {predecessor} "
@@ -4772,7 +4937,7 @@ def ensure_produced(
                           "before asking the builder to produce it")
     if not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
         loan_wait = _service_bootstrap_loan(
-            client, bridge, surface, force, item, emit,
+            client, bridge, surface, force, item, reference_point, emit,
         )
         if loan_wait is not None:
             raise ProductionPrerequisiteDeferred(loan_wait)

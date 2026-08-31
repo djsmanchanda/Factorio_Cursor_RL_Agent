@@ -647,6 +647,9 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
         builder, "extend_power", lambda *_a, **_k: calls.append("power") or True,
     )
     monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: calls.append("submit"))
+    monkeypatch.setattr(builder, "missing_refinery_placements", lambda *_a: ())
+    monkeypatch.setattr(builder, "_wait_for_ghosts", lambda *_a, **_k: 0)
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bring_modular_refinery_up", lambda *_a, **_k: calls.append("bring"),
     )
@@ -657,7 +660,7 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
         state, 60, (10.0, 10.0), lambda _message: None,
     )
 
-    assert calls[:2] == ["coverage", "power"]
+    assert calls[0] == "coverage"
     assert calls[-2:] == ["submit", "bring"]
 
 
@@ -668,6 +671,10 @@ def test_rejected_extension_does_not_commit_future_bootstrap_ownership(
     calls = []
     monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
     monkeypatch.setattr(builder, "_prepare_replacement_services", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "missing_refinery_placements",
+        lambda *_a: ({"entity": "electric-furnace"},),
+    )
     monkeypatch.setattr(
         builder, "_submit",
         lambda *_a, **_k: (_ for _ in ()).throw(
@@ -686,6 +693,75 @@ def test_rejected_extension_does_not_commit_future_bootstrap_ownership(
         )
 
     assert calls == []
+
+
+def test_unfinished_growth_defers_without_submitting_provider_cutover(
+    monkeypatch,
+) -> None:
+    state = _state("iron-plate", 6)
+    submitted: list[tuple[str, dict]] = []
+    committed: list[int] = []
+    monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
+    monkeypatch.setattr(builder, "_prepare_replacement_services", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "missing_refinery_placements",
+        lambda *_a: ({"entity": "electric-furnace"},),
+    )
+    monkeypatch.setattr(builder, "_wait_for_ghosts", lambda *_a, **_k: 7)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e, **_k: submitted.append((name, plan)),
+    )
+    monkeypatch.setattr(
+        builder, "_record_bootstrap_replacement",
+        lambda _r, _p, _o, count: committed.append(count),
+    )
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="growth must finish before its provider moves",
+    ):
+        builder._extend_plate_smelter(
+            object(), object(), "nauvis", "player", "iron-plate",
+            state, 12, (10.0, 10.0), lambda _message: None,
+        )
+
+    assert [name for name, _plan in submitted] == ["prepare_iron-plate_refinery_growth"]
+    assert not any(
+        action["action_type"] == "remove_entity"
+        for action in actions(submitted[0][1])
+    )
+    assert committed == []
+
+
+def test_retry_uses_ledger_owner_after_all_growth_furnaces_are_visible(
+    monkeypatch,
+) -> None:
+    old_plan = generate_managed_refinery_plan("iron-plate", 6, variant="basic")
+    grown_plan = generate_managed_refinery_plan("iron-plate", 12, variant="basic")
+    observed = refinery_state.infer_refinery_state(
+        "iron-plate", _furnaces(grown_plan), variant="basic",
+    )
+    owned = tuple(
+        action for action in actions(old_plan)
+        if action["action_type"] in {"place_entity", "place_ghost"}
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_state",
+        lambda _recipe: SimpleNamespace(
+            replacement_origin=observed.origin,
+            replacement_furnaces=6,
+            replacement_actions=owned,
+        ),
+    )
+
+    committed = builder._committed_refinery_state(
+        "iron-plate", observed, 12,
+    )
+
+    assert observed.furnace_count == 12
+    assert committed.furnace_count == 6
+    assert committed.owned_actions == owned
 
 
 def test_replacement_services_use_the_future_footprint(monkeypatch) -> None:

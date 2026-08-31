@@ -17,6 +17,7 @@ from orchestrator.material_reservations import (
     MaterialReservationLedger, set_active_material_ledger,
 )
 from orchestrator.parts_mall import MaterialShortage
+from planners.plan_validation import actions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -592,6 +593,58 @@ def test_consumed_loan_output_is_fulfilled_by_monotonic_craft_count(
     assert result == "restored borrowed copper-cable producer after seed completion"
     assert submitted == ["restore_bootstrap_loan_splitter"]
     assert any("LOAN FULFILLED" in message for message in messages)
+
+
+def test_rotating_loan_restores_before_advanced_circuit_without_plastic(
+    monkeypatch,
+) -> None:
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="requester-chest",
+        target_count=3, side="left", requester_position=(50.5, 32.5),
+        current_recipe="copper-cable",
+    )
+    step = SimpleNamespace(
+        recipe="advanced-circuit", target_count=1, crafts=1,
+    )
+    submitted: list[tuple[str, dict]] = []
+    ladder_calls: list[tuple[str, tuple[float, float]]] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 0,
+    )
+    monkeypatch.setattr(builder, "next_bootstrap_step", lambda *_a: step)
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor",
+        lambda *_a: "plastic-bar",
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e, **_k: submitted.append((name, plan)),
+    )
+
+    def defer_to_ladder(_c, _b, _s, _f, item, reference, _emit):
+        ladder_calls.append((item, reference))
+        raise builder.ProductionPrerequisiteDeferred("plastic first")
+
+    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", defer_to_ladder)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="plastic first"):
+        builder._submit_bootstrap_loan(
+            object(), object(), "nauvis", "player", loan,
+            lambda _message: None, reference_point=(3.0, -1.0),
+        )
+
+    assert [name for name, _plan in submitted] == [
+        "restore_bootstrap_loan_requester-chest",
+    ]
+    restored_machine = next(
+        action for action in actions(submitted[0][1])
+        if action.get("entity") == "assembling-machine-2"
+    )
+    assert restored_machine["recipe"] == "copper-cable"
+    assert ladder_calls == [("advanced-circuit", (3.0, -1.0))]
 
 
 def test_active_loan_polls_once_and_reports_monotonic_progress(monkeypatch) -> None:
