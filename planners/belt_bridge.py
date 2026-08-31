@@ -1004,6 +1004,47 @@ def bridge_belt_to_belt(
     return actions
 
 
+def bridge_chest_to_belt(
+    source_position: Point,
+    dest_belt: Point,
+    *,
+    exit_direction: str,
+    entry_direction: str,
+    belt_type: str = "fast-transport-belt",
+    inserter_type: str = "fast-inserter",
+    blocked_tiles: set[tuple[int, int]] | None = None,
+    max_route_tiles: int | None = None,
+    destination_direction: str | None = None,
+) -> list[dict]:
+    """Drain a provider chest onto a belt that joins an inline destination bus."""
+    if exit_direction not in _FACING_TO_VECTOR:
+        raise ValueError(f"Unknown exit direction: {exit_direction!r}")
+    if entry_direction not in _FACING_TO_VECTOR:
+        raise ValueError(f"Unknown entry direction: {entry_direction!r}")
+    exit_vector = _FACING_TO_VECTOR[exit_direction]
+    source_inserter = _add(source_position, _scaled(exit_vector, 1))
+    belt_start = _add(source_position, _scaled(exit_vector, 2))
+    actions = [{
+        "action_type": "place_entity",
+        "entity": inserter_type,
+        "position": {"x": source_inserter[0], "y": source_inserter[1]},
+        "direction": opposite(exit_direction),
+    }]
+    actions.extend(
+        bridge_belt_to_belt(
+            belt_start,
+            dest_belt,
+            entry_direction=entry_direction,
+            belt_type=belt_type,
+            blocked_tiles=blocked_tiles,
+            max_route_tiles=max_route_tiles,
+            exit_direction=exit_direction,
+            destination_direction=destination_direction,
+        )
+    )
+    return actions
+
+
 def _turn_buffer_actions(
     route: Sequence[Point],
     blocked_tiles: set[tuple[int, int]],

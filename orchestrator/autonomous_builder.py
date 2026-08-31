@@ -3039,6 +3039,7 @@ def _conversion_feed_plan(
                 mode=modes[ingredient],
                 destination_is_belt=direct_belt_input,
                 destination_belt_direction=flow_direction,
+                allow_chest_source_to_belt=(recipe == "steel-plate"),
             )
             if route is not None:
                 preflighted[ingredient] = route
@@ -3245,6 +3246,7 @@ def _connect_stage_feeds(
                 # from the one that was checked.
                 destination_is_belt=direct_belt_input,
                 destination_belt_direction=destination_belt_direction,
+                allow_chest_source_to_belt=(recipe == "steel-plate"),
             ),
         )
     # A stage cannot possibly run before its first ingredient physically

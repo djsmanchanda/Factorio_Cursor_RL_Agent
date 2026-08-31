@@ -16,6 +16,7 @@ from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from planners.belt_bridge import (  # noqa: E402
     bridge_belt_to_belt,
     bridge_belt_to_chest,
+    bridge_chest_to_belt,
     bridge_chest_to_chest,
 )
 
@@ -149,6 +150,60 @@ def test_the_chest_shaped_bridges_do_need_them() -> None:
     )["inserter"] == 2
 
 
+def test_chest_to_inline_belt_has_only_the_source_inserter() -> None:
+    actions = bridge_chest_to_belt(
+        (0.5, 0.5), (20.5, 0.5),
+        exit_direction="east", entry_direction="west",
+        destination_direction="east", belt_type="transport-belt",
+        inserter_type="inserter",
+    )
+
+    assert sum(action["entity"].endswith("inserter") for action in actions) == 1
+    assert any(
+        action["position"] == {"x": 19.5, "y": 0.5}
+        and action["direction"] == "east"
+        for action in actions
+    )
+    assert not any(
+        action["position"] == {"x": 20.5, "y": 0.5}
+        for action in actions
+    )
+
+
+def test_declared_chest_source_can_feed_an_inline_belt(monkeypatch) -> None:
+    monkeypatch.setattr(stage_transport, "_through_belt_source", lambda *_a, **_k: None)
+    monkeypatch.setattr(live_base, "entity_at", lambda *_a, **_k: None)
+    monkeypatch.setattr(live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        live_base, "available_items",
+        lambda *_a, **_k: {"transport-belt": 100, "inserter": 10},
+    )
+
+    actions, belt_type, reused_belt = stage_transport._plan_belt_transport(
+        object(), "nauvis", "player", "iron-plate",
+        (0.5, 0.5), (20.5, 0.5), reuse_existing=False,
+        max_belt_route_tiles=None, destination_is_belt=True,
+        destination_belt_direction="east", allow_chest_source_to_belt=True,
+    )
+
+    assert belt_type == "transport-belt"
+    assert reused_belt is False
+    assert sum(action["entity"].endswith("inserter") for action in actions) == 1
+
+
+def test_raw_refinery_feed_still_rejects_a_chest_source(monkeypatch) -> None:
+    monkeypatch.setattr(stage_transport, "_through_belt_source", lambda *_a, **_k: None)
+
+    with pytest.raises(Exception, match="refusing a chest/inserter side-feed"):
+        stage_transport._survey_belt_route(
+            object(), "nauvis", "player", "iron-ore",
+            (0.5, 0.5), (20.5, 0.5), reuse_existing=False,
+            additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=None,
+        )
+
+
 def test_the_build_path_knows_when_the_destination_is_a_belt() -> None:
     """It did not. The preflight took `destination_is_belt` and planned a
     belt-to-belt join; the build path had no such parameter and laid a
@@ -169,6 +224,17 @@ def test_refinery_never_falls_back_to_a_chest_side_feed() -> None:
 def test_both_belt_ends_produce_a_belt_to_belt_bridge() -> None:
     assert "if belt_source is not None and destination_is_belt:" in _ROUTE
     assert "bridge_belt_to_belt(" in _ROUTE
+
+
+def test_only_declared_conversion_feeds_may_drain_a_chest_into_a_belt() -> None:
+    survey = inspect.getsource(stage_transport._survey_belt_route)
+    conversion = inspect.getsource(builder._conversion_feed_plan)
+    connect = inspect.getsource(builder._connect_stage_feeds)
+
+    assert "and not allow_chest_source_to_belt" in survey
+    assert 'allow_chest_source_to_belt=(recipe == "steel-plate")' in conversion
+    assert 'allow_chest_source_to_belt=(recipe == "steel-plate")' in connect
+    assert "bridge_chest_to_belt(" in _ROUTE
 
 
 def test_a_chest_destination_still_gets_its_inserter() -> None:

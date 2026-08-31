@@ -31,6 +31,7 @@ from planners.belt_bridge import (
     UNDERGROUND_REACH,
     bridge_belt_to_belt,
     bridge_belt_to_chest,
+    bridge_chest_to_belt,
     bridge_chest_to_chest,
     opposite,
     transit_seconds,
@@ -466,6 +467,7 @@ def _survey_belt_route(
     additional_blocked: set[tuple[int, int]] | None, upstream_shift: int,
     destination_is_belt: bool, destination_belt_direction: str,
     planned_belt_source: Point | None,
+    allow_chest_source_to_belt: bool = False,
     through_flow_direction: str | None = None,
     owned_transport_tiles: set[tuple[int, int]] | None = None,
 ) -> tuple[Point | None, Point, set[tuple[int, int]], str, str]:
@@ -474,7 +476,11 @@ def _survey_belt_route(
         client, surface, ingredient, source_position,
         upstream_shift=upstream_shift,
     ) or planned_belt_source
-    if destination_is_belt and belt_source is None:
+    if (
+        destination_is_belt
+        and belt_source is None
+        and not allow_chest_source_to_belt
+    ):
         raise StuckError(
             f"{ingredient} refinery feed requires an existing source belt at "
             f"{source_position}; refusing a chest/inserter side-feed"
@@ -598,6 +604,14 @@ def _route_belt_actions(
         return _replace_existing_source_belt(
             client, surface, belt_source, actions,
         )
+    if destination_is_belt:
+        return bridge_chest_to_belt(
+            source_position, feed_position,
+            exit_direction=exit_direction, entry_direction=entry_direction,
+            belt_type=tier, inserter_type=_DEFAULT_INSERTER,
+            blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
+            destination_direction=destination_belt_direction,
+        )
     return bridge_chest_to_chest(
         source_position, feed_position,
         exit_direction=exit_direction, entry_direction=entry_direction,
@@ -614,6 +628,7 @@ def _plan_belt_transport(
     reserved_transport_belts: int = 0,
     destination_belt_direction: str = "east",
     planned_belt_source: Point | None = None,
+    allow_chest_source_to_belt: bool = False,
     through_flow_direction: str | None = None,
     required_belt_type: str | None = None,
     defer_required_tier_affordability: bool = False,
@@ -627,6 +642,7 @@ def _plan_belt_transport(
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
             destination_belt_direction=destination_belt_direction,
             planned_belt_source=planned_belt_source,
+            allow_chest_source_to_belt=allow_chest_source_to_belt,
             through_flow_direction=through_flow_direction,
             owned_transport_tiles=owned_transport_tiles,
         )
@@ -724,6 +740,7 @@ def preflight_ingredient_transport(
     upstream_shift: int = 1,
     destination_is_belt: bool = False,
     destination_belt_direction: str = "east",
+    allow_chest_source_to_belt: bool = False,
 ) -> None:
     """Reject an illegal belt route before its destination stage is submitted."""
     if (mode or _transport_mode(recipe, ingredient, machine_count)) == "logistic":
@@ -733,7 +750,8 @@ def preflight_ingredient_transport(
         reuse_existing=False, max_belt_route_tiles=max_belt_route_tiles,
         additional_blocked=additional_blocked,
         upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
-            destination_belt_direction=destination_belt_direction,
+        destination_belt_direction=destination_belt_direction,
+        allow_chest_source_to_belt=allow_chest_source_to_belt,
         )
 
 
@@ -805,6 +823,7 @@ def ensure_ingredient_transport(
     upstream_shift: int = 1,
     destination_is_belt: bool = False,
     destination_belt_direction: str = "east",
+    allow_chest_source_to_belt: bool = False,
 ) -> float:
     """Idempotently ensure one declared source-to-feed link."""
     demand = _ingredient_demand(recipe, ingredient, machine_count)
@@ -843,6 +862,7 @@ def ensure_ingredient_transport(
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
             destination_belt_direction=destination_belt_direction,
+            allow_chest_source_to_belt=allow_chest_source_to_belt,
         )
     except StuckError as blocked_route:
         # Before giving up, check whether what is in the way is merely a pole.
@@ -856,6 +876,7 @@ def ensure_ingredient_transport(
             reuse_existing=reuse_existing, max_belt_route_tiles=max_belt_route_tiles,
             upstream_shift=upstream_shift, destination_is_belt=destination_is_belt,
             destination_belt_direction=destination_belt_direction,
+            allow_chest_source_to_belt=allow_chest_source_to_belt,
         )
     plan = {
         "phases": [{"name": f"bridge_{ingredient}_to_{recipe}", "actions": actions}],
