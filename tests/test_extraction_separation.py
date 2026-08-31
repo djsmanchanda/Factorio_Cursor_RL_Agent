@@ -1246,3 +1246,29 @@ def test_saturated_patch_defers_instead_of_killing_the_run(monkeypatch) -> None:
             (17.5, -26.5), (47.5, 23.5), 3,
             "fast-transport-belt", "fast-inserter", 40,
         )
+
+
+def test_new_mine_site_survey_is_cached_until_construction_changes(monkeypatch) -> None:
+    calls = []
+    client = object()
+    stage_extraction.clear_new_mine_cache()
+    result = ((10, 20), 6, {"phases": [{"actions": []}]}, (30.5, 20.5))
+    monkeypatch.setattr(
+        stage_extraction, "_new_direct_mine",
+        lambda *_a, **_k: calls.append(True) or result,
+    )
+    args = (
+        client, "nauvis", "iron-ore", (17.5, 3.5),
+        (17.5, -26.5), (47.5, 23.5), 3,
+        "fast-transport-belt", "fast-inserter", 40,
+    )
+
+    first = stage_extraction._cached_new_direct_mine(*args)
+    first[2]["surface"] = "mutation-must-not-leak"
+    second = stage_extraction._cached_new_direct_mine(*args)
+
+    assert calls == [True]
+    assert "surface" not in second[2]
+    stage_extraction.invalidate_new_mine_cache(client, "nauvis", "iron-ore")
+    stage_extraction._cached_new_direct_mine(*args)
+    assert calls == [True, True]

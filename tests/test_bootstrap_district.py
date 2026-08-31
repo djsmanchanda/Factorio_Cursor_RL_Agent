@@ -114,6 +114,48 @@ def test_released_district_never_recreates_its_pioneer(
     assert "refusing to recreate its pioneer" in str(failure.value)
 
 
+def test_released_foundation_stays_ready_during_a_partial_later_expansion(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger, _state = _provisioned(tmp_path)
+    opening = [
+        _action("electric-furnace", x, y)
+        for y in (30.5, 33.5, 36.5)
+        for x in (20.5, 26.5)
+    ]
+    future = [
+        _action("electric-furnace", x, y)
+        for y in (30.5, 33.5, 36.5)
+        for x in (32.5, 38.5)
+    ]
+    ledger.update_replacement(
+        "iron-plate", replacement_provider=(52.5, 42.5),
+        replacement_furnaces=12,
+        replacement_actions=opening + future,
+    )
+    ledger.mark_validating("iron-plate", measured_output_count=3)
+    ledger.mark_retiring("iron-plate")
+    ledger.mark_released("iron-plate")
+    live_positions = {
+        (action["position"]["x"], action["position"]["y"])
+        for action in opening
+    }
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "entity_names_at",
+        lambda _client, _surface, positions: {
+            position: (
+                "electric-furnace" if position in live_positions else None
+            )
+            for position in positions
+        },
+    )
+
+    assert builder._direct_plate_foundation_ready(
+        object(), "nauvis", "player", "iron-plate",
+    )
+
+
 def test_retirement_cannot_skip_measured_replacement_output(tmp_path: Path) -> None:
     ledger, _state = _provisioned(tmp_path)
 

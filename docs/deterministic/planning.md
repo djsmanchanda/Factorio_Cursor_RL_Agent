@@ -56,6 +56,12 @@ These names describe intended responsibilities, not permission to build speculat
   extend the collector through its own haul route, re-route around that route,
   or resurvey a new refinery because the original block has become real or
   temporarily has no output.
+- Later district expansion is a separate transaction from opening-foundation
+  readiness. The original live six-furnace module remains sufficient lifecycle
+  evidence while future modules construct, and recipe surveys may not undercount
+  owned but temporarily unset furnaces. Persist a larger replacement footprint
+  only after its executor submission is accepted; a rejected material preflight
+  leaves the prior ownership record unchanged.
 - Automation science may overlap final pioneer teardown only when both metal
   replacements retain their full lifecycle reservations, match the exact
   opening six-furnace module, and have measured output. Otherwise the gate
@@ -159,6 +165,10 @@ These names describe intended responsibilities, not permission to build speculat
   pass guard remains the tighter detector for real contradictions. Unchanged
   mall requester, provider-limit, and stock-gate configurations are submitted
   once per run and refreshed after any recipe-loan reconfiguration.
+  Within a run, a dedicated mall provider limit and its item stock gate are
+  monotonic: a smaller incidental demand cannot shrink a reserve already being
+  filled. Deliberate shared-provider loan mode remains uncapped and restores the
+  dedicated policy after the loan.
 - Pending mall batches are peers unless one appears in the selected item's
   recipe closure or declared compact-cell bill. A drill batch must therefore
   continue while splitter and inserter batches are also queued; treating every
@@ -184,6 +194,9 @@ These names describe intended responsibilities, not permission to build speculat
   future-reserve size. Each candidate row is surveyed once, then its supported
   reserve is measured; reserve fallback must not restart the same live RCON
   scan. The complete operation emits one timed `new_mine_site` survey event.
+  A read-only new-mine result is reused across supply-only retries and copied
+  before plan metadata is attached. Any submitted mine capacity invalidates the
+  cached result because occupancy has then changed.
 - A position inside a pole's supply area is not evidence that a power bridge
   was built. Capacity planning distinguishes existing coverage from a submitted
   network bridge and keeps measuring the actual connected grid.
@@ -274,3 +287,6 @@ generation and measured connected accumulator storage with bounded peak demand,
 including night energy and recharge surplus; it stops when that metric converges.
 Every Nauvis template contains one accumulator per solar panel; the power bill
 and the placed geometry use the same 1:1 ratio.
+Opening background stock funds the concrete unit selected when substations are
+available: twelve panels and twelve accumulators, not a smaller reserve that can
+never pass that unit's atomic preflight.

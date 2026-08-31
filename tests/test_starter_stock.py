@@ -48,6 +48,11 @@ def test_electric_furnaces_are_not_a_background_bootstrap_reserve() -> None:
     assert "electric-furnace" not in _OPENING
 
 
+def test_opening_power_stock_funds_the_selected_substation_unit() -> None:
+    assert _OPENING["solar-panel"] >= 12
+    assert _OPENING["accumulator"] >= 12
+
+
 def test_every_opening_item_is_something_the_agent_can_build() -> None:
     import json
 

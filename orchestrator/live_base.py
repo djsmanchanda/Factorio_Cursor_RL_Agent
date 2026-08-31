@@ -593,6 +593,32 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     return result
 
 
+def entity_names_at(
+    client: RconClient, surface: str, positions: Sequence[Point],
+) -> dict[Point, str | None]:
+    """Resolve exact entity names for many positions in one RCON round trip."""
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "out[#out+1]=i..'='..(e and e.name or 'missing') end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    names: dict[Point, str | None] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        index, _, name = pair.partition("=")
+        names[tuple(positions[int(index) - 1])] = (
+            None if name == "missing" else name
+        )
+    return names
+
+
 def transport_belt_direction_at(
     client: RconClient, surface: str, position: Point,
 ) -> str | None:

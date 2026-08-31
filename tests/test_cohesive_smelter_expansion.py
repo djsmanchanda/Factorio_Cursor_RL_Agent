@@ -354,6 +354,9 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
     monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 60))
     monkeypatch.setattr(
+        builder, "_electric_furnace_producer_started", lambda *_a: True,
+    )
+    monkeypatch.setattr(
         builder, "_assert_atomic_plate_expansion_affordable",
         lambda *_a, **_k: foundation,
     )
@@ -502,6 +505,9 @@ def test_mining_expansion_rejects_full_bill_before_submitting_mine(monkeypatch) 
     monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
     monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 60))
     monkeypatch.setattr(
+        builder, "_electric_furnace_producer_started", lambda *_a: True,
+    )
+    monkeypatch.setattr(
         builder, "_assert_atomic_plate_expansion_affordable",
         lambda *_a, **_k: (_ for _ in ()).throw(
             MaterialShortage("expand_iron-plate_system", {"fast-transport-belt": 74}, {})
@@ -517,6 +523,38 @@ def test_mining_expansion_rejects_full_bill_before_submitting_mine(monkeypatch) 
             object(), object(), "nauvis", "player", "iron-plate",
             (0.0, 0.0), lambda _message: None, expand=True,
         )
+
+
+def test_bootstrap_cap_applies_to_the_cohesive_total_not_the_new_batch(
+    monkeypatch,
+) -> None:
+    extraction = SimpleNamespace(
+        build_plan={"phases": []}, drill_count=12, furnace_count=12,
+        mining_productivity_bonus=0.0, ore_output=(10.0, 20.0),
+        smelter_flow_direction="east", system_drill_count_before=12,
+        system_drill_target=24, ore="iron-ore", smelter_origin=(30.0, 30.0),
+    )
+    state = _state("iron-plate", 12)
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 24))
+    monkeypatch.setattr(
+        builder, "_electric_furnace_producer_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_assert_atomic_plate_expansion_affordable",
+        lambda *_a, **_k: pytest.fail("cap must run before expansion preflight"),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as failure:
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (0.0, 0.0), lambda _message: None, expand=True,
+        )
+
+    assert failure.value.code == "electric_furnace_supply_wait"
+    assert failure.value.details["planned_furnaces"] == 24
 
 
 @pytest.mark.parametrize("recipe", ["iron-plate", "stone-brick"])
@@ -621,6 +659,33 @@ def test_extension_adds_coverage_before_tail_migration(monkeypatch) -> None:
 
     assert calls[:2] == ["coverage", "power"]
     assert calls[-2:] == ["submit", "bring"]
+
+
+def test_rejected_extension_does_not_commit_future_bootstrap_ownership(
+    monkeypatch,
+) -> None:
+    state = _state("iron-plate", 6)
+    calls = []
+    monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
+    monkeypatch.setattr(builder, "_prepare_replacement_services", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            MaterialShortage("extend_iron-plate_refinery", {"electric-furnace": 3}, {})
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_record_bootstrap_replacement",
+        lambda *_a: calls.append("ownership"),
+    )
+
+    with pytest.raises(MaterialShortage):
+        builder._extend_plate_smelter(
+            object(), object(), "nauvis", "player", "iron-plate",
+            state, 12, (10.0, 10.0), lambda _message: None,
+        )
+
+    assert calls == []
 
 
 def test_replacement_services_use_the_future_footprint(monkeypatch) -> None:

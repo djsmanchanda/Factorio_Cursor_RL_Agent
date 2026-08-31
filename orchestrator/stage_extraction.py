@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import time
+from copy import deepcopy
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -34,6 +35,26 @@ LOCAL_MODE_MAX_LINK_TILES = 300.0
 RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 REFINERY_SITE_CLEARANCE_TILES = 10.0
+_NEW_DIRECT_MINE_CACHE: dict[tuple[object, ...], tuple[Point, int, dict, Point]] = {}
+
+
+def clear_new_mine_cache() -> None:
+    """Forget read-only site surveys at the start of an episode controller."""
+    _NEW_DIRECT_MINE_CACHE.clear()
+
+
+def invalidate_new_mine_cache(
+    client: RconClient, surface: str, ore: str | None = None,
+) -> None:
+    """Invalidate site choices after construction changes extraction occupancy."""
+    client_id = id(client)
+    stale = [
+        key for key in _NEW_DIRECT_MINE_CACHE
+        if key[0] == client_id and key[1] == surface
+        and (ore is None or key[2] == ore)
+    ]
+    for key in stale:
+        _NEW_DIRECT_MINE_CACHE.pop(key, None)
 
 
 class PendingSystemDeferred(WorkStateSignal):
@@ -391,6 +412,30 @@ def _new_direct_mine(
         output_side="east",
     )
     return origin, row_drill_count * 2, plan, output
+
+
+def _cached_new_direct_mine(
+    client: RconClient, surface: str, ore: str, nearest_tile: Point,
+    patch_min: Point, patch_max: Point, machine_count: int,
+    belt_type: str, inserter_type: str, belt_stock: int,
+) -> tuple[Point, int, dict, Point]:
+    """Reuse an unchanged read-only site survey until a mine is submitted.
+
+    Callers mutate plans while attaching surface and force metadata, so every
+    cache read returns a deep copy rather than sharing the cached blueprint.
+    """
+    key = (
+        id(client), surface, ore, nearest_tile, patch_min, patch_max,
+        machine_count, belt_type, inserter_type,
+    )
+    cached = _NEW_DIRECT_MINE_CACHE.get(key)
+    if cached is None:
+        cached = _new_direct_mine(
+            client, surface, ore, nearest_tile, patch_min, patch_max,
+            machine_count, belt_type, inserter_type, belt_stock,
+        )
+        _NEW_DIRECT_MINE_CACHE[key] = deepcopy(cached)
+    return deepcopy(cached)
 
 
 def buildable_batch_prefix(
@@ -862,7 +907,7 @@ def plan_local_extraction(
     else:
         mine_origin, drill_count, build_plan, ore_output = surveyed(
             "new_mine_site",
-            lambda: _new_direct_mine(
+            lambda: _cached_new_direct_mine(
                 client, surface, ore, nearest_tile, patch_min, patch_max,
                 machine_count, belt_type, inserter_type, belt_stock,
             ),

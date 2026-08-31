@@ -1169,6 +1169,9 @@ def _submit_mining_plan(
         resource_patches.invalidate_patch_cache(
             client, surface, extraction.ore,
         )
+        stage_extraction.invalidate_new_mine_cache(
+            client, surface, extraction.ore,
+        )
 
 
 def _repair_unpowered_existing_mine(
@@ -1639,12 +1642,19 @@ def _extend_plate_smelter(
     _prepare_replacement_services(
         client, bridge, surface, force, full, delta, emit,
     )
-    _record_bootstrap_replacement(
-        recipe, full, interface.provider, target_machines,
-    )
     _submit(
         client, bridge, surface, delta, f"extend_{recipe}_refinery", emit,
         allow_unfunded_ghosts=allow_unfunded_ghosts,
+    )
+    # A rejected material preflight has not changed the live district. Persist
+    # larger ownership only after the executor accepts its delta; recording it
+    # first made a released 12-furnace district falsely claim 24 missing units.
+    _record_bootstrap_replacement(
+        recipe, full, interface.provider, target_machines,
+    )
+    emit(
+        f"BOOTSTRAP OWNERSHIP COMMIT: {recipe} accepted expansion from "
+        f"{state.furnace_count} to {target_machines} furnace(s)"
     )
     _bring_modular_refinery_up(
         client, bridge, surface, force, recipe, full,
@@ -2478,24 +2488,6 @@ def build_mining_stage(
         return _reconcile_submitted_bootstrap_replacement(
             client, bridge, surface, force, bootstrap, emit,
         )
-    bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
-    if (
-        bootstrap_cap is not None
-        and getattr(extraction, "furnace_count", 0) > bootstrap_cap
-        and not _electric_furnace_producer_started(client, surface, force)
-    ):
-        emit(
-            f"BOOTSTRAP FURNACE CAP: deferring {recipe} expansion at "
-            f"{bootstrap_cap} furnace(s) until electric-furnace production is working "
-            f"(planned {extraction.furnace_count})"
-        )
-        raise ProductionPrerequisiteDeferred(
-            f"{recipe} expansion waits for electric-furnace production after "
-            f"the {bootstrap_cap}-furnace bootstrap cap",
-            code="electric_furnace_supply_wait",
-            state="supply_wait",
-            details={"recipe": recipe, "bootstrap_cap": bootstrap_cap},
-        )
     existing_smelter, cohesive_target = _cohesive_smelter_target(
         client, surface, force, recipe, extraction, expand, emit,
     )
@@ -2503,6 +2495,33 @@ def build_mining_stage(
         raise ProductionPrerequisiteDeferred(
             f"{recipe} expansion has no recoverable managed refinery; refusing to "
             "expand its mine ahead of the refinery"
+        )
+    bootstrap_cap = BOOTSTRAP_FURNACE_CAPS.get(recipe)
+    planned_furnaces = (
+        cohesive_target
+        if cohesive_target is not None
+        else getattr(extraction, "furnace_count", 0)
+    )
+    if (
+        bootstrap_cap is not None
+        and planned_furnaces > bootstrap_cap
+        and not _electric_furnace_producer_started(client, surface, force)
+    ):
+        emit(
+            f"BOOTSTRAP FURNACE CAP: deferring {recipe} expansion at "
+            f"{bootstrap_cap} furnace(s) until electric-furnace production is working "
+            f"(cohesive target {planned_furnaces})"
+        )
+        raise ProductionPrerequisiteDeferred(
+            f"{recipe} expansion waits for electric-furnace production after "
+            f"the {bootstrap_cap}-furnace bootstrap cap",
+            code="electric_furnace_supply_wait",
+            state="supply_wait",
+            details={
+                "recipe": recipe,
+                "bootstrap_cap": bootstrap_cap,
+                "planned_furnaces": planned_furnaces,
+            },
         )
     foundation = None
     if cohesive_target is not None:
@@ -3440,17 +3459,31 @@ def _refresh_mall_cell(
                 )
                 for position in existing.machine_positions
             )
+            shared_or_fill = plan.fill_provider or shared_output
+            provider_key = (surface, force, item, mall_provider)
+            if not shared_or_fill:
+                mall_storage_limit = max(
+                    mall_storage_limit,
+                    _MALL_PROVIDER_CAPACITY_FLOORS.get(provider_key, 0),
+                )
+                _MALL_PROVIDER_CAPACITY_FLOORS[provider_key] = mall_storage_limit
+            if stock_gate_target is not None:
+                gate_key = (surface, force, item)
+                stock_gate_target = max(
+                    stock_gate_target,
+                    _MALL_STOCK_GATE_FLOORS.get(gate_key, 0),
+                )
+                _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
             capacity = (
                 "the full chest"
-                if plan.fill_provider or shared_output
+                if shared_or_fill
                 else str(mall_storage_limit)
             )
             limit_plan = generate_mall_provider_limit_update(
                 item, mall_provider, mall_storage_limit,
-                fill_chest=plan.fill_provider or shared_output,
+                fill_chest=shared_or_fill,
             )
             limit_plan["surface"], limit_plan["force"] = surface, force
-            shared_or_fill = plan.fill_provider or shared_output
 
             def refresh_provider_limit() -> None:
                 emit(
@@ -3793,6 +3826,8 @@ _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 _MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
+_MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
+_MALL_STOCK_GATE_FLOORS: dict[tuple[str, str, str], int] = {}
 _PARALLEL_BOOTSTRAP_RESERVE_ITEMS = frozenset({"electronic-circuit", "splitter"})
 _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS = 60.0
 
@@ -5615,7 +5650,15 @@ def _prep_plate_extraction(
     if deferred_target is not None and wanted_furnaces <= deferred_target:
         return False
     deferred_targets.pop(short_plate, None)
-    have = plate_line.machine_count if plate_line else 0
+    lifecycle = _bootstrap_state(short_plate)
+    owned_live = (
+        len(_live_bootstrap_replacement_furnaces(
+            client, surface, short_plate, lifecycle,
+        ))
+        if lifecycle is not None and lifecycle.lifecycle_state != "pioneer"
+        else 0
+    )
+    have = max(plate_line.machine_count if plate_line else 0, owned_live)
     if have >= wanted_furnaces:
         newly_prepped = short_plate not in prepped
         prepped.add(short_plate)
@@ -5718,6 +5761,27 @@ def _prep_plate_extraction(
     return True
 
 
+def _live_bootstrap_replacement_furnaces(
+    client: RconClient, surface: str, recipe: str,
+    lifecycle: BootstrapDistrictState | None = None,
+) -> tuple[Point, ...]:
+    """Return only real furnaces at the district's exact owned positions."""
+    lifecycle = lifecycle or _bootstrap_state(recipe)
+    if lifecycle is None:
+        return ()
+    machine = LINE_RECIPES[recipe]["machine"]
+    owned = tuple(
+        (float(action["position"]["x"]), float(action["position"]["y"]))
+        for action in lifecycle.replacement_actions
+        if action.get("entity") == machine
+    )
+    names = live_base.entity_names_at(client, surface, owned)
+    return tuple(
+        position for position in owned
+        if names.get(position) == machine
+    )
+
+
 def _direct_plate_foundation_ready(
     client: RconClient, surface: str, force: str, recipe: str,
 ) -> bool:
@@ -5736,22 +5800,11 @@ def _direct_plate_foundation_ready(
         # and enter retirement before stone provisioning had even begun.
         if lifecycle.lifecycle_state == "pioneer":
             return False
-        machine = LINE_RECIPES[recipe]["machine"]
-        positions = tuple(
-            (float(action["position"]["x"]), float(action["position"]["y"]))
-            for action in lifecycle.replacement_actions
-            if action.get("entity") == machine
+        positions = _live_bootstrap_replacement_furnaces(
+            client, surface, recipe, lifecycle,
         )
         required = PLATE_FOUNDATION_FURNACES[recipe]
         if len(positions) < required:
-            return False
-        if any(
-            not (
-                (entity := live_base.entity_at(client, surface, position))
-                and entity.get("name") == machine
-            )
-            for position in positions
-        ):
             return False
         return bool(_complete_six_furnace_candidates(tuple(sorted(positions))))
 
@@ -6473,9 +6526,12 @@ def _open_the_run(
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION
     UNBACKED_DRAWS.clear()   # module state must not leak between runs
     resource_patches.clear_patch_cache()
+    stage_extraction.clear_new_mine_cache()
     MANAGED_INTERMEDIATE_SOURCES.clear()
     _BOOTSTRAP_SHARED_PROVIDER_ITEMS.clear()
     _MALL_REFRESH_SIGNATURES.clear()
+    _MALL_PROVIDER_CAPACITY_FLOORS.clear()
+    _MALL_STOCK_GATE_FLOORS.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False

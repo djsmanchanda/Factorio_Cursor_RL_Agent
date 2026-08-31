@@ -133,6 +133,57 @@ def test_unchanged_mall_maintenance_is_submitted_once_per_run(monkeypatch) -> No
     assert submitted == ["mall_provider_limit_splitter", "mall_stock_gate_splitter"]
 
 
+def test_mall_reserve_and_gate_do_not_shrink_later_in_the_run(monkeypatch) -> None:
+    machines = ((50.5, 32.5), (56.5, 32.5))
+    provider = (53.5, 31.5)
+    submitted = []
+    monkeypatch.setattr(builder, "_MALL_REFRESH_SIGNATURES", set())
+    monkeypatch.setattr(builder, "_MALL_PROVIDER_CAPACITY_FLOORS", {})
+    monkeypatch.setattr(builder, "_MALL_STOCK_GATE_FLOORS", {})
+    monkeypatch.setattr(builder, "_mineable", lambda _item: False)
+    monkeypatch.setattr(builder, "refresh_paired_mall_requests", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_paired_mall_provider", lambda *_a: provider)
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_args, **_kwargs: submitted.append(_args[3]),
+    )
+
+    def refresh(target: int) -> None:
+        plan = SimpleNamespace(
+            existing=SimpleNamespace(machine_positions=machines),
+            spec={"machine": "assembling-machine-2"},
+            production_target=target,
+            mall_storage_limit=target,
+            fill_provider=False,
+            mall_request_multiplier=15,
+        )
+        builder._refresh_mall_cell(
+            object(), object(), "nauvis", "player", "transport-belt", plan,
+            lambda _message: None, upgrade_bootstrap=False,
+            stock_gate_target=target,
+        )
+
+    refresh(400)
+    refresh(5)
+
+    provider_updates = [
+        action for plan in submitted for phase in plan["phases"]
+        for action in phase["actions"]
+        if action["entity"] == "passive-provider-chest"
+    ]
+    gate_updates = [
+        action for plan in submitted for phase in plan["phases"]
+        for action in phase["actions"]
+        if "logistic_condition" in action
+    ]
+    assert len(provider_updates) == 1
+    assert len(gate_updates) == len(machines)
+    assert {
+        action["logistic_condition"]["constant"] for action in gate_updates
+    } == {400}
+
+
 def test_long_blocking_reserve_can_fund_a_second_bootstrap_producer(
     monkeypatch,
 ) -> None:

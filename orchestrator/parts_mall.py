@@ -34,8 +34,11 @@ STARTER_MALL_TARGETS = (
     # showed nights collapsing a 1000 kW panel nameplate to zero output with no
     # buffer -- their battery prerequisite resolves through the explicit
     # water -> sulfuric-acid -> battery cell once the oil sulfur line is up.
-    ("solar-panel", 8),
-    ("accumulator", 8),
+    # With substations available, power planning selects the 12/12 unit. Keep
+    # background stock aligned with the concrete bill so the selected remedy
+    # can start instead of repeating a permanent 8/12 shortage.
+    ("solar-panel", 12),
+    ("accumulator", 12),
 )
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,
