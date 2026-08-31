@@ -63,6 +63,7 @@ from orchestrator.mall_bootstrap import (
     active_bootstrap_loans,
     bootstrap_loan_plan,
     next_bootstrap_step,
+    promote_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
 )
 from orchestrator.material_reservations import (
@@ -253,6 +254,17 @@ def _bootstrap_state(recipe: str) -> BootstrapDistrictState | None:
         return _BOOTSTRAP_DISTRICT_LEDGER.load(recipe)
     except BootstrapLifecycleError as error:
         raise _bootstrap_lifecycle_stuck(recipe, error) from error
+
+
+def _all_plate_pioneers_released() -> bool:
+    """Whether every temporary iron, copper, and stone starter is retired."""
+    states = tuple(
+        _bootstrap_state(recipe) for recipe in PLATE_FOUNDATION_BUILD_ORDER
+    )
+    return all(
+        state is not None and state.lifecycle_state == "released"
+        for state in states
+    )
 
 
 def _bootstrap_owned_actions(
@@ -3930,6 +3942,9 @@ _MALL_RECIPE_ANCHORS = {
     "iron-gear-wheel": 1,
     "copper-cable": 1,
 }
+_PIPE_PERMANENT_DONORS = frozenset(
+    RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS)
+)
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
@@ -4109,6 +4124,30 @@ def _submit_bootstrap_loan(
             )
             raise AssertionError("missing chemical predecessor did not defer")
     if step is None:
+        if (
+            loan.target_item == "pipe"
+            and loan.original_recipe in _PIPE_PERMANENT_DONORS
+            and _all_plate_pioneers_released()
+        ):
+            plan = promote_bootstrap_loan_plan(
+                loan, stock_target=loan.production_target,
+            )
+            plan["surface"], plan["force"] = surface, force
+            _submit(
+                client, bridge, surface, plan,
+                "promote_bootstrap_loan_pipe", emit,
+            )
+            _MALL_REFRESH_SIGNATURES.clear()
+            _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add("pipe")
+            emit(
+                "  PIPE MALL PERMANENT: all plate pioneers are released; "
+                f"converted the stocked {loan.original_recipe} demand slot at "
+                f"{loan.machine_position} without funding another cell"
+            )
+            return (
+                f"converted borrowed {loan.original_recipe} producer into the "
+                "permanent pipe mall"
+            )
         _restore_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
             reason=(
@@ -4240,6 +4279,8 @@ def _start_bootstrap_loan(
     target_item: str, target_count: int, reference_point: Point,
     emit: Callable[[str], None], *, spare_target_count: int | None = None,
     allowed_original_recipes: frozenset[str] | None = None,
+    allow_shared_provider: bool = False,
+    require_stocked_original: bool = False,
 ) -> str | None:
     existing = active_bootstrap_loans(client, surface, force)
     if existing:
@@ -4294,6 +4335,8 @@ def _start_bootstrap_loan(
         )
         if line is None:
             continue
+        if require_stocked_original and stock.get(original_recipe, 0) < 1:
+            continue
         anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
         if line.machine_count <= anchor_minimum:
             # Gear and cable are the bootstrap mall's feedstock anchors. A
@@ -4304,7 +4347,7 @@ def _start_bootstrap_loan(
             if located is None:
                 continue
             origin, side = located
-            if mall_slot_uses_shared_provider(
+            if not allow_shared_provider and mall_slot_uses_shared_provider(
                 client, surface, machine_position, reference_point,
             ):
                 # The companion recipe still owns this provider. Borrowing
@@ -4764,11 +4807,22 @@ def _iron_capacity_for_fast_belts(
 
 
 _CHEMICAL_BATCH_TARGETS = {
+    "pipe": ITEM_STACK_SIZES.get("pipe", 100),
     "chemical-plant": 2,
     "oil-refinery": 1,
     "offshore-pump": 1,
     "pumpjack": 1,
 }
+
+
+def _chemical_uses_rotating_batch(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    if item == "pipe":
+        return not _all_plate_pioneers_released()
+    return item in _CHEMICAL_BATCH_TARGETS and not _core_mall_ready(
+        client, surface, force,
+    )
 
 
 def _chemical_capability_started(
@@ -4781,8 +4835,8 @@ def _chemical_capability_started(
         return line is not None and (
             line.working_count > 0 or line.produced_count > 0
         )
-    if item in _CHEMICAL_BATCH_TARGETS and not _core_mall_ready(
-        client, surface, force,
+    if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
+        client, surface, force, item,
     ):
         stock = live_base.available_items(client, surface, force)
         return stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]
@@ -4831,8 +4885,8 @@ def _ensure_chemical_ladder_predecessor(
             f"  CHEMICAL LADDER: {item} waits at {predecessor} "
             f"({stop}/{len(CHEMICAL_BOOTSTRAP_LADDER)} rungs required)"
         )
-        if target is not None and not _core_mall_ready(
-            client, surface, force,
+        if target is not None and _chemical_uses_rotating_batch(
+            client, surface, force, predecessor,
         ):
             remedy = _start_bootstrap_loan(
                 client, bridge, surface, force, predecessor, target,
@@ -4941,6 +4995,45 @@ def ensure_produced(
         )
         if loan_wait is not None:
             raise ProductionPrerequisiteDeferred(loan_wait)
+    if (
+        item == "pipe"
+        and not upgrade_bootstrap
+        and _all_plate_pioneers_released()
+        and live_base.find_line(
+            client, surface, force, item, LINE_RECIPES[item]["machine"],
+        ) is None
+    ):
+        target = max(stock_target, _CHEMICAL_BATCH_TARGETS["pipe"])
+        remedy = _start_bootstrap_loan(
+            client, bridge, surface, force, item, target,
+            reference_point, emit,
+            spare_target_count=target,
+            allowed_original_recipes=_PIPE_PERMANENT_DONORS,
+            allow_shared_provider=True,
+            require_stocked_original=True,
+        )
+        if remedy is None:
+            stock = live_base.available_items(client, surface, force)
+            raise StuckError(
+                "permanent pipe mall needs one stocked demand slot to convert, "
+                "but no eligible slot is currently releasable",
+                code="pipe_permanent_slot_unavailable",
+                classification="intended_difficulty",
+                state="supply_wait",
+                details={
+                    "eligible_recipes": sorted(_PIPE_PERMANENT_DONORS),
+                    "stocked_eligible_recipes": sorted(
+                        recipe for recipe in _PIPE_PERMANENT_DONORS
+                        if stock.get(recipe, 0) > 0
+                    ),
+                },
+            )
+        raise ProductionPrerequisiteDeferred(
+            remedy,
+            code="pipe_permanent_slot_conversion",
+            state="constructing",
+            details={"target_stock": target},
+        )
     if (
         item == "automation-science-pack"
         and not _metal_starter_transition_complete(client, surface, force)
@@ -5204,9 +5297,10 @@ def _rationed_mall_batch(
     may temporarily contain products from more than one recipe; stock surveys,
     not chest identity, decide when the batch is complete.
     """
-    if item not in RATIONED_MALL_BATCH_ITEMS or _core_mall_ready(
-        client, surface, force,
-    ):
+    pipe_batch = item == "pipe" and not _all_plate_pioneers_released()
+    if item not in RATIONED_MALL_BATCH_ITEMS and not pipe_batch:
+        return False
+    if not pipe_batch and _core_mall_ready(client, surface, force):
         return False
     stock = live_base.available_items(client, surface, force)
     if stock.get(item, 0) >= target:
@@ -5287,14 +5381,44 @@ def _ensure_mall_item(
             "knowledge exists for that construction item"
         )
     mode = "background reserve" if background else "stock target"
+    if item == "steel-plate":
+        emit(
+            f"--- steel starter: ensuring dedicated one-furnace production "
+            f"for {mode} {target} ---"
+        )
+        try:
+            output = ensure_produced(
+                client, bridge, surface, force, item, reference_point, emit,
+                upgrade_bootstrap=True, stock_target=max(1, target),
+                minimum_machines=STEEL_BASELINE_FURNACES,
+                allow_promotion=False,
+            )
+        except ProductionPrerequisiteDeferred as deferred:
+            emit(f"  STEEL STARTER DEFERRED: {deferred}")
+            return False, None
+        except MaterialShortage as shortage:
+            add_demands(mall_targets, shortage)
+            emit(
+                f"  STEEL STARTER DEMAND: {shortage.stage} needs "
+                + ", ".join(
+                    f"{name}={count}"
+                    for name, count in sorted(shortage.required.items())
+                )
+                + " -- queued"
+            )
+            return False, None
+        return True, output
     emit(f"--- parts mall: ensuring {item} production for {mode} {target} ---")
     if _rationed_mall_batch(
         client, bridge, surface, force, item, target, reference_point, emit,
     ):
         return False, None
+    pipe_batch = item == "pipe" and not _all_plate_pioneers_released()
     if (
-        item in RATIONED_MALL_BATCH_ITEMS
-        and not _core_mall_ready(client, surface, force)
+        (pipe_batch or (
+            item in RATIONED_MALL_BATCH_ITEMS
+            and not _core_mall_ready(client, surface, force)
+        ))
         and live_base.available_items(client, surface, force).get(item, 0) >= target
     ):
         emit(

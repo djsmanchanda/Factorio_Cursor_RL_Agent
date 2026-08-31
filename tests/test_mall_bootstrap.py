@@ -14,6 +14,7 @@ from orchestrator.mall_bootstrap import (
     active_bootstrap_loans,
     bootstrap_loan_plan,
     next_bootstrap_step,
+    promote_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
 )
 from planners.recipe_data import LINE_RECIPES
@@ -136,6 +137,37 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
         if action["entity"] == "passive-provider-chest"
     )
     assert "fill_chest" not in provider["inventory_limit"]
+    assert not list(SCHEMA.iter_errors(plan))
+
+
+def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
+    loan = MallBootstrapLoan(
+        original_recipe="splitter", target_item="pipe", target_count=100,
+        side="left", requester_position=(39.5, 32.5), current_recipe="pipe",
+    )
+
+    plan = promote_bootstrap_loan_plan(loan, stock_target=100)
+    actions = plan["phases"][0]["actions"]
+    requester = next(
+        action for action in actions if action["entity"] == "requester-chest"
+    )
+    machine = next(
+        action for action in actions if action["entity"] == "assembling-machine-2"
+    )
+    provider = next(
+        action for action in actions
+        if action["entity"] == "passive-provider-chest"
+    )
+
+    assert {action["action_type"] for action in actions} == {"configure_entity"}
+    assert requester["clear_logistic_groups"] == [loan.group]
+    assert requester["logistic_sections"][0]["group"] == "mall:pipe:left"
+    assert requester["logistic_sections"][0]["requests"] == [
+        {"name": "iron-plate", "count": 1},
+    ]
+    assert machine["recipe"] == "pipe"
+    assert machine["logistic_condition"]["constant"] == 100
+    assert provider["inventory_limit"]["fill_chest"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 

@@ -358,3 +358,53 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
             _as_configuration(provider),
         ],
     }]}
+
+
+def promote_bootstrap_loan_plan(
+    loan: MallBootstrapLoan, *, stock_target: int,
+) -> dict:
+    """Keep a completed borrowed cell as the permanent target producer.
+
+    Promotion reuses the assembler, requester, inserters, power, and provider
+    already owned by a demand slot. The provider remains open because paired
+    bootstrap halves may share it; the assembler's stock condition bounds
+    production without imposing an inventory bar behind older products.
+    """
+    spec = LINE_RECIPES[loan.target_item]
+    requester_section = {
+        "group": recipe_group_name(loan.target_item, loan.side),
+        "requests": recipe_group_requests(spec["ingredients"], spec["amounts"]),
+        "multiplier": request_multiplier(spec["machine"], spec["craft_time"]),
+    }
+    provider = generate_mall_provider_limit_update(
+        loan.target_item, loan.provider_position, stock_target,
+        fill_chest=True,
+    )["phases"][0]["actions"][0]
+    return {"phases": [{
+        "name": f"promote_bootstrap_loan_{loan.target_item}",
+        "actions": [
+            {
+                "action_type": "configure_entity",
+                "entity": "requester-chest",
+                "position": {
+                    "x": loan.requester_position[0],
+                    "y": loan.requester_position[1],
+                },
+                "clear_logistic_groups": [loan.group],
+                "logistic_sections": [requester_section],
+            },
+            {
+                "action_type": "configure_entity",
+                "entity": "assembling-machine-2",
+                "position": {
+                    "x": loan.machine_position[0],
+                    "y": loan.machine_position[1],
+                },
+                "recipe": loan.target_item,
+                "logistic_condition": stock_gate(
+                    loan.target_item, max(1, stock_target),
+                ),
+            },
+            _as_configuration(provider),
+        ],
+    }]}

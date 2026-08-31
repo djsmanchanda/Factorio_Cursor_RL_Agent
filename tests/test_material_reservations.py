@@ -390,6 +390,176 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
     assert any("mixed provider contents are expected" in line for line in messages)
 
 
+def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: False)
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable",
+        lambda *_a: (False, {"assembling-machine-2": 1}),
+    )
+    started: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: started.append((_a[4], _a[5])) or "pipe batch",
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a: 100,
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "pipe", 40,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert started == [("pipe", 40)]
+
+
+def test_released_plate_districts_convert_a_stocked_demand_slot_for_pipe(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
+    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    started: list[dict] = []
+
+    def start(*_args, **kwargs):
+        started.append(kwargs)
+        return "converted splitter slot"
+
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", start)
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="converted splitter slot",
+    ):
+        builder.ensure_produced(
+            object(), object(), "nauvis", "player", "pipe", (0.0, 0.0),
+            lambda _message: None, upgrade_bootstrap=False, stock_target=20,
+        )
+
+    assert started == [{
+        "spare_target_count": builder._CHEMICAL_BATCH_TARGETS["pipe"],
+        "allowed_original_recipes": builder._PIPE_PERMANENT_DONORS,
+        "allow_shared_provider": True,
+        "require_stocked_original": True,
+    }]
+
+
+def test_completed_pipe_loan_is_promoted_only_from_a_demand_slot(
+    monkeypatch,
+) -> None:
+    loan = builder.MallBootstrapLoan(
+        original_recipe="splitter", target_item="pipe", target_count=100,
+        side="left", requester_position=(39.5, 32.5), current_recipe="pipe",
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock",
+        lambda *_a: ({"pipe": 100}, {"pipe": 100}),
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    assert result == (
+        "converted borrowed splitter producer into the permanent pipe mall"
+    )
+    assert submitted == ["promote_bootstrap_loan_pipe"]
+
+
+def test_permanent_pipe_conversion_accepts_a_stocked_shared_demand_slot(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [5], "product_amount": 1, "craft_time": 1.0,
+        "set_recipe": True,
+    })
+    machine_position = (32.5, 32.5)
+    requester_position = (35.5, 32.5)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"splitter": 2},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(
+            machine_count=1, machine_positions=(machine_position,),
+        ) if _a[3] == "splitter" else None,
+    )
+    monkeypatch.setattr(
+        builder, "locate_mall_cell", lambda *_a: ((31, 31), "left"),
+    )
+    monkeypatch.setattr(
+        builder, "mall_slot_uses_shared_provider", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _c, _s, position: {
+            "name": (
+                "assembling-machine-2"
+                if position == machine_position else "requester-chest"
+            ),
+        } if position in {machine_position, requester_position} else None,
+    )
+    selected: list[builder.MallBootstrapLoan] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: selected.append(_a[4]) or "started pipe conversion",
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "pipe", 100,
+        (0.0, 0.0), lambda _message: None,
+        allowed_original_recipes=builder._PIPE_PERMANENT_DONORS,
+        allow_shared_provider=True,
+        require_stocked_original=True,
+    )
+
+    assert result == "started pipe conversion"
+    assert selected[0].original_recipe == "splitter"
+    assert selected[0].requester_position == requester_position
+
+
+def test_steel_target_bypasses_mall_reservation_policy(monkeypatch) -> None:
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_a, **kwargs: calls.append(kwargs) or (10.5, 8.5),
+    )
+    monkeypatch.setattr(
+        builder, "mall_reserve_for",
+        lambda *_a: pytest.fail("steel must not use mall reserve policy"),
+    )
+    messages: list[str] = []
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "steel-plate", 5, {},
+        (0.0, 0.0), messages.append, background=False,
+    )
+
+    assert ready and output == (10.5, 8.5)
+    assert calls == [{
+        "upgrade_bootstrap": True,
+        "stock_target": 5,
+        "minimum_machines": builder.STEEL_BASELINE_FURNACES,
+        "allow_promotion": False,
+    }]
+    assert messages[0].startswith("--- steel starter:")
+
+
 def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     monkeypatch,
 ) -> None:

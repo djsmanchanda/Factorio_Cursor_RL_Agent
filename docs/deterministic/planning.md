@@ -97,6 +97,8 @@ These names describe intended responsibilities, not permission to build speculat
 - Steel begins as one electric furnace beside and belt-fed from the persistent
   iron provider. This produces the first construction steel without reserving
   six scarce furnaces; measured demand may expand it only after first output.
+  Steel is a persistent conversion stage, not a mall recipe: it never claims a
+  compact assembler slot or passes through mall reserve policy.
 - Planner-owned roboports are movable service infrastructure. When one blocks
   an owned refinery extension, place and power a connected replacement outside
   the future footprint before removing the old port. Production infrastructure
@@ -159,6 +161,12 @@ These names describe intended responsibilities, not permission to build speculat
   and shared provider; it is capacity allocation, not free starter supply.
   Monotonic loan craft progress counts as controller progress even when bots
   consume each output before it can accumulate in provider stock.
+  Pipe has an additional lifecycle boundary. While any iron, copper, or stone
+  pioneer remains, pipe is a finite rotating batch and the borrowed slot is
+  restored. Only after all three district ledgers reach `released` may pipe
+  become permanent; at that point the controller converts a stocked
+  low-demand building slot in place, reusing its assembler, requester,
+  inserters, provider, and power instead of funding another compact cell.
 - The controller's outer pass limit counts non-progress decisions. A pass is
   credited back when required stock grows, pending ghosts fall, a recipe loan
   advances, or the outstanding-work state changes. The consecutive unchanged
