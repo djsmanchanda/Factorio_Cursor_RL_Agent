@@ -4072,7 +4072,7 @@ _MALL_RECIPE_ANCHORS = {
     "copper-cable": 1,
 }
 _PIPE_PERMANENT_DONORS = frozenset(
-    RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS)
+    RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS, {"pipe"})
 )
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
@@ -4082,6 +4082,63 @@ _MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
 _MALL_STOCK_GATE_FLOORS: dict[tuple[str, str, str], int] = {}
 _PARALLEL_BOOTSTRAP_RESERVE_ITEMS = frozenset({"electronic-circuit", "splitter"})
 _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS = 60.0
+
+
+def _is_pre_core_temporary_mall_item(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    """Whether a compact mall output must remain a bounded batch for now.
+
+    Gear and cable are the two bootstrap feedstock anchors.  Every other
+    recipe in ``RATIONED_MALL_BATCH_ITEMS`` is temporary until the five core
+    mall producers are independently working; persistent intermediates keep
+    their dedicated-source path instead of being turned into rotating loans.
+    """
+    return bool(
+        item in RATIONED_MALL_BATCH_ITEMS
+        and item not in _MALL_RECIPE_ANCHORS
+        and item not in PERSISTENT_INTERMEDIATES
+        and not _core_mall_ready(client, surface, force)
+    )
+
+
+def _pipe_is_temporary_batch(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Keep pipe in the rotating mall until both bootstrap gates release."""
+    return not _all_plate_pioneers_released() or not _core_mall_ready(
+        client, surface, force,
+    )
+
+
+def _recipe_depends_on_fast_transport_belt(item: str) -> bool:
+    """Whether a mall recipe would bypass the fast-belt capability gate."""
+    pending = [item]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == "fast-transport-belt":
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        spec = LINE_RECIPES.get(current)
+        if spec is None or spec.get("fluid_ingredients"):
+            continue
+        pending.extend(str(ingredient) for ingredient in spec.get("ingredients", ()))
+    return False
+
+
+def _fast_transport_belt_gate_open(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Mirror the fast-belt gate before a recipe loan can configure a cell."""
+    if not _electric_furnace_producer_started(client, surface, force):
+        return False
+    iron_furnaces, iron_drills = _iron_capacity_for_fast_belts(
+        client, surface, force,
+    )
+    return min(iron_furnaces, iron_drills) >= _FAST_BELT_IRON_CAPACITY
 
 
 def _bootstrap_loan_stock(
@@ -4338,7 +4395,7 @@ def _submit_bootstrap_loan(
         if (
             loan.target_item == "pipe"
             and loan.original_recipe in _PIPE_PERMANENT_DONORS
-            and _all_plate_pioneers_released()
+            and not _pipe_is_temporary_batch(client, surface, force)
         ):
             plan = promote_bootstrap_loan_plan(
                 loan, stock_target=loan.production_target,
@@ -4351,7 +4408,8 @@ def _submit_bootstrap_loan(
             _MALL_REFRESH_SIGNATURES.clear()
             _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add("pipe")
             emit(
-                "  PIPE MALL PERMANENT: all plate pioneers are released; "
+                "  PIPE MALL PERMANENT: plate pioneers are released and the "
+                "core mall is self-sufficient; "
                 f"converted the stocked {loan.original_recipe} demand slot at "
                 f"{loan.machine_position} without funding another cell"
             )
@@ -4889,11 +4947,13 @@ def _build_assembled_stage(
     # consulted it, while core-mall promotion kept allocating permanent cells
     # outside the budget; the latest run therefore reached thirteen mall
     # assemblers before the first logistic chest existed.  A running line is
-    # never blocked here -- only a genuinely new compact slot waits.
+    # never blocked here -- only a genuinely new compact slot, including an
+    # extra half for an under-sized existing line, waits.
     if (
         not upgrade_bootstrap
-        and plan.existing is None
         and not _core_mall_ready(client, surface, force)
+        and not plan.promote_to_line
+        and (plan.existing is None or not plan.at_size)
     ):
         committed = mall_slot_count(client, surface, reference_point)
         if committed >= BOOTSTRAP_MALL_SLOT_TARGET:
@@ -5129,7 +5189,7 @@ def _chemical_uses_rotating_batch(
     client: RconClient, surface: str, force: str, item: str,
 ) -> bool:
     if item == "pipe":
-        return not _all_plate_pioneers_released()
+        return _pipe_is_temporary_batch(client, surface, force)
     return item in _CHEMICAL_BATCH_TARGETS and not _core_mall_ready(
         client, surface, force,
     )
@@ -5238,6 +5298,7 @@ def ensure_produced(
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
+    temporary_mall: bool = False,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -5299,6 +5360,34 @@ def ensure_produced(
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
+    if not upgrade_bootstrap:
+        temporary_precore = _is_pre_core_temporary_mall_item(
+            client, surface, force, item,
+        )
+        if temporary_mall or temporary_precore:
+            if _rationed_mall_batch(
+                client, bridge, surface, force, item, max(1, stock_target),
+                reference_point, emit, force_temporary=temporary_mall,
+            ):
+                raise ProductionPrerequisiteDeferred(
+                    f"{item} is being made as a temporary bootstrap mall batch",
+                    code="temporary_mall_batch",
+                    state="supply_wait",
+                    details={"item": item, "target": max(1, stock_target)},
+                )
+        if temporary_precore:
+            temporary_target = _rationed_mall_spare_target(
+                client, surface, force, item, max(1, stock_target),
+            )
+            stock_target = max(stock_target, temporary_target)
+            storage_limit = min(
+                storage_limit if storage_limit is not None else temporary_target,
+                temporary_target,
+            )
+            stock_gate_target = max(
+                stock_gate_target or 0, temporary_target,
+            )
+            fill_provider = False
     if not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
         loan_wait = _service_bootstrap_loan(
             client, bridge, surface, force, item, reference_point, emit,
@@ -5308,7 +5397,7 @@ def ensure_produced(
     if (
         item == "pipe"
         and not upgrade_bootstrap
-        and _all_plate_pioneers_released()
+        and not _pipe_is_temporary_batch(client, surface, force)
         and live_base.find_line(
             client, surface, force, item, LINE_RECIPES[item]["machine"],
         ) is None
@@ -5550,18 +5639,56 @@ def _bootstrap_reserve_machine_target(
     client: RconClient, surface: str, force: str, item: str, target: int,
     reference_point: Point, emit: Callable[[str], None], *, background: bool,
 ) -> int:
-    """Fund a second temporary producer when a transition reserve is slow.
+    """Fund temporary capacity when a transition reserve is slow.
 
     The ten-slot bootstrap pool is capacity, not just recipe coverage. Once a
     producer exists, a blocking one-stack circuit or splitter reserve may use
     one additional shared-output slot when its remaining backlog exceeds a
-    minute. Exact cell materials and the pool limit remain hard gates.
+    minute. Gear and cable may likewise grow by bounded temporary cells when a
+    large construction reserve needs them; their protected anchor remains.
+    Exact cell materials and the pool limit remain hard gates.
     """
     if (
         background
-        or item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS
         or _core_mall_ready(client, surface, force)
         or not _metal_starter_transition_complete(client, surface, force)
+    ):
+        return 1
+    if item in _MALL_RECIPE_ANCHORS:
+        if target < ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE):
+            return 1
+        spec = LINE_RECIPES[item]
+        existing = live_base.find_line(
+            client, surface, force, item, str(spec["machine"]),
+        )
+        existing_count = existing.machine_count if existing is not None else 0
+        if existing_count <= 0:
+            return 1
+        stock = live_base.available_items(client, surface, force)
+        outstanding = max(0, target - int(stock.get(item, 0)))
+        backlog = backlog_seconds(item, outstanding, existing_count)
+        if backlog <= _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS:
+            return existing_count
+        affordable, shortage = _bootstrap_demand_cell_affordable(
+            client, surface, force, item, target, reference_point,
+        )
+        if not affordable:
+            if shortage:
+                emit(
+                    f"  DYNAMIC ANCHOR CAPACITY WAIT: another {item} "
+                    "producer would consume reserved "
+                    + ", ".join(sorted(shortage))
+                )
+            return existing_count
+        wanted = existing_count + 1
+        emit(
+            f"  DYNAMIC ANCHOR CAPACITY: {item} has {backlog:.0f}s of "
+            f"blocking backlog; funding {wanted} temporary producers "
+            f"within the {BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool"
+        )
+        return wanted
+    if (
+        item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS
         or target < ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
     ):
         return 1
@@ -5599,21 +5726,33 @@ def _bootstrap_reserve_machine_target(
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, force_temporary: bool = False,
 ) -> bool:
     """Make a finite construction batch in a borrowed cell when necessary.
 
     Returns True while the caller should keep the demand queued. The provider
     may temporarily contain products from more than one recipe; stock surveys,
-    not chest identity, decide when the batch is complete.
+    not chest identity, decide when the batch is complete. ``force_temporary``
+    is used by the belt-prep checkpoint: a producer is required even when the
+    opening starter already has enough belts for its first craft.
     """
-    pipe_batch = item == "pipe" and not _all_plate_pioneers_released()
+    pipe_batch = item == "pipe" and _pipe_is_temporary_batch(
+        client, surface, force,
+    )
     if item not in RATIONED_MALL_BATCH_ITEMS and not pipe_batch:
         return False
     if not pipe_batch and _core_mall_ready(client, surface, force):
         return False
+    if (
+        _recipe_depends_on_fast_transport_belt(item)
+        and not _fast_transport_belt_gate_open(client, surface, force)
+    ):
+        # A recipe loan configures the borrowed assembler directly and would
+        # otherwise skip ensure_produced's fast-belt gate for a nested fast
+        # belt/underground/splitter shortage.
+        return False
     stock = live_base.available_items(client, surface, force)
-    if stock.get(item, 0) >= target:
+    if stock.get(item, 0) >= target and not force_temporary:
         return False
     active = active_bootstrap_loans(client, surface, force)
     if not active:
@@ -5683,6 +5822,7 @@ def _ensure_mall_item(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, mall_targets: dict[str, int],
     reference_point: Point, emit: Callable[[str], None], *, background: bool,
+    force_temporary: bool = False, allow_promotion: bool = True,
 ) -> tuple[bool, Point | None]:
     """Start or repair one mall producer, optionally without a stock wait."""
     if item not in LINE_RECIPES:
@@ -5721,14 +5861,18 @@ def _ensure_mall_item(
     emit(f"--- parts mall: ensuring {item} production for {mode} {target} ---")
     if _rationed_mall_batch(
         client, bridge, surface, force, item, target, reference_point, emit,
+        force_temporary=force_temporary,
     ):
         return False, None
-    pipe_batch = item == "pipe" and not _all_plate_pioneers_released()
+    pipe_batch = item == "pipe" and _pipe_is_temporary_batch(
+        client, surface, force,
+    )
+    temporary_precore = _is_pre_core_temporary_mall_item(
+        client, surface, force, item,
+    )
     if (
-        (pipe_batch or (
-            item in RATIONED_MALL_BATCH_ITEMS
-            and not _core_mall_ready(client, surface, force)
-        ))
+        (pipe_batch or temporary_precore)
+        and not force_temporary
         and live_base.available_items(client, surface, force).get(item, 0) >= target
     ):
         emit(
@@ -5738,9 +5882,36 @@ def _ensure_mall_item(
         return True, None
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
+        if temporary_precore:
+            # A pre-core construction item is a demand batch, not a one-stack
+            # standing reserve. Keep only the current bill plus two optional
+            # outputs; the core mall earns permanent slots after it is live.
+            temporary_target = (
+                target + _RATIONED_MALL_EXTRA_SPARES
+                if reserve.fill_chest
+                else _rationed_mall_spare_target(
+                    client, surface, force, item, target,
+                )
+            )
+            stack_size = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+            reserve = MallReserve(
+                temporary_target,
+                temporary_target,
+                max(1, math.ceil(temporary_target / stack_size)),
+                False,
+            )
+            emit(
+                f"  MALL TEMPORARY RESERVE: {item} is limited to "
+                f"need {target} + margin {temporary_target - target} "
+                "until the core mall is self-sufficient"
+            )
         production_target = (
-            target if reserve.fill_chest or reserve.storage_count >= target
-            else reserve.storage_count
+            reserve.storage_count
+            if temporary_precore and not reserve.fill_chest
+            else (
+                target if reserve.fill_chest or reserve.storage_count >= target
+                else reserve.storage_count
+            )
         )
         if not background and target > production_target:
             emit(
@@ -5796,6 +5967,7 @@ def _ensure_mall_item(
             storage_limit=reserve.storage_count,
             fill_provider=reserve.fill_chest, blocking_stock_target=target,
             minimum_machines=minimum_machines,
+            allow_promotion=allow_promotion,
         )
     except ProductionPrerequisiteDeferred as deferred:
         emit(f"  MALL DEFERRED: {deferred}")
@@ -6596,7 +6768,7 @@ def _prep_the_belt_cell(
         ensure_produced(
             client, bridge, surface, force, "transport-belt", reference_point,
             emit, upgrade_bootstrap=False, stock_target=1,
-            minimum_machines=1, allow_promotion=False,
+            minimum_machines=1, allow_promotion=False, temporary_mall=True,
         )
     except MaterialShortage as shortage:
         add_demands(mall_targets, shortage)

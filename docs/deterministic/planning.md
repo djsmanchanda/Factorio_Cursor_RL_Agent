@@ -183,11 +183,13 @@ These names describe intended responsibilities, not permission to build speculat
   of being manufactured again. Once a parent step starts, incidental stock
   churn cannot push the rotating assembler backward into a completed child.
   Pipe has an additional lifecycle boundary. While any iron, copper, or stone
-  pioneer remains, pipe is a finite rotating batch and the borrowed slot is
-  restored. Only after all three district ledgers reach `released` may pipe
-  become permanent; at that point the controller converts a stocked
-  low-demand building slot in place, reusing its assembler, requester,
-  inserters, provider, and power instead of funding another compact cell.
+  pioneer remains, or while the five core mall producers are not independently
+  working, pipe is a finite rotating batch and the borrowed slot is restored.
+  Only after all three district ledgers reach `released` **and** the core mall
+  is self-sufficient may pipe become permanent; at that point the controller
+  converts a stocked low-demand building slot in place, reusing its assembler,
+  requester, inserters, provider, and power instead of funding another compact
+  cell.
 - The controller's outer pass limit counts non-progress decisions. A pass is
   credited back when required stock grows, pending ghosts fall, a recipe loan
   advances, or the outstanding-work state changes. The consecutive unchanged

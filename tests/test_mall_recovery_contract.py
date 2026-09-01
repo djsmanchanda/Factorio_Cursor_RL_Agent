@@ -229,6 +229,35 @@ def test_long_blocking_reserve_can_fund_a_second_bootstrap_producer(
     assert "electronic-circuit" in builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS
 
 
+def test_anchor_backlog_can_fund_one_bounded_temporary_slot(monkeypatch) -> None:
+    """Gear/cable keep an anchor while large construction demand may add one."""
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(machine_count=2),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"iron-gear-wheel": 0},
+    )
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a: 180.0)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (True, {}),
+    )
+    messages: list[str] = []
+
+    wanted = builder._bootstrap_reserve_machine_target(
+        object(), "nauvis", "player", "iron-gear-wheel", 400,
+        (3.0, -1.0), messages.append, background=False,
+    )
+
+    assert wanted == 3
+    assert any("temporary producers" in message for message in messages)
+
+
 def test_new_compact_cell_cannot_escape_the_global_bootstrap_slot_cap(monkeypatch) -> None:
     """Core-mall promotion used to bypass the ten-slot bootstrap budget."""
     plan = builder._LinePlan(
@@ -236,6 +265,33 @@ def test_new_compact_cell_cannot_escape_the_global_bootstrap_slot_cap(monkeypatc
         production_target=1, mall_storage_limit=1, fill_provider=False,
         mall_request_multiplier=None, demand=0.0, saturated=False,
         promoted_count=None, promote_to_line=False, at_size=True,
+    )
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "mall_slot_count", lambda *_a: builder.BOOTSTRAP_MALL_SLOT_TARGET,
+    )
+    monkeypatch.setattr(
+        builder, "_ingredient_sources", lambda *_a, **_k: pytest.fail("must not spend inputs"),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as raised:
+        builder._build_assembled_stage(
+            object(), object(), "nauvis", "player", "transport-belt",
+            (3.0, -1.0), lambda _message: None, plan, None,
+            upgrade_bootstrap=False,
+        )
+
+    assert raised.value.code == "bootstrap_mall_slot_cap"
+
+
+def test_under_sized_existing_line_cannot_escape_the_global_slot_cap(monkeypatch) -> None:
+    """Adding a temporary anchor half is also a new compact slot."""
+    plan = builder._LinePlan(
+        existing=SimpleNamespace(machine_count=2),
+        spec=builder.LINE_RECIPES["transport-belt"],
+        production_target=1, mall_storage_limit=1, fill_provider=False,
+        mall_request_multiplier=None, demand=0.0, saturated=False,
+        promoted_count=None, promote_to_line=False, at_size=False,
     )
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
     monkeypatch.setattr(

@@ -42,10 +42,10 @@ def test_belt_cell_preps_before_any_plate_extraction(monkeypatch) -> None:
     """Ordering guard: the belt-cell key must gate the prep so no mine runs
     while the mall still has no transport-belt producer."""
     prepped: set[str] = set()
-    calls: list[str] = []
+    calls: list[dict] = []
 
     def fake_ensure(*_a, **_k):
-        calls.append("belt_cell")
+        calls.append(_k)
         return (50.0, 31.5)
 
     monkeypatch.setattr(builder, "ensure_produced", fake_ensure)
@@ -55,7 +55,13 @@ def test_belt_cell_preps_before_any_plate_extraction(monkeypatch) -> None:
     )
 
     assert spent
-    assert calls == ["belt_cell"]
+    assert calls == [{
+        "upgrade_bootstrap": False,
+        "stock_target": 1,
+        "minimum_machines": 1,
+        "allow_promotion": False,
+        "temporary_mall": True,
+    }]
     assert builder._BELT_CELL_PREP_KEY in prepped
 
     # Once prepped, the caller's gate skips it entirely.

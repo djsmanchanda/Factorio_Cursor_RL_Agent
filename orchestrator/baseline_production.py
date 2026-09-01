@@ -90,12 +90,34 @@ BOOTSTRAP_MALL_SLOT_TARGET = 10
 
 RATIONED_MALL_BATCH_ITEMS = frozenset({
     *CORE_MALL_PRODUCERS,
-    # Ordinary inserters are needed in a dozen-item burst to establish the
-    # stone foundation, before logistic-chest capability exists.  Keep that
-    # burst inside the ten-slot pool by borrowing a completed demand cell;
-    # allocating an eleventh permanent compact cell deadlocks the bootstrap.
+    # Before the core mall can build its own machines, every construction
+    # output below is a demand-owned, need-plus-margin batch.  It may claim a
+    # free half of the ten-slot pool, or borrow an existing half when the pool
+    # is full; it must not become a permanent one-recipe cell and consume the
+    # slot needed to make the core mall self-sufficient.
+    "assembling-machine-1",
+    "electronic-circuit",
+    "transport-belt",
+    "underground-belt",
     "inserter",
     "splitter",
+    "bulk-inserter",
+    "fast-splitter",
+    "fast-transport-belt",
+    "fast-underground-belt",
+    "small-electric-pole",
+    "medium-electric-pole",
+    "big-electric-pole",
+    "iron-chest",
+    "storage-chest",
+    "active-provider-chest",
+    "buffer-chest",
+    "pipe",
+    "pipe-to-ground",
+    "lab",
+    "solar-panel",
+    "accumulator",
+    "assembling-machine-3",
     "electric-furnace",
     "electric-mining-drill",
     "chemical-plant",

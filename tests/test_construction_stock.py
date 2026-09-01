@@ -242,6 +242,46 @@ def test_blocking_project_bill_overrides_the_starter_idle_cap(monkeypatch) -> No
     assert any("SCHEDULED BILL OVERRIDE" in message for message in messages)
 
 
+def test_pre_core_mall_cell_keeps_only_need_plus_margin(monkeypatch) -> None:
+    """A temporary construction cell must not reserve a whole machine stack."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-1", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [9], "craft_time": 0.5, "product_amount": 1,
+        "set_recipe": True,
+    })
+    monkeypatch.setattr(builder, "_rationed_mall_batch", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "mall_reserve_for", lambda *_a: MallReserve(50, 50, 1),
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a: 3,
+    )
+    monkeypatch.setattr(builder, "_bootstrap_reserve_machine_target", lambda *_a, **_k: 1)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_a, **kwargs: captured.update(kwargs),
+    )
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "assembling-machine-1", 1,
+        {}, (0.0, 0.0), lambda _message: None, background=False,
+    )
+
+    assert (ready, output) == (True, None)
+    assert captured["stock_target"] == 3
+    assert captured["storage_limit"] == 3
+    assert captured["stock_gate_target"] == 3
+    assert captured["fill_provider"] is False
+
+
 def test_baseline_prep_cannot_expand_the_circuit_provider_past_its_cap(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: False,

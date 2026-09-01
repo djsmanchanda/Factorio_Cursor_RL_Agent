@@ -421,6 +421,64 @@ def test_inserter_uses_a_rotating_batch_when_the_bootstrap_pool_is_full(
     assert borrowed == [("inserter", 12)]
 
 
+def test_assembling_machine_one_uses_a_rotating_batch_at_bootstrap_cap(
+    monkeypatch,
+) -> None:
+    """The AM1 needed to build the core mall must not allocate slot eleven."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-1", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [9], "craft_time": 0.5, "product_amount": 1,
+        "set_recipe": True,
+    })
+    assert "assembling-machine-1" in builder.RATIONED_MALL_BATCH_ITEMS
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"assembling-machine-1": 0},
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (False, {}),
+    )
+    monkeypatch.setattr(builder, "_rationed_mall_spare_target", lambda *_a: 3)
+    borrowed: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: borrowed.append((_a[4], _a[5])) or "borrowed gear cell",
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "assembling-machine-1", 1,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert borrowed == [("assembling-machine-1", 1)]
+
+
+def test_fast_tier_batch_cannot_bypass_the_fast_belt_capability_gate(
+    monkeypatch,
+) -> None:
+    """Nested fast-belt recipes must wait before a loan configures a cell."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "fast-underground-belt", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["fast-transport-belt"], "amounts": [2],
+        "craft_time": 0.5, "product_amount": 2, "set_recipe": True,
+    })
+    assert "fast-underground-belt" in builder.RATIONED_MALL_BATCH_ITEMS
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_fast_transport_belt_gate_open", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: pytest.fail("fast-tier loan bypassed its capability gate"),
+    )
+
+    assert not builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "fast-underground-belt", 2,
+        (0.0, 0.0), lambda _message: None,
+    )
+
+
 def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
     monkeypatch,
 ) -> None:
@@ -449,10 +507,40 @@ def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
     assert started == [("pipe", 40)]
 
 
+def test_pipe_stays_rotating_until_the_core_mall_is_self_sufficient(
+    monkeypatch,
+) -> None:
+    """Released plate pioneers alone must not create a permanent pipe slot."""
+    monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable",
+        lambda *_a: (False, {"assembling-machine-2": 1}),
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a: 42,
+    )
+    started: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: started.append((_a[4], _a[5])) or "pipe batch",
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "pipe", 40,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert started == [("pipe", 40)]
+
+
 def test_released_plate_districts_convert_a_stocked_demand_slot_for_pipe(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", lambda *_a: None)
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
@@ -490,6 +578,7 @@ def test_completed_pipe_loan_is_promoted_only_from_a_demand_slot(
     )
     submitted: list[str] = []
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock",
         lambda *_a: ({"pipe": 100}, {"pipe": 100}),
