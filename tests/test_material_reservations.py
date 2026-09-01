@@ -745,6 +745,114 @@ def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
     )]
 
 
+def test_logistic_chest_core_waits_for_steel_chest_before_admission(
+    monkeypatch,
+) -> None:
+    """A provider/requester recipe cannot be the source of its steel chest."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["advanced-circuit", "electronic-circuit", "steel-chest"],
+        "amounts": [1, 3, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-plate"],
+        "amounts": [8], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "advanced-circuit", {
+        "machine": "assembling-machine-2", "ingredients": ["plastic-bar"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    started = {"assembling-machine-2", "fast-inserter"}
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item in started,
+    )
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        builder,
+        "ensure_produced",
+        lambda *_args, **kwargs: calls.append((_args[4], kwargs)),
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a chest prerequisite must be established before the borrowed cell"
+        ),
+    )
+
+    assert builder._prep_core_mall(
+        object(), object(), "nauvis", "player",
+        {"_core_mall:assembling-machine-2", "_core_mall:fast-inserter"},
+        {}, (0.0, 0.0), lambda _message: None,
+    )
+    assert calls == [(
+        "steel-chest",
+        {
+            "upgrade_bootstrap": True,
+            "stock_target": 1,
+            "minimum_machines": 1,
+            "allow_promotion": False,
+        },
+    )]
+
+
+def test_logistic_chest_core_waits_for_advanced_circuit_ladder(
+    monkeypatch,
+) -> None:
+    """Advanced circuits are not admitted until their oil/plastic gate runs."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["advanced-circuit", "electronic-circuit", "steel-chest"],
+        "amounts": [1, 3, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    started = {"assembling-machine-2", "fast-inserter", "steel-chest"}
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item in started,
+    )
+    calls: list[str] = []
+
+    def defer(*args, **_kwargs):
+        calls.append(args[4])
+        raise builder.ProductionPrerequisiteDeferred("plastic waits for oil")
+
+    monkeypatch.setattr(builder, "ensure_produced", defer)
+    messages: list[str] = []
+
+    assert builder._prep_core_mall(
+        object(), object(), "nauvis", "player",
+        {"_core_mall:assembling-machine-2", "_core_mall:fast-inserter"},
+        {}, (0.0, 0.0), messages.append,
+    )
+    assert calls == ["advanced-circuit"]
+    assert any("gated on advanced-circuit" in message for message in messages)
+
+
+def test_core_promotion_catches_forced_loan_prerequisite_deferral(
+    monkeypatch,
+) -> None:
+    """A loan handoff is a wait, not an unhandled controller exception."""
+    monkeypatch.setattr(builder, "_production_started", lambda *_args: False)
+    monkeypatch.setattr(
+        builder, "mall_slot_count",
+        lambda *_args: builder.BOOTSTRAP_MALL_SLOT_TARGET,
+    )
+    monkeypatch.setattr(
+        builder,
+        "_rationed_mall_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            builder.ProductionPrerequisiteDeferred("restore then reobserve")
+        ),
+    )
+    messages: list[str] = []
+
+    assert builder._prep_core_mall(
+        object(), object(), "nauvis", "player", set(), {},
+        (0.0, 0.0), messages.append,
+    )
+    assert any("waits while restore then reobserve" in message for message in messages)
+
+
 def test_completed_core_loan_is_promoted_in_place_even_when_seed_is_stocked(
     monkeypatch,
 ) -> None:

@@ -3967,6 +3967,18 @@ PERSISTENT_INTERMEDIATES = frozenset({
 })
 MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
 
+# Logistic chests are capability endpoints, not bootstrap recipes.  Their
+# live recipes consume both a steel chest and an advanced circuit; admitting a
+# chest cell before those producers exist merely leaves a borrowed assembler
+# requesting an impossible recipe.  Keep the order explicit: establish the
+# steel-chest source first, then advance through the oil/plastic chemical
+# ladder for advanced-circuit.  The recipe check in
+# ``_core_mall_prerequisites`` keeps dry/catalog-less callers compatible.
+_CORE_MALL_PREREQUISITE_ORDER = ("steel-chest", "advanced-circuit")
+_CORE_MALL_RECIPE_ITEMS = frozenset({
+    "passive-provider-chest", "requester-chest",
+})
+
 # The direct iron/copper stacks are deliberately temporary. Their tiny mall
 # ceilings protect the first plates from being converted into construction
 # components before the belt-fed metal systems take over.
@@ -6866,6 +6878,81 @@ def _production_started(
     )
 
 
+def _core_mall_prerequisites(
+    client: RconClient, surface: str, force: str, item: str,
+) -> tuple[str, ...]:
+    """Return the unstarted inputs that must precede a logistic chest cell.
+
+    The recipe catalog is installed at run start, so the gate follows the
+    live recipe rather than assuming every modded chest has the same bill.
+    ``steel-chest`` and ``advanced-circuit`` are ordered deliberately because
+    the latter must not be admitted until ``ensure_produced`` has walked the
+    oil/plastic chemical ladder.
+    """
+    if item not in _CORE_MALL_RECIPE_ITEMS:
+        return ()
+    spec = LINE_RECIPES.get(item)
+    if spec is None:
+        return ()
+    ingredients = set(str(ingredient) for ingredient in spec.get("ingredients", ()))
+    return tuple(
+        prerequisite
+        for prerequisite in _CORE_MALL_PREREQUISITE_ORDER
+        if prerequisite in ingredients
+        and not _production_started(client, surface, force, prerequisite)
+    )
+
+
+def _prepare_core_mall_prerequisite(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    item: str, mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool | None:
+    """Start one missing chest prerequisite and spend the current pass.
+
+    ``True`` means a stage or wait consumed this pass; ``False`` hands a
+    material shortage to the mall in the same pass; ``None`` means the core
+    recipe is admitted.  Persistent prerequisite goods use their dedicated
+    conversion path, so they do not consume another pre-logistics mall slot.
+    """
+    prerequisites = _core_mall_prerequisites(client, surface, force, item)
+    if not prerequisites:
+        return None
+    prerequisite = prerequisites[0]
+    emit(
+        f"  CORE MALL WAIT: {item} is gated on {prerequisite}; "
+        "establishing the prerequisite before admitting its recipe"
+    )
+    try:
+        # These are persistent intermediates, not finite mall stock.  The
+        # dedicated path also avoids the ten-slot bootstrap cap; advanced
+        # circuits then enforce their own oil/plastic ladder before a machine
+        # can be configured.
+        ensure_produced(
+            client, bridge, surface, force, prerequisite, reference_point,
+            emit, upgrade_bootstrap=True, stock_target=1,
+            minimum_machines=1, allow_promotion=False,
+        )
+    except MaterialShortage as shortage:
+        add_demands(mall_targets, shortage)
+        emit(
+            f"  CORE MALL WAIT: {item} cannot fund {prerequisite}; "
+            + ", ".join(
+                f"{name}={count}"
+                for name, count in sorted(shortage.required.items())
+            )
+            + " -- handing the pass to the mall"
+        )
+        return False
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(
+            f"  CORE MALL WAIT: {item} prerequisite {prerequisite} -- "
+            f"{deferred}"
+        )
+        return True
+    return True
+
+
 def _baseline_recipe_ready(
     client: RconClient, surface: str, force: str, recipe: str,
 ) -> bool:
@@ -6957,6 +7044,12 @@ def _prep_core_mall(
             emit(f"  CORE MALL READY: {item} has independent production")
             return True
         emit(f"--- core mall promotion: permanent {item} producer ---")
+        prerequisite_pass = _prepare_core_mall_prerequisite(
+            client, bridge, surface, force, item, mall_targets,
+            reference_point, emit,
+        )
+        if prerequisite_pass is not None:
+            return prerequisite_pass
         # Core promotion is the one pre-logistics demand that must be able to
         # reclaim capacity from the hard ten-slot pool.  A stocked seed item
         # would otherwise make _rationed_mall_batch return early, after which
@@ -6966,10 +7059,28 @@ def _prep_core_mall(
         if mall_slot_count(
             client, surface, reference_point,
         ) >= BOOTSTRAP_MALL_SLOT_TARGET:
-            if _rationed_mall_batch(
-                client, bridge, surface, force, item, 1,
-                reference_point, emit, force_temporary=True,
-            ):
+            try:
+                if _rationed_mall_batch(
+                    client, bridge, surface, force, item, 1,
+                    reference_point, emit, force_temporary=True,
+                ):
+                    return True
+            except MaterialShortage as shortage:
+                add_demands(mall_targets, shortage)
+                emit(
+                    f"  CORE MALL WAIT: {item} reserves its complete cell; "
+                    + ", ".join(
+                        f"{name}={count}"
+                        for name, count in sorted(shortage.required.items())
+                    )
+                    + " -- handing the pass to the mall"
+                )
+                return False
+            except ProductionPrerequisiteDeferred as deferred:
+                # Recipe-loan handoffs are expected live transitions.  The
+                # forced path used to let this signal escape and terminate the
+                # controller before it could re-observe the restored cell.
+                emit(f"  CORE MALL BATCH: {item} waits while {deferred}")
                 return True
         try:
             ensure_produced(

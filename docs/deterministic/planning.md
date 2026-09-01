@@ -155,6 +155,11 @@ These names describe intended responsibilities, not permission to build speculat
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
   ends the current pass, and the predecessor loan begins only after the next
   live observation confirms that restoration.
+  Logistic chest promotion has an additional recipe gate: passive-provider and
+  requester chests wait for a working steel-chest producer and an
+  advanced-circuit producer.  Advanced-circuit admission still walks the
+  chemical ladder through oil and plastic first, so a borrowed chest cell never
+  requests an input that the base cannot yet make.
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking
