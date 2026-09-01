@@ -55,7 +55,9 @@ These names describe intended responsibilities, not permission to build speculat
   across retries. A retry reconciles the same entities and ghosts; it must not
   extend the collector through its own haul route, re-route around that route,
   or resurvey a new refinery because the original block has become real or
-  temporarily has no output.
+  temporarily has no output. If another project consumed a construction item,
+  reconciliation queues that exact shortage through the mall and retries the
+  persisted district instead of aborting or replanning it.
 - Later district expansion is a separate transaction from opening-foundation
   readiness. The original live six-furnace module remains sufficient lifecycle
   evidence while future modules construct, and recipe surveys may not undercount

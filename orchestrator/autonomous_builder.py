@@ -6676,9 +6676,27 @@ def _prep_plate_foundation(
             # Real furnace bodies may finish before their ore route and output
             # support.  Structural readiness must not bypass the persisted
             # construction reconciliation and spin on a zero output counter.
-            _reconcile_submitted_bootstrap_replacement(
-                client, bridge, surface, force, lifecycle, emit,
-            )
+            try:
+                _reconcile_submitted_bootstrap_replacement(
+                    client, bridge, surface, force, lifecycle, emit,
+                )
+            except MaterialShortage as shortage:
+                # A submitted district owns its exact ghosts, but it does not
+                # own construction stock that another project may have
+                # consumed while bots were working.  Keep the persisted
+                # replacement authoritative and hand the missing item back to
+                # the mall instead of aborting the whole controller pass.
+                add_demands(mall_targets, shortage)
+                emit(
+                    f"  PLATE FOUNDATION DEMAND: {plate} submitted replacement "
+                    "needs "
+                    + ", ".join(
+                        f"{item}={target}"
+                        for item, target in sorted(shortage.required.items())
+                    )
+                    + " -- queued for the mall"
+                )
+                return False
             return True
         if _direct_plate_foundation_ready(client, surface, force, plate):
             if starter is None:
