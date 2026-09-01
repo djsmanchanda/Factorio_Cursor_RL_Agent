@@ -107,5 +107,5 @@ sidecar every ten seconds, while the PID record remains the dashboard's
 authoritative running-state probe.
 Unhandled tracebacks retain only their final 24 frames. Helper packets remove
 duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
-model calls above a 120,000-character prompt ceiling so recursive failures
-cannot consume the local review model's context window.
+model calls above a 36,000-character prompt ceiling so a 16K local review
+context retains room for the system rubric and structured answer.

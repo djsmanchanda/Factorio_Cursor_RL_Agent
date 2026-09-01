@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
             data_root,
             model_endpoint=settings.model_endpoint,
             model_name=settings.model_name,
+            restart_command=settings.restart_command,
+            restart_ready_timeout_seconds=settings.restart_ready_timeout_seconds,
+            restart_cooldown_seconds=settings.restart_cooldown_seconds,
         )
         service.model_timeout_seconds = settings.timeout_seconds
         for packet, report in service.process_inbox():

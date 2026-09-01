@@ -5,11 +5,26 @@
 data_root = "~/.local/share/factorio-rl/helper_agent"
 
 [model]
-# Local Freetoken OpenAI-compatible endpoint. Unavailability falls back safely.
+# Local Freetoken OpenAI-compatible endpoint.  The Helper Agent makes one
+# guarded restart attempt when it is unavailable, then preserves the packet for
+# a later model review instead of finalizing a fallback as if it were one.
 endpoint = "http://127.0.0.1:1919/v1/chat/completions"
 model = "Qwen3.6-35B-A3B-NVFP4"
 api_key_env = ""
 timeout_seconds = 180
+restart_command = [
+  "~/.freetoken/venv/bin/ft", "serve",
+  "--model", "~/.freetoken/models/Qwen3.6-35B-A3B-NVFP4",
+  "--served-model-name", "Qwen3.6-35B-A3B-NVFP4",
+  "--host", "127.0.0.1", "--port", "1919",
+  "--max-running-requests", "1", "--max-output-tokens", "1536",
+  "--max-seq-len-override", "16384", "--max-prefill-length", "4096",
+  "--memory-ratio", "0.92", "--cache-type", "radix",
+  "--moe-backend", "offload", "--moe-cache-auto",
+  "--kv-reserve-tokens", "8192", "--enable-cache-report",
+]
+restart_ready_timeout_seconds = 180
+restart_cooldown_seconds = 600
 
 [review]
 max_notable_moments = 12

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+import urllib.error
 
 from helper_agent import cli, config, dashboard, feedback
 from helper_agent.brief import generate_brief
@@ -430,7 +431,7 @@ def test_model_request_supplies_review_schema_and_bounds_output(
     prompt = json.loads(body["messages"][1]["content"])
 
     assert prompt["review_report_schema"]["title"] == "HelperAgentReviewReport"
-    assert body["max_tokens"] == 4096
+    assert body["max_tokens"] == 1536
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
     assert "response_format" not in body
     system_prompt = body["messages"][0]["content"]
@@ -463,6 +464,51 @@ def test_model_request_falls_back_before_oversized_prompt(
     assert result is None
     ledger = (tmp_path / "state" / "ledger.jsonl").read_text(encoding="utf-8")
     assert "model_input_too_large" in ledger
+
+
+def test_unavailable_model_defers_packet_without_writing_a_fallback(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    packet = _packet(tmp_path)
+    path = write_packet(packet, tmp_path / "inbox")
+    service = ReviewService(tmp_path, model_endpoint="http://model.invalid")
+    monkeypatch.setattr(
+        service, "_request_model",
+        lambda _request: (_ for _ in ()).throw(
+            urllib.error.URLError(ConnectionRefusedError("offline"))
+        ),
+    )
+    monkeypatch.setattr(service, "_restart_and_wait", lambda: False)
+
+    assert service.process_inbox() == []
+    assert path.is_file()
+    assert not (tmp_path / "processed" / path.name).exists()
+    assert not list((tmp_path / "reports").glob("*.json"))
+    ledger = (tmp_path / "state" / "ledger.jsonl").read_text(encoding="utf-8")
+    assert "model_review_deferred" in ledger
+
+
+def test_unavailable_model_retries_after_supervisor_readiness(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    service = ReviewService(
+        tmp_path, model_endpoint="http://model.invalid", restart_command=("ft", "serve"),
+    )
+    attempts = iter([
+        urllib.error.URLError(ConnectionRefusedError("offline")),
+        {"schema_version": 1},
+    ])
+
+    def request(_request):
+        value = next(attempts)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    monkeypatch.setattr(service, "_request_model", request)
+    monkeypatch.setattr(service, "_restart_and_wait", lambda: True)
+
+    assert service._call_model({"run_id": "run-1"}, []) == {"schema_version": 1}
 
 
 def test_short_completed_run_without_blockers_has_valid_fallback_evidence(tmp_path: Path) -> None:

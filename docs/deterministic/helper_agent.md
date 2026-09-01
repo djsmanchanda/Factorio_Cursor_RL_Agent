@@ -236,9 +236,13 @@ Every notable moment must classify the issue as one of:
 - `operational`: log capture, manifest, deployment, console, or lifecycle issue.
 - `unclear`: evidence is insufficient.
 
-If the model is unavailable or returns invalid output, Helper Agent must still
-write a deterministic signature summary and mark the model review as missing.
-It must not invent a diagnosis.
+If the model endpoint is unavailable, Helper Agent must make one bounded local
+inference-server restart attempt and wait for readiness without blocking the
+runner. If it remains unavailable, retain the packet for a later model review
+and record that deferred state; do not present a deterministic fallback as the
+requested LLM review. If the reachable model returns invalid output, Helper
+Agent writes a clearly marked deterministic signature summary instead. It must
+not invent a diagnosis.
 
 ## Feedback contract
 

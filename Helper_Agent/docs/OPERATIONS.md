@@ -24,9 +24,24 @@ uses the local Freetoken OpenAI-compatible endpoint on port 1919 and supplies th
 complete review-report JSON schema to the model. The request disables Qwen's
 thinking channel through Freetoken's `chat_template_kwargs`; this bounded
 classification task needs a complete schema response more than a long hidden
-reasoning trace. If that endpoint is unavailable or returns invalid output,
-Helper Agent writes a deterministic signature fallback report and marks the
-model review as missing. It never blocks or restarts the runner.
+reasoning trace.
+
+When port 1919 is unavailable, the detached review worker makes one
+cooldown-guarded `ft serve` restart attempt, waits for `/health`, and retries the
+review. If the model remains unavailable, the packet stays in `inbox/` and the
+ledger records `model_review_deferred`; it is not converted into a final fallback
+report. A later processor run can therefore produce the real review. Invalid or
+schema-incompatible model responses still produce a clearly marked deterministic
+fallback, because the model was reachable but did not satisfy the review
+contract. This supervision never blocks or restarts the Factorio runner.
+
+The supplied Qwen3.6 helper profile is intentionally small: one running request,
+16K sequence cap, 4K prefill chunks, 8K KV reserve, and 1,536 output tokens.
+It uses `offload` plus automatic MoE cache sizing, leaving the Mamba cache under
+FreeToken's checkpoint/GPU auto-sizing rather than reserving an arbitrary large
+pool. Packets are capped at 36K characters before the system rubric and JSON
+schema are added, preserving room in the 16K window. Inspect `ft ctl stats` and
+`ft ctl cache` after a real review before resizing any live cache pool.
 
 ## Why this is not a Hermes agent session or schedule
 

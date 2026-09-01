@@ -18,6 +18,9 @@ class HelperConfig:
     model_name: str
     api_key_env: str
     timeout_seconds: int
+    restart_command: tuple[str, ...]
+    restart_ready_timeout_seconds: int
+    restart_cooldown_seconds: int
 
 
 def default_config() -> HelperConfig:
@@ -25,12 +28,22 @@ def default_config() -> HelperConfig:
     payload = tomllib.loads((SIDEcar_ROOT / "config" / "agent.toml").read_text("utf-8"))
     data_root = Path(payload["paths"]["data_root"]).expanduser()
     model = payload.get("model", {})
+    restart_command = model.get("restart_command", [])
+    if not isinstance(restart_command, list) or not all(
+        isinstance(item, str) for item in restart_command
+    ):
+        raise ValueError("model.restart_command must be an array of strings")
     return HelperConfig(
         data_root=data_root,
         model_endpoint=str(model.get("endpoint", "")).strip(),
         model_name=str(model.get("model", "local-lite")),
         api_key_env=str(model.get("api_key_env", "")).strip(),
         timeout_seconds=int(model.get("timeout_seconds", 60)),
+        restart_command=tuple(restart_command),
+        restart_ready_timeout_seconds=int(
+            model.get("restart_ready_timeout_seconds", 180)
+        ),
+        restart_cooldown_seconds=int(model.get("restart_cooldown_seconds", 600)),
     )
 
 

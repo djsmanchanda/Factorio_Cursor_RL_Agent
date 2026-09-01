@@ -7,12 +7,15 @@ import hashlib
 import json
 import os
 import re
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import BinaryIO, Callable, Iterator, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 import jsonschema
 
@@ -34,16 +37,30 @@ _RUN_TEMPLATE = (_SIDEcar_ROOT / "templates" / "run_review.md").read_text("utf-8
 _MOMENT_TEMPLATE = (_SIDEcar_ROOT / "templates" / "notable_moment.md").read_text("utf-8")
 _NOW = lambda: datetime.now().astimezone().isoformat(timespec="seconds")
 _SLUG = re.compile(r"[^A-Za-z0-9_.-]+")
-_MAX_MODEL_PROMPT_CHARS = 120_000
+# A 16K local context needs room for the system rubric and structured response;
+# helper packets use this smaller cap rather than the generic global ceiling.
+_MAX_MODEL_PROMPT_CHARS = 36_000
+_MAX_MODEL_OUTPUT_TOKENS = 1_536
+
+
+class ModelUnavailable(RuntimeError):
+    """The local review model could not be made ready for this packet."""
 
 
 class ReviewService:
-    def __init__(self, data_root: Path, *, model_endpoint: str = "", model_name: str = "local-lite"):
+    def __init__(
+        self, data_root: Path, *, model_endpoint: str = "", model_name: str = "local-lite",
+        restart_command: tuple[str, ...] = (), restart_ready_timeout_seconds: int = 180,
+        restart_cooldown_seconds: int = 600,
+    ):
         self.data_root = data_root
         self.directories = config.ensure_runtime(data_root)
         self.model_endpoint = model_endpoint
         self.model_name = model_name
         self.model_timeout_seconds = 60
+        self.restart_command = restart_command
+        self.restart_ready_timeout_seconds = restart_ready_timeout_seconds
+        self.restart_cooldown_seconds = restart_cooldown_seconds
 
     def process_inbox(self) -> list[tuple[str, str]]:
         with _processor_lock(self.directories["state"] / "processor.lock"):
@@ -52,6 +69,13 @@ class ReviewService:
                 try:
                     report_path = self.process_packet(path)
                     results.append((path.name, str(report_path)))
+                except ModelUnavailable as error:
+                    self._append_ledger({
+                        "event": "model_review_deferred", "packet": str(path),
+                        "model": self.model_name, "error": str(error),
+                        "created_at": _NOW(),
+                    })
+                    break
                 except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as error:
                     self._append_ledger({
                         "event": "packet_rejected", "packet": str(path),
@@ -120,7 +144,7 @@ class ReviewService:
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 4096,
+                "max_tokens": _MAX_MODEL_OUTPUT_TOKENS,
                 "chat_template_kwargs": {"enable_thinking": False},
             }).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -130,29 +154,134 @@ class ReviewService:
             "packet_hash": self._hash(packet), "created_at": _NOW(),
         })
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout()) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            content = payload["choices"][0]["message"]["content"]
-            return json.loads(self._json_payload(content))
+            return self._request_model(request)
         except (
             OSError, ValueError, KeyError, IndexError,
             urllib.error.URLError, json.JSONDecodeError,
         ) as error:
-            detail = f"{type(error).__name__}: {error}"
-            if isinstance(error, urllib.error.HTTPError):
+            if not self._endpoint_unavailable(error):
+                self._record_model_failure(packet, error)
+                return None
+            if self._restart_and_wait():
                 try:
-                    body = error.read(2048).decode("utf-8", errors="replace")
-                except OSError:
-                    body = ""
-                if body:
-                    detail = f"{detail}; response={body}"
+                    return self._request_model(request)
+                except (
+                    OSError, ValueError, KeyError, IndexError,
+                    urllib.error.URLError, json.JSONDecodeError,
+                ) as retry_error:
+                    error = retry_error
+            detail = self._record_model_failure(packet, error)
+            if not self._endpoint_unavailable(error):
+                return None
+            raise ModelUnavailable(detail) from error
+
+    @staticmethod
+    def _endpoint_unavailable(error: BaseException) -> bool:
+        if isinstance(error, urllib.error.HTTPError):
+            return error.code in {502, 503, 504}
+        return isinstance(error, (OSError, urllib.error.URLError))
+
+    def _record_model_failure(
+        self, packet: Mapping[str, object], error: BaseException,
+    ) -> str:
+        detail = f"{type(error).__name__}: {error}"
+        if isinstance(error, urllib.error.HTTPError):
+            try:
+                body = error.read(2048).decode("utf-8", errors="replace")
+            except OSError:
+                body = ""
+            if body:
+                detail = f"{detail}; response={body}"
+        self._append_ledger({
+            "event": "model_review_failed", "model": self.model_name,
+            "packet_hash": self._hash(packet), "error": detail,
+            "created_at": _NOW(),
+        })
+        return detail
+
+    def _request_model(self, request: urllib.request.Request) -> dict:
+        with urllib.request.urlopen(request, timeout=self._timeout()) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        content = payload["choices"][0]["message"]["content"]
+        return json.loads(self._json_payload(content))
+
+    def _restart_and_wait(self) -> bool:
+        """Start the local inference server once, then wait only in this worker."""
+        if self._model_ready():
+            return True
+        if not self.restart_command or not self._restart_allowed():
+            return False
+        command = tuple(os.path.expanduser(part) for part in self.restart_command)
+        self._append_ledger({
+            "event": "model_restart_started", "model": self.model_name,
+            "command": command[0], "created_at": _NOW(),
+        })
+        try:
+            self._launch_model(command)
+        except (OSError, subprocess.SubprocessError) as error:
             self._append_ledger({
-                "event": "model_review_failed", "model": self.model_name,
-                "packet_hash": self._hash(packet), "error": detail,
-                "fallback": True,
+                "event": "model_restart_failed", "model": self.model_name,
+                "error": f"{type(error).__name__}: {error}", "created_at": _NOW(),
+            })
+            return False
+        deadline = time.monotonic() + self.restart_ready_timeout_seconds
+        while time.monotonic() < deadline:
+            if self._model_ready():
+                self._append_ledger({
+                    "event": "model_restart_ready", "model": self.model_name,
+                    "created_at": _NOW(),
+                })
+                return True
+            time.sleep(2)
+        self._append_ledger({
+            "event": "model_restart_timeout", "model": self.model_name,
+            "timeout_seconds": self.restart_ready_timeout_seconds, "created_at": _NOW(),
+        })
+        return False
+
+    def _restart_allowed(self) -> bool:
+        path = self.directories["state"] / "model-restart.json"
+        now = time.time()
+        try:
+            prior = json.loads(path.read_text(encoding="utf-8"))
+            previous = float(prior.get("started_at", 0))
+        except (OSError, ValueError, json.JSONDecodeError):
+            previous = 0
+        if now - previous < self.restart_cooldown_seconds:
+            self._append_ledger({
+                "event": "model_restart_cooldown", "model": self.model_name,
+                "remaining_seconds": int(self.restart_cooldown_seconds - (now - previous)),
                 "created_at": _NOW(),
             })
-            return None
+            return False
+        path.write_text(json.dumps({"started_at": now}) + "\n", encoding="utf-8")
+        return True
+
+    def _launch_model(self, command: tuple[str, ...]) -> None:
+        output_path = self.directories["state"] / "freetoken-supervisor.log"
+        if os.environ.get("INVOCATION_ID"):
+            unit = f"factorio-rl-freetoken-{os.getpid()}-{time.time_ns()}.service"
+            subprocess.run([
+                "systemd-run", "--user", "--quiet", "--collect", f"--unit={unit}",
+                f"--working-directory={Path.home()}",
+                f"--property=StandardOutput=append:{output_path}",
+                f"--property=StandardError=append:{output_path}", *command,
+            ], check=True)
+            return
+        with output_path.open("ab") as output:
+            subprocess.Popen(
+                command, cwd=Path.home(), stdin=subprocess.DEVNULL,
+                stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+
+    def _model_ready(self) -> bool:
+        parts = urlsplit(self.model_endpoint)
+        health = urlunsplit((parts.scheme, parts.netloc, "/health", "", ""))
+        try:
+            with urllib.request.urlopen(health, timeout=5) as response:
+                return 200 <= response.status < 300
+        except (OSError, urllib.error.URLError):
+            return False
 
     def _timeout(self) -> int:
         return self.model_timeout_seconds
