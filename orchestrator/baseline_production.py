@@ -90,6 +90,11 @@ BOOTSTRAP_MALL_SLOT_TARGET = 10
 
 RATIONED_MALL_BATCH_ITEMS = frozenset({
     *CORE_MALL_PRODUCERS,
+    # Ordinary inserters are needed in a dozen-item burst to establish the
+    # stone foundation, before logistic-chest capability exists.  Keep that
+    # burst inside the ten-slot pool by borrowing a completed demand cell;
+    # allocating an eleventh permanent compact cell deadlocks the bootstrap.
+    "inserter",
     "splitter",
     "electric-furnace",
     "electric-mining-drill",

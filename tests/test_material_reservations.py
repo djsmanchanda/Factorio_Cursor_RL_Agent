@@ -390,6 +390,37 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
     assert any("mixed provider contents are expected" in line for line in messages)
 
 
+def test_inserter_uses_a_rotating_batch_when_the_bootstrap_pool_is_full(
+    monkeypatch,
+) -> None:
+    """Stone's inserter burst must not escape the hard ten-slot cap."""
+    assert "inserter" in builder.RATIONED_MALL_BATCH_ITEMS
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"inserter": 0},
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    # A false affordability result with no material shortage is the global
+    # slot-cap path.  The item must borrow an existing cell rather than defer
+    # until a non-existent promotion releases one.
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (False, {}),
+    )
+    monkeypatch.setattr(builder, "_rationed_mall_spare_target", lambda *_a: 12)
+    borrowed: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: borrowed.append((_a[4], _a[5])) or "borrowed splitter cell",
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "inserter", 12,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert borrowed == [("inserter", 12)]
+
+
 def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
     monkeypatch,
 ) -> None:
