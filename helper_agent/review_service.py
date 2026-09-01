@@ -34,6 +34,7 @@ _RUN_TEMPLATE = (_SIDEcar_ROOT / "templates" / "run_review.md").read_text("utf-8
 _MOMENT_TEMPLATE = (_SIDEcar_ROOT / "templates" / "notable_moment.md").read_text("utf-8")
 _NOW = lambda: datetime.now().astimezone().isoformat(timespec="seconds")
 _SLUG = re.compile(r"[^A-Za-z0-9_.-]+")
+_MAX_MODEL_PROMPT_CHARS = 120_000
 
 
 class ReviewService:
@@ -101,6 +102,15 @@ class ReviewService:
             "relevant_casebook_skills": related,
             "review_report_schema": _REVIEW_REPORT_SCHEMA,
         }, indent=2)
+        prompt_chars = len(_SYSTEM_PROMPT) + len(prompt)
+        if prompt_chars > _MAX_MODEL_PROMPT_CHARS:
+            self._append_ledger({
+                "event": "model_input_too_large", "model": self.model_name,
+                "packet_hash": self._hash(packet), "prompt_chars": prompt_chars,
+                "limit_chars": _MAX_MODEL_PROMPT_CHARS, "fallback": True,
+                "created_at": _NOW(),
+            })
+            return None
         request = urllib.request.Request(
             self.model_endpoint,
             data=json.dumps({

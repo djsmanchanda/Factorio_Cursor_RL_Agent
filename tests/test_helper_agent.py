@@ -110,6 +110,114 @@ def test_run_logger_writes_compact_structured_events(tmp_path: Path) -> None:
     assert events[1]["message"].startswith("PRIORITY: steel-plate")
 
 
+def test_run_logger_compacts_exact_retries_and_preserves_counts(tmp_path: Path) -> None:
+    logger = autonomous_run._RunLogger(tmp_path / "autonomous-run.log")
+    logger.emit("RUN START: command=research target=mining-productivity-4")
+    for _ in range(10):
+        logger.emit("PRIORITY: splitter rating=49/100 completion=0%")
+    for _ in range(12):
+        logger.emit("RUN HEARTBEAT pid=123 ppid=1")
+    logger.flush_compaction()
+    logger.emit("RUN END")
+    logger.close()
+
+    human_lines = (tmp_path / "autonomous-run.log").read_text(
+        encoding="utf-8",
+    ).splitlines()
+    assert len(human_lines) == 10
+    assert any("LOG REPEAT x8: PRIORITY: splitter" in line for line in human_lines)
+    assert any("LOG REPEAT x12: RUN HEARTBEAT" in line for line in human_lines)
+    assert any(
+        "LOG COMPACTION: suppressed 15 semantically repeated event(s)"
+        in line for line in human_lines
+    )
+
+    events = [
+        json.loads(line) for line in
+        (tmp_path / "deterministic-events.jsonl").read_text(
+            encoding="utf-8",
+        ).splitlines()
+    ]
+    summary = _decision_summary(events)
+    assert summary["event_count"] == 25
+    assert summary["stored_event_count"] == 10
+    assert summary["priority_counts"] == {"splitter": 10}
+    assert summary["repeated_messages"][0] == {
+        "count": 10,
+        "message": "PRIORITY: splitter rating=49/100 completion=0%",
+    }
+
+
+def test_run_logger_limits_recursive_traceback_frames(
+    tmp_path: Path, capsys,
+) -> None:
+    logger = autonomous_run._RunLogger(tmp_path / "autonomous-run.log")
+
+    def fail(depth: int) -> None:
+        if depth:
+            fail(depth - 1)
+        else:
+            raise RuntimeError("bounded traceback")
+
+    try:
+        fail(100)
+    except RuntimeError:
+        logger.exception()
+    logger.close()
+
+    logged = (tmp_path / "autonomous-run.log").read_text(encoding="utf-8")
+    assert "earlier frame(s) omitted" in logged
+    assert "RuntimeError: bounded traceback" in logged
+    assert len(logged.splitlines()) <= autonomous_run._TRACEBACK_FRAME_LIMIT + 8
+    assert "RuntimeError: bounded traceback" in capsys.readouterr().err
+
+
+def test_run_logger_compacts_counter_updates_without_losing_latest_value(
+    tmp_path: Path,
+) -> None:
+    logger = autonomous_run._RunLogger(tmp_path / "autonomous-run.log")
+    logger.emit("RUN START: command=research target=mining-productivity-4")
+    for value in range(1, 11):
+        logger.emit(
+            f"PRIORITY: splitter rating=49/100 completion={value}% "
+            f"age={value * 60} ticks"
+        )
+    logger.flush_compaction()
+    logger.emit("RUN END")
+    logger.close()
+
+    human = (tmp_path / "autonomous-run.log").read_text(encoding="utf-8")
+    assert human.count("PRIORITY: splitter") == 5
+    assert "LOG UPDATE x8: PRIORITY: splitter" in human
+    assert "10x PRIORITY: splitter" in human
+
+    events = [
+        json.loads(line) for line in
+        (tmp_path / "deterministic-events.jsonl").read_text(
+            encoding="utf-8",
+        ).splitlines()
+    ]
+    summary = _decision_summary(events)
+    assert summary["priority_counts"] == {"splitter": 10}
+    assert summary["repeated_messages"][0]["count"] == 10
+    assert "completion=10%" in summary["repeated_messages"][0]["message"]
+
+
+def test_log_signature_preserves_positions_and_zero_state() -> None:
+    at_first_cell = autonomous_run._RunLogger._message_signature(
+        "CELL DELIVERY: moved 0 iron-plate beside requester at (10.5, 20.5)"
+    )
+    at_second_cell = autonomous_run._RunLogger._message_signature(
+        "CELL DELIVERY: moved 4 iron-plate beside requester at (30.5, 40.5)"
+    )
+
+    assert at_first_cell != at_second_cell
+    assert "moved 0" in at_first_cell
+    assert "moved #" in at_second_cell
+    assert "(10.5, 20.5)" in at_first_cell
+    assert "(30.5, 40.5)" in at_second_cell
+
+
 def test_packet_builder_still_reads_legacy_absolute_timestamps(tmp_path: Path) -> None:
     log = tmp_path / "autonomous-run.log"
     log.write_text(
@@ -123,6 +231,32 @@ def test_packet_builder_still_reads_legacy_absolute_timestamps(tmp_path: Path) -
 
     assert packet["target"] == "legacy"
     assert packet["duration_seconds"] == 15
+
+
+def test_packet_excerpt_has_a_small_distinct_character_budget(tmp_path: Path) -> None:
+    log = tmp_path / "autonomous-run.log"
+    lines = [
+        "RUN START: ts=2026-08-28T10:00:00+05:30 command=research "
+        "target=mining-productivity-4 surface=nauvis force=player "
+        "bootstrap_profile=reduced-v1",
+    ]
+    lines.extend(
+        f"+{index}s PRIORITY: item-{index} " + ("x" * 3_000)
+        for index in range(300)
+    )
+    lines.append("+301s ERROR: RuntimeError: bounded evidence")
+    lines.append("+302s RUN END")
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    packet = build_case_packet(log_path=log)
+    excerpt = packet["log_excerpt"]
+    all_lines = [line for values in excerpt.values() for line in values]
+
+    assert sum(len(line) for line in all_lines) <= 24_000
+    assert max(map(len, all_lines)) <= 2_000
+    assert len(all_lines) == len(set(all_lines))
+    assert any("ERROR: RuntimeError" in line for line in all_lines)
+    assert len(json.dumps(packet)) < 40_000
 
 
 def test_decision_summary_retains_recent_mall_loan_transitions() -> None:
@@ -204,11 +338,13 @@ def test_packet_builder_preserves_unprefixed_traceback_frames(tmp_path: Path) ->
     )
 
     rebuilt = build_case_packet(log_path=log)
+    excerpt_lines = [
+        line for values in rebuilt["log_excerpt"].values() for line in values
+    ]
 
     assert any(
         "autonomous_builder.py" in line
-        for line in rebuilt["log_excerpt"]["tail_lines"]
-        or rebuilt["log_excerpt"]["head_lines"]
+        for line in excerpt_lines
     )
     assert any(
         "TypeError: 'NoneType'" in line
@@ -294,6 +430,28 @@ def test_model_request_supplies_review_schema_and_bounds_output(
     assert "Co-occurrence and sequence alone do not prove causality" in normalized_prompt
     assert "Start every `fix_direction` with `Category:`" in normalized_prompt
     assert "Provide seed stock or adjust the bootstrap profile" in normalized_prompt
+
+
+def test_model_request_falls_back_before_oversized_prompt(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "helper_agent.review_service.urllib.request.urlopen",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("oversized prompt must not reach the model")
+        ),
+    )
+    service = ReviewService(
+        tmp_path, model_endpoint="http://model.invalid", model_name="test-model",
+    )
+
+    result = service._call_model({
+        "run_id": "oversized-run", "telemetry": {"blob": "x" * 130_000},
+    }, [])
+
+    assert result is None
+    ledger = (tmp_path / "state" / "ledger.jsonl").read_text(encoding="utf-8")
+    assert "model_input_too_large" in ledger
 
 
 def test_short_completed_run_without_blockers_has_valid_fallback_evidence(tmp_path: Path) -> None:

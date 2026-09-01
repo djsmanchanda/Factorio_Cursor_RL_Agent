@@ -198,6 +198,11 @@ tick, and exact log evidence. The known candidate kinds are:
 
 The packet should not contain whole multi-megabyte logs. It should contain a
 bounded excerpt plus references back to the original archived file.
+The current packet contract keeps at most 24 head lines, 40 tail lines, and 64
+additional matched lines, removes exact duplication between those sections,
+caps any one line at 2,000 characters, and caps excerpt text at 24,000
+characters. The review service falls back deterministically instead of calling
+the model if the complete model-facing prompt exceeds 120,000 characters.
 
 ## Review report
 

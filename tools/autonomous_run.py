@@ -8,12 +8,14 @@ import ctypes
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import threading
 import time
 import traceback
+from collections import Counter
 from copy import copy
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +35,15 @@ from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
 
 
+_TRACEBACK_FRAME_LIMIT = 24
+_HEARTBEAT_SAMPLE_EVERY = 6
+_REPETITION_SUMMARY_LIMIT = 8
+_TRANSIENT_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9_.-])-?\d+(?:\.\d+)?(?:%|s|kW|MJ|ticks?)?"
+)
+_POSITION = re.compile(r"\(-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?\)")
+
+
 class _RunLogger:
     """Flush every mission event to both the terminal and a durable file."""
 
@@ -44,6 +55,10 @@ class _RunLogger:
         self._events = self.events_path.open("a", encoding="utf-8", buffering=1)
         self._started = time.monotonic()
         self._sequence = 0
+        self._message_counts: Counter[str] = Counter()
+        self._signature_counts: Counter[str] = Counter()
+        self._signature_latest: dict[str, str] = {}
+        self._suppressed_messages = 0
         self._lock = threading.Lock()
 
     @staticmethod
@@ -57,21 +72,70 @@ class _RunLogger:
         }
         return prefix if prefix in known else "controller_event"
 
+    @staticmethod
+    def _message_signature(message: str) -> str:
+        """Collapse changing counters while preserving item and position identity."""
+        protected: list[str] = []
+
+        def hold(match: re.Match[str]) -> str:
+            protected.append(match.group(0))
+            return f"@POSITION{len(protected) - 1}@"
+
+        signature = _POSITION.sub(hold, message)
+
+        def normalize_number(match: re.Match[str]) -> str:
+            numeric = re.match(r"-?\d+(?:\.\d+)?", match.group(0))
+            return "0" if numeric and float(numeric.group(0)) == 0 else "#"
+
+        signature = _TRANSIENT_NUMBER.sub(normalize_number, signature)
+        for index, value in enumerate(protected):
+            signature = signature.replace(f"@POSITION{index}@", value)
+        return signature
+
     def emit(self, message: str) -> None:
         observed = datetime.now().astimezone().isoformat(timespec="seconds")
         with self._lock:
             self._sequence += 1
             elapsed = int(time.monotonic() - self._started)
+            self._message_counts[message] += 1
+            occurrence = self._message_counts[message]
+            signature = self._message_signature(message)
+            self._signature_counts[signature] += 1
+            signature_occurrence = self._signature_counts[signature]
+            self._signature_latest[signature] = message
+            if message.startswith("RUN HEARTBEAT"):
+                write_message = (
+                    signature_occurrence == 1
+                    or signature_occurrence % _HEARTBEAT_SAMPLE_EVERY == 0
+                )
+            else:
+                # Retries with only counters changing carry the same decision.
+                # Keep exponentially spaced samples with their newest values.
+                write_message = (
+                    signature_occurrence & (signature_occurrence - 1) == 0
+                )
+            if not write_message:
+                self._suppressed_messages += 1
+                return
+            displayed_message = (
+                message if signature_occurrence == 1
+                else f"LOG REPEAT x{signature_occurrence}: {message}"
+                if occurrence == signature_occurrence
+                else f"LOG UPDATE x{signature_occurrence}: {message}"
+            )
             if self._sequence == 1 and message.startswith("RUN START:"):
                 line = f"RUN START: ts={observed}{message.removeprefix('RUN START:')}"
             else:
-                line = f"+{elapsed}s {message}"
+                line = f"+{elapsed}s {displayed_message}"
             event = {
                 "v": 2,
                 "seq": self._sequence,
                 "dt": elapsed,
                 "type": self._event_type(message),
                 "message": message,
+                "occurrence": occurrence,
+                "signature": signature,
+                "signature_occurrence": signature_occurrence,
             }
             if self._sequence == 1:
                 event["ts"] = observed
@@ -82,9 +146,71 @@ class _RunLogger:
                 file=self._events, flush=True,
             )
 
+    def flush_compaction(self) -> None:
+        """Record exact totals for the top repeated templates before RUN END."""
+        with self._lock:
+            if self._suppressed_messages <= 0:
+                return
+            repeated = [
+                (count, signature, self._signature_latest[signature])
+                for signature, count in self._signature_counts.items()
+                if count > 1
+            ]
+            repeated.sort(key=lambda item: (-item[0], item[1]))
+            top = repeated[:_REPETITION_SUMMARY_LIMIT]
+            compact_top = " | ".join(
+                f"{count}x {message[:120]}" for count, _signature, message in top
+            )
+            message = (
+                f"LOG COMPACTION: suppressed {self._suppressed_messages} "
+                f"semantically repeated event(s) across {len(repeated)} "
+                f"template(s); top={compact_top}"
+            )
+            self._sequence += 1
+            elapsed = int(time.monotonic() - self._started)
+            event = {
+                "v": 2,
+                "seq": self._sequence,
+                "dt": elapsed,
+                "type": "log_compaction",
+                "message": message,
+                "repetition_counts": [
+                    {
+                        "count": count, "signature": signature,
+                        "message": original,
+                    }
+                    for count, signature, original in top
+                ],
+            }
+            line = f"+{elapsed}s {message}"
+            print(line, flush=True)
+            print(line, file=self._file, flush=True)
+            print(
+                json.dumps(event, sort_keys=True, separators=(",", ":")),
+                file=self._events, flush=True,
+            )
+            self._suppressed_messages = 0
+
     def exception(self) -> None:
-        traceback.print_exc()
-        traceback.print_exc(file=self._file)
+        error = sys.exception()
+        if error is None:
+            rendered = "No active exception\n"
+        else:
+            frame_count = sum(1 for _frame, _line in traceback.walk_tb(error.__traceback__))
+            rendered = "".join(traceback.format_exception(
+                type(error), error, error.__traceback__,
+                limit=-_TRACEBACK_FRAME_LIMIT, chain=True,
+            ))
+            omitted = max(0, frame_count - _TRACEBACK_FRAME_LIMIT)
+            if omitted:
+                rendered = rendered.replace(
+                    "Traceback (most recent call last):",
+                    "Traceback (most recent call last; "
+                    f"{omitted} earlier frame(s) omitted):",
+                    1,
+                )
+        print(rendered, end="", file=sys.stderr, flush=True)
+        print(rendered, end="", file=self._file, flush=True)
         self._file.flush()
 
     def close(self) -> None:
@@ -599,6 +725,7 @@ def main(argv: list[str] | None = None) -> int:
                 ended_at=datetime.now().astimezone().isoformat(timespec="seconds"),
                 termination_reason=termination_reason,
             )
+            logger.flush_compaction()
             logger.emit("RUN END")
             if (
                 mission_state_path is not None

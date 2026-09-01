@@ -99,3 +99,11 @@ Readers accept both this format and archived logs that repeat an ISO timestamp
 on every line. Helper Agent summaries scope the append-only structured event
 file to the newest completed run, so priorities and zero-placement counts from
 older episodes cannot contaminate the current diagnosis.
+Runner retries whose semantic template is unchanged are emitted at exponentially
+spaced occurrence counts, with heartbeats sampled once per minute and one
+terminal count summary; changing positions and zero/nonzero outcomes remain
+distinct.
+Unhandled tracebacks retain only their final 24 frames. Helper packets remove
+duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
+model calls above a 120,000-character prompt ceiling so recursive failures
+cannot consume the local review model's context window.

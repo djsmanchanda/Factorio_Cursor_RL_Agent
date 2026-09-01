@@ -37,8 +37,12 @@ _MATCHERS = tuple(
         r"^[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception):",
     )
 )
-_MAX_LOG_LINES = 160
-_MAX_BLOCKERS = 40
+_MAX_HEAD_LINES = 24
+_MAX_TAIL_LINES = 40
+_MAX_MATCHED_LINES = 64
+_MAX_LOG_LINE_CHARS = 2_000
+_MAX_LOG_EXCERPT_CHARS = 24_000
+_MAX_BLOCKERS = 8
 
 
 def _read_json(path: Path | None) -> dict:
@@ -111,17 +115,48 @@ def _latest_complete_run(log_path: Path) -> tuple[list[tuple[datetime, str, str]
 
 
 def _bounded(lines: list[str]) -> dict[str, list[str]]:
-    head = lines[:_MAX_LOG_LINES // 2]
-    tail = lines[-(_MAX_LOG_LINES // 2):] if len(lines) > len(head) else []
-    matched = [
+    """Keep distinct, line-capped evidence inside one small prompt budget."""
+    def clip(line: str) -> str:
+        if len(line) <= _MAX_LOG_LINE_CHARS:
+            return line
+        omitted = len(line) - _MAX_LOG_LINE_CHARS
+        suffix = f" ... [{omitted} chars omitted]"
+        return f"{line[:_MAX_LOG_LINE_CHARS - len(suffix)]}{suffix}"
+
+    def unique(values: list[str], *, excluded: set[str] | None = None) -> list[str]:
+        seen = set(excluded or ())
+        result: list[str] = []
+        for value in values:
+            value = clip(value)
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
+
+    matched = unique([
         line for line in lines
         if any(pattern.search(line) for pattern in _MATCHERS)
-    ]
-    return {
+    ])[-_MAX_MATCHED_LINES:]
+    head = unique(lines[:_MAX_HEAD_LINES], excluded=set(matched))
+    tail = unique(
+        lines[-_MAX_TAIL_LINES:], excluded=set(matched) | set(head),
+    )
+    excerpt = {
         "head_lines": head,
         "tail_lines": tail,
-        "matched_pattern_lines": matched[-_MAX_LOG_LINES:],
+        "matched_pattern_lines": matched,
     }
+    while sum(len(line) for values in excerpt.values() for line in values) > _MAX_LOG_EXCERPT_CHARS:
+        if len(excerpt["head_lines"]) > 2:
+            excerpt["head_lines"].pop()
+        elif len(excerpt["tail_lines"]) > 2:
+            excerpt["tail_lines"].pop(0)
+        elif len(excerpt["matched_pattern_lines"]) > 4:
+            excerpt["matched_pattern_lines"].pop(0)
+        else:
+            break
+    return excerpt
 
 
 def _normalized_blocker(raw: Mapping[str, object]) -> dict:
@@ -178,12 +213,47 @@ def _repository_revision() -> str | None:
 def _decision_summary(events: list[dict]) -> dict:
     """Compact semantic signals for deterministic fallback review."""
     messages = [str(event.get("message", "")) for event in events]
-    priorities = [
+    semantic_messages = [
+        message for event, message in zip(events, messages, strict=True)
+        if event.get("type") != "log_compaction"
+    ]
+    grouped_messages: dict[str, tuple[str, int]] = {}
+    for event, message in zip(events, messages, strict=True):
+        if event.get("type") == "log_compaction":
+            for item in event.get("repetition_counts", []):
+                if not isinstance(item, Mapping):
+                    continue
+                original = str(item.get("message", ""))
+                signature = str(item.get("signature") or original)
+                count = item.get("count")
+                if original and isinstance(count, int):
+                    previous = grouped_messages.get(signature, (original, 0))[1]
+                    grouped_messages[signature] = (original, max(previous, count))
+            continue
+        signature = str(event.get("signature") or message)
+        signature_occurrence = event.get("signature_occurrence")
+        occurrence = signature_occurrence or event.get("occurrence")
+        if isinstance(occurrence, int):
+            previous = grouped_messages.get(signature, (message, 0))[1]
+            grouped_messages[signature] = (message, max(previous, occurrence))
+        else:
+            previous = grouped_messages.get(signature, (message, 0))[1]
+            grouped_messages[signature] = (message, previous + 1)
+    message_counts: Counter[str] = Counter()
+    for message, count in grouped_messages.values():
+        message_counts[message] += count
+    priority_counts: Counter[str] = Counter()
+    for message, count in message_counts.items():
+        if "PRIORITY:" not in message:
+            continue
+        priority = message.split("PRIORITY:", 1)[1].strip().split()[0]
+        priority_counts[priority] += count
+    priority_samples = [
         message.split("PRIORITY:", 1)[1].strip().split()[0]
-        for message in messages if "PRIORITY:" in message
+        for message in semantic_messages if "PRIORITY:" in message
     ]
     survey_seconds: list[tuple[float, str]] = []
-    for message in messages:
+    for message in semantic_messages:
         if "SURVEY END:" not in message or "elapsed=" not in message:
             continue
         try:
@@ -191,19 +261,27 @@ def _decision_summary(events: list[dict]) -> dict:
         except ValueError:
             continue
         survey_seconds.append((elapsed, message))
-    repeated = Counter(
-        message for message in messages
+    repeated = Counter({
+        message: count for message, count in message_counts.items()
         if not message.startswith("RUN HEARTBEAT")
-    )
+    })
+    sequence_numbers = [
+        event.get("seq") for event in events if isinstance(event.get("seq"), int)
+    ]
     return {
-        "event_count": len(events),
-        "priority_counts": dict(sorted(Counter(priorities).items())),
-        "priority_tail": priorities[-12:],
+        "event_count": (
+            max(sequence_numbers) - min(sequence_numbers) + 1
+            if sequence_numbers else len(events)
+        ),
+        "stored_event_count": len(events),
+        "priority_counts": dict(sorted(priority_counts.items())),
+        "priority_tail": priority_samples[-12:],
         "alternating_priority_cycle": (
-            len(priorities[-8:]) == 8
-            and len(set(priorities[-8:])) == 2
+            len(priority_samples[-8:]) == 8
+            and len(set(priority_samples[-8:])) == 2
             and all(
-                priorities[-8:][index] == priorities[-8:][index % 2]
+                priority_samples[-8:][index]
+                == priority_samples[-8:][index % 2]
                 for index in range(8)
             )
         ),
@@ -212,11 +290,12 @@ def _decision_summary(events: list[dict]) -> dict:
             for elapsed, message in sorted(survey_seconds, reverse=True)[:5]
         ],
         "mall_loan_tail": [
-            message for message in messages
+            message for message in semantic_messages
             if "MALL BOOTSTRAP LOAN" in message
         ][-8:],
         "zero_placement_reports": sum(
-            "placed 0 actions" in message for message in messages
+            count for message, count in message_counts.items()
+            if "placed 0 actions" in message
         ),
         "repeated_messages": [
             {"count": count, "message": message}
