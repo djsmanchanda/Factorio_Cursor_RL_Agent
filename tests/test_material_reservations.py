@@ -745,10 +745,10 @@ def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
     )]
 
 
-def test_logistic_chest_core_waits_for_steel_chest_before_admission(
+def test_logistic_chest_core_builds_steel_before_the_temporary_chest_batch(
     monkeypatch,
 ) -> None:
-    """A provider/requester recipe cannot be the source of its steel chest."""
+    """A chest loan cannot wait on the durable steel source it consumes."""
     monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
         "machine": "assembling-machine-2",
         "ingredients": ["advanced-circuit", "electronic-circuit", "steel-chest"],
@@ -787,10 +787,10 @@ def test_logistic_chest_core_waits_for_steel_chest_before_admission(
         {}, (0.0, 0.0), lambda _message: None,
     )
     assert calls == [(
-        "steel-chest",
+        "steel-plate",
         {
-            "upgrade_bootstrap": False,
-            "temporary_mall": True,
+            "upgrade_bootstrap": True,
+            "temporary_mall": False,
             "stock_target": 1,
             "minimum_machines": 1,
             "allow_promotion": False,
@@ -1553,3 +1553,64 @@ def test_recipe_loan_never_borrows_the_last_gear_or_cable_machine(
         object(), object(), "nauvis", "player", "splitter", 2,
         (0.0, 0.0), lambda _message: None,
     ) is None
+
+
+def test_recipe_loan_never_reclaims_a_core_mall_producer(monkeypatch) -> None:
+    """A permanent core cell is not spare capacity for a temporary batch."""
+    core_machine = (36.5, 32.5)
+    other_machine = (47.5, 32.5)
+    origins = {
+        core_machine: (35, 31),
+        other_machine: (46, 31),
+    }
+    requesters = {(39.5, 32.5), (50.5, 32.5)}
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [9], "product_amount": 1, "craft_time": 1.0,
+        "set_recipe": True,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [5], "product_amount": 1, "craft_time": 1.0,
+        "set_recipe": True,
+    })
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"assembling-machine-2": 100, "splitter": 1},
+    )
+
+    def line(_client, _surface, _force, recipe, _machine):
+        positions = {
+            "assembling-machine-2": (core_machine,),
+            "splitter": (other_machine,),
+        }.get(recipe)
+        return (
+            SimpleNamespace(machine_count=1, machine_positions=positions)
+            if positions is not None else None
+        )
+
+    monkeypatch.setattr(builder.live_base, "find_line", line)
+    monkeypatch.setattr(
+        builder, "locate_mall_cell", lambda position, *_a: (origins[position], "left"),
+    )
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _c, _s, position: (
+            {"name": "assembling-machine-2"} if position in origins
+            else {"name": "requester-chest"} if position in requesters
+            else None
+        ),
+    )
+    selected: list[builder.MallBootstrapLoan] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: selected.append(_a[4]) or "started temporary batch",
+    )
+
+    assert builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "temporary-target", 1,
+        (3.0, -1.0), lambda _message: None,
+    ) == "started temporary batch"
+    assert selected[0].original_recipe == "splitter"

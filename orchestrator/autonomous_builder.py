@@ -3972,8 +3972,9 @@ MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
 # live recipes consume both a steel chest and an advanced circuit; admitting a
 # chest cell before those producers exist merely leaves a borrowed assembler
 # requesting an impossible recipe.  Keep the order explicit: establish the
-# steel-chest source first, then advance through the oil/plastic chemical
-# ladder for advanced-circuit.  The recipe check in
+# dedicated steel-plate capability first, then the steel-chest source, then
+# advance through the oil/plastic chemical ladder for advanced-circuit.  The
+# recipe check in
 # ``_core_mall_prerequisites`` keeps dry/catalog-less callers compatible.
 _CORE_MALL_PREREQUISITE_ORDER = ("steel-chest", "advanced-circuit")
 _CORE_MALL_RECIPE_ITEMS = frozenset({
@@ -4655,6 +4656,12 @@ def _start_bootstrap_loan(
     ))
     candidates: list[tuple[int, int, str, Point, tuple[int, int], str]] = []
     for original_recipe in recipes:
+        if original_recipe in CORE_MALL_PRODUCERS:
+            # Once a core-mall recipe owns a cell, that cell is reserved for
+            # self-sufficiency.  Borrowing it can convert the only permanent
+            # assembler-2/fast-inserter/etc. producer back into an unrelated
+            # temporary recipe and recreate the bootstrap deadlock.
+            continue
         spec = LINE_RECIPES.get(original_recipe)
         if spec is None:
             continue
@@ -6926,6 +6933,16 @@ def _core_mall_prerequisites(
                 stock = live_base.available_items(client, surface, force)
             if stock.get(prerequisite, 0) >= ingredient_amounts[prerequisite]:
                 continue
+        if (
+            prerequisite == "steel-chest"
+            and not _production_started(client, surface, force, "steel-plate")
+        ):
+            # A steel-chest batch is deliberately temporary, but its steel
+            # input is not.  Establish the dedicated furnace capability
+            # before borrowing a mall cell, otherwise that loan can only
+            # request zero steel and block the chemical ladder from opening
+            # the source that would satisfy it.
+            prerequisites.append("steel-plate")
         prerequisites.append(prerequisite)
     return tuple(prerequisites)
 
