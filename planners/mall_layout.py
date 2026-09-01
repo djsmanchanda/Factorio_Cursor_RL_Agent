@@ -198,12 +198,15 @@ def generate_promoted_mall_retirement_plan(
     machine: str,
     machine_position: tuple[float, float],
     provider_position: tuple[float, float],
+    *,
+    preserve_provider: bool = False,
 ) -> dict:
     """Free one paired mall half after its recipe moves to a shared line.
 
     The shared requester and substation stay in place. Only the old machine,
     its two inserters, provider, and this recipe's requester section are
-    retired, leaving the half available for a later mall assignment.
+    retired, leaving the half available for a later mall assignment. A
+    bootstrap shared provider is retained when its sibling still owns it.
     """
     mx, my = machine_position
     px, py = provider_position
@@ -224,9 +227,12 @@ def generate_promoted_mall_retirement_plan(
                 "action_type": "remove_entity", "entity": name,
                 "position": {"x": inserter_x, "y": y},
             })
+    if not preserve_provider:
+        actions.append(
+            {"action_type": "remove_entity", "entity": "passive-provider-chest",
+             "position": {"x": px, "y": py}},
+        )
     actions.extend([
-        {"action_type": "remove_entity", "entity": "passive-provider-chest",
-         "position": {"x": px, "y": py}},
         {"action_type": "place_entity", "entity": "requester-chest",
          "position": {"x": requester[0], "y": requester[1]},
          "clear_logistic_groups": [

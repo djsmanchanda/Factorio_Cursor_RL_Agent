@@ -46,6 +46,7 @@ class LineLayoutMixin:
         belt_type: str = "transport-belt",
         inserter_type: str = "fast-inserter",
         feed_style: str = "chest",
+        direct_bus_ingredients: "set | list | None" = None,
         chained_ingredients: "set | list | None" = None,
         terminal_collector: bool = True,
         flow_direction: str = "east",
@@ -108,12 +109,28 @@ class LineLayoutMixin:
             raise ValueError(f"Unknown inserter tier: {inserter_type}")
         if feed_style not in FEED_STYLES:
             raise ValueError(f"Unknown feed style: {feed_style}")
-        if feed_style == "sideload" and not mining_feed:
-            self._check_sideload_lane_capacity(recipe, machine_count, belt_type)
-
         spec = LINE_RECIPES[recipe]
         machine = spec["machine"]
         ingredients = spec["ingredients"]
+        direct_bus = set(direct_bus_ingredients or ())
+        unknown_direct_bus = direct_bus.difference(ingredients)
+        if unknown_direct_bus:
+            raise ValueError(
+                f"{recipe} has no direct-bus ingredient(s): {sorted(unknown_direct_bus)}"
+            )
+        if direct_bus and feed_style != "sideload":
+            raise ValueError("direct-bus ingredients require feed_style='sideload'")
+        if feed_style == "sideload" and not mining_feed:
+            # A direct bus reaches the input belt head-on and may use both
+            # lanes. Only the remaining side-loaded ingredients have the
+            # one-lane ceiling enforced here.
+            side_indices = {
+                index for index, ingredient in enumerate(ingredients)
+                if ingredient not in direct_bus
+            }
+            self._check_sideload_lane_capacity(
+                recipe, machine_count, belt_type, only_indices=side_indices,
+            )
         auxiliary_index = spec.get("auxiliary_ingredient_index")
         three_input = len(ingredients) == 3 and auxiliary_index == 1
         if not (1 <= len(ingredients) <= 2 or three_input):
@@ -300,36 +317,38 @@ class LineLayoutMixin:
             # from the west by infinity-chest + inserter pairs (one per demand
             # feed point) so the buffered belt saturates the input.
             north_needed = feeders_needed[0]
-            for row in range(-(north_needed + 1), 0):  # rows -(N+1)..-1
-                ghosts.append({"action_type": "place_ghost", "entity": belt_type,
-                               "position": at(SIDELOAD_NORTH_COL + 0.5, row + 0.5),
-                               "direction": "south"})
-            for slot in range(north_needed):
-                row = -(2 + slot)  # loading tiles sit above the junction (row -1)
-                scaffolding.extend([
-                    {"action_type": "place_entity", "entity": "infinity-chest",
-                     "position": at(SIDELOAD_NORTH_COL - 1.5, row + 0.5),
-                     "infinity_filter": ingredients[0]},
-                    {"action_type": "place_entity", "entity": inserter_type,
-                     "position": at(SIDELOAD_NORTH_COL - 0.5, row + 0.5), "direction": "west"},
-                ])
+            if ingredients[0] not in direct_bus:
+                for row in range(-(north_needed + 1), 0):  # rows -(N+1)..-1
+                    ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                                   "position": at(SIDELOAD_NORTH_COL + 0.5, row + 0.5),
+                                   "direction": "south"})
+                for slot in range(north_needed):
+                    row = -(2 + slot)  # loading tiles sit above the junction (row -1)
+                    scaffolding.extend([
+                        {"action_type": "place_entity", "entity": "infinity-chest",
+                         "position": at(SIDELOAD_NORTH_COL - 1.5, row + 0.5),
+                         "infinity_filter": ingredients[0]},
+                        {"action_type": "place_entity", "entity": inserter_type,
+                         "position": at(SIDELOAD_NORTH_COL - 0.5, row + 0.5), "direction": "west"},
+                    ])
             if len(ingredients) == 2:
                 # South feeder belt (ingredient 1): column running NORTH, its
                 # last tile (row 1) sideloading the input belt from the south.
                 south_needed = feeders_needed[1]
-                for row in range(1, south_needed + 2):  # rows 1..S+1
-                    ghosts.append({"action_type": "place_ghost", "entity": belt_type,
-                                   "position": at(SIDELOAD_SOUTH_COL + 0.5, row + 0.5),
-                                   "direction": "north"})
-                for slot in range(south_needed):
-                    row = 2 + slot  # loading tiles sit below the junction (row 1)
-                    scaffolding.extend([
-                        {"action_type": "place_entity", "entity": "infinity-chest",
-                         "position": at(SIDELOAD_SOUTH_COL - 1.5, row + 0.5),
-                         "infinity_filter": ingredients[1]},
-                        {"action_type": "place_entity", "entity": inserter_type,
-                         "position": at(SIDELOAD_SOUTH_COL - 0.5, row + 0.5), "direction": "west"},
-                    ])
+                if ingredients[1] not in direct_bus:
+                    for row in range(1, south_needed + 2):  # rows 1..S+1
+                        ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                                       "position": at(SIDELOAD_SOUTH_COL + 0.5, row + 0.5),
+                                       "direction": "north"})
+                    for slot in range(south_needed):
+                        row = 2 + slot  # loading tiles sit below the junction (row 1)
+                        scaffolding.extend([
+                            {"action_type": "place_entity", "entity": "infinity-chest",
+                             "position": at(SIDELOAD_SOUTH_COL - 1.5, row + 0.5),
+                             "infinity_filter": ingredients[1]},
+                            {"action_type": "place_entity", "entity": inserter_type,
+                             "position": at(SIDELOAD_SOUTH_COL - 0.5, row + 0.5), "direction": "west"},
+                        ])
 
         phases = [
             {"name": "line_scaffolding", "actions": scaffolding},
@@ -478,4 +497,3 @@ class LineLayoutMixin:
             messages = [f"- {self._format_error_path(e)}: {e.message}" for e in errors]
             raise ValueError("BuildPlan validation FAILED:\n" + "\n".join(messages))
         _reject_fuel_entities(plan)
-

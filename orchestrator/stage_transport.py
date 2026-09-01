@@ -48,15 +48,9 @@ _CARDINAL_DIRECTION = {0: "north", 4: "east", 8: "south", 12: "west"}
 def _direct_belt_entry(
     feed_position: Point, blocked: set[tuple[int, int]], belt_direction: str,
 ) -> str:
-    """Return the only approach that continues inline with a refinery bus.
-
-    A belt flowing west may only be supplied from its east/upstream end (and
-    vice versa). Allowing a clear north or south approach makes a valid-looking
-    T merge, but it compresses ore onto one lane. A refinery must join the
-    endpoint tangentially or fail.
-    """
-    if belt_direction not in {"east", "west"}:
-        raise ValueError("Direct refinery belt direction must be east or west")
+    """Return the only approach that continues inline with a direct bus."""
+    if belt_direction not in DIRECTION_VECTORS:
+        raise ValueError(f"Unknown direct-belt direction: {belt_direction!r}")
     entry_direction = opposite(belt_direction)
     vx, vy = DIRECTION_VECTORS[entry_direction]
     approach = {
@@ -147,8 +141,6 @@ def _through_belt_source(
                 return shifted
         return mine_belt
 
-    if ingredient not in {"iron-plate", "copper-plate"}:
-        return None
     sample_tile = (provider[0], provider[1] - 1)
     main_tile = (provider[0], provider[1] - 2)
     tail_tile = (provider[0] + 1, provider[1] - 2)

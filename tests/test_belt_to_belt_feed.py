@@ -40,6 +40,8 @@ def test_a_belt_to_belt_join_needs_no_inserter() -> None:
 def test_refinery_bus_requires_an_inline_upstream_approach() -> None:
     assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "west") == "east"
     assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "east") == "west"
+    assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "north") == "south"
+    assert stage_transport._direct_belt_entry((20.5, 0.5), set(), "south") == "north"
 
 
 def test_refinery_bus_rejects_a_side_merge_when_its_upstream_end_is_blocked() -> None:
@@ -112,6 +114,20 @@ def test_pending_mine_ghosts_are_recognized_as_a_through_belt(
     assert stage_transport._through_belt_source(
         object(), "nauvis", "iron-ore", (12.5, -3.5)
     ) == (13.5, -1.5)
+
+
+def test_generic_promoted_output_side_tap_is_a_continuous_belt_source(monkeypatch) -> None:
+    """Copper cable uses the same provider side tap as plates when promoted."""
+    entities = {
+        (10.5, 9.5): {"type": "inserter"},
+        (10.5, 8.5): {"type": "transport-belt"},
+        (11.5, 8.5): {"type": "transport-belt"},
+    }
+    monkeypatch.setattr(live_base, "entity_at", lambda _c, _s, p: entities.get(p))
+
+    assert stage_transport._through_belt_source(
+        object(), "nauvis", "copper-cable", (10.5, 10.5),
+    ) == (12.5, 8.5)
 def test_direct_mine_belt_is_used_without_a_side_tap(monkeypatch) -> None:
     entities = {
         (7.5, 20.5): {
@@ -248,7 +264,7 @@ def test_the_conversion_stage_passes_the_flag_to_the_build_not_only_the_prefligh
     connect = inspect.getsource(builder._connect_stage_feeds)
 
     assert "destination_is_belt=direct_belt_input" in connect
-    assert "destination_belt_direction=destination_belt_direction" in connect
+    assert "direct_sideload_feeds.get" in connect
 
 
 def test_running_short_of_belt_is_recoverable() -> None:

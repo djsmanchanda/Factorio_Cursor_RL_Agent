@@ -11,14 +11,76 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 from orchestrator.extraction_capacity import EXTRACTION_DRILL_PHASES  # noqa: E402
 from orchestrator.intermediate_scaling import (  # noqa: E402
+    ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT,
     MALL_INTERMEDIATE_RATE_LIMIT,
     PROMOTED_LINE_PHASES,
+    promoted_companion_machine_count,
     promoted_line_belt_type,
     promoted_line_machine_count,
 )
 from orchestrator import autonomous_builder as builder  # noqa: E402
+from planners.local_layout_planner import LocalLayoutPlanner  # noqa: E402
 
 GEARS = "iron-gear-wheel"
+
+
+def test_third_circuit_mall_machine_promotes_to_the_six_machine_block() -> None:
+    """Circuits keep two bootstrap cells; higher sustained demand is a line."""
+    assert ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT == 2
+    assert promoted_line_machine_count(
+        "electronic-circuit", 3.01, 2,
+    ) == 6
+    assert promoted_line_machine_count(
+        "electronic-circuit", 3.0, 2,
+    ) is None
+
+
+def test_queued_circuit_work_beyond_two_cells_promotes_without_live_consumers() -> None:
+    assert promoted_line_machine_count(
+        "electronic-circuit", 0.0, 2, backlog=121,
+    ) == 6
+
+
+def test_six_circuits_get_the_recipe_derived_nine_cable_companion() -> None:
+    assert promoted_companion_machine_count("electronic-circuit", 6) == 9
+
+
+def test_direct_circuit_block_requests_an_express_full_lane_bus_when_unstocked() -> None:
+    assert promoted_line_belt_type(
+        "electronic-circuit", 6, {}, full_lane_input=True,
+    ) == "express-transport-belt"
+
+
+def test_nine_cables_use_turbo_for_their_single_lane_output() -> None:
+    assert promoted_line_belt_type(
+        "copper-cable", 9, {}, full_lane_input=True,
+    ) == "turbo-transport-belt"
+
+
+def test_promoted_circuit_block_replaces_sideload_cheats_with_belt_endpoints() -> None:
+    """The six-machine block must have two real belt inputs, not requesters."""
+    plan = LocalLayoutPlanner().generate_line_layout(
+        "electronic-circuit", 6, 100, 200,
+        belt_type="express-transport-belt", inserter_type="fast-inserter",
+        feed_style="sideload", direct_bus_ingredients={"copper-cable"},
+        terminal_collector=True,
+    )
+
+    endpoints = builder._direct_sideload_feeds(
+        plan, "electronic-circuit", 6, 100, 200, "fast-inserter",
+        frozenset({"copper-cable", "iron-plate"}),
+        frozenset({"copper-cable"}),
+    )
+
+    assert endpoints == {
+        "copper-cable": ((97.5, 200.5), "east"),
+        "iron-plate": ((97.5, 204.5), "north"),
+    }
+    remaining_cheats = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "infinity-chest"
+    ]
+    assert remaining_cheats == []
 
 
 def test_promotion_does_not_use_unexecutable_stocked_belts(monkeypatch) -> None:

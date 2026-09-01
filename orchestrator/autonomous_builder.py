@@ -74,7 +74,8 @@ from orchestrator.parts_mall import (
 )
 from orchestrator.intermediate_scaling import (
     backlog_seconds,
-    live_intermediate_demand, promoted_line_belt_type, promoted_line_machine_count,
+    live_intermediate_demand, promoted_companion_machine_count,
+    promoted_line_belt_type, promoted_line_machine_count,
 )
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity
@@ -158,6 +159,8 @@ from planners.recipe_data import (
     LINE_RECIPES,
     MACHINE_SPEEDS,
     ITEM_STACK_SIZES,
+    SIDELOAD_NORTH_COL,
+    SIDELOAD_SOUTH_COL,
     install_catalog_line_recipes,
     install_catalog_machines,
     install_catalog_stack_sizes,
@@ -2986,6 +2989,7 @@ def _conversion_feed_plan(
     plan: dict, ingredient_sources: dict[str, Point], machine_count: int,
     belt_type: str, flow_direction: str, emit: Callable[[str], None], *,
     allow_logistic_inputs: bool, max_belt_route_tiles: int | None,
+    direct_sideload_feeds: Mapping[str, tuple[Point, str]] | None = None,
 ) -> tuple[dict, dict, dict, bool]:
     """Decide how each ingredient reaches this line, and preflight the routes.
 
@@ -3006,6 +3010,9 @@ def _conversion_feed_plan(
         )
         for ingredient in LINE_RECIPES[recipe]["ingredients"]
     }
+    direct_sideload_feeds = direct_sideload_feeds or {}
+    for ingredient in direct_sideload_feeds:
+        modes[ingredient] = "belt"
     direct_belt_input = (
         recipe in {"iron-plate", "copper-plate", "steel-plate"}
         and len(modes) == 1
@@ -3022,6 +3029,10 @@ def _conversion_feed_plan(
         }
     else:
         feed_positions = _swap_infinity_chests(plan, modes)
+    feed_positions.update({
+        ingredient: position
+        for ingredient, (position, _direction) in direct_sideload_feeds.items()
+    })
     unresolved = sorted(set(feed_positions) - set(ingredient_sources))
     if unresolved:
         raise StuckError(
@@ -3037,8 +3048,10 @@ def _conversion_feed_plan(
                 max_belt_route_tiles=max_belt_route_tiles,
                 additional_blocked=planned_blocked,
                 mode=modes[ingredient],
-                destination_is_belt=direct_belt_input,
-                destination_belt_direction=flow_direction,
+                destination_is_belt=direct_belt_input or ingredient in direct_sideload_feeds,
+                destination_belt_direction=direct_sideload_feeds.get(
+                    ingredient, (None, flow_direction),
+                )[1],
                 allow_chest_source_to_belt=(recipe == "steel-plate"),
             )
             if route is not None:
@@ -3048,6 +3061,79 @@ def _conversion_feed_plan(
                     "actions": route[0],
                 })
     return modes, feed_positions, preflighted, direct_belt_input
+
+
+def _direct_sideload_feeds(
+    plan: dict, recipe: str, machine_count: int, ox: float, oy: float,
+    inserter_type: str, ingredients: frozenset[str],
+    full_bus_ingredients: frozenset[str] = frozenset(),
+) -> dict[str, tuple[Point, str]]:
+    """Expose selected sideload feeder ends as continuous belt inputs.
+
+    ``LocalLayoutPlanner`` emits infinity chests for standalone layouts. A
+    promoted intermediate block instead takes high-rate ingredients from real
+    upstream belts. Remove only those chest/inserter loaders; the planner's
+    feeder columns remain stable belt-to-belt endpoints for each lane.
+    """
+    if not ingredients:
+        return {}
+    recipe_ingredients = tuple(LINE_RECIPES[recipe]["ingredients"])
+    unknown = ingredients.difference(recipe_ingredients)
+    if unknown:
+        raise ValueError(f"{recipe} has no direct sideload ingredient(s): {sorted(unknown)}")
+    if len(recipe_ingredients) > 2:
+        raise ValueError("direct sideload feeds support at most two ingredients")
+    if not full_bus_ingredients.issubset(ingredients):
+        raise ValueError("full-bus ingredients must be direct sideload ingredients")
+
+    layout_planner = LocalLayoutPlanner()
+    feeders_needed = layout_planner._feeders_needed(
+        recipe, machine_count, inserter_type,
+    )
+    endpoints: dict[str, tuple[Point, str]] = {}
+    loader_chests: set[tuple[float, float]] = set()
+    for index, ingredient in enumerate(recipe_ingredients):
+        if ingredient not in ingredients:
+            continue
+        if ingredient in full_bus_ingredients:
+            belt_west = layout_planner._belt_west(
+                recipe, machine_count, "sideload", inserter_type, False,
+            )
+            endpoints[ingredient] = ((ox + belt_west + 0.5, oy + 0.5), "east")
+        elif index == 0:
+            # The north feeder flows south; enter at its northern tail.
+            endpoints[ingredient] = (
+                (ox + SIDELOAD_NORTH_COL + 0.5, oy - feeders_needed[index] - 0.5),
+                "south",
+            )
+        else:
+            # The south feeder flows north; enter at its southern tail.
+            endpoints[ingredient] = (
+                (ox + SIDELOAD_SOUTH_COL + 0.5, oy + feeders_needed[index] + 1.5),
+                "north",
+            )
+        loader_chests.update({
+            (action["position"]["x"], action["position"]["y"])
+            for phase in plan["phases"]
+            for action in phase["actions"]
+            if action.get("entity") == "infinity-chest"
+            and action.get("infinity_filter") == ingredient
+        })
+
+    for phase in plan["phases"]:
+        phase["actions"] = [
+            action for action in phase["actions"]
+            if not (
+                (action.get("entity") == "infinity-chest"
+                 and (action["position"]["x"], action["position"]["y"]) in loader_chests)
+                or (
+                    action.get("entity", "").endswith("inserter")
+                    and (action["position"]["x"] - 1, action["position"]["y"])
+                    in loader_chests
+                )
+            )
+        ]
+    return endpoints
 
 
 def _ensure_plan_construction_coverage(
@@ -3217,9 +3303,11 @@ def _connect_stage_feeds(
     belt_type: str, inserter_type: str, emit: Callable[[str], None], *,
     max_belt_route_tiles: int | None, direct_belt_input: bool,
     destination_belt_direction: str,
+    direct_sideload_feeds: Mapping[str, tuple[Point, str]] | None = None,
 ) -> None:
     """Run each ingredient in, then confirm the machines are actually fed."""
     feed_delay = 0.0
+    direct_sideload_feeds = direct_sideload_feeds or {}
     for ingredient in sorted(feed_positions):
         feed_position = feed_positions[ingredient]
         source_position = ingredient_sources[ingredient]
@@ -3244,8 +3332,10 @@ def _connect_stage_feeds(
                 # bridge instead, with an inserter in the middle of what should
                 # be one continuous belt -- and a different bill of materials
                 # from the one that was checked.
-                destination_is_belt=direct_belt_input,
-                destination_belt_direction=destination_belt_direction,
+                destination_is_belt=direct_belt_input or ingredient in direct_sideload_feeds,
+                destination_belt_direction=direct_sideload_feeds.get(
+                    ingredient, (None, destination_belt_direction),
+                )[1],
                 allow_chest_source_to_belt=(recipe == "steel-plate"),
             ),
         )
@@ -3262,7 +3352,7 @@ def _connect_stage_feeds(
         # fed: direct refinery feeds are belts, not chests, so do not run the
         # chest inventory probe against them.
         for ingredient, feed_position in feed_positions.items():
-            if direct_belt_input:
+            if direct_belt_input or ingredient in direct_sideload_feeds:
                 emit(
                     f"  DIAGNOSIS: {feed_position} input belt for {ingredient} "
                     "received nothing -- the mine-to-refinery belt is disconnected"
@@ -3303,6 +3393,8 @@ def build_conversion_stage(
     allow_logistic_inputs: bool = False,
     flow_direction: str = "east",
     side_tap_output: bool = False,
+    direct_sideload_ingredients: frozenset[str] = frozenset(),
+    full_bus_ingredients: frozenset[str] = frozenset(),
 ) -> Point:
     """Assemble `recipe` from its (already-producing) ingredients. Bridges each
     ingredient's real upstream output chest to this stage's real feed chest
@@ -3320,11 +3412,29 @@ def build_conversion_stage(
         flow_direction, emit,
     )
     emit(f"conversion stage for {recipe}: building at ({ox},{oy})")
+    if direct_sideload_ingredients and flow_direction != "east":
+        raise ValueError("direct sideload conversion stages currently require east flow")
+    if not direct_sideload_ingredients:
+        feed_style = "chest"
+    else:
+        unknown = direct_sideload_ingredients.difference(
+            LINE_RECIPES[recipe]["ingredients"],
+        )
+        if unknown:
+            raise ValueError(f"{recipe} has no direct sideload ingredient(s): {sorted(unknown)}")
+        feed_style = "sideload"
+    if not full_bus_ingredients.issubset(direct_sideload_ingredients):
+        raise ValueError("full-bus ingredients must be direct sideload ingredients")
     plan = planner.generate_line_layout(
         recipe, machine_count, ox, oy,
         belt_type=belt_type, inserter_type=inserter_type,
-        feed_style="chest", terminal_collector=True,
+        feed_style=feed_style, terminal_collector=True,
+        direct_bus_ingredients=full_bus_ingredients,
         flow_direction=flow_direction,
+    )
+    direct_sideload_feeds = _direct_sideload_feeds(
+        plan, recipe, machine_count, ox, oy, inserter_type,
+        direct_sideload_ingredients, full_bus_ingredients,
     )
     plan = strip_local_power(plan, remove_substations=False)
     output_position = (
@@ -3345,6 +3455,7 @@ def build_conversion_stage(
         machine_count, belt_type, flow_direction, emit,
         allow_logistic_inputs=allow_logistic_inputs,
         max_belt_route_tiles=max_belt_route_tiles,
+        direct_sideload_feeds=direct_sideload_feeds,
     )
     machine = LINE_RECIPES[recipe]["machine"]
     machine_positions = [
@@ -3382,6 +3493,7 @@ def build_conversion_stage(
         max_belt_route_tiles=max_belt_route_tiles,
         direct_belt_input=direct_belt_input,
         destination_belt_direction=flow_direction,
+        direct_sideload_feeds=direct_sideload_feeds,
     )
     return output_position
 
@@ -3476,7 +3588,7 @@ def _plan_line(
     # whenever it has any work, so it fired while filling a one-off chest and
     # promoted transport-belt to six machines -- and six feed requesters -- for
     # a 200 target one cell covers in about a minute.
-    outstanding = max(0, stock_target - live_base.available_items(
+    outstanding = max(0, max(stock_target, mall_storage_limit) - live_base.available_items(
         client, surface, force,
     ).get(item, 0))
     backlog = backlog_seconds(
@@ -4773,6 +4885,33 @@ def _build_assembled_stage(
     stock_gate_target: int | None = None,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
+    # The bootstrap budget is global.  Previously only optional demand cells
+    # consulted it, while core-mall promotion kept allocating permanent cells
+    # outside the budget; the latest run therefore reached thirteen mall
+    # assemblers before the first logistic chest existed.  A running line is
+    # never blocked here -- only a genuinely new compact slot waits.
+    if (
+        not upgrade_bootstrap
+        and plan.existing is None
+        and not _core_mall_ready(client, surface, force)
+    ):
+        committed = mall_slot_count(client, surface, reference_point)
+        if committed >= BOOTSTRAP_MALL_SLOT_TARGET:
+            emit(
+                f"  BOOTSTRAP MALL CAP: {committed}/"
+                f"{BOOTSTRAP_MALL_SLOT_TARGET} assemblers are committed; "
+                f"deferring new {item} cell until a line promotion frees a slot"
+            )
+            raise ProductionPrerequisiteDeferred(
+                f"bootstrap mall is capped at {BOOTSTRAP_MALL_SLOT_TARGET} assemblers",
+                code="bootstrap_mall_slot_cap",
+                state="supply_wait",
+                details={
+                    "item": item,
+                    "committed_slots": committed,
+                    "slot_cap": BOOTSTRAP_MALL_SLOT_TARGET,
+                },
+            )
     sources = _ingredient_sources(
         client, bridge, surface, force, item, reference_point, emit, plan,
         upgrade_bootstrap=upgrade_bootstrap,
@@ -4817,6 +4956,47 @@ def _build_assembled_stage(
         )
         return
     if promote_to_line:
+        # Circuit promotion is a complete local production block, not a third
+        # requester-fed cell.  First bring copper cable to the recipe-derived
+        # companion size; its own raw-copper check expands the refinery before
+        # construction.  The following circuit pass can then route the cable
+        # line directly and retire both compact circuit cells.
+        companion_count = promoted_companion_machine_count(item, promoted_count)
+        if companion_count is not None:
+            cable_spec = LINE_RECIPES["copper-cable"]
+            cable_existing = live_base.find_line(
+                client, surface, force, "copper-cable", cable_spec["machine"],
+            )
+            if cable_existing is None or cable_existing.machine_count < companion_count:
+                cable_plan = _LinePlan(
+                    existing=cable_existing,
+                    spec=cable_spec,
+                    production_target=companion_count,
+                    mall_storage_limit=companion_count,
+                    fill_provider=False,
+                    mall_request_multiplier=None,
+                    demand=0.0,
+                    saturated=False,
+                    promoted_count=companion_count,
+                    promote_to_line=True,
+                    at_size=False,
+                )
+                cable_provider = (
+                    _paired_mall_provider(
+                        client, surface, cable_existing.machine_positions,
+                    ) if cable_existing is not None else None
+                )
+                emit(
+                    f"  CIRCUIT BLOCK: {promoted_count} circuit machines need "
+                    f"{companion_count} direct copper-cable machines; "
+                    "expanding cable before circuits"
+                )
+                _build_assembled_stage(
+                    client, bridge, surface, force, "copper-cable",
+                    reference_point, emit, cable_plan, cable_provider,
+                    upgrade_bootstrap=False,
+                )
+                return
         upstream = _promotion_upstream_shortfall(
             client, surface, force, item, promoted_count,
         )
@@ -4849,33 +5029,60 @@ def _build_assembled_stage(
                 f"  LINE SITING: placing the {item} line near its heaviest "
                 f"input at {line_reference} rather than the mall"
             )
-        build_conversion_stage(
+        output = build_conversion_stage(
             client, bridge, surface, force, item, sources, line_reference, emit,
             machine_count=promoted_count,
             belt_type=promoted_line_belt_type(
                 item, promoted_count, live_base.available_items(client, surface, force),
+                full_lane_input=item in {"copper-cable", "electronic-circuit"},
             ),
             inserter_type="fast-inserter",
             allow_logistic_inputs=False,
             side_tap_output=True,
+            direct_sideload_ingredients=(
+                frozenset({"copper-plate"})
+                if item == "copper-cable"
+                else frozenset({"copper-cable", "iron-plate"})
+                if item == "electronic-circuit"
+                else frozenset()
+            ),
+            full_bus_ingredients=(
+                frozenset({"copper-plate"})
+                if item == "copper-cable"
+                else frozenset({"copper-cable"})
+                if item == "electronic-circuit"
+                else frozenset()
+            ),
         )
+        MANAGED_INTERMEDIATE_SOURCES[item] = output
         # Retire the old cell only now the line that replaces it exists.
         # Retiring first meant a pass that did not finish the line left the
         # recipe with no machine at all, so the next survey rebuilt the very
         # cell just removed -- seen twice in fifteen seconds at cell (35,31).
-        if mall_provider is not None and existing and len(existing.machine_positions) == 1:
-            retirement = generate_promoted_mall_retirement_plan(
-                item, spec["machine"], existing.machine_positions[0], mall_provider,
-            )
-            retirement["surface"], retirement["force"] = surface, force
-            emit(
-                f"  MALL RETIRE: the {item} line is up; removing the old cell "
-                "and clearing its request group"
-            )
-            _submit(
-                client, bridge, surface, retirement,
-                f"retire_promoted_mall_{item}", emit,
-            )
+        if existing:
+            retired = 0
+            for position in existing.machine_positions:
+                provider = _paired_mall_provider(client, surface, [position])
+                if provider is None:
+                    continue
+                preserve_provider = mall_slot_uses_shared_provider(
+                    client, surface, position, reference_point,
+                )
+                retirement = generate_promoted_mall_retirement_plan(
+                    item, spec["machine"], position, provider,
+                    preserve_provider=preserve_provider,
+                )
+                retirement["surface"], retirement["force"] = surface, force
+                _submit(
+                    client, bridge, surface, retirement,
+                    f"retire_promoted_mall_{item}_{position[0]}_{position[1]}", emit,
+                )
+                retired += 1
+            if retired:
+                emit(
+                    f"  MALL RETIRE: the {item} line is up; released {retired} "
+                    "compact mall slot(s) and cleared their request groups"
+                )
     elif not upgrade_bootstrap:
         output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,

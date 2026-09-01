@@ -74,7 +74,9 @@ def test_the_survey_measures_the_backlog_from_live_stock() -> None:
     source = inspect.getsource(builder._plan_line)
 
     assert "backlog_seconds(" in source
-    assert "stock_target -" in source, "outstanding is target minus what exists"
+    assert "max(stock_target, mall_storage_limit) -" in source, (
+        "outstanding includes queued mall demand, not only the nominal reserve"
+    )
 
 
 def test_the_promotion_log_says_how_much_is_outstanding() -> None:

@@ -30,6 +30,12 @@ PROMOTED_LINE_PHASES = EXTRACTION_DRILL_PHASES
 PROMOTED_LINE_MIN_MACHINES = PROMOTED_LINE_PHASES[0]
 PROMOTED_LINE_HEADROOM = 1.25
 
+# Circuits are the one bootstrap intermediate that routinely feeds several
+# independent construction chains at once.  Two paired-mall assemblers are a
+# useful transition buffer; a third is not.  Once live demand outgrows those
+# two cells, move the whole dependency into its first proper belt-fed block.
+ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT = 2
+
 # How long the existing cells may take to finish what is OUTSTANDING before
 # a saturated cell justifies a dedicated line.
 #
@@ -153,6 +159,24 @@ def promoted_line_machine_count(
     """
     if not is_promotable(item):
         return None
+    # A third circuit mall machine is exactly the point at which the compact
+    # mall stops being the right topology.  Keep the first two cells for the
+    # bootstrap, then promote to the six-machine phase as soon as measured
+    # consumers exceed their combined 3.0/s capacity. Queued construction
+    # demand is also evidence when it exceeds the two-cell patience window:
+    # consumers starved of circuits do not report as working, so relying on
+    # their live rate alone caused the controller to keep borrowing mall slots.
+    if (
+        item == "electronic-circuit"
+        and existing_machines >= ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT
+        and (
+            demand_per_second > (
+                output_per_machine(item) * ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT
+            )
+            or backlog is not None and backlog > PROMOTION_PATIENCE_SECONDS
+        )
+    ):
+        return PROMOTED_LINE_MIN_MACHINES
     if saturated and backlog is not None and backlog <= PROMOTION_PATIENCE_SECONDS:
         # Busy, but the work is nearly done. A cell filling a one-off chest
         # is saturated the whole time it is filling it, which says nothing
@@ -171,21 +195,60 @@ def promoted_line_machine_count(
         target = max(target, _line_phase(existing_machines + 1))
     return target
 
+
+def promoted_companion_machine_count(item: str, machine_count: int) -> int | None:
+    """Size the direct intermediate companion required by a promoted line.
+
+    A six-machine electronic-circuit line consumes 27 copper cable/s.  With
+    assembling-machine-2 that is nine cable assemblers, not another mall pair.
+    Keep this derived from live recipe rates so recipe/catalog changes cannot
+    silently desynchronise the two lines.
+    """
+    if item != "electronic-circuit" or machine_count <= 0:
+        return None
+    cable_index = LINE_RECIPES[item]["ingredients"].index("copper-cable")
+    cable_demand = machine_ingredient_rates(item, machine_count)[cable_index]
+    return math.ceil(cable_demand / output_per_machine("copper-cable"))
+
 def promoted_line_belt_type(
-    item: str, machine_count: int, available: dict[str, int],
+    item: str, machine_count: int, available: dict[str, int], *,
+    full_lane_input: bool = False,
 ) -> str:
-    """Choose the cheapest stocked belt whose full rate carries the line input."""
+    """Choose the cheapest belt whose required input topology can sustain.
+
+    A full-lane bus carries the aggregate input rate, rather than one side
+    lane's rate. If no suitable belt is stocked, return the smallest capable
+    tier so ordinary construction-shortage handling schedules that tier instead
+    of building a line which cannot ever meet its own throughput.
+    """
     spec = LINE_RECIPES[item]
-    demand = max(machine_ingredient_rates(item, machine_count), default=0.0)
-    tiers = tuple(
-        tier for tier in (
-            "transport-belt", "fast-transport-belt",
-            "express-transport-belt", "turbo-transport-belt",
-        )
-        if tier in LINE_RECIPES
-    ) or ("transport-belt",)
+    rates = machine_ingredient_rates(item, machine_count)
+    demand = sum(rates) if full_lane_input else max(rates, default=0.0)
+    if full_lane_input:
+        # The direct input bus may use both lanes, but LocalLayoutPlanner's
+        # machine output inserters land on one lane. The selected belt must
+        # therefore also carry the whole produced rate on that output lane.
+        demand = max(demand, 2 * output_per_machine(item) * machine_count)
+    ordered_tiers = (
+        "transport-belt", "fast-transport-belt",
+        "express-transport-belt", "turbo-transport-belt",
+    )
+    # A direct full-lane block names its physically required belt even before
+    # the dynamic catalog has registered its recipe. The material scheduler
+    # then queues that recipe after catalog load instead of silently choosing
+    # an incapable yellow belt. Ordinary promoted lines keep the old
+    # executable-only rule.
+    tiers = (
+        ordered_tiers if full_lane_input else tuple(
+            tier for tier in ordered_tiers if tier in LINE_RECIPES
+        ) or ("transport-belt",)
+    )
     for tier in tiers:
         if available.get(tier, 0) > 0 and BELT_TIERS[tier] >= demand:
             return tier
+    if full_lane_input:
+        capable = next((tier for tier in tiers if BELT_TIERS[tier] >= demand), None)
+        if capable is not None:
+            return capable
     stocked = [tier for tier in tiers if available.get(tier, 0) > 0]
     return max(stocked, key=lambda tier: BELT_TIERS[tier], default="transport-belt")

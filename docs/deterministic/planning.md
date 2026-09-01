@@ -162,6 +162,20 @@ These names describe intended responsibilities, not permission to build speculat
   existing one-machine producer may claim a second reservation-funded slot in
   the ten-assembler bootstrap pool. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
+  The pre-logistics pool is a hard global ceiling of ten compact assemblers:
+  core-mall requests may not bypass it.  Once a circuit request exceeds the
+  capacity of two circuit cells (by live rate or queued work beyond their
+  patience window), it is not assigned a third mall half.  The controller
+  builds the first dedicated block instead: six electronic-circuit assemblers
+  plus the recipe-derived nine copper-cable assemblers, expands copper and
+  iron to their measured input rates, and releases the replaced compact halves
+  only after the direct lines are healthy.  Copper cable enters the circuit
+  input as a full continuous belt while iron sideloads the remaining lane;
+  the resulting 36/s aggregate bus requires an express-or-better belt.  The
+  provider chest is a side tap for construction storage; the primary belt
+  remains continuous for downstream production.  The cable block's 27/s
+  output still lands on one output lane, so it requires a turbo belt; the
+  circuit input bus itself is express-or-better.
   Monotonic loan craft progress counts as controller progress even when bots
   consume each output before it can accumulate in provider stock. The loan tag
   persists the absolute stock target of every completed prerequisite step, so
