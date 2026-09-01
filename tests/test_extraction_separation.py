@@ -534,6 +534,27 @@ def test_plan_local_extraction_reports_a_pending_system_as_deferred(monkeypatch)
         )
 
 
+def test_expansion_defers_a_pending_mine_instead_of_replanning_its_batch(
+    monkeypatch,
+) -> None:
+    """Mine ghosts submitted beside furnace growth must be resumed, not duplicated."""
+    _patch_and_rates(monkeypatch, existing=ResourceMine(
+        output=(49.5, -65.5), drill_count=6, pending=True,
+        row_capacity=16, belt_y=-65.5, first_column_x=40.5,
+        haul_head=(78.5, -65.5), growth_direction=-1,
+    ))
+
+    with pytest.raises(
+        stage_extraction.PendingSystemDeferred,
+        match="refusing to submit a duplicate expansion batch",
+    ):
+        plan_local_extraction(
+            object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+            belt_type="transport-belt", inserter_type="inserter",
+            reuse_existing=False,
+        )
+
+
 def test_owned_refinery_origin_resumes_through_pending_ghosts(monkeypatch) -> None:
     _patch_and_rates(monkeypatch, existing=ResourceMine(
         output=(49.5, -65.5), drill_count=3,

@@ -113,8 +113,11 @@ These names describe intended responsibilities, not permission to build speculat
   ghosts before every construction item is stocked only when every missing
   item has a producer and every solid prerequisite traces back to active raw
   extraction. Collision, ownership, and duplicate-pending checks still run
-  first, and missing items stay queued. A supply-starved refinery triggers
-  mine or transport repair, never an isolated furnace block.
+  first, and missing items stay queued. Submit the non-destructive mine growth
+  once before waiting on refinery-growth ghosts; a later survey defers while
+  those mine ghosts are pending instead of opening a duplicate batch. A
+  supply-starved refinery triggers mine or transport repair, never an isolated
+  furnace block.
 - Construction stock is allocated through an episode-scoped material ledger.
   Every named project records its complete item bill, current reservation,
   source producer, expected rate, and ETA. A compact producer reserves its

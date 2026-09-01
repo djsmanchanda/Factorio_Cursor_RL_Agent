@@ -2720,13 +2720,19 @@ def build_mining_stage(
                 "direct starter follows this pass"
             )
     if cohesive_target is not None:
+        # The mine and smelter deltas were preflighted together above. Submit
+        # the harmless mine growth before waiting on refinery growth ghosts;
+        # otherwise `_extend_plate_smelter` raises its construction wait and
+        # the old provider stays live while the six new drills are never
+        # placed.  Extra ore can safely queue on the old output adapter, while
+        # the destructive End/provider cutover still remains behind growth.
+        _submit_mining_plan(
+            client, bridge, surface, force, extraction, ore_output, emit,
+            allow_unfunded_ghosts=earmark_unfunded,
+        )
         provider = _extend_plate_smelter(
             client, bridge, surface, force, recipe, existing_smelter,
             cohesive_target, ore_output, emit,
-            allow_unfunded_ghosts=earmark_unfunded,
-        )
-        _submit_mining_plan(
-            client, bridge, surface, force, extraction, ore_output, emit,
             allow_unfunded_ghosts=earmark_unfunded,
         )
     else:

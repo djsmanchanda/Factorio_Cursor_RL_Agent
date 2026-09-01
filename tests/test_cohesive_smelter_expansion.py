@@ -47,8 +47,8 @@ def test_mining_expansion_validates_modular_ownership_before_drills() -> None:
     assert build_source.index("_assert_atomic_plate_expansion_affordable(") < (
         build_source.index("_submit_mining_plan(")
     )
-    assert build_source.index("_extend_plate_smelter(") < build_source.index(
-        "_submit_mining_plan("
+    assert build_source.index("_submit_mining_plan(") < build_source.index(
+        "_extend_plate_smelter("
     )
 
 
@@ -402,7 +402,8 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
         builder, "_submit_mining_plan", lambda *_a, **_k: calls.append("mine"),
     )
     monkeypatch.setattr(
-        builder, "_extend_plate_smelter", lambda *_a, **_k: (30.0, 40.0),
+        builder, "_extend_plate_smelter",
+        lambda *_a, **_k: calls.append("extend") or (30.0, 40.0),
     )
 
     output = builder.build_mining_stage(
@@ -411,7 +412,55 @@ def test_mining_expansion_places_landfill_before_its_mine(monkeypatch) -> None:
     )
 
     assert output == (30.0, 40.0)
-    assert calls == ["foundation", "mine", "retire"]
+    assert calls == ["foundation", "mine", "extend", "retire"]
+
+
+def test_mining_expansion_submits_drills_before_refinery_growth_waits(
+    monkeypatch,
+) -> None:
+    """A slow furnace-growth wait must not suppress its paired mine batch."""
+    state = _state("iron-plate", 6)
+    extraction = SimpleNamespace(
+        build_plan={"phases": [{"name": "direct_mine_output", "actions": [{
+            "action_type": "place_ghost", "entity": "electric-mining-drill",
+            "position": {"x": 1.5, "y": 1.5},
+        }]}]},
+        expansion_positions=(), drill_count=6, furnace_count=6,
+        mining_productivity_bonus=0.0, ore_output=(10.0, 20.0),
+        smelter_flow_direction="east", system_drill_count_before=6,
+        system_drill_target=12, ore="iron-ore",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (state, 12))
+    monkeypatch.setattr(builder, "_electric_furnace_producer_started", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "_assert_atomic_plate_expansion_affordable",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(builder, "_place_plate_expansion_foundation", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_submit_mining_plan", lambda *_a, **_k: calls.append("mine"),
+    )
+    monkeypatch.setattr(
+        builder, "_extend_plate_smelter",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            builder.ProductionPrerequisiteDeferred(
+                "growth must finish", code="refinery_growth_construction_wait",
+                state="constructing",
+            )
+        ),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate", (0.0, 0.0),
+            lambda _message: None, expand=True,
+        )
+
+    assert calls == ["mine"]
 
 
 def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:

@@ -784,6 +784,13 @@ def plan_local_extraction(
         )
     existing = observed if reuse_existing else None
     active = extraction_capacity.expandable_mine(mines) if not reuse_existing else None
+    if not reuse_existing:
+        pending = next((mine for mine in mines if mine.pending), None)
+        if pending is not None:
+            raise PendingSystemDeferred(
+                f"The {ore} mine at {pending.output} is still constructing; "
+                "refusing to submit a duplicate expansion batch"
+            )
     survey_mine = active or observed
     survey_near = survey_mine.output if survey_mine is not None else reference_point
     found = surveyed(
