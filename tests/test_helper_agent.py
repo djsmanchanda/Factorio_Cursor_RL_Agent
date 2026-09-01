@@ -115,8 +115,6 @@ def test_run_logger_compacts_exact_retries_and_preserves_counts(tmp_path: Path) 
     logger.emit("RUN START: command=research target=mining-productivity-4")
     for _ in range(10):
         logger.emit("PRIORITY: splitter rating=49/100 completion=0%")
-    for _ in range(12):
-        logger.emit("RUN HEARTBEAT pid=123 ppid=1")
     logger.flush_compaction()
     logger.emit("RUN END")
     logger.close()
@@ -124,11 +122,10 @@ def test_run_logger_compacts_exact_retries_and_preserves_counts(tmp_path: Path) 
     human_lines = (tmp_path / "autonomous-run.log").read_text(
         encoding="utf-8",
     ).splitlines()
-    assert len(human_lines) == 10
+    assert len(human_lines) == 7
     assert any("LOG REPEAT x8: PRIORITY: splitter" in line for line in human_lines)
-    assert any("LOG REPEAT x12: RUN HEARTBEAT" in line for line in human_lines)
     assert any(
-        "LOG COMPACTION: suppressed 15 semantically repeated event(s)"
+        "LOG COMPACTION: suppressed 6 semantically repeated event(s)"
         in line for line in human_lines
     )
 
@@ -139,13 +136,27 @@ def test_run_logger_compacts_exact_retries_and_preserves_counts(tmp_path: Path) 
         ).splitlines()
     ]
     summary = _decision_summary(events)
-    assert summary["event_count"] == 25
-    assert summary["stored_event_count"] == 10
+    assert summary["event_count"] == 13
+    assert summary["stored_event_count"] == 7
     assert summary["priority_counts"] == {"splitter": 10}
     assert summary["repeated_messages"][0] == {
         "count": 10,
         "message": "PRIORITY: splitter rating=49/100 completion=0%",
     }
+
+
+def test_runner_heartbeat_overwrites_a_constant_size_sidecar(tmp_path: Path) -> None:
+    path = tmp_path / "autonomous-run.heartbeat.json"
+
+    autonomous_run._write_runner_heartbeat(path)
+    autonomous_run._write_runner_heartbeat(path)
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    payload = json.loads(lines[0])
+    assert len(lines) == 1
+    assert payload["pid"] == autonomous_run.os.getpid()
+    assert payload["ppid"] == autonomous_run.os.getppid()
+    assert payload["observed_at"]
 
 
 def test_run_logger_limits_recursive_traceback_frames(

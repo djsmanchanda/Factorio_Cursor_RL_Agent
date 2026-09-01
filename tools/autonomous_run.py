@@ -36,7 +36,6 @@ from tools.runner_process import runner_pid_record
 
 
 _TRACEBACK_FRAME_LIMIT = 24
-_HEARTBEAT_SAMPLE_EVERY = 6
 _REPETITION_SUMMARY_LIMIT = 8
 _TRANSIENT_NUMBER = re.compile(
     r"(?<![A-Za-z0-9_.-])-?\d+(?:\.\d+)?(?:%|s|kW|MJ|ticks?)?"
@@ -103,17 +102,11 @@ class _RunLogger:
             self._signature_counts[signature] += 1
             signature_occurrence = self._signature_counts[signature]
             self._signature_latest[signature] = message
-            if message.startswith("RUN HEARTBEAT"):
-                write_message = (
-                    signature_occurrence == 1
-                    or signature_occurrence % _HEARTBEAT_SAMPLE_EVERY == 0
-                )
-            else:
-                # Retries with only counters changing carry the same decision.
-                # Keep exponentially spaced samples with their newest values.
-                write_message = (
-                    signature_occurrence & (signature_occurrence - 1) == 0
-                )
+            # Retries with only counters changing carry the same decision.
+            # Keep exponentially spaced samples with their newest values.
+            write_message = (
+                signature_occurrence & (signature_occurrence - 1) == 0
+            )
             if not write_message:
                 self._suppressed_messages += 1
                 return
@@ -216,6 +209,21 @@ class _RunLogger:
     def close(self) -> None:
         self._file.close()
         self._events.close()
+
+
+def _write_runner_heartbeat(path: Path) -> None:
+    """Overwrite one last-seen record without growing the durable run log."""
+    payload = {
+        "pid": os.getpid(),
+        "ppid": os.getppid(),
+        "observed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def _queue_helper_agent_review(
@@ -597,6 +605,7 @@ def main(argv: list[str] | None = None) -> int:
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
     pid_path = log_path.with_name("autonomous-run.pid")
+    heartbeat_path = log_path.with_name("autonomous-run.heartbeat.json")
     termination_reason = "completed"
     mission_status = "completed"
     mission_state_path: Path | None = None
@@ -608,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def _emit_heartbeat() -> None:
             while not heartbeat_stop.wait(10.0):
-                logger.emit(f"RUN HEARTBEAT pid={os.getpid()} ppid={os.getppid()}")
+                _write_runner_heartbeat(heartbeat_path)
 
         heartbeat_thread = threading.Thread(
             target=_emit_heartbeat, name="runner-heartbeat", daemon=True,
@@ -619,6 +628,7 @@ def main(argv: list[str] | None = None) -> int:
             f"surface={args.surface} force={args.force} "
             f"bootstrap_profile={args.bootstrap_profile} log={log_path}"
         )
+        _write_runner_heartbeat(heartbeat_path)
         heartbeat_thread.start()
         _patch_episode_manifest(
             getattr(args, "episode_manifest", None),
@@ -747,6 +757,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"{type(helper_error).__name__}: {helper_error}"
                     )
             logger.close()
+            heartbeat_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

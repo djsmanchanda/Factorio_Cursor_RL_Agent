@@ -203,6 +203,9 @@ additional matched lines, removes exact duplication between those sections,
 caps any one line at 2,000 characters, and caps excerpt text at 24,000
 characters. The review service falls back deterministically instead of calling
 the model if the complete model-facing prompt exceeds 120,000 characters.
+Runner liveness is stored in one overwritten heartbeat sidecar rather than in
+the append-only evidence stream, so long healthy waits add no heartbeat tokens
+to either the packet or the copied run.
 
 ## Review report
 

@@ -54,8 +54,10 @@ def test_runner_logs_trapped_signal_terminations() -> None:
     assert 'getattr(signal, "SIGHUP", None)' in source
 
 
-def test_runner_emits_liveness_heartbeats() -> None:
+def test_runner_uses_a_constant_size_liveness_sidecar() -> None:
     source = RUNNER.read_text(encoding="utf-8")
-    assert "RUN HEARTBEAT pid=" in source
+    assert "autonomous-run.heartbeat.json" in source
+    assert "_write_runner_heartbeat(heartbeat_path)" in source
     assert "heartbeat_stop.wait(10.0)" in source
+    assert "RUN HEARTBEAT pid=" not in source
     assert "libc.prctl(1, signal.SIGTERM)" in source

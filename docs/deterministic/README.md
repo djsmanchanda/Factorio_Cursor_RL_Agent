@@ -100,9 +100,11 @@ on every line. Helper Agent summaries scope the append-only structured event
 file to the newest completed run, so priorities and zero-placement counts from
 older episodes cannot contaminate the current diagnosis.
 Runner retries whose semantic template is unchanged are emitted at exponentially
-spaced occurrence counts, with heartbeats sampled once per minute and one
-terminal count summary; changing positions and zero/nonzero outcomes remain
-distinct.
+spaced occurrence counts with one terminal count summary; changing positions
+and zero/nonzero outcomes remain distinct. Process liveness does not enter the
+append-only log: the runner overwrites one `autonomous-run.heartbeat.json`
+sidecar every ten seconds, while the PID record remains the dashboard's
+authoritative running-state probe.
 Unhandled tracebacks retain only their final 24 frames. Helper packets remove
 duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
 model calls above a 120,000-character prompt ceiling so recursive failures
