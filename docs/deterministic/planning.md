@@ -147,6 +147,9 @@ These names describe intended responsibilities, not permission to build speculat
   batch services the active loan through measured completion and restoration,
   defers the new batch, and retries it on the next pass; a busy or completed
   prior loan is never classified as an absence of borrowable capacity.
+  Chemical-ladder handoffs use the same boundary: restoring a downstream loan
+  ends the current pass, and the predecessor loan begins only after the next
+  live observation confirms that restoration.
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking

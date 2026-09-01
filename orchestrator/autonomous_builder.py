@@ -4211,11 +4211,17 @@ def _submit_bootstrap_loan(
                 f"before establishing {predecessor}; {step.recipe} is not "
                 "admitted on zero upstream production"
             )
-            _ensure_chemical_ladder_predecessor(
-                client, bridge, surface, force, step.recipe,
-                reference_point or loan.machine_position, emit,
+            # Restoring the borrowed assembler is a live configuration
+            # transition. Re-survey it on the next controller pass before
+            # borrowing the same cell for the predecessor; otherwise the
+            # still-observable old loan recursively services itself.
+            raise ProductionPrerequisiteDeferred(
+                f"chemical ladder handoff restored {step.recipe} before "
+                f"establishing {predecessor}; retrying after re-observation",
+                code="chemical_capability_handoff",
+                state="supply_wait",
+                details={"target": step.recipe, "rung": predecessor},
             )
-            raise AssertionError("missing chemical predecessor did not defer")
     if step is None:
         if (
             loan.target_item == "pipe"

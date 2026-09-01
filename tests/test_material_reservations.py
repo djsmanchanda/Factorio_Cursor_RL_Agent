@@ -871,19 +871,18 @@ def test_started_parent_step_does_not_regress_when_stock_is_consumed(
     assert submitted == []
 
 
-def test_rotating_loan_restores_before_advanced_circuit_without_plastic(
+def test_rotating_loan_restores_and_defers_before_missing_chemical_rung(
     monkeypatch,
 ) -> None:
     loan = builder.MallBootstrapLoan(
-        original_recipe="copper-cable", target_item="requester-chest",
-        target_count=3, side="left", requester_position=(50.5, 32.5),
-        current_recipe="copper-cable",
+        original_recipe="copper-cable", target_item="pumpjack",
+        target_count=1, side="left", requester_position=(50.5, 32.5),
+        current_recipe="pumpjack",
     )
     step = SimpleNamespace(
-        recipe="advanced-circuit", target_count=1, crafts=1,
+        recipe="pumpjack", target_count=1, crafts=1,
     )
     submitted: list[tuple[str, dict]] = []
-    ladder_calls: list[tuple[str, tuple[float, float]]] = []
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}),
     )
@@ -893,34 +892,41 @@ def test_rotating_loan_restores_before_advanced_circuit_without_plastic(
     monkeypatch.setattr(builder, "next_bootstrap_step", lambda *_a: step)
     monkeypatch.setattr(
         builder, "_missing_chemical_ladder_predecessor",
-        lambda *_a: "plastic-bar",
+        lambda *_a: "chemical-plant",
     )
     monkeypatch.setattr(
         builder, "_submit",
         lambda _c, _b, _s, plan, name, _e, **_k: submitted.append((name, plan)),
     )
 
-    def defer_to_ladder(_c, _b, _s, _f, item, reference, _emit):
-        ladder_calls.append((item, reference))
-        raise builder.ProductionPrerequisiteDeferred("plastic first")
+    monkeypatch.setattr(
+        builder, "_ensure_chemical_ladder_predecessor",
+        lambda *_a, **_k: pytest.fail(
+            "the chemical ladder must be re-observed on the next pass"
+        ),
+    )
 
-    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", defer_to_ladder)
-
-    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="plastic first"):
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="retrying after re-observation",
+    ) as deferred:
         builder._submit_bootstrap_loan(
             object(), object(), "nauvis", "player", loan,
             lambda _message: None, reference_point=(3.0, -1.0),
         )
 
     assert [name for name, _plan in submitted] == [
-        "restore_bootstrap_loan_requester-chest",
+        "restore_bootstrap_loan_pumpjack",
     ]
     restored_machine = next(
         action for action in actions(submitted[0][1])
         if action.get("entity") == "assembling-machine-2"
     )
     assert restored_machine["recipe"] == "copper-cable"
-    assert ladder_calls == [("advanced-circuit", (3.0, -1.0))]
+    assert deferred.value.code == "chemical_capability_handoff"
+    assert deferred.value.details == {
+        "target": "pumpjack", "rung": "chemical-plant",
+    }
 
 
 def test_active_loan_polls_once_and_reports_monotonic_progress(monkeypatch) -> None:
