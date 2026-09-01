@@ -104,7 +104,7 @@ def test_existing_starved_stage_repairs_declared_transport(monkeypatch) -> None:
     monkeypatch.setattr(
         live_base, "entity_at",
         lambda _client, _surface, position: (
-            {"name": "steel-chest", "type": "container", "force": "player"}
+            {"name": "requester-chest", "type": "container", "force": "player"}
             if position == feeds["iron-plate"] else None
         ),
     )
@@ -134,7 +134,7 @@ def test_existing_starved_stage_waits_for_missing_upstream(monkeypatch) -> None:
     machines = [(-25.5, -22.5), (-22.5, -22.5)]
     monkeypatch.setattr(
         live_base, "entity_at",
-        lambda *_args: {"name": "steel-chest", "type": "container", "force": "player"},
+        lambda *_args: {"name": "requester-chest", "type": "container", "force": "player"},
     )
     monkeypatch.setattr(
         "orchestrator.stage_recovery.ensure_ingredient_transport",

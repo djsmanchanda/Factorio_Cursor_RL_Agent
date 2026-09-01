@@ -3959,11 +3959,12 @@ UNBACKED_DRAWS: set[str] = set()
 # the reserve is a bootstrap input rather than the only supply behind the mall.
 # Steel is a small logistic-fed furnace line because an unset furnace recipe
 # cannot be rediscovered by ``find_line`` later.
-# Advanced-circuit and steel-chest sit on the electric-furnace unlock chain
-# (GATE WORK): drawing them from starter stock without a producer held that
-# gate at 83% for twelve passes (live run 15).
+# Advanced circuits sit on the electric-furnace unlock chain (GATE WORK):
+# drawing them from starter stock without a producer held that gate at 83% for
+# twelve passes (live run 15). Steel chests are deliberately excluded: they
+# are a low-volume mall capability seed, not a sustained intermediate line.
 PERSISTENT_INTERMEDIATES = frozenset({
-    "iron-stick", "steel-plate", "advanced-circuit", "steel-chest",
+    "iron-stick", "steel-plate", "advanced-circuit",
 })
 MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
 
@@ -3978,6 +3979,7 @@ _CORE_MALL_PREREQUISITE_ORDER = ("steel-chest", "advanced-circuit")
 _CORE_MALL_RECIPE_ITEMS = frozenset({
     "passive-provider-chest", "requester-chest",
 })
+_CORE_MALL_TEMPORARY_PREREQUISITES = frozenset({"steel-chest"})
 
 # The direct iron/copper stacks are deliberately temporary. Their tiny mall
 # ceilings protect the first plates from being converted into construction
@@ -5413,6 +5415,15 @@ def ensure_produced(
     if item not in LINE_RECIPES:
         raise StuckError(f"No recipe knowledge for {item!r} -- add it to planners/recipe_data.py "
                           "before asking the builder to produce it")
+    if item == "steel-chest" and upgrade_bootstrap:
+        # Steel chests only seed the logistic-chest capability before the core
+        # mall exists. A generic conversion line defaults to two assemblers
+        # and rate-sizes five requester feeders for this recipe, which is
+        # wasteful for a one-chest seed and can never be a mall expansion
+        # decision. Route early requests through the compact/loan path; once
+        # the core mall is ready it may allocate a normal permanent cell.
+        upgrade_bootstrap = False
+        temporary_mall = True
     if not upgrade_bootstrap:
         temporary_precore = _is_pre_core_temporary_mall_item(
             client, surface, force, item,
@@ -6894,13 +6905,29 @@ def _core_mall_prerequisites(
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return ()
-    ingredients = set(str(ingredient) for ingredient in spec.get("ingredients", ()))
-    return tuple(
-        prerequisite
-        for prerequisite in _CORE_MALL_PREREQUISITE_ORDER
-        if prerequisite in ingredients
-        and not _production_started(client, surface, force, prerequisite)
-    )
+    ingredient_amounts = {
+        str(ingredient): int(amount)
+        for ingredient, amount in zip(
+            spec.get("ingredients", ()), spec.get("amounts", ()), strict=True,
+        )
+    }
+    stock: dict[str, int] | None = None
+    prerequisites: list[str] = []
+    for prerequisite in _CORE_MALL_PREREQUISITE_ORDER:
+        if prerequisite not in ingredient_amounts:
+            continue
+        if _production_started(client, surface, force, prerequisite):
+            continue
+        if prerequisite in _CORE_MALL_TEMPORARY_PREREQUISITES:
+            # Query inventory only when the temporary-batch exception is
+            # relevant. Advanced-circuit-only callers should stay a pure
+            # producer-state check and avoid an unnecessary RCON round trip.
+            if stock is None:
+                stock = live_base.available_items(client, surface, force)
+            if stock.get(prerequisite, 0) >= ingredient_amounts[prerequisite]:
+                continue
+        prerequisites.append(prerequisite)
+    return tuple(prerequisites)
 
 
 def _prepare_core_mall_prerequisite(
@@ -6912,8 +6939,8 @@ def _prepare_core_mall_prerequisite(
 
     ``True`` means a stage or wait consumed this pass; ``False`` hands a
     material shortage to the mall in the same pass; ``None`` means the core
-    recipe is admitted.  Persistent prerequisite goods use their dedicated
-    conversion path, so they do not consume another pre-logistics mall slot.
+    recipe is admitted. Steel chests are a finite borrowed-mall batch; the
+    advanced-circuit prerequisite remains a dedicated capability line.
     """
     prerequisites = _core_mall_prerequisites(client, surface, force, item)
     if not prerequisites:
@@ -6924,13 +6951,17 @@ def _prepare_core_mall_prerequisite(
         "establishing the prerequisite before admitting its recipe"
     )
     try:
-        # These are persistent intermediates, not finite mall stock.  The
-        # dedicated path also avoids the ten-slot bootstrap cap; advanced
-        # circuits then enforce their own oil/plastic ladder before a machine
-        # can be configured.
+        # Steel chests must stay inside the temporary mall until it is
+        # self-sustaining. In particular, never upgrade this one-chest seed
+        # into the generic conversion layout: that layout rate-sizes several
+        # requester feeders for two assemblers. Advanced circuits retain the
+        # dedicated path so their oil/plastic prerequisite ladder is enforced.
         ensure_produced(
             client, bridge, surface, force, prerequisite, reference_point,
-            emit, upgrade_bootstrap=True, stock_target=1,
+            emit,
+            upgrade_bootstrap=prerequisite not in _CORE_MALL_TEMPORARY_PREREQUISITES,
+            temporary_mall=prerequisite in _CORE_MALL_TEMPORARY_PREREQUISITES,
+            stock_target=1,
             minimum_machines=1, allow_promotion=False,
         )
     except MaterialShortage as shortage:

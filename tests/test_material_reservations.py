@@ -767,6 +767,7 @@ def test_logistic_chest_core_waits_for_steel_chest_before_admission(
         builder, "_production_started",
         lambda _c, _s, _f, item: item in started,
     )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_args: {})
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(
         builder,
@@ -788,12 +789,57 @@ def test_logistic_chest_core_waits_for_steel_chest_before_admission(
     assert calls == [(
         "steel-chest",
         {
-            "upgrade_bootstrap": True,
+            "upgrade_bootstrap": False,
+            "temporary_mall": True,
             "stock_target": 1,
             "minimum_machines": 1,
             "allow_promotion": False,
         },
     )]
+
+
+def test_steel_chest_upgrade_is_routed_to_the_temporary_mall(monkeypatch) -> None:
+    """One chest seed must never open the generic two-assembler conversion line."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-plate"],
+        "amounts": [8], "product_amount": 1, "craft_time": 0.5,
+    })
+    calls: list[tuple[str, int, bool]] = []
+
+    def rationed(*args, **kwargs):
+        calls.append((args[4], args[5], kwargs["force_temporary"]))
+        return True
+
+    monkeypatch.setattr(builder, "_rationed_mall_batch", rationed)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder.ensure_produced(
+            object(), object(), "nauvis", "player", "steel-chest",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert calls == [("steel-chest", 1, True)]
+    assert "steel-chest" not in builder.PERSISTENT_INTERMEDIATES
+
+
+def test_core_chest_accepts_a_stocked_temporary_steel_seed(monkeypatch) -> None:
+    """A completed loan may restore before its one chest seeds core promotion."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["advanced-circuit", "steel-chest"],
+        "amounts": [1, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item == "advanced-circuit",
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_args: {"steel-chest": 1},
+    )
+
+    assert builder._core_mall_prerequisites(
+        object(), "nauvis", "player", "passive-provider-chest",
+    ) == ()
 
 
 def test_logistic_chest_core_waits_for_advanced_circuit_ladder(

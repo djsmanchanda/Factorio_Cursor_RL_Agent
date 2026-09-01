@@ -67,7 +67,12 @@ def repair_existing_ingredient_transport(
     feeds, modes = _existing_stage_feed_positions(recipe, machine_positions)
     for ingredient, position in sorted(feeds.items()):
         entity = live_base.entity_at(client, surface, position)
-        expected = "requester-chest" if modes[ingredient] == "logistic" else "steel-chest"
+        # Every normal line feeder is converted from the sandbox's
+        # ``infinity-chest`` into a requester, even when its steady-state
+        # transport mode is a belt. Recovery must validate that real build
+        # contract rather than the intended transport mode; expecting a plain
+        # steel chest here rejected the exact requester layout it had built.
+        expected = "requester-chest"
         if entity is None or entity["name"] != expected:
             found = "nothing" if entity is None else entity["name"]
             raise StuckError(

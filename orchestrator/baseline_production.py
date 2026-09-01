@@ -112,6 +112,10 @@ RATIONED_MALL_BATCH_ITEMS = frozenset({
     "storage-chest",
     "active-provider-chest",
     "buffer-chest",
+    # Steel chests are a small bootstrap capability batch. Before the core
+    # mall is self-sustaining, borrow an existing mall cell rather than open a
+    # two-assembler, belt-fed conversion line for one chest seed.
+    "steel-chest",
     "pipe",
     "pipe-to-ground",
     "lab",

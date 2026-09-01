@@ -236,11 +236,11 @@ def test_gate_demand_exceeds_idle_furnace_stock(monkeypatch) -> None:
 
 
 def test_electric_furnace_chain_intermediates_are_persistent(monkeypatch) -> None:
-    """Run 15: advanced-circuit and steel-chest were drawn unbacked while the
-    electric-furnace gate waited on them -- the gate can never lift unless
-    drawing them schedules their producers."""
-    for item in ("advanced-circuit", "steel-chest", "steel-plate"):
+    """Advanced circuits and steel plates need durable sources; steel chests
+    are instead a temporary mall capability batch."""
+    for item in ("advanced-circuit", "steel-plate"):
         assert item in builder.PERSISTENT_INTERMEDIATES
+    assert "steel-chest" not in builder.PERSISTENT_INTERMEDIATES
 
 
 def test_gate_task_itself_is_served_not_repromoted() -> None:
