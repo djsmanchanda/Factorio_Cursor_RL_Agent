@@ -166,7 +166,9 @@ These names describe intended responsibilities, not permission to build speculat
   the ten-assembler bootstrap pool. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
   The pre-logistics pool is a hard global ceiling of ten compact assemblers:
-  core-mall requests may not bypass it.  Once a circuit request exceeds the
+  core-mall requests may not bypass it; when the pool is full, core promotion
+  reclaims an existing non-anchor temporary slot and converts it in place
+  rather than waiting for an eleventh slot.  Once a circuit request exceeds the
   capacity of two circuit cells (by live rate or queued work beyond their
   patience window), it is not assigned a third mall half.  The controller
   builds the first dedicated block instead: six electronic-circuit assemblers

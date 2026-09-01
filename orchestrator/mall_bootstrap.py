@@ -422,6 +422,7 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
 
 def promote_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, stock_target: int,
+    clear_original_groups: bool = False,
 ) -> dict:
     """Keep a completed borrowed cell as the permanent target producer.
 
@@ -440,6 +441,18 @@ def promote_bootstrap_loan_plan(
         loan.target_item, loan.provider_position, stock_target,
         fill_chest=True,
     )["phases"][0]["actions"][0]
+    clear_groups = [loan.group]
+    if clear_original_groups:
+        # A core promotion may be entered from a legacy/no-step loan whose
+        # unique tag is not the only request group still on the shared chest.
+        # Remove this borrower's base and side-labelled groups as well, while
+        # leaving a paired companion's side group untouched.
+        for group in (
+            recipe_group_name(loan.original_recipe),
+            recipe_group_name(loan.original_recipe, loan.side),
+        ):
+            if group not in clear_groups:
+                clear_groups.append(group)
     return {"phases": [{
         "name": f"promote_bootstrap_loan_{loan.target_item}",
         "actions": [
@@ -450,7 +463,7 @@ def promote_bootstrap_loan_plan(
                     "x": loan.requester_position[0],
                     "y": loan.requester_position[1],
                 },
-                "clear_logistic_groups": [loan.group],
+                "clear_logistic_groups": clear_groups,
                 "logistic_sections": [requester_section],
             },
             {

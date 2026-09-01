@@ -713,6 +713,89 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     assert any("10-assembler pool" in message for message in messages)
 
 
+def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
+    monkeypatch,
+) -> None:
+    """A stocked core seed must not make the ten-slot cap a circular wait."""
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "mall_slot_count",
+        lambda *_a: builder.BOOTSTRAP_MALL_SLOT_TARGET,
+    )
+    calls: list[tuple[str, int, dict]] = []
+    monkeypatch.setattr(
+        builder,
+        "_rationed_mall_batch",
+        lambda *args, **kwargs: calls.append((args[4], args[5], kwargs)) or True,
+    )
+    monkeypatch.setattr(
+        builder,
+        "ensure_produced",
+        lambda *_a, **_kwargs: pytest.fail(
+            "a full bootstrap pool must reclaim a temporary cell first"
+        ),
+    )
+
+    assert builder._prep_core_mall(
+        object(), object(), "nauvis", "player", set(), {},
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert calls == [(
+        "assembling-machine-2", 1, {"force_temporary": True},
+    )]
+
+
+def test_completed_core_loan_is_promoted_in_place_even_when_seed_is_stocked(
+    monkeypatch,
+) -> None:
+    """Core conversion must finish instead of restoring into the same cap."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 0.5,
+        "set_recipe": True,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="assembling-machine-2",
+        target_count=1, side="left", requester_position=(39.5, 32.5),
+        current_recipe="iron-gear-wheel",
+    )
+    stock = {"assembling-machine-2": 1}
+    submitted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock))
+    monkeypatch.setattr(
+        builder,
+        "_submit",
+        lambda _c, _b, _s, plan, name, _e: submitted.append((name, plan)),
+    )
+    shared = {"assembling-machine-2"}
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", shared)
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    assert result == (
+        "converted borrowed iron-gear-wheel producer into the permanent "
+        "assembling-machine-2 mall"
+    )
+    assert [name for name, _plan in submitted] == [
+        "promote_bootstrap_loan_assembling-machine-2",
+    ]
+    actions = submitted[0][1]["phases"][0]["actions"]
+    requester = next(
+        action for action in actions if action["entity"] == "requester-chest"
+    )
+    machine = next(
+        action for action in actions if action["entity"] == "assembling-machine-2"
+    )
+    assert requester["clear_logistic_groups"] == [
+        loan.group, "mall:iron-gear-wheel", "mall:iron-gear-wheel:left",
+    ]
+    assert machine["logistic_condition"]["constant"] == 2
+    assert shared == set()
+
+
 def test_bootstrap_shared_output_retrofit_queues_its_exact_bill(monkeypatch) -> None:
     plan = {"phases": [{"actions": [
         {"action_type": "place_entity", "entity": "passive-provider-chest"},

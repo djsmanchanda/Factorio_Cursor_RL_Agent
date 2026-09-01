@@ -4398,6 +4398,41 @@ def _submit_bootstrap_loan(
                 details={"target": step.recipe, "rung": predecessor},
             )
     if step is None:
+        if loan.target_item in CORE_MALL_PRODUCERS:
+            # A core producer is allowed to reclaim a completed temporary
+            # batch.  This is the only way to finish the self-sustaining mall
+            # when the ten-slot pre-logistics pool is already full: restoring
+            # the borrowed cell would return us to the same cap forever.
+            # Raise the gate one item above observed stock so a recipe that
+            # already has a starter still performs one real craft and becomes
+            # visible to _production_started on the next observation.
+            promotion_target = max(
+                1,
+                loan.production_target,
+                int(actual.get(loan.target_item, 0)) + 1,
+            )
+            plan = promote_bootstrap_loan_plan(
+                loan,
+                stock_target=promotion_target,
+                clear_original_groups=True,
+            )
+            plan["surface"], plan["force"] = surface, force
+            _submit(
+                client, bridge, surface, plan,
+                f"promote_bootstrap_loan_{loan.target_item}", emit,
+            )
+            _MALL_REFRESH_SIGNATURES.clear()
+            _BOOTSTRAP_SHARED_PROVIDER_ITEMS.discard(loan.target_item)
+            emit(
+                f"  CORE MALL PERMANENT: converted the borrowed "
+                f"{loan.original_recipe} demand slot at {loan.machine_position} "
+                f"into {loan.target_item}; reused its existing assembler "
+                "without funding another compact cell"
+            )
+            return (
+                f"converted borrowed {loan.original_recipe} producer into the "
+                f"permanent {loan.target_item} mall"
+            )
         if (
             loan.target_item == "pipe"
             and loan.original_recipe in _PIPE_PERMANENT_DONORS
@@ -6904,6 +6939,20 @@ def _prep_core_mall(
             emit(f"  CORE MALL READY: {item} has independent production")
             return True
         emit(f"--- core mall promotion: permanent {item} producer ---")
+        # Core promotion is the one pre-logistics demand that must be able to
+        # reclaim capacity from the hard ten-slot pool.  A stocked seed item
+        # would otherwise make _rationed_mall_batch return early, after which
+        # _build_assembled_stage sees 10/10 and defers forever.  Force the
+        # rotating-batch path so it can borrow an existing non-anchor cell;
+        # completion promotes that same cell in _submit_bootstrap_loan.
+        if mall_slot_count(
+            client, surface, reference_point,
+        ) >= BOOTSTRAP_MALL_SLOT_TARGET:
+            if _rationed_mall_batch(
+                client, bridge, surface, force, item, 1,
+                reference_point, emit, force_temporary=True,
+            ):
+                return True
         try:
             ensure_produced(
                 client, bridge, surface, force, item, reference_point, emit,
