@@ -160,7 +160,11 @@ These names describe intended responsibilities, not permission to build speculat
   the ten-assembler bootstrap pool. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
   Monotonic loan craft progress counts as controller progress even when bots
-  consume each output before it can accumulate in provider stock.
+  consume each output before it can accumulate in provider stock. The loan tag
+  persists the absolute stock target of every completed prerequisite step, so
+  a consumed gear/circuit/belt batch advances toward the parent recipe instead
+  of being manufactured again. Once a parent step starts, incidental stock
+  churn cannot push the rotating assembler backward into a completed child.
   Pipe has an additional lifecycle boundary. While any iron, copper, or stone
   pioneer remains, pipe is a finite rotating batch and the borrowed slot is
   restored. Only after all three district ledgers reach `released` may pipe

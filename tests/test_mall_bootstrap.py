@@ -110,7 +110,7 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         action for action in actions if action["entity"] == "assembling-machine-2"
     ))
     assert requester["logistic_sections"][0]["group"].startswith(
-        "mall-bootstrap:v3:"
+        "mall-bootstrap:v4:"
     )
     provider = next(
         action for action in actions
@@ -220,3 +220,19 @@ def test_active_v3_loan_recovers_required_and_spare_thresholds() -> None:
     assert loan.production_target == 50
     assert loan.step_required_crafts == 50
     assert loan.step_minimum_crafts == 3
+
+
+def test_active_v4_loan_recovers_step_target_and_completed_prerequisites() -> None:
+    class Client:
+        def command(self, _command: str) -> str:
+            return (
+                "mall-bootstrap:v4:electronic-circuit:electric-mining-drill:"
+                "6:8:right:electronic-circuit:18:349:18:18:"
+                "iron-gear-wheel=25|50.5|32.5|splitter|electronic-circuit"
+            )
+
+    loan = active_bootstrap_loans(Client(), "nauvis", "player")[0]
+
+    assert loan.step_target_count == 18
+    assert loan.step_baseline_finished == 349
+    assert loan.completed_step_targets == (("iron-gear-wheel", 25),)

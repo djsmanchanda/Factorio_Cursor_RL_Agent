@@ -765,6 +765,112 @@ def test_consumed_loan_output_is_fulfilled_by_monotonic_craft_count(
     assert any("LOAN FULFILLED" in message for message in messages)
 
 
+def test_consumed_prerequisite_advances_and_persists_its_credit(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-gear-wheel", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="electronic-circuit", target_item="electric-mining-drill",
+        target_count=6, spare_target_count=8, side="right",
+        requester_position=(50.5, 32.5), current_recipe="iron-gear-wheel",
+        step_recipe="iron-gear-wheel", step_baseline_finished=324,
+        step_required_crafts=25, step_minimum_crafts=25,
+    )
+    stock = {
+        "electric-mining-drill": 1, "electronic-circuit": 15,
+        "iron-gear-wheel": 0, "iron-plate": 100,
+    }
+    submitted: list[dict] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 356,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan, messages.append,
+    )
+
+    assert "temporary electric-mining-drill" in result
+    actions = submitted[0]["phases"][0]["actions"]
+    machine = next(
+        action for action in actions
+        if action["entity"] == "assembling-machine-2"
+    )
+    requester = next(
+        action for action in actions if action["entity"] == "requester-chest"
+    )
+    assert machine["recipe"] == "electric-mining-drill"
+    assert "iron-gear-wheel=25" in requester["logistic_sections"][0]["group"]
+    assert loan.group in requester["clear_logistic_groups"]
+    assert any("PREREQUISITE FULFILLED" in message for message in messages)
+
+
+def test_started_parent_step_does_not_regress_when_stock_is_consumed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-gear-wheel", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="electronic-circuit", target_item="electric-mining-drill",
+        target_count=6, spare_target_count=8, side="right",
+        requester_position=(50.5, 32.5), current_recipe="electric-mining-drill",
+        step_recipe="electric-mining-drill", step_target_count=6,
+        step_baseline_finished=356, step_required_crafts=5,
+        step_minimum_crafts=5,
+        completed_step_targets=(("iron-gear-wheel", 25),),
+    )
+    stock = {
+        "electric-mining-drill": 0, "electronic-circuit": 15,
+        "iron-gear-wheel": 0, "iron-plate": 100,
+    }
+    counters = iter((356, 356))
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: next(counters),
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    result = builder._submit_bootstrap_loan(
+        object(), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    assert "temporary electric-mining-drill" in result
+    assert submitted == []
+
+
 def test_rotating_loan_restores_before_advanced_circuit_without_plastic(
     monkeypatch,
 ) -> None:
@@ -1046,7 +1152,7 @@ def test_completed_bill_enters_durable_spare_phase(monkeypatch) -> None:
         action for action in actions if action["entity"] == "requester-chest"
     )
     group = requester["logistic_sections"][0]["group"]
-    assert group.endswith(":splitter:43:50:0")
+    assert ":splitter:50:43:50:0:" in group
 
 
 def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:

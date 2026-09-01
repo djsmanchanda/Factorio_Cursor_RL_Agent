@@ -59,7 +59,7 @@ from orchestrator.mall_builder import (
     rebuild_incomplete_mall_cell,
 )
 from orchestrator.mall_bootstrap import (
-    MallBootstrapLoan,
+    MallBootstrapLoan, MallBootstrapStep,
     active_bootstrap_loans,
     bootstrap_loan_plan,
     next_bootstrap_step,
@@ -4033,6 +4033,49 @@ def _bootstrap_loan_minimum_fulfilled(
     )
 
 
+def _bootstrap_loan_credited_stock(
+    loan: MallBootstrapLoan, actual: Mapping[str, int], usable: Mapping[str, int],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Apply durable prerequisite credits without inventing final products."""
+    credited_actual = dict(actual)
+    credited_usable = dict(usable)
+    for recipe, target_count in loan.completed_step_targets:
+        if recipe == loan.target_item:
+            continue
+        credited_actual[recipe] = max(
+            int(credited_actual.get(recipe, 0)), target_count,
+        )
+        credited_usable[recipe] = max(
+            int(credited_usable.get(recipe, 0)), target_count,
+        )
+    return credited_actual, credited_usable
+
+
+def _bootstrap_loan_persisted_step(
+    loan: MallBootstrapLoan, actual: Mapping[str, int],
+) -> MallBootstrapStep | None:
+    """Keep an unfinished configured step stable across stock churn."""
+    if (
+        loan.step_recipe is None
+        or loan.step_required_crafts is None
+    ):
+        return None
+    product_amount = max(
+        1, math.floor(float(
+            LINE_RECIPES.get(loan.step_recipe, {}).get("product_amount", 1)
+        )),
+    )
+    target_count = loan.step_target_count
+    if target_count is None:
+        target_count = (
+            int(actual.get(loan.step_recipe, 0))
+            + loan.step_required_crafts * product_amount
+        )
+    return MallBootstrapStep(
+        loan.step_recipe, target_count, loan.step_required_crafts,
+    )
+
+
 def _restore_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *, reason: str,
@@ -4057,6 +4100,7 @@ def _submit_bootstrap_loan(
     preempt_for: str | None = None, reference_point: Point | None = None,
 ) -> str:
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION
+    live_loan_group = loan.group
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
     )
@@ -4067,12 +4111,44 @@ def _submit_bootstrap_loan(
     minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
         loan, actual, products_finished,
     )
+    completed_prerequisite = bool(
+        loan.step_recipe is not None
+        and loan.step_recipe != loan.target_item
+        and loan.step_baseline_finished is not None
+        and loan.step_required_crafts is not None
+        and products_finished is not None
+        and products_finished - loan.step_baseline_finished
+        >= loan.step_required_crafts
+    )
+    if completed_prerequisite:
+        persisted = _bootstrap_loan_persisted_step(loan, actual)
+        assert persisted is not None
+        loan = loan.credit_completed_step(
+            persisted.recipe, persisted.target_count,
+        )
+        emit(
+            f"  MALL BOOTSTRAP PREREQUISITE FULFILLED: {persisted.recipe} "
+            f"produced {products_finished - loan.step_baseline_finished} "
+            "craft(s); advancing the durable loan even though logistics may "
+            "already have consumed them"
+        )
+    planning_actual, planning_usable = _bootstrap_loan_credited_stock(
+        loan, actual, usable,
+    )
     planning_target = (
         loan.production_target if minimum_fulfilled else loan.target_count
     )
     step = next_bootstrap_step(
-        loan.target_item, planning_target, usable, actual,
+        loan.target_item, planning_target, planning_usable, planning_actual,
     )
+    if not completed_prerequisite and loan.step_recipe is not None:
+        persisted = _bootstrap_loan_persisted_step(loan, actual)
+        if (
+            persisted is not None
+            and step is not None
+            and step.recipe != loan.step_recipe
+        ):
+            step = persisted
     if step is not None and products_finished is None:
         products_finished = _bootstrap_loan_products_finished(
             client, surface, loan,
@@ -4183,6 +4259,7 @@ def _submit_bootstrap_loan(
         or loan.step_baseline_finished is None
         or loan.step_required_crafts is None
         or starting_spare_phase
+        or completed_prerequisite
     ):
         if products_finished is None:
             raise StuckError(
@@ -4200,6 +4277,9 @@ def _submit_bootstrap_loan(
             minimum_crafts=(
                 0 if minimum_fulfilled
                 else _bootstrap_loan_minimum_crafts(loan, step, actual)
+            ),
+            previous_group=(
+                live_loan_group if live_loan_group != loan.group else None
             ),
         )
         plan["surface"], plan["force"] = surface, force
