@@ -4579,6 +4579,7 @@ def _submit_bootstrap_loan(
             f"bootstrap_loan_{loan.target_item}", emit,
         )
         _MALL_REFRESH_SIGNATURES.clear()
+        _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
         emit(
             f"  MALL BOOTSTRAP LOAN: borrowed {loan.original_recipe} at "
             f"{loan.machine_position} to make {step.recipe} through stock "
@@ -7981,6 +7982,10 @@ def run(
             relevant_mission_items = set(mission_items or (goal_item,))
             relevant_mission_items.update(mall_targets)
             relevant_mission_items.update(background_targets)
+            for active_loan in active_bootstrap_loans(client, surface, force):
+                relevant_mission_items.add(active_loan.target_item)
+                if active_loan.step_recipe:
+                    relevant_mission_items.add(active_loan.step_recipe)
             items_now = sum(
                 int(target_stock_now.get(item, 0))
                 for item in relevant_mission_items

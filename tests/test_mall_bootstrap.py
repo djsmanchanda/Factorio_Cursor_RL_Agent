@@ -278,3 +278,20 @@ def test_active_v4_loan_recovers_step_target_and_completed_prerequisites() -> No
     assert loan.step_target_count == 18
     assert loan.step_baseline_finished == 349
     assert loan.completed_step_targets == (("iron-gear-wheel", 25),)
+
+
+def test_active_loan_recovers_when_opposite_side_machine_is_missing() -> None:
+    class Client:
+        def command(self, _command: str) -> str:
+            return (
+                "mall-bootstrap:v4:copper-cable:splitter:3:3:left:electronic-circuit:18:111:2:2:-|"
+                "39.5|38.5|assembling-machine-1,electronic-circuit|-"
+            )
+
+    loans = active_bootstrap_loans(Client(), "nauvis", "player")
+    assert len(loans) == 1
+    loan = loans[0]
+    assert loan.current_recipe == "electronic-circuit"
+    assert loan.machine_name == "assembling-machine-1"
+    assert loan.step_recipe == "electronic-circuit"
+

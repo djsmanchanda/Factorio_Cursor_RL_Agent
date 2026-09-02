@@ -354,12 +354,13 @@ def active_bootstrap_loans(
         if not record:
             continue
         group, raw_x, raw_y, left_state, right_state = record.split("|", 4)
-        if "," in left_state and "," in right_state:
-            left_machine, left_recipe = left_state.split(",", 1)
-            right_machine, right_recipe = right_state.split(",", 1)
-        else:  # v1-v4 recovery output from a pre-tier-one deployment.
-            left_machine = right_machine = "assembling-machine-1"
-            left_recipe, right_recipe = left_state, right_state
+        def _parse_side_state(state: str) -> tuple[str, str]:
+            if "," in state:
+                return state.split(",", 1)
+            return "assembling-machine-1", state
+
+        left_machine, left_recipe = _parse_side_state(left_state)
+        right_machine, right_recipe = _parse_side_state(right_state)
         parsed = parse_bootstrap_loan_group(group)
         if parsed is None:
             continue
