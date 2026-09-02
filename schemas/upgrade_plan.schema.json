@@ -26,6 +26,7 @@
           },
           "from_name": { "type": "string" },
           "to_name": { "type": "string" },
+          "recipe": { "type": "string" },
           "module_to": { "type": "string" },
           "module_count": { "type": "integer", "minimum": 1 },
           "block": { "type": "string" }

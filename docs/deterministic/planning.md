@@ -18,6 +18,13 @@ These names describe intended responsibilities, not permission to build speculat
 - Route around established infrastructure. A blocked endpoint should trigger another candidate or a safe failure.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
+- Change the tier of an owned machine through Factorio's native upgrade order,
+  never an overlapping ghost or a destroy-and-rebuild pair. Scope every order
+  to the explicit surface and force, require the expected source prototype at
+  the exact position, and preserve the active recipe as an ownership guard.
+  Construction bots perform the replacement and recover the old machine. A
+  downgrade is legal only when the replacement prototype supports the active
+  recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
 - Base capacity on rates and live game facts, not machine counts alone.

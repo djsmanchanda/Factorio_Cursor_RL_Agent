@@ -201,9 +201,24 @@ class GameBridge:
             command += " " + force
         return self._run_and_collect(command, RECIPE_CATALOG_SUBDIR, timeout)
 
-    def execute_upgrade_plan(self, authorization: dict, upgrade_plan: dict, timeout: float = 120.0) -> Path:
-        payload = json.dumps({"authorization": authorization, "upgrade_plan": upgrade_plan}, separators=(",", ":"))
-        return self._run_and_collect(f"/execute_upgrade_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
+    def execute_upgrade_plan(
+        self, authorization: dict, upgrade_plan: dict, *,
+        surface: str, force: str, timeout: float = 120.0,
+    ) -> Path:
+        """Order upgrades on one explicit existing surface and force."""
+        if not isinstance(surface, str) or not surface:
+            raise ValueError("surface must be a non-empty string")
+        if not isinstance(force, str) or not force:
+            raise ValueError("force must be a non-empty string")
+        payload = json.dumps({
+            "authorization": authorization,
+            "upgrade_plan": upgrade_plan,
+            "surface": surface,
+            "force": force,
+        }, separators=(",", ":"))
+        return self._run_and_collect(
+            f"/execute_upgrade_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout,
+        )
 
     def execute_deconstruction(
         self, authorization: dict, deconstruction_plan: dict, *,

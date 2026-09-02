@@ -125,7 +125,7 @@ def _cheapest_fitting(recipe: str) -> str:
 def machines_to_upgrade(
     existing: Mapping[str, int], capability: BaseCapability,
 ) -> dict[str, int]:
-    """How many tier-1 machines to rebuild as tier 2, per recipe.
+    """How many tier-1 machines to promote to tier 2, per recipe.
 
     Only once the base MAKES tier 2, and only out of spare stock above
     UPGRADE_RESERVE -- a rebuild is housekeeping, and housekeeping must not
@@ -133,8 +133,8 @@ def machines_to_upgrade(
     """
     if not capability.produces_tier2:
         return {}
-    # Stock of the machine being INSTALLED. The tier-1 machines come back out
-    # of the ground as the rebuild proceeds, so they are not the constraint.
+    # Stock of the machine being installed. Construction bots recover each
+    # tier-1 machine after its native upgrade, so it is not the constraint.
     spare = max(0, capability.held(TIERS[1]) - UPGRADE_RESERVE)
     if spare <= 0:
         return {}
@@ -156,10 +156,11 @@ def machines_to_upgrade(
 
 
 def upgrade_plan(positions: Mapping[str, list], target: str = TIERS[1]) -> dict:
-    """Rebuild the given tier-1 machines as `target`, in place.
+    """Order bot-driven in-place promotion of exact tier-1 machines.
 
-    Remove then place, unlike the pole nudge: the machine occupies the tile its
-    replacement needs, so there is no order that avoids the gap.
+    Factorio's native upgrade path preserves the configured machine while
+    replacing its tier. The expected recipe remains in the action as an
+    ownership guard: a repurposed cell must never be upgraded by stale intent.
     """
     if not positions:
         raise ValueError("An assembler upgrade plan needs at least one machine")
@@ -167,12 +168,9 @@ def upgrade_plan(positions: Mapping[str, list], target: str = TIERS[1]) -> dict:
     for recipe, machine_positions in sorted(positions.items()):
         for position in machine_positions:
             actions.append({
-                "action_type": "remove_entity", "entity": TIERS[0],
-                "position": {"x": position[0], "y": position[1]},
-            })
-            actions.append({
-                "action_type": "place_entity", "entity": target,
-                "position": {"x": position[0], "y": position[1]},
+                "action": "assembler_tier_upgrade",
+                "from_name": TIERS[0], "to_name": target,
                 "recipe": recipe,
+                "position": {"x": position[0], "y": position[1]},
             })
-    return {"phases": [{"name": "upgrade_assemblers", "actions": actions}]}
+    return {"actions": actions}

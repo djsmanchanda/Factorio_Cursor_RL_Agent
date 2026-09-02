@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft7Validator
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 from planners import recipe_data  # noqa: E402
@@ -20,7 +22,6 @@ from planners.assembler_tiers import (  # noqa: E402
     tier3_is_worth_it,
     upgrade_plan,
 )
-from planners.plan_validation import validate_build_plan  # noqa: E402
 from planners.recipe_data import LINE_RECIPES, install_catalog_machines  # noqa: E402
 
 _AM1, _AM2, _AM3 = TIERS
@@ -164,19 +165,21 @@ def test_spare_machines_are_shared_across_lines_not_double_spent() -> None:
     assert sum(plan.values()) == 4
 
 
-def test_the_upgrade_plan_rebuilds_in_place_with_the_recipe_reapplied() -> None:
-    """A machine occupies the tile its replacement needs, so remove precedes
-    place -- and the new machine must be told its recipe."""
+def test_the_upgrade_plan_orders_native_replacement_with_a_recipe_guard() -> None:
     plan = upgrade_plan({"iron-gear-wheel": [(4.5, 2.5)]})
-    plan["surface"], plan["force"] = "nauvis", "player"
+    schema = json.loads(
+        (Path(__file__).resolve().parents[1] / "schemas" / "upgrade_plan.schema.json")
+        .read_text(encoding="utf-8")
+    )
 
-    validate_build_plan(plan)
-    actions = plan["phases"][0]["actions"]
-    assert [a["action_type"] for a in actions] == ["remove_entity", "place_entity"]
-    assert actions[0]["entity"] == _AM1
-    assert actions[1]["entity"] == _AM2
-    assert actions[1]["recipe"] == "iron-gear-wheel"
-    assert actions[0]["position"] == actions[1]["position"]
+    assert not list(Draft7Validator(schema).iter_errors(plan))
+    assert plan["actions"] == [{
+        "action": "assembler_tier_upgrade",
+        "from_name": _AM1,
+        "to_name": _AM2,
+        "recipe": "iron-gear-wheel",
+        "position": {"x": 4.5, "y": 2.5},
+    }]
 
 
 def test_an_empty_upgrade_is_refused_rather_than_submitted() -> None:
