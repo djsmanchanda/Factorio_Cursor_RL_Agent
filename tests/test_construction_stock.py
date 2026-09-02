@@ -136,6 +136,32 @@ def test_producer_backed_job_releases_before_full_stock(monkeypatch) -> None:
     assert completed == ["pipe"]
 
 
+def test_rationed_mall_ready_completes_task_when_output_is_none(monkeypatch) -> None:
+    """Rationed pre-core batches that reached their target complete immediately."""
+    task = type("Task", (), {"item": "transport-belt", "target": 148})()
+    targets = {"transport-belt": 148}
+    completed: list[str] = []
+    priorities = type("Priorities", (), {
+        "describe": lambda *_args: "transport-belt task",
+        "complete": lambda _self, item, _tick: completed.append(item),
+    })()
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: (True, None),
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 456)
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 100, targets,
+        priorities, (0.0, 0.0), lambda _message: None,
+    )
+
+    assert targets == {}
+    assert completed == ["transport-belt"]
+
+
+
 def test_background_reserve_starts_a_producer_without_waiting(monkeypatch) -> None:
     background = {"transport-belt": 200}
     blocking: dict[str, int] = {}

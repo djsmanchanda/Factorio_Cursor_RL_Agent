@@ -6494,6 +6494,11 @@ def _serve_mall_task(
         ):
             return
         return
+    if output is None:
+        if ready:
+            priorities.complete(item, live_base.game_tick(client))
+            mall_targets.pop(item, None)
+        return
     if output is not None:
         if construction_supply_chain_is_scheduled(
             client, surface, force, item,
