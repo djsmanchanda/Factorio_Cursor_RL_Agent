@@ -64,6 +64,48 @@ def test_intermediate_prep_uses_only_inputs_already_producing(monkeypatch) -> No
     assert calls == ["iron-gear-wheel"]
 
 
+def test_existing_intermediate_reobserves_a_new_rotating_loan(monkeypatch) -> None:
+    """A live AM1 cell may be borrowed to seed its next ingredient. Starting
+    that loan spends the pass; its supply-wait signal must not end the run."""
+    line = type("Line", (), {
+        "machine_count": 1, "working_count": 0, "produced_count": 0,
+    })()
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        autonomous_builder, "baseline_build_order",
+        lambda: ["electronic-circuit"],
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_baseline_recipe_ready", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line", lambda *_args: line,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "ensure_produced",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            autonomous_builder.ProductionPrerequisiteDeferred(
+                "borrowed copper-cable cell is producing temporary "
+                "electronic-circuit",
+            ),
+        ),
+    )
+
+    prepped: set[str] = set()
+    spent = autonomous_builder._prep_intermediate(
+        object(), object(), "nauvis", "player", prepped, {},
+        (0.0, 0.0), messages.append,
+    )
+
+    assert spent is True
+    assert prepped == set()
+    assert messages == [
+        "  PREP WAIT: electronic-circuit -- borrowed copper-cable cell is "
+        "producing temporary electronic-circuit",
+    ]
+
+
 def test_extraction_is_grown_to_the_declared_furnace_count() -> None:
     assert "smelter_count_for_draw(short_plate, declared_draw)" in _PREP
     assert "build_mining_stage(" in _PREP

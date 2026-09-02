@@ -7108,11 +7108,30 @@ def _prep_intermediate(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
         if line is not None and line.machine_count >= wanted:
-            ensure_produced(
-                client, bridge, surface, force, recipe, reference_point, emit,
-                upgrade_bootstrap=False, stock_target=wanted,
-                minimum_machines=wanted, allow_promotion=False,
-            )
+            try:
+                ensure_produced(
+                    client, bridge, surface, force, recipe, reference_point, emit,
+                    upgrade_bootstrap=False, stock_target=wanted,
+                    minimum_machines=wanted, allow_promotion=False,
+                )
+            except MaterialShortage as shortage:
+                add_demands(mall_targets, shortage)
+                emit(
+                    f"  PREP BLOCKED: {recipe} needs "
+                    + ", ".join(
+                        f"{item}={target}"
+                        for item, target in sorted(shortage.required.items())
+                    )
+                    + " -- handing the pass to the mall"
+                )
+                return False
+            except ProductionPrerequisiteDeferred as deferred:
+                # ensure_produced may have reconfigured this existing cell as
+                # a rotating bootstrap loan. That is successful work for this
+                # pass; re-observe it on the next pass instead of treating its
+                # supply-wait signal as an unhandled controller failure.
+                emit(f"  PREP WAIT: {recipe} -- {deferred}")
+                return True
             prepped.add(recipe)
             emit(f"  PREP READY: {recipe} has {line.machine_count}/{wanted} machine(s)")
             return True
