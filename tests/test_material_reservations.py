@@ -362,7 +362,10 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
         "set_recipe": True,
     })
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"steel-plate": 15},
+    )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
     monkeypatch.setattr(
@@ -397,7 +400,10 @@ def test_inserter_uses_a_rotating_batch_when_the_bootstrap_pool_is_full(
     assert "inserter" in builder.RATIONED_MALL_BATCH_ITEMS
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
     monkeypatch.setattr(
-        builder.live_base, "available_items", lambda *_a: {"inserter": 0},
+        builder.live_base, "available_items", lambda *_a: {
+            "inserter": 0, "electronic-circuit": 12,
+            "iron-gear-wheel": 12, "iron-plate": 12,
+        },
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
@@ -433,7 +439,9 @@ def test_assembling_machine_one_uses_a_rotating_batch_at_bootstrap_cap(
     assert "assembling-machine-1" in builder.RATIONED_MALL_BATCH_ITEMS
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
     monkeypatch.setattr(
-        builder.live_base, "available_items", lambda *_a: {"assembling-machine-1": 0},
+        builder.live_base, "available_items", lambda *_a: {
+            "assembling-machine-1": 0, "iron-plate": 9,
+        },
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
@@ -484,7 +492,9 @@ def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
 ) -> None:
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: False)
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"iron-plate": 40},
+    )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
     monkeypatch.setattr(
@@ -513,7 +523,9 @@ def test_pipe_stays_rotating_until_the_core_mall_is_self_sufficient(
     """Released plate pioneers alone must not create a permanent pipe slot."""
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"iron-plate": 40},
+    )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
     monkeypatch.setattr(
@@ -689,7 +701,9 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
         "set_recipe": True,
     })
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"iron-plate": 60},
+    )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
     monkeypatch.setattr(
@@ -743,6 +757,84 @@ def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
     assert calls == [(
         "assembling-machine-2", 1, {"force_temporary": True},
     )]
+
+
+def test_rotating_mall_establishes_unproduced_external_input_first(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}))
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    ensured: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: ensured.append((args[4], kwargs)),
+    )
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: pytest.fail(
+            "the rotating slot must not request an unproduced input"
+        ),
+    )
+    messages: list[str] = []
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "assembling-machine-2", 1,
+        (0.0, 0.0), messages.append, force_temporary=True,
+    )
+    assert ensured == [(
+        "steel-plate",
+        {
+            "upgrade_bootstrap": True,
+            "stock_target": 2,
+            "minimum_machines": 1,
+            "allow_promotion": False,
+        },
+    )]
+    assert any("ROTATING MALL SWITCH" in message for message in messages)
+
+
+def test_active_rotating_loan_restores_before_external_handoff(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="assembling-machine-2",
+        target_count=1, side="left", requester_position=(50.5, 32.5),
+        current_recipe="assembling-machine-2",
+    )
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}))
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    restored: list[str] = []
+    monkeypatch.setattr(
+        builder, "_restore_bootstrap_loan",
+        lambda *_a, **kwargs: restored.append(kwargs["reason"]),
+    )
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+    ) as deferred:
+        builder._rationed_mall_batch(
+            object(), object(), "nauvis", "player", "assembling-machine-2", 1,
+            (0.0, 0.0), lambda _message: None, force_temporary=True,
+        )
+
+    assert restored == [
+        "assembling-machine-2 needs unproduced external input steel-plate=2",
+    ]
+    assert deferred.value.code == "rotating_mall_prerequisite_handoff"
 
 
 def test_logistic_chest_core_builds_steel_before_the_temporary_chest_batch(

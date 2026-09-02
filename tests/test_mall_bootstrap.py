@@ -9,9 +9,11 @@ from pathlib import Path
 from jsonschema import Draft7Validator
 
 from orchestrator.mall_bootstrap import (
+    MallBootstrapExternalShortage,
     MallBootstrapLoan,
     MallBootstrapStep,
     active_bootstrap_loans,
+    bootstrap_external_shortages,
     bootstrap_loan_plan,
     next_bootstrap_step,
     promote_bootstrap_loan_plan,
@@ -82,6 +84,45 @@ def test_reserved_prerequisite_causes_extra_production(monkeypatch) -> None:
     step = next_bootstrap_step("requester-chest", 2, usable, actual)
 
     assert step == MallBootstrapStep("electronic-circuit", 10, 4)
+
+
+def test_external_shortage_is_exposed_instead_of_ignored(monkeypatch) -> None:
+    monkeypatch.setitem(LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["assembling-machine-1", "steel-plate"],
+        "amounts": [1, 2], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setitem(LINE_RECIPES, "assembling-machine-1", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [9], "product_amount": 1, "craft_time": 0.5,
+    })
+    stock = {
+        "assembling-machine-1": 1, "iron-plate": 100, "steel-plate": 0,
+        "assembling-machine-2": 0,
+    }
+
+    assert bootstrap_external_shortages(
+        "assembling-machine-2", 1, stock, stock,
+    ) == (MallBootstrapExternalShortage("steel-plate", 2),)
+
+
+def test_craftable_shortage_stays_inside_the_rotating_assembler(monkeypatch) -> None:
+    monkeypatch.setitem(LINE_RECIPES, "fast-inserter", {
+        "machine": "assembling-machine-2", "ingredients": ["inserter"],
+        "amounts": [1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setitem(LINE_RECIPES, "inserter", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 0.5,
+    })
+    stock = {"fast-inserter": 0, "inserter": 0, "iron-plate": 10}
+
+    assert bootstrap_external_shortages(
+        "fast-inserter", 1, stock, stock,
+    ) == ()
+    assert next_bootstrap_step(
+        "fast-inserter", 1, stock, stock,
+    ) == MallBootstrapStep("inserter", 1, 1)
 
 
 def test_loan_configures_only_existing_entities_and_requests_step_inputs(

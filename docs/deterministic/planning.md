@@ -155,6 +155,11 @@ These names describe intended responsibilities, not permission to build speculat
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
   ends the current pass, and the predecessor loan begins only after the next
   live observation confirms that restoration.
+  A rotating slot may wait on a missing input only when that input has a live
+  producer. It recursively switches to a missing solid assembler dependency
+  when possible. If the missing dependency requires a furnace, fluid stage,
+  extraction, or another external capability, it restores the active loan,
+  establishes that capability, and only then borrows a slot again.
   Logistic chest promotion has an additional recipe gate: passive-provider and
   requester chests first establish the dedicated steel-plate capability, then
   wait for a working steel-chest mall batch or its exact stocked chest seed,

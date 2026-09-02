@@ -61,6 +61,7 @@ from orchestrator.mall_builder import (
 from orchestrator.mall_bootstrap import (
     MallBootstrapLoan, MallBootstrapStep,
     active_bootstrap_loans,
+    bootstrap_external_shortages,
     bootstrap_loan_plan,
     next_bootstrap_step,
     promote_bootstrap_loan_plan,
@@ -5826,6 +5827,51 @@ def _rationed_mall_batch(
     if stock.get(item, 0) >= target and not force_temporary:
         return False
     active = active_bootstrap_loans(client, surface, force)
+    if not active or active[0].target_item == item:
+        actual, usable = _bootstrap_loan_stock(
+            client, surface, force, item,
+        )
+        external = next((
+            shortage
+            for shortage in bootstrap_external_shortages(
+                item, target, usable, actual,
+            )
+            if not _production_started(
+                client, surface, force, shortage.item,
+            )
+        ), None)
+        if external is not None:
+            if active:
+                _restore_bootstrap_loan(
+                    client, bridge, surface, force, active[0], emit,
+                    reason=(
+                        f"{item} needs unproduced external input "
+                        f"{external.item}={external.count}"
+                    ),
+                )
+                raise ProductionPrerequisiteDeferred(
+                    f"rotating mall restored {item} before establishing "
+                    f"{external.item}; retrying after re-observation",
+                    code="rotating_mall_prerequisite_handoff",
+                    state="supply_wait",
+                    details={
+                        "target": item,
+                        "prerequisite": external.item,
+                        "required": external.count,
+                    },
+                )
+            emit(
+                f"  ROTATING MALL SWITCH: {item} needs {external.item}="
+                f"{external.count}, with no stock or live producer; "
+                "establishing that prerequisite before borrowing a slot"
+            )
+            ensure_produced(
+                client, bridge, surface, force, external.item,
+                reference_point, emit, upgrade_bootstrap=True,
+                stock_target=max(1, external.count), minimum_machines=1,
+                allow_promotion=False,
+            )
+            return True
     if not active:
         spec = LINE_RECIPES[item]
         existing = live_base.find_line(

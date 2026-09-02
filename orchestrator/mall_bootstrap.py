@@ -118,6 +118,14 @@ class MallBootstrapStep:
     crafts: int
 
 
+@dataclass(frozen=True)
+class MallBootstrapExternalShortage:
+    """A missing input that the borrowed assembler cannot manufacture."""
+
+    item: str
+    count: int
+
+
 def bootstrap_loan_group(
     original_recipe: str, target_item: str, target_count: int, side: str,
 ) -> str:
@@ -265,6 +273,53 @@ def next_bootstrap_step(
         )
 
     return descend(target_item, root_missing, frozenset())
+
+
+def bootstrap_external_shortages(
+    target_item: str,
+    target_count: int,
+    usable_stock: Mapping[str, int],
+    actual_stock: Mapping[str, int],
+) -> tuple[MallBootstrapExternalShortage, ...]:
+    """Return missing recipe inputs that a rotating assembler cannot make.
+
+    Temporarily craftable solid dependencies are traversed recursively. Their
+    furnace, fluid, extraction, or otherwise non-assembler inputs are surfaced
+    so the controller can establish those capabilities before borrowing a
+    slot. This keeps a rotating cell from requesting ingredients that neither
+    exist nor have a producer.
+    """
+    if target_count < 1 or target_item not in LINE_RECIPES:
+        return ()
+    root_missing = max(0, target_count - int(actual_stock.get(target_item, 0)))
+    if root_missing == 0:
+        return ()
+    shortages: dict[str, int] = {}
+
+    def descend(item: str, missing: int, visiting: frozenset[str]) -> None:
+        if missing <= 0 or item in visiting:
+            return
+        if not _temporary_assembler_recipe(item):
+            shortages[item] = max(shortages.get(item, 0), missing)
+            return
+        spec = LINE_RECIPES[item]
+        product_amount = max(1, math.floor(float(spec.get("product_amount", 1))))
+        crafts = math.ceil(missing / product_amount)
+        next_visiting = visiting | {item}
+        for ingredient, amount in zip(
+            spec["ingredients"], spec["amounts"], strict=True,
+        ):
+            required = math.ceil(float(amount) * crafts)
+            available = int(usable_stock.get(ingredient, 0))
+            if available >= required:
+                continue
+            descend(ingredient, required - available, next_visiting)
+
+    descend(target_item, root_missing, frozenset())
+    return tuple(
+        MallBootstrapExternalShortage(item, count)
+        for item, count in shortages.items()
+    )
 
 
 def active_bootstrap_loans(
