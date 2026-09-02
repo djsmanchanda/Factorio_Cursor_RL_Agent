@@ -69,6 +69,7 @@ esac
 require_port "$RCON_PORT"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+[[ "$PYTHON_BIN" == "python3" && -x "$REPO_ROOT/.venv/bin/python" ]] && PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 SECRET_PATH="$STATE_ROOT/rcon-password"
 SCRIPT_OUTPUT="$STATE_ROOT/script-output"
 LOG_PATH="$STATE_ROOT/logs/autonomous-run.log"

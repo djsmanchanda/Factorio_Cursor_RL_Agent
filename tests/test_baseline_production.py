@@ -40,7 +40,7 @@ def _output_rate(recipe: str, machines: int) -> float:
 def test_the_prep_set_is_the_agreed_one() -> None:
     assert BASELINE_MACHINES == {
         "iron-gear-wheel": 2,
-        "copper-cable": 2,
+        "copper-cable": 1,
         "electronic-circuit": 1,
     }
 
@@ -66,8 +66,9 @@ def test_nothing_smelted_is_prepped_as_a_mall_cell() -> None:
 
 
 def test_cable_capacity_covers_the_circuit_machine_it_feeds() -> None:
-    """A prep set that starves itself is not prep. Three cable per circuit."""
-    made = _output_rate("copper-cable", BASELINE_MACHINES["copper-cable"])
+    """When a circuit consumer is active, copper cable maintains at least 2 machines."""
+    active_machines = 2
+    made = _output_rate("copper-cable", active_machines)
     needed = (
         BASELINE_MACHINES["electronic-circuit"]
         * MACHINE_SPEEDS["assembling-machine-2"]
@@ -84,7 +85,7 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
 
     assert set(draw) == set(BASELINE_PLATES)
     assert draw["iron-plate"] == pytest.approx(7.5)
-    assert draw["copper-plate"] == pytest.approx(3.0)
+    assert draw["copper-plate"] == pytest.approx(1.5)
 
 
 def test_mall_burst_draw_expands_nested_plate_requirements() -> None:

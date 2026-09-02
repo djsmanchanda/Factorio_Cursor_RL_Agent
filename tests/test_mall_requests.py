@@ -95,9 +95,9 @@ def test_two_matching_halves_each_contribute_their_own_request(recipe: str) -> N
     assert left["group"] != right["group"]
     assert left_chest["clear_logistic_groups"] == [recipe_group_name(recipe)]
     assert right_chest["clear_logistic_groups"] == [recipe_group_name(recipe)]
-    assert left["multiplier"] == 15
-    assert right["multiplier"] == 15
-    assert sum(section["multiplier"] for section in (left, right)) == 30
+    assert left["multiplier"] == 23
+    assert right["multiplier"] == 23
+    assert sum(section["multiplier"] for section in (left, right)) == 46
 
 
 def test_group_holds_per_craft_amounts_and_multiplier_carries_the_rate() -> None:
@@ -112,11 +112,11 @@ def test_group_holds_per_craft_amounts_and_multiplier_carries_the_rate() -> None
 
 def test_the_worked_example_from_the_floor() -> None:
     """copper-cable on an assembling-machine-2: 1.5 crafts/s consumes 1.5
-    copper-plate/s, so a ten-second buffer is 15 plates."""
+    copper-plate/s, so a fifteen-second buffer is 23 plates."""
     section = _requester(_half("copper-cable", "left"))["logistic_sections"][0]
 
     assert section["requests"] == [{"name": "copper-plate", "count": 1}]
-    assert section["multiplier"] == 15
+    assert section["multiplier"] == 23
 
 
 @pytest.mark.parametrize("recipe", ["electronic-circuit", "copper-cable", "iron-gear-wheel"])
@@ -141,7 +141,7 @@ def test_a_faster_machine_asks_for_proportionally_more() -> None:
         for machine in ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
     ]
 
-    assert [section["multiplier"] for section in tiers] == [10, 15, 25]
+    assert [section["multiplier"] for section in tiers] == [15, 23, 38]
     assert all(section["requests"] == tiers[0]["requests"] for section in tiers), (
         "only the scale moves; the group's per-craft contents are the recipe"
     )

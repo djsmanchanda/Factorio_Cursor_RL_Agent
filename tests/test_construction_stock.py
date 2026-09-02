@@ -376,7 +376,7 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     )
     assert builder._mall_request_multiplier(
         object(), "nauvis", "player", "splitter", spec, 50,
-    ) == 8
+    ) == 12
     assert builder._mall_request_multiplier(
         object(), "nauvis", "player", "transport-belt", spec, 200,
     ) == 30

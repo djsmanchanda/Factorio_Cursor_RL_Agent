@@ -294,9 +294,19 @@ def _item_supply_chain_is_scheduled(
         # Fluid provenance needs the chemical system's connected-flow survey;
         # absent that proof, an unfunded blueprint remains blocked.
         return False
-    if live_base.find_line(
+    has_producer = live_base.find_line(
         client, surface, force, item, str(recipe["machine"]),
-    ) is None:
+    ) is not None
+    if not has_producer:
+        try:
+            from orchestrator.mall_bootstrap import active_bootstrap_loans
+            has_producer = any(
+                loan.target_item == item
+                for loan in active_bootstrap_loans(client, surface, force)
+            )
+        except Exception:
+            has_producer = False
+    if not has_producer:
         return False
     parents = visiting | {item}
     return all(

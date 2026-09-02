@@ -16,8 +16,9 @@ MALL_MINIMUM_STACKS = {
 
 # A requester holds this many seconds of the machine's own consumption. Sizing
 # the buffer in TIME rather than in finished goods keeps it correct as machines
-# get faster: the same ten-second window simply resolves to a bigger number.
-MALL_SUPPLY_SECONDS = 10.0
+# get faster: the same fifteen-second window resolves to a proportionally bigger
+# number and absorbs worker bot flight latency across the factory.
+MALL_SUPPLY_SECONDS = 15.0
 
 
 def _inventory_limit(recipe: str, stock_target: int, *, fill_chest: bool = False) -> dict:

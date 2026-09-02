@@ -25,7 +25,7 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 # belongs to a smelting stage, and is built on demand by whatever needs it.
 BASELINE_MACHINES = {
     "iron-gear-wheel": 2,
-    "copper-cable": 2,
+    "copper-cable": 1,
     "electronic-circuit": 1,
 }
 

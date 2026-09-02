@@ -2493,6 +2493,26 @@ def build_mining_stage(
     try:
         belt_type = _essential_belt_type(client, surface, force)
         bootstrap = _bootstrap_state(recipe)
+        if not excluded_drill_positions and not expand:
+            starter_drills: set[Point] = set()
+            if bootstrap is not None and bootstrap.pioneer_actions:
+                for a in bootstrap.pioneer_actions:
+                    if a.get("entity") == "electric-mining-drill":
+                        pos = a.get("position")
+                        if pos:
+                            starter_drills.add((float(pos["x"]), float(pos["y"])))
+            if hasattr(client, "command"):
+                try:
+                    starter = live_base.direct_plate_starter(
+                        client, surface, force, recipe, ore, reference_point,
+                    )
+                    if starter is not None:
+                        starter_drills.add(starter.drill_position)
+                        starter_drills.update(starter.additional_drill_positions)
+                except Exception:
+                    pass
+            if starter_drills:
+                excluded_drill_positions = tuple(sorted(starter_drills))
         owned_smelter_origin = (
             bootstrap.replacement_origin
             if bootstrap is not None
@@ -4164,6 +4184,33 @@ _PARALLEL_BOOTSTRAP_RESERVE_ITEMS = frozenset({"electronic-circuit", "splitter"}
 _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS = 60.0
 
 
+def _copper_cable_consumers_active(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether any item requiring copper cable is currently being produced or prepped."""
+    if not hasattr(client, "command"):
+        return False
+    for recipe, spec in LINE_RECIPES.items():
+        if "copper-cable" not in spec.get("ingredients", ()):
+            continue
+        try:
+            line = live_base.find_line(
+                client, surface, force, recipe, str(spec["machine"]),
+            )
+            if line is not None and line.machine_count > 0:
+                return True
+        except Exception:
+            pass
+        try:
+            from orchestrator.mall_bootstrap import active_bootstrap_loans
+            for loan in active_bootstrap_loans(client, surface, force):
+                if loan.target_item == recipe or loan.current_recipe == recipe:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
 def _is_pre_core_temporary_mall_item(
     client: RconClient, surface: str, force: str, item: str,
 ) -> bool:
@@ -4363,11 +4410,19 @@ def _submit_bootstrap_loan(
     completed_prerequisite = bool(
         loan.step_recipe is not None
         and loan.step_recipe != loan.target_item
-        and loan.step_baseline_finished is not None
-        and loan.step_required_crafts is not None
-        and products_finished is not None
-        and products_finished - loan.step_baseline_finished
-        >= loan.step_required_crafts
+        and (
+            (
+                loan.step_baseline_finished is not None
+                and loan.step_required_crafts is not None
+                and products_finished is not None
+                and products_finished - loan.step_baseline_finished
+                >= loan.step_required_crafts
+            )
+            or (
+                loan.step_target_count is not None
+                and int(actual.get(loan.step_recipe, 0)) >= loan.step_target_count
+            )
+        )
     )
     if completed_prerequisite:
         persisted = _bootstrap_loan_persisted_step(loan, actual)
@@ -4375,11 +4430,15 @@ def _submit_bootstrap_loan(
         loan = loan.credit_completed_step(
             persisted.recipe, persisted.target_count,
         )
+        crafts_done = (
+            products_finished - loan.step_baseline_finished
+            if products_finished is not None and loan.step_baseline_finished is not None
+            else 0
+        )
         emit(
             f"  MALL BOOTSTRAP PREREQUISITE FULFILLED: {persisted.recipe} "
-            f"produced {products_finished - loan.step_baseline_finished} "
-            "craft(s); advancing the durable loan even though logistics may "
-            "already have consumed them"
+            f"target {persisted.target_count} reached ({crafts_done} crafted); "
+            "advancing the durable loan"
         )
     planning_actual, planning_usable = _bootstrap_loan_credited_stock(
         loan, actual, usable,
@@ -4474,38 +4533,67 @@ def _submit_bootstrap_loan(
     if step is None:
         if loan.target_item in CORE_MALL_PRODUCERS:
             # A core producer is allowed to reclaim a completed temporary
-            # batch.  This is the only way to finish the self-sustaining mall
-            # when the ten-slot pre-logistics pool is already full: restoring
-            # the borrowed cell would return us to the same cap forever.
-            # Raise the gate one item above observed stock so a recipe that
-            # already has a starter still performs one real craft and becomes
-            # visible to _production_started on the next observation.
-            promotion_target = max(
-                1,
-                loan.production_target,
-                int(actual.get(loan.target_item, 0)) + 1,
-            )
-            plan = promote_bootstrap_loan_plan(
-                loan,
-                stock_target=promotion_target,
-                clear_original_groups=True,
-            )
-            plan["surface"], plan["force"] = surface, force
-            _submit(
-                client, bridge, surface, plan,
-                f"promote_bootstrap_loan_{loan.target_item}", emit,
-            )
-            _MALL_REFRESH_SIGNATURES.clear()
-            _BOOTSTRAP_SHARED_PROVIDER_ITEMS.discard(loan.target_item)
-            emit(
-                f"  CORE MALL PERMANENT: converted the borrowed "
-                f"{loan.original_recipe} demand slot at {loan.machine_position} "
-                f"into {loan.target_item}; reused its existing assembler "
-                "without funding another compact cell"
+            # batch, BUT ONLY IF the host recipe has surplus capacity above
+            # its BASELINE_MACHINES quota (e.g. 2 for copper-cable, 2 for
+            # iron-gear-wheel). Sacrificing a baseline machine permanently
+            # starves downstream lines.
+            host_count = 0
+            if hasattr(client, "command"):
+                try:
+                    host_line = live_base.find_line(
+                        client, surface, force, loan.original_recipe,
+                        LINE_RECIPES.get(loan.original_recipe, {}).get("machine", "assembling-machine-1"),
+                    )
+                    host_count = host_line.machine_count if host_line is not None else 0
+                except Exception:
+                    host_count = 99
+            else:
+                host_count = 99
+            baseline_needed = BASELINE_MACHINES.get(loan.original_recipe, 0)
+            if (
+                loan.original_recipe == "copper-cable"
+                and _copper_cable_consumers_active(client, surface, force)
+            ):
+                baseline_needed = max(baseline_needed, 2)
+            if host_count > baseline_needed:
+                promotion_target = max(
+                    1,
+                    loan.production_target,
+                    int(actual.get(loan.target_item, 0)) + 1,
+                )
+                plan = promote_bootstrap_loan_plan(
+                    loan,
+                    stock_target=promotion_target,
+                    clear_original_groups=True,
+                )
+                plan["surface"], plan["force"] = surface, force
+                _submit(
+                    client, bridge, surface, plan,
+                    f"promote_bootstrap_loan_{loan.target_item}", emit,
+                )
+                _MALL_REFRESH_SIGNATURES.clear()
+                _BOOTSTRAP_SHARED_PROVIDER_ITEMS.discard(loan.target_item)
+                emit(
+                    f"  CORE MALL PERMANENT: converted the borrowed "
+                    f"{loan.original_recipe} demand slot at {loan.machine_position} "
+                    f"into {loan.target_item}; reused its existing assembler "
+                    "without funding another compact cell"
+                )
+                return (
+                    f"converted borrowed {loan.original_recipe} producer into the "
+                    f"permanent {loan.target_item} mall"
+                )
+            _restore_bootstrap_loan(
+                client, bridge, surface, force, loan, emit,
+                reason=(
+                    f"{loan.target_item} fulfilled its required {loan.target_count}; "
+                    f"preserving {loan.original_recipe} baseline machine quota "
+                    f"({host_count}/{baseline_needed})"
+                ),
             )
             return (
-                f"converted borrowed {loan.original_recipe} producer into the "
-                f"permanent {loan.target_item} mall"
+                f"restored borrowed {loan.original_recipe} producer to protect its "
+                f"baseline quota"
             )
         if (
             loan.target_item == "pipe"
@@ -4823,10 +4911,15 @@ def _allocate_dynamic_belt_capacity(
             client, surface, force, recipe, str(spec["machine"]),
         )
         anchor_counts[recipe] = line.machine_count if line is not None else 0
+    def _target_anchor_count(recipe: str) -> int:
+        if recipe == "copper-cable" and _copper_cable_consumers_active(client, surface, force):
+            return 2
+        return BASELINE_MACHINES[recipe]
+
     missing_anchor = next(
         (
             recipe for recipe, count in anchor_counts.items()
-            if count < BASELINE_MACHINES[recipe]
+            if count < _target_anchor_count(recipe)
         ),
         None,
     )
@@ -4839,7 +4932,7 @@ def _allocate_dynamic_belt_capacity(
             client, bridge, surface, force, missing_anchor, reference_point,
             emit, upgrade_bootstrap=False,
             stock_target=max(1, plan.production_target),
-            minimum_machines=BASELINE_MACHINES[missing_anchor],
+            minimum_machines=_target_anchor_count(missing_anchor),
             allow_promotion=False,
         )
         raise ProductionPrerequisiteDeferred(
@@ -5443,6 +5536,9 @@ def ensure_produced(
     )
     if item == "steel-plate":
         minimum_machines = max(minimum_machines, STEEL_BASELINE_FURNACES)
+    if item == "copper-cable":
+        if _copper_cable_consumers_active(client, surface, force):
+            minimum_machines = max(minimum_machines, 2)
     if item == "fast-transport-belt":
         if not _electric_furnace_producer_started(client, surface, force):
             emit(
@@ -5730,14 +5826,15 @@ def _rationed_mall_spare_target(
 ) -> int:
     """Bound optional rotating-slot output without delaying its current bill."""
     reserve = mall_reserve_for(client, surface, force, item, required)
-    if (
-        item == "splitter"
-        and _metal_starter_transition_complete(client, surface, force)
-    ):
-        # Once both permanent metal districts are live, keeping one complete
-        # splitter stack is affordable and prevents every mine module from
-        # reopening the same tiny batch.
-        return max(required, reserve.storage_count)
+    if item == "splitter":
+        if _metal_starter_transition_complete(client, surface, force):
+            return max(required, reserve.storage_count)
+        iron_available = (
+            live_base.available_items(client, surface, force).get("iron-plate", 0)
+            if hasattr(client, "command") else 0
+        )
+        if iron_available >= 50:
+            return max(required, 15)
     if reserve.storage_count <= required:
         return required
     return min(reserve.storage_count, required + _RATIONED_MALL_EXTRA_SPARES)
@@ -7161,7 +7258,10 @@ def _prep_intermediate(
     ]
     if ready:
         recipe = ready[0]
-        wanted = BASELINE_MACHINES[recipe]
+        wanted = (
+            2 if recipe == "copper-cable" and _copper_cable_consumers_active(client, surface, force)
+            else BASELINE_MACHINES[recipe]
+        )
         line = live_base.find_line(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
