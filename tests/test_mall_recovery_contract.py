@@ -309,3 +309,37 @@ def test_under_sized_existing_line_cannot_escape_the_global_slot_cap(monkeypatch
         )
 
     assert raised.value.code == "bootstrap_mall_slot_cap"
+
+
+def test_circuit_anchor_not_treated_as_temporary_precore_batch() -> None:
+    assert "electronic-circuit" in builder._MALL_RECIPE_ANCHORS
+    assert not builder._is_pre_core_temporary_mall_item(
+        object(), "nauvis", "player", "electronic-circuit",
+    )
+
+
+def test_tier1_assembler_scales_circuit_producer_at_lower_backlog(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_metal_starter_transition_complete", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(machine_count=1),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"electronic-circuit": 0},
+    )
+    monkeypatch.setattr(builder, "mall_machine", lambda *_a: "assembling-machine-1")
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (True, {}),
+    )
+
+    wanted = builder._bootstrap_reserve_machine_target(
+        object(), "nauvis", "player", "electronic-circuit", 40,
+        (3.0, -1.0), lambda _message: None, background=False,
+    )
+
+    assert wanted == 2
+    assert "electronic-circuit" in builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS
+

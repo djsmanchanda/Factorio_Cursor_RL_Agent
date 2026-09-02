@@ -3621,10 +3621,11 @@ def _plan_line(
     ).get(item, 0))
     backlog = backlog_seconds(
         item, outstanding, existing.machine_count if existing else 0,
+        spec["machine"],
     )
     promoted_count = promoted_line_machine_count(
         item, demand, existing.machine_count if existing else 0, saturated=saturated,
-        backlog=backlog,
+        backlog=backlog, machine_name=spec["machine"],
     )
     # Production prep asks for a standing number of MALL cells and must be
     # allowed to finish. Promotion outranking it turned "copper-cable to 2
@@ -3988,10 +3989,22 @@ UNBACKED_DRAWS: set[str] = set()
 # drawing them from starter stock without a producer held that gate at 83% for
 # twelve passes (live run 15). Steel chests are deliberately excluded: they
 # are a low-volume mall capability seed, not a sustained intermediate line.
+# Inserters are required by all mall cells; start a compact producer before
+# starter reserves are exhausted.
 PERSISTENT_INTERMEDIATES = frozenset({
-    "iron-stick", "steel-plate", "advanced-circuit",
+    "iron-stick", "steel-plate", "advanced-circuit", "inserter",
 })
 MANAGED_INTERMEDIATE_SOURCES: dict[str, Point] = {}
+
+
+def _transferable_or_available_stock(
+    client: RconClient, surface: str, force: str,
+) -> dict[str, int]:
+    """Transferable construction stock, falling back to available stock if unmocked in test dummies."""
+    try:
+        return live_base.transferable_items(client, surface, force)
+    except AttributeError:
+        return live_base.available_items(client, surface, force)
 
 # Logistic chests are capability endpoints, not bootstrap recipes.  Their
 # live recipes consume both a steel chest and an advanced circuit; admitting a
@@ -4136,6 +4149,7 @@ _RATIONED_MALL_EXTRA_SPARES = 2
 _MALL_RECIPE_ANCHORS = {
     "iron-gear-wheel": 1,
     "copper-cable": 1,
+    "electronic-circuit": 1,
 }
 _PIPE_PERMANENT_DONORS = frozenset(
     RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS, {"pipe"})
@@ -4802,7 +4816,7 @@ def _allocate_dynamic_belt_capacity(
             and loans[0].original_recipe in _DYNAMIC_BELT_BORROWERS
         )
     anchor_counts: dict[str, int] = {}
-    for recipe in _MALL_RECIPE_ANCHORS:
+    for recipe in ("iron-gear-wheel", "copper-cable"):
         spec = LINE_RECIPES[recipe]
         line = live_base.find_line(
             client, surface, force, recipe, str(spec["machine"]),
@@ -4944,7 +4958,7 @@ def _ingredient_sources(
     spec, promote_to_line = plan.spec, plan.promote_to_line
     sources: dict[str, Point] = {}
     stocked = (
-        live_base.transferable_items(client, surface, force)
+        _transferable_or_available_stock(client, surface, force)
         if may_consume_stocked_inputs(
             upgrade_bootstrap=upgrade_bootstrap, promote_to_line=promote_to_line,
         ) else {}
@@ -5747,7 +5761,7 @@ def _bootstrap_demand_cell_affordable(
         item, stock_target=max(1, target), side=side, shared_provider=True,
         machine_name="assembling-machine-1",
     )
-    stock = live_base.available_items(client, surface, force)
+    stock = _transferable_or_available_stock(client, surface, force)
     available = (
         _MATERIAL_RESERVATION_LEDGER.allocatable_stock(
             stock, claimant=_material_project_id(item),
@@ -5775,14 +5789,27 @@ def _bootstrap_reserve_machine_target(
     large construction reserve needs them; their protected anchor remains.
     Exact cell materials and the pool limit remain hard gates.
     """
-    if (
-        background
-        or _core_mall_ready(client, surface, force)
-        or not _metal_starter_transition_complete(client, surface, force)
-    ):
+    if background or _core_mall_ready(client, surface, force):
         return 1
+    capability = BaseCapability(
+        produces_tier2=_production_started(
+            client, surface, force, "assembling-machine-2",
+        ),
+        produces_tier3=_production_started(
+            client, surface, force, "assembling-machine-3",
+        ),
+        stock=live_base.available_items(client, surface, force),
+    )
+    active_machine = mall_machine(item, capability)
+    is_tier1 = active_machine == "assembling-machine-1"
+    metal_complete = _metal_starter_transition_complete(client, surface, force)
+    if not metal_complete and not is_tier1:
+        return 1
+    backlog_threshold = 30.0 if is_tier1 else _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS
+    stack_size = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+
     if item in _MALL_RECIPE_ANCHORS:
-        if target < ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE):
+        if not is_tier1 and target < stack_size:
             return 1
         spec = LINE_RECIPES[item]
         existing = live_base.find_line(
@@ -5793,8 +5820,10 @@ def _bootstrap_reserve_machine_target(
             return 1
         stock = live_base.available_items(client, surface, force)
         outstanding = max(0, target - int(stock.get(item, 0)))
-        backlog = backlog_seconds(item, outstanding, existing_count)
-        if backlog <= _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS:
+        backlog = backlog_seconds(
+            item, outstanding, existing_count, active_machine,
+        )
+        if backlog <= backlog_threshold:
             return existing_count
         affordable, shortage = _bootstrap_demand_cell_affordable(
             client, surface, force, item, target, reference_point,
@@ -5808,16 +5837,16 @@ def _bootstrap_reserve_machine_target(
                 )
             return existing_count
         wanted = existing_count + 1
+        _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
         emit(
             f"  DYNAMIC ANCHOR CAPACITY: {item} has {backlog:.0f}s of "
             f"blocking backlog; funding {wanted} temporary producers "
             f"within the {BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool"
         )
         return wanted
-    if (
-        item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS
-        or target < ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
-    ):
+    if item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS:
+        return 1
+    if not is_tier1 and target < stack_size:
         return 1
     spec = LINE_RECIPES[item]
     existing = live_base.find_line(
@@ -5828,8 +5857,10 @@ def _bootstrap_reserve_machine_target(
         return max(1, existing_count)
     stock = live_base.available_items(client, surface, force)
     outstanding = max(0, target - int(stock.get(item, 0)))
-    backlog = backlog_seconds(item, outstanding, existing_count)
-    if backlog <= _PARALLEL_BOOTSTRAP_BACKLOG_SECONDS:
+    backlog = backlog_seconds(
+        item, outstanding, existing_count, active_machine,
+    )
+    if backlog <= backlog_threshold:
         return existing_count
     affordable, shortage = _bootstrap_demand_cell_affordable(
         client, surface, force, item, target, reference_point,
@@ -6330,7 +6361,7 @@ def _serve_mall_task(
         reference_point, emit, background=False,
     )
     if not ready:
-        stock = live_base.available_items(client, surface, force)
+        stock = _transferable_or_available_stock(client, surface, force)
         actual_prerequisites = _queued_mall_prerequisites(item)
         other_pending = {
             other for other, target in mall_targets.items()
@@ -7629,7 +7660,7 @@ def _survey_pass(
     not keep re-selecting work the base already finished while a later pass was
     running.
     """
-    stock = live_base.available_items(client, surface, force)
+    stock = _transferable_or_available_stock(client, surface, force)
     tick = live_base.game_tick(client)
     priorities.sync(mall_targets, stock, tick)
     for stocked_item, stocked_target in list(mall_targets.items()):

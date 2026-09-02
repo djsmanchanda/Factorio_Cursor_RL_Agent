@@ -117,17 +117,21 @@ def live_intermediate_demand(
     return total
 
 
-def output_per_machine(item: str) -> float:
+def output_per_machine(item: str, machine_name: str | None = None) -> float:
     """One machine's output of `item`, in items per second."""
     spec = LINE_RECIPES[item]
+    machine = machine_name or spec["machine"]
     return (
         spec.get("product_amount", 1)
-        * MACHINE_SPEEDS[spec["machine"]]
+        * MACHINE_SPEEDS[machine]
         / spec["craft_time"]
     )
 
 
-def backlog_seconds(item: str, outstanding: int, machines: int) -> float:
+def backlog_seconds(
+    item: str, outstanding: int, machines: int,
+    machine_name: str | None = None,
+) -> float:
     """How long the machines already built need to finish `outstanding`.
 
     Infinite when nothing is built, so the first cell is never blocked from
@@ -137,13 +141,15 @@ def backlog_seconds(item: str, outstanding: int, machines: int) -> float:
         return 0.0
     if machines <= 0 or item not in LINE_RECIPES:
         return float("inf")
-    rate = output_per_machine(item) * machines
+    rate = output_per_machine(item, machine_name=machine_name) * machines
     return outstanding / rate if rate > 0 else float("inf")
+
 
 
 def promoted_line_machine_count(
     item: str, demand_per_second: float, existing_machines: int = 0,
     *, saturated: bool = False, backlog: float | None = None,
+    machine_name: str | None = None,
 ) -> int | None:
     """Return the new shared-line size when mall capacity is no longer enough.
 
@@ -162,7 +168,7 @@ def promoted_line_machine_count(
     # A third circuit mall machine is exactly the point at which the compact
     # mall stops being the right topology.  Keep the first two cells for the
     # bootstrap, then promote to the six-machine phase as soon as measured
-    # consumers exceed their combined 3.0/s capacity. Queued construction
+    # consumers exceed their combined capacity. Queued construction
     # demand is also evidence when it exceeds the two-cell patience window:
     # consumers starved of circuits do not report as working, so relying on
     # their live rate alone caused the controller to keep borrowing mall slots.
@@ -171,7 +177,8 @@ def promoted_line_machine_count(
         and existing_machines >= ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT
         and (
             demand_per_second > (
-                output_per_machine(item) * ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT
+                output_per_machine(item, machine_name=machine_name)
+                * ELECTRONIC_CIRCUIT_MALL_MACHINE_LIMIT
             )
             or backlog is not None and backlog > PROMOTION_PATIENCE_SECONDS
         )
@@ -184,7 +191,7 @@ def promoted_line_machine_count(
         saturated = False
     if not saturated and demand_per_second <= MALL_INTERMEDIATE_RATE_LIMIT:
         return None
-    per_machine = output_per_machine(item)
+    per_machine = output_per_machine(item, machine_name=machine_name)
     existing_capacity = max(0, existing_machines) * per_machine
     required = max(0.0, demand_per_second - existing_capacity)
     needed = math.ceil(required * PROMOTED_LINE_HEADROOM / per_machine)
@@ -194,6 +201,7 @@ def promoted_line_machine_count(
         # so step past it rather than re-proposing what is already built.
         target = max(target, _line_phase(existing_machines + 1))
     return target
+
 
 
 def promoted_companion_machine_count(item: str, machine_count: int) -> int | None:

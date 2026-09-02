@@ -76,6 +76,32 @@ def test_stocked_iron_stick_schedules_a_real_producer(monkeypatch):
     assert calls[0][1]["upgrade_bootstrap"] is False
 
 
+def test_stocked_inserter_schedules_a_real_producer(monkeypatch):
+    """When mall cells draw regular inserters from stock without a live producer,
+    schedule a real producer before the initial inventory runs out."""
+    calls = []
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_args: {"inserter": 20},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or None,
+    )
+
+    result = builder._ingredient_sources(
+        object(), object(), "nauvis", "player", "fast-inserter",
+        (0.0, 0.0), lambda _message: None, _plan("fast-inserter", "inserter"),
+        upgrade_bootstrap=False,
+    )
+
+    assert result is None
+    assert len(calls) == 1
+    assert calls[0][0][4] == "inserter"
+    assert calls[0][1]["upgrade_bootstrap"] is False
+
+
 def test_steel_line_reuses_the_real_iron_provider_not_starter_storage(monkeypatch):
     monkeypatch.setattr(
         builder.live_base, "available_items",
