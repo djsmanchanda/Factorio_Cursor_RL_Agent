@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from planners.recipe_data import (
     LINE_RECIPES,
     MACHINE_CAPABILITIES,
-    machine_holds,
+    machine_supports_recipe,
 )
 
 # Cheapest first. The tiers are NOT interchangeable: what separates them is
@@ -47,7 +47,7 @@ class BaseCapability:
 
 
 def _fits(machine: str, recipe: str) -> bool:
-    return machine_holds(machine, len(LINE_RECIPES[recipe]["ingredients"]))
+    return machine_supports_recipe(machine, recipe)
 
 
 def _craft_seconds(recipe: str) -> float:
@@ -80,7 +80,7 @@ def mall_machine(recipe: str, capability: BaseCapability) -> str:
         return LINE_RECIPES[recipe]["machine"]
     if capability.produces_tier3 and _fits(TIERS[2], recipe):
         return TIERS[2]
-    if _fits(TIERS[1], recipe):
+    if capability.produces_tier2 and _fits(TIERS[1], recipe):
         return TIERS[1]
     return _cheapest_fitting(recipe)
 
@@ -155,7 +155,10 @@ def machines_to_upgrade(
     return plan
 
 
-def upgrade_plan(positions: Mapping[str, list], target: str = TIERS[1]) -> dict:
+def upgrade_plan(
+    positions: Mapping[str, list], target: str = TIERS[1], *,
+    source: str = TIERS[0],
+) -> dict:
     """Order bot-driven in-place promotion of exact tier-1 machines.
 
     Factorio's native upgrade path preserves the configured machine while
@@ -169,8 +172,22 @@ def upgrade_plan(positions: Mapping[str, list], target: str = TIERS[1]) -> dict:
         for position in machine_positions:
             actions.append({
                 "action": "assembler_tier_upgrade",
-                "from_name": TIERS[0], "to_name": target,
+                "from_name": source, "to_name": target,
                 "recipe": recipe,
                 "position": {"x": position[0], "y": position[1]},
             })
     return {"actions": actions}
+
+
+def entity_upgrade_plan(
+    positions: list, *, source: str, target: str,
+) -> dict:
+    """Order an exact non-crafter tier replacement without a recipe guard."""
+    if not positions:
+        raise ValueError("An entity upgrade plan needs at least one position")
+    return {"actions": [{
+        "action": "entity_tier_upgrade",
+        "from_name": source,
+        "to_name": target,
+        "position": {"x": position[0], "y": position[1]},
+    } for position in positions]}

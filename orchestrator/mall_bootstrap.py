@@ -23,6 +23,9 @@ _LOAN_V1_PREFIX = f"{_LOAN_PREFIX}v1:"
 _LOAN_V2_PREFIX = f"{_LOAN_PREFIX}v2:"
 _LOAN_V3_PREFIX = f"{_LOAN_PREFIX}v3:"
 _LOAN_V4_PREFIX = f"{_LOAN_PREFIX}v4:"
+_ASSEMBLER_TIERS = {
+    "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
+}
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class MallBootstrapLoan:
     step_required_crafts: int | None = None
     step_minimum_crafts: int | None = None
     completed_step_targets: tuple[tuple[str, int], ...] = ()
+    machine_name: str = "assembling-machine-1"
 
     @property
     def production_target(self) -> int:
@@ -226,7 +230,7 @@ def _temporary_assembler_recipe(item: str) -> bool:
     return bool(
         spec
         and spec.get("set_recipe", True)
-        and spec.get("machine") == "assembling-machine-2"
+        and spec.get("machine") in _ASSEMBLER_TIERS
         and not spec.get("fluid_ingredients")
     )
 
@@ -329,18 +333,19 @@ def active_bootstrap_loans(
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local out={};local prefix='" + _LOAN_PREFIX + "';"
-        "local function recipe_at(x,y) local e=s.find_entities_filtered{position={x,y},"
+        "local function machine_at(x,y) local e=s.find_entities_filtered{position={x,y},"
         "radius=0.4,force=f,limit=1}[1];if not e then return '-' end;"
         "local ok,r=pcall(function() return e.get_recipe() end);"
-        "return ok and r and r.name or '-' end;"
+        "local name=e.type=='entity-ghost' and e.ghost_name or e.name;"
+        "return name..','..(ok and r and r.name or '-') end;"
         "for _,c in pairs(s.find_entities_filtered{name='requester-chest',force=f}) do "
         "local ok,sections=pcall(function() return c.get_logistic_sections() end);"
         "if ok and sections then for _,section in pairs(sections.sections) do "
         "local g=section.group or '';if string.sub(g,1,#prefix)==prefix then "
         "local slot=section.get_slot(1);if slot and slot.value then "
         "out[#out+1]=g..'|'..c.position.x..'|'..c.position.y..'|'"
-        "..recipe_at(c.position.x-3,c.position.y)..'|'"
-        "..recipe_at(c.position.x+3,c.position.y) end end end end end;"
+        "..machine_at(c.position.x-3,c.position.y)..'|'"
+        "..machine_at(c.position.x+3,c.position.y) end end end end end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = client.command("/sc " + lua).strip()
@@ -348,7 +353,13 @@ def active_bootstrap_loans(
     for record in raw.split(";"):
         if not record:
             continue
-        group, raw_x, raw_y, left_recipe, right_recipe = record.split("|", 4)
+        group, raw_x, raw_y, left_state, right_state = record.split("|", 4)
+        if "," in left_state and "," in right_state:
+            left_machine, left_recipe = left_state.split(",", 1)
+            right_machine, right_recipe = right_state.split(",", 1)
+        else:  # v1-v4 recovery output from a pre-tier-one deployment.
+            left_machine = right_machine = "assembling-machine-1"
+            left_recipe, right_recipe = left_state, right_state
         parsed = parse_bootstrap_loan_group(group)
         if parsed is None:
             continue
@@ -370,6 +381,7 @@ def active_bootstrap_loans(
             step_required_crafts=required,
             step_minimum_crafts=minimum,
             completed_step_targets=completed,
+            machine_name=left_machine if side == "left" else right_machine,
         ))
     return tuple(loans)
 
@@ -392,7 +404,7 @@ def bootstrap_loan_plan(
     requests = recipe_group_requests(spec["ingredients"], spec["amounts"])
     machine = {
         "action_type": "configure_entity",
-        "entity": "assembling-machine-2",
+        "entity": loan.machine_name,
         "position": {"x": loan.machine_position[0], "y": loan.machine_position[1]},
         "recipe": step.recipe,
         "logistic_condition": stock_gate(step.recipe, step.target_count),
@@ -441,7 +453,7 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
     requester_section = {
         "group": recipe_group_name(loan.original_recipe, loan.side),
         "requests": recipe_group_requests(spec["ingredients"], spec["amounts"]),
-        "multiplier": request_multiplier(spec["machine"], spec["craft_time"]),
+        "multiplier": request_multiplier(loan.machine_name, spec["craft_time"]),
     }
     provider = generate_mall_provider_limit_update(
         loan.original_recipe, loan.provider_position, 1,
@@ -463,7 +475,7 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
             },
             {
                 "action_type": "configure_entity",
-                "entity": "assembling-machine-2",
+                "entity": loan.machine_name,
                 "position": {
                     "x": loan.machine_position[0], "y": loan.machine_position[1],
                 },
@@ -490,7 +502,7 @@ def promote_bootstrap_loan_plan(
     requester_section = {
         "group": recipe_group_name(loan.target_item, loan.side),
         "requests": recipe_group_requests(spec["ingredients"], spec["amounts"]),
-        "multiplier": request_multiplier(spec["machine"], spec["craft_time"]),
+        "multiplier": request_multiplier(loan.machine_name, spec["craft_time"]),
     }
     provider = generate_mall_provider_limit_update(
         loan.target_item, loan.provider_position, stock_target,
@@ -523,7 +535,7 @@ def promote_bootstrap_loan_plan(
             },
             {
                 "action_type": "configure_entity",
-                "entity": "assembling-machine-2",
+                "entity": loan.machine_name,
                 "position": {
                     "x": loan.machine_position[0],
                     "y": loan.machine_position[1],

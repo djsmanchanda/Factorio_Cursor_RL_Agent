@@ -8,6 +8,7 @@ import math
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -51,6 +52,7 @@ from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
     locate_mall_cell,
     mall_cell_needs_rebuild,
+    mall_entity_positions,
     mall_slot_count,
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
@@ -105,6 +107,9 @@ from orchestrator.stage_extraction import (
     smelter_count_for_drills,
 )
 from planners.resource_layouts import mine_substation_positions
+from planners.assembler_tiers import (
+    UPGRADE_RESERVE, BaseCapability, entity_upgrade_plan, mall_machine,
+)
 from orchestrator.stage_recovery import repair_existing_ingredient_transport
 from orchestrator.stage_services import (
     StuckError,
@@ -3566,7 +3571,17 @@ def _plan_line(
     shared_provider: bool = False,
 ) -> _LinePlan:
     """Survey the item's current line and decide whether it should be promoted."""
-    spec = LINE_RECIPES[item]
+    declared_spec = LINE_RECIPES[item]
+    capability = BaseCapability(
+        produces_tier2=_production_started(
+            client, surface, force, "assembling-machine-2",
+        ),
+        produces_tier3=_production_started(
+            client, surface, force, "assembling-machine-3",
+        ),
+        stock=live_base.available_items(client, surface, force),
+    )
+    spec = {**declared_spec, "machine": mall_machine(item, capability)}
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
     mall_storage_limit = (
         startup_cap
@@ -3703,6 +3718,7 @@ def _refresh_mall_cell(
                     client, bridge, surface, force, item,
                     list(machine_positions), reference_point, emit,
                     request_multiplier_override=plan.mall_request_multiplier,
+                    machine_name=spec["machine"],
                 ),
             )
         mall_provider = _paired_mall_provider(
@@ -3877,6 +3893,7 @@ def _repair_stalled_line(
         ) and rebuild_incomplete_mall_cell(
             client, bridge, surface, force, item,
             existing.machine_positions[0], reference_point, emit,
+            machine_name=plan.spec["machine"],
         ):
             return None
         # Paired mall cells intentionally use a six-tile machine spacing and
@@ -3920,6 +3937,7 @@ def _repair_stalled_line(
             if rebuild_incomplete_mall_cell(
                 client, bridge, surface, force, item,
                 existing.machine_positions[0], reference_point, emit,
+                machine_name=plan.spec["machine"],
             ):
                 return None
             raise
@@ -4647,7 +4665,7 @@ def _start_bootstrap_loan(
             or recipe in allowed_original_recipes
         )
         and spec.get("set_recipe", True)
-        and spec.get("machine") == "assembling-machine-2"
+        and spec.get("machine") in live_base.ASSEMBLER_TIERS
         and not spec.get("fluid_ingredients")
     ]
     recipes.sort(key=lambda recipe: (
@@ -4694,7 +4712,7 @@ def _start_bootstrap_loan(
             machine = live_base.entity_at(client, surface, machine_position)
             requester = live_base.entity_at(client, surface, requester_position)
             if (
-                not machine or machine["name"] != "assembling-machine-2"
+                not machine or machine["name"] not in live_base.ASSEMBLER_TIERS
                 or not requester or requester["name"] != "requester-chest"
             ):
                 continue
@@ -4708,8 +4726,14 @@ def _start_bootstrap_loan(
             ))
     if not candidates:
         return None
-    _spare, _stocked, original_recipe, _machine, origin, side = min(candidates)
+    _spare, _stocked, original_recipe, machine_position, origin, side = min(candidates)
     requester_position = (origin[0] + 4.5, origin[1] + 1.5)
+    machine_entity = live_base.entity_at(client, surface, machine_position)
+    machine_name = (
+        str(machine_entity["name"])
+        if machine_entity and machine_entity.get("name") in live_base.ASSEMBLER_TIERS
+        else "assembling-machine-1"
+    )
     loan = MallBootstrapLoan(
         original_recipe=original_recipe,
         target_item=target_item,
@@ -4718,6 +4742,7 @@ def _start_bootstrap_loan(
         side=side,
         requester_position=requester_position,
         current_recipe=original_recipe,
+        machine_name=machine_name,
     )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loan, emit,
@@ -4818,6 +4843,7 @@ def _reserve_compact_mall_project(
         preview_mall_allocation(client, surface, item, reference_point)
         if reference_point is not None else None
     )
+    project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
     bill = compact_mall_project_bill(
         item, stock_target=plan.mall_storage_limit,
         stock_gate_target=stock_gate_target,
@@ -4825,6 +4851,7 @@ def _reserve_compact_mall_project(
         request_multiplier_override=plan.mall_request_multiplier,
         side=allocation[1] if allocation is not None else "left",
         shared_provider=getattr(plan, "shared_provider", False),
+        machine_name=project_spec.get("machine"),
     )
     stock = live_base.available_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
@@ -5214,6 +5241,7 @@ def _build_assembled_stage(
             fill_chest=plan.fill_provider,
             request_multiplier_override=plan.mall_request_multiplier,
             shared_provider=getattr(plan, "shared_provider", False),
+            machine_name=spec["machine"],
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -5691,6 +5719,7 @@ def _bootstrap_demand_cell_affordable(
     _origin, side = allocation
     bill = compact_mall_project_bill(
         item, stock_target=max(1, target), side=side, shared_provider=True,
+        machine_name="assembling-machine-1",
     )
     stock = live_base.available_items(client, surface, force)
     available = (
@@ -7200,6 +7229,81 @@ def _prep_core_mall(
     return False
 
 
+def _upgrade_bootstrap_mall(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Self-fund and order in-place tier upgrades for the compact mall.
+
+    The controller starts exclusively from assembler-1s and regular inserters.
+    Once their permanent upgrade producers have demonstrably run, it holds a
+    small construction reserve and consumes only the surplus in exact native
+    bot upgrade orders. Pending orders are excluded from the next survey.
+    """
+    stock = live_base.available_items(client, surface, force)
+    upgrades = (
+        ("assembling-machine-1", "assembling-machine-2"),
+        ("inserter", "fast-inserter"),
+    )
+    for source, target in upgrades:
+        if not _production_started(client, surface, force, target):
+            continue
+        positions = mall_entity_positions(
+            client, surface, force, reference_point, source,
+        )
+        if not positions:
+            continue
+        wanted = len(positions) + UPGRADE_RESERVE
+        held = int(stock.get(target, 0))
+        if held <= UPGRADE_RESERVE:
+            if mall_targets.get(target, 0) < wanted:
+                mall_targets[target] = wanted
+                emit(
+                    f"  MALL UPGRADE STOCK: {len(positions)} {source} await "
+                    f"native replacement; stocking {target} to {wanted}"
+                )
+            return False
+        selected = list(positions[:min(len(positions), held - UPGRADE_RESERVE)])
+        if not selected:
+            return False
+        block = f"bootstrap-mall-{source}-to-{target}"
+        plan = entity_upgrade_plan(selected, source=source, target=target)
+        for action in plan["actions"]:
+            action["block"] = block
+        authorization = {
+            "approved_actions": ["apply_upgrades"],
+            "denied_actions": [],
+            "scope_limits": {
+                "max_count": len(selected),
+                "block_filter": [block],
+            },
+            "authorization_timestamp": datetime.now(timezone.utc).isoformat(),
+            "authorization_source": "policy",
+        }
+        report = load_json(bridge.execute_upgrade_plan(
+            authorization, plan, surface=surface, force=force,
+        ))
+        failed = [
+            action for action in report.get("actions", ())
+            if action.get("status") not in {"success", "skipped"}
+        ]
+        if failed:
+            raise StuckError(
+                f"Native mall upgrade {source} -> {target} rejected "
+                f"{len(failed)}/{len(selected)} exact order(s)",
+                code="mall_upgrade_rejected",
+                classification="bug",
+                details={"source": source, "target": target, "failures": failed},
+            )
+        emit(
+            f"  MALL NATIVE UPGRADE: ordered {len(selected)} exact "
+            f"{source} -> {target} replacement(s); recipes and wiring stay in place"
+        )
+        return True
+    return False
+
+
 def _prep_post_metal_stack_reserves(
     client: RconClient, surface: str, force: str,
     prepped: set[str], mall_targets: dict[str, int],
@@ -7917,6 +8021,11 @@ def run(
                     reference_point, emit,
                 ):
                     continue
+            elif _upgrade_bootstrap_mall(
+                client, bridge, surface, force, mall_targets,
+                reference_point, emit,
+            ):
+                continue
             elif _retrofit_bootstrap_mall_outputs(
                 client, bridge, surface, force, mall_targets,
                 reference_point, emit,

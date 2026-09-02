@@ -40,11 +40,12 @@ def compact_mall_project_bill(
     request_multiplier_override: int | None = None,
     side: str = "left",
     shared_provider: bool = False,
+    machine_name: str | None = None,
 ) -> dict[str, int]:
     """Incremental cell-half bill plus one craft of bootstrap ingredients."""
     spec = LINE_RECIPES[recipe]
     preview = generate_paired_mall_layout(
-        recipe, spec["machine"], spec["ingredients"], spec["amounts"],
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
         (0, 0), side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
@@ -79,6 +80,31 @@ def mall_slot_count(
         recipe != "-"
         for left, right, _requester in states.values()
         for recipe in (left, right)
+    )
+
+
+def mall_entity_positions(
+    client: RconClient, surface: str, force: str, reference_point: Point,
+    entity_name: str,
+) -> tuple[Point, ...]:
+    """Exact, not-already-upgrading entities inside the compact mall district."""
+    origins = _cell_origins(reference_point)
+    min_x = min(origin[0] for origin in origins) - 2
+    min_y = min(origin[1] for origin in origins)
+    max_x = max(origin[0] for origin in origins) + 12
+    max_y = max(origin[1] for origin in origins) + 7
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for _,e in pairs(s.find_entities_filtered{name='" + entity_name
+        + "',force=f,area={{" + str(min_x) + "," + str(min_y) + "},{"
+        + str(max_x) + "," + str(max_y) + "}}}) do "
+        "if not e.to_be_upgraded() then out[#out+1]=e.position.x..':'..e.position.y end end;"
+        "table.sort(out);rcon.print(table.concat(out,','))"
+    )
+    raw = client.command("/sc " + lua).strip()
+    return tuple(
+        (float(pair.split(":", 1)[0]), float(pair.split(":", 1)[1]))
+        for pair in raw.split(",") if pair
     )
 
 
@@ -352,6 +378,7 @@ def rebuild_incomplete_mall_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, machine_position: Point, reference_point: Point,
     emit: Callable[[str], None], *, stock_target: int = 1,
+    machine_name: str | None = None,
 ) -> bool:
     """Regenerate a half-built paired cell's declared plan IN PLACE.
 
@@ -369,7 +396,7 @@ def rebuild_incomplete_mall_cell(
     origin, side = located
     spec = LINE_RECIPES[recipe]
     plan = generate_paired_mall_layout(
-        recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin,
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin,
         side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
@@ -386,6 +413,7 @@ def refresh_paired_mall_requests(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, machine_positions: list[Point], reference_point: Point,
     emit: Callable[[str], None], *, request_multiplier_override: int | None = None,
+    machine_name: str | None = None,
 ) -> bool:
     """Migrate complete paired cells to one request section per machine."""
     spec = LINE_RECIPES[recipe]
@@ -396,7 +424,7 @@ def refresh_paired_mall_requests(
             continue
         origin, side = located
         plan = generate_paired_mall_layout(
-            recipe, spec["machine"], spec["ingredients"], spec["amounts"],
+            recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
             origin, side, product_amount=spec.get("product_amount", 1),
             craft_time=spec["craft_time"],
             set_recipe=spec.get("set_recipe", True),
@@ -429,6 +457,7 @@ def build_compact_mall_stage(
     fill_chest: bool = False,
     request_multiplier_override: int | None = None,
     shared_provider: bool = False,
+    machine_name: str | None = None,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     spec = LINE_RECIPES[recipe]
@@ -448,7 +477,7 @@ def build_compact_mall_stage(
         raise StuckError(f"No assignable slot remains in the compact parts mall for {recipe}")
     origin, side = allocation
     plan = generate_paired_mall_layout(
-        recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
         stock_gate_target=stock_gate_target,

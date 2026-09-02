@@ -148,7 +148,7 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         _loan().group,
     ]
     assert actions.index(requester) < actions.index(next(
-        action for action in actions if action["entity"] == "assembling-machine-2"
+        action for action in actions if action["entity"] == "assembling-machine-1"
     ))
     assert requester["logistic_sections"][0]["group"].startswith(
         "mall-bootstrap:v4:"
@@ -166,7 +166,7 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
     plan = restore_bootstrap_loan_plan(_loan("requester-chest"))
     actions = plan["phases"][0]["actions"]
     requester = next(action for action in actions if action["entity"] == "requester-chest")
-    machine = next(action for action in actions if action["entity"] == "assembling-machine-2")
+    machine = next(action for action in actions if action["entity"] == "assembling-machine-1")
 
     assert requester["clear_logistic_groups"] == [_loan().group]
     assert requester["logistic_sections"][0]["group"] == "mall:copper-cable:right"
@@ -193,7 +193,7 @@ def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
         action for action in actions if action["entity"] == "requester-chest"
     )
     machine = next(
-        action for action in actions if action["entity"] == "assembling-machine-2"
+        action for action in actions if action["entity"] == "assembling-machine-1"
     )
     provider = next(
         action for action in actions
@@ -217,7 +217,8 @@ def test_active_loan_is_recovered_from_requester_tag() -> None:
         def command(self, _command: str) -> str:
             return (
                 "mall-bootstrap:v1:copper-cable:requester-chest:2:right|"
-                "39.5|32.5|iron-gear-wheel|advanced-circuit"
+                "39.5|32.5|assembling-machine-1,iron-gear-wheel|"
+                "assembling-machine-1,advanced-circuit"
             )
 
     assert active_bootstrap_loans(Client(), "nauvis", "player") == (

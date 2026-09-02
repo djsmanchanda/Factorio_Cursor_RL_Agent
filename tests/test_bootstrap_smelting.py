@@ -31,7 +31,7 @@ def test_direct_starter_matches_the_live_reference_stack() -> None:
         "medium-electric-pole",
         "electric-mining-drill",
         "electric-furnace",
-        "fast-inserter",
+        "inserter",
         "passive-provider-chest",
     ]
     assert not any("transport-belt" in action["entity"] for action in actions)
@@ -130,7 +130,7 @@ def test_direct_starter_retirement_keeps_only_its_shared_power_pole() -> None:
     assert {action["entity"] for action in actions} == {
         "electric-mining-drill",
         "electric-furnace",
-        "fast-inserter",
+        "inserter",
         "passive-provider-chest",
     }
     assert all(action["action_type"] == "remove_entity" for action in actions)

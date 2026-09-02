@@ -153,7 +153,7 @@ def generate_direct_smelter(
         },
         {
             "action_type": "place_ghost",
-            "entity": "fast-inserter",
+            "entity": "inserter",
             "position": {"x": positions["inserter"][0], "y": positions["inserter"][1]},
             "direction": _OPPOSITE_DIRECTION[output_direction],
         },
@@ -174,7 +174,7 @@ def generate_direct_smelter(
             },
         }, {
             "action_type": "place_ghost",
-            "entity": "fast-inserter",
+            "entity": "inserter",
             "position": {
                 "x": positions["secondary_inserter"][0],
                 "y": positions["secondary_inserter"][1],

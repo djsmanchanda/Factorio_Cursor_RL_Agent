@@ -147,7 +147,15 @@ These names describe intended responsibilities, not permission to build speculat
   This is recovery after the mall has duplicate cells, not the cold-start
   source: `reduced-v1` supplies exactly two requester chests once per episode
   before production prep, and the material ledger prevents replenishment.
-- Reduced supply begins with a rationed mall. Until assembling-machine-2,
+- Reduced supply begins entirely on assembling-machine-1 and regular inserters;
+  neither upgraded tier is part of the starter contract. Solid compact cells,
+  including the permanent assembling-machine-2 and fast-inserter producers,
+  are assigned tier 1 from the live machine-category catalog. Once those two
+  producers have completed real crafts, the controller stocks exact replacement
+  counts plus a four-item construction reserve and orders native in-place bot
+  upgrades. Pending upgrades are excluded from later batches, and mixed AM1/AM2
+  recipe rows remain one observable line throughout the transition.
+  Until assembling-machine-2,
   fast-inserter, passive-provider-chest, requester-chest, and substation each
   have independent production, low-demand construction items are finite
   batches made by a recoverable recipe loan in an existing mall assembler.

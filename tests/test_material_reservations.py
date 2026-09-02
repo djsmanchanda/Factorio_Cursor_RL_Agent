@@ -1033,7 +1033,7 @@ def test_completed_core_loan_is_promoted_in_place_even_when_seed_is_stocked(
         action for action in actions if action["entity"] == "requester-chest"
     )
     machine = next(
-        action for action in actions if action["entity"] == "assembling-machine-2"
+        action for action in actions if action["entity"] == loan.machine_name
     )
     assert requester["clear_logistic_groups"] == [
         loan.group, "mall:iron-gear-wheel", "mall:iron-gear-wheel:left",
@@ -1168,7 +1168,7 @@ def test_completed_prior_loan_is_restored_before_the_new_batch(
     assert submitted[0][0] == "restore_bootstrap_loan_splitter"
     machine = next(
         action for action in submitted[0][1]["phases"][0]["actions"]
-        if action["entity"] == "assembling-machine-2"
+        if action["entity"] == loan.machine_name
     )
     assert machine["recipe"] == "copper-cable"
     assert any("LOAN RESTORED" in message for message in messages)
@@ -1258,7 +1258,7 @@ def test_consumed_prerequisite_advances_and_persists_its_credit(
     actions = submitted[0]["phases"][0]["actions"]
     machine = next(
         action for action in actions
-        if action["entity"] == "assembling-machine-2"
+        if action["entity"] == loan.machine_name
     )
     requester = next(
         action for action in actions if action["entity"] == "requester-chest"
@@ -1369,7 +1369,7 @@ def test_rotating_loan_restores_and_defers_before_missing_chemical_rung(
     ]
     restored_machine = next(
         action for action in actions(submitted[0][1])
-        if action.get("entity") == "assembling-machine-2"
+        if action.get("entity") == loan.machine_name
     )
     assert restored_machine["recipe"] == "copper-cable"
     assert deferred.value.code == "chemical_capability_handoff"
@@ -1563,7 +1563,7 @@ def test_optional_spares_do_not_expand_prerequisites_before_blocking_bill(
     actions = submitted[0]["phases"][0]["actions"]
     machine = next(
         action for action in actions
-        if action["entity"] == "assembling-machine-2"
+        if action["entity"] == loan.machine_name
     )
     requester = next(
         action for action in actions if action["entity"] == "requester-chest"

@@ -261,6 +261,7 @@ def generate_paired_mall_layout(
     fill_chest: bool = False,
     request_multiplier_override: int | None = None,
     shared_provider: bool = False,
+    inserter_type: str | None = "inserter",
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -314,11 +315,15 @@ def generate_paired_mall_layout(
          "clear_logistic_groups": [recipe_group_name(recipe)],
          "logistic_sections": [section]},
         {"action_type": "place_entity",
-         "entity": compact_input_inserter(machine, ingredients, amounts, craft_time),
+         "entity": inserter_type or compact_input_inserter(
+             machine, ingredients, amounts, craft_time,
+         ),
          "position": {"x": input_x, "y": oy + 1.5},
          "direction": input_direction},
         {"action_type": "place_entity",
-         "entity": compact_output_inserter(machine, product_amount, craft_time),
+         "entity": inserter_type or compact_output_inserter(
+             machine, product_amount, craft_time,
+         ),
          "position": {"x": output_x, "y": provider_y},
          "direction": output_direction},
         {"action_type": "place_entity", "entity": "passive-provider-chest",

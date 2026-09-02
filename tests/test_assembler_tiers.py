@@ -28,9 +28,12 @@ _AM1, _AM2, _AM3 = TIERS
 # Slot counts as the live game reports them; the whole point is that these are
 # read, not assumed.
 _LIVE_MACHINES = {"machines": [
-    {"name": _AM1, "ingredient_count": 2, "crafting_speed": 0.5, "categories": ["crafting"]},
-    {"name": _AM2, "ingredient_count": 4, "crafting_speed": 0.75, "categories": ["crafting"]},
-    {"name": _AM3, "ingredient_count": 6, "crafting_speed": 1.25, "categories": ["crafting"]},
+    {"name": _AM1, "ingredient_count": 65535, "crafting_speed": 0.5,
+     "categories": ["advanced-crafting", "crafting", "parameters"]},
+    {"name": _AM2, "ingredient_count": 65535, "crafting_speed": 0.75,
+     "categories": ["advanced-crafting", "crafting", "crafting-with-fluid", "parameters"]},
+    {"name": _AM3, "ingredient_count": 65535, "crafting_speed": 1.25,
+     "categories": ["advanced-crafting", "crafting", "crafting-with-fluid", "parameters"]},
 ]}
 
 _BOOTSTRAP = BaseCapability()
@@ -59,15 +62,14 @@ def test_a_narrow_line_takes_tier_one_while_tier_two_is_finite() -> None:
     assert line_machine("copper-cable", _BOOTSTRAP) == _AM1
 
 
-def test_a_recipe_too_wide_for_tier_one_takes_tier_two_anyway() -> None:
-    """Slots are physics, not policy: a three-ingredient recipe cannot run on a
-    two-slot machine however scarce the alternative is."""
+def test_a_three_ingredient_solid_recipe_starts_on_tier_one() -> None:
+    """Current Factorio tier one exposes enough slots for ordinary solids."""
     assert len(LINE_RECIPES["inserter"]["ingredients"]) == 3
-    assert line_machine("inserter", _BOOTSTRAP) == _AM2
+    assert line_machine("inserter", _BOOTSTRAP) == _AM1
 
 
 def test_the_mall_gets_first_claim_on_tier_two() -> None:
-    assert mall_machine("inserter", _BOOTSTRAP) == _AM2
+    assert mall_machine("inserter", _BOOTSTRAP) == _AM1
 
 
 # --- phase 2: the base makes its own ---------------------------------------

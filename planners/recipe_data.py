@@ -29,8 +29,8 @@ LINE_RECIPES: Dict[str, dict] = {
     # player-force export (tests/fixtures/player_recipe_catalog.json) rather
     # than from memory -- Factorio 2.0 Space Age recipes differ from 1.1, and
     # tests/test_recipe_catalog_contract.py re-checks them against that export.
-    # transport-belt's category is "pressing" and electronic-circuit's is
-    # "electronics"; assembling-machine-2 supports both (verified live).
+    # Machine categories are refreshed from the current live catalog below;
+    # current Factorio exposes these solid recipes to assembling-machine-1.
     "transport-belt": {
         "machine": "assembling-machine-2", "ingredients": ["iron-gear-wheel", "iron-plate"],
         "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
@@ -121,11 +121,9 @@ _GENERIC_ASSEMBLER_CATEGORIES = {
 # does not care how many ingredients it asks for. A belt-fed line does: it
 # carries two main lanes and one auxiliary, and refuses a fourth.
 #
-# assembling-machine-2 is here because every line in the system runs on one
-# (LINE_RECIPES[*]["machine"]), and its recipe takes four ingredients -- so
-# without this the agent could never build the machine it builds everything
-# with, and depended on the player having stocked them by hand. Same for
-# bulk-inserter, which the rate-driven selector reaches for on busy lines.
+# assembling-machine-2 stays mall-only because the base must manufacture its
+# own upgrade stock before replacing tier-1 cells. The rotating tier-1 mall can
+# make it; no gifted tier-2 machine is part of the bootstrap contract.
 MALL_ONLY_RECIPES = {
     "chemical-plant", "oil-refinery", "pumpjack",
     "assembling-machine-2", "bulk-inserter", "flying-robot-frame",
@@ -143,7 +141,6 @@ def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
         products = recipe.get("products", [])
         if (
             not isinstance(name, str)
-            or name in LINE_RECIPES
             or not recipe.get("enabled")
             or not recipe.get("supported")
             or recipe.get("category") not in _GENERIC_ASSEMBLER_CATEGORIES
@@ -158,8 +155,12 @@ def install_catalog_line_recipes(catalog: Mapping) -> tuple[str, ...]:
             or products[0].get("name") != name
         ):
             continue
+        if name in LINE_RECIPES:
+            LINE_RECIPES[name]["category"] = recipe.get("category", "crafting")
+            continue
         spec = {
             "machine": "assembling-machine-2",
+            "category": recipe.get("category", "crafting"),
             "ingredients": [part["name"] for part in ingredients],
             "amounts": [part["amount"] for part in ingredients],
             "product_amount": products[0]["amount"],
@@ -449,3 +450,19 @@ def machine_holds(machine: str, ingredient_count: int) -> bool:
     if capability is None:
         return False
     return capability["ingredient_count"] >= ingredient_count
+
+
+def machine_supports_recipe(machine: str, recipe: str) -> bool:
+    """Whether a live machine has both the slots and category for a recipe."""
+    spec = LINE_RECIPES[recipe]
+    capability = MACHINE_CAPABILITIES.get(machine)
+    if capability is None:
+        return False
+    category = spec.get(
+        "category",
+        "crafting-with-fluid" if spec.get("fluid_ingredients") else "crafting",
+    )
+    return (
+        machine_holds(machine, len(spec.get("ingredients", ())))
+        and category in capability.get("categories", ())
+    )

@@ -13,6 +13,9 @@ from planners.recipe_data import DRILL_MINING_AREAS, drill_mining_reach
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+ASSEMBLER_TIERS = (
+    "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
+)
 
 # Entities safe to auto-clear when they block a planned placement: incidental
 # map clutter a player would just chop/mine through without a second thought.
@@ -50,8 +53,16 @@ class DirectPlateStarter:
     additional_drill_positions: tuple[Point, ...] = ()
 
 
-def find_line(client: RconClient, surface: str, force: str, recipe: str, machine: str) -> LineState | None:
-    """Every machine of `machine` type with `recipe` set, anywhere on the base.
+def find_line(
+    client: RconClient, surface: str, force: str, recipe: str, machine: str,
+    *, exact_machine: bool = False, exclude_upgrade_ordered: bool = False,
+) -> LineState | None:
+    """Every compatible machine with `recipe` set, anywhere on the base.
+
+    An assembler-tier request spans all three native tiers so an in-place bot
+    upgrade never makes a configured row disappear from controller telemetry.
+    Non-assemblers remain exact; callers may request an exact assembler tier
+    for upgrade inventory with ``exact_machine=True``.
 
     A recipe counts as "already produced" only when at least one such machine
     exists AND is not sitting idle for a structural reason (no_power,
@@ -59,15 +70,25 @@ def find_line(client: RconClient, surface: str, force: str, recipe: str, machine
     not yet verified working" -- callers decide what to do with a struggling
     line; this just reports what's there).
     """
+    machine_names = (
+        (machine,)
+        if exact_machine or machine not in ASSEMBLER_TIERS
+        else ASSEMBLER_TIERS
+    )
+    names = "{" + ",".join(f"'{name}'" for name in machine_names) + "}"
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=0;local w=0;local made=0;local pos={};"
-        "local machines=s.find_entities_filtered{name='" + machine + "',force=f};"
+        "local wanted=" + names + ";local machines={};"
+        "for _,name in pairs(wanted) do for _,e in pairs(s.find_entities_filtered{name=name,force=f}) do "
+        "machines[#machines+1]=e end end;"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
-        "if g.ghost_name=='" + machine + "' then table.insert(machines,g) end end;"
+        "for _,name in pairs(wanted) do if g.ghost_name==name then table.insert(machines,g) end end end;"
         "for _,e in pairs(machines) do "
         "local ok,r=pcall(function() return e.get_recipe() end);"
-        "if ok and r and r.name=='" + recipe + "' then n=n+1;"
+        "if ok and r and r.name=='" + recipe + "' and ("
+        + ("e.type=='entity-ghost' or not e.to_be_upgraded()" if exclude_upgrade_ordered else "true")
+        + ") then n=n+1;"
         "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
         "local okp,p=pcall(function() return e.products_finished end);"
         "if okp and type(p)=='number' then made=made+p end;"
@@ -196,7 +217,7 @@ def direct_plate_starter(
         "local dx,dy=v[2],v[3];local fp={d.position.x+3*dx,d.position.y+3*dy};"
         "local ip={d.position.x+5*dx,d.position.y+5*dy};"
         "local cp={d.position.x+6*dx,d.position.y+6*dy};"
-        "if furnace_ok(fp) and named(ip,'fast-inserter') "
+        "if furnace_ok(fp) and named(ip,'inserter') "
         "and named(cp,'passive-provider-chest') then "
         "local side=0;for _,ps in pairs({-1,1}) do "
         "local px,py=dy*ps,-dx*ps;"
@@ -213,7 +234,7 @@ def direct_plate_starter(
         "local spp={sx+2*px+2*py*side,sy+2*py-2*px*side};"
         "local sdri=named({sx,sy},'electric-mining-drill');"
         "extra=sdri and sdri.direction==sd and furnace_ok(sf) and "
-        "named(si,'fast-inserter') and named(spp,'medium-electric-pole')~=nil;"
+        "named(si,'inserter') and named(spp,'medium-electric-pole')~=nil;"
         "else sx,sy=fp[1]-3*px,fp[2]-3*py;"
         "local sdri=named({sx,sy},'electric-mining-drill');"
         "extra=sdri and sdri.direction==sd and named({fp[1]-4*px+3*dx,"
@@ -286,7 +307,7 @@ def direct_plate_starter_site(
         "local cp={p.x+6*dx,p.y+6*dy};"
         "if can('electric-mining-drill',p,v[4],1.4) "
         "and can('electric-furnace',fp,nil,1.4) "
-        "and can('fast-inserter',ip,nil,0.4) "
+        "and can('inserter',ip,nil,0.4) "
         "and can('passive-provider-chest',cp,nil,0.4) then "
         "for _,side in pairs({1,-1}) do local px,py=dy*side,-dx*side;"
         "local pp={p.x+2*dx+2*px,p.y+2*dy+2*py};"
@@ -297,7 +318,7 @@ def direct_plate_starter_site(
         "local sp=dual and {cp[1]+6*dx,cp[2]+6*dy} or {fp[1]-3*px,fp[2]-3*py};"
         "local extra=not two or (mines_only(sp) and can('electric-mining-drill',sp,sd,1.4) "
         "and (not dual or (can('electric-furnace',{cp[1]+3*dx,cp[2]+3*dy},nil,1.4) "
-        "and can('fast-inserter',{cp[1]+dx,cp[2]+dy},nil,0.4) "
+        "and can('inserter',{cp[1]+dx,cp[2]+dy},nil,0.4) "
         "and can('medium-electric-pole',{sp[1]+2*px+2*py*side,sp[2]+2*py-2*px*side},nil,0.4))) "
         "and (dual or can('medium-electric-pole',{fp[1]-4*px+3*dx,fp[2]-4*py+3*dy},nil,0.4)));"
         "if can('medium-electric-pole',pp,nil,0.4) and extra then "
