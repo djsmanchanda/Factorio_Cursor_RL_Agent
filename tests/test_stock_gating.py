@@ -171,6 +171,7 @@ def test_real_build_uses_the_reserve_for_both_the_bar_and_gate(monkeypatch) -> N
         promoted_count=None,
     )
     monkeypatch.setattr(builder, "_ingredient_sources", lambda *_a, **_k: {})
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_args: True)
 
     def capture(*_args, **kwargs) -> None:
         observed.update(kwargs)
@@ -209,6 +210,9 @@ def test_ensure_produced_preserves_requirement_and_capacity_to_the_build(
     monkeypatch.setattr(builder, "_plan_line", planned)
     monkeypatch.setattr(builder, "_refresh_mall_cell", refreshed)
     monkeypatch.setattr(builder, "_build_assembled_stage", built)
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_args: False,
+    )
 
     result = builder.ensure_produced(
         object(), object(), "nauvis", "player", "transport-belt",

@@ -1353,10 +1353,10 @@ def transport_occupancy_snapshot(
 def available_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
     """Everything the force is holding in containers on this surface.
 
-    This is the real build budget: construction bots can only revive a ghost
-    from material that exists somewhere they can reach. Planning against an
-    item the base does not have produces ghosts that sit forever -- observed
-    live when fast-transport-belt ran to zero mid-build.
+    This broad observation includes requester/buffer work-in-progress and is
+    suitable for production progress and total-stock diagnostics. New
+    construction and consumers must use ``transferable_items`` instead;
+    requester-held ingredients cannot fund another project.
     """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];local t={};"
@@ -1365,6 +1365,44 @@ def available_items(client: RconClient, surface: str, force: str) -> dict[str, i
         "if inv then for _,it in pairs(inv.get_contents()) do "
         "t[it.name]=(t[it.name] or 0)+it.count end end end;"
         "local o={};for n,c in pairs(t) do o[#o+1]=n..'='..c end;rcon.print(table.concat(o,','))"
+    )
+    raw = _sc(client, lua)
+    if not raw:
+        return {}
+    counts: dict[str, int] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        name, _, count = pair.partition("=")
+        counts[name] = int(count)
+    return counts
+
+
+def transferable_items(
+    client: RconClient, surface: str, force: str,
+) -> dict[str, int]:
+    """Stock that can fund a new consumer or construction project.
+
+    Requester and buffer inventories are work-in-progress already assigned to
+    another consumer. Counting them as free stock let a finite fast-inserter
+    cell pull every regular inserter into its requester while the refinery
+    preflight continued to report those same items as a valid construction
+    budget. Ordinary, passive-provider, and storage containers remain
+    transferable: the controller can publish ordinary-container stock through
+    a stage provider when the target network needs it.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local t={};"
+        "for _,c in pairs(s.find_entities_filtered{"
+        "type={'container','logistic-container'},force=f}) do "
+        "local mode=nil;pcall(function() mode=c.prototype.logistic_mode end);"
+        "if mode==nil or mode=='passive-provider' or mode=='storage' then "
+        "local inv=c.get_inventory(defines.inventory.chest);"
+        "if inv then for _,it in pairs(inv.get_contents()) do "
+        "t[it.name]=(t[it.name] or 0)+it.count end end end end;"
+        "local o={};for n,c in pairs(t) do o[#o+1]=n..'='..c end;"
+        "rcon.print(table.concat(o,','))"
     )
     raw = _sc(client, lua)
     if not raw:
@@ -1389,18 +1427,7 @@ def transferable_item_count(
     only draws from ordinary, passive-provider, and storage containers.  Use
     the same source contract before placing a temporary destination chest.
     """
-    lua = (
-        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local total=0;"
-        "for _,c in pairs(s.find_entities_filtered{"
-        "type={'container','logistic-container'},force=f}) do "
-        "local mode=nil;pcall(function() mode=c.prototype.logistic_mode end);"
-        "if mode==nil or mode=='passive-provider' or mode=='storage' then "
-        "local inv=c.get_inventory(defines.inventory.chest);"
-        "if inv then total=total+inv.get_item_count('" + item + "') end end end;"
-        "rcon.print(tostring(total))"
-    )
-    return int(_sc(client, lua))
+    return transferable_items(client, surface, force).get(item, 0)
 
 
 def roboports_needing_power(

@@ -224,7 +224,10 @@ def assert_affordable(
     required = _ghost_materials(plan)
     if not required:
         return
-    stock = live_base.available_items(client, surface, force)
+    # Requester/buffer contents are already committed work-in-progress. They
+    # cannot revive construction ghosts or be moved into a stage provider, so
+    # accepting them here creates a false-ready plan that no bot can finish.
+    stock = live_base.transferable_items(client, surface, force)
     ledger = active_material_ledger()
     if ledger is not None:
         project = ledger.projects.get(name)

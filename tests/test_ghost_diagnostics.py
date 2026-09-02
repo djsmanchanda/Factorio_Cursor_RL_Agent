@@ -391,6 +391,41 @@ def test_material_remedy_raises_shortage_when_base_lacks_item(monkeypatch) -> No
 
     assert raised.value.required == {"stone-brick": 8}
 
+
+def test_transferable_stock_excludes_consumer_work_in_progress() -> None:
+    client = _Client("inserter=7,transport-belt=12")
+
+    assert live_base.transferable_items(
+        client, "nauvis", "player",
+    ) == {"inserter": 7, "transport-belt": 12}
+    command = client.commands[0]
+    assert "mode=='passive-provider'" in command
+    assert "mode=='storage'" in command
+    assert "mode=='requester'" not in command
+    assert "mode=='buffer'" not in command
+
+
+def test_construction_affordability_rejects_requester_held_stock(
+    monkeypatch,
+) -> None:
+    """Twelve inserters in a fast-inserter requester are not a budget that
+    can revive ten refinery ghosts."""
+    monkeypatch.setattr(
+        stage_services.live_base, "transferable_items", lambda *_args: {},
+    )
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "inserter",
+    }]}]}
+
+    with pytest.raises(MaterialShortage) as raised:
+        stage_services.assert_affordable(
+            object(), "nauvis", "player", plan, "iron-refinery",
+            lambda _message: None,
+        )
+
+    assert raised.value.required == {"inserter": 1}
+    assert raised.value.available == {}
+
 def test_coverage_remedy_targets_the_stranded_ghost_not_stage_origin(monkeypatch) -> None:
     targets = []
     monkeypatch.setattr(
@@ -818,7 +853,10 @@ def test_missing_feed_on_a_mall_cell_rebuilds_instead_of_dying(monkeypatch) -> N
 
     plan = builder._LinePlan(
         existing=_Existing(),
-        spec={"ingredients": [], "amounts": []},
+        spec={
+            "machine": "assembling-machine-1",
+            "ingredients": [], "amounts": [],
+        },
         production_target=1,
         mall_storage_limit=0,
         fill_provider=False,

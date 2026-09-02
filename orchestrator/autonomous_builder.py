@@ -3594,7 +3594,13 @@ def _plan_line(
         )
     existing = live_base.find_line(client, surface, force, item, spec["machine"])
     mall_request_multiplier = _mall_request_multiplier(
-        client, surface, force, item, spec,
+        client, surface, force, item, spec, mall_storage_limit,
+        finite_batch=(
+            not upgrade_bootstrap
+            and _is_pre_core_temporary_mall_item(
+                client, surface, force, item,
+            )
+        ),
     )
     demand = live_intermediate_demand(client, surface, force, item)
     # Every machine busy means this cell cannot go faster, whatever measured
@@ -4021,15 +4027,35 @@ _STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
 
 def _mall_request_multiplier(
     client: RconClient, surface: str, force: str, item: str, spec: dict,
+    output_target: int, *, finite_batch: bool = False,
 ) -> int | None:
-    """Keep belt-component requester buffers small while starter metal is scarce."""
+    """Keep startup requesters from claiming more inputs than their batch.
+
+    Permanent cells keep a throughput-sized ten-second input window. Before
+    core-mall readiness, every non-anchor output is finite; its requester may
+    therefore ask for at most the crafts needed by that bounded batch. This
+    prevents a one-item fast-inserter construction need from warehousing ten
+    or more regular inserters needed by an already planned refinery.
+    """
+    standard = standard_mall_request_multiplier(
+        spec["machine"], spec["craft_time"],
+    )
     if item == "transport-belt":
-        return 30
-    if item not in _STARTUP_MALL_REQUESTER_ITEMS:
-        return None
-    if not _metal_starter_transition_complete(client, surface, force):
-        return 2
-    return standard_mall_request_multiplier(spec["machine"], spec["craft_time"])
+        multiplier = 30
+    elif (
+        item in _STARTUP_MALL_REQUESTER_ITEMS
+        and not _metal_starter_transition_complete(client, surface, force)
+    ):
+        multiplier = 2
+    else:
+        multiplier = standard
+    if finite_batch:
+        product_amount = max(1, int(spec.get("product_amount", 1)))
+        batch_crafts = max(1, math.ceil(output_target / product_amount))
+        return min(multiplier, batch_crafts)
+    if item == "transport-belt" or item in _STARTUP_MALL_REQUESTER_ITEMS:
+        return multiplier
+    return None
 
 
 def _startup_mall_item_cap(
@@ -4853,7 +4879,7 @@ def _reserve_compact_mall_project(
         shared_provider=getattr(plan, "shared_provider", False),
         machine_name=project_spec.get("machine"),
     )
-    stock = live_base.available_items(client, surface, force)
+    stock = live_base.transferable_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
         client, surface, force, bill, stock,
     )
@@ -4918,7 +4944,7 @@ def _ingredient_sources(
     spec, promote_to_line = plan.spec, plan.promote_to_line
     sources: dict[str, Point] = {}
     stocked = (
-        live_base.available_items(client, surface, force)
+        live_base.transferable_items(client, surface, force)
         if may_consume_stocked_inputs(
             upgrade_bootstrap=upgrade_bootstrap, promote_to_line=promote_to_line,
         ) else {}

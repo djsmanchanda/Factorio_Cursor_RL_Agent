@@ -123,6 +123,7 @@ def test_affordability_cannot_spend_stock_reserved_by_another_project(
     )
     set_active_material_ledger(ledger)
     monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "passive-provider-chest",
     }]}]}
@@ -144,6 +145,7 @@ def test_reused_submission_name_gets_a_fresh_transient_reservation(
     stock = {"substation": 2}
     set_active_material_ledger(ledger)
     monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "substation",
     }]}]}
@@ -303,6 +305,7 @@ def test_missing_self_seed_after_profile_application_is_typed_bug(
         lambda *_a, **_k: {"passive-provider-chest": 1},
     )
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
     monkeypatch.setattr(builder, "_material_sources_and_rates", lambda *_a: ({}, {}))
     monkeypatch.setattr(builder, "_has_producer", lambda *_a: False)
     plan = SimpleNamespace(
@@ -330,6 +333,7 @@ def test_missing_self_seed_starts_a_borrowed_mall_producer(
         lambda *_a, **_k: {"requester-chest": 1},
     )
     monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
     monkeypatch.setattr(builder, "_material_sources_and_rates", lambda *_a: ({}, {}))
     monkeypatch.setattr(
         builder, "_start_bootstrap_loan",
@@ -903,6 +907,9 @@ def test_steel_chest_upgrade_is_routed_to_the_temporary_mall(monkeypatch) -> Non
         return True
 
     monkeypatch.setattr(builder, "_rationed_mall_batch", rationed)
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_args: False,
+    )
 
     with pytest.raises(builder.ProductionPrerequisiteDeferred):
         builder.ensure_produced(

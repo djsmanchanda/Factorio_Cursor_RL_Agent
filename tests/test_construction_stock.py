@@ -357,26 +357,49 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: False,
     )
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_args: False,
+    )
     spec = {"machine": "assembling-machine-2", "craft_time": 1.0}
 
     assert builder._mall_request_multiplier(
-        object(), "nauvis", "player", "splitter", spec,
+        object(), "nauvis", "player", "splitter", spec, 50,
     ) == 2
     assert builder._mall_request_multiplier(
-        object(), "nauvis", "player", "electronic-circuit", spec,
+        object(), "nauvis", "player", "electronic-circuit", spec, 200,
     ) is None
     assert builder._mall_request_multiplier(
-        object(), "nauvis", "player", "transport-belt", spec,
+        object(), "nauvis", "player", "transport-belt", spec, 200,
     ) == 30
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
     assert builder._mall_request_multiplier(
-        object(), "nauvis", "player", "splitter", spec,
+        object(), "nauvis", "player", "splitter", spec, 50,
     ) == 8
     assert builder._mall_request_multiplier(
-        object(), "nauvis", "player", "transport-belt", spec,
+        object(), "nauvis", "player", "transport-belt", spec, 200,
     ) == 30
+
+
+def test_pre_core_finite_requester_cannot_hoard_construction_inputs(
+    monkeypatch,
+) -> None:
+    """The failed AM1 run needed one fast inserter plus two spares, but its
+    throughput buffer pulled all 12 regular inserters into the requester and
+    stranded the refinery's final 10 ghosts."""
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_args: True,
+    )
+    spec = {
+        "machine": "assembling-machine-1", "craft_time": 0.5,
+        "product_amount": 1,
+    }
+
+    assert builder._mall_request_multiplier(
+        object(), "nauvis", "player", "fast-inserter", spec, 3,
+        finite_batch=True,
+    ) == 3
 
 
 def test_automation_science_repairs_an_unhealthy_metal_transition(monkeypatch) -> None:

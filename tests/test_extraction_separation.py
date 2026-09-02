@@ -1020,7 +1020,8 @@ def test_find_line_includes_configured_machine_ghosts() -> None:
     )
 
     assert line is not None and line.machine_count == 2 and line.working_count == 0
-    assert "ghost_name=='electric-furnace'" in client.commands[0]
+    assert "local wanted={'electric-furnace'}" in client.commands[0]
+    assert "g.ghost_name==name" in client.commands[0]
 
 
 def test_find_line_parses_a_proven_machine_with_no_reported_position() -> None:

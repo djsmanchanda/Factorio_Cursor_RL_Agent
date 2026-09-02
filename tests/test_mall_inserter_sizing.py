@@ -64,12 +64,13 @@ def test_a_trickle_recipe_still_gets_a_plain_inserter() -> None:
     ) == "inserter"
 
 
-def test_the_built_cell_uses_the_sized_inserters() -> None:
+def test_auto_sized_cell_uses_the_sized_inserters() -> None:
     spec = LINE_RECIPES["electronic-circuit"]
     plan = generate_paired_mall_layout(
         "electronic-circuit", spec["machine"], spec["ingredients"], spec["amounts"],
         (100, 100), "left", stock_target=6,
         product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
+        inserter_type=None,
     )
     entities = {
         action["entity"]

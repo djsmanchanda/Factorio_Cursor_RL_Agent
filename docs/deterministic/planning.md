@@ -163,6 +163,12 @@ These names describe intended responsibilities, not permission to build speculat
   temporary product with earlier contents in the same provider, and restores
   the original recipe and requests after the batch. Permanent one-recipe mall
   slots resume only after those five core producers are live.
+  A finite cell's requester buffer is capped to the crafts in its current
+  need-plus-margin batch; it may not use the normal throughput window to
+  warehouse construction components. Requester and buffer inventories are
+  committed work-in-progress, not transferable construction stock: blueprint
+  affordability and new-cell ingredient sourcing count only ordinary,
+  passive-provider, and storage containers.
   Exactly one recipe loan may be active at a time. A request for a different
   batch services the active loan through measured completion and restoration,
   defers the new batch, and retries it on the next pass; a busy or completed
