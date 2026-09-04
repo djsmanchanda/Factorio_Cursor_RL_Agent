@@ -253,8 +253,14 @@ def _bounded_shortest_path(
     blocked: set[tuple[int, int]],
     bounds: tuple[int, int, int, int],
     tunnelable: set[tuple[int, int]] = frozenset(),
+    diveable: set[tuple[int, int]] = frozenset(),
 ) -> list[tuple[int, int]]:
-    """Deterministic bounded A* path with straight terrain crossings."""
+    """Deterministic bounded A* path with straight terrain crossings.
+
+    `diveable` tiles (blocked hard obstacles such as poles) are walkable but
+    only in a straight run, exactly like water: the emitter later bridges
+    each such run with a pipe-to-ground pair instead of landfilling it.
+    """
     min_x, max_x, min_y, max_y = bounds
     frontier: list[tuple[int, int, int, int, str, int]] = []
     state_type = tuple[tuple[int, int], str | None, int]
@@ -263,6 +269,7 @@ def _bounded_shortest_path(
     vectors = {"north": (0, -1), "west": (-1, 0),
                "east": (1, 0), "south": (0, 1)}
     headings = {vector: heading for heading, vector in vectors.items()}
+    tunnel = set(tunnelable) | set(diveable)
     for start in sorted(starts):
         state = (start, None, 0)
         costs[state] = 0
@@ -284,19 +291,19 @@ def _bounded_shortest_path(
                 path.append(cursor[0])
             return list(reversed(path))
         directions = tuple(vectors.values())
-        if current in tunnelable and heading is not None:
+        if current in tunnel and heading is not None:
             directions = (vectors[heading],)
         for dx, dy in directions:
             nxt = x + dx, y + dy
             if not (min_x <= nxt[0] <= max_x and min_y <= nxt[1] <= max_y):
                 continue
-            if nxt in blocked:
+            if nxt in blocked and nxt not in diveable:
                 continue
-            if current in tunnelable and (dx, dy) != vectors[heading]:
+            if current in tunnel and (dx, dy) != vectors[heading]:
                 continue
             next_heading = heading
             next_run = terrain_run
-            if nxt in tunnelable:
+            if nxt in tunnel:
                 next_heading = next_heading or headings[(dx, dy)]
                 next_run += 1
             else:
@@ -343,26 +350,104 @@ def _terrain_run_tunnels(
         cursor = next_index + 1
 
 
+def _split_dive_run(
+    path: list[tuple[int, int]], start: int, end: int, *,
+    water: set[tuple[int, int]], blocked: set[tuple[int, int]],
+    surface_reserved: set[tuple[int, int]],
+) -> tuple[list[tuple[tuple[int, int], tuple[int, int]]], set[tuple[int, int]]]:
+    """Bridge one blocked run with pipe-to-ground spans and no landfill.
+
+    The run's tiles stay buried (excluded from the purity segment, exactly
+    like terrain tunnels), so the pair dives under poles, machines, or
+    planned footprints instead of dying on them (2026-09-05: the crude
+    pipeline ended two runs on a mid-pass power pole at -297.5,-57.5).
+    Span endpoints must be placeable surface tiles -- never blocked, never
+    an existing same-fluid tile (a ptg landing on a pipe ghost would
+    collide in the executor); water endpoints take a landfill ghost like
+    terrain crossings. Fewest spans win (DP), so a long run never strands
+    itself past MAX_UNDERGROUND_SPAN.
+    """
+    if start == 0 or end == len(path):
+        raise ValueError("A dive needs clear land on both sides")
+    positions = [path[start - 1]] + path[start:end] + [path[end]]
+    placeable = [
+        point not in blocked and point not in surface_reserved
+        for point in positions
+    ]
+    if not placeable[0] or not placeable[-1]:
+        raise ValueError("A dive needs placeable pipe-to-ground endpoints")
+    # Tile the run with contiguous spans: the next span starts on the tile
+    # AFTER the previous one ends, so no two pairs share (and fight over)
+    # one endpoint tile -- the same rule the terrain splitter enforces.
+    count: list[float] = [float("inf")] * len(positions)
+    first: list[int] = [-1] * len(positions)
+    for e in range(1, len(positions)):
+        if not placeable[e]:
+            continue
+        for s in range(0, e):
+            if s > 0 and (not placeable[s] or count[s - 1] == float("inf")):
+                continue
+            try:
+                validate_underground_span(positions[s], positions[e])
+            except ValueError:
+                continue
+            candidate = 1 if s == 0 else count[s - 1] + 1
+            if candidate < count[e]:
+                count[e], first[e] = candidate, s
+    if count[-1] == float("inf"):
+        raise ValueError(
+            "Dive run has no placeable pipe-to-ground span sequence within "
+            f"{MAX_UNDERGROUND_SPAN} tiles"
+        )
+    tunnels: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    landfill: set[tuple[int, int]] = set()
+    cursor = len(positions) - 1
+    while cursor > 0:
+        entry, exit = positions[first[cursor]], positions[cursor]
+        tunnels.append((entry, exit))
+        for point in (entry, exit):
+            if point in water:
+                landfill.add(point)
+        cursor = first[cursor] - 1
+    return sorted(tunnels), landfill
+
+
 def _surface_path_and_tunnels(
-    path: list[tuple[int, int]], tunnelable: set[tuple[int, int]],
+    path: list[tuple[int, int]], tunnelable: set[tuple[int, int]], *,
+    diveable: set[tuple[int, int]] = frozenset(),
+    blocked: set[tuple[int, int]] = frozenset(),
+    surface_reserved: set[tuple[int, int]] = frozenset(),
 ) -> tuple[
     list[tuple[int, int]],
     list[tuple[tuple[int, int], tuple[int, int]]],
     set[tuple[int, int]],
 ]:
-    """Replace terrain runs with pipe-to-ground pairs and landfill endpoints."""
-    surface = {point for point in path if point not in tunnelable}
+    """Replace terrain runs with pipe-to-ground pairs and landfill endpoints.
+
+    Runs over hard blockers take the same treatment without landfill (see
+    _split_dive_run); pure water runs keep the legacy splitter so their
+    exact spans never change.
+    """
+    tunnel = set(tunnelable) | set(diveable)
+    dive = set(diveable)
+    surface = {point for point in path if point not in tunnel}
     tunnels: list[tuple[tuple[int, int], tuple[int, int]]] = []
     landfill: set[tuple[int, int]] = set()
     index = 0
     while index < len(path):
-        if path[index] not in tunnelable:
+        if path[index] not in tunnel:
             index += 1
             continue
         start = index
-        while index < len(path) and path[index] in tunnelable:
+        while index < len(path) and path[index] in tunnel:
             index += 1
-        run_tunnels, run_landfill = _terrain_run_tunnels(path, start, index)
+        if set(path[start:index]) & dive:
+            run_tunnels, run_landfill = _split_dive_run(
+                path, start, index, water=set(tunnelable),
+                blocked=blocked, surface_reserved=surface_reserved,
+            )
+        else:
+            run_tunnels, run_landfill = _terrain_run_tunnels(path, start, index)
         tunnels.extend(run_tunnels)
         landfill.update(run_landfill)
     surface.update(landfill)
@@ -398,8 +483,18 @@ def _chain_network(
     search_margin: int,
     *,
     allow_tunnels: bool,
+    allow_dives: bool = False,
+    diveable_tiles: set[tuple[int, int]] = frozenset(),
+    surface_reserved: set[tuple[int, int]] = frozenset(),
 ) -> tuple[list[tuple[int, int]], list[tuple[tuple[int, int], tuple[int, int]]]]:
-    """Join targets to one deterministic network, optionally crossing terrain."""
+    """Join targets to one deterministic network, optionally crossing terrain.
+
+    With `allow_dives`, `diveable_tiles` (poles, machines, planned
+    footprints -- physical obstacles only, never another fluid's network)
+    become walkable in straight runs that the emitter bridges with
+    landfill-free pipe-to-ground spans. Foreign-fluid tiles stay
+    impassable; span endpoints additionally avoid `surface_reserved`
+    (existing same-fluid tiles a new ptg would collide with)."""
     source = _route_tile(from_point)
     targets = sorted({_route_tile(point) for point in to_points})
     if not targets:
@@ -408,6 +503,7 @@ def _chain_network(
         raise ValueError("search_margin must be non-negative")
     hard = {_route_tile(point) for point in hard_tiles}
     tunnelable = {_route_tile(point) for point in tunnelable_tiles} - hard
+    dive = {_route_tile(point) for point in diveable_tiles} if allow_dives else set()
     if source in tunnelable or any(target in tunnelable for target in targets):
         raise ValueError("Fluid endpoints must be on land, not tunnelable terrain")
     network = {source}
@@ -430,10 +526,11 @@ def _chain_network(
         for target in sorted(remaining):
             path = _bounded_shortest_path(
                 network, target, blocked - network, bounds,
-                tunnelable if allow_tunnels else set(),
+                tunnelable if allow_tunnels else set(), diveable=dive,
             )
             surface, path_tunnels, path_landfill = _surface_path_and_tunnels(
-                path, tunnelable if allow_tunnels else set(),
+                path, tunnelable if allow_tunnels else set(), diveable=dive,
+                blocked=blocked, surface_reserved=set(surface_reserved),
             )
             if used_tunnel_ends & {point for pair in path_tunnels for point in pair}:
                 continue
@@ -495,6 +592,7 @@ def shortest_fluid_chain_segments(
     search_margin: int = ROUTE_SEARCH_MARGIN,
     mixing_margin: bool = False,
     allow_terrain_tunnels: bool = False,
+    allow_dives: bool = False,
 ) -> List[dict]:
     """Return one purity segment, with narrow terrain tunnels represented."""
     foreign = list(foreign)
@@ -504,9 +602,16 @@ def shortest_fluid_chain_segments(
         else _obstacles(foreign, fluid)
     )
     hard = set(hard_tiles) | blocked | _foreign_tunnel_endpoints(foreign, fluid)
+    surface_reserved = {
+        tuple(tile) for segment in foreign
+        if segment.get("fluid") == fluid
+        for tile in segment.get("tiles", ())
+    }
     network, tunnels, _ = _chain_network(
         from_point, to_points, hard, tunnelable_tiles,
         clearance, search_margin, allow_tunnels=allow_terrain_tunnels,
+        allow_dives=allow_dives, diveable_tiles=set(hard_tiles),
+        surface_reserved=surface_reserved,
     )
     return [{
         "fluid": fluid,
@@ -527,6 +632,7 @@ def _route_segment_with_tunnels(
     search_margin: int,
     mixing_margin: bool,
     allow_terrain_tunnels: bool,
+    allow_dives: bool = False,
 ) -> tuple[dict, list[tuple[tuple[int, int], tuple[int, int]]]]:
     """Build the segment and retain the tunnel endpoint pairs for emission."""
     endpoints = {_route_tile(from_point)} | {_route_tile(point) for point in to_points}
@@ -535,9 +641,16 @@ def _route_segment_with_tunnels(
         else _obstacles(foreign, fluid)
     )
     hard = set(hard_tiles) | blocked | _foreign_tunnel_endpoints(foreign, fluid)
+    surface_reserved = {
+        tuple(tile) for segment in foreign
+        if segment.get("fluid") == fluid
+        for tile in segment.get("tiles", ())
+    }
     network, tunnels, landfill = _chain_network(
         from_point, to_points, hard, tunnelable_tiles,
         clearance, search_margin, allow_tunnels=allow_terrain_tunnels,
+        allow_dives=allow_dives, diveable_tiles=set(hard_tiles),
+        surface_reserved=surface_reserved,
     )
     return {
         "fluid": fluid, "separated_by_pump": False, "tiles": network,
@@ -557,12 +670,17 @@ def generate_shortest_fluid_chain_link(
     existing_tiles=(),
     mixing_margin: bool = False,
     allow_terrain_tunnels: bool = False,
+    allow_dives: bool = False,
 ) -> dict:
-    """Return a schema-validated fluid link, tunnelling only narrow terrain."""
+    """Return a schema-validated fluid link, tunnelling only narrow terrain.
+
+    With `allow_dives`, blocked hard tiles are additionally bridged with
+    landfill-free pipe-to-ground spans (see _split_dive_run)."""
     foreign = list(foreign)
     segment, tunnels, landfill = _route_segment_with_tunnels(
         from_point, to_points, fluid, foreign, hard_tiles, tunnelable_tiles,
         clearance, search_margin, mixing_margin, allow_terrain_tunnels,
+        allow_dives,
     )
     existing = {_route_tile(point) for point in existing_tiles}
     # A same-fluid link may already own part of this network. Reusing those
@@ -596,6 +714,18 @@ def generate_shortest_fluid_chain_link(
                 "position": {"x": point[0] + 0.5, "y": point[1] + 0.5},
                 "direction": direction,
             })
+    orphaned = sorted({
+        point for pair in tunnels for point in pair
+        if point in existing and point not in emitted_tunnel_ends
+    })
+    if orphaned:
+        # A tunnel span whose endpoint was skipped leaves a buried run with
+        # no surface structure: a broken link the bots can never complete.
+        # Fail loudly so the caller detours instead of stranding machines.
+        raise ValueError(
+            "Chain link tunnel endpoint(s) collide with existing "
+            f"same-fluid tiles {orphaned[:3]}; refusing a broken link"
+        )
     plan = {"phases": [{"name": f"fluid_link_{fluid}", "actions": actions}]}
     _validate(plan)
     validate_network_purity([segment] + foreign)

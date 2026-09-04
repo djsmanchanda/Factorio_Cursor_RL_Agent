@@ -487,12 +487,16 @@ def test_oil_route_tries_land_before_requesting_landfill(monkeypatch) -> None:
 
 
 def test_oil_route_uses_landfill_only_when_land_route_is_impossible(monkeypatch) -> None:
+    """Dives are tried before landfill: surface, then pipe-to-ground spans,
+    then water crossings (2026-09-05: dives hop blockers like the killer
+    pole without paying for landfill)."""
     choices = []
 
     def link(*_args, **kwargs):
-        allow = kwargs["allow_terrain_tunnels"]
-        choices.append(allow)
-        if not allow:
+        choices.append(
+            (kwargs["allow_dives"], kwargs["allow_terrain_tunnels"]),
+        )
+        if not kwargs["allow_terrain_tunnels"]:
             raise ValueError("no land detour")
         return {"phases": [{"name": "fluid", "actions": []}]}
 
@@ -507,7 +511,7 @@ def test_oil_route_uses_landfill_only_when_land_route_is_impossible(monkeypatch)
         terrain_water={(2, 0)}, existing_tiles=[],
     )
 
-    assert choices == [False, True]
+    assert choices == [(False, False), (True, False), (True, True)]
     assert crossed_water
 
 
@@ -909,3 +913,26 @@ def test_oil_power_connection_reserves_the_pipe_corridor(monkeypatch) -> None:
 
     assert len(calls) == 1
     assert calls[0]["reserved_tiles"] == {(-298, -58)}
+
+
+def test_oil_link_dives_under_a_pole_before_failing() -> None:
+    """2026-09-05: the crude pipeline ended two runs on a mid-pass power
+    pole. The oil router now spends one pipe-to-ground pair (pass 2)
+    before water crossings or failure. Walls seal the margin-48 bound so
+    no surface detour exists."""
+    hard = {(4, 0)} | {
+        (x, y) for x in range(9) for y in range(-50, 51) if y != 0
+    }
+
+    link, segments, crossed_water = stage_chemical._route_oil_fluid_link(
+        (0, 0), [(8, 0)], "crude-oil", foreign=[], hard=hard,
+        terrain_water=set(), existing_tiles=[(0, 0)],
+    )
+
+    assert crossed_water is False
+    assert {
+        (int(a["position"]["x"] - 0.5), int(a["position"]["y"] - 0.5)): a["direction"]
+        for phase in link["phases"] for a in phase["actions"]
+        if a.get("entity") == "pipe-to-ground"
+    } == {(3, 0): "west", (5, 0): "east"}
+    assert stage_chemical._link_dive_tiles(segments, hard) == {(4, 0)}

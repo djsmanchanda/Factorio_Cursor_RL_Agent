@@ -126,3 +126,80 @@ def test_automatic_fluid_chain_plan_avoids_foreign_fluid_without_tunnelling():
     plan = generate_shortest_fluid_chain_link((0, 0), [(8, 0)], "water", foreign)
     assert {action["entity"] for action in plan["phases"][0]["actions"]} == {"pipe"}
     assert (4, 0) not in _tiles(plan)
+
+
+def _corridor_walls(x_lo: int, x_hi: int) -> set[tuple[int, int]]:
+    """Full-height walls (in a margin-2 bound) sealing every detour."""
+    return {(x, y) for x in range(x_lo, x_hi + 1) for y in (-2, -1, 1, 2)}
+
+
+def _ptg(plan: dict) -> dict[tuple[int, int], str]:
+    return {
+        (int(action["position"]["x"] - 0.5), int(action["position"]["y"] - 0.5)): action["direction"]
+        for action in plan["phases"][0]["actions"]
+        if action.get("entity") == "pipe-to-ground"
+    }
+
+
+def test_dive_hops_a_single_blocker_tile() -> None:
+    """2026-09-05: the crude pipeline died on a mid-pass power pole at
+    (-297.5,-57.5). With dives, one pipe-to-ground pair hops the tile
+    (outward facings, exactly the live-verified interleaving technique)."""
+    hard = {(4, 0)} | _corridor_walls(0, 8)
+
+    with pytest.raises(ValueError, match="bounded search area"):
+        generate_shortest_fluid_chain_link(
+            (0, 0), [(8, 0)], "crude-oil", hard_tiles=hard,
+            clearance=0, search_margin=2,
+        )
+
+    plan = generate_shortest_fluid_chain_link(
+        (0, 0), [(8, 0)], "crude-oil", hard_tiles=hard,
+        clearance=0, search_margin=2, allow_dives=True,
+    )
+
+    assert _ptg(plan) == {(3, 0): "west", (5, 0): "east"}
+    assert (4, 0) not in _tiles(plan)
+
+
+def test_dive_spans_nine_blocked_tiles_but_not_twelve() -> None:
+    """Max underground span is 10: nine blocks between heads dives, twelve
+    refuses cleanly instead of emitting a broken link."""
+    plan = generate_shortest_fluid_chain_link(
+        (0, 0), [(16, 0)], "crude-oil",
+        hard_tiles={(x, 0) for x in range(4, 13)} | _corridor_walls(0, 16),
+        clearance=0, search_margin=2, allow_dives=True,
+    )
+    assert _ptg(plan) == {(3, 0): "west", (13, 0): "east"}
+
+    with pytest.raises(ValueError, match="no placeable pipe-to-ground span"):
+        generate_shortest_fluid_chain_link(
+            (0, 0), [(19, 0)], "crude-oil",
+            hard_tiles={(x, 0) for x in range(4, 16)} | _corridor_walls(0, 19),
+            clearance=0, search_margin=2, allow_dives=True,
+        )
+
+
+def test_dive_endpoints_avoid_same_fluid_tiles() -> None:
+    """A pair landing on an existing same-fluid pipe would collide in the
+    executor: the dive refuses instead of emitting a broken link."""
+    foreign = [{"fluid": "crude-oil", "separated_by_pump": False,
+                "tiles": [(3, 0)]}]
+    with pytest.raises(ValueError, match="placeable pipe-to-ground endpoints"):
+        generate_shortest_fluid_chain_link(
+            (0, 0), [(8, 0)], "crude-oil", foreign,
+            hard_tiles={(4, 0)} | _corridor_walls(0, 8),
+            clearance=0, search_margin=2, allow_dives=True,
+        )
+
+
+def test_dive_keeps_foreign_fluids_impassable() -> None:
+    """Only physical obstacles are diveable: a full-height foreign pipe run
+    seals the bound, and even dives refuse to tunnel under it."""
+    foreign = [{"fluid": "petroleum-gas", "separated_by_pump": False,
+                "tiles": [(4, y) for y in range(-2, 3)]}]
+    with pytest.raises(ValueError):
+        generate_shortest_fluid_chain_link(
+            (0, 0), [(8, 0)], "water", foreign,
+            clearance=0, search_margin=2, allow_dives=True,
+        )

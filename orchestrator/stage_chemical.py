@@ -666,6 +666,13 @@ def _extend_sulfur_stage(
             ) from error
         links.append((name, link))
         foreign.extend(segments)
+        dives = _link_dive_tiles(segments, hard)
+        if dives:
+            emit(
+                f"  FLUID ROUTE: {fluid} dives under "
+                f"{len(dives)} blocked tile(s) with pipe-to-ground "
+                "instead of detouring"
+            )
 
     power = _filter_plan_actions(
         sulfur, lambda action: action.get("entity") in _POWER_ENTITIES,
@@ -703,26 +710,53 @@ def _extend_sulfur_stage(
     return {**existing, "sulfur": _provider(sulfur)}
 
 
+def _link_dive_tiles(
+    segments: list[dict], hard: set[tuple[int, int]],
+) -> set[tuple[int, int]]:
+    """Blocked tiles a routed link's tunnels pass under (not water)."""
+    buried: set[tuple[int, int]] = set()
+    for segment in segments:
+        for (ax, ay), (bx, by) in segment.get("tunnel_endpoints", ()):
+            if ax == bx:
+                step = 1 if by > ay else -1
+                buried.update((ax, y) for y in range(ay + step, by, step))
+            elif ay == by:
+                step = 1 if bx > ax else -1
+                buried.update((x, ay) for x in range(ax + step, bx, step))
+    return buried & set(hard)
+
+
 def _route_oil_fluid_link(
     source: Point, targets: list[Point], fluid: str, *,
     foreign: list[dict], hard: set[tuple[int, int]],
     terrain_water: set[tuple[int, int]], existing_tiles: list[Point],
 ) -> tuple[dict, list[dict], bool]:
-    """Prefer a land route; cross water only when no bounded detour exists."""
+    """Prefer a land route; dive under blockers before crossing water.
+
+    Pass 2 bridges blocked hard tiles (poles, machines, planned footprints)
+    with landfill-free pipe-to-ground spans -- a single-tile blocker costs
+    one pair instead of a detour or a dead run (2026-09-05: the crude
+    pipeline ended two runs on a mid-pass power pole). Water crossings stay
+    last: landfill is more expensive than a dive.
+    """
     last_error: ValueError | None = None
-    for allow_water_crossing in (False, True):
+    for allow_dives, allow_water_crossing in (
+        (False, False), (True, False), (True, True),
+    ):
         try:
             link = generate_shortest_fluid_chain_link(
                 source, targets, fluid, foreign=foreign, hard_tiles=hard,
                 tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
                 existing_tiles=existing_tiles, mixing_margin=True,
                 allow_terrain_tunnels=allow_water_crossing,
+                allow_dives=allow_dives,
             )
             segments = shortest_fluid_chain_segments(
                 source, targets, fluid, foreign=foreign, hard_tiles=hard,
                 tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
                 mixing_margin=True,
                 allow_terrain_tunnels=allow_water_crossing,
+                allow_dives=allow_dives,
             )
             return link, segments, allow_water_crossing
         except ValueError as error:
@@ -879,6 +913,13 @@ def ensure_oil_cell(
             )
             links.append((link_name, link))
             foreign.extend(segments)
+            dives = _link_dive_tiles(segments, hard)
+            if dives:
+                emit(
+                    f"  FLUID ROUTE: {fluid} dives under "
+                    f"{len(dives)} blocked tile(s) with pipe-to-ground "
+                    "instead of detouring"
+                )
             if crossed_water:
                 emit(
                     f"  FLUID ROUTE: {fluid} has no bounded land detour; "
