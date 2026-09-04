@@ -4055,6 +4055,13 @@ _POST_STARTER_ONE_STACK_ITEMS = frozenset({
     "electronic-circuit", "splitter", "underground-belt",
 })
 _POST_METAL_STACK_RESERVES = ("electronic-circuit", "splitter")
+# Explicit reserve targets where a full stack is pure overstock. Measured
+# 2026-09-04 (22:33 run): the splitter full-stack reserve held the single
+# rotating assembler from +1538s to +1950s (~412s, including its 200-belt
+# prerequisite ladder) before stone could start, yet the only plate project
+# that requests splitters asks for 3 (iron PREP DEMAND) and refinery ghosts
+# needed 2 more. 12 covers 3-per-refinery across all four plates.
+_POST_METAL_RESERVE_TARGETS = {"splitter": 12}
 _STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
 
 
@@ -7504,11 +7511,13 @@ def _prep_post_metal_stack_reserves(
         key = f"_post_metal_stack:{item}"
         if key in prepped:
             continue
-        target = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+        target = _POST_METAL_RESERVE_TARGETS.get(
+            item, ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE),
+        )
         if int(stock.get(item, 0)) >= target:
             prepped.add(key)
             emit(
-                f"  POST-METAL RESERVE READY: {item} has one full stack "
+                f"  POST-METAL RESERVE READY: {item} reached reserve "
                 f"({target})"
             )
             continue
@@ -7516,7 +7525,7 @@ def _prep_post_metal_stack_reserves(
             mall_targets[item] = target
             emit(
                 f"  POST-METAL RESERVE: iron/copper transition is complete; "
-                f"stocking {item} to one full stack ({target}) before stone"
+                f"stocking {item} to reserve ({target}) before stone"
             )
         return True
     return False

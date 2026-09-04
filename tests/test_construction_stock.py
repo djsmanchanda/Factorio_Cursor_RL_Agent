@@ -531,6 +531,12 @@ def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
 
 
 def test_post_metal_reserve_queues_circuits_then_splitters(monkeypatch) -> None:
+    """Splitter reserve is a 12-unit buffer, not a full stack.
+
+    2026-09-04 (22:33 run): the 50-splitter reserve held the rotating
+    assembler +1538s to +1950s before stone, while measured refinery demand
+    is 3 per plate project.
+    """
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
@@ -555,9 +561,9 @@ def test_post_metal_reserve_queues_circuits_then_splitters(monkeypatch) -> None:
     assert builder._prep_post_metal_stack_reserves(
         object(), "nauvis", "player", prepped, targets, messages.append,
     )
-    assert targets == {"splitter": 50}
+    assert targets == {"splitter": 12}
 
-    stock["splitter"] = 50
+    stock["splitter"] = 12
     targets.clear()
     assert not builder._prep_post_metal_stack_reserves(
         object(), "nauvis", "player", prepped, targets, messages.append,
