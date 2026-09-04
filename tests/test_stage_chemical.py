@@ -690,7 +690,7 @@ def test_oil_power_scaffolds_connect_before_stage_waits(monkeypatch) -> None:
     connected = []
     monkeypatch.setattr(
         stage_chemical, "extend_power",
-        lambda _c, _b, _s, _f, position, _emit:
+        lambda _c, _b, _s, _f, position, _emit, **_kwargs:
             connected.append(position) or True,
     )
     plan = {"phases": [{"name": "power", "actions": [
@@ -868,3 +868,44 @@ def test_chest_content_query_reads_held_items() -> None:
     lua = client.commands[0]
     assert "get_contents" in lua
     assert "requester-chest" in lua
+
+
+def test_link_corridor_tiles_collects_only_pipe_tiles() -> None:
+    links = [("chemical_crude_pipeline", {"phases": [
+        {"name": "fluid_link_crude-oil", "actions": [
+            {"action_type": "place_ghost", "entity": "pipe",
+             "position": {"x": -297.5, "y": -57.5}},
+            {"action_type": "place_ghost", "entity": "pipe-to-ground",
+             "position": {"x": -290.5, "y": -57.5}, "direction": "west"},
+            {"action_type": "place_ghost", "entity": "medium-electric-pole",
+             "position": {"x": -280.5, "y": -57.5}},
+        ]},
+        {"name": "other", "actions": [
+            {"action_type": "place_tile_ghost", "tile": "landfill",
+             "position": {"x": 8, "y": 4}},
+        ]},
+    ]})]
+    assert stage_chemical._link_corridor_tiles(links) == {(-298, -58), (-291, -58)}
+
+
+def test_oil_power_connection_reserves_the_pipe_corridor(monkeypatch) -> None:
+    """2026-09-05: the backbone power bridge chained through the just-routed
+    crude corridor and the pipeline died on its pole. The corridor rides
+    along to extend_power."""
+    calls: list[dict] = []
+    def _extend(_c, _b, _s, _f, position, _emit, **kwargs):
+        calls.append({"position": position, **kwargs})
+        return True
+    monkeypatch.setattr(stage_chemical, "extend_power", _extend)
+    plan = {"phases": [{"name": "power", "actions": [{
+        "action_type": "place_entity", "entity": "substation",
+        "position": {"x": -320.0, "y": -39.0},
+    }]}]}
+
+    stage_chemical._connect_oil_cell_power(
+        object(), object(), "nauvis", "player", [plan], lambda _m: None,
+        reserved_tiles={(-298, -58)},
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["reserved_tiles"] == {(-298, -58)}

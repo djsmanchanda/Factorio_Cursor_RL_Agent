@@ -1143,7 +1143,14 @@ def extend_roboport_coverage(
                 )
             if status in {"no_power", "low_power"}:
                 emit(f"  bridged roboport at {position} is {status} -- connecting it")
-                if not extend_power(client, bridge, surface, force, position, emit):
+                # The roboport dodged reserved tiles, but its power chain has
+                # to dodge them too: a hop through a sibling plan's future
+                # footprint becomes a pole on a pipe ghost (2026-09-05: the
+                # crude pipeline died on a roboport-chain pole at -297.5,-57.5).
+                if not extend_power(
+                    client, bridge, surface, force, position, emit,
+                    reserved_tiles=reserved_tiles,
+                ):
                     raise StuckError(
                         f"roboport at {position} cannot be powered; it would provide no "
                         f"{purpose} coverage"

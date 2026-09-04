@@ -289,16 +289,42 @@ def _submit_oil_cell_packets(
             after_packet(name)
 
 
+def _link_corridor_tiles(links: list[tuple[str, dict]]) -> set[tuple[int, int]]:
+    """Pipe tiles later packets still have to ghost.
+
+    Power bridging runs mid-pass (right after the backbone packet) while
+    pipelines submit last, so a chain planned against a fresh snapshot still
+    marches through the corridor unless it is reserved explicitly.
+    """
+    tiles: set[tuple[int, int]] = set()
+    for _name, link in links:
+        for phase in link["phases"]:
+            for action in phase["actions"]:
+                if (
+                    action.get("entity") in {"pipe", "pipe-to-ground"}
+                    and "position" in action
+                ):
+                    tiles.add((
+                        math.floor(action["position"]["x"]),
+                        math.floor(action["position"]["y"]),
+                    ))
+    return tiles
+
+
 def _connect_oil_cell_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    plans: list[dict], emit: Callable[[str], None],
+    plans: list[dict], emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> None:
     """Bring every local oil scaffold onto the generated grid immediately."""
     substations = sorted({
         position for plan in plans for position in _positions(plan, "substation")
     })
     for position in substations:
-        extend_power(client, bridge, surface, force, position, emit)
+        extend_power(
+            client, bridge, surface, force, position, emit,
+            reserved_tiles=reserved_tiles,
+        )
 
 
 def _positions(plan: dict, entity: str) -> list[Point]:
@@ -655,7 +681,10 @@ def _extend_sulfur_stage(
     _submit_oil_cell_packets(
         client, bridge, surface, force, packets, emit,
         after_packet=lambda name: (
-            _connect_oil_cell_power(client, bridge, surface, force, [sulfur], emit)
+            _connect_oil_cell_power(
+                client, bridge, surface, force, [sulfur], emit,
+                reserved_tiles=_link_corridor_tiles(links),
+            )
             if name == "chemical_sulfur_power" else None
         ),
     )
@@ -923,6 +952,7 @@ def ensure_oil_cell(
         after_packet=lambda name: (
             _connect_oil_cell_power(
                 client, bridge, surface, force, plans, emit,
+                reserved_tiles=_link_corridor_tiles(links),
             )
             if name == "chemical_power_backbone" else None
         ),

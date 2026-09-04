@@ -342,7 +342,8 @@ def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
     monkeypatch.setattr("orchestrator.stage_services._submit", lambda *a, **k: {"ok": True})
     monkeypatch.setattr(
         "orchestrator.stage_services.extend_power",
-        lambda _c, _b, _s, _f, position, _emit: powered.append(position) or True,
+        lambda _c, _b, _s, _f, position, _emit, **_kwargs:
+            powered.append(position) or True,
     )
     assert extend_roboport_coverage(
         None, None, "nauvis", "player", (30.0, 0.0), lambda _m: None,
@@ -713,3 +714,46 @@ def test_diagnose_blockage_skips_the_logistic_query_when_no_chests_are_known(mon
     assert _diagnose_blockage(
         None, "nauvis", "player", (10.0, 10.0), (10.0, 12.0), [(11.0, 10.0)],
     ) is None
+
+
+def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> None:
+    """2026-09-05: the bridged roboport dodged the pipe corridor but its
+    power chain marched through it, and the crude pipeline died on the pole
+    at (-297.5, -57.5). The hookup inherits the corridor reservation."""
+    from orchestrator import stage_services
+
+    monkeypatch.setattr(
+        stage_services, "_repair_existing_roboport_power", lambda *_args: None,
+    )
+    calls = {"n": 0}
+    def _nearest(*_args):
+        calls["n"] += 1
+        return (5.0, 5.0) if calls["n"] == 1 else (100.0, 5.0)
+    monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
+    monkeypatch.setattr(
+        live_base, "entity_status_name", lambda *_args: "low_power",
+    )
+    monkeypatch.setattr(
+        stage_services, "_await_roboport_charge", lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions",
+        lambda *_args, **_kwargs: [(45.0, 5.0)],
+    )
+    monkeypatch.setattr(
+        stage_services, "_submit",
+        lambda _c, _b, _s, _plan, name, _emit, **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(stage_services, "_await_built_status", lambda *_args: "low_power")
+    powered: list[dict] = []
+    def _extend(_c, _b, _s, _f, position, _emit, **kwargs):
+        powered.append({"position": position, **kwargs})
+        return True
+    monkeypatch.setattr(stage_services, "extend_power", _extend)
+
+    assert stage_services.extend_roboport_coverage(
+        object(), object(), "nauvis", "player", (100.0, 5.0),
+        lambda _message: None, reserved_tiles={(1, 2), (3, 4)},
+    )
+    assert powered and powered[0]["position"] == (45.0, 5.0)
+    assert powered[0]["reserved_tiles"] == {(1, 2), (3, 4)}
