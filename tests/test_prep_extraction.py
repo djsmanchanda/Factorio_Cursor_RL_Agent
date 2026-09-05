@@ -790,8 +790,8 @@ def test_furnace_cap_lifts_only_after_a_working_furnace_producer(monkeypatch) ->
 
 
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
-    """7.5 plate/s needs 12 furnaces; a standard row builds 7."""
-    assert baseline_smelter_count("iron-plate") == 12
+    """9 plate/s needs 15 furnaces; a standard row builds 7."""
+    assert baseline_smelter_count("iron-plate") == 15
     assert baseline_drill_phase("iron-plate") == 24
 
 

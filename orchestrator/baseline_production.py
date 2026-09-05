@@ -15,18 +15,22 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 # start instead of from zero.
 #
 # Counts are machines, and deliberately small -- this is a standing baseline,
-# not a target. iron-gear-wheel sits in the mall as two cells (both halves of
-# one paired cell) until saturation promotes it to a dedicated line.
-# steel-plate is deliberately NOT here. It is smelted, not assembled: a furnace
-# takes its recipe from what is inserted, so an idle one reports no recipe and
-# find_line can never count it. Prep saw zero however many it had built and
-# placed another cell every pass -- twelve furnaces across six mall cells in one
-# run. It also wants an iron-plate BELT, which does not exist this early. Steel
-# belongs to a smelting stage, and is built on demand by whatever needs it.
+# not a target. The opening mall is six fixed cells: one permanent anchor
+# each for iron-gear-wheel and copper-cable (never borrowed or reconfigured),
+# plus four rotational cells starting as a second gear, a second cable, one
+# electronic-circuit, and one transport-belt. A new need below the eight-slot
+# cap adds another rotational cell; at the cap the six rotational slots rotate
+# instead. Steel-plate is deliberately NOT here. It is smelted, not assembled:
+# a furnace takes its recipe from what is inserted, so an idle one reports no
+# recipe and find_line can never count it. Prep saw zero however many it had
+# built and placed another cell every pass -- twelve furnaces across six mall
+# cells in one run. Steel belongs to a smelting stage, and is built on demand
+# by whatever needs it.
 BASELINE_MACHINES = {
     "iron-gear-wheel": 2,
-    "copper-cable": 1,
+    "copper-cable": 2,
     "electronic-circuit": 1,
+    "transport-belt": 1,
 }
 
 # A plate the prep set consumes has to be mined and smelted; anything else in
@@ -82,17 +86,20 @@ CORE_MALL_PRODUCERS = (
     "substation",
 )
 
-# Bootstrap may own more than the six standing prep assemblers when another
-# complete cell half is affordable. Ten recovered the useful pre-plastic
-# parallelism seen before finite-stock rationing, without making every demand
-# an unconditional permanent mall allocation.
-BOOTSTRAP_MALL_SLOT_TARGET = 10
+# Bootstrap owns at most eight mall assemblers: two permanent anchors (one
+# gear, one cable) plus up to six rotational slots. A new construction need
+# below the cap adds a rotational cell for it; at the cap the rotational slots
+# borrow and restore instead, and the two anchors are never touched. Eight
+# recovered the useful pre-plastic parallelism seen before finite-stock
+# rationing, without making every demand an unconditional permanent mall
+# allocation.
+BOOTSTRAP_MALL_SLOT_TARGET = 8
 
 RATIONED_MALL_BATCH_ITEMS = frozenset({
     *CORE_MALL_PRODUCERS,
     # Before the core mall can build its own machines, every construction
     # output below is a demand-owned, need-plus-margin batch.  It may claim a
-    # free half of the ten-slot pool, or borrow an existing half when the pool
+    # free half of the eight-slot pool, or borrow an existing half when the pool
     # is full; it must not become a permanent one-recipe cell and consume the
     # slot needed to make the core mall self-sufficient.
     "assembling-machine-1",

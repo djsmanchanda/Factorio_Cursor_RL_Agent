@@ -154,6 +154,7 @@ def test_priority_wait_sleeps_to_due_tick_without_busy_polling(
     slept = []
     priorities = type("Priorities", (), {
         "wait_ticks": lambda self, _targets, _tick: wait_ticks,
+        "next": lambda self, _targets, _tick: None,
     })()
     monkeypatch.setattr(autonomous_builder.time, "sleep", slept.append)
 

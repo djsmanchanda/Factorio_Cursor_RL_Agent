@@ -56,6 +56,7 @@ class DirectPlateStarter:
 def find_line(
     client: RconClient, surface: str, force: str, recipe: str, machine: str,
     *, exact_machine: bool = False, exclude_upgrade_ordered: bool = False,
+    include_ghosts: bool = True,
 ) -> LineState | None:
     """Every compatible machine with `recipe` set, anywhere on the base.
 
@@ -69,6 +70,10 @@ def find_line(
     no_ingredients, item_ingredient_shortage, etc. all count as "exists but
     not yet verified working" -- callers decide what to do with a struggling
     line; this just reports what's there).
+
+    Ghosts count by default (pending construction is still capacity), but
+    anchor protection must pass ``include_ghosts=False``: an unbuilt ghost is
+    not a producer that remains after borrowing the only real machine.
     """
     machine_names = (
         (machine,)
@@ -76,14 +81,18 @@ def find_line(
         else ASSEMBLER_TIERS
     )
     names = "{" + ",".join(f"'{name}'" for name in machine_names) + "}"
+    ghost_scan = (
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
+        "for _,name in pairs(wanted) do if g.ghost_name==name then table.insert(machines,g) end end end;"
+        if include_ghosts else ""
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=0;local w=0;local made=0;local pos={};"
         "local wanted=" + names + ";local machines={};"
         "for _,name in pairs(wanted) do for _,e in pairs(s.find_entities_filtered{name=name,force=f}) do "
         "machines[#machines+1]=e end end;"
-        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f}) do "
-        "for _,name in pairs(wanted) do if g.ghost_name==name then table.insert(machines,g) end end end;"
+        + ghost_scan +
         "for _,e in pairs(machines) do "
         "local ok,r=pcall(function() return e.get_recipe() end);"
         "if ok and r and r.name=='" + recipe + "' and ("
@@ -1369,13 +1378,7 @@ def available_items(client: RconClient, surface: str, force: str) -> dict[str, i
     raw = _sc(client, lua)
     if not raw:
         return {}
-    counts: dict[str, int] = {}
-    for pair in raw.split(","):
-        if not pair:
-            continue
-        name, _, count = pair.partition("=")
-        counts[name] = int(count)
-    return counts
+    return _parse_stock_counts(raw)
 
 
 def transferable_items(
@@ -1407,13 +1410,7 @@ def transferable_items(
     raw = _sc(client, lua)
     if not raw:
         return {}
-    counts: dict[str, int] = {}
-    for pair in raw.split(","):
-        if not pair:
-            continue
-        name, _, count = pair.partition("=")
-        counts[name] = int(count)
-    return counts
+    return _parse_stock_counts(raw)
 
 
 def transferable_item_count(
@@ -1476,6 +1473,38 @@ _GENERATOR_TYPES = (
 
 class TelemetryError(RuntimeError):
     """A live survey returned an unusable numeric value."""
+
+
+#: Malformed stock-response chunks skipped instead of killing the run.
+#: 2026-09-04: a loan-record tail ('250|39.5|32.5|assembling-machine-1')
+#: arrived glued into an available_items response and ended a run on a bare
+#: ValueError. Prototype names and counts have strict shapes, so a chunk that
+#: is not exactly name=integer cannot be real stock; the next survey
+#: re-reads it. Retained (capped) for post-run diagnosis.
+_MALFORMED_STOCK_CHUNKS: list[str] = []
+_MALFORMED_STOCK_CHUNK_LIMIT = 32
+
+
+def _note_malformed_stock_chunk(chunk: str) -> None:
+    _MALFORMED_STOCK_CHUNKS.append(chunk)
+    del _MALFORMED_STOCK_CHUNKS[:-_MALFORMED_STOCK_CHUNK_LIMIT]
+
+
+def _parse_stock_counts(raw: str) -> dict[str, int]:
+    """Parse name=count responses, skipping garbled chunks, never raising."""
+    counts: dict[str, int] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        name, sep, count = pair.partition("=")
+        if not sep or not name:
+            _note_malformed_stock_chunk(pair)
+            continue
+        try:
+            counts[name] = int(count)
+        except ValueError:
+            _note_malformed_stock_chunk(pair)
+    return counts
 
 
 def belt_underground_reach(client: RconClient, belt_type: str) -> int:

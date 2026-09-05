@@ -489,3 +489,42 @@ def test_run_loop_checks_generation_proactively(monkeypatch) -> None:
     source = inspect.getsource(builder.run)
     assert "_top_up_solar_generation" in source
     assert "_GENERATION_CHECK_INTERVAL_TICKS" in source
+
+
+def test_belt_recovery_is_queued_with_the_deferral(monkeypatch) -> None:
+    """2026-09-04: splitter waited 243s on belts at 26 while nothing was
+    tasked with making belts. The deferral now queues belt recovery."""
+    from orchestrator import priority_list
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {"ingredients": ["transport-belt"], "amounts": [4],
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 26},
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 1000)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
+    priorities = priority_list.PriorityList.__new__(priority_list.PriorityList)
+    priorities.items = {}
+    promoted: list[str] = []
+    monkeypatch.setattr(
+        priorities, "promote",
+        lambda item, target, tick: promoted.append(item),
+    )
+    monkeypatch.setattr(
+        priorities, "defer", lambda item, tick, reason: None,
+    )
+    mall_targets: dict[str, int] = {"splitter": 50}
+    messages: list[str] = []
+    task = type("Task", (), {"item": "splitter", "target": 50})()
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 1000, mall_targets,
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert mall_targets.get("transport-belt", 0) >= 50
+    assert promoted == ["transport-belt"]
+    assert any("BELT RECOVERY" in message for message in messages)

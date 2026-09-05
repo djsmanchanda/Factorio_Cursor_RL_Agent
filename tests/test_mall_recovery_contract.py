@@ -46,7 +46,7 @@ def test_complete_matching_pair_migrates_to_two_request_sections(
     assert {section["group"] for section in sections} == {
         "mall:copper-cable:left", "mall:copper-cable:right",
     }
-    assert sum(section["multiplier"] for section in sections) == 30
+    assert sum(section["multiplier"] for section in sections) == 46
 
 
 def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None:
@@ -259,7 +259,7 @@ def test_anchor_backlog_can_fund_one_bounded_temporary_slot(monkeypatch) -> None
 
 
 def test_new_compact_cell_cannot_escape_the_global_bootstrap_slot_cap(monkeypatch) -> None:
-    """Core-mall promotion used to bypass the ten-slot bootstrap budget."""
+    """Core-mall promotion used to bypass the eight-slot bootstrap budget."""
     plan = builder._LinePlan(
         existing=None, spec=builder.LINE_RECIPES["transport-belt"],
         production_target=1, mall_storage_limit=1, fill_provider=False,
@@ -311,9 +311,10 @@ def test_under_sized_existing_line_cannot_escape_the_global_slot_cap(monkeypatch
     assert raised.value.code == "bootstrap_mall_slot_cap"
 
 
-def test_circuit_anchor_not_treated_as_temporary_precore_batch() -> None:
-    assert "electronic-circuit" in builder._MALL_RECIPE_ANCHORS
-    assert not builder._is_pre_core_temporary_mall_item(
+def test_circuit_is_a_rotational_precore_batch(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    assert "electronic-circuit" not in builder._MALL_RECIPE_ANCHORS
+    assert builder._is_pre_core_temporary_mall_item(
         object(), "nauvis", "player", "electronic-circuit",
     )
 
@@ -342,4 +343,3 @@ def test_tier1_assembler_scales_circuit_producer_at_lower_backlog(monkeypatch) -
 
     assert wanted == 2
     assert "electronic-circuit" in builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS
-

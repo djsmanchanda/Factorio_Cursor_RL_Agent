@@ -136,7 +136,10 @@ These names describe intended responsibilities, not permission to build speculat
   source producer, expected rate, and ETA. A compact producer reserves its
   whole standalone cell plus one recipe craft before it recursively schedules
   prerequisites; nested producers therefore protect every requester/provider
-  chest needed to reach first output. Starter caps limit idle inventory only:
+  chest needed to reach first output. The cell starts building once half the
+  bill is stocked and every missing bill item already has a scheduled supply
+  chain; the reserved remainder arrives while ghosts construct instead of
+  blocking placement behind the slowest ingredient. Starter caps limit idle inventory only:
   a blocking project raises its producer target to the exact scheduled bill.
   Producer reservations remain held through construction and release only
   after measured output; an impossible self-seed is a typed supply wait rather
@@ -168,15 +171,24 @@ These names describe intended responsibilities, not permission to build speculat
   the original recipe and requests after the batch. Permanent one-recipe mall
   slots resume only after those five core producers are live.
   A finite cell's requester buffer is capped to the crafts in its current
-  need-plus-margin batch; it may not use the normal throughput window to
-  warehouse construction components. Requester and buffer inventories are
-  committed work-in-progress, not transferable construction stock: blueprint
-  affordability and new-cell ingredient sourcing count only ordinary,
-  passive-provider, and storage containers.
-  Exactly one recipe loan may be active at a time. A request for a different
-  batch services the active loan through measured completion and restoration,
-  defers the new batch, and retries it on the next pass; a busy or completed
-  prior loan is never classified as an absence of borrowable capacity.
+  need-plus-margin batch plus 20% headroom (rounded up); it may not use the
+  normal throughput window to warehouse construction components. Requester
+  and buffer inventories are committed work-in-progress, not transferable
+  construction stock: blueprint affordability and new-cell ingredient
+  sourcing count only ordinary, passive-provider, and storage containers.
+  The need-plus-margin squeeze applies only while starter metal carries the
+  base; once the direct iron/copper replacements are healthy and released,
+  pre-core items keep their grown standing reserve past the bill and build
+  ahead instead of stopping at need-plus-margin.
+  Concurrent recipe loans may run on different free cells: a batch for X and
+  a batch for Y (or for X's precursors) each borrow their own cell and advance
+  on their own passes, so the rotating pool makes several things at once. Each
+  planner-owned cell hosts at most one loan, since paired halves share one
+  passive provider. Only when no borrowable cell is free does a request for a
+  different batch service the active loan through measured completion and
+  restoration, defer the new batch, and retry it on the next pass; a busy or
+  completed prior loan is never classified as an absence of borrowable
+  capacity.
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
   ends the current pass, and the predecessor loan begins only after the next
   live observation confirms that restoration.
@@ -197,15 +209,30 @@ These names describe intended responsibilities, not permission to build speculat
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking
-  bill was made. After both metal districts validate and release their
+  bill was made. The borrowed machine's stock gate always tracks the loan's
+  current step target and is refreshed on drift; a bill-frozen gate stranding
+  a spare-phase loan is configuration drift, not progress. Foundation-blocked
+  items rate 100 while queued and retire with their demand; a binding loan
+  below its blocking bill is shielded from preempt by non-binding batches. After both metal districts validate and release their
   pioneers, the controller fills one stack of electronic circuits followed by
   one stack of splitters before opening the stone district. This replenishes
   the construction stock consumed by iron/copper while the rotating slot is
-  still available; other low-demand batches keep at most two optional spares.
+   still available; other low-demand batches target their blocking bill plus
+   at least 20% spares (rounded up, covering requester/buffer WIP), and retire
+   only once that transferable stock exists. A demand whose bill is met in
+   transferable stock while its loan keeps advancing without accumulation
+   retires as drained; the cell finishes spares in the background. A lagging
+   build names its transferable shortfall, locked WIP, and pending ghosts
+   instead of waiting on force-wide stock that bots cannot spend.
   When either blocking stack has more than one minute of measured backlog, an
   existing one-machine producer may claim a second reservation-funded slot in
-  the ten-assembler bootstrap pool. The extra cell still needs its exact bill
+  the ten-assembler bootstrap pool. A lone transport-belt cell facing a large
+  backlog may do the same. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
+  A cell bill whose shortfall is reserved but flowing -- scheduled producer
+  chain plus spendable stock on hand -- draws from that flow instead of
+  waiting out the reserve; a stagnant stockpile with no scheduled producer
+  still blocks.
   The pre-logistics pool is a hard global ceiling of ten compact assemblers:
   core-mall requests may not bypass it; when the pool is full, core promotion
   reclaims an existing non-anchor temporary slot and converts it in place
@@ -238,7 +265,10 @@ These names describe intended responsibilities, not permission to build speculat
   cell.
 - The controller's outer pass limit counts non-progress decisions. A pass is
   credited back when required stock grows, pending ghosts fall, a recipe loan
-  advances, or the outstanding-work state changes. The consecutive unchanged
+  advances, or the outstanding-work state changes. A pass serves up to three
+  ready mall tasks: serving continues while tasks complete or advance without
+  an explicit defer, and stops at the first task that stays queued behind one,
+  so independent cells and loans build concurrently instead of one per pass. The consecutive unchanged
   pass guard remains the tighter detector for real contradictions. Unchanged
   mall requester, provider-limit, and stock-gate configurations are submitted
   once per run and refreshed after any recipe-loan reconfiguration.

@@ -66,6 +66,16 @@ class PriorityList:
                 })
                 if task.created_tick > tick:
                     task.created_tick = tick
+                # Ratings and deferrals describe a live moment, not durable
+                # truth: a promoted base_rating (blocking prerequisite) or a
+                # far-future retry_tick from a dead episode must not steer the
+                # next one (2026-09-03: base 100 persisted across a fresh
+                # campaign and flattened scheduling). Live pressure re-marks
+                # within a pass or two; keep identity, target, and progress.
+                task.base_rating = _DEFAULT_RATINGS.get(task.item, 45)
+                task.reason = ""
+                task.status = "ready"
+                task.retry_tick = tick
                 if task.retry_tick > tick + _MAX_RETRY_AHEAD_TICKS:
                     task.retry_tick = tick + _MAX_RETRY_AHEAD_TICKS
                 self.items[task.item] = task
@@ -132,13 +142,13 @@ class PriorityList:
         task.retry_tick = tick + retry_ticks
         self._save()
 
-    def complete(self, item: str, tick: int) -> None:
+    def complete(self, item: str, tick: int, *, reason: str = "") -> None:
         self.tick = tick
         task = self.items[item]
         task.status = "complete"
         task.progress_percent = 100
         task.retry_tick = tick
-        task.reason = ""
+        task.reason = reason
         self._save()
 
     def wait_ticks(self, targets: Mapping[str, int], tick: int) -> int | None:

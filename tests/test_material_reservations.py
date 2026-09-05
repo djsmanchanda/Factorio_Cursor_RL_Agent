@@ -371,7 +371,7 @@ def test_rationed_mall_batches_low_demand_buildings_without_a_new_cell(
         lambda *_a: {"steel-plate": 15},
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_demand_cell_affordable",
         lambda *_a: (False, {"assembling-machine-2": 1}),
@@ -410,7 +410,7 @@ def test_inserter_uses_a_rotating_batch_when_the_bootstrap_pool_is_full(
         },
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     # A false affordability result with no material shortage is the global
     # slot-cap path.  The item must borrow an existing cell rather than defer
     # until a non-existent promotion releases one.
@@ -448,7 +448,7 @@ def test_assembling_machine_one_uses_a_rotating_batch_at_bootstrap_cap(
         },
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_demand_cell_affordable", lambda *_a: (False, {}),
     )
@@ -500,7 +500,7 @@ def test_pipe_is_a_rotating_batch_until_all_plate_pioneers_release(
         builder.live_base, "available_items", lambda *_a: {"iron-plate": 40},
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_demand_cell_affordable",
         lambda *_a: (False, {"assembling-machine-2": 1}),
@@ -531,7 +531,7 @@ def test_pipe_stays_rotating_until_the_core_mall_is_self_sufficient(
         builder.live_base, "available_items", lambda *_a: {"iron-plate": 40},
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_demand_cell_affordable",
         lambda *_a: (False, {"assembling-machine-2": 1}),
@@ -559,7 +559,7 @@ def test_released_plate_districts_convert_a_stocked_demand_slot_for_pipe(
     monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
     monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", lambda *_a: None)
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     started: list[dict] = []
 
     def start(*_args, **kwargs):
@@ -631,7 +631,7 @@ def test_permanent_pipe_conversion_accepts_a_stocked_shared_demand_slot(
     )
     monkeypatch.setattr(
         builder.live_base, "find_line",
-        lambda *_a: SimpleNamespace(
+        lambda *_a, **_k: SimpleNamespace(
             machine_count=1, machine_positions=(machine_position,),
         ) if _a[3] == "splitter" else None,
     )
@@ -648,7 +648,10 @@ def test_permanent_pipe_conversion_accepts_a_stocked_shared_demand_slot(
                 "assembling-machine-2"
                 if position == machine_position else "requester-chest"
             ),
-        } if position in {machine_position, requester_position} else None,
+        } if position in {machine_position, requester_position} else (
+            {"name": "passive-provider-chest"}
+            if tuple(position) == (35.5, 31.5) else None
+        ),
     )
     selected: list[builder.MallBootstrapLoan] = []
     monkeypatch.setattr(
@@ -709,7 +712,7 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
         builder.live_base, "available_items", lambda *_a: {"iron-plate": 60},
     )
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
-    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_demand_cell_affordable",
         lambda *_a: (True, {}),
@@ -728,13 +731,13 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     assert builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS == {
         "electric-mining-drill",
     }
-    assert any("10-assembler pool" in message for message in messages)
+    assert any("8-assembler pool" in message for message in messages)
 
 
 def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
     monkeypatch,
 ) -> None:
-    """A stocked core seed must not make the ten-slot cap a circular wait."""
+    """A stocked core seed must not make the eight-slot cap a circular wait."""
     monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
     monkeypatch.setattr(
         builder, "mall_slot_count",
@@ -826,6 +829,13 @@ def test_active_rotating_loan_restores_before_external_handoff(
         builder, "_restore_bootstrap_loan",
         lambda *_a, **kwargs: restored.append(kwargs["reason"]),
     )
+    established: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: established.append(
+            (str(args[4]), int(kwargs["stock_target"]))
+        ),
+    )
 
     with pytest.raises(
         builder.ProductionPrerequisiteDeferred,
@@ -838,6 +848,7 @@ def test_active_rotating_loan_restores_before_external_handoff(
     assert restored == [
         "assembling-machine-2 needs unproduced external input steel-plate=2",
     ]
+    assert established == [("steel-plate", 2)]
     assert deferred.value.code == "rotating_mall_prerequisite_handoff"
 
 
@@ -1125,6 +1136,9 @@ def test_new_rationed_target_services_and_restores_the_active_loan(
         lambda *_a, **_k: submitted.append(_a[4])
         or "restored borrowed copper-cable producer after seed completion",
     )
+    # No borrowable cell is free, so the new target serializes behind the
+    # active loan instead of opening a parallel one.
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_rationed_mall_spare_target", lambda *_a: 8,
     )
@@ -1155,6 +1169,10 @@ def test_completed_prior_loan_is_restored_before_the_new_batch(
     monkeypatch.setattr(
         builder, "active_bootstrap_loans", lambda *_a: (loan,),
     )
+    # No borrowable cell is free, so the new batch restores the completed
+    # loan first instead of opening a parallel one.
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock",
         lambda *_a: ({"splitter": 10}, {"splitter": 10}),
@@ -1219,6 +1237,313 @@ def test_consumed_loan_output_is_fulfilled_by_monotonic_craft_count(
     assert result == "restored borrowed copper-cable producer after seed completion"
     assert submitted == ["restore_bootstrap_loan_splitter"]
     assert any("LOAN FULFILLED" in message for message in messages)
+
+
+def _belt_loan() -> builder.MallBootstrapLoan:
+    return builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="transport-belt",
+        target_count=122, spare_target_count=147, side="left",
+        requester_position=(39.5, 38.5),
+        current_recipe="transport-belt", step_recipe="transport-belt",
+        step_baseline_finished=100, step_required_crafts=12,
+    )
+
+
+def test_drained_loan_keeps_producing_instead_of_restore_churn(
+    monkeypatch,
+) -> None:
+    """2026-09-03 belt stall: 150 available hit the 147 spare ceiling while
+    transferable sat at 138. The loan restored and re-borrowed every pass
+    until the 12-pass guard tripped. Spendable stock below the bill must keep
+    the cell producing, not release it."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "transport-belt", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
+    })
+    stock = {"transport-belt": 150, "iron-gear-wheel": 100, "iron-plate": 100}
+    submitted: list[str] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 112,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: None,
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name", lambda *_a: "working",
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    result = builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player", _belt_loan(), messages.append,
+    )
+
+    assert result.startswith("borrowed iron-gear-wheel cell is producing")
+    assert submitted == []
+    assert not any("RESTORED" in message for message in messages)
+    assert not any("LOAN FULFILLED" in message for message in messages)
+
+
+def test_spendable_loan_still_restores_on_true_completion(monkeypatch) -> None:
+    """The churn fix must not pin the cell forever: 150 spendable belts for
+    a 122 bill with a 147 ceiling restores exactly as before."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "transport-belt", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
+    })
+    stock = {"transport-belt": 150, "iron-gear-wheel": 100, "iron-plate": 100}
+    submitted: list[str] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 112,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a: dict(stock),
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, _p, name, _e: submitted.append(name),
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    result = builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player", _belt_loan(), messages.append,
+    )
+
+    assert result == "restored borrowed iron-gear-wheel producer after seed completion"
+    assert submitted == ["restore_bootstrap_loan_transport-belt"]
+
+
+def test_reserved_but_flowing_input_funds_another_mall_cell(monkeypatch) -> None:
+    """2026-09-03: free pool slots sat empty while reserved iron-plate sat in
+    the provider and belts serialized on one AM1. A ledger-reserved input
+    with a scheduled producer and spendable stock funds the cell from flow."""
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 5)
+    monkeypatch.setattr(
+        builder, "preview_mall_allocation", lambda *_a: ((0.0, 0.0), "left"),
+    )
+    monkeypatch.setattr(
+        builder, "compact_mall_project_bill",
+        lambda *_a, **_k: {"iron-plate": 2, "inserter": 2},
+    )
+    ledger = SimpleNamespace(
+        allocatable_stock=lambda stock, **_k: {"inserter": 10},
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items",
+        lambda *_a: {"iron-plate": 20, "inserter": 10},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"iron-plate": 20, "inserter": 10},
+    )
+    monkeypatch.setattr(
+        builder, "construction_supply_chain_is_scheduled", lambda *_a: True,
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    affordable, shortage = builder._bootstrap_demand_cell_affordable(
+        client, "nauvis", "player", "transport-belt", 122, (0.0, 0.0),
+    )
+
+    assert affordable and shortage == {}
+
+
+def test_stagnant_reserve_still_blocks_another_mall_cell(monkeypatch) -> None:
+    """Flow funding must not spend a stagnant stockpile: with no scheduled
+    producer the reserved shortage still waits."""
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 5)
+    monkeypatch.setattr(
+        builder, "preview_mall_allocation", lambda *_a: ((0.0, 0.0), "left"),
+    )
+    monkeypatch.setattr(
+        builder, "compact_mall_project_bill",
+        lambda *_a, **_k: {"iron-plate": 2, "inserter": 2},
+    )
+    ledger = SimpleNamespace(
+        allocatable_stock=lambda stock, **_k: {"inserter": 10},
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items",
+        lambda *_a: {"iron-plate": 20, "inserter": 10},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"iron-plate": 20, "inserter": 10},
+    )
+    monkeypatch.setattr(
+        builder, "construction_supply_chain_is_scheduled", lambda *_a: False,
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    affordable, shortage = builder._bootstrap_demand_cell_affordable(
+        client, "nauvis", "player", "transport-belt", 122, (0.0, 0.0),
+    )
+
+    assert not affordable and shortage == {"iron-plate": 2}
+
+
+def test_large_belt_backlog_earns_a_second_mall_cell(monkeypatch) -> None:
+    """A lone belt cell facing a multi-minute backlog funds one parallel
+    producer from the pool instead of serializing the whole foundation."""
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    monkeypatch.setitem(builder.LINE_RECIPES, "transport-belt", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1], "product_amount": 2, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(machine_count=1),
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a: 240.0)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (True, {}),
+    )
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
+    messages: list[str] = []
+
+    wanted = builder._bootstrap_reserve_machine_target(
+        object(), "nauvis", "player", "transport-belt", 122, (0.0, 0.0),
+        messages.append, background=False,
+    )
+
+    assert wanted == 2
+    assert any("DYNAMIC MALL CAPACITY" in message for message in messages)
+
+
+def _drill_loan(**overrides) -> builder.MallBootstrapLoan:
+    fields = {
+        "original_recipe": "iron-gear-wheel", "target_item": "electric-mining-drill",
+        "target_count": 6, "spare_target_count": 8, "side": "left",
+        "requester_position": (39.5, 38.5),
+        "current_recipe": "electric-mining-drill",
+        "step_recipe": "electric-mining-drill",
+        "step_target_count": 6, "step_baseline_finished": 100,
+        "step_required_crafts": 4, "step_minimum_crafts": 2,
+    }
+    fields.update(overrides)
+    return builder.MallBootstrapLoan(**fields)
+
+
+def _mock_drill_recipe(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+
+
+def test_spare_phase_refreshes_the_frozen_bill_gate(monkeypatch) -> None:
+    """2026-09-03 drill stall: the machine gate froze at the bill of 6 while
+    the loan step advanced to the spare ceiling of 8, so the cell disabled at
+    6 and the run died on gate_mismatch. A drifted gate must reconfigure."""
+    _mock_drill_recipe(monkeypatch)
+    stock = {
+        "electric-mining-drill": 6, "electronic-circuit": 100,
+        "iron-gear-wheel": 100, "iron-plate": 100,
+    }
+    plans: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 101,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a: dict(stock),
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e: plans.append((name, plan)),
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player", _drill_loan(),
+        lambda _message: None,
+    )
+
+    assert [name for name, _plan in plans] == [
+        "bootstrap_loan_electric-mining-drill",
+    ]
+    machine = next(
+        action for action in plans[0][1]["phases"][0]["actions"]
+        if action.get("entity") == "assembling-machine-1"
+    )
+    assert machine["logistic_condition"] == {
+        "signal": "electric-mining-drill", "comparator": "<", "constant": 8,
+    }
+
+
+def test_stale_disabled_reading_resumes_instead_of_ending_the_run(
+    monkeypatch,
+) -> None:
+    """Status and stock are sampled seconds apart while bots drain the batch:
+    a machine that already re-enabled must not end the run on the stale
+    disabled reading."""
+    _mock_drill_recipe(monkeypatch)
+    stock = {
+        "electric-mining-drill": 6, "electronic-circuit": 100,
+        "iron-gear-wheel": 100, "iron-plate": 100,
+    }
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 100,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a: dict(stock),
+    )
+    statuses = iter(["disabled_by_control_behavior", "working"])
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name", lambda *_a: next(statuses),
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: None,
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    result = builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player",
+        _drill_loan(step_target_count=8), messages.append,
+    )
+
+    assert "producing temporary" in result
+    assert any("LOAN RESUMED" in message for message in messages)
 
 
 def test_consumed_prerequisite_advances_and_persists_its_credit(
@@ -1481,6 +1806,10 @@ def test_competing_batch_preempts_optional_spares_after_minimum_crafts(
     submitted: list[str] = []
     messages: list[str] = []
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    # No borrowable cell is free, so the competing batch serializes behind
+    # the active loan instead of opening a parallel one.
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock),
     )
@@ -1576,7 +1905,9 @@ def test_optional_spares_do_not_expand_prerequisites_before_blocking_bill(
         action for action in actions if action["entity"] == "requester-chest"
     )
     assert machine["recipe"] == "iron-gear-wheel"
-    assert requester["logistic_sections"][0]["multiplier"] == 3
+    # 3 step crafts ask for ceil(3 * 1.2): bounded headroom past the exact
+    # batch so bots lagging the plan cannot dry the requester (2026-09-03).
+    assert requester["logistic_sections"][0]["multiplier"] == 4
 
 
 def test_completed_bill_enters_durable_spare_phase(monkeypatch) -> None:
@@ -1639,7 +1970,7 @@ def test_recipe_loan_never_borrows_the_last_gear_or_cable_machine(
         lambda *_a: {"iron-gear-wheel": 100, "copper-cable": 100},
     )
 
-    def line(_client, _surface, _force, recipe, _machine):
+    def line(_client, _surface, _force, recipe, _machine, **_kwargs):
         if recipe not in {"iron-gear-wheel", "copper-cable"}:
             return None
         return SimpleNamespace(
@@ -1679,7 +2010,7 @@ def test_recipe_loan_never_reclaims_a_core_mall_producer(monkeypatch) -> None:
         lambda *_a: {"assembling-machine-2": 100, "splitter": 1},
     )
 
-    def line(_client, _surface, _force, recipe, _machine):
+    def line(_client, _surface, _force, recipe, _machine, **_kwargs):
         positions = {
             "assembling-machine-2": (core_machine,),
             "splitter": (other_machine,),
@@ -1699,6 +2030,8 @@ def test_recipe_loan_never_reclaims_a_core_mall_producer(monkeypatch) -> None:
         lambda _c, _s, position: (
             {"name": "assembling-machine-2"} if position in origins
             else {"name": "requester-chest"} if position in requesters
+            else {"name": "passive-provider-chest"}
+            if tuple(position) in {(39.5, 31.5), (50.5, 31.5)}
             else None
         ),
     )
@@ -1713,3 +2046,233 @@ def test_recipe_loan_never_reclaims_a_core_mall_producer(monkeypatch) -> None:
         (3.0, -1.0), lambda _message: None,
     ) == "started temporary batch"
     assert selected[0].original_recipe == "splitter"
+
+
+def _parallel_loan_world(monkeypatch, free_origin):
+    """One active splitter loan plus a three-machine gear line."""
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"iron-gear-wheel": 5},
+    )
+
+    def line(_client, _surface, _force, recipe, _machine, **_kwargs):
+        if recipe != "iron-gear-wheel":
+            return None
+        return SimpleNamespace(
+            machine_count=3,
+            machine_positions=((36.5, 32.5), (37.5, 32.5), (38.5, 32.5)),
+        )
+
+    monkeypatch.setattr(builder.live_base, "find_line", line)
+    monkeypatch.setattr(
+        builder, "locate_mall_cell", lambda *_a: (free_origin, "left"),
+    )
+    monkeypatch.setattr(
+        builder, "mall_slot_uses_shared_provider", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _c, _s, position: (
+            {"name": "assembling-machine-1"}
+            if position == (38.5, 32.5)
+            else {"name": "requester-chest"}
+            if position == (free_origin[0] + 4.5, free_origin[1] + 1.5)
+            else {"name": "passive-provider-chest"}
+            if tuple(position) == (free_origin[0] + 4.5, free_origin[1] + 0.5)
+            else None
+        ),
+    )
+    return loan
+
+
+def test_parallel_loan_opens_on_a_free_cell(monkeypatch) -> None:
+    """A new batch borrows a free cell instead of queueing behind a loan."""
+    _parallel_loan_world(monkeypatch, (35, 31))
+    submitted: list[builder.MallBootstrapLoan] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: submitted.append(_a[4]) or "parallel started",
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert result == "parallel started"
+    assert submitted[0].target_item == "electric-mining-drill"
+    assert submitted[0].original_recipe == "iron-gear-wheel"
+    assert any("LOAN PARALLEL" in message for message in messages)
+    assert not any("LOAN HANDOFF" in message for message in messages)
+
+
+def test_loan_on_the_same_cell_falls_back_to_handoff(monkeypatch) -> None:
+    """The active loan's own cell is never borrowed twice."""
+    _parallel_loan_world(monkeypatch, (46, 31))
+    submitted: list[builder.MallBootstrapLoan] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: submitted.append(_a[4]) or "handoff served",
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert result == "handoff served"
+    assert submitted[0].target_item == "splitter"
+    assert any("LOAN HANDOFF" in message for message in messages)
+
+
+def test_service_routes_to_the_matching_loan(monkeypatch) -> None:
+    """With several loans, each batch services its own cell."""
+    splitter_loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+    )
+    drill_loan = builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="electric-mining-drill",
+        target_count=6, side="left",
+        requester_position=(39.5, 32.5), current_recipe="drill",
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: (splitter_loan, drill_loan),
+    )
+    submitted: list[tuple] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: submitted.append((_a[4], _k.get("preempt_for")))
+        or "served",
+    )
+
+    assert builder._service_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill",
+        (0.0, 0.0), lambda _message: None,
+    ) == "served"
+    assert submitted == [(drill_loan, None)]
+    assert builder._service_bootstrap_loan(
+        object(), object(), "nauvis", "player", "unrelated-item",
+        (0.0, 0.0), lambda _message: None,
+    ) is None
+
+
+def test_service_keeps_handoff_for_a_single_other_loan(monkeypatch) -> None:
+    """One foreign loan is still serviced so the new batch can borrow next."""
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter",
+        target_count=3, side="left",
+        requester_position=(50.5, 32.5), current_recipe="splitter",
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    submitted: list[tuple] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: submitted.append((_a[4], _k.get("preempt_for")))
+        or "served",
+    )
+
+    assert builder._service_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill",
+        (0.0, 0.0), lambda _message: None,
+    ) == "served"
+    assert submitted == [(loan, "electric-mining-drill")]
+
+
+def _binding_drill_loan() -> builder.MallBootstrapLoan:
+    return builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="electric-mining-drill",
+        target_count=6, spare_target_count=8, side="left",
+        requester_position=(39.5, 38.5),
+        current_recipe="electric-mining-drill",
+        step_recipe="electric-mining-drill",
+        step_baseline_finished=100, step_required_crafts=4,
+        step_minimum_crafts=2,
+    )
+
+
+def _mock_binding_serve(monkeypatch, *, transferable: int) -> list[str]:
+    messages: list[str] = []
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    stock = {
+        "electric-mining-drill": transferable, "electronic-circuit": 100,
+        "iron-gear-wheel": 100, "iron-plate": 100,
+    }
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", {"electric-mining-drill"})
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 100,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_minimum_fulfilled", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items",
+        lambda *_a: {"electric-mining-drill": transferable},
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: None,
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name", lambda *_a: "working",
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a, **_k: messages.append("SUBMIT") or None,
+    )
+    return messages
+
+
+def test_binding_loan_short_of_bill_shields_against_stockpile_preempt(
+    monkeypatch,
+) -> None:
+    """2026-09-03: drills at 2/8 with mine ghosts pending yielded their cell
+    to circuits-200 stockpiling. A binding loan below its bill keeps the cell
+    against a non-binding preemptor."""
+    messages = _mock_binding_serve(monkeypatch, transferable=2)
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    result = builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player", _binding_drill_loan(),
+        messages.append, preempt_for="electronic-circuit",
+    )
+
+    assert "producing temporary" in result
+    assert not any("PREEMPT" in message for message in messages)
+    assert "SUBMIT" not in messages
+
+
+def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
+    """Once the blocking bill is spendable, spares yield normally."""
+    messages = _mock_binding_serve(monkeypatch, transferable=6)
+    monkeypatch.setattr(
+        builder, "_restore_bootstrap_loan", lambda *_a, **_k: messages.append("RESTORED"),
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    builder._submit_bootstrap_loan(
+        client, object(), "nauvis", "player", _binding_drill_loan(),
+        messages.append, preempt_for="electronic-circuit",
+    )
+
+    assert any("PREEMPT" in message for message in messages)
+    assert "RESTORED" in messages

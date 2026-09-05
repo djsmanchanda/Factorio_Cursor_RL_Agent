@@ -510,3 +510,107 @@ def test_pioneer_cannot_adopt_nearby_refinery_or_enter_retirement(
 
     assert failure.value.code == "bootstrap_lifecycle_conflict"
     assert "before replacement provisioning" in str(failure.value)
+
+
+def test_fresh_plate_builds_its_beltless_seed_first(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Mall-first opening: a plate with no starter and no lifecycle builds
+    the beltless direct seed first. With zero belt stock the full foundation
+    bill is unaffordable before first plates; skipping the seed stalled the
+    2026-09-04 opening with nothing producing anything."""
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: False,
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_direct_plate_line",
+        lambda *_a: calls.append("seed"),
+    )
+    monkeypatch.setattr(
+        builder, "_prep_plate_extraction",
+        lambda *_a, **_k: pytest.fail("seed comes before the foundation"),
+    )
+
+    spent = builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {},
+        (0.0, 0.0), lambda _message: None, {}, {},
+    )
+
+    assert spent is True
+    assert calls == ["seed"]
+
+
+def test_provisioning_records_opening_pioneer_without_starter(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The first foundation submission records the opening district itself as
+    the pioneer, so the managed lifecycle (provisioning -> released) works
+    with no starter stack ever built."""
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    extraction = SimpleNamespace(
+        ore="iron-ore", smelter_origin=(20.0, 30.0),
+        ore_output=(10.5, 10.5), furnace_count=6,
+    )
+    replacement_plan = {"phases": [{"name": "replacement", "actions": [
+        _action("electric-furnace", 20.5, 30.5),
+        _action("passive-provider-chest", 34.5, 42.5),
+    ]}]}
+    system_plan = {"phases": [{"name": "system", "actions": [
+        _action("transport-belt", 11.5, 10.5),
+    ]}]}
+
+    builder._record_bootstrap_provisioning(
+        "iron-plate", extraction, replacement_plan, system_plan,
+        [_action("transport-belt", 10.5, 10.5)], (34.5, 42.5),
+    )
+
+    state = ledger.load("iron-plate")
+    assert state is not None
+    assert state.lifecycle_state == "provisioning"
+    assert state.pioneer_actions != ()
+    assert state.replacement_furnaces == 6
+
+
+def test_only_gear_and_cable_are_permanent_anchors() -> None:
+    """Two permanent cells (one gear, one cable); circuits and belts rotate."""
+    assert builder._MALL_RECIPE_ANCHORS == {
+        "iron-gear-wheel": 1, "copper-cable": 1,
+    }
+
+
+def test_seed_drill_shortfall_queues_a_mall_drill_demand(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A seed arriving before its drills exist (fewer than the 5-drill
+    starter set, or retirement still in flight) must hand a drill demand to
+    the mall and retry -- never die on the shortfall."""
+    from orchestrator.parts_mall import MaterialShortage
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: False,
+    )
+    def _short(*_args: object, **_kwargs: object) -> object:
+        raise MaterialShortage(
+            "direct_stone-brick_starter", {"electric-mining-drill": 1}, {},
+        )
+    monkeypatch.setattr(builder, "_bootstrap_direct_plate_line", _short)
+    mall_targets: dict[str, int] = {}
+
+    spent = builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, mall_targets,
+        (0.0, 0.0), lambda _message: None, {}, {},
+    )
+
+    assert spent is True
+    assert mall_targets.get("electric-mining-drill", 0) >= 1

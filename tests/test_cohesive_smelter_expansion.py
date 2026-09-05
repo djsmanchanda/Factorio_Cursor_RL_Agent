@@ -1184,7 +1184,7 @@ def test_direct_starter_retires_only_after_the_full_refinery_is_healthy(
     ]
     assert {action["entity"] for action in retirements[0][1]["phases"][0]["actions"]} == {
         "electric-mining-drill", "electric-furnace",
-        "fast-inserter", "passive-provider-chest",
+        "inserter", "passive-provider-chest",
     }
 
 

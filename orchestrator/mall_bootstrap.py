@@ -27,6 +27,11 @@ _ASSEMBLER_TIERS = {
     "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
 }
 
+#: Bounded requester headroom past a loan step's crafts (user standard
+#: 2026-09-03): exact-craft caps idled machines on dry requesters whenever
+#: bots lagged the plan. The cap itself stays.
+_LOAN_REQUEST_HEADROOM_FRACTION = 0.20
+
 
 @dataclass(frozen=True)
 class MallBootstrapLoan:
@@ -356,7 +361,15 @@ def active_bootstrap_loans(
         group, raw_x, raw_y, left_state, right_state = record.split("|", 4)
         def _parse_side_state(state: str) -> tuple[str, str]:
             if "," in state:
-                return state.split(",", 1)
+                machine, recipe = state.split(",", 1)
+                # The pad survey returns whatever entity happens to sit there,
+                # including robots flying over the cell. Only an assembler
+                # tier is a usable machine identity; anything else (a
+                # logistic-robot hovering at survey tick killed the 18:41 run
+                # with configure_target_missing) falls back to tier 1.
+                if machine not in _ASSEMBLER_TIERS:
+                    machine = "assembling-machine-1"
+                return machine, recipe
             return "assembling-machine-1", state
 
         left_machine, left_recipe = _parse_side_state(left_state)
@@ -419,7 +432,12 @@ def bootstrap_loan_plan(
         "logistic_sections": [{
             "group": active.group,
             "requests": requests,
-            "multiplier": max(1, step.crafts),
+            # Bounded headroom past the step's crafts (user standard
+            # 2026-09-03): exact-craft caps idled machines on dry requesters
+            # whenever bots lagged the plan.
+            "multiplier": max(1, math.ceil(
+                step.crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION),
+            )),
         }],
         # Stop requesting the borrowed recipe before its assembler changes.
         # The executor processes actions in order and returns any ingredient
@@ -448,8 +466,19 @@ def bootstrap_loan_plan(
     }]}
 
 
-def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
-    """Restore the original recipe and request group after the seed is stocked."""
+def restore_bootstrap_loan_plan(
+    loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
+    provider_fill_chest: bool = False,
+) -> dict:
+    """Restore the original recipe and request group after the seed is stocked.
+
+    ``provider_stock_target`` is the item's canonical provider count: every
+    live cell making the same item carries the same limit (user standard
+    2026-09-04). ``None`` keeps the legacy count of 1. A shared provider
+    keeps ``provider_fill_chest``: resetting a count bar behind another
+    recipe's stacks strands every future output (2026-09-04: a restore
+    barred a shared chest behind 9 slots of mixed stock and ended the run).
+    """
     spec = LINE_RECIPES[loan.original_recipe]
     requester_section = {
         "group": recipe_group_name(loan.original_recipe, loan.side),
@@ -457,7 +486,9 @@ def restore_bootstrap_loan_plan(loan: MallBootstrapLoan) -> dict:
         "multiplier": request_multiplier(loan.machine_name, spec["craft_time"]),
     }
     provider = generate_mall_provider_limit_update(
-        loan.original_recipe, loan.provider_position, 1,
+        loan.original_recipe, loan.provider_position,
+        1 if provider_stock_target is None else provider_stock_target,
+        fill_chest=provider_fill_chest,
     )["phases"][0]["actions"][0]
     return {"phases": [{
         "name": f"restore_bootstrap_loan_{loan.original_recipe}",

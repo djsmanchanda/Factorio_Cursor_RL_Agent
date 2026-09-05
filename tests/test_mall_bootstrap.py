@@ -141,7 +141,9 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         {"name": "copper-cable", "count": 4},
         {"name": "electronic-circuit", "count": 2},
     ]
-    assert requester["logistic_sections"][0]["multiplier"] == 2
+    assert requester["logistic_sections"][0]["multiplier"] == 3
+    # Bounded headroom: 2 step crafts ask for ceil(2 * 1.2), never the exact
+    # count, so the machine never idles on a dry requester (2026-09-03).
     assert requester["clear_logistic_groups"] == [
         "mall:copper-cable",
         "mall:copper-cable:right",
@@ -295,3 +297,164 @@ def test_active_loan_recovers_when_opposite_side_machine_is_missing() -> None:
     assert loan.machine_name == "assembling-machine-1"
     assert loan.step_recipe == "electronic-circuit"
 
+
+
+def test_hovering_robot_is_not_parsed_as_the_borrowed_machine() -> None:
+    """2026-09-03 run killer: a logistic robot flying over the mall pad at
+    survey tick was parsed as the loan's machine, so the next submit tried
+    to configure_entity a logistic-robot and died on configure_target_missing.
+    Only assembler tiers are usable machine identities."""
+    group = (
+        "mall-bootstrap:v4:iron-gear-wheel:transport-belt:128:154:left:"
+        "transport-belt:150:100:12:12:-"
+    )
+    reply = f"{group}|39.5|38.5|logistic-robot,transport-belt|-"
+
+    class _Client:
+        def command(self, _command: str) -> str:
+            return reply
+
+    (loan,) = active_bootstrap_loans(_Client(), "nauvis", "player")
+
+    assert loan.machine_name == "assembling-machine-1"
+    assert loan.current_recipe == "transport-belt"
+
+
+def _provider_counts(plan: dict) -> list[int]:
+    return [
+        action["inventory_limit"]["count"]
+        for phase in plan["phases"]
+        for action in phase["actions"]
+        if action.get("entity") == "passive-provider-chest"
+        and isinstance(action.get("inventory_limit"), dict)
+    ]
+
+
+def test_restore_defaults_to_the_legacy_provider_count() -> None:
+    plan = restore_bootstrap_loan_plan(_loan("copper-cable"))
+
+    assert _provider_counts(plan) == [1]
+
+
+def test_restore_applies_the_canonical_twin_limit() -> None:
+    """Every live cell making the same item carries the same provider limit
+    (user standard 2026-09-04): a restored twin must not reset to 1 while its
+    sibling holds hundreds."""
+    plan = restore_bootstrap_loan_plan(
+        _loan("copper-cable"), provider_stock_target=240,
+    )
+
+    assert _provider_counts(plan) == [240]
+
+
+def _install_self_supply_recipes(monkeypatch) -> None:
+    """Assemblers and drills as catalog recipes: plates, gears, and circuits
+    in, finished machines out -- everything a seed-powered base can supply."""
+    monkeypatch.setitem(LINE_RECIPES, "assembling-machine-1", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["iron-plate", "iron-gear-wheel"],
+        "amounts": [9, 4], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setitem(LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["iron-plate", "iron-gear-wheel", "electronic-circuit"],
+        "amounts": [10, 5, 3], "product_amount": 1, "craft_time": 2.0,
+    })
+
+
+def test_drill_batch_is_admitted_on_seed_stock(monkeypatch) -> None:
+    """5-drill start: seeds consume every gifted drill, so the first mine
+    expansion drills must be mall batches made from seed plates, gears, and
+    circuits -- with no external capability missing."""
+    _install_self_supply_recipes(monkeypatch)
+    stock = {
+        "iron-plate": 100, "iron-gear-wheel": 30, "electronic-circuit": 18,
+        "electric-mining-drill": 0,
+    }
+
+    step = next_bootstrap_step("electric-mining-drill", 6, stock, stock)
+    external = bootstrap_external_shortages(
+        "electric-mining-drill", 6, stock, stock,
+    )
+
+    assert step is not None
+    assert step.recipe == "electric-mining-drill"
+    assert external == ()
+
+
+def test_drill_batch_makes_circuits_first_when_they_are_missing(monkeypatch) -> None:
+    """Without circuits flowing, the loan ladder still has everything it
+    needs: cable and plates stocked means no external capability is missing
+    and the deepest step is circuits, ahead of the drills themselves."""
+    _install_self_supply_recipes(monkeypatch)
+    stock = {
+        "iron-plate": 100, "iron-gear-wheel": 30, "copper-cable": 60,
+        "electronic-circuit": 0,
+    }
+
+    step = next_bootstrap_step("electric-mining-drill", 6, stock, stock)
+    external = bootstrap_external_shortages(
+        "electric-mining-drill", 6, stock, stock,
+    )
+
+    assert step is not None
+    assert step.recipe == "electronic-circuit"
+    assert external == ()
+
+
+def test_drill_batch_names_raw_plate_when_cable_runs_dry(monkeypatch) -> None:
+    """With no cable either, the walk bottoms out at the raw capability the
+    controller must establish rather than borrowing a slot it cannot feed."""
+    _install_self_supply_recipes(monkeypatch)
+    stock = {
+        "iron-plate": 100, "iron-gear-wheel": 30, "copper-cable": 0,
+        "electronic-circuit": 0,
+    }
+
+    external = bootstrap_external_shortages(
+        "electric-mining-drill", 6, stock, stock,
+    )
+
+    assert "copper-plate" in [shortage.item for shortage in external]
+
+
+def test_seventh_assembler_is_a_mall_batch_on_seed_stock(monkeypatch) -> None:
+    """6-AM1 start: the 6 standing cells consume every gifted assembler, so
+    cells 7-8 (and the core producers) must be mall batches, not stock."""
+    _install_self_supply_recipes(monkeypatch)
+    stock = {
+        "iron-plate": 40, "iron-gear-wheel": 20, "assembling-machine-1": 0,
+    }
+
+    step = next_bootstrap_step("assembling-machine-1", 1, stock, stock)
+    external = bootstrap_external_shortages(
+        "assembling-machine-1", 1, stock, stock,
+    )
+
+    assert step is not None
+    assert step.recipe == "assembling-machine-1"
+    assert external == ()
+
+
+def _restore_plan(provider_fill_chest: bool) -> dict:
+    return restore_bootstrap_loan_plan(
+        _loan("copper-cable"), provider_stock_target=240,
+        provider_fill_chest=provider_fill_chest,
+    )
+
+
+def test_restore_opens_shared_providers() -> None:
+    """2026-09-04: resetting a count bar behind another recipe's stacks
+    stranded every future output on a shared chest."""
+    actions = [
+        action for phase in _restore_plan(True)["phases"]
+        for action in phase["actions"]
+        if action.get("entity") == "passive-provider-chest"
+    ]
+    assert actions and all(
+        action["inventory_limit"].get("fill_chest") for action in actions
+    )
+
+
+def test_restore_applies_canonical_count_to_dedicated() -> None:
+    assert _provider_counts(_restore_plan(False)) == [240]

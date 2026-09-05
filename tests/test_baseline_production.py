@@ -40,9 +40,11 @@ def _output_rate(recipe: str, machines: int) -> float:
 def test_the_prep_set_is_the_agreed_one() -> None:
     assert BASELINE_MACHINES == {
         "iron-gear-wheel": 2,
-        "copper-cable": 1,
+        "copper-cable": 2,
         "electronic-circuit": 1,
+        "transport-belt": 1,
     }
+    assert sum(BASELINE_MACHINES.values()) == 6
 
 
 def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
@@ -84,8 +86,8 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
     draw = baseline_plate_draw()
 
     assert set(draw) == set(BASELINE_PLATES)
-    assert draw["iron-plate"] == pytest.approx(7.5)
-    assert draw["copper-plate"] == pytest.approx(1.5)
+    assert draw["iron-plate"] == pytest.approx(9.0)
+    assert draw["copper-plate"] == pytest.approx(3.0)
 
 
 def test_mall_burst_draw_expands_nested_plate_requirements() -> None:
@@ -111,7 +113,7 @@ def test_mall_burst_has_a_bounded_influence_on_standing_draw() -> None:
     assert adjusted["copper-plate"] == baseline["copper-plate"]
 
 def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
-    """8.75 plate/s is well past what six drills carry -- the reason prep has
+    """9.0 plate/s is well past what six drills carry -- the reason prep has
     to raise extraction rather than inherit the opening row."""
     assert baseline_drill_phase("iron-plate") == 24
     assert EXTRACTION_DRILL_PHASES[0] == 6
@@ -136,7 +138,7 @@ def test_reduced_supply_chemical_capabilities_have_one_explicit_order() -> None:
         "assembling-machine-2", "fast-inserter", "passive-provider-chest",
         "requester-chest", "substation",
     )
-    assert BOOTSTRAP_MALL_SLOT_TARGET == 10
+    assert BOOTSTRAP_MALL_SLOT_TARGET == 8
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)
@@ -157,6 +159,7 @@ def test_build_order_puts_a_feeder_before_what_it_feeds() -> None:
 
     assert order == (
         "iron-gear-wheel", "copper-cable", "electronic-circuit",
+        "transport-belt",
     )
 
 
