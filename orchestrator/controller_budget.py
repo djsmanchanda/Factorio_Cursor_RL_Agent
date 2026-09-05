@@ -23,17 +23,34 @@ class ControlBudget:
     waits: int = 0
     diagnoses: int = 0
     progress_credits: int = 0
+    _plans_at_pass_start: int = 0
 
     def begin_pass(self) -> None:
         if self.passes >= self.max_passes:
             raise BudgetExhausted(f"control pass budget exhausted at {self.passes} passes")
         self.passes += 1
+        self._plans_at_pass_start = self.plans
 
     def credit_progress_pass(self) -> None:
-        """Do not spend the control-loop limit on an observably productive pass."""
+        """Do not spend the control-loop limit on an observably productive pass.
+
+        Productive passes also refund one remediation, diagnosis, and wait
+        each, and refund every plan spent within the pass. A saturated mall
+        rotating borrow/restore reconfigures submits several configure-only
+        plans per pass while crafts advance (2026-09-05: 2200s of
+        fast-inserter/belt rotation bled 2-4 plans/pass against the old
+        1-plan refund and died on BudgetExhausted with no construction
+        fault). The refund only returns to the pass-start mark, so spend
+        banked by earlier unproductive passes is kept and pure spinning
+        still trips the bound.
+        """
         if self.passes > 0:
             self.passes -= 1
             self.progress_credits += 1
+        self.plans = max(0, self._plans_at_pass_start)
+        self.remediations = max(0, self.remediations - 1)
+        self.diagnoses = max(0, self.diagnoses - 1)
+        self.waits = max(0, self.waits - 1)
 
     def consume_plan(self, name: str) -> None:
         if self.plans >= self.max_plans:

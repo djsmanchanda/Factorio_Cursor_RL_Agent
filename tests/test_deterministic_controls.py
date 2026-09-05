@@ -334,3 +334,80 @@ def test_baseline_verification_is_recorded_atomically(tmp_path: Path) -> None:
     assert payload["baseline_verified"] is True
     assert payload["initial_game_tick"] == 1200
     assert payload["termination_reason"] == "completed"
+
+
+def test_observed_progress_refunds_every_run_total_budget() -> None:
+    """2026-09-04: a productive 3218s run died on the wait budget while
+    chaining power to oil. Progress refunds one of each counter; idle
+    counters floor at zero instead of going negative."""
+    budget = begin_run_budget(100)
+    try:
+        budget.begin_pass()
+        for _ in range(5):
+            consume_wait("settle")
+        consume_plan_submission("plan")
+        consume_remediation("fix")
+        consume_diagnosis("probe")
+        assert budget.waits == 5
+
+        budget.credit_progress_pass()
+
+        assert budget.waits == 4
+        assert budget.plans == 0
+        assert budget.remediations == 0
+        assert budget.diagnoses == 0
+        assert budget.passes == 0
+    finally:
+        end_run_budget()
+
+
+def test_unproductive_spinning_still_exhausts_every_budget() -> None:
+    """Refunds only flow on progress: a pure spin still trips each bound."""
+    budget = begin_run_budget(1, plans_per_pass=1)
+    try:
+        for index in range(4):
+            consume_wait(f"wait{index}")
+        with pytest.raises(BudgetExhausted, match="wait budget"):
+            consume_wait("last")
+    finally:
+        end_run_budget()
+
+
+def test_productive_pass_refunds_every_plan_spent_within_it() -> None:
+    """2026-09-05: 2200s of fast-inserter/belt rotation submitted 2-4
+    configure-only plans per productive pass and bled out against the old
+    1-plan refund. Productive passes go plan-net-zero; banked unproductive
+    spend is kept, not forgiven."""
+    budget = begin_run_budget(100)
+    try:
+        # Banked unproductive spend first: no credit, it stays.
+        budget.begin_pass()
+        consume_plan_submission("stale-a")
+        consume_plan_submission("stale-b")
+        assert budget.plans == 2
+
+        # A productive rotation pass spends several plans and is refunded
+        # to the pass-start mark, not below it.
+        budget.begin_pass()
+        consume_plan_submission("borrow")
+        consume_plan_submission("restore")
+        consume_plan_submission("rebind")
+        assert budget.plans == 5
+        budget.credit_progress_pass()
+        assert budget.plans == 2
+    finally:
+        end_run_budget()
+
+
+def test_unproductive_plan_spend_still_exhausts_the_budget() -> None:
+    """The pass-start refund must not launder pure spinning: passes without
+    credit keep every submission until the bound fires."""
+    budget = begin_run_budget(1, plans_per_pass=2)
+    try:
+        budget.begin_pass()
+        consume_plan_submission("first")
+        consume_plan_submission("second")
+        with pytest.raises(BudgetExhausted, match="plan submission budget"):
+            consume_plan_submission("third")
+    finally:
+        end_run_budget()
