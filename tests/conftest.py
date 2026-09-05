@@ -1,6 +1,11 @@
 # Path: tests/conftest.py
 # Purpose: Share immutable fixtures and apply the repository's explicit test taxonomy.
 
+import ast
+import copy
+import importlib
+import inspect
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -54,6 +59,7 @@ _FAST_FILES = {
     "test_resource_district_state.py", "test_run_loop_bounds.py",
     "test_runner_log_retention.py", "test_sandbox_contracts.py",
     "test_science_recipe_graph.py", "test_training_isolation.py",
+    "test_test_taxonomy.py",
     "test_training_power.py", "test_training_rewards.py",
     "test_transport_occupancy.py",
 }
@@ -96,9 +102,51 @@ _LIVE_REGRESSION_FILES = {
     "test_bootstrap_priorities.py", "test_cohesive_smelter_expansion.py",
     "test_extraction_separation.py", "test_plate_bootstrap_circle.py",
 }
-_SOURCE_TRIPWIRE_TOKENS = (
-    "inspect.getsource(", ".read_text(", "Path(__file__).read_text(",
-)
+_SOURCE_TRIPWIRE_FILES = {
+    "test_executor_settings_coverage.py",
+    "test_research_lua.py",
+}
+_SOURCE_TRIPWIRE_NODE_FRAGMENTS = {
+    "test_landfill_executor_contract.py::test_lua_executor",
+    "test_power_district.py::test_power_plans_request_runtime_atomic_preflight",
+    "test_recipe_catalog_lua.py::test_recipe_catalog_uses",
+    "test_refinery_blueprints.py::test_lua_executor_applies",
+    "test_science_telemetry_lua.py::test_science_status_module_is_registered_from_control",
+    "test_stock_gating.py::test_the_executor_applies_the_gate",
+    "test_stock_gating.py::test_the_gate_is_a_reapplied_setting_not_a_creation_time_field",
+    "test_stock_gating.py::test_a_gate_that_does_not_land_is_reported_rather_than_swallowed",
+    "test_stock_gating.py::test_the_gate_is_verified_after_it_is_written",
+    "test_stock_gating.py::test_the_executor_clears_and_verifies_an_old_gate",
+    "test_upgrades_lua.py::test_upgrade_module_uses_the_native_order_api",
+}
+
+# These caches and ledgers are process-global in production because one runner
+# owns one episode. Tests exercise many episodes in one interpreter, so restore
+# their pre-test contents explicitly instead of depending on collection order.
+_ISOLATED_MUTABLE_STATE = {
+    "orchestrator.autonomous_builder": (
+        "_STAGE_DELIVERY_PROVIDERS",
+        "_REFINERY_SITE_RESERVATIONS",
+        "_TRANSFERABLE_WAITS",
+        "_BLOCKING_MALL_ITEMS",
+        "_DRAIN_WATCH_LAST_TRANSFERABLE",
+        "_DRAIN_WATCH_PREVIOUS_TRANSFERABLE",
+        "UNBACKED_DRAWS",
+        "MANAGED_INTERMEDIATE_SOURCES",
+        "_LOAN_GATE_REFRESH_ATTEMPTS",
+        "_BOOTSTRAP_SHARED_PROVIDER_ITEMS",
+        "_MALL_REFRESH_SIGNATURES",
+        "_MALL_PROVIDER_CAPACITY_FLOORS",
+        "_MALL_STOCK_GATE_FLOORS",
+        "_MALL_ITEM_PROVIDER_LIMITS",
+        "_CRAFT_PROOF_CONSUMED",
+    ),
+    "orchestrator.resource_patches": ("_PATCH_CACHE",),
+    "orchestrator.stage_extraction": ("_NEW_DIRECT_MINE_CACHE",),
+    "orchestrator.stage_services": ("_PENDING_POWER_BRIDGES",),
+    "orchestrator.stage_chemical": ("_CRUDE_EXPANSION_FAILED_CELLS",),
+    "orchestrator.live_base": ("_MALFORMED_STOCK_CHUNKS",),
+}
 
 
 def _primary_domain(filename: str) -> str:
@@ -111,9 +159,99 @@ def _primary_domain(filename: str) -> str:
     return "contracts"
 
 
+def _module_source_names(path: Path) -> frozenset[str]:
+    """Find module constants populated from inspect.getsource calls."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return frozenset()
+
+    names = set()
+    for statement in tree.body:
+        value = getattr(statement, "value", None)
+        if value is None or not any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "inspect"
+            and node.func.attr == "getsource"
+            for node in ast.walk(value)
+        ):
+            continue
+        targets = statement.targets if isinstance(statement, ast.Assign) else (
+            [statement.target] if isinstance(statement, ast.AnnAssign) else []
+        )
+        names.update(target.id for target in targets if isinstance(target, ast.Name))
+    return frozenset(names)
+
+
+def _source_tripwire_matches(
+    filename: str,
+    nodeid: str,
+    item_source: str,
+    module_source_names: frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether one collected case asserts directly against source text."""
+    if (
+        filename in _SOURCE_TRIPWIRE_FILES
+        or any(fragment in nodeid for fragment in _SOURCE_TRIPWIRE_NODE_FRAGMENTS)
+        or "inspect.getsource(" in item_source
+    ):
+        return True
+    if not module_source_names:
+        return False
+    try:
+        item_tree = ast.parse(textwrap.dedent(item_source))
+    except SyntaxError:
+        return False
+    referenced_names = {
+        node.id
+        for node in ast.walk(item_tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    return bool(referenced_names & module_source_names)
+
+
+def _collected_item_source(item: pytest.Item) -> str:
+    try:
+        return inspect.getsource(item.obj)
+    except (OSError, TypeError):
+        return ""
+
+
+def _restore_mutable_value(module, name: str, snapshot) -> None:
+    current = getattr(module, name)
+    if isinstance(snapshot, dict) and isinstance(current, dict):
+        current.clear()
+        current.update(copy.deepcopy(snapshot))
+    elif isinstance(snapshot, set) and isinstance(current, set):
+        current.clear()
+        current.update(copy.deepcopy(snapshot))
+    elif isinstance(snapshot, list) and isinstance(current, list):
+        current.clear()
+        current.extend(copy.deepcopy(snapshot))
+    else:
+        setattr(module, name, copy.deepcopy(snapshot))
+
+
+@pytest.fixture(autouse=True)
+def isolate_mutable_runtime_state():
+    """Keep deterministic runner caches from leaking between test cases."""
+    snapshots = []
+    for module_name, names in _ISOLATED_MUTABLE_STATE.items():
+        module = importlib.import_module(module_name)
+        for name in names:
+            snapshots.append((module, name, copy.deepcopy(getattr(module, name))))
+
+    yield
+
+    for module, name, snapshot in snapshots:
+        _restore_mutable_value(module, name, snapshot)
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Attach domain, cost, and environment markers from one audited map."""
-    source_cache: dict[Path, str] = {}
+    module_source_names: dict[Path, frozenset[str]] = {}
     for item in items:
         path = Path(str(item.path))
         filename = path.name
@@ -148,12 +286,14 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if filename in _LIVE_REGRESSION_FILES:
             item.add_marker(pytest.mark.live_regression)
 
-        if path not in source_cache:
-            source_cache[path] = path.read_text(
-                encoding="utf-8", errors="replace",
-            )
-        source = source_cache[path]
-        if any(token in source for token in _SOURCE_TRIPWIRE_TOKENS):
+        if path not in module_source_names:
+            module_source_names[path] = _module_source_names(path)
+        if _source_tripwire_matches(
+            filename,
+            nodeid,
+            _collected_item_source(item),
+            module_source_names[path],
+        ):
             item.add_marker(pytest.mark.source_tripwire)
 
         if filename in _FAST_FILES and not (slow or exhaustive or integration):

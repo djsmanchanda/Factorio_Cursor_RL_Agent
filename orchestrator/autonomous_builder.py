@@ -6173,6 +6173,56 @@ def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
     return CHEMICAL_BOOTSTRAP_LADDER[:stop]
 
 
+def _unfunded_ladder_ingredient(
+    client: RconClient, surface: str, force: str, item: str,
+) -> str | None:
+    """First unstarted, unstocked ladder rung in `item`'s recipe closure.
+
+    Mall batches for items whose advanced chemical ingredients cannot exist
+    yet (no producer, no stock, upstream cell unbuilt) spin borrow/restore
+    cycles forever: every pass serves them, nothing can be made (2026-09-05:
+    bulk-inserter waited 500s on advanced circuits while plastic-bar was not
+    even sited). Only the oil-gated half of the ladder gates: early rungs
+    (pipe through pumpjack) have dedicated establishment flows that the
+    batch path actively drives, so parking on them would just idle. Ladder
+    rungs establish themselves and are never gated; everything else parks
+    until its rung flows. Returns None when the item is fundable --
+    including when any survey fails, since a blind park is worse than a
+    wasted borrow.
+    """
+    if item in CHEMICAL_BOOTSTRAP_LADDER:
+        return None
+    try:
+        oil_half = CHEMICAL_BOOTSTRAP_LADDER[
+            CHEMICAL_BOOTSTRAP_LADDER.index("plastic-bar"):
+        ]
+    except ValueError:
+        return None
+    try:
+        closure = _recipe_ingredient_closure(item)
+    except Exception:
+        return None
+    try:
+        stock = _transferable_or_available_stock(client, surface, force)
+    except Exception:
+        return None
+    for rung in oil_half:
+        if rung not in closure:
+            continue
+        try:
+            if int(stock.get(rung, 0)) > 0:
+                continue
+        except Exception:
+            continue
+        try:
+            started = _chemical_capability_started(client, surface, force, rung)
+        except Exception:
+            continue
+        if not started:
+            return rung
+    return None
+
+
 def _missing_chemical_ladder_predecessor(
     client: RconClient, surface: str, force: str, item: str,
 ) -> str | None:
@@ -6877,6 +6927,17 @@ def _rationed_mall_batch(
     )
     if stock.get(item, 0) >= done_at and not force_temporary:
         return False
+    ladder_block = _unfunded_ladder_ingredient(client, surface, force, item)
+    if ladder_block is not None:
+        # The bill's advanced ingredients cannot exist yet; borrowing a cell
+        # for it just churns against whoever holds one. Park on the rung
+        # like a chemical handoff so the pass stays cheap while oil builds.
+        raise ProductionPrerequisiteDeferred(
+            f"chemical ladder is establishing {ladder_block} before {item}",
+            code="chemical_capability_handoff",
+            state="supply_wait",
+            details={"target": item, "rung": ladder_block},
+        )
     active = active_bootstrap_loans(client, surface, force)
     if not active or any(loan.target_item == item for loan in active):
         actual, usable = _bootstrap_loan_stock(

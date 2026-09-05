@@ -3130,3 +3130,106 @@ def test_handoff_scan_stays_quiet_when_holders_are_fed(monkeypatch) -> None:
 
     assert targets == {}
     assert messages == []
+
+
+def _ladder_recipes(monkeypatch) -> None:
+    """Bulk needs advanced circuits; advanced needs plastic (live 2.x bills)."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "bulk-inserter", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["iron-gear-wheel", "electronic-circuit",
+                        "advanced-circuit", "fast-inserter"],
+        "amounts": [15, 15, 1, 1], "product_amount": 1, "craft_time": 8.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "advanced-circuit", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["plastic-bar", "copper-cable", "electronic-circuit"],
+        "amounts": [2, 4, 2], "product_amount": 1, "craft_time": 6.0,
+    })
+
+
+def test_unfundable_batch_parks_on_its_missing_rung(monkeypatch) -> None:
+    """2026-09-05: bulk-inserter spun 500s of borrow/restore against
+    advanced circuits while plastic-bar was not even sited. The batch parks
+    on the rung instead of churning."""
+    _ladder_recipes(monkeypatch)
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_completion_target", lambda *_a: 999,
+    )
+    monkeypatch.setattr(
+        builder, "_chemical_capability_started", lambda *_a: False,
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as parked:
+        builder._rationed_mall_batch(
+            object(), object(), "nauvis", "player", "bulk-inserter", 1,
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert parked.value.code == "chemical_capability_handoff"
+    assert parked.value.details["rung"] == "plastic-bar"
+    assert parked.value.details["target"] == "bulk-inserter"
+
+
+def test_ladder_rungs_establish_themselves(monkeypatch) -> None:
+    """Rungs are never gated (they ARE the establishment path)."""
+    _ladder_recipes(monkeypatch)
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_chemical_capability_started", lambda *_a: False,
+    )
+
+    assert builder._unfunded_ladder_ingredient(
+        object(), "nauvis", "player", "plastic-bar",
+    ) is None
+    assert builder._unfunded_ladder_ingredient(
+        object(), "nauvis", "player", "advanced-circuit",
+    ) is None
+
+
+def test_stocked_rung_does_not_gate(monkeypatch) -> None:
+    """Spendable advanced circuits fund the batch even while plastic-bar
+    has never run."""
+    _ladder_recipes(monkeypatch)
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock",
+        lambda *_a: {"advanced-circuit": 5},
+    )
+    monkeypatch.setattr(
+        builder, "_chemical_capability_started", lambda *_a: False,
+    )
+
+    assert builder._unfunded_ladder_ingredient(
+        object(), "nauvis", "player", "bulk-inserter",
+    ) == "plastic-bar"
+
+
+def test_flowing_ladder_never_parks(monkeypatch) -> None:
+    """Started rungs (or survey failures) leave the batch alone."""
+    _ladder_recipes(monkeypatch)
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_chemical_capability_started", lambda *_a: True,
+    )
+
+    assert builder._unfunded_ladder_ingredient(
+        object(), "nauvis", "player", "bulk-inserter",
+    ) is None
+
+    def _boom(*_args: object, **_kwargs: object) -> dict:
+        raise RuntimeError("survey offline")
+
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", _boom,
+    )
+
+    assert builder._unfunded_ladder_ingredient(
+        object(), "nauvis", "player", "bulk-inserter",
+    ) is None
