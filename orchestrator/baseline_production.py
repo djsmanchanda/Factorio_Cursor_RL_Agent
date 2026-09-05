@@ -143,6 +143,37 @@ BOOTSTRAP_FURNACE_CAPS = {
 
 ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
 
+#: Lookahead when bounding mine growth by refinery appetite: one ladder row.
+#: Mines build in complete six-drill rows, so the cap lets the next row land
+#: while its furnaces are funded without stranding rows the refinery cannot
+#: eat for the whole oil-gated era.
+COHERENT_MINE_HEADROOM_DRILLS = 6
+
+
+def coherent_drill_cap(
+    recipe: str, furnace_count: int, mining_productivity_bonus: float,
+) -> int:
+    """Drills a refinery of `furnace_count` can consume, plus one row.
+
+    Mine and refinery move as one coherent increment: at live productivity
+    six iron furnaces eat ~6 drills' output (1:1) while six stone-brick
+    furnaces eat ~12 (2:1 ore ratio) -- the exact ratios live runs are held
+    to. Sizing on the base drill rate or plate units instead overbuilds iron
+    behind oil-gated refineries and starves stone behind its own ratio.
+    Supports only growth decisions; it never shrinks a plan.
+    """
+    spec = LINE_RECIPES[recipe]
+    furnace_ore_rate = (
+        MACHINE_SPEEDS[spec["machine"]] * spec["amounts"][0] / spec["craft_time"]
+    )
+    drill_rate = ELECTRIC_DRILL_ITEMS_PER_SECOND * (
+        1.0 + max(0.0, mining_productivity_bonus)
+    )
+    need = math.ceil(
+        max(0, furnace_count) * furnace_ore_rate / drill_rate
+    )
+    return need + COHERENT_MINE_HEADROOM_DRILLS
+
 
 def _machine_craft_rate(recipe: str) -> float:
     """Crafts per second one machine completes on `recipe`."""

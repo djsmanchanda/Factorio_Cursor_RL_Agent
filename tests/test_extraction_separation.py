@@ -1294,3 +1294,106 @@ def test_new_mine_site_survey_is_cached_until_construction_changes(monkeypatch) 
     stage_extraction.invalidate_new_mine_cache(client, "nauvis", "iron-ore")
     stage_extraction._cached_new_direct_mine(*args)
     assert calls == [True, True]
+
+
+def test_mine_short_of_furnace_appetite_flags_half_fed_stone() -> None:
+    """2026-09-03: six stone drills fed three of six furnaces while every
+    machine looked healthy, so no starvation rule fired at 50% fed. Ore-rate
+    math must name the shortfall; 1:1 metals keep legacy behavior exactly."""
+    from orchestrator.stage_extraction import mine_short_of_furnace_appetite
+
+    assert mine_short_of_furnace_appetite("stone-brick", 6, 6, 0.3) is True
+    assert mine_short_of_furnace_appetite("stone-brick", 6, 6, 0.0) is True
+    assert mine_short_of_furnace_appetite("stone-brick", 12, 6, 0.3) is False
+    assert mine_short_of_furnace_appetite("iron-plate", 6, 6, 0.3) is False
+    assert mine_short_of_furnace_appetite("copper-plate", 6, 6, 0.0) is False
+    assert mine_short_of_furnace_appetite("iron-plate", 0, 6, 0.0) is False
+
+
+def _mine_stage_harness(monkeypatch, *, ore: str, statuses: dict) -> None:
+    """Drive build_mining_stage to its refinery-health check without RCON."""
+    from types import SimpleNamespace
+
+    extraction = SimpleNamespace(
+        drill_count=6, furnace_count=6, mining_productivity_bonus=0.3,
+        smelter_origin=(0.0, 0.0), smelter_reserved_area=None, ore=ore,
+        ore_output=(0.0, 0.0), smelter_flow_direction="east",
+        smelter_vertical_mirror=False, haul_head=(0.0, 0.0), output=(0.0, 0.0),
+        shared_belt_y=0.0, pending=False, first_column_x=None,
+        growth_direction=1, expansion_step=0,
+    )
+    monkeypatch.setattr(autonomous_builder, "_essential_belt_type", lambda *_a: "transport-belt")
+    monkeypatch.setattr(autonomous_builder, "_bootstrap_state", lambda *_a: None)
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "plan_local_extraction", lambda *_a, **_k: extraction,
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line",
+        lambda *_a: SimpleNamespace(produced_count=5),
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_refinery_machine_positions",
+        lambda *_a: [(float(index), 0.0) for index in range(6)],
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "entity_statuses", lambda *_a: dict(statuses),
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_repair_unpowered_existing_mine", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_build_initial_plate_smelter", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_submit_mining_plan", lambda *_a, **_k: None,
+    )
+
+
+def test_half_fed_stone_module_expands_its_own_mine(monkeypatch) -> None:
+    """2026-09-03: six stone drills fed three of six furnaces indefinitely
+    because the starvation rule only fires at a quarter fed. Ore-rate
+    adequacy must expand the mine; 1:1 metals at full feed must not."""
+    _mine_stage_harness(
+        monkeypatch, ore="stone",
+        statuses={
+            **{(float(index), 0.0): "working" for index in range(3)},
+            **{(float(index), 0.0): "no_ingredients" for index in range(3, 6)},
+        },
+    )
+
+    calls: list[bool] = []
+
+    def _expansion(*_a, **_k):
+        calls.append(bool(_k.get("expand", False)))
+        raise RuntimeError("expansion requested")
+
+    real_stage = autonomous_builder.build_mining_stage
+    monkeypatch.setattr(autonomous_builder, "build_mining_stage", _expansion)
+
+    with __import__("pytest").raises(RuntimeError, match="expansion requested"):
+        real_stage(
+            object(), object(), "nauvis", "player", "stone-brick",
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    assert calls == [True]
+
+
+def test_fully_fed_iron_module_does_not_expand(monkeypatch) -> None:
+    """Six drills feeding six iron furnaces is adequate: no expansion."""
+    _mine_stage_harness(
+        monkeypatch, ore="iron-ore",
+        statuses={(float(index), 0.0): "working" for index in range(6)},
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_cohesive_smelter_target",
+        lambda *_a: (None, None),
+    )
+
+    autonomous_builder.build_mining_stage(
+        object(), object(), "nauvis", "player", "iron-plate",
+        (0.0, 0.0), lambda _message: None,
+    )

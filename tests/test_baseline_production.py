@@ -187,3 +187,26 @@ def test_every_prep_recipe_is_actually_buildable() -> None:
     for recipe in BASELINE_MACHINES:
         spec = LINE_RECIPES[recipe]
         assert spec["machine"] in MACHINE_SPEEDS, f"{recipe} has no measured machine speed"
+
+
+def test_coherent_drill_cap_matches_live_ratios() -> None:
+    """2026-09-04: 12 iron drills behind 6 furnaces (needs 6+row), 6 stone
+    drills behind 6 furnaces (needs 12+row). One rule gives both."""
+    from orchestrator.baseline_production import coherent_drill_cap
+
+    assert coherent_drill_cap("iron-plate", 6, 0.30) == 12
+    assert coherent_drill_cap("copper-plate", 6, 0.30) == 12
+    assert coherent_drill_cap("stone-brick", 6, 0.30) == 18
+    assert coherent_drill_cap("iron-plate", 0, 0.30) == 6
+    assert coherent_drill_cap("iron-plate", 12, 0.30) == 18
+
+
+def test_coherent_drill_cap_credits_productivity() -> None:
+    """Fresh bases (no bonus) size conservatively; researched bases slim."""
+    from orchestrator.baseline_production import coherent_drill_cap
+
+    assert coherent_drill_cap("iron-plate", 6, 0.0) == 14
+    assert (
+        coherent_drill_cap("iron-plate", 6, 1.0)
+        < coherent_drill_cap("iron-plate", 6, 0.0)
+    )

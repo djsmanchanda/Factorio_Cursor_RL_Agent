@@ -103,6 +103,10 @@ These names describe intended responsibilities, not permission to build speculat
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.
+  New-mine rows scale with the recipe's own ore-per-product ratio instead:
+  iron/copper open three drills per row while stone-brick opens six, so 12
+  drills feed 6 stone furnaces at the same tightness; narrow patches still
+  fall back through patch-fit.
 - Steel begins as one electric furnace beside and belt-fed from the persistent
   iron provider. This produces the first construction steel without reserving
   six scarce furnaces; measured demand may expand it only after first output.

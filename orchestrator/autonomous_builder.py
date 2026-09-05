@@ -37,7 +37,7 @@ from orchestrator.baseline_production import (
     PLATE_FOUNDATION_BUILD_ORDER, PLATE_FOUNDATION_FURNACES,
     RATIONED_MALL_BATCH_ITEMS,
     baseline_build_order, baseline_drill_phase, baseline_plate_draw,
-    demand_adjusted_plate_draw, drill_phase_for_draw,
+    coherent_drill_cap, demand_adjusted_plate_draw, drill_phase_for_draw,
     smelter_count_for_draw, STEEL_BASELINE_FURNACES,
     STEEL_IRON_CAPACITY_FLOOR,
 )
@@ -102,6 +102,7 @@ from orchestrator.stage_extraction import (
     candidate_mining_origins as _candidate_mining_origins,  # noqa: F401 - compatibility export
     choose_mining_origin as _choose_mining_origin,  # noqa: F401 - compatibility export
     mining_drill_positions as _mining_drill_positions,  # noqa: F401 - compatibility export
+    mine_short_of_furnace_appetite,
     plan_local_extraction,
     planned_smelter_count_for_drills,
     smelter_count_for_drills,
@@ -2495,8 +2496,12 @@ def build_mining_stage(
         bootstrap = _bootstrap_state(recipe)
         if not excluded_drill_positions and not expand:
             starter_drills: set[Point] = set()
-            if bootstrap is not None and bootstrap.pioneer_actions:
-                for a in bootstrap.pioneer_actions:
+            pioneer_actions = (
+                getattr(bootstrap, "pioneer_actions", ())
+                if bootstrap is not None else ()
+            )
+            if pioneer_actions:
+                for a in pioneer_actions:
                     if a.get("entity") == "electric-mining-drill":
                         pos = a.get("position")
                         if pos:
@@ -2570,6 +2575,7 @@ def build_mining_stage(
         )
     if not expand:
         starved = False
+        ore_short = False
         line = None
         try:
             line = live_base.find_line(
@@ -2589,9 +2595,18 @@ def build_mining_stage(
                     if state == "working"
                 )
                 starved = working <= len(positions) // 4
+                # A half-fed multi-ore module never trips the starvation
+                # heuristic above, yet its mine cannot feed it at any drill
+                # phase the ladder reaches on machine parity (2026-09-03:
+                # stone ran 3/6 fed indefinitely). Ore-rate math names it.
+                ore_short = mine_short_of_furnace_appetite(
+                    recipe, extraction.drill_count, len(positions),
+                    extraction.mining_productivity_bonus,
+                )
         except Exception:  # survey unavailable (dry harness): guard passes
             starved = False
-        if starved:
+            ore_short = False
+        if starved or ore_short:
             if _repair_unpowered_existing_mine(
                 client, bridge, surface, force, extraction,
                 extraction.ore_output, recipe, emit,
@@ -2628,21 +2643,41 @@ def build_mining_stage(
                     f"its reserved origin {bootstrap.replacement_origin}"
                 )
             else:
-                # A standing refinery that is mostly UNFED is an ore-supply
-                # problem, not a capacity one (live run 15 built 24 stone
-                # furnaces fed for three). User standard: keep the proper module
-                # and grow ITS OWN mine instead -- one more drill row behind the
-                # existing line feeds what the furnaces already draw.
-                emit(
-                    f"  ORE STARVATION: {recipe} refinery runs at "
-                    f"{working}/{len(positions)} furnace(s) fed -- expanding its "
-                    "own mine by one phase instead of adding capacity"
+                # Coherence before growth: drills the live refinery cannot
+                # eat (at live productivity and the recipe's own ore ratio)
+                # are idle steel in the ground. When the mine already covers
+                # its furnaces plus one lookahead row, the unfed furnaces
+                # want transport/power repair or more furnaces -- not more
+                # drills -- so fall through to cohesion below instead of
+                # extending the mine (2026-09-04: 12 iron drills behind 6
+                # furnaces while the refinery waited on oil-gated furnaces).
+                coherent_cap = coherent_drill_cap(
+                    recipe, len(positions),
+                    extraction.mining_productivity_bonus,
                 )
-                return build_mining_stage(
-                    client, bridge, surface, force, recipe,
-                    reference_point, emit, expand=True,
-                    excluded_drill_positions=excluded_drill_positions,
-                )
+                if extraction.drill_count >= coherent_cap:
+                    emit(
+                        f"  MINE COHERENCE: {recipe} mine holds "
+                        f"{extraction.drill_count} drill(s) for "
+                        f"{len(positions)} furnace(s) (cap {coherent_cap}); "
+                        "growing the refinery instead of the mine"
+                    )
+                else:
+                    # A standing refinery that is mostly UNFED is an ore-supply
+                    # problem, not a capacity one (live run 15 built 24 stone
+                    # furnaces fed for three). User standard: keep the proper module
+                    # and grow ITS OWN mine instead -- one more drill row behind the
+                    # existing line feeds what the furnaces already draw.
+                    emit(
+                        f"  ORE STARVATION: {recipe} refinery runs at "
+                        f"{working}/{len(positions)} furnace(s) fed -- expanding its "
+                        "own mine by one phase instead of adding capacity"
+                    )
+                    return build_mining_stage(
+                        client, bridge, surface, force, recipe,
+                        reference_point, emit, expand=True,
+                        excluded_drill_positions=excluded_drill_positions,
+                    )
     if (
         not expand
         and bootstrap is not None

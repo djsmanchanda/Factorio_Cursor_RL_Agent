@@ -491,6 +491,37 @@ def complete_six_drill_prefix(positions: tuple[Point, ...]) -> tuple[Point, ...]
     return positions[:complete]
 
 
+def mine_short_of_furnace_appetite(
+    recipe: str, drill_count: int, furnace_count: int,
+    mining_productivity_bonus: float,
+) -> bool:
+    """Whether the mine's ore rate cannot feed its furnace module.
+
+    Rate math, not machine parity: multi-ore recipes (ore per product above
+    one) can leave a full furnace row half-fed while every machine looks
+    healthy (2026-09-03: six stone drills fed three of six furnaces; the
+    rest sat recipe-less and no starvation rule fired at 50% fed). 1:1
+    recipes keep legacy behavior exactly. Supports only growth decisions --
+    it never shrinks a plan.
+    """
+    if drill_count <= 0 or furnace_count <= 0:
+        return False
+    spec = LINE_RECIPES[recipe]
+    ore_per_plate = spec["amounts"][0] / max(1, spec.get("product_amount", 1))
+    if ore_per_plate <= 1:
+        return False
+    furnace_ore_rate = (
+        MACHINE_SPEEDS[spec["machine"]] * spec["amounts"][0] / spec["craft_time"]
+    )
+    supportable = math.floor(
+        drill_count
+        * ELECTRIC_DRILL_ITEMS_PER_SECOND
+        * (1.0 + max(0.0, mining_productivity_bonus))
+        / furnace_ore_rate
+    )
+    return supportable < furnace_count
+
+
 def smelter_count_for_drills(
     recipe: str, drill_count: int, mining_productivity_bonus: float,
 ) -> int:
