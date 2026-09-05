@@ -29,7 +29,9 @@ RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 # again on each poll. Unbounded history therefore makes each command slower than
 # the last, forever, across every run sharing one script-output. Only the file a
 # command just produced is ever read back, so older reports are pure history:
-# keep a generous window for post-mortems and drop the rest.
+# keep a generous window for post-mortems and drop the rest. Reports whose
+# content repeats the newest file on disk (ignoring the tick stamp) are dropped
+# on collection instead: if nothing has changed, no new log is kept.
 REPORT_RETENTION = 200
 
 
@@ -148,6 +150,53 @@ class GameBridge:
                 continue
         return removed
 
+    @staticmethod
+    def _content_signature(payload: object) -> str:
+        """Canonical form of a report payload, ignoring the tick stamp."""
+        if isinstance(payload, dict):
+            payload = {key: value for key, value in payload.items() if key != "tick"}
+        return json.dumps(payload, sort_keys=True)
+
+    def _dedupe_unchanged_report(self, subdir: Path, collected: Path) -> Path:
+        """Drop ``collected`` when it repeats the newest report already on disk.
+
+        Pollers (e.g. a dashboard refreshing research every few seconds)
+        re-issue the same command long after the game state stopped changing,
+        and the mod answers every call with a fresh tick-stamped file. Only
+        the returned file's content is ever read back, so a repeat is pure
+        history: delete it and hand the caller the report it duplicates. A
+        genuine transition -- research started, completed, next target queued
+        -- always differs, so it is always kept. Anything unparseable is kept:
+        a failed comparison must never delete a report.
+        """
+        try:
+            with collected.open("r", encoding="utf-8") as handle:
+                fresh = self._content_signature(json.load(handle))
+        except (json.JSONDecodeError, OSError, ValueError):
+            return collected
+        directory = self.script_output / subdir
+        try:
+            others = [item for item in directory.glob("*.json") if item != collected]
+        except OSError:
+            return collected
+        if not others:
+            return collected
+        try:
+            previous = max(
+                others, key=lambda item: (item.stat().st_mtime_ns, item.name)
+            )
+            with previous.open("r", encoding="utf-8") as handle:
+                old = self._content_signature(json.load(handle))
+        except (OSError, json.JSONDecodeError, ValueError):
+            return collected
+        if old != fresh:
+            return collected
+        try:
+            collected.unlink()
+        except OSError:
+            return collected
+        return previous
+
     def _run_and_collect(self, command_text: str, subdir: Path, timeout: float) -> Path:
         known = self._existing_files(subdir)
         response = self.command(command_text)
@@ -156,6 +205,7 @@ class GameBridge:
             if "error" in lowered or "blocked" in lowered:
                 raise BridgeError(f"Command {command_text!r} failed: {response.strip()}")
         collected = self._wait_for_new_file(subdir, known, timeout)
+        collected = self._dedupe_unchanged_report(subdir, collected)
         self._prune_reports(subdir, collected)
         return collected
 

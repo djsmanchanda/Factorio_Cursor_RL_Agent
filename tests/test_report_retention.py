@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -126,6 +127,115 @@ def test_collect_prunes_so_scan_cost_stays_bounded(
         collected = bridge._run_and_collect("/build_layout_plan {}", SUBDIR, timeout=5.0)
         assert collected.exists(), "the report just collected must survive pruning"
         assert len(list(directory.glob("*.json"))) <= 10
+
+
+def _write_named_report(
+    tmp_path: Path, name: str, payload: dict, mtime_ns: int,
+) -> Path:
+    item = tmp_path / SUBDIR / name
+    item.parent.mkdir(parents=True, exist_ok=True)
+    item.write_text(json.dumps(payload), encoding="utf-8")
+    os.utime(item, ns=(mtime_ns, mtime_ns))
+    return item
+
+
+def _collect_with_fresh_report(
+    bridge: GameBridge,
+    directory: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    payload: dict,
+) -> Path:
+    """Run one collection whose mod write is simulated by ``payload``."""
+
+    def _fake_command(_text: str) -> str:
+        (directory / name).write_text(json.dumps(payload), encoding="utf-8")
+        return ""
+
+    monkeypatch.setattr(bridge, "command", _fake_command)
+    return bridge._run_and_collect("/research_options {}", SUBDIR, timeout=5.0)
+
+
+def test_collect_drops_report_identical_to_previous_ignoring_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If nothing has changed, no new log: the repeat is deleted and the
+    caller is handed the report it duplicates."""
+    directory = tmp_path / SUBDIR
+    body = {"force": "player", "research_queue": [], "options": ["a"], "ok": True}
+    first = _write_named_report(
+        tmp_path, "layout_0001.json", {**body, "tick": 100}, 1_000_000_000,
+    )
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    collected = _collect_with_fresh_report(
+        bridge, directory, monkeypatch, "layout_0002.json", {**body, "tick": 200},
+    )
+
+    assert collected == first
+    assert first.exists()
+    assert not (directory / "layout_0002.json").exists()
+    assert len(list(directory.glob("*.json"))) == 1
+
+
+def test_collect_keeps_report_when_content_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuine transition -- research started, completed, next target queued
+    -- always differs, so it is always kept."""
+    directory = tmp_path / SUBDIR
+    first = _write_named_report(
+        tmp_path,
+        "layout_0001.json",
+        {"tick": 100, "research_queue": [], "ok": True},
+        1_000_000_000,
+    )
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    collected = _collect_with_fresh_report(
+        bridge,
+        directory,
+        monkeypatch,
+        "layout_0002.json",
+        {"tick": 200, "research_queue": ["automation"], "ok": True},
+    )
+
+    assert collected == directory / "layout_0002.json"
+    assert first.exists() and collected.exists()
+
+
+def test_collect_keeps_first_report_when_nothing_previous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / SUBDIR
+    directory.mkdir(parents=True, exist_ok=True)
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    collected = _collect_with_fresh_report(
+        bridge, directory, monkeypatch, "layout_0001.json", {"tick": 1, "ok": True},
+    )
+
+    assert collected.exists()
+    assert len(list(directory.glob("*.json"))) == 1
+
+
+def test_collect_keeps_reports_when_previous_is_unparseable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed comparison must never delete a report."""
+    directory = tmp_path / SUBDIR
+    directory.mkdir(parents=True, exist_ok=True)
+    previous = directory / "layout_0001.json"
+    previous.write_text("{not json", encoding="utf-8")
+    os.utime(previous, ns=(1_000_000_000, 1_000_000_000))
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    collected = _collect_with_fresh_report(
+        bridge, directory, monkeypatch, "layout_0002.json", {"tick": 2, "ok": True},
+    )
+
+    assert collected == directory / "layout_0002.json"
+    assert previous.exists() and collected.exists()
 
 
 def test_retain_reports_must_keep_at_least_one(
