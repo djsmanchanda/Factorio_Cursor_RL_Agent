@@ -88,6 +88,10 @@ _PENDING_POWER_BRIDGES: dict[tuple[str, str], float] = {}
 # Slack subtracted from a chain's final hop so tile rounding can never land it
 # a fraction outside the service radius it was placed to satisfy.
 _COVERAGE_MARGIN = 2.0
+# Settle after a chain lands before verifying coverage: network membership
+# and power join lag placement by moments, and a first-check flake would
+# otherwise fail runs the chain actually served.
+_COVERAGE_VERIFY_SETTLE_SECONDS = 5.0
 # Roboport placement is batched. A fresh roboport lands at ~50% of its 100 MJ
 # buffer (live-verified) and draws up to ~2.1 MW while topping up, so placing a
 # whole long chain at once stacks a multi-megawatt transient on a small grid and
@@ -1157,7 +1161,27 @@ def extend_roboport_coverage(
                     )
         if client is not None or wave_start + _ROBOPORT_WAVE < len(placed):
             _await_roboport_charge(client, surface, force, nearest, wave, emit)
-    return True
+    # Verify the target actually entered coverage instead of assuming the
+    # chain did: dropped final hops (blocked tiles) used to return success
+    # with the gap intact, and a built chest would then sit in no network
+    # forever (2026-09-04: a plastic provider 28 tiles from its port while
+    # construction coverage reported fine).
+    verified = live_base.nearest_roboport(client, surface, force, target_position)
+    if verified is not None and service_distance(
+        verified, target_position, square=square,
+    ) <= radius:
+        return True
+    time.sleep(_COVERAGE_VERIFY_SETTLE_SECONDS)
+    verified = live_base.nearest_roboport(client, surface, force, target_position)
+    if verified is not None and service_distance(
+        verified, target_position, square=square,
+    ) <= radius:
+        return True
+    raise StuckError(
+        f"{target_position} is still outside {purpose} coverage "
+        f"(radius {radius:.0f}) after chaining; nearest roboport is "
+        f"{verified} -- investigate directly"
+    )
 
 
 def _logistic_chest_positions(plan: dict) -> list[Point]:

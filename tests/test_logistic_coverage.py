@@ -336,7 +336,11 @@ def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) ->
 
 def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
     powered = []
-    monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
+    calls = {"n": 0}
+    def _nearest(*a, **k):
+        calls["n"] += 1
+        return (0.0, 0.0) if calls["n"] == 1 else (30.0, 0.0)
+    monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
     monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "low_power")
     monkeypatch.setattr("orchestrator.stage_services._submit", lambda *a, **k: {"ok": True})
@@ -406,7 +410,11 @@ def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) 
     monkeypatch.setattr(
         stage_services, "_repair_existing_roboport_power", lambda *_args: None,
     )
-    monkeypatch.setattr(live_base, "nearest_roboport", lambda *_args: (5.0, 5.0))
+    calls = {"n": 0}
+    def _nearest(*_args):
+        calls["n"] += 1
+        return (5.0, 5.0) if calls["n"] == 1 else (100.0, 5.0)
+    monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
     monkeypatch.setattr(
         live_base, "entity_status_name", lambda *_args: "low_power",
     )
@@ -442,7 +450,11 @@ def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
 
     submitted_waves: list[int] = []
     waits: list[int] = []
-    monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
+    calls = {"n": 0}
+    def _nearest(*a, **k):
+        calls["n"] += 1
+        return (0.0, 0.0) if calls["n"] == 1 else (400.0, 0.0)
+    monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
     monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
     monkeypatch.setattr(
         "orchestrator.stage_services._submit",
@@ -619,7 +631,11 @@ def test_extend_roboport_coverage_ignores_the_gap_when_asked_about_construction(
 
 def test_ensure_logistic_coverage_places_a_roboport_for_a_stranded_chest(monkeypatch) -> None:
     submitted: list[dict] = []
-    monkeypatch.setattr(live_base, "nearest_roboport", lambda *a, **k: (0.0, 0.0))
+    calls = {"n": 0}
+    def _nearest(*a, **k):
+        calls["n"] += 1
+        return (0.0, 0.0) if calls["n"] == 1 else (30.5, -9.5)
+    monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "working")
     monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
     monkeypatch.setattr(
@@ -715,6 +731,66 @@ def test_diagnose_blockage_skips_the_logistic_query_when_no_chests_are_known(mon
         None, "nauvis", "player", (10.0, 10.0), (10.0, 12.0), [(11.0, 10.0)],
     ) is None
 
+
+def test_roboport_chain_verifies_coverage_after_placing(monkeypatch) -> None:
+    """2026-09-04: dropped final hops returned success with the gap intact.
+    A target still outside coverage after chaining raises loudly."""
+    from orchestrator import stage_services
+    from orchestrator.stage_services import StuckError, extend_roboport_coverage
+    far, near, target = (0.0, 0.0), (100.0, 100.0), (100.0, 100.0)
+    remaining = [[far], [far], [far]]
+    monkeypatch.setattr(
+        stage_services.live_base, "roboports_needing_power", lambda *_a: [],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "nearest_roboport",
+        lambda *_a: remaining.pop(0)[0],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_status_name", lambda *_a: "active",
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions", lambda *_a, **_k: [(50.0, 50.0)],
+    )
+    monkeypatch.setattr(stage_services, "_submit", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        stage_services, "_await_built_status", lambda *_a: "active",
+    )
+    monkeypatch.setattr(
+        stage_services, "_await_roboport_charge", lambda *_a: None,
+    )
+    monkeypatch.setattr("time.sleep", lambda *_a: None)
+
+    with pytest.raises(StuckError, match="still outside logistic coverage"):
+        extend_roboport_coverage(
+            object(), object(), "nauvis", "player", target,
+            lambda _message: None, purpose="logistic",
+        )
+
+
+def test_covered_target_skips_chaining_entirely(monkeypatch) -> None:
+    """No gap, no work: covered chests cost one survey."""
+    from orchestrator import stage_services
+    from orchestrator.stage_services import extend_roboport_coverage
+    monkeypatch.setattr(
+        stage_services.live_base, "roboports_needing_power", lambda *_a: [],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "nearest_roboport",
+        lambda *_a: (100.0, 100.0),
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_status_name", lambda *_a: "active",
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions",
+        lambda *_a, **_k: pytest.fail("covered target must not chain"),
+    )
+
+    assert extend_roboport_coverage(
+        object(), object(), "nauvis", "player", (100.0, 100.0),
+        lambda _message: None, purpose="logistic",
+    ) is False
 
 def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> None:
     """2026-09-05: the bridged roboport dodged the pipe corridor but its

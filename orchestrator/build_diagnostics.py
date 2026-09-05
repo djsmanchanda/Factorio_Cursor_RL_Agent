@@ -102,14 +102,18 @@ def _diagnose_blockage(
 ) -> tuple[str, str] | None:
     """Why is this stage not finishing? Returns (issue, remedy) or None.
 
-    Ordered by what actually blocks construction first: bots cannot build
-    outside coverage, and a roboport with no power provides no coverage at all.
-    Remaining ghosts are then checked for their concrete network/material cause.
-    Logistic coverage is checked next because its remedy places AND powers a
-    roboport, which can incidentally close a power gap near the stage -- the
-    reverse is never true, so diagnosing it before machine power lets one round
-    fix both. Machine power is last; it is also the only check here that has to
-    poll every machine's live status.
+    Ordered by what actually blocks construction first: missing items are
+    named before coverage, because the probe reports per-ghost coverage
+    before global stock -- a drill ghost inside a charging network otherwise
+    reads as an electricity issue while zero drills exist anywhere, and the
+    run waits out charge windows instead of queuing drills. Bots cannot
+    build outside coverage, and a roboport with no power provides no coverage
+    at all. Remaining ghosts are then checked for their concrete
+    network/material cause. Logistic coverage is checked next because its
+    remedy places AND powers a roboport, which can incidentally close a power
+    gap near the stage -- the reverse is never true, so diagnosing it before
+    machine power lets one round fix both. Machine power is last; it is also
+    the only check here that has to poll every machine's live status.
     """
     nearest = live_base.nearest_roboport(client, surface, force, origin)
     if nearest is None:
@@ -124,6 +128,57 @@ def _diagnose_blockage(
         return (f"covering roboport at {nearest} has no power", "roboport_power")
     if area is not None:
         ghosts = live_base.ghost_blockages(client, surface, force, area)
+        # Materials first: ghosts are returned in probe order, so a coverage
+        # ghost listed before a material-starved one used to shadow it and the
+        # run waited instead of manufacturing the missing item.
+        for ghost in ghosts:
+            reason = str(ghost.get("reason", "pending"))
+            if reason.startswith("missing_material:"):
+                item = str(ghost.get("item", reason.split(":", 2)[1]))
+                required = int(ghost.get("required", 1))
+                available = int(ghost.get("available", 0))
+                return (
+                    f"ghost {ghost.get('entity', 'entity')} at {ghost['position']} needs "
+                    f"{required} {item}, but its network has {available}",
+                    f"materials:{item}:{required}",
+                )
+        stock_cache: dict[str, dict[str, int]] = {}
+
+        def _globally_unstocked(entity: object) -> int:
+            """Pending ghosts of this entity awaiting manufacture, else 0.
+
+            A ghost inside a charging network has no network-local stock
+            reading, so the probe can only report coverage there. Compare the
+            ghost's placing item against force-wide transferable stock: when
+            nothing spendable exists, queuing manufacture unblocks the build
+            faster than waiting out the charge window. Ghost entity names
+            match their placing item for everything the planners emit; an
+            unmapped entity keeps its coverage verdict instead of queuing a
+            bogus mall target, so only a confirmed double-zero diverts.
+            """
+            name = str(entity or "")
+            if not name:
+                return 0
+            try:
+                if "transferable" not in stock_cache:
+                    stock_cache["transferable"] = live_base.transferable_items(
+                        client, surface, force,
+                    )
+                    stock_cache["available"] = live_base.available_items(
+                        client, surface, force,
+                    )
+                if int(stock_cache["transferable"].get(name, 0)) > 0:
+                    return 0
+                if int(stock_cache["available"].get(name, 0)) > 0:
+                    return 0
+            except Exception:
+                return 0
+            return sum(
+                1 for other in ghosts
+                if other.get("entity") == entity
+                and str(other.get("reason", "pending")) != "pending"
+            ) or 1
+
         for ghost in ghosts:
             reason = str(ghost.get("reason", "pending"))
             position = ghost["position"]
@@ -150,6 +205,16 @@ def _diagnose_blockage(
                             f"{nearest_covering}",
                             f"roboport_power_at:{nearest_covering[0]}:{nearest_covering[1]}",
                         )
+                    unstocked = _globally_unstocked(ghost.get("entity"))
+                    if unstocked:
+                        entity = str(ghost.get("entity", "entity"))
+                        return (
+                            f"ghost {entity} at {position} has no transferable "
+                            f"{entity} in stock ({unstocked} pending ghost(s)) -- "
+                            "making more unblocks it faster than waiting on "
+                            "the charging network",
+                            f"materials:{entity}:{unstocked}",
+                        )
                     return (
                         f"ghost {ghost.get('entity', 'entity')} at {position} is "
                         f"inside roboport {nearest_covering}'s construction area, "
@@ -167,15 +232,8 @@ def _diagnose_blockage(
                     "construction robots in its logistic network",
                     "none",
                 )
-            if reason.startswith("missing_material:"):
-                item = str(ghost.get("item", reason.split(":", 2)[1]))
-                required = int(ghost.get("required", 1))
-                available = int(ghost.get("available", 0))
-                return (
-                    f"ghost {ghost.get('entity', 'entity')} at {position} needs "
-                    f"{required} {item}, but its network has {available}",
-                    f"materials:{item}:{required}",
-                )
+            # missing_material ghosts are handled in the materials-first pass
+            # above, so they never reach this loop.
     if logistic_chest_positions:
         # Only chests that are actually BUILT are judged here; ones still
         # waiting on a bot are absent from the reply and are the ghost count's

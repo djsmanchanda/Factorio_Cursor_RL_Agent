@@ -299,6 +299,70 @@ def test_material_remedy_does_not_place_an_empty_stage_provider(monkeypatch) -> 
     assert any("waiting instead of placing an empty stage chest" in m for m in messages)
 
 
+def test_transferable_wait_escalates_to_mall_demand(monkeypatch) -> None:
+    """Force stock that never becomes transferable restarts production."""
+    builder._TRANSFERABLE_WAITS.clear()
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 12},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_item_count", lambda *_a: 0,
+    )
+    args = (
+        object(), object(), "nauvis", "player",
+        "modular refinery for copper-plate", "materials:transport-belt:1",
+        "ghost belt needs one", (82.0, -79.0), (94.5, -94.5), [], [],
+        ((80.0, -100.0), (125.0, -60.0)),
+    )
+    messages: list[str] = []
+    assert builder._apply_remedy(*args, messages.append) is False
+    assert builder._apply_remedy(*args, messages.append) is False
+    with pytest.raises(MaterialShortage) as caught:
+        builder._apply_remedy(*args, messages.append)
+    assert caught.value.required == {"transport-belt": 1}
+
+
+def test_transferable_delivery_resets_the_wait_count(monkeypatch) -> None:
+    """A successful delivery forgives earlier transferable waits."""
+    builder._TRANSFERABLE_WAITS.clear()
+    transferable = {"count": 0}
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"transport-belt": 12},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(
+        builder.live_base, "transferable_item_count",
+        lambda *_a: transferable["count"],
+    )
+    provider = (61.5, -112.5)
+    monkeypatch.setattr(
+        builder.live_base, "nearest_container", lambda *_a, **_k: provider,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *_a: 16)
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: pytest.fail("must reuse chest"),
+    )
+    args = (
+        object(), object(), "nauvis", "player",
+        "modular refinery for copper-reset-test", "materials:transport-belt:1",
+        "ghost belt needs one", (82.0, -79.0), (94.5, -94.5), [], [],
+        ((80.0, -100.0), (125.0, -60.0)),
+    )
+    assert builder._apply_remedy(*args, lambda _m: None) is False
+    assert builder._apply_remedy(*args, lambda _m: None) is False
+    transferable["count"] = 20
+    assert builder._apply_remedy(*args, lambda _m: None) is True
+    transferable["count"] = 0
+    assert builder._apply_remedy(*args, lambda _m: None) is False
+    assert builder._apply_remedy(*args, lambda _m: None) is False
+    with pytest.raises(MaterialShortage):
+        builder._apply_remedy(*args, lambda _m: None)
+
+
 def test_producer_backed_shortage_places_blueprint_without_explicit_override(
     monkeypatch,
 ) -> None:
@@ -877,3 +941,103 @@ def test_missing_feed_on_a_mall_cell_rebuilds_instead_of_dying(monkeypatch) -> N
     assert raised, "the strict repair must have run before the fallback"
     assert rebuilt == [("advanced-circuit", machine)]
     assert result is None
+
+
+def _covered_drill_ghosts() -> list[dict]:
+    """Two drill ghosts inside a charging network, as in the 2026-09-03 run."""
+    return [
+        {
+            "position": (10.0, 0.0), "entity": "electric-mining-drill",
+            "reason": "out_of_construction_range",
+        },
+        {
+            "position": (13.0, 0.0), "entity": "electric-mining-drill",
+            "reason": "out_of_construction_range",
+        },
+    ]
+
+
+def _mock_covered_charging_network(monkeypatch) -> None:
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *_a: (20.0, 0.0))
+    monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(
+        live_base, "roboport_positions", lambda *_a: [(20.0, 0.0)],
+    )
+
+
+def test_diagnosis_prefers_materials_over_earlier_coverage_ghost(
+    monkeypatch,
+) -> None:
+    """Probe order must not decide the verdict: a material-starved ghost
+    listed after a coverage ghost still wins, so the run manufactures the
+    missing item instead of waiting."""
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *_a: (0.0, 0.0))
+    monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(
+        live_base, "ghost_blockages", lambda *_a: [
+            {
+                "position": (25.5, -49.5), "entity": "transport-belt",
+                "reason": "out_of_construction_range",
+            },
+            {
+                "position": (77.5, -18.5), "entity": "transport-belt",
+                "reason": "missing_material:transport-belt:4:0",
+                "item": "transport-belt", "required": 4, "available": 0,
+            },
+        ],
+    )
+
+    issue = builder._diagnose_blockage(
+        None, "nauvis", "player", (10.0, 10.0), (10.0, 12.0),
+        [(11.0, 10.0)], area=((0.0, 0.0), (100.0, 100.0)),
+    )
+
+    assert issue is not None and issue[1] == "materials:transport-belt:4"
+
+
+def test_covered_charging_ghost_with_no_stock_reports_materials(
+    monkeypatch,
+) -> None:
+    """Live 2026-09-03: 2/6 copper drills built, 4 ghosts looping on
+    coverage_charge_wait while zero drills existed anywhere. Unstocked
+    ghosts inside a charging network must name manufacture, not power."""
+    _mock_covered_charging_network(monkeypatch)
+    monkeypatch.setattr(
+        live_base, "ghost_blockages", lambda *_a: _covered_drill_ghosts(),
+    )
+    monkeypatch.setattr(live_base, "transferable_items", lambda *_a: {})
+    monkeypatch.setattr(live_base, "available_items", lambda *_a: {})
+
+    issue = builder._diagnose_blockage(
+        None, "nauvis", "player", (0.0, 0.0), (0.0, 2.0),
+        [], area=((-20.0, -20.0), (40.0, 20.0)),
+    )
+
+    assert issue is not None
+    assert issue[1] == "materials:electric-mining-drill:2"
+
+
+def test_covered_charging_ghost_with_stock_keeps_coverage_wait(
+    monkeypatch,
+) -> None:
+    """Once drills sit in provider/storage stock, the same geometry is
+    genuinely a charge wait -- the material diversion must not fire."""
+    _mock_covered_charging_network(monkeypatch)
+    monkeypatch.setattr(
+        live_base, "ghost_blockages", lambda *_a: _covered_drill_ghosts(),
+    )
+    monkeypatch.setattr(
+        live_base, "transferable_items",
+        lambda *_a: {"electric-mining-drill": 4},
+    )
+    monkeypatch.setattr(
+        live_base, "available_items",
+        lambda *_a: {"electric-mining-drill": 4},
+    )
+
+    issue = builder._diagnose_blockage(
+        None, "nauvis", "player", (0.0, 0.0), (0.0, 2.0),
+        [], area=((-20.0, -20.0), (40.0, 20.0)),
+    )
+
+    assert issue is not None and issue[1] == "coverage_charge_wait"
