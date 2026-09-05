@@ -2,6 +2,7 @@
 -- Purpose: Load planner command modules and register lifecycle event handlers.
 
 local shared = require("sandbox_shared")
+local trash_requesters = require("trash_requesters")
 require("world_generation")
 require("snapshot")
 require("recipe_catalog")
@@ -29,6 +30,18 @@ script.on_event(defines.events.on_robot_built_entity, function(event)
     local storage = shared.ensure_storage()
     if storage.construction_session then
       storage.construction_session.completed = storage.construction_session.completed + 1
+    end
+  end
+
+  -- Bot-revived requester chests cannot carry the blueprint trash flag
+  -- (ghosts hold no settings and no setter exists), so swap each one for a
+  -- trash-enabled copy at revive time, before any configure flow or delivery
+  -- touches it. Scoped to bot builds: player hand placements keep whatever
+  -- the player set. Training forces run under their own mod and contract.
+  if entity.valid and entity.name == "requester-chest" then
+    local force_name = entity.force and entity.force.name
+    if trash_requesters.managed_force(force_name) then
+      trash_requesters.revive_with_trash(entity.surface, entity)
     end
   end
 end)

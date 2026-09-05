@@ -167,6 +167,12 @@ package.preload["logistic_sections"] = function()
   }
 end
 
+package.preload["trash_requesters"] = function()
+  return {
+    creation_params = function() return {} end,
+  }
+end
+
 commands = {
   add_command = function(name, _description, callback) registered[name] = callback end,
 }

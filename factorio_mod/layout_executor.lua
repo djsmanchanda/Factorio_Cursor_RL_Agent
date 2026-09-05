@@ -280,6 +280,7 @@ end
 -- running game -- a chest holding no requests is indistinguishable from one
 -- that was never asked for any, so the failure mode is silent.
 local logistic_sections = require("logistic_sections")
+local trash_requesters = require("trash_requesters")
 local find_section_by_group = logistic_sections.find_section_by_group
 local claim_section_for_group = logistic_sections.claim_section_for_group
 local verify_section_slots = logistic_sections.verify_section_slots
@@ -898,13 +899,21 @@ local function execute_build_plan(authorization, build_plan)
           counts.failed_entities = counts.failed_entities + 1
           record_failure(phase, action, "exact_position_occupied_by_different_entity")
         else
-          local entity = surface.create_entity({
+          local params = {
             name = action.entity,
             position = { position.x, position.y },
             direction = direction,
             type = action.underground_type,
             force = force
-          })
+          }
+          -- Requester chests accept the blueprint trash payload at creation
+          -- time only (no runtime setter exists): merge it here so directly
+          -- placed cells self-clean stale WIP. Ghost-built cells get the same
+          -- treatment through the revive hook in control.lua.
+          for key, value in pairs(trash_requesters.creation_params(action.entity)) do
+            params[key] = value
+          end
+          local entity = surface.create_entity(params)
           if entity and entity.valid then
             local configure_error = configure_created_entity(entity, action)
             local verify_error = configure_error or configuration_error(entity, action, direction)
