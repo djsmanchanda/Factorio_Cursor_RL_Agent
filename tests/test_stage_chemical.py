@@ -370,6 +370,10 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     monkeypatch.setattr(stage_chemical, "_submit_oil_cell_packets", submit)
     monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
     monkeypatch.setattr(stage_chemical, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(stage_chemical, "_crude_patch_tiles", lambda *_a: [])
+    monkeypatch.setattr(
+        stage_chemical, "ensure_logistic_coverage", lambda *_a, **_k: False,
+    )
 
     result = stage_chemical.ensure_oil_cell(
         object(), object(), "nauvis", "player", (3.0, -1.0),
@@ -378,9 +382,9 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     )
 
     assert set(result) == {"plastic-bar"}
-    assert calls["coal_reference"] == (-237.0, -91.0)
+    assert calls["coal_reference"] == (-226.0, -86.0)
     assert calls["prefer_nearest_patch"] is True
-    assert calls["plastic_inputs"] == ((-237.0, -91.0), (-340.0, 20.0))
+    assert calls["plastic_inputs"] == ((-226.0, -86.0), (-340.0, 20.0))
     args, kwargs = calls["preflight"]
     assert args[5:7] == ((-340.0, 20.0), (-306.5, -44.5))
     assert kwargs["mode"] == "belt"
@@ -872,6 +876,469 @@ def test_chest_content_query_reads_held_items() -> None:
     lua = client.commands[0]
     assert "get_contents" in lua
     assert "requester-chest" in lua
+
+
+def test_extra_pumpjack_spots_fill_the_patch_without_overlap() -> None:
+    """2026-09-04: one 9/s well left the 20/s refinery (and both plastic
+    plants) idle. Extra 3x3 spots cover crude tiles at footprint pitch."""
+    tiles = [
+        (-291.0, -110.0), (-292.0, -81.0), (-269.0, -99.0),
+        (-285.0, -89.0), (-280.0, -85.0), (-279.0, -91.0),
+        (-277.0, -95.0), (-276.0, -92.0), (-277.0, -85.0),
+    ]
+    spots = stage_chemical._extra_pumpjack_spots(
+        tiles, (-269.0, -99.0), (-237.0, -91.0),
+    )
+
+    assert 1 <= len(spots) <= 2
+    positions = [(-269.0, -99.0)] + [tuple(s["position"]) for s in spots]
+    for index, first in enumerate(positions):
+        for second in positions[index + 1:]:
+            assert (
+                abs(first[0] - second[0]) >= 3.0
+                or abs(first[1] - second[1]) >= 3.0
+            ), "footprints must not overlap"
+    assert all(s.get("output") for s in spots)
+
+
+def test_extra_pumpjack_spots_respect_the_draw_ceiling() -> None:
+    """A dense field still caps at refinery draw, not at tile count."""
+    tiles = [(float(x), float(y)) for x in range(-300, -240) for y in range(-110, -80, 3)]
+    spots = stage_chemical._extra_pumpjack_spots(
+        tiles, (-269.0, -99.0), (-237.0, -91.0),
+    )
+
+    assert len(spots) == 2
+    assert stage_chemical._extra_pumpjack_spots(
+        [], (-269.0, -99.0), (-237.0, -91.0),
+    ) == []
+
+
+def test_existing_oil_output_rechecks_logistic_coverage(monkeypatch) -> None:
+    """2026-09-04: the plastic provider sat 28 tiles from its port while
+    construction coverage reported fine. Every visit re-verifies."""
+    monkeypatch.setattr(
+        stage_chemical, "_existing_outputs",
+        lambda *_a: {"plastic-bar": (1.0, 2.0)},
+    )
+    covered: list[list] = []
+    monkeypatch.setattr(
+        stage_chemical, "ensure_logistic_coverage",
+        lambda _c, _b, _s, _f, positions, _e: covered.append(list(positions)),
+    )
+
+    result = stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (0.0, 0.0), None,
+        lambda _message: None, target_output="plastic-bar",
+    )
+
+    assert result == {"plastic-bar": (1.0, 2.0)}
+    assert covered == [[(1.0, 2.0)]]
+
+
+def test_oil_cell_builds_extra_pumpjacks_to_saturate_the_refinery(monkeypatch) -> None:
+    """2026-09-04: one 9/s well left the 20/s refinery idle and plastic
+    crawled. Extra patch spots join the build with their own crude links."""
+    monkeypatch.setattr(stage_chemical, "_existing_outputs", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.live_base, "nearest_resource",
+        lambda *_a: ((-268.5, -98.5), 1_000_000),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_find_oil_cell_site", lambda *_a: (-258.0, -108.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "ensure_coal_mine", lambda *_a, **_k: (-340.0, 20.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_find_plastic_site", lambda *_a: (-305.0, -45.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical.chemical_survey, "nearest_offshore_pump_site",
+        lambda *_a: {
+            "position": (-97.5, 15.5), "output": (-98, 14),
+            "resource": "water", "direction": "south",
+        },
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_crude_patch_tiles",
+        lambda *_a: [(-260.0, -95.0), (-250.0, -85.0)],
+    )
+    monkeypatch.setattr(stage_chemical.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(stage_chemical.live_base, "water_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        stage_chemical, "_route_oil_fluid_link",
+        lambda *_a, **_k: ({"phases": [{"name": "fluid", "actions": []}]}, [], False),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "preflight_ingredient_transport",
+        lambda *_a, **_k: ([], "transport-belt"),
+    )
+    submitted: dict[str, object] = {}
+    monkeypatch.setattr(
+        stage_chemical, "_submit_oil_cell_packets",
+        lambda _c, _b, _s, _f, packets, _e, **_k: submitted.setdefault("packets", packets),
+    )
+    monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
+    monkeypatch.setattr(stage_chemical, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        stage_chemical, "ensure_logistic_coverage", lambda *_a, **_k: False,
+    )
+
+    stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        lambda *_a, **_k: None, lambda _m: None,
+        target_output="plastic-bar",
+    )
+
+    packets = submitted["packets"]
+    names = [name for name, _plan in packets]
+    assert "chemical_crude_pipeline_2" in names
+    jacks = [
+        action for _name, plan in packets
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "pumpjack"
+    ]
+    assert len(jacks) == 3
+
+
+def _oil_cell_world(monkeypatch, routed) -> None:
+    """Drive ensure_oil_cell with routing captured instead of executed."""
+    monkeypatch.setattr(stage_chemical, "_existing_outputs", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_chemical.live_base, "nearest_resource",
+        lambda *_a: ((-268.5, -98.5), 1_000_000),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_find_oil_cell_site", lambda *_a: (-258.0, -108.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "ensure_coal_mine", lambda *_a, **_k: (-340.0, 20.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_find_plastic_site", lambda *_a: (-305.0, -45.0),
+    )
+    monkeypatch.setattr(
+        stage_chemical.chemical_survey, "nearest_offshore_pump_site",
+        lambda *_a: {
+            "position": (-97.5, 15.5), "output": (-98, 14),
+            "resource": "water", "direction": "south",
+        },
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_crude_patch_tiles",
+        lambda *_a: [(-260.0, -95.0), (-250.0, -85.0)],
+    )
+    monkeypatch.setattr(stage_chemical.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(stage_chemical.live_base, "water_tiles", lambda *_a, **_k: set())
+    def _capture(source, targets, fluid, **kwargs):
+        routed.append({
+            "source": source, "targets": list(targets), "fluid": fluid,
+            "foreign": list(kwargs.get("foreign", ())),
+        })
+        return {"phases": [{"name": "fluid", "actions": []}]}, [], False
+    monkeypatch.setattr(stage_chemical, "_route_oil_fluid_link", _capture)
+    monkeypatch.setattr(
+        stage_chemical, "preflight_ingredient_transport",
+        lambda *_a, **_k: ([], "transport-belt"),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_submit_oil_cell_packets", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a: None)
+    monkeypatch.setattr(stage_chemical, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        stage_chemical, "ensure_logistic_coverage", lambda *_a, **_k: False,
+    )
+
+
+def test_oil_cell_reserves_all_four_refinery_headers(monkeypatch) -> None:
+    """2026-09-05: keepout described a 1-machine refinery while the row
+    builds 4, so gas routed through the invisible eastern crude header and
+    merged. Every built header tile must be reserved before links route."""
+    routed: list[dict] = []
+    _oil_cell_world(monkeypatch, routed)
+
+    stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        lambda *_a, **_k: None, lambda _m: None,
+        target_output="plastic-bar",
+    )
+
+    recipe = stage_chemical.oil_processing_recipe(0)
+    expected = {
+        tuple(tile)
+        for segment in stage_chemical.fluid_network_segments(
+            recipe, stage_chemical.OPENING_REFINERY_COUNT, -258, -108,
+        )
+        if segment["fluid"] == "crude-oil"
+        for tile in segment["tiles"]
+    }
+    gas = next(call for call in routed if call["fluid"] == "petroleum-gas")
+    reserved = {
+        tuple(tile) for segment in gas["foreign"]
+        if segment.get("fluid") == "crude-oil"
+        for tile in segment.get("tiles", ())
+    }
+    assert expected and expected <= reserved
+
+
+def test_extra_pumpjacks_tap_the_trunk_not_the_refinery(monkeypatch) -> None:
+    """2026-09-05: every jack ran its own full-length pipeline; two jacks
+    sat on lone stubs when their packets died. Taps target trunk tiles."""
+    routed: list[dict] = []
+    _oil_cell_world(monkeypatch, routed)
+
+    stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        lambda *_a, **_k: None, lambda _m: None,
+        target_output="plastic-bar",
+    )
+
+    crude_to = stage_chemical.header_attachment(
+        stage_chemical.oil_processing_recipe(0), "crude-oil",
+        1, -258, -108,
+    )["attach"]
+    crude_calls = [call for call in routed if call["fluid"] == "crude-oil"]
+    assert len(crude_calls) >= 2
+    assert crude_calls[0]["targets"] == [crude_to]
+    recipe = stage_chemical.oil_processing_recipe(0)
+    header = {
+        tuple(tile)
+        for segment in stage_chemical.fluid_network_segments(
+            recipe, stage_chemical.OPENING_REFINERY_COUNT, -258, -108,
+        )
+        if segment["fluid"] == "crude-oil"
+        for tile in segment["tiles"]
+    }
+    for tap in crude_calls[1:]:
+        assert tap["targets"] != [crude_to]
+        assert tap["targets"][0] in header
+
+
+def test_nearest_crude_tile_prefers_the_closest_trunk_tile() -> None:
+    foreign = [
+        {"fluid": "crude-oil", "tiles": [(0, 0), (10, 0), (20, 0)]},
+        {"fluid": "water", "tiles": [(5, 5)]},
+    ]
+    assert stage_chemical._nearest_crude_tile(foreign, (11, 2)) == (10, 0)
+    with pytest.raises(stage_chemical.StuckError):
+        stage_chemical._nearest_crude_tile([], (0, 0))
+
+
+def test_multi_pumpjack_power_keeps_a_substation_when_default_collides() -> None:
+    """2026-09-05: the shared scaffold's substation was dropped onto a
+    later jack and two pumpjacks stayed dark. The anchor moves instead."""
+    from planners.infrastructure_geometry import footprint_tile_indices
+    from planners.resource_layouts import (
+        generate_pumpjack_source, verified_pumpjack_output_tile,
+    )
+
+    def _site(x: float, y: float) -> dict:
+        site = {
+            "position": (x, y), "resource": "crude-oil", "direction": "east",
+        }
+        site["output"] = verified_pumpjack_output_tile(site)
+        return site
+
+    first = _site(-268.5, -98.5)
+    from planners.resource_layouts import even_size_center
+    blocker_at = even_size_center(first["position"][0] - 7, first["position"][1] + 3)
+    # A second jack straddling the default substation footprint forces the
+    # scaffold off its first choice.
+    sites = [first, _site(blocker_at["x"] + 0.5, blocker_at["y"] + 0.5)]
+    plan = generate_pumpjack_source(
+        sites, [site["output"] for site in sites],
+    )
+
+    subs = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "substation"
+    ]
+    assert len(subs) == 1
+    jack_tiles: set[tuple[int, int]] = set()
+    for site in sites:
+        jack_tiles.update(footprint_tile_indices(site["position"], 3))
+    pos = subs[0]["position"]
+    assert footprint_tile_indices((pos["x"], pos["y"]), 2).isdisjoint(jack_tiles)
+
+
+def test_multi_pumpjack_power_avoids_jack_footprints() -> None:
+    """2026-09-04: the shared power scaffold landed a substation on a new
+    jack and plan validation killed the run. Colliding power placements are
+    dropped (extend_power bridges the rest); jacks and pipes stand."""
+    from planners.infrastructure_geometry import footprint_tile_indices
+    from planners.resource_layouts import (
+        generate_pumpjack_source, verified_pumpjack_output_tile,
+    )
+
+    def _site(x: float, y: float) -> dict:
+        site = {
+            "position": (x, y), "resource": "crude-oil", "direction": "east",
+        }
+        site["output"] = verified_pumpjack_output_tile(site)
+        return site
+
+    sites = [_site(-268.5, -98.5), _site(-276.5, -94.5)]
+    plan = generate_pumpjack_source(
+        sites, [site["output"] for site in sites],
+    )
+
+    jacks = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "pumpjack"
+    ]
+    assert len(jacks) == 2
+    jack_tiles: set[tuple[int, int]] = set()
+    for site in sites:
+        jack_tiles.update(footprint_tile_indices(site["position"], 3))
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            entity = action.get("entity", "")
+            if entity in {"substation", "electric-energy-interface"}:
+                pos = action["position"]
+                tiles = footprint_tile_indices((pos["x"], pos["y"]), 2)
+                assert tiles.isdisjoint(jack_tiles), action
+
+
+def test_remote_patch_picker_prefers_big_unused_cells() -> None:
+    grid = {(0, 0): 2, (5, 5): 18, (9, 9): 9}
+    assert stage_chemical._pick_remote_crude_cell(
+        grid, (0.0, 0.0), {(5, 5)},
+    ) == (9, 9)
+    assert stage_chemical._pick_remote_crude_cell(
+        grid, (0.0, 0.0), {(5, 5), (9, 9)},
+    ) == (0, 0)
+    assert stage_chemical._pick_remote_crude_cell(
+        {}, (0.0, 0.0), set(),
+    ) is None
+
+
+def _expansion_world(monkeypatch, *, plastic_working: int):
+    plastic = SimpleNamespace(
+        machine_count=2, working_count=plastic_working,
+        machine_positions=[(-281.0, -37.0)], produced_count=10,
+    )
+    refinery = SimpleNamespace(
+        machine_count=1, working_count=0,
+        machine_positions=[(-256.0, -104.0)], produced_count=5,
+    )
+    def _find(_c, _s, _f, recipe, _m, **_k):
+        if recipe == "plastic-bar":
+            return plastic
+        if recipe in {"basic-oil-processing", "advanced-oil-processing"}:
+            return refinery
+        return None
+    monkeypatch.setattr(stage_chemical.live_base, "find_line", _find)
+    monkeypatch.setattr(
+        stage_chemical, "_existing_outputs",
+        lambda *_a: {"plastic-bar": (-279.0, -37.0)},
+    )
+    monkeypatch.setattr(
+        stage_chemical, "ensure_logistic_coverage", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_district_pumpjacks", lambda *_a: ([(-269.0, -99.0)], 0),
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_crude_patch_grid",
+        lambda *_a: {(20, 20): 12, (-6, -2): 9},
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_crude_patch_tiles",
+        lambda *_a, **_k: [(1001.5, 1001.5), (1005.5, 1001.5)],
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_route_oil_fluid_link",
+        lambda *_a, **_k: ({"phases": [{"name": "fluid", "actions": []}]}, [], False),
+    )
+    monkeypatch.setattr(stage_chemical.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(stage_chemical.live_base, "water_tiles", lambda *_a, **_k: set())
+
+
+def test_remote_crude_expands_on_idle_plastic(monkeypatch) -> None:
+    """2026-09-04: one 9/s well against 40/s of plant draw. Idle plants +
+    uncovered draw add the next patch; flowing plants never trigger."""
+    _expansion_world(monkeypatch, plastic_working=0)
+    submitted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        stage_chemical, "_submit_oil_cell_packets",
+        lambda _c, _b, _s, _f, packets, _e, **_k: submitted.extend(packets),
+    )
+    serviced: list[str] = []
+    monkeypatch.setattr(
+        stage_chemical, "live_base", stage_chemical.live_base,
+    )
+    calls: dict[str, object] = {}
+    def _service(_c, _b, _s, _f, name, *_a, **_k):
+        serviced.append(str(name))
+    result = stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        _service, lambda _m: None, target_output="plastic-bar",
+    )
+
+    assert result == {"plastic-bar": (-279.0, -37.0)}
+    names = [name for name, _plan in submitted]
+    assert any(name.startswith("chemical_crude_expansion_") for name in names)
+    assert any("remote crude" in name for name in serviced)
+    jacks = [
+        action for _name, plan in submitted
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "pumpjack"
+    ]
+    assert len(jacks) >= 1
+
+
+def test_remote_crude_skips_flowing_plastic(monkeypatch) -> None:
+    """Working plants mean the constraint is elsewhere: no survey storm."""
+    _expansion_world(monkeypatch, plastic_working=2)
+    monkeypatch.setattr(
+        stage_chemical, "_submit_oil_cell_packets",
+        lambda *_a, **_k: pytest.fail("flowing plastic must not expand crude"),
+    )
+
+    result = stage_chemical.ensure_oil_cell(
+        object(), object(), "nauvis", "player", (3.0, -1.0),
+        lambda *_a, **_k: None, lambda _m: None, target_output="plastic-bar",
+    )
+
+    assert result == {"plastic-bar": (-279.0, -37.0)}
+
+
+def test_four_refinery_district_fits_without_overlap() -> None:
+    """4 refineries + sulfur + plastic must tile without colliding (user:
+    4 refineries to feed the plastic plants). Sulfur sits east of the
+    measured row end, not at a fixed offset that a wider row overruns."""
+    from planners.fluid_layouts import generate_fluid_machine_row
+    from planners.infrastructure_geometry import footprint_tile_indices
+    from planners.plan_validation import ENTITY_FOOTPRINTS
+
+    refinery = generate_fluid_machine_row("basic-oil-processing", 4, 0, 0)
+    east = max(
+        action["position"]["x"]
+        for phase in refinery["phases"] for action in phase["actions"]
+    )
+    sulfur = generate_fluid_machine_row("sulfur", 2, round(east) + 10, 16)
+    plastic = generate_fluid_machine_row("plastic-bar", 2, -40, -40)
+
+    def _tiles(plan: dict) -> set[tuple[int, int]]:
+        cells: set[tuple[int, int]] = set()
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                pos = action["position"]
+                size = ENTITY_FOOTPRINTS.get(action.get("entity", ""), 1)
+                cells.update(
+                    footprint_tile_indices((pos["x"], pos["y"]), size)
+                )
+        return cells
+
+    refinery_tiles, sulfur_tiles, plastic_tiles = (
+        _tiles(refinery), _tiles(sulfur), _tiles(plastic),
+    )
+    assert refinery_tiles.isdisjoint(sulfur_tiles)
+    assert refinery_tiles.isdisjoint(plastic_tiles)
+    assert sulfur_tiles.isdisjoint(plastic_tiles)
+    assert east - 0.0 <= 26.0, "four-wide row must fit a buildable district"
 
 
 def test_link_corridor_tiles_collects_only_pipe_tiles() -> None:

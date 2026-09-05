@@ -6,6 +6,7 @@ from __future__ import annotations
 from math import floor, isclose
 
 from planners.infrastructure import POLE_SPECS
+from planners.infrastructure_geometry import footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from planners.recipe_data import BELT_TIERS
 
@@ -545,6 +546,47 @@ def generate_shared_belt_batch_expansion(
     validate_build_plan(plan)
     return plan
 
+def _pumpjack_power_anchor(
+    sites: list[dict], default: tuple[float, float],
+    extra_avoid: set[tuple[int, int]] = frozenset(),
+) -> tuple[float, float]:
+    """First jack-corner whose substation and EEI clear jacks and stubs.
+
+    The shared scaffold hangs off the first site; with several jacks the
+    default corner can sit on a later jack or its output stub, and dropping
+    the colliding substation leaves the row dark (2026-09-05: two of three
+    pumpjacks unpowered after the drop). Each corner keeps the substation
+    one step from the first jack so it stays inside the supply square.
+    """
+    avoid: set[tuple[int, int]] = set(extra_avoid)
+    for site in sites:
+        cx, cy = site["position"]
+        avoid.update(
+            footprint_tile_indices((cx, cy), ENTITY_FOOTPRINTS["pumpjack"])
+        )
+    first = tuple(sites[0]["position"])
+    corners = [default] + [
+        (first[0] + dx, first[1] + dy)
+        for dx, dy in ((3, 3), (-3, -3), (3, -3))
+        if (first[0] + dx, first[1] + dy) != default
+    ]
+    for corner in corners:
+        sub = even_size_center(corner[0] - 4, corner[1])
+        eei = even_size_center(corner[0] - 8, corner[1])
+        if (
+            footprint_tile_indices(
+                (sub["x"], sub["y"]),
+                ENTITY_FOOTPRINTS["substation"],
+            ).isdisjoint(avoid)
+            and footprint_tile_indices(
+                (eei["x"], eei["y"]),
+                ENTITY_FOOTPRINTS["electric-energy-interface"],
+            ).isdisjoint(avoid)
+        ):
+            return corner
+    return default
+
+
 def _fluid_resource_plan(
     kind: str,
     entity: str,
@@ -590,11 +632,41 @@ def _fluid_resource_plan(
         power_actions = []
     else:
         power_anchor = (anchor[0] - 3, anchor[1] + 3)
+        if entity == "pumpjack" and len(sites) > 1:
+            stub_tiles = {(floor(x), floor(y)) for x, y in pipe_tiles}
+            power_anchor = _pumpjack_power_anchor(
+                sites, power_anchor, stub_tiles,
+            )
         power_actions = _power_scaffold(
             power_anchor, entity,
             max(site["position"][0] for site in sites),
             include_row_poles=entity not in {"pumpjack"},
         )
+    if entity == "pumpjack" and len(sites) > 1:
+        # The shared scaffold is drawn from the first site across the whole
+        # row: with several jacks it can land a substation on a later jack
+        # (2026-09-04: plan validation killed the run on exactly that) or on
+        # an output stub. The anchor search above avoids both; this net only
+        # catches what the search could not place. extend_power bridges power
+        # to whatever scaffold survives.
+        avoid_tiles: set[tuple[int, int]] = {
+            (floor(x), floor(y)) for x, y in pipe_tiles
+        }
+        for site in sites:
+            cx, cy = site["position"]
+            avoid_tiles.update(
+                footprint_tile_indices((cx, cy), ENTITY_FOOTPRINTS["pumpjack"])
+            )
+        kept = []
+        for action in power_actions:
+            size = ENTITY_FOOTPRINTS.get(action.get("entity", ""), 1)
+            pos = action.get("position", {})
+            tiles = footprint_tile_indices(
+                (float(pos.get("x", 0.0)), float(pos.get("y", 0.0))), size,
+            )
+            if tiles.isdisjoint(avoid_tiles):
+                kept.append(action)
+        power_actions = kept
     plan = {"phases": [
         {"name": f"{kind}_power", "actions": power_actions},
         {"name": f"{kind}_source", "actions": entities + pipes},

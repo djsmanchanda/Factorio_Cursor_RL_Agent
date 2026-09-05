@@ -20,7 +20,8 @@ from orchestrator.stage_extraction import (
 from orchestrator.stage_services import (
     StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
     _ghost_materials, _logistic_chest_positions, _submit,
-    _wait_for_ghosts, construction_supply_chain_is_scheduled, extend_power,
+    _wait_for_ghosts, construction_supply_chain_is_scheduled,
+    ensure_logistic_coverage, extend_power,
     extend_roboport_coverage, service_distance,
 )
 from orchestrator.stage_transport import (
@@ -78,6 +79,112 @@ def _merge(*plans: dict) -> dict:
     return {"phases": [phase for plan in plans for phase in plan["phases"]]}
 
 
+#: Crude/s one basic-or-advanced refinery draws (100 crude per 5s either way).
+#: Pumpjacks are sized to saturate the built refinery; a second refinery
+#: without the wells to feed it is not capacity (and vice versa).
+REFINERY_CRUDE_DRAW_PER_SECOND = 20.0
+#: Opening refinery row: four basic refineries make ~36 petroleum/s, matching
+#: the two plastic plants' 40/s draw (user standard 2026-09-04). Advanced
+#: processing arrives through the existing ladder, not by overbuilding basic.
+OPENING_REFINERY_COUNT = 4
+#: Crude/s the opening district must be able to deliver (four refineries).
+OPENING_CRUDE_TARGET_PER_SECOND = (
+    OPENING_REFINERY_COUNT * REFINERY_CRUDE_DRAW_PER_SECOND
+)
+#: Patches that refused a crude expansion (unroutable, unplaceable). World
+#: coordinates, so fresh episodes start clean and entries stay bounded.
+_CRUDE_EXPANSION_FAILED_CELLS: set[tuple[int, int]] = set()
+#: Radius around the plastic chest inside which pumpjacks count as district
+#: supply. Remote patches join through their own pipelines.
+DISTRICT_JACK_RADIUS = 120.0
+#: Conservative crude/s per pumpjack for build-time sizing (live-measured 9/s
+#: at +30% productivity on a middling patch; minimum yield floors near 2/s).
+#: Post-build starvation still expands later; this only sizes the opening set.
+ESTIMATED_CRUDE_PER_PUMPJACK = 8.0
+#: Hard ceiling on opening pumpjacks: patch-bounded, bill-bounded, and enough
+#: for one refinery at the estimate above. More wells join on measured
+#: starvation, never on speculation.
+MAX_OPENING_PUMPJACKS = 4
+#: Centre spacing between pumpjack 3x3 footprints: no overlap, with working
+#: room for each connector pipe. The fluid router and plan preflight still
+#: validate; spacing only proposes.
+PUMPJACK_SPOT_PITCH = 4.0
+
+
+def _crude_patch_tiles(
+    client: RconClient, surface: str, center: Point, radius: float = 40.0,
+) -> list[tuple[float, float]]:
+    """Crude-oil tile centres near `center`, capping the survey."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local cx,cy=" + str(center[0]) + "," + str(center[1]) + ";"
+        "local r=" + str(radius) + ";local out={};local n=0;"
+        "for _,e in pairs(s.find_entities_filtered{name='crude-oil',"
+        "area={{cx-r,cy-r},{cx+r,cy+r}}}) do "
+        "n=n+1;if n>400 then break end;"
+        "out[#out+1]=e.position.x..','..e.position.y end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = client.command("/sc " + lua).strip()
+    tiles = []
+    for record in raw.split(";"):
+        if not record:
+            continue
+        try:
+            x, y = record.split(",", 1)
+            tiles.append((float(x), float(y)))
+        except (ValueError, TypeError):
+            continue
+    return tiles
+
+
+def _extra_pumpjack_spots(
+    tiles: list[tuple[float, float]], existing: Point | None, target: Point, *,
+    draw_per_second: float = REFINERY_CRUDE_DRAW_PER_SECOND,
+    est_per_jack: float = ESTIMATED_CRUDE_PER_PUMPJACK,
+    max_jacks: int = MAX_OPENING_PUMPJACKS,
+) -> list[dict]:
+    """Extra pumpjack sites on the same patch, nearest first.
+
+    One refinery draws 20 crude/s; a lone 9/s well leaves it (and both
+    plastic plants behind it) idle most of the time (2026-09-04: plastic
+    crawled on 9/s against 40/s of plant draw). Sites cover at least one
+    crude tile, keep footprint pitch from each other and the existing jack,
+    and rotate their connector toward the cell. Returns site dicts ready for
+    generate_pumpjack_source; empty when the patch holds no more spots.
+    With no existing jack (a fresh remote patch), every spot is new and
+    tiles sort toward the refinery instead.
+    """
+    wanted = max(1, min(max_jacks, math.ceil(draw_per_second / est_per_jack)))
+    chosen: list[tuple[float, float]] = (
+        [(float(existing[0]), float(existing[1]))] if existing is not None else []
+    )
+    if existing is None:
+        order: Callable[[tuple[float, float]], float] = (
+            lambda t: (t[0] - target[0]) ** 2 + (t[1] - target[1]) ** 2
+        )
+    else:
+        order = (
+            lambda t: (t[0] - existing[0]) ** 2 + (t[1] - existing[1]) ** 2
+        )
+    spots: list[dict] = []
+    for tile in sorted(tiles, key=order):
+        if len(chosen) >= wanted:
+            break
+        candidate = (float(tile[0]), float(tile[1]))
+        if any(
+            math.dist(candidate, placed) < PUMPJACK_SPOT_PITCH
+            for placed in chosen
+        ):
+            continue
+        site = _pumpjack_site_nearest(candidate, target)
+        if site.get("output") is None:
+            continue
+        chosen.append(candidate)
+        spots.append(site)
+    return spots
+
+
 def _pumpjack_site_nearest(oil_position: Point, target: Point) -> dict:
     """Rotate a pumpjack so its real connector is closest to the local cell."""
     sites = []
@@ -112,7 +219,7 @@ def _find_oil_cell_site(
 ) -> Point | None:
     """Reserve the chemical district around crude oil, not around the base."""
     return live_base.find_clear_area(
-        client, surface, oil_position, 42, 34, max_radius=80.0,
+        client, surface, oil_position, 64, 44, max_radius=80.0,
         avoid_resources=True, resource_clearance=5,
     )
 
@@ -641,7 +748,14 @@ def _extend_sulfur_stage(
     hard -= endpoint_tiles
     foreign = [
         {"fluid": "water", "separated_by_pump": False, "tiles": [water["output"]]},
-        *fluid_network_segments(refinery_recipe, 1, ox, oy),
+        # The keepout must cover the WHOLE built row: a 1-machine phantom
+        # leaves the eastern headers unreserved and later links route gas
+        # straight through crude (2026-09-05: petroleum-gas merged into the
+        # crude header it could not see).
+        *fluid_network_segments(
+            refinery_recipe, max(1, len(refinery_line.machine_positions)),
+            ox, oy,
+        ),
         *fluid_network_segments("sulfur", 2, sulfur_x, sulfur_y),
     ]
     links: list[tuple[str, dict]] = []
@@ -710,6 +824,28 @@ def _extend_sulfur_stage(
     return {**existing, "sulfur": _provider(sulfur)}
 
 
+def _nearest_crude_tile(foreign: list[dict], source: Point) -> tuple[int, int]:
+    """Nearest already-routed crude tile for an extra pumpjack tap.
+
+    Extra jacks join the trunk (or the refinery crude header) where it is
+    closest instead of each running a full-length pipeline to the refinery.
+    """
+    crude = {
+        tuple(tile) for segment in foreign
+        if segment.get("fluid") == "crude-oil"
+        for tile in segment.get("tiles", ())
+    }
+    if not crude:
+        raise StuckError(
+            f"extra pumpjack at {source} has no routed crude network to tap"
+        )
+    sx, sy = source
+    return min(
+        crude,
+        key=lambda tile: (abs(tile[0] - sx) + abs(tile[1] - sy), tile),
+    )
+
+
 def _link_dive_tiles(
     segments: list[dict], hard: set[tuple[int, int]],
 ) -> set[tuple[int, int]]:
@@ -764,6 +900,230 @@ def _route_oil_fluid_link(
     raise last_error or ValueError("No bounded fluid route found")
 
 
+def _district_pumpjacks(
+    client: RconClient, surface: str, anchor: Point,
+) -> tuple[list[Point], int]:
+    """Live pumpjack positions near `anchor`, plus unbuilt pumpjack ghosts.
+
+    One survey answers both capacity (real jacks) and in-flight work
+    (ghosts mean a previous expansion is still constructing: wait, don't
+    duplicate it).
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local ax,ay=" + str(anchor[0]) + "," + str(anchor[1]) + ";"
+        "local real={};local ghosts=0;"
+        "for _,e in pairs(s.find_entities_filtered{name='pumpjack'}) do "
+        "local dx,dy=e.position.x-ax,e.position.y-ay;"
+        "if dx*dx+dy*dy<=" + str(DISTRICT_JACK_RADIUS ** 2) + " then "
+        "real[#real+1]=e.position.x..','..e.position.y end end;"
+        "for _,e in pairs(s.find_entities_filtered{type='entity-ghost'}) do "
+        "if e.ghost_name=='pumpjack' then "
+        "local dx,dy=e.position.x-ax,e.position.y-ay;"
+        "if dx*dx+dy*dy<=" + str(400.0 ** 2) + " then ghosts=ghosts+1 end end end;"
+        "rcon.print(table.concat(real,';')..'|'..ghosts)"
+    )
+    raw = client.command("/sc " + lua).strip()
+    positions: list[Point] = []
+    ghost_count = 0
+    head, _, tail = raw.partition("|")
+    for record in head.split(";"):
+        if not record:
+            continue
+        try:
+            x, y = record.split(",", 1)
+            positions.append((float(x), float(y)))
+        except (ValueError, TypeError):
+            continue
+    try:
+        ghost_count = int(tail or 0)
+    except ValueError:
+        ghost_count = 0
+    return positions, ghost_count
+
+
+def _crude_patch_grid(
+    client: RconClient, surface: str, center: Point, radius: float = 400.0,
+) -> dict[tuple[int, int], int]:
+    """Crude tile counts per 50-tile cell around `center` (one survey)."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local cx,cy=" + str(center[0]) + "," + str(center[1]) + ";"
+        "local r=" + str(radius) + ";local counts={};"
+        "for _,e in pairs(s.find_entities_filtered{name='crude-oil',"
+        "area={{cx-r,cy-r},{cx+r,cy+r}}}) do "
+        "local k=math.floor(e.position.x/50)..','..math.floor(e.position.y/50);"
+        "counts[k]=(counts[k] or 0)+1 end;"
+        "local out={};for k,v in pairs(counts) do out[#out+1]=k..':'..v end;"
+        "rcon.print(table.concat(out,'|'))"
+    )
+    grid: dict[tuple[int, int], int] = {}
+    for record in client.command("/sc " + lua).strip().split("|"):
+        if not record or ":" not in record:
+            continue
+        try:
+            key, raw_count = record.split(":", 1)
+            x, y = key.split(",", 1)
+            grid[(int(x), int(y))] = int(raw_count)
+        except (ValueError, TypeError):
+            continue
+    return grid
+
+
+def _pick_remote_crude_cell(
+    grid: dict[tuple[int, int], int], near: Point,
+    used: set[tuple[int, int]],
+) -> tuple[int, int] | None:
+    """Biggest unused crude patch cell, nearest wins ties.
+
+    Pure function over the grid survey: biggest patch first (fewer pipelines
+    for the same crude), skipping cells already serving jacks and cells that
+    previously refused expansion. Lone tiles qualify; the spot search bounds
+    what actually builds.
+    """
+    options = [
+        (count, cell) for cell, count in grid.items()
+        if cell not in used and cell not in _CRUDE_EXPANSION_FAILED_CELLS
+    ]
+    if not options:
+        return None
+    options.sort(
+        key=lambda entry: (
+            -entry[0],
+            (entry[1][0] * 50 - near[0]) ** 2
+            + (entry[1][1] * 50 - near[1]) ** 2,
+        ),
+    )
+    return options[0][1]
+
+
+def _expand_remote_crude_if_starved(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    service_stage: ServiceStage, emit: Callable[[str], None],
+    plastic_chest: Point,
+) -> None:
+    """Add one remote patch of pumpjacks when plastic idles for lack of crude.
+
+    Best-effort and never fatal: surveys are gated behind idle plants, one
+    patch builds at a time (ghosts in flight defer), failures are remembered
+    per cell, and material shortages ride the normal queue. Each expansion
+    that lands raises district capacity toward the refinery draw.
+    """
+    try:
+        plastic_line = live_base.find_line(
+            client, surface, force, "plastic-bar", "chemical-plant",
+        )
+        if plastic_line is None or plastic_line.working_count > 0:
+            return
+        jacks, ghosts = _district_pumpjacks(client, surface, plastic_chest)
+        if ghosts > 0:
+            emit("  OIL EXPANSION WAIT: pumpjack ghosts still constructing")
+            return
+        capacity = len(jacks) * ESTIMATED_CRUDE_PER_PUMPJACK
+        if capacity >= OPENING_CRUDE_TARGET_PER_SECOND:
+            return
+        refinery_pos: Point | None = None
+        refinery_recipe = "basic-oil-processing"
+        for recipe in ("basic-oil-processing", "advanced-oil-processing"):
+            line = live_base.find_line(client, surface, force, recipe, "oil-refinery")
+            if line is not None and line.machine_positions:
+                refinery_pos = line.machine_positions[0]
+                refinery_recipe = recipe
+                break
+        if refinery_pos is None:
+            return
+        origin = _infer_fluid_row_origin(refinery_recipe, refinery_pos)
+        crude_to = header_attachment(
+            refinery_recipe, "crude-oil", 1, origin[0], origin[1],
+        )["attach"]
+        grid = _crude_patch_grid(client, surface, plastic_chest)
+        used = {
+            (math.floor(x / 50), math.floor(y / 50)) for x, y in jacks
+        }
+        cell = _pick_remote_crude_cell(grid, plastic_chest, used)
+        if cell is None:
+            emit("  OIL EXPANSION WAIT: no unused crude patch in survey range")
+            return
+        cell_centre = (cell[0] * 50.0 + 25.0, cell[1] * 50.0 + 25.0)
+        tiles = _crude_patch_tiles(client, surface, cell_centre, radius=60.0)
+        spots = _extra_pumpjack_spots(
+            tiles, None, crude_to,
+            draw_per_second=max(
+                1.0, OPENING_CRUDE_TARGET_PER_SECOND - capacity,
+            ),
+            max_jacks=6,
+        )
+        if not spots:
+            _CRUDE_EXPANSION_FAILED_CELLS.add(cell)
+            emit(
+                f"  OIL EXPANSION WAIT: patch {cell} holds no pumpjack spot"
+            )
+            return
+        outputs = [site["output"] for site in spots]
+        source = generate_pumpjack_source(spots, outputs)
+        links: list[tuple[str, dict]] = []
+        foreign: list[dict] = []
+        lo = (
+            min(x for x, _ in [crude_to, *outputs]) - 24,
+            min(y for _, y in [crude_to, *outputs]) - 24,
+        )
+        hi = (
+            max(x for x, _ in [crude_to, *outputs]) + 24,
+            max(y for _, y in [crude_to, *outputs]) + 24,
+        )
+        try:
+            hard = live_base.occupied_tiles(
+                client, surface, lo, hi, include_water=False,
+            )
+            terrain_water = live_base.water_tiles(client, surface, lo, hi)
+        except Exception:
+            hard, terrain_water = set(), set()
+        try:
+            for index, output in enumerate(outputs):
+                link, segments, _crossed = _route_oil_fluid_link(
+                    output, [crude_to], "crude-oil", foreign=foreign,
+                    hard=set(hard), terrain_water=set(terrain_water),
+                    existing_tiles=[output],
+                )
+                links.append((f"chemical_crude_expansion_{index}", link))
+                foreign.extend(segments)
+        except ValueError as error:
+            _CRUDE_EXPANSION_FAILED_CELLS.add(cell)
+            emit(f"  OIL EXPANSION WAIT: crude unroutable from {cell}: {error}")
+            return
+        _submit_oil_cell_packets(
+            client, bridge, surface, force,
+            [(name, link) for name, link in links]
+            + [(f"chemical_crude_expansion_machines", source)],
+            emit,
+        )
+        machines = _positions(source, "pumpjack")
+        area = _area(source)
+        try:
+            substation_position = _substation(source)
+        except Exception:
+            substation_position = None
+        if substation_position is None:
+            try:
+                substation_position = live_base.nearest_powered_pole(
+                    client, surface, force, machines[0],
+                )
+            except Exception:
+                substation_position = None
+        service_stage(
+            client, bridge, surface, force,
+            f"remote crude {cell}", machines[0], area,
+            substation_position if substation_position is not None else machines[0],
+            machines, emit,
+        )
+        emit(
+            f"  OIL EXPANSION: {len(spots)} pumpjack(s) on patch {cell} "
+            f"toward {OPENING_CRUDE_TARGET_PER_SECOND:.0f}/s crude"
+        )
+    except Exception as error:
+        emit(f"  OIL EXPANSION WAIT: {type(error).__name__}: {error}")
+
+
 def ensure_oil_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage,
@@ -773,6 +1133,18 @@ def ensure_oil_cell(
         raise ValueError(f"unsupported oil-cell output {target_output!r}")
     existing = _existing_outputs(client, surface, force) or {}
     if target_output in existing:
+        # A built output chest outside every logistic network supplies
+        # nothing no matter how healthy its machines are (2026-09-04: the
+        # plastic provider sat 28 tiles from its port). Re-check on every
+        # visit; already-covered chests cost one survey and no action.
+        ensure_logistic_coverage(
+            client, bridge, surface, force, list(existing.values()), emit,
+        )
+        _expand_remote_crude_if_starved(
+            client, bridge, surface, force, service_stage, emit,
+            existing["plastic-bar"] if "plastic-bar" in existing
+            else next(iter(existing.values())),
+        )
         return existing
     if target_output == "sulfur" and "plastic-bar" in existing:
         emit(
@@ -789,9 +1161,9 @@ def ensure_oil_cell(
     oil_pos = oil[0]
     cell = _find_oil_cell_site(client, surface, oil_pos)
     if cell is None:
-        raise StuckError("No ore-free 42x34 area found near the crude-oil source")
+        raise StuckError("No ore-free 64x44 area found near the crude-oil source")
     ox, oy = round(cell[0]), round(cell[1])
-    cell_centre = (ox + 21.0, oy + 17.0)
+    cell_centre = (ox + 32.0, oy + 22.0)
     coal = ensure_coal_mine(
         client, bridge, surface, force, cell_centre, service_stage, emit,
         prefer_nearest_patch=True,
@@ -815,15 +1187,36 @@ def ensure_oil_cell(
         f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
         f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
     )
+    try:
+        patch_tiles = _crude_patch_tiles(client, surface, oil_pos)
+    except Exception:
+        patch_tiles = []
+    extra_sites = _extra_pumpjack_spots(patch_tiles, oil_site["position"], cell_centre)
+    pumpjack_sites = [oil_site, *extra_sites]
+    if extra_sites:
+        emit(
+            f"  OIL DISTRICT: {len(pumpjack_sites)} pumpjacks to saturate the "
+            f"{REFINERY_CRUDE_DRAW_PER_SECOND:.0f}/s refinery draw "
+            f"({len(patch_tiles)} crude tiles surveyed)"
+        )
     emit(
         f"  OIL DISTRICT: plastic at {(px, py)} between refinery "
         f"{cell_centre} and local coal belt {coal}"
     )
     refinery_recipe = oil_processing_recipe(0)
-    refinery = generate_fluid_machine_row(refinery_recipe, 1, ox, oy)
+    refinery = generate_fluid_machine_row(
+        refinery_recipe, OPENING_REFINERY_COUNT, ox, oy,
+    )
+    refinery_east = max(
+        action["position"]["x"]
+        for phase in refinery["phases"] for action in phase["actions"]
+    )
     plastic = generate_fluid_machine_row("plastic-bar", 2, px, py)
-    sulfur = generate_fluid_machine_row("sulfur", 2, ox + 18, oy + 16)
-    crude_source = generate_pumpjack_source([oil_site], [oil_site["output"]])
+    sulfur_ox, sulfur_oy = round(refinery_east) + 10, oy + 16
+    sulfur = generate_fluid_machine_row("sulfur", 2, sulfur_ox, sulfur_oy)
+    crude_source = generate_pumpjack_source(
+        pumpjack_sites, [site["output"] for site in pumpjack_sites],
+    )
     water_source = generate_offshore_pump_source([water], [water["output"]])
     plans = [
         strip_local_power(plan, remove_substations=False)
@@ -837,8 +1230,8 @@ def ensure_oil_cell(
     crude_to = header_attachment(refinery_recipe, "crude-oil", 1, ox, oy)["attach"]
     petroleum_from = header_attachment(refinery_recipe, "petroleum-gas", 1, ox, oy)["attach"]
     plastic_gas = header_attachment("plastic-bar", "petroleum-gas", 2, px, py)["attach"]
-    sulfur_gas = header_attachment("sulfur", "petroleum-gas", 2, ox + 18, oy + 16)["attach"]
-    sulfur_water = header_attachment("sulfur", "water", 2, ox + 18, oy + 16)["attach"]
+    sulfur_gas = header_attachment("sulfur", "petroleum-gas", 2, sulfur_ox, sulfur_oy)["attach"]
+    sulfur_water = header_attachment("sulfur", "water", 2, sulfur_ox, sulfur_oy)["attach"]
     endpoints = [oil_site["output"], water["output"], crude_to, petroleum_from,
                  plastic_gas]
     if include_sulfur:
@@ -876,18 +1269,32 @@ def ensure_oil_cell(
                 "tiles": [water["output"]],
             },
         ]
-        + fluid_network_segments(refinery_recipe, 1, ox, oy)
+        + fluid_network_segments(
+            refinery_recipe, OPENING_REFINERY_COUNT, ox, oy,
+        )
         + fluid_network_segments("plastic-bar", 2, px, py)
         + (
-            fluid_network_segments("sulfur", 2, ox + 18, oy + 16)
+            fluid_network_segments("sulfur", 2, sulfur_ox, sulfur_oy)
             if include_sulfur else []
         )
     )
     links: list[tuple[str, dict]] = []
+    # The first jack owns the trunk to the refinery; every extra jack taps
+    # the nearest crude tile (trunk or header) with targets=None resolved
+    # after the trunk exists. Separate full-length pipelines per jack wasted
+    # pipe, crossed each other oddly, and left jacks unconnected when their
+    # packet died (2026-09-05: two of three jacks sat on lone stub pipes).
     requested_links = [
         (
             "chemical_crude_pipeline", oil_site["output"], [crude_to],
             "crude-oil", [oil_site["output"]],
+        ),
+        *(
+            (
+                f"chemical_crude_pipeline_{index}", site["output"], None,
+                "crude-oil", [site["output"]],
+            )
+            for index, site in enumerate(extra_sites, start=2)
         ),
         (
             "chemical_plastic_petroleum_pipeline", petroleum_from,
@@ -906,6 +1313,12 @@ def ensure_oil_cell(
             ),
         ))
     for link_name, source, targets, fluid, existing_tiles in requested_links:
+        if targets is None:
+            targets = [_nearest_crude_tile(foreign, source)]
+            emit(
+                f"  FLUID ROUTE: {link_name} taps the crude trunk at "
+                f"{targets[0]} instead of running to the refinery"
+            )
         try:
             link, segments, crossed_water = _route_oil_fluid_link(
                 source, targets, fluid, foreign=foreign, hard=hard,
@@ -968,6 +1381,11 @@ def ensure_oil_cell(
             _merge(water_source_stage, crude_source_stage, refinery_stage, plastic_stage),
         ),
         ("chemical_crude_pipeline", link_packets["chemical_crude_pipeline"]),
+        *(
+            (link_name, link_packets[link_name])
+            for link_name in sorted(link_packets)
+            if link_name.startswith("chemical_crude_pipeline_")
+        ),
         (
             "chemical_plastic_petroleum_pipeline",
             link_packets["chemical_plastic_petroleum_pipeline"],
@@ -1026,6 +1444,16 @@ def ensure_oil_cell(
     production_positions = _positions(plastic, "chemical-plant")
     if include_sulfur:
         production_positions += _positions(sulfur, "chemical-plant")
+    # Providers must sit inside a live logistic network, not merely inside
+    # construction reach (see the early-return recheck above) -- and before
+    # health is measured, so an unreachable chest cannot masquerade as an
+    # unhealthy machine. Verify while power and ports are fresh.
+    ensure_logistic_coverage(
+        client, bridge, surface, force,
+        [_provider(plastic)]
+        + ([_provider(sulfur)] if include_sulfur else []),
+        emit,
+    )
     stuck = _diagnose_machines(
         client, surface, production_positions,
         emit, grace_seconds=coal_grace, bridge=bridge, force=force,
