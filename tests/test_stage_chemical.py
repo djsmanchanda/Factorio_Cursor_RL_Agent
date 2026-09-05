@@ -100,6 +100,24 @@ def test_pumpjack_faces_the_local_oil_cell() -> None:
     assert north["output"] == (-288, -101)
 
 
+def test_pumpjack_blueprint_rotation_and_mirror_map_to_real_connectors() -> None:
+    """User-supplied blueprints: default, 90° clockwise, then mirrored.
+
+    The exported defaults are north, east, and south respectively; connector
+    tiles must rotate with the 3x3 body, not remain at the default location.
+    """
+    position = (-286.5, -98.5)
+    assert stage_chemical.verified_pumpjack_output_tile({
+        "position": position, "direction": "north",
+    }) == (-288, -101)
+    assert stage_chemical.verified_pumpjack_output_tile({
+        "position": position, "direction": "east",
+    }) == (-285, -100)
+    assert stage_chemical.verified_pumpjack_output_tile({
+        "position": position, "direction": "south",
+    }) == (-286, -97)
+
+
 def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
     site = stage_chemical._pumpjack_site_nearest(
         (-268.5, -98.5), (-237.0, -91.0),
@@ -912,6 +930,20 @@ def test_extra_pumpjack_spots_respect_the_draw_ceiling() -> None:
     assert stage_chemical._extra_pumpjack_spots(
         [], (-269.0, -99.0), (-237.0, -91.0),
     ) == []
+
+
+def test_patch_pumpjack_selection_skips_blocked_footprints() -> None:
+    """A closer well is not legal when its 3x3 body hits infrastructure."""
+    blocked = stage_chemical.footprint_tile_indices((8.5, 0.5), 3)
+    sites = stage_chemical._pumpjack_sites_for_patch(
+        [(4.5, 0.5), (8.5, 0.5)], (0.5, 0.5), (12.0, 0.0),
+        blocked_tiles=blocked, draw_per_second=8.0, max_jacks=1,
+    )
+
+    assert [site["position"] for site in sites] == [(4.5, 0.5)]
+    assert stage_chemical.footprint_tile_indices(
+        sites[0]["position"], 3,
+    ).isdisjoint(blocked)
 
 
 def test_existing_oil_output_rechecks_logistic_coverage(monkeypatch) -> None:

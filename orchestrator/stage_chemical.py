@@ -143,6 +143,7 @@ def _extra_pumpjack_spots(
     draw_per_second: float = REFINERY_CRUDE_DRAW_PER_SECOND,
     est_per_jack: float = ESTIMATED_CRUDE_PER_PUMPJACK,
     max_jacks: int = MAX_OPENING_PUMPJACKS,
+    blocked_tiles: set[tuple[int, int]] = frozenset(),
 ) -> list[dict]:
     """Extra pumpjack sites on the same patch, nearest first.
 
@@ -172,17 +173,93 @@ def _extra_pumpjack_spots(
         if len(chosen) >= wanted:
             break
         candidate = (float(tile[0]), float(tile[1]))
+        # A crude tile only grants the resource overlap required by a
+        # pumpjack; it does not make a 3x3 pumpjack legal over an existing
+        # pole, pipe, rock, or water.  This used to be checked only after the
+        # whole oil packet was assembled, when one bad extra well could reject
+        # its source packet and leave the other wells on disconnected stubs.
+        footprint = footprint_tile_indices(candidate, ENTITY_FOOTPRINTS["pumpjack"])
+        if footprint & blocked_tiles:
+            continue
         if any(
             math.dist(candidate, placed) < PUMPJACK_SPOT_PITCH
             for placed in chosen
         ):
             continue
         site = _pumpjack_site_nearest(candidate, target)
-        if site.get("output") is None:
+        if site.get("output") is None or site["output"] in blocked_tiles:
             continue
         chosen.append(candidate)
         spots.append(site)
     return spots
+
+
+def _pumpjack_sites_for_patch(
+    tiles: list[tuple[float, float]], primary: Point, target: Point, *,
+    blocked_tiles: set[tuple[int, int]] = frozenset(),
+    draw_per_second: float = REFINERY_CRUDE_DRAW_PER_SECOND,
+    est_per_jack: float = ESTIMATED_CRUDE_PER_PUMPJACK,
+    max_jacks: int = MAX_OPENING_PUMPJACKS,
+) -> list[dict]:
+    """Choose a legal, compact crude network for one patch.
+
+    The first pumpjack owns the long run to the refinery; each following one
+    joins that trunk.  Rank the first output by its route to the refinery and
+    each later output by its distance to the growing local network.  This is a
+    cheap deterministic proxy for the routed pipe bill, while the fluid router
+    remains the authority on a path around remote obstacles.
+    """
+    wanted = max(1, min(max_jacks, math.ceil(draw_per_second / est_per_jack)))
+    candidates = [tuple(map(float, primary))] + [
+        (float(x), float(y)) for x, y in tiles
+    ]
+    unique = list(dict.fromkeys(candidates))
+    legal = []
+    for candidate in unique:
+        if footprint_tile_indices(candidate, ENTITY_FOOTPRINTS["pumpjack"]) & blocked_tiles:
+            continue
+        site = _pumpjack_site_nearest(candidate, target)
+        if site.get("output") is not None and site["output"] not in blocked_tiles:
+            legal.append(site)
+    if not legal:
+        return []
+
+    def _target_cost(site: dict) -> int:
+        output = site["output"]
+        return abs(output[0] - target[0]) + abs(output[1] - target[1])
+
+    # The long trunk matters more than any later branch, so settle its source
+    # first.  Position/direction make ties repeatable across identical seeds.
+    legal.sort(key=lambda site: (_target_cost(site), site["position"], site["direction"]))
+    chosen = [legal.pop(0)]
+    while legal and len(chosen) < wanted:
+        chosen_tiles = set().union(*(
+            footprint_tile_indices(
+                tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
+            ) for site in chosen
+        ))
+        viable = [
+            site for site in legal
+            if footprint_tile_indices(
+                tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
+            ).isdisjoint(chosen_tiles)
+        ]
+        if not viable:
+            break
+        # Branches tap the nearest already-owned crude tile, so this is the
+        # incremental pipe cost, with the refinery distance as a stable tie.
+        viable.sort(key=lambda site: (
+            min(
+                abs(site["output"][0] - prior["output"][0])
+                + abs(site["output"][1] - prior["output"][1])
+                for prior in chosen
+            ),
+            _target_cost(site), site["position"], site["direction"],
+        ))
+        selected = viable[0]
+        chosen.append(selected)
+        legal.remove(selected)
+    return chosen
 
 
 def _pumpjack_site_nearest(oil_position: Point, target: Point) -> dict:
@@ -1046,12 +1123,22 @@ def _expand_remote_crude_if_starved(
             return
         cell_centre = (cell[0] * 50.0 + 25.0, cell[1] * 50.0 + 25.0)
         tiles = _crude_patch_tiles(client, surface, cell_centre, radius=60.0)
+        try:
+            placement_blocked = live_base.occupied_tiles(
+                client, surface,
+                (min(x for x, _ in tiles) - 4, min(y for _, y in tiles) - 4),
+                (max(x for x, _ in tiles) + 5, max(y for _, y in tiles) + 5),
+                include_resources=False, include_clutter=True,
+            ) if tiles else set()
+        except Exception:
+            placement_blocked = set()
         spots = _extra_pumpjack_spots(
             tiles, None, crude_to,
             draw_per_second=max(
                 1.0, OPENING_CRUDE_TARGET_PER_SECOND - capacity,
             ),
             max_jacks=6,
+            blocked_tiles=placement_blocked,
         )
         if not spots:
             _CRUDE_EXPANSION_FAILED_CELLS.add(cell)
@@ -1182,17 +1269,33 @@ def ensure_oil_cell(
     )
     if water is None:
         raise StuckError("No buildable straight shoreline found near the oil cell")
-    oil_site = _pumpjack_site_nearest(oil_pos, cell_centre)
-    emit(
-        f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
-        f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
-    )
     try:
         patch_tiles = _crude_patch_tiles(client, surface, oil_pos)
     except Exception:
         patch_tiles = []
-    extra_sites = _extra_pumpjack_spots(patch_tiles, oil_site["position"], cell_centre)
-    pumpjack_sites = [oil_site, *extra_sites]
+    # A crude tile is only the required resource overlap.  Survey the complete
+    # 3x3 body before choosing a well, so a nearby pole, pipe, water tile, or
+    # clutter cannot poison the all-or-nothing source packet.
+    patch_points = [oil_pos, *patch_tiles]
+    try:
+        pumpjack_blocked = live_base.occupied_tiles(
+            client, surface,
+            (min(x for x, _ in patch_points) - 4, min(y for _, y in patch_points) - 4),
+            (max(x for x, _ in patch_points) + 5, max(y for _, y in patch_points) + 5),
+            include_resources=False, include_clutter=True,
+        )
+    except Exception:
+        pumpjack_blocked = set()
+    pumpjack_sites = _pumpjack_sites_for_patch(
+        patch_tiles, oil_pos, cell_centre, blocked_tiles=pumpjack_blocked,
+    )
+    if not pumpjack_sites:
+        raise StuckError("No legal pumpjack footprint on the selected crude-oil patch")
+    oil_site, *extra_sites = pumpjack_sites
+    emit(
+        f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
+        f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
+    )
     if extra_sites:
         emit(
             f"  OIL DISTRICT: {len(pumpjack_sites)} pumpjacks to saturate the "
