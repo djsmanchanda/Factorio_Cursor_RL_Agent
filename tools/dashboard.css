@@ -61,7 +61,8 @@ main { display: grid; grid-template-columns: minmax(350px, .72fr) minmax(540px, 
 .controls { grid-column: 1; grid-row: 1; }
 .priority-panel { grid-column: 1; grid-row: 2; }
 .research-panel { grid-column: 2; grid-row: 3; }
-.helper-panel { grid-column: 1; grid-row: 3; }
+.logistic-inventory-panel { grid-column: 1; grid-row: 3; }
+.helper-panel { grid-column: 1; grid-row: 4; }
 .research-help { color: var(--muted); margin: 0 0 12px; }
 .research-form { display: flex; gap: 8px; flex-wrap: wrap; }
 .research-form select { flex: 1 1 260px; min-width: 0; min-height: 126px; background: var(--panel); color: var(--text); border: 1px solid var(--line); padding: 6px; }
@@ -99,6 +100,13 @@ button { border: 0; color: inherit; font: inherit; cursor: pointer; }
 .priority-panel tr:last-child td { border-bottom: 0; }
 .priority-panel small { display: block; max-width: 250px; margin-top: 4px; color: var(--muted); }
 .priority-panel progress { width: 92px; accent-color: var(--orange); }
+.logistic-inventory-summary { margin: 0; padding: 14px 16px; color: var(--muted); font: .75rem/1.45 ui-monospace, monospace; border-bottom: 1px solid var(--line); }
+.logistic-inventory-table-wrap { max-height: 360px; overflow: auto; }
+.logistic-inventory-panel table { width: 100%; border-collapse: collapse; font: .78rem/1.35 ui-monospace, monospace; }
+.logistic-inventory-panel th, .logistic-inventory-panel td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.logistic-inventory-panel th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+.logistic-inventory-panel td:last-child, .logistic-inventory-panel th:last-child { text-align: right; color: #efaa6c; }
+.logistic-inventory-panel tr:last-child td { border-bottom: 0; }
 .priority-panel .deferred { color: var(--yellow); }
 .priority-panel .complete { color: var(--green); }
 .helper-body { padding: 20px; display: grid; gap: 22px; }
@@ -149,7 +157,8 @@ code { color: #efaa6c; }
   .console-panel { grid-column: 1; grid-row: 2; }
   .research-panel { grid-column: 1; grid-row: 3; }
   .priority-panel { grid-column: 1; grid-row: 4; }
-  .helper-panel { grid-column: 1; grid-row: 5; }
+  .logistic-inventory-panel { grid-column: 1; grid-row: 5; }
+  .helper-panel { grid-column: 1; grid-row: 6; }
   pre { height: 480px; }
 }
 @media (max-width: 560px) {

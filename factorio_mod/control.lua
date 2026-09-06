@@ -16,6 +16,7 @@ require("water_seeding")
 require("layout_executor")
 require("research")
 require("science_telemetry")
+require("logistic_inventory")
 require("live_execution")
 require("spidertron_builder")
 

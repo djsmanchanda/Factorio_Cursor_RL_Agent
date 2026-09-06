@@ -260,6 +260,19 @@ class OperationManager:
             raise OperationError(report.get("error", "Research options report failed"))
         return report
 
+    def logistic_inventory(self) -> dict:
+        """Read the live Nauvis/player logistic networks without changing game state."""
+        bridge = self._research_bridge()
+        try:
+            report = load_json(bridge.logistic_inventory("nauvis", "player"))
+        except Exception as error:
+            raise OperationError(f"Cannot read live logistic inventory: {error}") from error
+        finally:
+            bridge.close()
+        if not report.get("ok"):
+            raise OperationError(report.get("error", "Logistic inventory report failed"))
+        return report
+
     @staticmethod
     def _level_parts(technology: str) -> tuple[str, int] | None:
         match = re.fullmatch(r"(.+)-(\d+)", technology)

@@ -24,6 +24,9 @@ const helperMessage = document.querySelector('#helper-message');
 const helperComment = document.querySelector('#helper-comment');
 const helperObservations = document.querySelector('#helper-observations');
 const helperSkillId = document.querySelector('#helper-skill-id');
+const logisticInventoryStatus = document.querySelector('#logistic-inventory-status');
+const logisticInventorySummary = document.querySelector('#logistic-inventory-summary');
+const logisticInventoryBody = document.querySelector('#logistic-inventory-body');
 let latestHelperRun = null;
 const titles = {
   runner: 'Autonomous runner',
@@ -263,6 +266,49 @@ function renderPriorities(items) {
   });
 }
 
+function formatItemCount(count) {
+  return new Intl.NumberFormat().format(count);
+}
+
+function renderLogisticInventory(report) {
+  const items = Object.entries(report.total_items || {})
+    .filter(([, count]) => Number.isFinite(count) && count > 0)
+    .sort(([leftName, leftCount], [rightName, rightCount]) =>
+      rightCount - leftCount || leftName.localeCompare(rightName));
+  const networks = report.networks || [];
+  const networkText = `${networks.length} NETWORK${networks.length === 1 ? '' : 'S'}`;
+  const ports = networks.reduce((total, network) => total + (network.roboports || 0), 0);
+  logisticInventoryStatus.textContent = `${items.length} ITEM TYPES`;
+  logisticInventorySummary.textContent = `${networkText} · ${ports} ROBOports · ${report.disconnected_roboports || 0} without a network · tick ${report.tick}`;
+  logisticInventoryBody.replaceChildren();
+  if (!items.length) {
+    const row = document.createElement('tr');
+    const cell = priorityCell('No available items in the live logistic networks.');
+    cell.colSpan = 2;
+    cell.className = 'empty-priority';
+    row.append(cell);
+    logisticInventoryBody.append(row);
+    return;
+  }
+  items.forEach(([item, count]) => {
+    const row = document.createElement('tr');
+    row.append(priorityCell(item), priorityCell(formatItemCount(count)));
+    logisticInventoryBody.append(row);
+  });
+}
+
+async function refreshLogisticInventory() {
+  try {
+    const response = await fetch('/api/logistic-inventory', {cache: 'no-store'});
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error || 'Logistic inventory request failed');
+    renderLogisticInventory(report);
+  } catch (error) {
+    logisticInventoryStatus.textContent = 'UNAVAILABLE';
+    logisticInventorySummary.textContent = error.message;
+  }
+}
+
 async function refreshPriorities() {
   try {
     const response = await fetch('/api/priorities', {cache: 'no-store'});
@@ -458,4 +504,6 @@ setInterval(refreshResearchOptions, 3000);
 refreshResearchQueue();
 refreshResearchOptions();
 refreshHelper();
+refreshLogisticInventory();
 setInterval(refreshHelper, 3000);
+setInterval(refreshLogisticInventory, 5000);

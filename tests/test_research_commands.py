@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.game_bridge import GameBridge, RECIPE_CATALOG_SUBDIR, RESEARCH_REPORT_SUBDIR
+from orchestrator.game_bridge import (
+    GameBridge,
+    LOGISTIC_INVENTORY_REPORT_SUBDIR,
+    RECIPE_CATALOG_SUBDIR,
+    RESEARCH_REPORT_SUBDIR,
+)
 
 
 
@@ -58,6 +63,20 @@ def test_research_options_sends_existing_force() -> None:
 
     assert calls == [
         ('/research_options {"force":"player"}', RESEARCH_REPORT_SUBDIR, 60.0)
+    ]
+
+
+def test_logistic_inventory_sends_explicit_real_base_scope() -> None:
+    bridge, calls = _recording_bridge()
+
+    bridge.logistic_inventory("nauvis", "player")
+
+    assert calls == [
+        (
+            '/logistic_inventory {"surface":"nauvis","force":"player"}',
+            LOGISTIC_INVENTORY_REPORT_SUBDIR,
+            60.0,
+        )
     ]
 
 

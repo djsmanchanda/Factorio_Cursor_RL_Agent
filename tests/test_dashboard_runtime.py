@@ -250,6 +250,34 @@ class _FakeLiveResearchBridge:
         self.closed = True
 
 
+def test_logistic_inventory_reads_the_explicit_real_base_scope(monkeypatch) -> None:
+    manager = object.__new__(OperationManager)
+    report = {
+        "ok": True,
+        "surface": "nauvis",
+        "force": "player",
+        "networks": [],
+        "total_items": {},
+    }
+
+    class Bridge:
+        closed = False
+
+        def logistic_inventory(self, surface: str, force: str):
+            assert (surface, force) == ("nauvis", "player")
+            return report
+
+        def close(self) -> None:
+            self.closed = True
+
+    bridge = Bridge()
+    manager._research_bridge = lambda: bridge
+    monkeypatch.setattr(dashboard_runtime, "load_json", lambda value: value)
+
+    assert manager.logistic_inventory() is report
+    assert bridge.closed is True
+
+
 def test_future_repeatable_target_requires_predecessor_in_queue(monkeypatch) -> None:
     manager = object.__new__(OperationManager)
     bridge = _FakeLiveResearchBridge({

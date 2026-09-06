@@ -80,3 +80,15 @@ def test_helper_feedback_validation_error_returns_conflict() -> None:
     handler.do_POST()
 
     assert replies == [(409, {"error": "feedback is invalid"})]
+
+
+def test_logistic_inventory_endpoint_returns_the_live_report() -> None:
+    handler = object.__new__(DashboardHandler)
+    handler.path = "/api/logistic-inventory"
+    handler.manager = SimpleNamespace(logistic_inventory=lambda: {"ok": True, "tick": 99})
+    replies: list[tuple[int, dict]] = []
+    handler._json = lambda code, body: replies.append((code, body))
+
+    handler.do_GET()
+
+    assert replies == [(200, {"ok": True, "tick": 99})]

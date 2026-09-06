@@ -126,6 +126,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except OperationError as exc:
                 self._json(500, {"error": str(exc)})
             return
+        if request.path == "/api/logistic-inventory":
+            try:
+                self._json(200, self.manager.logistic_inventory())
+            except OperationError as exc:
+                self._json(500, {"error": str(exc)})
+            return
         if request.path == "/api/logs":
             query = parse_qs(request.query)
             name = query.get("name", ["runner"])[0]
