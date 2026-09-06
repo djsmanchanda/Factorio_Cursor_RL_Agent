@@ -56,6 +56,8 @@ class Config:
 class State:
     completed_cycles: int = 0
     terminal_keys: list[str] = field(default_factory=list)
+    active_cycle: int | None = None
+    active_session_id: str | None = None
 
 
 def _now() -> str:
@@ -79,6 +81,11 @@ def _load_state(path: Path) -> State:
     return State(
         completed_cycles=int(payload.get("completed_cycles", 0)),
         terminal_keys=[str(item) for item in payload.get("terminal_keys", []) if isinstance(item, str)],
+        active_cycle=int(payload["active_cycle"]) if isinstance(payload.get("active_cycle"), int) else None,
+        active_session_id=(
+            str(payload["active_session_id"]) if isinstance(payload.get("active_session_id"), str)
+            and payload["active_session_id"] else None
+        ),
     )
 
 
@@ -316,15 +323,28 @@ def run_campaign(config: Config) -> int:
             _append(config.observations, "## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
             return 0
         cycle = state.completed_cycles + 1
-        fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
-        if fresh.returncode:
-            raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
-        _append(config.observations, f"## Cycle {cycle} — fresh lifecycle ({_now()})\n\n```text\n{(fresh.stdout + fresh.stderr).strip()}\n```\n")
-        session_id, _ = _ask(config, _initial_prompt(config, cycle), None, sequence)
-        sequence += 1
-        if session_id is None:
-            raise RuntimeError("OpenCode did not return a session ID; refusing to create an untracked observer session")
-        offset = 0
+        resuming = state.active_cycle == cycle and state.active_session_id is not None
+        if resuming:
+            session_id = state.active_session_id
+            _append(
+                config.observations,
+                f"## Cycle {cycle} — controller resumed ({_now()})\n\n"
+                "The persisted OpenCode session will continue this same run; no fresh lifecycle was issued.\n",
+            )
+            offset = (config.state_root / "logs/autonomous-run.log").stat().st_size if (config.state_root / "logs/autonomous-run.log").exists() else 0
+        else:
+            fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
+            if fresh.returncode:
+                raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
+            _append(config.observations, f"## Cycle {cycle} — fresh lifecycle ({_now()})\n\n```text\n{(fresh.stdout + fresh.stderr).strip()}\n```\n")
+            session_id, _ = _ask(config, _initial_prompt(config, cycle), None, sequence)
+            sequence += 1
+            if session_id is None:
+                raise RuntimeError("OpenCode did not return a session ID; refusing to create an untracked observer session")
+            state.active_cycle = cycle
+            state.active_session_id = session_id
+            _save_state(config.state_file, state)
+            offset = 0
         checkpoint = 0
         while True:
             checkpoint += 1
@@ -345,6 +365,8 @@ def run_campaign(config: Config) -> int:
         after = _tree_fingerprint(config.observations)
         state.completed_cycles += 1
         state.terminal_keys = (state.terminal_keys + [_terminal_key(run_text)])[-2:]
+        state.active_cycle = None
+        state.active_session_id = None
         _save_state(config.state_file, state)
         if _decision(output) in {"stop", "no-change"} and before == after:
             _append(config.observations, "## Campaign stop\n\nNo focused code change was justified.\n")

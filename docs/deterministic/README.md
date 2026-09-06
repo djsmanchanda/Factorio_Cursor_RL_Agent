@@ -67,7 +67,8 @@ last-ten-runs journal.
 
 For unattended campaigns, `tools/opencode_campaign_orchestrator.py` owns the
 isolated fresh-run lifecycle and starts a **new OpenCode session for each
-run**. It records a controller/log/logistic-inventory snapshot every two
+run**. It persists the active run's session ID, so a controller restart resumes
+that same session rather than duplicating an hour-long run. It records a controller/log/logistic-inventory snapshot every two
 minutes in `docs/deterministic/opencode_campaign_observations.md`, uses that
 run's session for the checkpoint reviews, then requires its final comparison
 against the preceding documented run before one focused edit can trigger the

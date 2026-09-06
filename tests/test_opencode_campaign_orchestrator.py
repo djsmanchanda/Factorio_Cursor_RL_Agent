@@ -65,3 +65,15 @@ def test_dry_run_completes_without_touching_live_services(tmp_path: Path) -> Non
 
     assert result == 0
     assert "Dry run: status probe skipped." in observations.read_text(encoding="utf-8")
+
+
+def test_state_preserves_active_session_for_long_run_resume(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    campaign._save_state(state_path, campaign.State(
+        completed_cycles=2, active_cycle=3, active_session_id="ses_long_run",
+    ))
+
+    restored = campaign._load_state(state_path)
+
+    assert restored.active_cycle == 3
+    assert restored.active_session_id == "ses_long_run"
