@@ -6402,6 +6402,44 @@ def _missing_chemical_ladder_predecessor(
     ), None)
 
 
+def _defer_steel_blocked_loan(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference_point: Point, emit: Callable[[str], None],
+) -> bool:
+    """Release a loan that cannot advance until the steel starter exists.
+
+    `pipe` is first in the chemical capability ladder, but it is not an input
+    to the dedicated steel furnace.  Letting that capability ordering hold an
+    AM2 loan which is itself missing steel creates a circular cell handoff.
+    Restoring the blocked loan is safe: it has no path to its target until the
+    independent, material-funded steel conversion starts.
+    """
+    for loan in active_bootstrap_loans(client, surface, force):
+        if loan.target_item == "steel-plate":
+            continue
+        try:
+            if "steel-plate" not in _loan_blocked_inputs(
+                client, surface, force, loan,
+            ):
+                continue
+        except Exception:
+            continue
+        _restore_bootstrap_loan(
+            client, bridge, surface, force, loan, emit,
+            reference_point=reference_point,
+            reason=(
+                "yielding to the independent steel starter required by its "
+                "current recipe"
+            ),
+        )
+        emit(
+            f"  STEEL STARTER PRIORITY: deferred {loan.target_item} at "
+            f"{loan.machine_position}; pipe does not gate its steel prerequisite"
+        )
+        return True
+    return False
+
+
 def _ensure_chemical_ladder_predecessor(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, reference_point: Point, emit: Callable[[str], None],
@@ -6414,6 +6452,17 @@ def _ensure_chemical_ladder_predecessor(
         client, surface, force, item,
     )
     if predecessor is None:
+        return
+    if (
+        item == "steel-plate"
+        and predecessor == "pipe"
+        and _defer_steel_blocked_loan(
+            client, bridge, surface, force, reference_point, emit,
+        )
+    ):
+        # Steel is a dedicated conversion, not a borrowed mall batch. Its
+        # first furnace can start now; the restored AM2 loan is retried only
+        # after that producer has a chance to make its missing prerequisite.
         return
     stop = len(predecessors)
     if predecessor is not None:

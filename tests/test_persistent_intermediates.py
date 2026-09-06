@@ -232,6 +232,42 @@ def test_steel_starter_power_uses_only_presteel_poles() -> None:
     assert "substation" not in bill
 
 
+def test_steel_starter_defers_a_loan_blocked_on_steel(monkeypatch) -> None:
+    """Pipe capability ordering cannot trap the AM2 loan ahead of steel."""
+    from orchestrator.mall_bootstrap import MallBootstrapLoan
+
+    loan = MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="assembling-machine-2",
+        target_count=2, side="left", requester_position=(39.5, 32.5),
+        current_recipe="assembling-machine-2", step_recipe="assembling-machine-2",
+    )
+    restored: list[str] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: "pipe",
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    monkeypatch.setattr(
+        builder, "_loan_blocked_inputs", lambda *_a: ["steel-plate"],
+    )
+    monkeypatch.setattr(
+        builder, "_restore_bootstrap_loan",
+        lambda *_a, **_k: restored.append(_a[4].target_item),
+    )
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: pytest.fail("steel must not wait for a pipe loan"),
+    )
+
+    builder._ensure_chemical_ladder_predecessor(
+        object(), object(), "nauvis", "player", "steel-plate", (3.0, -1.0),
+        messages.append,
+    )
+
+    assert restored == ["assembling-machine-2"]
+    assert any(message.startswith("  STEEL STARTER PRIORITY:") for message in messages)
+
+
 def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):
     monkeypatch.setattr(
         builder, "_transport_mode", lambda *_args: "logistic",
