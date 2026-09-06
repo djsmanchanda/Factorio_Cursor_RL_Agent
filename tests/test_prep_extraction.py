@@ -29,6 +29,36 @@ def test_metal_foundations_precede_the_belt_cell() -> None:
     assert _LOOP.index("_prep_plate_foundation(") < _LOOP.index("_prep_the_belt_cell(")
 
 
+def test_plate_starter_retries_a_pending_roboport_coverage_wave(monkeypatch) -> None:
+    """A ghost-only coverage hop is ordinary construction, not a starter failure."""
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter", lambda *_args: None,
+    )
+    monkeypatch.setattr(autonomous_builder, "_bootstrap_state", lambda *_args: None)
+    monkeypatch.setattr(
+        autonomous_builder, "_direct_plate_foundation_ready", lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_bootstrap_direct_plate_line",
+        lambda *_args: (_ for _ in ()).throw(
+            autonomous_builder.ProductionPrerequisiteDeferred(
+                "logistic coverage waits for bot-built roboport wave (28.0, -35.0)",
+                code="roboport_coverage_construction_wait", state="constructing",
+            ),
+        ),
+    )
+    waits: list[float] = []
+    monkeypatch.setattr(autonomous_builder.time, "sleep", waits.append)
+    messages: list[str] = []
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        messages.append, {}, {},
+    )
+    assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
+    assert any("PLATE STARTER COVERAGE WAIT" in message for message in messages)
+
+
 def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
     """Standing precursor cells run before either blocking or background mall work."""
     assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_ready_pass(")

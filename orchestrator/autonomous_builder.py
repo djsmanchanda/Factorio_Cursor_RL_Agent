@@ -8338,6 +8338,15 @@ def _prep_plate_foundation(
             _bootstrap_direct_plate_line(
                 client, bridge, surface, force, plate, reference_point, emit,
             )
+        except ProductionPrerequisiteDeferred as deferred:
+            if deferred.code != "roboport_coverage_construction_wait":
+                raise
+            emit(
+                f"  PLATE STARTER COVERAGE WAIT: {plate} -- {deferred}; "
+                "re-observing the bot-built roboport wave before retrying"
+            )
+            consume_wait(f"coverage_{plate}_starter")
+            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
         except MaterialShortage as error:
             add_demands(mall_targets, error)
             emit(

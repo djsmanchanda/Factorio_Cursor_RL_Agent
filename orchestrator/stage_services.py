@@ -1120,8 +1120,9 @@ def roboport_chain(source: Point, target: Point, radius: float) -> list[Point]:
 def _repair_existing_roboport_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     emit: Callable[[str], None],
-) -> None:
+) -> tuple[Point, ...]:
     """Repair powerless ports left by an earlier interrupted runner."""
+    pending: list[Point] = []
     for position, status in live_base.roboports_needing_power(
         client, surface, force
     ):
@@ -1130,6 +1131,34 @@ def _repair_existing_roboport_power(
             raise StuckError(
                 f"existing roboport at {position} cannot be powered"
             )
+        pending.append(position)
+    return tuple(pending)
+
+
+def _defer_roboport_coverage_wave(
+    target_position: Point, purpose: str, wave: Sequence[Point], *,
+    state: str,
+) -> None:
+    """Yield until the current bot-built coverage wave can be re-observed.
+
+    Import lazily because the builder imports these shared services.  A
+    coverage ghost or its just-submitted pole bridge is normal construction
+    work, not a terminal coverage gap: the next controller pass must survey
+    the port before using it as the source for another hop.
+    """
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    raise ProductionPrerequisiteDeferred(
+        f"{purpose} coverage waits for bot-built roboport wave "
+        + ", ".join(str(position) for position in wave),
+        code="roboport_coverage_construction_wait",
+        state=state,
+        details={
+            "purpose": purpose,
+            "target": [target_position[0], target_position[1]],
+            "wave": [[position[0], position[1]] for position in wave],
+        },
+    )
 
 def _await_roboport_charge(
     client: RconClient, surface: str, force: str,
@@ -1172,9 +1201,16 @@ def extend_roboport_coverage(
     True if roboports were added (caller should re-check ghost completion),
     False if coverage was already fine."""
     if client is not None:
-        _repair_existing_roboport_power(
+        repaired = _repair_existing_roboport_power(
             client, bridge, surface, force, emit
         )
+        if repaired:
+            _await_roboport_charge(
+                client, surface, force, repaired[0], repaired, emit,
+            )
+            _defer_roboport_coverage_wave(
+                target_position, purpose, repaired, state="constructing",
+            )
     radius, square = _ROBOPORT_SERVICE_AREAS[purpose]
     nearest = live_base.nearest_roboport(client, surface, force, target_position)
     if nearest is None:
@@ -1209,7 +1245,11 @@ def extend_roboport_coverage(
             f"{target_position} is outside {purpose} coverage of the roboport at "
             f"{nearest} but no chain position could be derived; investigate directly"
         )
-    for wave_start in range(0, len(placed), _ROBOPORT_WAVE):
+    wave_starts = (
+        range(0, len(placed), _ROBOPORT_WAVE)
+        if client is None else range(0, _ROBOPORT_WAVE, _ROBOPORT_WAVE)
+    )
+    for wave_start in wave_starts:
         wave = placed[wave_start:wave_start + _ROBOPORT_WAVE]
         actions = [
             {"action_type": "place_ghost", "entity": "roboport", "position": {"x": x, "y": y}}
@@ -1217,6 +1257,11 @@ def extend_roboport_coverage(
         ]
         plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
         _submit(client, bridge, surface, plan, "roboport_bridge", emit)
+        if client is None:
+            # Offline geometry callers have no live entity state to reobserve.
+            # They retain the complete deterministic chain calculation while
+            # real runs stop after one submitted, bot-built wave below.
+            continue
         # A roboport with no power provides NO coverage of either kind, so chaining
         # one out without connecting it just moves the stall. Observed live: a
         # bridged roboport sat at no_power and its ghosts never built.
@@ -1231,9 +1276,8 @@ def extend_roboport_coverage(
                 timeout_seconds=_INFRASTRUCTURE_BUILD_SECONDS,
             )
             if status is None:
-                raise StuckError(
-                    f"bridged roboport at {position} was never built; it would provide no "
-                    f"{purpose} coverage"
+                _defer_roboport_coverage_wave(
+                    target_position, purpose, wave, state="constructing",
                 )
             if status in {"no_power", "low_power"}:
                 emit(f"  bridged roboport at {position} is {status} -- connecting it")
@@ -1249,8 +1293,22 @@ def extend_roboport_coverage(
                         f"roboport at {position} cannot be powered; it would provide no "
                         f"{purpose} coverage"
                     )
+                _defer_roboport_coverage_wave(
+                    target_position, purpose, wave, state="power_wait",
+                )
         if client is not None or wave_start + _ROBOPORT_WAVE < len(placed):
             _await_roboport_charge(client, surface, force, nearest, wave, emit)
+        if client is not None:
+            verified = live_base.nearest_roboport(
+                client, surface, force, target_position,
+            )
+            if verified is not None and service_distance(
+                verified, target_position, square=square,
+            ) <= radius:
+                return True
+            _defer_roboport_coverage_wave(
+                target_position, purpose, wave, state="constructing",
+            )
     # Verify the target actually entered coverage instead of assuming the
     # chain did: dropped final hops (blocked tiles) used to return success
     # with the gap intact, and a built chest would then sit in no network
@@ -1270,7 +1328,21 @@ def extend_roboport_coverage(
     raise StuckError(
         f"{target_position} is still outside {purpose} coverage "
         f"(radius {radius:.0f}) after chaining; nearest roboport is "
-        f"{verified} -- investigate directly"
+        f"{verified} -- investigate directly",
+        code="coverage_gap",
+        details={
+            "purpose": purpose,
+            "target": [target_position[0], target_position[1]],
+            "nearest": (
+                [verified[0], verified[1]] if verified is not None else None
+            ),
+            "gap": (
+                service_distance(verified, target_position, square=square)
+                if verified is not None else None
+            ),
+            "radius": radius,
+            "waves_placed": len(placed),
+        },
     )
 
 

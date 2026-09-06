@@ -335,6 +335,8 @@ def test_blocked_local_roboport_ideal_uses_an_alternate_corridor(monkeypatch) ->
 
 
 def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
+    from orchestrator import stage_services
+
     powered = []
     calls = {"n": 0}
     def _nearest(*a, **k):
@@ -342,17 +344,25 @@ def test_low_power_roboport_is_given_a_power_hookup(monkeypatch) -> None:
         return (0.0, 0.0) if calls["n"] == 1 else (30.0, 0.0)
     monkeypatch.setattr(live_base, "nearest_roboport", _nearest)
     monkeypatch.setattr(live_base, "area_clear", lambda *a, **k: True)
+    monkeypatch.setattr(
+        stage_services, "_repair_existing_roboport_power", lambda *_args: (),
+    )
     monkeypatch.setattr(live_base, "entity_status_name", lambda *a, **k: "low_power")
     monkeypatch.setattr("orchestrator.stage_services._submit", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(
+        stage_services, "_await_built_status", lambda *_args, **_kwargs: "low_power",
+    )
+    monkeypatch.setattr(stage_services, "_await_roboport_charge", lambda *_args: None)
     monkeypatch.setattr(
         "orchestrator.stage_services.extend_power",
         lambda _c, _b, _s, _f, position, _emit, **_kwargs:
             powered.append(position) or True,
     )
-    assert extend_roboport_coverage(
-        None, None, "nauvis", "player", (30.0, 0.0), lambda _m: None,
-        purpose="logistic",
-    )
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        extend_roboport_coverage(
+            object(), object(), "nauvis", "player", (30.0, 0.0), lambda _m: None,
+            purpose="logistic",
+        )
     assert powered
 
 
@@ -446,8 +456,87 @@ def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) 
     assert submitted == ["roboport_bridge"]
 
 
-def test_long_chains_advance_one_bot_built_roboport_at_a_time(monkeypatch) -> None:
-    """Each powered port earns the construction range for exactly one next hop."""
+def test_coverage_waits_for_powered_source_before_next_ghost_hop(monkeypatch) -> None:
+    """A mall-funded pole bridge cannot make its roboport usable in this pass.
+
+    Cycle 5 placed the first construction-reachable port at (28,-35), then
+    treated it as a live logistic source before its ghost-built power bridge
+    had joined. The second hop was therefore unreachable and the controller
+    terminally rejected ordinary construction work.
+    """
+    from orchestrator import stage_services
+
+    source, target = (28.0, -35.0), (54.5, -70.5)
+    monkeypatch.setattr(
+        stage_services.live_base, "roboports_needing_power",
+        lambda *_args: [(source, "low_power")],
+    )
+    bridges: list[Point] = []
+    monkeypatch.setattr(
+        stage_services, "extend_power",
+        lambda *_args, **_kwargs: bridges.append(_args[4]) or True,
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions",
+        lambda *_args, **_kwargs: pytest.fail(
+            "the next roboport must wait for the powered source",
+        ),
+    )
+    monkeypatch.setattr(stage_services, "_await_roboport_charge", lambda *_args: None)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        stage_services.extend_roboport_coverage(
+            object(), object(), "nauvis", "player", target, lambda _m: None,
+            purpose="logistic",
+        )
+
+    assert bridges == [source]
+    assert deferred.value.code == "roboport_coverage_construction_wait"
+    assert deferred.value.state == "constructing"
+    assert deferred.value.details["wave"] == [[28.0, -35.0]]
+
+
+def test_new_roboport_ghost_defers_before_a_second_unreachable_hop(monkeypatch) -> None:
+    """One submitted port is a construction wait, never permission to bulk-chain."""
+    from orchestrator import stage_services
+
+    source, first, second, target = (0.0, 0.0), (28.0, -35.0), (54.5, -70.5), (70.0, -90.0)
+    monkeypatch.setattr(
+        stage_services.live_base, "roboports_needing_power", lambda *_args: [],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "nearest_roboport", lambda *_args: source,
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_status_name", lambda *_args: "working",
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions", lambda *_args, **_kwargs: [first, second],
+    )
+    submitted: list[list[dict]] = []
+    monkeypatch.setattr(
+        stage_services, "_submit",
+        lambda _c, _b, _s, plan, *_args, **_kwargs:
+            submitted.append(plan["phases"][0]["actions"]) or {},
+    )
+    monkeypatch.setattr(stage_services, "_await_built_status", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        stage_services.extend_roboport_coverage(
+            object(), object(), "nauvis", "player", target, lambda _m: None,
+            purpose="logistic",
+        )
+
+    assert submitted == [[{
+        "action_type": "place_ghost", "entity": "roboport",
+        "position": {"x": first[0], "y": first[1]},
+    }]]
+    assert deferred.value.code == "roboport_coverage_construction_wait"
+    assert deferred.value.state == "constructing"
+
+
+def test_offline_long_chains_retain_complete_geometric_plan(monkeypatch) -> None:
+    """Offline geometry has no entities to re-observe, so it retains all hops."""
     from orchestrator import stage_services
 
     submitted_waves: list[int] = []
@@ -479,7 +568,7 @@ def test_long_chains_advance_one_bot_built_roboport_at_a_time(monkeypatch) -> No
     assert sum(submitted_waves) >= 4
     assert set(submitted_waves) == {1}
     assert stage_services._ROBOPORT_WAVE == 1
-    assert waits == submitted_waves[:-1]
+    assert waits == []
 
 
 def test_network_generation_query_sums_generators_on_one_network() -> None:
@@ -736,11 +825,10 @@ def test_diagnose_blockage_skips_the_logistic_query_when_no_chests_are_known(mon
     ) is None
 
 
-def test_roboport_chain_verifies_coverage_after_placing(monkeypatch) -> None:
-    """2026-09-04: dropped final hops returned success with the gap intact.
-    A target still outside coverage after chaining raises loudly."""
+def test_roboport_chain_defers_after_a_live_wave_that_has_not_reached_target(monkeypatch) -> None:
+    """A live one-hop wave waits for re-observation rather than terminally failing."""
     from orchestrator import stage_services
-    from orchestrator.stage_services import StuckError, extend_roboport_coverage
+    from orchestrator.stage_services import extend_roboport_coverage
     far, near, target = (0.0, 0.0), (100.0, 100.0), (100.0, 100.0)
     remaining = [[far], [far], [far]]
     monkeypatch.setattr(
@@ -765,11 +853,62 @@ def test_roboport_chain_verifies_coverage_after_placing(monkeypatch) -> None:
     )
     monkeypatch.setattr("time.sleep", lambda *_a: None)
 
-    with pytest.raises(StuckError, match="still outside logistic coverage"):
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
         extend_roboport_coverage(
             object(), object(), "nauvis", "player", target,
             lambda _message: None, purpose="logistic",
         )
+    assert deferred.value.code == "roboport_coverage_construction_wait"
+
+
+def test_coverage_gap_verdict_files_a_typed_contract(monkeypatch) -> None:
+    """Cycle 5 (+134s): the coverage-chain verdict fired as legacy
+    `untyped_stuck` with empty details, so the next identical verdict could
+    not discriminate a dropped final hop from a still-converging wave. The
+    raise keeps its message but files code `coverage_gap` plus the geometry
+    and wave facts the blocker record needs."""
+    from orchestrator import stage_services
+    from orchestrator.stage_services import StuckError, extend_roboport_coverage
+    far, target = (0.0, 0.0), (100.0, 100.0)
+    remaining = [[far], [far], [far]]
+    monkeypatch.setattr(
+        stage_services.live_base, "roboports_needing_power", lambda *_a: [],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "nearest_roboport",
+        lambda *_a: remaining.pop(0)[0],
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_status_name", lambda *_a: "active",
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions", lambda *_a, **_k: [(50.0, 50.0)],
+    )
+    monkeypatch.setattr(stage_services, "_submit", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        stage_services, "_await_built_status", lambda *_a, **_k: "active",
+    )
+    monkeypatch.setattr(
+        stage_services, "_await_roboport_charge", lambda *_a: None,
+    )
+    monkeypatch.setattr("time.sleep", lambda *_a: None)
+
+    with pytest.raises(StuckError, match="still outside logistic coverage") as error:
+        extend_roboport_coverage(
+            None, None, "nauvis", "player", target,
+            lambda _message: None, purpose="logistic",
+        )
+
+    assert error.value.code == "coverage_gap"
+    assert error.value.classification == "bug"
+    assert error.value.state == "failed"
+    details = error.value.details
+    assert details["purpose"] == "logistic"
+    assert details["target"] == [100.0, 100.0]
+    assert details["nearest"] == [0.0, 0.0]
+    assert details["gap"] == pytest.approx(100.0)
+    assert details["radius"] == stage_services._ROBOPORT_LOGISTIC_RADIUS
+    assert details["waves_placed"] == 1
 
 
 def test_covered_target_skips_chaining_entirely(monkeypatch) -> None:
@@ -834,9 +973,11 @@ def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> N
         return True
     monkeypatch.setattr(stage_services, "extend_power", _extend)
 
-    assert stage_services.extend_roboport_coverage(
-        object(), object(), "nauvis", "player", (100.0, 5.0),
-        lambda _message: None, reserved_tiles={(1, 2), (3, 4)},
-    )
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        stage_services.extend_roboport_coverage(
+            object(), object(), "nauvis", "player", (100.0, 5.0),
+            lambda _message: None, reserved_tiles={(1, 2), (3, 4)},
+        )
     assert powered and powered[0]["position"] == (45.0, 5.0)
     assert powered[0]["reserved_tiles"] == {(1, 2), (3, 4)}
+    assert deferred.value.code == "roboport_coverage_construction_wait"
