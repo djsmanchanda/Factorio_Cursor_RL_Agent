@@ -21,6 +21,7 @@ from orchestrator.pole_relocation import (  # noqa: E402
     keeps_wire,
     relocation_actions,
     relocation_plan,
+    staged_relocation_plans,
 )
 from planners.infrastructure import POLE_SPECS  # noqa: E402
 from planners.plan_validation import validate_build_plan  # noqa: E402
@@ -169,6 +170,27 @@ def test_a_relocation_plan_is_a_valid_build_plan() -> None:
 
     validate_build_plan(plan)
     assert len(plan["phases"][0]["actions"]) == 4
+
+
+def test_relocation_builds_replacements_before_retiring_old_poles() -> None:
+    placement, retirement = staged_relocation_plans([
+        PoleMove(_MEDIUM, _POLE, (11.5, 10.5)),
+    ])
+
+    assert [
+        action["action_type"]
+        for action in placement["phases"][0]["actions"]
+    ] == ["place_entity"]
+    assert [
+        action["action_type"]
+        for action in retirement["phases"][0]["actions"]
+    ] == ["remove_entity"]
+    assert placement["phases"][0]["actions"][0]["position"] == {
+        "x": 11.5, "y": 10.5,
+    }
+    assert retirement["phases"][0]["actions"][0]["position"] == {
+        "x": 10.5, "y": 10.5,
+    }
 
 
 def test_an_empty_relocation_is_refused_rather_than_submitted() -> None:

@@ -145,6 +145,33 @@ def relocation_plan(moves: Sequence[PoleMove]) -> dict:
     return {"phases": [{"name": "relocate_blocking_poles", "actions": actions}]}
 
 
+def staged_relocation_plans(
+    moves: Sequence[PoleMove],
+) -> tuple[dict, dict]:
+    """Separate bot-built replacements from old-pole removals.
+
+    A build plan executes every action immediately, while a replacement pole
+    is now a construction ghost. Keeping placement and removal in one plan
+    would therefore cut the live network before bots revived the replacement.
+    The submit boundary waits for the first plan's formerly-direct pole action;
+    only a later submission may remove the original.
+    """
+    combined = relocation_plan(moves)
+    actions = combined["phases"][0]["actions"]
+    placements = [
+        action for action in actions
+        if action["action_type"] == "place_entity"
+    ]
+    removals = [
+        action for action in actions
+        if action["action_type"] == "remove_entity"
+    ]
+    return (
+        {"phases": [{"name": "place_relocated_poles", "actions": placements}]},
+        {"phases": [{"name": "retire_relocated_poles", "actions": removals}]},
+    )
+
+
 def corridor_tiles(start: Point, end: Point) -> set[tuple[int, int]]:
     """Tiles either L-shaped route between two points could use.
 

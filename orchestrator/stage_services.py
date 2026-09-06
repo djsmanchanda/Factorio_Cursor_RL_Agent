@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import heapq
 import math
 import time
@@ -60,6 +61,12 @@ _SUPPLY_WAIT_STATUSES = {
 _STUCK_GRACE_SECONDS = 20.0
 # How long a bot-built entity gets to actually exist before it is called missing.
 _GHOST_BUILD_SECONDS = 60.0
+# Infrastructure that used to be executor-placed has synchronous callers: a
+# submitted pole is immediately surveyed for grid membership and a submitted
+# roboport becomes the source of the next coverage hop.  Keep that contract
+# while making the entities honest construction jobs by allowing one normal
+# five-minute construction window for the ghosts to be revived by bots.
+_INFRASTRUCTURE_BUILD_SECONDS = 300.0
 # Live-verified this session: roboport construction radius 55, link (chain)
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
@@ -92,22 +99,21 @@ _COVERAGE_MARGIN = 2.0
 # and power join lag placement by moments, and a first-check flake would
 # otherwise fail runs the chain actually served.
 _COVERAGE_VERIFY_SETTLE_SECONDS = 5.0
-# Roboport placement is batched. A fresh roboport lands at ~50% of its 100 MJ
-# buffer (live-verified) and draws up to ~2.1 MW while topping up, so placing a
-# whole long chain at once stacks a multi-megawatt transient on a small grid and
-# starves production for minutes. Early grids grow in waves of this many ports;
-# once the network can generate the threshold below, batching stops mattering.
-_ROBOPORT_WAVE = 3
+# Coverage advances one bot-built port at a time.  The current network builds
+# the next reachable port, its ordinary ghost-built pole bridge powers it, and
+# only then may that port extend construction range to the following hop.
+_ROBOPORT_WAVE = 1
 _ROBOPORT_WAVE_GENERATION_KW = 100_000.0
 # Charge is observed for diagnostics, but never truncates the required
-# coverage geometry. Ports are direct infrastructure and each receives a power
-# bridge before the next production plan is judged on construction progress.
+# coverage geometry. Each bot-built port receives a ghost-built power bridge
+# before the next production plan is judged on construction progress.
 _ROBOPORT_CHARGE_TARGET_J = 95_000_000.0
 # Every chest type that is inert unless it is inside a logistic supply area.
 _LOGISTIC_CHEST_ENTITIES = frozenset({
     "active-provider-chest", "buffer-chest", "passive-provider-chest",
     "requester-chest", "storage-chest",
 })
+_BOT_BUILT_INFRASTRUCTURE = frozenset({*POLE_SPECS, "roboport"})
 # How far from a stage's machines its own collection chest can be. A stage's
 # chest sits at the end of its machine row; a container farther away than a
 # whole stage footprint belongs to something else and is not ours to cover.
@@ -170,7 +176,8 @@ def validate_builder_target(
 
 def _ghost_materials(plan: dict) -> dict[str, int]:
     """Items construction bots must consume to revive this plan's ghosts.
-    place_entity actions are created directly and cost nothing."""
+    Direct placements are excluded because they are existing-entity
+    configuration/removal operations, never new power or coverage entities."""
     required: dict[str, int] = {}
     for phase in plan["phases"]:
         for action in phase["actions"]:
@@ -179,6 +186,74 @@ def _ghost_materials(plan: dict) -> dict[str, int]:
             elif action.get("action_type") == "place_tile_ghost":
                 required[action["tile"]] = required.get(action["tile"], 0) + 1
     return required
+
+
+def _ghostify_direct_infrastructure(plan: dict) -> tuple[tuple[str, Point], ...]:
+    """Turn every server-side pole/roboport placement into a bot-built ghost.
+
+    Planner generators still use ``place_entity`` for a mixture of sandbox
+    scaffolding and existing-entity configuration.  The deterministic submit
+    boundary is therefore the reusable enforcement point: no active real-base
+    path can accidentally gain a free pole, substation, or roboport because a
+    caller retained the old action type.
+
+    The returned identities are the actions whose former synchronous contract
+    must be preserved after submission.  Pre-existing ``place_ghost`` actions
+    remain asynchronous as their caller intended.
+    """
+    converted: list[tuple[str, Point]] = []
+    for phase in plan.get("phases", []):
+        for action in phase.get("actions", []):
+            if (
+                action.get("action_type") == "place_entity"
+                and action.get("entity") in _BOT_BUILT_INFRASTRUCTURE
+            ):
+                action["action_type"] = "place_ghost"
+                position = action["position"]
+                converted.append((
+                    str(action["entity"]),
+                    (float(position["x"]), float(position["y"])),
+                ))
+    return tuple(converted)
+
+
+def _await_bot_built_infrastructure(
+    client: RconClient, surface: str,
+    placements: Sequence[tuple[str, Point]], emit: Callable[[str], None],
+) -> None:
+    """Wait for formerly-direct infrastructure to be built by real bots."""
+    if not placements or not hasattr(client, "command"):
+        return
+    expected = {position: entity for entity, position in placements}
+    deadline = time.monotonic() + _INFRASTRUCTURE_BUILD_SECONDS
+    consume_wait("bot_built_infrastructure")
+    while True:
+        observed = live_base.entity_names_at(
+            client, surface, tuple(expected),
+        )
+        pending = [
+            (entity, position)
+            for position, entity in expected.items()
+            if observed.get(position) != entity
+        ]
+        if not pending:
+            return
+        if time.monotonic() >= deadline:
+            raise StuckError(
+                "bot-built infrastructure did not finish inside the construction "
+                "window: " + ", ".join(
+                    f"{entity}@{position}" for entity, position in pending[:8]
+                ),
+                code="infrastructure_construction_wait",
+                classification="intended_difficulty", state="constructing",
+                details={
+                    "pending": [
+                        {"entity": entity, "position": list(position)}
+                        for entity, position in pending
+                    ],
+                },
+            )
+        time.sleep(2.0)
 
 
 def _reservation_supply_estimates(
@@ -370,6 +445,11 @@ def _submit(
     """
     if not any(phase.get("actions") for phase in plan.get("phases", [])):
         raise StuckError(f"{name}: proposed zero actions")
+    # Keep caller-owned/persisted plan identities stable. A failed coverage or
+    # material attempt may retry the same object later and must be converted
+    # again so its synchronous infrastructure contract is not silently lost.
+    plan = copy.deepcopy(plan)
+    converted_infrastructure = _ghostify_direct_infrastructure(plan)
     consume_plan_submission(name)
     clear_plan_clutter(client, surface, plan, emit)
     try:
@@ -444,6 +524,9 @@ def _submit(
                         client, surface, plan.get("force", "player"),
                     ),
                 )
+            _await_bot_built_infrastructure(
+                client, surface, converted_infrastructure, emit,
+            )
             return report
         cleared_any = False
         blocking = []
@@ -927,12 +1010,17 @@ def extend_power(
                 "tile wire reach"
             )
     actions = [
-        {"action_type": "place_entity", "entity": "medium-electric-pole", "position": {"x": x, "y": y}}
+        {"action_type": "place_ghost", "entity": "medium-electric-pole", "position": {"x": x, "y": y}}
         for x, y in hops
     ]
     plan = {"phases": [{"name": "power_bridge", "actions": actions}], "surface": surface, "force": force}
     try:
         _submit(client, bridge, surface, plan, "power_bridge", emit)
+        _await_bot_built_infrastructure(
+            client, surface,
+            tuple(("medium-electric-pole", position) for position in hops),
+            emit,
+        )
     except StuckError as error:
         if (
             _retried
@@ -1049,11 +1137,10 @@ def _await_roboport_charge(
 ) -> None:
     """Report a charging wave without turning it into control flow.
 
-    Each fresh port draws up to ~2.1 MW while charging from ~50%. Landing a
-    whole chain is visible load, but incomplete construction coverage is worse:
-    a stopped wave permanently strands remote ghosts. Every required port is
-    therefore placed and power-connected; charging affects when its bots work,
-    not whether later coverage geometry is scheduled."""
+    Each fresh port draws up to ~2.1 MW while charging from ~50%. Coverage now
+    advances as one bot-built hop, so charging is visible natural backpressure:
+    later geometry remains planned, but cannot build until this port becomes a
+    powered member of the network."""
     generation = live_base.network_generation_kw(client, surface, force, near)
     if generation is not None and generation >= _ROBOPORT_WAVE_GENERATION_KW:
         return
@@ -1069,7 +1156,7 @@ def _await_roboport_charge(
 
     emit(
         "  ROBOport POWER PENDING: this coverage wave is still charging; "
-        "continuing the required coverage chain while ports charge independently"
+        "the next bot-built coverage hop waits on this network member"
     )
 
 
@@ -1125,7 +1212,7 @@ def extend_roboport_coverage(
     for wave_start in range(0, len(placed), _ROBOPORT_WAVE):
         wave = placed[wave_start:wave_start + _ROBOPORT_WAVE]
         actions = [
-            {"action_type": "place_entity", "entity": "roboport", "position": {"x": x, "y": y}}
+            {"action_type": "place_ghost", "entity": "roboport", "position": {"x": x, "y": y}}
             for x, y in wave
         ]
         plan = {"phases": [{"name": "roboport_bridge", "actions": actions}], "surface": surface, "force": force}
@@ -1139,7 +1226,10 @@ def extend_roboport_coverage(
         # None rather than "no_power", so the guard passed vacuously and left an
         # unpowered roboport serving nothing.
         for position in wave:
-            status = _await_built_status(client, surface, position)
+            status = _await_built_status(
+                client, surface, position,
+                timeout_seconds=_INFRASTRUCTURE_BUILD_SECONDS,
+            )
             if status is None:
                 raise StuckError(
                     f"bridged roboport at {position} was never built; it would provide no "

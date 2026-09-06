@@ -710,6 +710,10 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
         (math.floor(action["position"]["x"]), math.floor(action["position"]["y"]))
         for action in submitted[0]["phases"][0]["actions"]
     }
+    assert all(
+        action["action_type"] == "place_ghost"
+        for action in submitted[0]["phases"][0]["actions"]
+    )
     assert not poles & reserved
     assert occupied_options == [{"include_resources": True}]
     assert powered_options == [{

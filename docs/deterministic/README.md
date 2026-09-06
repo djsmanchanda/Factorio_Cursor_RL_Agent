@@ -45,6 +45,12 @@ Sharing means extracting a narrow interface. It does not mean importing the full
 
 Fix these when they block the real runtime or when the fix produces a reusable primitive. Do not let deterministic cleanup displace the RL roadmap.
 
+New power and construction-service infrastructure follows the same material
+boundary as production blueprints: electric poles, substations, and roboports
+are bot-built ghosts funded through the episode material ledger. Coverage
+expansion advances one powered roboport hop at a time; the executor does not
+gift a distant pole line or roboport chain to the base.
+
 ## Real-base rule
 
 Observe the live factory, identify the planner decision that caused the failure, fix the code and focused tests, deploy deliberately when Lua changed, then rerun from the requested save. Never manually repair the base to conceal a planner defect.

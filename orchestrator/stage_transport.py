@@ -12,7 +12,7 @@ from orchestrator.parts_mall import MaterialShortage
 from orchestrator.pole_relocation import (
     choose_pole_move,
     corridor_tiles,
-    relocation_plan,
+    staged_relocation_plans,
 )
 from orchestrator.stage_services import (
     StuckError,
@@ -800,9 +800,15 @@ def relocate_blocking_poles(
         moves.append(move)
     if not moves:
         return 0
-    plan = relocation_plan(moves)
-    plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, "relocate_blocking_poles", emit)
+    placement, retirement = staged_relocation_plans(moves)
+    for plan in (placement, retirement):
+        plan["surface"], plan["force"] = surface, force
+    _submit(
+        client, bridge, surface, placement, "place_relocated_poles", emit,
+    )
+    _submit(
+        client, bridge, surface, retirement, "retire_relocated_poles", emit,
+    )
     return len(moves)
 
 

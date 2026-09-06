@@ -401,7 +401,7 @@ def test_charging_wave_does_not_sleep_or_stop_coverage(monkeypatch) -> None:
         messages.append,
     )
     assert slept == []
-    assert any("continuing the required coverage chain" in message for message in messages)
+    assert any("next bot-built coverage hop waits" in message for message in messages)
 
 
 def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) -> None:
@@ -433,7 +433,10 @@ def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) 
         lambda _c, _b, _s, _plan, name, _emit, **_kwargs:
             submitted.append(name) or {"ok": True},
     )
-    monkeypatch.setattr(stage_services, "_await_built_status", lambda *_args: "working")
+    monkeypatch.setattr(
+        stage_services, "_await_built_status",
+        lambda *_args, **_kwargs: "working",
+    )
 
     assert stage_services.extend_roboport_coverage(
         object(), object(), "nauvis", "player", (100.0, 5.0),
@@ -443,9 +446,8 @@ def test_existing_low_power_anchor_still_extends_required_coverage(monkeypatch) 
     assert submitted == ["roboport_bridge"]
 
 
-def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
-    """Placing nine ports at once stacks ~9 MW of charge demand on the grid;
-    waves of three let each batch top up before the next lands."""
+def test_long_chains_advance_one_bot_built_roboport_at_a_time(monkeypatch) -> None:
+    """Each powered port earns the construction range for exactly one next hop."""
     from orchestrator import stage_services
 
     submitted_waves: list[int] = []
@@ -462,7 +464,8 @@ def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
             submitted_waves.append(len(plan["phases"][0]["actions"])) or {"ok": True},
     )
     monkeypatch.setattr(
-        "orchestrator.stage_services._await_built_status", lambda *_a: "working",
+        "orchestrator.stage_services._await_built_status",
+        lambda *_a, **_k: "working",
     )
     monkeypatch.setattr(
         "orchestrator.stage_services._await_roboport_charge",
@@ -474,7 +477,8 @@ def test_long_chains_land_in_waves_and_charge_between_them(monkeypatch) -> None:
     )
 
     assert sum(submitted_waves) >= 4
-    assert max(submitted_waves) == stage_services._ROBOPORT_WAVE
+    assert set(submitted_waves) == {1}
+    assert stage_services._ROBOPORT_WAVE == 1
     assert waits == submitted_waves[:-1]
 
 
@@ -754,7 +758,7 @@ def test_roboport_chain_verifies_coverage_after_placing(monkeypatch) -> None:
     )
     monkeypatch.setattr(stage_services, "_submit", lambda *_a, **_k: {})
     monkeypatch.setattr(
-        stage_services, "_await_built_status", lambda *_a: "active",
+        stage_services, "_await_built_status", lambda *_a, **_k: "active",
     )
     monkeypatch.setattr(
         stage_services, "_await_roboport_charge", lambda *_a: None,
@@ -820,7 +824,10 @@ def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> N
         stage_services, "_submit",
         lambda _c, _b, _s, _plan, name, _emit, **_kwargs: {"ok": True},
     )
-    monkeypatch.setattr(stage_services, "_await_built_status", lambda *_args: "low_power")
+    monkeypatch.setattr(
+        stage_services, "_await_built_status",
+        lambda *_args, **_kwargs: "low_power",
+    )
     powered: list[dict] = []
     def _extend(_c, _b, _s, _f, position, _emit, **kwargs):
         powered.append({"position": position, **kwargs})

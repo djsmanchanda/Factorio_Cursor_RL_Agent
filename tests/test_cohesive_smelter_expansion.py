@@ -1065,7 +1065,6 @@ def test_earmarked_initial_refinery_is_not_advertised_before_it_is_built(
     )
     monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
     monkeypatch.setattr(builder, "assert_affordable", lambda *_a: None)
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"medium-electric-pole": 1})
     submitted: list[dict] = []
     monkeypatch.setattr(
         builder, "_submit", lambda *_a, **_k: submitted.append(_a[3]),
@@ -1103,7 +1102,7 @@ def test_earmarked_initial_refinery_is_not_advertised_before_it_is_built(
     assert powered == [interface.power_anchor]
     assert any(
         action["entity"] == "medium-electric-pole"
-        and action["action_type"] == "place_entity"
+        and action["action_type"] == "place_ghost"
         for action in actions(submitted[0])
     )
 

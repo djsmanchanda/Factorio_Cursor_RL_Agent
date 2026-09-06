@@ -313,6 +313,17 @@ These names describe intended responsibilities, not permission to build speculat
 - A position inside a pole's supply area is not evidence that a power bridge
   was built. Capacity planning distinguishes existing coverage from a submitted
   network bridge and keeps measuring the actual connected grid.
+- Every new electric pole, substation, and roboport is an ordinary
+  construction ghost. Its item bill is reserved through the material ledger
+  and supplied by the mall; the executor may not create service infrastructure
+  directly. For these entity types, direct placement remains only as an
+  upstream synchronous intent that the submit boundary converts, or in
+  non-production sandbox fixtures.
+- Construction coverage advances one reachable roboport at a time. The current
+  network builds that port and its pole bridge, observed power makes the port
+  usable, and only then can its new construction radius build the following
+  hop. Planning a distant destination never licenses a complete live pole line
+  ahead of the bots.
 - Emergency pole chains are planned at Factorio's actual half-tile medium-pole
   centres, and every adjacent edge is checked against the shorter endpoint's
   wire reach before submission. A successful placement report is still not
@@ -350,11 +361,12 @@ These names describe intended responsibilities, not permission to build speculat
   plastic requester and long construction-bot coal haul are not valid steady
   transport.
 - Chemical construction coverage reserves the complete future pipe and machine
-  footprint before siting roboports. The complete required roboport chain is
-  placed and power-connected without synchronously waiting for charge; only bot
-  activity waits on charging, never coverage geometry or production planning.
-  Every local oil substation is connected as soon as the plan is submitted
-  rather than after all pipe ghosts complete.
+  footprint before siting roboports. Each required roboport hop and its power
+  bridge are funded ghosts built inside the preceding port's construction
+  radius; the controller observes that hop before advancing the chain. Charging
+  may delay the next hop naturally. Every local oil substation is likewise a
+  funded ghost and is connected once bots have built it rather than appearing
+  directly when the plan is submitted.
 - A remote chemical district is submitted as independently affordable packets:
   coal belt, power backbone, refinery/plastic machines, crude pipeline, plastic
   petroleum pipeline, sulfur machines, sulfur petroleum pipeline, and water

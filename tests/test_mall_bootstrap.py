@@ -458,3 +458,140 @@ def test_restore_opens_shared_providers() -> None:
 
 def test_restore_applies_canonical_count_to_dedicated() -> None:
     assert _provider_counts(_restore_plan(False)) == [240]
+
+
+def _telemetry_loan(**overrides) -> MallBootstrapLoan:
+    fields = {
+        "original_recipe": "copper-cable", "target_item": "transport-belt",
+        "target_count": 184, "side": "right",
+        "requester_position": (39.5, 38.5),
+        "current_recipe": "iron-gear-wheel",
+        "step_recipe": "iron-gear-wheel", "step_target_count": 92,
+        "step_baseline_finished": 40, "step_required_crafts": 52,
+        "step_minimum_crafts": 52, "spare_target_count": 221,
+    }
+    fields.update(overrides)
+    return MallBootstrapLoan(**fields)
+
+
+def test_loan_cell_telemetry_names_missing_ingredient_pool_and_loans(
+    monkeypatch,
+) -> None:
+    """2026-09-06 chemical stall: a bare LOAN WAIT cannot tell a starved
+    requester from pool exhaustion, loan contention, or bill accounting."""
+    from orchestrator import autonomous_builder as builder
+
+    loan = _telemetry_loan()
+    other = _telemetry_loan(
+        target_item="splitter", target_count=12, side="left",
+        requester_position=(50.5, 32.5), current_recipe="transport-belt",
+        step_recipe="transport-belt", spare_target_count=50,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents", lambda *_a: {},
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan, other),
+    )
+    emitted: list[str] = []
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", loan,
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        {"transport-belt": 2}, 44, emitted.append,
+        reference_point=(3.0, -1.0),
+    )
+
+    assert len(emitted) == 1
+    line = emitted[0]
+    assert "LOAN CELL TELEMETRY" in line
+    assert "bill 2/184+221" in line
+    assert "crafts 4/52" in line
+    assert "missing iron-plate" in line
+    assert "pool 2/8 free" in line
+    assert "transport-belt:iron-gear-wheel@(42.5,38.5)" in line
+    assert "splitter:transport-belt@(47.5,32.5)" in line
+
+
+def test_loan_cell_telemetry_never_raises(monkeypatch) -> None:
+    """Telemetry is zero-behavior: total probe failure still emits one
+    skip marker instead of breaking the pass."""
+    from orchestrator import autonomous_builder as builder
+
+    def _boom(*_a, **_k) -> None:
+        raise RuntimeError("no rcon")
+
+    class _BadStock(dict):
+        def get(self, *_a, **_k) -> None:  # noqa: ANN002, ANN003
+            raise RuntimeError("no stock")
+
+    monkeypatch.setattr(builder.live_base, "chest_contents", _boom)
+    monkeypatch.setattr(builder, "mall_slot_count", _boom)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", _boom)
+    emitted: list[str] = []
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", _telemetry_loan(),
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        _BadStock(), 44, emitted.append,
+    )
+
+    assert len(emitted) == 1
+    assert emitted[0].startswith("  LOAN CELL TELEMETRY skipped: ")
+
+
+def test_stage_delivery_telemetry_counts_attempts_and_names_stock() -> None:
+    """2026-09-06 oil terminal: one moved-0 pumpjack delivery, mall restock
+    to 1, no further attempt logged. The attempt ordinal plus net /
+    transferable / ghost-network counts distinguish "reconcile never
+    re-ran" from "transfer cannot complete" from "stock locked in WIP"."""
+    from orchestrator import autonomous_builder as builder
+
+    builder._STAGE_DELIVERY_ATTEMPTS.clear()
+    try:
+        emitted: list[str] = []
+        builder._emit_stage_delivery_telemetry(
+            object(), "nauvis", "player", "crude-oil source",
+            "pumpjack", 1, {"pumpjack": 0}, (-284.5, -88.5), emitted.append,
+        )
+        builder._emit_stage_delivery_telemetry(
+            object(), "nauvis", "player", "crude-oil source",
+            "pumpjack", 1, {"pumpjack": 1}, (-284.5, -88.5), emitted.append,
+        )
+
+        assert len(emitted) == 2
+        # Live probes fail against a dummy client; counts fall back while
+        # the attempt ordinal and net stock still discriminate the retry.
+        assert (
+            "STAGE DELIVERY TELEMETRY: crude-oil source pumpjack attempt 1 "
+            "need 1 | net 0 " in emitted[0]
+        )
+        assert (
+            "STAGE DELIVERY TELEMETRY: crude-oil source pumpjack attempt 2 "
+            "need 1 | net 1 " in emitted[1]
+        )
+    finally:
+        builder._STAGE_DELIVERY_ATTEMPTS.clear()
+
+
+def test_stage_delivery_telemetry_never_raises(monkeypatch) -> None:
+    """Telemetry is zero-behavior: total probe failure still emits one
+    skip marker instead of breaking the pass."""
+    from orchestrator import autonomous_builder as builder
+
+    def _boom(*_a, **_k) -> None:
+        raise RuntimeError("no rcon")
+
+    class _BadStock(dict):
+        def get(self, *_a, **_k) -> None:  # noqa: ANN002, ANN003
+            raise RuntimeError("no stock")
+
+    monkeypatch.setattr(builder.live_base, "transferable_item_count", _boom)
+    monkeypatch.setattr(builder.live_base, "network_item_count", _boom)
+    emitted: list[str] = []
+    builder._emit_stage_delivery_telemetry(
+        object(), "nauvis", "player", "crude-oil source",
+        "pumpjack", 1, _BadStock(), (-284.5, -88.5), emitted.append,
+    )
+
+    assert len(emitted) == 1
+    assert "STAGE DELIVERY TELEMETRY" in emitted[0]

@@ -679,6 +679,13 @@ def _wait_for_construction_network(
 _TRANSFERABLE_WAIT_ROUNDS = 3
 _TRANSFERABLE_WAITS: dict[tuple[str, str, str, str], int] = {}
 
+#: Consecutive stage-delivery attempts per stage item. A bare MATERIAL
+#: DELIVERY line cannot tell "retried after restock" from "tried once while
+#: empty and never again" (oil district, 2026-09-06: one moved-0 pumpjack
+#: delivery, mall restocked to 1, no further attempt logged before the
+#: 12-pass guard fired). Telemetry state only; reset per run.
+_STAGE_DELIVERY_ATTEMPTS: dict[tuple[str, str, str, str], int] = {}
+
 #: Mall items currently blocking placed-ghost construction. Only a submitted
 #: replacement names what its waiting ghosts need -- bulk prep queues are
 #: deliberately excluded, since marking a whole foundation bill binding flattens
@@ -702,6 +709,61 @@ def _mark_binding_demands(shortage: MaterialShortage) -> None:
 #: _survey_pass; read by _drain_aware_pop_due.
 _DRAIN_WATCH_LAST_TRANSFERABLE: dict[tuple[str, str, str], int] = {}
 _DRAIN_WATCH_PREVIOUS_TRANSFERABLE: dict[tuple[str, str, str], int] = {}
+
+
+def _emit_stage_delivery_telemetry(
+    client: RconClient, surface: str, force: str, name: str, item: str,
+    required: int, stock: Mapping[str, int], origin: Point,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic line per stage material-delivery attempt.
+
+    Zero behavior change: every probe is guarded, nothing is submitted, and
+    any failure emits a skip marker instead of raising. The attempt ordinal
+    is the discriminator the 2026-09-06 oil terminal lacked: attempt 1 with
+    net 0 followed by silence means the reconcile never re-ran, while a
+    later attempt with net/transferable stocked and moved 0 means the
+    transfer itself cannot complete. Net vs transferable vs ghost-network
+    counts name where the stock sits, and the wait count shows the
+    transferable-escalation state.
+    """
+    try:
+        key = (surface, force, name, item)
+        attempt = _STAGE_DELIVERY_ATTEMPTS.get(key, 0) + 1
+        _STAGE_DELIVERY_ATTEMPTS[key] = attempt
+    except Exception:
+        attempt = -1
+    try:
+        net = int(stock.get(item, 0))
+    except Exception:
+        net = -1
+    try:
+        transferable = int(live_base.transferable_item_count(
+            client, surface, force, item,
+        ))
+    except Exception:
+        transferable = -1
+    try:
+        local = live_base.network_item_count(client, surface, force, origin, item)
+        local_text = "none" if local is None else str(int(local))
+    except Exception:
+        local_text = "?"
+    try:
+        waits = int(_TRANSFERABLE_WAITS.get((surface, force, name, item), 0))
+    except Exception:
+        waits = -1
+    try:
+        emit(
+            f"  STAGE DELIVERY TELEMETRY: {name} {item} attempt {attempt} "
+            f"need {int(required)} "
+            f"| net {net} transferable {transferable} local {local_text} "
+            f"| waits {waits}"
+        )
+    except Exception as error:
+        try:
+            emit(f"  STAGE DELIVERY TELEMETRY skipped: {error}")
+        except Exception:
+            pass
 
 
 def _apply_remedy(
@@ -829,6 +891,10 @@ def _apply_remedy(
         _, item, required_text = remedy.split(":", 2)
         required = int(required_text)
         stock = live_base.available_items(client, surface, force)
+        _emit_stage_delivery_telemetry(
+            client, surface, force, name, item, required, stock,
+            origin, emit,
+        )
         if stock.get(item, 0) < required:
             raise MaterialShortage(name, {item: required}, stock)
         # Distinguish two zero-network situations. Reservations by other
@@ -1126,10 +1192,10 @@ def _place_new_mine(
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
     if allow_unfunded_ghosts:
-        # The substation is intentionally placed as a real service anchor even
-        # when the rest of the mine is ghosts. Do not defer its connection:
-        # otherwise the drills finish later on an isolated grid and the first
-        # recovery pass has to rebuild their construction supply around them.
+        # The substation is an ordinary funded ghost. Do not defer its
+        # connection once bots revive it: otherwise the drills finish later on
+        # an isolated grid and the first recovery pass has to rebuild their
+        # construction supply around them.
         _ensure_power_anchor_on_generated_network(
             client, bridge, surface, force, substation_position,
             f"{extraction.ore} mine", emit,
@@ -2437,32 +2503,10 @@ def _build_initial_plate_smelter(
         ],
     }
     if preflight_only:
-        # A dry run must not mutate the world: coverage roboports are real
-        # infrastructure, and staging them for a plan that is never submitted
-        # is exactly the wasted-chain failure this ordering exists to prevent.
+        # A dry run must not mutate the world: staging coverage ghosts for a
+        # plan that is never submitted is exactly the wasted-chain failure this
+        # ordering exists to prevent.
         return provider
-    # An earmarked refinery still needs one real power anchor. The rest of the
-    # plan can remain ghosts while belts arrive, but a ghost-only power pole
-    # leaves completed furnaces on an isolated network forever.
-    if allow_unfunded_ghosts and live_base.available_items(
-        client, surface, force,
-    ).get("medium-electric-pole", 0) > 0:
-        target = max(FURNACES_PER_MODULE, extraction.furnace_count)
-        interface = refinery_interfaces(
-            target,
-            origin_x=extraction.smelter_origin[0],
-            origin_y=extraction.smelter_origin[1], variant="basic",
-            vertical_mirror=getattr(extraction, "smelter_vertical_mirror", False),
-        )
-        for phase in plan["phases"]:
-            for action in phase["actions"]:
-                if (
-                    action.get("entity") == "medium-electric-pole"
-                    and (action["position"]["x"], action["position"]["y"])
-                    == interface.power_anchor
-                ):
-                    action["action_type"] = "place_entity"
-                    break
     _submit(
         client, bridge, surface, plan, f"modular_{recipe}_refinery", emit,
         stage_coverage=lambda: _ensure_plan_construction_coverage(
@@ -4619,6 +4663,97 @@ def _binding_loan_shields_preempt(
     return int(have) < loan.target_count
 
 
+def _emit_loan_cell_telemetry(
+    client: RconClient, surface: str, force: str,
+    loan: MallBootstrapLoan, step, actual: Mapping[str, int],
+    products_finished: int | None, emit: Callable[[str], None], *,
+    reference_point: Point | None = None,
+) -> None:
+    """One read-only diagnostic line for a blocked loan cell. Zero behavior
+    change: every probe is guarded, nothing is submitted, and any failure
+    emits a skip marker instead of raising.
+
+    A bare LOAN WAIT cannot distinguish the four stall shapes seen live
+    (2026-09-06: which ingredient is missing at the stalled requester,
+    whether the pool has a free slot, what the other active loans hold, and
+    whether the bill or the spare ceiling drives restore). This names all
+    four from explicit live facts on every wait pass.
+    """
+    try:
+        spec = LINE_RECIPES.get(step.recipe, {})
+        ingredients = [
+            (str(item), float(amount))
+            for item, amount in zip(
+                spec.get("ingredients", ()), spec.get("amounts", ()),
+                strict=True,
+            )
+        ]
+    except Exception:
+        ingredients = []
+    try:
+        contents = live_base.chest_contents(
+            client, surface, loan.requester_position,
+        )
+    except Exception:
+        contents = {}
+    try:
+        committed = (
+            mall_slot_count(client, surface, reference_point)
+            if reference_point is not None else None
+        )
+    except Exception:
+        committed = None
+    try:
+        loans = active_bootstrap_loans(client, surface, force)
+    except Exception:
+        loans = ()
+    try:
+        missing = "-"
+        scarcest = 0.0
+        for item, amount in ingredients:
+            short = (
+                float(amount)
+                - float(contents.get(item, 0))
+                - float(actual.get(item, 0))
+            )
+            if short > scarcest:
+                scarcest = short
+                missing = item
+        baseline = loan.step_baseline_finished or 0
+        crafts_done = (
+            max(0, int(products_finished) - int(baseline))
+            if products_finished is not None else None
+        )
+        need = loan.step_required_crafts
+        requester = ",".join(
+            f"{item}={contents.get(item, 0)}" for item, _ in ingredients
+        ) or "-"
+        net = ",".join(
+            f"{item}={int(actual.get(item, 0))}" for item, _ in ingredients
+        ) or "-"
+        pool = (
+            f"{max(0, BOOTSTRAP_MALL_SLOT_TARGET - int(committed))}"
+            f"/{BOOTSTRAP_MALL_SLOT_TARGET}"
+            if committed is not None else "?"
+        )
+        table = ",".join(
+            f"{holder.target_item}:{holder.step_recipe or holder.current_recipe}"
+            f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
+            for holder in loans
+        ) or "-"
+        emit(
+            f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
+            f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
+            f"+{loan.production_target} "
+            f"crafts {crafts_done if crafts_done is not None else '?'}"
+            f"/{need if need is not None else '?'} "
+            f"| requester {requester} net {net} missing {missing} "
+            f"| pool {pool} free | loans {table}"
+        )
+    except Exception as error:
+        emit(f"  LOAN CELL TELEMETRY skipped: {error}")
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
@@ -4966,6 +5101,10 @@ def _submit_bootstrap_loan(
         emit(
             f"  MALL BOOTSTRAP LOAN WAIT: {step.recipe} at {loan.machine_position} "
             f"is making temporary stock through {step.target_count}"
+        )
+        _emit_loan_cell_telemetry(
+            client, surface, force, loan, step, actual, products_finished,
+            emit, reference_point=reference_point,
         )
         _deliver_cell_ingredients(
             client, bridge, surface, force, step.recipe,
@@ -9747,6 +9886,7 @@ def run(
     )
     budget = begin_run_budget(max_iterations)
     _TRANSFERABLE_WAITS.clear()
+    _STAGE_DELIVERY_ATTEMPTS.clear()
     try:
         mall_targets, background_targets, priorities = _open_the_run(
             client, bridge, surface, force, goal_item, mission_items,

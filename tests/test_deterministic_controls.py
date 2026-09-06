@@ -20,7 +20,9 @@ from orchestrator.controller_budget import (
     consume_wait,
     end_run_budget,
 )
-from orchestrator.stage_services import StuckError, _submit
+from orchestrator.stage_services import (
+    StuckError, _ghost_materials, _ghostify_direct_infrastructure, _submit,
+)
 from tools.autonomous_run import (
     REPO_ROOT, _directory_hash, _patch_episode_manifest, _validate_episode_manifest,
 )
@@ -126,6 +128,108 @@ def test_zero_placement_execution_is_not_treated_as_success(monkeypatch) -> None
     ]}]}
     with pytest.raises(StuckError, match="zero placements"):
         _submit(object(), bridge, "nauvis", plan, "empty", lambda _message: None)
+
+
+def test_submit_ghosts_and_bills_every_power_and_coverage_entity(
+    monkeypatch,
+) -> None:
+    """The deterministic executor may not gift infrastructure to the base."""
+    plan = {"surface": "nauvis", "force": "player", "phases": [{
+        "name": "service",
+        "actions": [
+            {"action_type": "place_entity", "entity": entity,
+             "position": {"x": index * 5.0, "y": 0.0}}
+            for index, entity in enumerate((
+                "small-electric-pole", "medium-electric-pole",
+                "big-electric-pole", "substation", "roboport",
+                "passive-provider-chest",
+            ))
+        ],
+    }]}
+    bills: list[dict[str, int]] = []
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        "orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0,
+    )
+    monkeypatch.setattr(
+        "orchestrator.stage_services.assert_affordable",
+        lambda _c, _s, _f, candidate, *_a, **_k:
+            bills.append(_ghost_materials(candidate)),
+    )
+    monkeypatch.setattr(
+        "orchestrator.stage_services.load_json", lambda value: value,
+    )
+    bridge = SimpleNamespace(build_layout=lambda _authorization, candidate: (
+        submitted.append(candidate) or {
+            "ok": True, "attempted_placements": 6,
+            "succeeded_placements": 6, "placed_ghosts": 5,
+            "placed_entities": 1,
+        }
+    ))
+
+    _submit(object(), bridge, "nauvis", plan, "service", lambda _message: None)
+
+    infrastructure = set((
+        "small-electric-pole", "medium-electric-pole",
+        "big-electric-pole", "substation", "roboport",
+    ))
+    actions = submitted[0]["phases"][0]["actions"]
+    assert all(
+        action["action_type"] == "place_ghost"
+        for action in actions if action["entity"] in infrastructure
+    )
+    assert actions[-1]["action_type"] == "place_entity"
+    assert bills == [{entity: 1 for entity in sorted(infrastructure)}]
+
+
+def test_infrastructure_ghostification_reports_only_former_direct_actions() -> None:
+    plan = {"phases": [{"actions": [
+        {"action_type": "place_entity", "entity": "substation",
+         "position": {"x": 4, "y": 5}},
+        {"action_type": "place_ghost", "entity": "roboport",
+         "position": {"x": 40, "y": 5}},
+    ]}]}
+
+    converted = _ghostify_direct_infrastructure(plan)
+
+    assert converted == (("substation", (4.0, 5.0)),)
+    assert [
+        action["action_type"] for action in plan["phases"][0]["actions"]
+    ] == ["place_ghost", "place_ghost"]
+
+
+def test_submit_waits_for_a_formerly_direct_pole_to_be_bot_built(
+    monkeypatch,
+) -> None:
+    from orchestrator import stage_services
+
+    plan = {"surface": "nauvis", "force": "player", "phases": [{
+        "actions": [{"action_type": "place_entity",
+                     "entity": "medium-electric-pole",
+                     "position": {"x": 10.5, "y": 20.5}}],
+    }]}
+    observations = iter((
+        {(10.5, 20.5): "entity-ghost"},
+        {(10.5, 20.5): "medium-electric-pole"},
+    ))
+    waits: list[str] = []
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr(stage_services, "assert_affordable", lambda *_a, **_k: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda value: value)
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_names_at", lambda *_a: next(observations),
+    )
+    monkeypatch.setattr(stage_services, "consume_wait", waits.append)
+    monkeypatch.setattr(stage_services.time, "sleep", lambda _seconds: None)
+    client = SimpleNamespace(command=lambda _command: "")
+    bridge = SimpleNamespace(build_layout=lambda *_a: {
+        "ok": True, "attempted_placements": 1, "succeeded_placements": 1,
+        "placed_ghosts": 1, "placed_entities": 0,
+    })
+
+    _submit(client, bridge, "nauvis", plan, "pole", lambda _message: None)
+
+    assert waits == ["bot_built_infrastructure"]
 
 
 def test_removal_only_plans_are_not_churn(monkeypatch) -> None:
