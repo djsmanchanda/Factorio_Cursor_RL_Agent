@@ -36,6 +36,7 @@ def test_linux_deterministic_runner_survives_manager_exit() -> None:
     assert '--unit="$RUNNER_UNIT" --collect' in source
     assert '"--setenv=VIRTUAL_ENV=$VENV_ROOT"' in source
     assert '"--setenv=PATH=$VENV_ROOT/bin:$PATH"' in source
+    assert '"--setenv=PYTHONPATH=$VENV_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"' in source
     assert 'systemctl --user stop "$RUNNER_UNIT"' in source
     assert "service_active" in source
 

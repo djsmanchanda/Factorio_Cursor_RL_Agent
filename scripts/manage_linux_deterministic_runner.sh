@@ -82,8 +82,10 @@ cd "$REPO_ROOT"
 # User services do not inherit an activated shell virtualenv. Preserve an
 # explicit selected venv so managed imports match direct runner imports.
 VENV_ROOT=""
+VENV_SITE_PACKAGES=""
 if [[ -f "$(dirname "$PYTHON_BIN")/../pyvenv.cfg" ]]; then
   VENV_ROOT="$(cd "$(dirname "$PYTHON_BIN")/.." && pwd)"
+  VENV_SITE_PACKAGES="$("$PYTHON_BIN" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 fi
 
 runner_pid() {
@@ -145,6 +147,7 @@ start_runner() {
     environment_args=(
       "--setenv=VIRTUAL_ENV=$VENV_ROOT"
       "--setenv=PATH=$VENV_ROOT/bin:$PATH"
+      "--setenv=PYTHONPATH=$VENV_SITE_PACKAGES${PYTHONPATH:+:$PYTHONPATH}"
     )
   fi
   systemd-run --user --quiet \
