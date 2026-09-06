@@ -670,6 +670,26 @@ def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) 
     )
 
 
+def test_power_bridge_skips_consumer_on_medium_pole_supply_boundary(monkeypatch) -> None:
+    """The seven-tile medium-pole supply width needs no extra bridge pole."""
+    from orchestrator import stage_services as ss
+
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((0.0, 0.0), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
+    monkeypatch.setattr(
+        ss, "_submit", lambda *_a, **_k: pytest.fail("covered consumer must not add poles"),
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (4.0, 0.0),
+        lambda _message: None,
+    )
+
+
 def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -> None:
     """Emergency power may not consume a belt tile planned by an expansion."""
     from orchestrator import autonomous_builder as builder_module

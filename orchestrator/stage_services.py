@@ -715,11 +715,10 @@ def _power_bridge_hops(
     """Shortest deterministic pole chain whose real centres avoid blockers.
 
     Medium poles snap to half-tile centres. Generic rounded route points can
-    therefore move another half tile on each axis when Factorio places them;
-    the live copper bridge from (89.5, -68.5) to (98.5, -67.5) became a
-    9-by-1 diagonal and silently exceeded the nine-tile wire reach. Generate
-    the actual half-tile centres here so route scoring and wire geometry agree
-    with the entities that will exist.
+    therefore move another half tile on each axis when Factorio places them.
+    Generate the actual half-tile centres here so route scoring and wire
+    geometry agree with the entities that will exist.  `spacing` is wire reach
+    (nine tiles for a medium pole), not its seven-tile supply-area width.
     """
 
     def pole_centre(point: Point) -> Point:
@@ -727,28 +726,43 @@ def _power_bridge_hops(
 
     def leg_hops(
         leg_start: Point, leg_end: Point, *, include_end: bool,
-    ) -> list[Point]:
-        span = distance(leg_start, leg_end)
+    ) -> list[Point] | None:
+        """Return a legal straight-line leg at any angle.
+
+        Fractional samples are snapped before their edges are checked.  This
+        lets a clear diagonal use the full wire reach, while increasing the
+        segment count when snapping would make an apparent nine-tile edge too
+        long.
+        """
+        actual_end = pole_centre(leg_end) if include_end else leg_end
+        span = distance(leg_start, actual_end)
         if span == 0:
             return []
-        ux = (leg_end[0] - leg_start[0]) / span
-        uy = (leg_end[1] - leg_start[1]) / span
-        points = [
-            pole_centre((
-                leg_start[0] + ux * spacing * step,
-                leg_start[1] + uy * spacing * step,
-            ))
-            for step in range(1, int(span // spacing) + 1)
-        ]
-        snapped_end = pole_centre(leg_end)
-        points = [point for point in points if point != snapped_end]
-        if include_end:
-            points.append(snapped_end)
-        return list(dict.fromkeys(points))
+        minimum_segments = max(1, math.ceil(span / spacing))
+        for segments in range(minimum_segments, minimum_segments + 9):
+            points = [
+                pole_centre((
+                    leg_start[0] + (actual_end[0] - leg_start[0]) * step / segments,
+                    leg_start[1] + (actual_end[1] - leg_start[1]) * step / segments,
+                ))
+                for step in range(1, segments)
+            ]
+            points = list(dict.fromkeys(points))
+            if include_end:
+                points.append(actual_end)
+            chain = [leg_start, *points, actual_end]
+            if all(
+                distance(left, right) <= spacing
+                for left, right in zip(chain, chain[1:])
+            ):
+                return points
+        return None
 
     horizontal = l_route(start, end)
     vertical = [start, (start[0], end[1]), end]
-    routes = [horizontal, vertical]
+    # A pole may connect at every angle; a direct diagonal is both the shortest
+    # route and generally uses fewer poles than the old orthogonal L route.
+    routes = [[start, end], horizontal, vertical]
     for offset in (-128, -64, -32, -16, 16, 32, 64, 128):
         routes.extend((
             [start, (start[0], start[1] + offset),
@@ -762,16 +776,31 @@ def _power_bridge_hops(
         route = [point for index, point in enumerate(route)
                  if index == 0 or point != route[index - 1]]
         hops: list[Point] = []
+        cursor = route[0]
+        route_legal = True
         legs = list(zip(route, route[1:]))
-        for index, (leg_start, leg_end) in enumerate(legs):
-            hops.extend(leg_hops(
-                leg_start, leg_end, include_end=index < len(legs) - 1,
-            ))
+        for index, (_leg_start, leg_end) in enumerate(legs):
+            # Intermediate route corners are poles and must use their actual
+            # snapped centre as the start of the next leg.
+            include_end = index < len(legs) - 1
+            leg = leg_hops(cursor, leg_end, include_end=include_end)
+            if leg is None:
+                route_legal = False
+                break
+            hops.extend(leg)
+            cursor = pole_centre(leg_end) if include_end else leg_end
+        if not route_legal:
+            continue
         hops = list(dict.fromkeys(hops))
         collisions = sum((math.floor(x), math.floor(y)) in blocked for x, y in hops)
         length = sum(distance(a, b) for a, b in zip(route, route[1:]))
         candidates.append((collisions, length, tuple(route), hops))
-    collisions, _length, _route, hops = min(candidates, key=lambda item: item[:3])
+    if not candidates:
+        return _searched_bridge_hops(start, end, spacing, blocked)
+    collisions, _length, _route, hops = min(
+        candidates,
+        key=lambda item: (item[0], len(item[3]), item[1], item[2]),
+    )
     if collisions:
         # The fixed menu of L-routes and offsets above is fast and deterministic,
         # and it is enough to dodge buildings. It is not enough to dodge
@@ -928,7 +957,7 @@ def extend_power(
         and max(
             abs(target_position[0] - near_position[0]),
             abs(target_position[1] - near_position[1]),
-        ) < target_supply + consumer_size / 2
+        ) <= target_supply + consumer_size / 2
     ):
         emit(f"  {near_position} is already inside the supply area of the powered "
              f"{target_name} at {target_position}; waiting for it to charge")
@@ -940,7 +969,8 @@ def extend_power(
         emit(f"  power gap found: network {own_network} at {near_position} carries no "
              f"generation -- bridging to {target_name} at {target_position}")
     # The first hop is limited by the shorter endpoint reach (small poles
-    # reach only 7.5 tiles); later medium-pole hops inherit that safe spacing.
+    # reach only 7.5 tiles). Medium-pole links otherwise use their full
+    # nine-tile wire reach; supply-area width is unrelated to this distance.
     target_wire = POLE_SPECS.get(
         target_name, POLE_SPECS["medium-electric-pole"],
     )["wire"]
@@ -953,7 +983,7 @@ def extend_power(
         POLE_SPECS["medium-electric-pole"]["wire"],
         target_wire,
         endpoint_wire,
-    ) - 1
+    )
     margin = 132.0
     blocked = live_base.occupied_tiles(
         client, surface,

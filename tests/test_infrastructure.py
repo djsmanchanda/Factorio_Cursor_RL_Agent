@@ -231,3 +231,20 @@ def test_power_bridge_uses_factorio_pole_centres_within_wire_reach() -> None:
         for left, right in zip(chain, chain[1:])
     )
     assert (98.5, -67.5) not in hops
+
+
+def test_power_bridge_uses_full_medium_pole_reach_on_a_diagonal() -> None:
+    """A medium pole wires nine tiles in every direction, not only on axes."""
+    start = (0.5, 0.5)
+    end = (18.5, 18.5)
+
+    hops = _power_bridge_hops(start, end, 9.0, set())
+    chain = [start, *hops, end]
+
+    assert hops == [(6.5, 6.5), (12.5, 12.5)]
+    assert all(math.dist(left, right) <= 9.0 for left, right in zip(chain, chain[1:]))
+
+
+def test_power_bridge_uses_exact_nine_tile_axial_hop() -> None:
+    """Supply-area width must not shorten a legal nine-tile copper link."""
+    assert _power_bridge_hops((0.5, 0.5), (18.5, 0.5), 9.0, set()) == [(9.5, 0.5)]
