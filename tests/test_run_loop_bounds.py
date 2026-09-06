@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -141,6 +142,54 @@ def test_bots_building_resets_the_livelock_bound() -> None:
 def test_a_repeated_signature_with_no_ground_progress_accumulates() -> None:
     assert _livelock_step(False, False, 3) == 4
     assert _livelock_step(True, False, 3) == 0
+
+
+def test_deferred_control_telemetry_preserves_bill_fallback_and_credit_coverage(
+    monkeypatch,
+) -> None:
+    """The chemical fast-belt stall must identify its bill, not just its mall task."""
+    task = SimpleNamespace(item="fast-transport-belt", target=9)
+    priorities = SimpleNamespace(items={
+        "fast-transport-belt": SimpleNamespace(
+            status="deferred", reason="fast belts wait for electric furnaces",
+            retry_tick=4_600,
+        ),
+    })
+    project = SimpleNamespace(
+        sequence=1, project_id="expand_stone-brick_system", state="reserved",
+        required={"fast-transport-belt": 9, "transport-belt": 4},
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_MATERIAL_RESERVATION_LEDGER",
+        SimpleNamespace(projects={project.project_id: project}),
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items",
+        lambda *_args: {
+            "fast-transport-belt": 0,
+            "transport-belt": 52,
+            "chemical-science-pack": 0,
+            "automation-science-pack": 190,
+        },
+    )
+    emitted: list[str] = []
+
+    autonomous_builder._emit_deferred_control_telemetry(
+        object(), "nauvis", "player", task, 1_000,
+        {"fast-transport-belt": 9}, {}, priorities,
+        "chemical-science-pack", ("automation-science-pack",), emitted.append,
+    )
+    autonomous_builder._emit_deferred_control_telemetry(
+        object(), "nauvis", "player", task, 1_000,
+        {"fast-transport-belt": 9}, {}, priorities,
+        "chemical-science-pack", ("automation-science-pack",), emitted.append,
+    )
+
+    assert "repeat=1; backoff=3600 ticks" in emitted[0]
+    assert "expand_stone-brick_system[state=reserved; bill=fast-transport-belt=9,transport-belt=4]" in emitted[0]
+    assert "belt-fallback=fast=0, regular=52, decision=not-applied" in emitted[0]
+    assert "chemical-credit(goal=chemical-science-pack)=[automation-science-pack=190,fast-transport-belt=0]" in emitted[0]
+    assert "repeat=2" in emitted[1]
 
 
 @pytest.mark.parametrize(("wait_ticks", "expected_seconds"), [

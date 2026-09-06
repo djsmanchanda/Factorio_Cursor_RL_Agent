@@ -9559,11 +9559,80 @@ def _open_the_run(
 _MAX_MALL_TASKS_PER_PASS = 3
 
 
+def _emit_deferred_control_telemetry(
+    client: RconClient, surface: str, force: str, task, tick: int,
+    mall_targets: Mapping[str, int], background_targets: Mapping[str, int],
+    priorities: PriorityList, goal_item: str, mission_items: Sequence[str],
+    emit: Callable[[str], None],
+) -> None:
+    """Name the exact work state behind a deferred mall control pass.
+
+    This is deliberately observational: it reads the already-persisted
+    priority and material ledger, then writes one human log line.  The fast
+    belt stall of 2026-09-06 could otherwise show the deferred *producer*
+    forever while hiding the expansion bill that requested its output.
+    """
+    entry = getattr(priorities, "items", {}).get(task.item)
+    if entry is None or getattr(entry, "status", "") != "deferred":
+        return
+    repeat_key = (task.item, str(getattr(entry, "reason", "")))
+    repeats = getattr(priorities, "_deferred_control_repeats", {})
+    repeat = int(repeats.get(repeat_key, 0)) + 1
+    repeats[repeat_key] = repeat
+    setattr(priorities, "_deferred_control_repeats", repeats)
+    try:
+        stock = live_base.available_items(client, surface, force)
+    except Exception:
+        stock = {}
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    origins: list[str] = []
+    if ledger is not None:
+        for project in sorted(ledger.projects.values(), key=lambda value: value.sequence):
+            required = project.required
+            if int(required.get(task.item, 0)) <= 0:
+                continue
+            bill = ",".join(
+                f"{item}={count}" for item, count in sorted(required.items())
+            )
+            origins.append(
+                f"{project.project_id}[state={project.state}; bill={bill}]"
+            )
+    origin_text = "; ".join(origins) or "none"
+    if task.item == "fast-transport-belt":
+        fast = int(stock.get("fast-transport-belt", 0))
+        regular = int(stock.get("transport-belt", 0))
+        fallback = (
+            "not-applied" if origins and fast <= 0 and regular > 0
+            else "not-applicable"
+        )
+        belt_text = (
+            f"fast={fast}, regular={regular}, decision={fallback}"
+        )
+    else:
+        belt_text = "not-applicable"
+    relevant_items = set(mission_items or (goal_item,))
+    relevant_items.update(mall_targets)
+    relevant_items.update(background_targets)
+    coverage = ",".join(
+        f"{item}={int(stock.get(item, 0))}" for item in sorted(relevant_items)
+    ) or "none"
+    retry_ticks = max(0, int(getattr(entry, "retry_tick", tick)) - tick)
+    emit(
+        "  DEFERRED CONTROL: "
+        f"task={task.item} target={getattr(task, 'target', mall_targets.get(task.item, 0))}; "
+        f"reason={getattr(entry, 'reason', '')}; "
+        f"repeat={repeat}; backoff={retry_ticks} ticks; "
+        f"origin={origin_text}; belt-fallback={belt_text}; "
+        f"chemical-credit(goal={goal_item})=[{coverage}]"
+    )
+
+
 def _serve_ready_pass(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     task, tick: int, mall_targets: dict[str, int],
     background_targets: dict[str, int], priorities: PriorityList,
-    reference_point: Point, goal_item: str, emit: Callable[[str], None],
+    reference_point: Point, goal_item: str, emit: Callable[[str], None], *,
+    mission_items: Sequence[str] = (),
 ) -> Point | object | None:
     """Serve blocking work, advance the goal, then start one reserve producer.
 
@@ -9602,6 +9671,11 @@ def _serve_ready_pass(
             if task.item in mall_targets:
                 entry = priorities.items.get(task.item)
                 if entry is None or entry.status == "deferred":
+                    _emit_deferred_control_telemetry(
+                        client, surface, force, task, tick, mall_targets,
+                        background_targets, priorities, goal_item,
+                        mission_items, emit,
+                    )
                     break
             task = priorities.next(mall_targets, tick)
             if task is None:
@@ -9780,7 +9854,7 @@ def run(
                 _serve_ready_pass(
                     client, bridge, surface, force, task, tick, mall_targets,
                     background_targets, priorities, reference_point,
-                    goal_item, emit,
+                    goal_item, emit, mission_items=mission_items,
                 )
                 continue
             # Establish iron, then copper, then stone-brick: beltless seeds
@@ -9800,6 +9874,7 @@ def run(
                 position = _serve_ready_pass(
                     client, bridge, surface, force, task, tick, mall_targets,
                     background_targets, priorities, reference_point, goal_item, emit,
+                    mission_items=mission_items,
                 )
                 if position is _SHORTAGE:
                     continue
@@ -9873,6 +9948,7 @@ def run(
             position = _serve_ready_pass(
                 client, bridge, surface, force, task, tick, mall_targets,
                 background_targets, priorities, reference_point, goal_item, emit,
+                mission_items=mission_items,
             )
             if position is _SHORTAGE:
                 continue
