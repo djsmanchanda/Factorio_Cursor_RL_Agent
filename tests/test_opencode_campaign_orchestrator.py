@@ -55,6 +55,22 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
     assert "CAMPAIGN_DECISION:" in prompt
 
 
+def test_telemetry_prompt_allows_only_a_zero_behavior_discriminator(tmp_path: Path) -> None:
+    config = campaign.Config(
+        state_root=tmp_path, source_save=tmp_path / "save.zip", observations=tmp_path / "notes.md",
+        state_file=tmp_path / "state.json", opencode_log_dir=tmp_path / "logs", technology="target",
+        interval_seconds=120, post_run_wait_seconds=120, max_cycles=0, max_runtime_seconds=0,
+        model="model", variant="xhigh", opencode_bin="opencode", python=tmp_path / "python",
+        campaign_manager=tmp_path / "campaign", dashboard_url="http://127.0.0.1:9137/api/logistic-inventory",
+        dry_run=False, resume_active_run=False,
+    )
+
+    prompt = campaign._telemetry_prompt(config, 4)
+
+    assert "zero-behavior observability patch" in prompt
+    assert "Do not alter planning behavior" in prompt
+
+
 def test_dry_run_completes_without_touching_live_services(tmp_path: Path) -> None:
     observations = tmp_path / "observations.md"
 

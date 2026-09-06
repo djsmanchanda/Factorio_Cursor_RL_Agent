@@ -285,6 +285,22 @@ reason: one sentence
 """
 
 
+def _telemetry_prompt(config: Config, cycle: int) -> str:
+    return f"""Cycle {cycle}'s final comparison correctly declined a speculative behavior change, but the campaign needs
+a non-speculative discriminator before its next fresh run. Implement one minimal zero-behavior observability patch for
+the identified terminal bottleneck, with a narrow regression test. Prefer explicit live facts that distinguish the
+blocked loan cell's missing ingredient/requester contents, free pool capacity, active loan state, and restore/fulfillment
+decision. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files. Append why this
+telemetry is sufficient to `{config.observations}`. End exactly with:
+
+CAMPAIGN_DECISION:
+status: change|no-change|stop
+files: comma-separated paths or none
+test: command/result or not-run
+reason: one sentence
+"""
+
+
 def _tree_fingerprint(observations: Path) -> str:
     """Fingerprint code/test changes while excluding the mandatory campaign journal."""
     command = ["git", "diff", "--binary", "--no-ext-diff", "--", "."]
@@ -387,7 +403,13 @@ def run_campaign(config: Config) -> int:
         state.active_cycle = None
         state.active_session_id = None
         _save_state(config.state_file, state)
-        if _decision(output) in {"stop", "no-change"} and before == after:
+        decision = _decision(output)
+        if decision == "no-change" and before == after:
+            _, output = _ask(config, _telemetry_prompt(config, cycle), session_id, sequence)
+            sequence += 1
+            after = _tree_fingerprint(config.observations)
+            decision = _decision(output)
+        if decision in {"stop", "no-change"} and before == after:
             _append(config.observations, "## Campaign stop\n\nNo focused code change was justified.\n")
             return 0
         if len(state.terminal_keys) == 2 and state.terminal_keys[0] == state.terminal_keys[1]:
