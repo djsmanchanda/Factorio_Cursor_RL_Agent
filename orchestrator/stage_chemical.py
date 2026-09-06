@@ -31,12 +31,18 @@ from orchestrator.stage_transport import (
 from planners.fluid_layouts import (
     fluid_network_segments, generate_fluid_machine_row, header_attachment,
 )
+from planners.fluid_layout_search import (
+    oriented_compact_paired_fluid_block,
+    oriented_fluid_network_segments, oriented_fluid_row_candidates,
+    oriented_header_attachment, recover_oriented_fluid_row,
+    transform_direction,
+)
 from planners.fluid_routing import (
     generate_shortest_fluid_chain_link, shortest_fluid_chain_segments,
 )
 from planners.infrastructure import strip_local_power
 from planners.infrastructure_geometry import footprint_tile_indices
-from planners.plan_validation import ENTITY_FOOTPRINTS
+from planners.plan_validation import ENTITY_FOOTPRINTS, occupied_tile_indices
 from planners.resource_layouts import (
     generate_offshore_pump_source, generate_pumpjack_source,
     verified_offshore_pump_output_tile, verified_pumpjack_output_tile,
@@ -76,7 +82,13 @@ def petroleum_rate(recipe: str, *, crack_all_outputs: bool = True) -> float:
 
 
 def _merge(*plans: dict) -> dict:
-    return {"phases": [phase for plan in plans for phase in plan["phases"]]}
+    merged = {"phases": [phase for plan in plans for phase in plan["phases"]]}
+    reserved = {
+        tuple(tile) for plan in plans for tile in plan.get("reserved_tiles", ())
+    }
+    if reserved:
+        merged["reserved_tiles"] = [list(tile) for tile in sorted(reserved)]
+    return merged
 
 
 #: Crude/s one basic-or-advanced refinery draws (100 crude per 5s either way).
@@ -406,7 +418,7 @@ def _filter_plan_actions(plan: dict, predicate: Callable[[dict], bool]) -> dict:
         actions = [action for action in phase["actions"] if predicate(action)]
         if actions:
             phases.append({**phase, "actions": actions})
-    return {"phases": phases}
+    return {**plan, "phases": phases}
 
 
 def _submit_oil_cell_packets(
@@ -416,7 +428,9 @@ def _submit_oil_cell_packets(
 ) -> None:
     """Ghost independent oil packets as soon as each material chain is ready."""
     future = _merge(*(plan for _name, plan in packets))
-    reserved = planned_footprint_tiles(future)
+    reserved = planned_footprint_tiles(future) | {
+        tuple(tile) for tile in future.get("reserved_tiles", ())
+    }
     required = _ghost_materials(future)
     available = live_base.available_items(client, surface, force)
     unscheduled = {
@@ -757,6 +771,35 @@ def _infer_fluid_row_origin(recipe: str, machine_position: Point) -> tuple[int, 
     )
 
 
+def _recover_fluid_row_layout(
+    client: RconClient, surface: str, recipe: str,
+    machine_positions: list[Point] | tuple[Point, ...],
+) -> tuple[Point, str, str | None]:
+    """Recover rotation/mirror from live machines and their verified pipes."""
+    if not machine_positions:
+        raise StuckError(f"Cannot recover empty {recipe} fluid row")
+    margin = 24
+    lo = (
+        min(x for x, _ in machine_positions) - margin,
+        min(y for _, y in machine_positions) - margin,
+    )
+    hi = (
+        max(x for x, _ in machine_positions) + margin,
+        max(y for _, y in machine_positions) + margin,
+    )
+    try:
+        pipes = live_base.entity_tile_indices(
+            client, surface, ("pipe", "pipe-to-ground"), lo, hi,
+        )
+        return recover_oriented_fluid_row(recipe, machine_positions, pipes)
+    except Exception:
+        # Legacy rows predate orientation search and are north/unmirrored.
+        return (
+            tuple(map(float, _infer_fluid_row_origin(recipe, machine_positions[0]))),
+            "north", None,
+        )
+
+
 def _extend_sulfur_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     service_stage: ServiceStage, emit: Callable[[str], None],
@@ -776,8 +819,8 @@ def _extend_sulfur_stage(
         raise StuckError(
             "plastic is producing but its planner-owned oil refinery cannot be recovered"
         )
-    ox, oy = _infer_fluid_row_origin(
-        refinery_recipe, refinery_line.machine_positions[0],
+    (ox, oy), refinery_direction, refinery_mirror = _recover_fluid_row_layout(
+        client, surface, refinery_recipe, refinery_line.machine_positions,
     )
     water = live_base.nearest_entity_site(
         client, surface, force, "offshore-pump", (ox + 21.0, oy + 17.0),
@@ -797,8 +840,10 @@ def _extend_sulfur_stage(
         remove_substations=False,
     )
     _publish_output_chest(sulfur)
-    petroleum_from = header_attachment(
-        refinery_recipe, "petroleum-gas", 1, ox, oy,
+    petroleum_from = oriented_header_attachment(
+        refinery_recipe, "petroleum-gas",
+        max(1, len(refinery_line.machine_positions)), (ox, oy),
+        direction=refinery_direction, mirror=refinery_mirror,
     )["attach"]
     sulfur_gas = header_attachment(
         "sulfur", "petroleum-gas", 2, sulfur_x, sulfur_y,
@@ -829,9 +874,9 @@ def _extend_sulfur_stage(
         # leaves the eastern headers unreserved and later links route gas
         # straight through crude (2026-09-05: petroleum-gas merged into the
         # crude header it could not see).
-        *fluid_network_segments(
+        *oriented_fluid_network_segments(
             refinery_recipe, max(1, len(refinery_line.machine_positions)),
-            ox, oy,
+            (ox, oy), direction=refinery_direction, mirror=refinery_mirror,
         ),
         *fluid_network_segments("sulfur", 2, sulfur_x, sulfur_y),
     ]
@@ -1100,18 +1145,23 @@ def _expand_remote_crude_if_starved(
         if capacity >= OPENING_CRUDE_TARGET_PER_SECOND:
             return
         refinery_pos: Point | None = None
+        refinery_positions: tuple[Point, ...] = ()
         refinery_recipe = "basic-oil-processing"
         for recipe in ("basic-oil-processing", "advanced-oil-processing"):
             line = live_base.find_line(client, surface, force, recipe, "oil-refinery")
             if line is not None and line.machine_positions:
                 refinery_pos = line.machine_positions[0]
+                refinery_positions = tuple(line.machine_positions)
                 refinery_recipe = recipe
                 break
         if refinery_pos is None:
             return
-        origin = _infer_fluid_row_origin(refinery_recipe, refinery_pos)
-        crude_to = header_attachment(
-            refinery_recipe, "crude-oil", 1, origin[0], origin[1],
+        origin, refinery_direction, refinery_mirror = _recover_fluid_row_layout(
+            client, surface, refinery_recipe, refinery_positions,
+        )
+        crude_to = oriented_header_attachment(
+            refinery_recipe, "crude-oil", len(refinery_positions), origin,
+            direction=refinery_direction, mirror=refinery_mirror,
         )["attach"]
         grid = _crude_patch_grid(client, surface, plastic_chest)
         used = {
@@ -1292,10 +1342,6 @@ def ensure_oil_cell(
     if not pumpjack_sites:
         raise StuckError("No legal pumpjack footprint on the selected crude-oil patch")
     oil_site, *extra_sites = pumpjack_sites
-    emit(
-        f"  OIL DISTRICT: chemical processing at {(ox, oy)} near crude source "
-        f"{oil_pos}; pumpjack faces {oil_site['direction']} toward its local pipe"
-    )
     if extra_sites:
         emit(
             f"  OIL DISTRICT: {len(pumpjack_sites)} pumpjacks to saturate the "
@@ -1307,15 +1353,120 @@ def ensure_oil_cell(
         f"{cell_centre} and local coal belt {coal}"
     )
     refinery_recipe = oil_processing_recipe(0)
-    refinery = generate_fluid_machine_row(
+    plastic = generate_fluid_machine_row("plastic-bar", 2, px, py)
+    plastic_gas = header_attachment(
+        "plastic-bar", "petroleum-gas", 2, px, py,
+    )["attach"]
+    normal_refinery = generate_fluid_machine_row(
         refinery_recipe, OPENING_REFINERY_COUNT, ox, oy,
+    )
+    normal_tiles = occupied_tile_indices([("normal-refinery", normal_refinery)])
+    refinery_center = (
+        (min(x for x, _ in normal_tiles) + max(x for x, _ in normal_tiles) + 1) / 2,
+        (min(y for _, y in normal_tiles) + max(y for _, y in normal_tiles) + 1) / 2,
+    )
+    layout_points = [oil_site["output"], plastic_gas, *normal_tiles]
+    try:
+        live_layout_blocked = live_base.occupied_tiles(
+            client, surface,
+            (
+                min(x for x, _ in layout_points) - 24,
+                min(y for _, y in layout_points) - 24,
+            ),
+            (
+                max(x for x, _ in layout_points) + 24,
+                max(y for _, y in layout_points) + 24,
+            ),
+            include_water=False,
+        )
+    except Exception:
+        live_layout_blocked = set()
+    layout_blocked = set(live_layout_blocked)
+    layout_blocked |= _planned_hard_tiles(plastic)
+    for site in pumpjack_sites:
+        layout_blocked |= footprint_tile_indices(
+            tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
+        )
+    refinery_candidates = oriented_fluid_row_candidates(
+        refinery_recipe, OPENING_REFINERY_COUNT, refinery_center,
+        {
+            "crude-oil": [oil_site["output"]],
+            "petroleum-gas": [plastic_gas],
+        },
+        blocked_tiles=layout_blocked,
+    )
+    if not refinery_candidates:
+        raise StuckError("No legal rotated or mirrored oil-refinery layout")
+    refinery_choice = refinery_candidates[0]
+    refinery = refinery_choice.plan
+    (refinery_ox, refinery_oy) = refinery_choice.origin
+    refinery_direction = refinery_choice.direction
+    refinery_mirror = refinery_choice.mirror
+    crude_to = refinery_choice.attachments["crude-oil"]
+    petroleum_from = refinery_choice.attachments["petroleum-gas"]
+    try:
+        paired_growth = oriented_compact_paired_fluid_block(
+            refinery_recipe, 2 * OPENING_REFINERY_COUNT,
+            refinery_choice.origin, direction=refinery_choice.direction,
+            mirror=refinery_choice.mirror,
+        )
+        opening_tiles = occupied_tile_indices([("opening-refinery", refinery)])
+        growth_tiles = occupied_tile_indices([("paired-growth", paired_growth.plan)])
+        refinery["reserved_tiles"] = [
+            list(tile) for tile in sorted(growth_tiles - opening_tiles)
+        ]
+    except ValueError:
+        refinery["reserved_tiles"] = []
+    emit(
+        f"  OIL LAYOUT: {refinery_choice.shape} {refinery_direction}"
+        f"{'/' + refinery_mirror if refinery_mirror else ''} refinery row selected; "
+        f"estimated pipe bill={refinery_choice.pipe_tiles}, "
+        f"poles={refinery_choice.pole_count}, land={refinery_choice.occupied_tiles}, "
+        f"expansion seam={refinery_choice.expansion_seam_tiles}"
+    )
+    emit(
+        f"  OIL DISTRICT: chemical processing at "
+        f"{(refinery_ox, refinery_oy)} near crude source {oil_pos}; "
+        f"pumpjack faces {oil_site['direction']} toward its local pipe"
+    )
+    plastic_tiles = occupied_tile_indices([("normal-plastic", plastic)])
+    plastic_center = (
+        (min(x for x, _ in plastic_tiles) + max(x for x, _ in plastic_tiles) + 1) / 2,
+        (min(y for _, y in plastic_tiles) + max(y for _, y in plastic_tiles) + 1) / 2,
+    )
+    plastic_blocked = set(live_layout_blocked) | _planned_hard_tiles(refinery)
+    for site in pumpjack_sites:
+        plastic_blocked |= footprint_tile_indices(
+            tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
+        )
+    plastic_candidates = oriented_fluid_row_candidates(
+        "plastic-bar", 2, plastic_center,
+        {"petroleum-gas": [petroleum_from]},
+        blocked_tiles=plastic_blocked,
+    )
+    if not plastic_candidates:
+        raise StuckError("No legal rotated or mirrored plastic-bar layout")
+    plastic_choice = plastic_candidates[0]
+    plastic = plastic_choice.plan
+    plastic_gas = plastic_choice.attachments["petroleum-gas"]
+    plastic_flow_direction = transform_direction(
+        "east", direction=plastic_choice.direction, mirror=plastic_choice.mirror,
+    )
+    emit(
+        f"  OIL LAYOUT: {plastic_choice.shape} {plastic_choice.direction}"
+        f"{'/' + plastic_choice.mirror if plastic_choice.mirror else ''} plastic row selected; "
+        f"estimated pipe bill={plastic_choice.pipe_tiles}, "
+        f"poles={plastic_choice.pole_count}, land={plastic_choice.occupied_tiles}"
     )
     refinery_east = max(
         action["position"]["x"]
         for phase in refinery["phases"] for action in phase["actions"]
     )
-    plastic = generate_fluid_machine_row("plastic-bar", 2, px, py)
-    sulfur_ox, sulfur_oy = round(refinery_east) + 10, oy + 16
+    refinery_south = max(
+        action["position"]["y"]
+        for phase in refinery["phases"] for action in phase["actions"]
+    )
+    sulfur_ox, sulfur_oy = round(refinery_east) + 10, round(refinery_south) + 6
     sulfur = generate_fluid_machine_row("sulfur", 2, sulfur_ox, sulfur_oy)
     crude_source = generate_pumpjack_source(
         pumpjack_sites, [site["output"] for site in pumpjack_sites],
@@ -1326,13 +1477,12 @@ def ensure_oil_cell(
         for plan in (crude_source, water_source, refinery, plastic, sulfur)
     ]
     crude_source, water_source, refinery, plastic, sulfur = plans
-    plastic_feed = _direct_single_belt_feed(plastic, "coal", "east")
+    plastic_feed = _direct_single_belt_feed(
+        plastic, "coal", plastic_flow_direction,
+    )
     _publish_output_chest(plastic)
     _publish_output_chest(sulfur)
 
-    crude_to = header_attachment(refinery_recipe, "crude-oil", 1, ox, oy)["attach"]
-    petroleum_from = header_attachment(refinery_recipe, "petroleum-gas", 1, ox, oy)["attach"]
-    plastic_gas = header_attachment("plastic-bar", "petroleum-gas", 2, px, py)["attach"]
     sulfur_gas = header_attachment("sulfur", "petroleum-gas", 2, sulfur_ox, sulfur_oy)["attach"]
     sulfur_water = header_attachment("sulfur", "water", 2, sulfur_ox, sulfur_oy)["attach"]
     endpoints = [oil_site["output"], water["output"], crude_to, petroleum_from,
@@ -1372,10 +1522,15 @@ def ensure_oil_cell(
                 "tiles": [water["output"]],
             },
         ]
-        + fluid_network_segments(
-            refinery_recipe, OPENING_REFINERY_COUNT, ox, oy,
+        + oriented_fluid_network_segments(
+            refinery_recipe, OPENING_REFINERY_COUNT,
+            (refinery_ox, refinery_oy),
+            direction=refinery_direction, mirror=refinery_mirror,
         )
-        + fluid_network_segments("plastic-bar", 2, px, py)
+        + oriented_fluid_network_segments(
+            "plastic-bar", 2, plastic_choice.origin,
+            direction=plastic_choice.direction, mirror=plastic_choice.mirror,
+        )
         + (
             fluid_network_segments("sulfur", 2, sulfur_ox, sulfur_oy)
             if include_sulfur else []
@@ -1452,7 +1607,7 @@ def ensure_oil_cell(
             _merge(*plans, *(link for _name, link in links))
         ),
         mode="belt", destination_is_belt=True,
-        destination_belt_direction="east",
+        destination_belt_direction=plastic_flow_direction,
     )
     if route is None:
         raise StuckError("plastic coal route unexpectedly selected logistics")
@@ -1514,7 +1669,13 @@ def ensure_oil_cell(
         after_packet=lambda name: (
             _connect_oil_cell_power(
                 client, bridge, surface, force, plans, emit,
-                reserved_tiles=_link_corridor_tiles(links),
+                reserved_tiles=(
+                    _link_corridor_tiles(links)
+                    | {
+                        tuple(tile) for plan in plans
+                        for tile in plan.get("reserved_tiles", ())
+                    }
+                ),
             )
             if name == "chemical_power_backbone" else None
         ),

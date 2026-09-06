@@ -956,8 +956,8 @@ def _direct_single_belt_feed(
     plan: dict, ingredient: str, flow_direction: str = "east",
 ) -> Point:
     """Remove a single-ingredient feed chest and expose the upstream belt end."""
-    if flow_direction not in {"east", "west"}:
-        raise ValueError("Direct belt feed direction must be east or west")
+    if flow_direction not in {"north", "east", "south", "west"}:
+        raise ValueError("Direct belt feed direction must be cardinal")
     chests = [
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "infinity-chest"
@@ -973,21 +973,27 @@ def _direct_single_belt_feed(
                 action for action in phase["actions"]
                 if action is not chest and not (
                     action.get("entity", "").endswith("inserter")
-                    and action["position"]["x"] == cx
-                    and abs(action["position"]["y"] - cy) == 1
+                    and abs(action["position"]["x"] - cx)
+                    + abs(action["position"]["y"] - cy) == 1
                 )
             ]
         belt_positions.extend(
             (action["position"]["x"], action["position"]["y"])
             for phase in plan["phases"] for action in phase["actions"]
             if "transport-belt" in action.get("entity", "")
-            and action["position"]["x"] == cx
-            and abs(action["position"]["y"] - cy) == 2
+            and abs(action["position"]["x"] - cx)
+            + abs(action["position"]["y"] - cy) == 2
         )
     if not belt_positions:
         raise StuckError(f"{ingredient} feed chest has no adjacent input belt")
-    selector = min if flow_direction == "east" else max
-    return selector(belt_positions, key=lambda point: point[0])
+    vector = {
+        "north": (0, -1), "east": (1, 0),
+        "south": (0, 1), "west": (-1, 0),
+    }[flow_direction]
+    return min(
+        belt_positions,
+        key=lambda point: point[0] * vector[0] + point[1] * vector[1],
+    )
 
 def _publish_output_chest(plan: dict) -> None:
     """Make a stage's collection chest a passive provider, so its product is

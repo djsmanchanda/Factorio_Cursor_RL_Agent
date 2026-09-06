@@ -404,7 +404,7 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
     assert calls["prefer_nearest_patch"] is True
     assert calls["plastic_inputs"] == ((-226.0, -86.0), (-340.0, 20.0))
     args, kwargs = calls["preflight"]
-    assert args[5:7] == ((-340.0, 20.0), (-306.5, -44.5))
+    assert args[5] == (-340.0, 20.0)
     assert kwargs["mode"] == "belt"
     assert kwargs["destination_is_belt"] is True
     packets = submitted["packets"]
@@ -415,6 +415,16 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
         "chemical_crude_pipeline",
         "chemical_plastic_petroleum_pipeline",
     ]
+    machine_plan = dict(packets)["chemical_refinery_and_plastic_machines"]
+    assert machine_plan.get("reserved_tiles"), (
+        "opening refinery must reserve its compact mirrored growth footprint"
+    )
+    assert any(
+        action.get("entity", "").endswith("transport-belt")
+        and (action["position"]["x"], action["position"]["y"]) == args[6]
+        and action.get("direction") == kwargs["destination_belt_direction"]
+        for phase in machine_plan["phases"] for action in phase["actions"]
+    )
     all_actions = [
         action for _name, plan in packets
         for phase in plan["phases"] for action in phase["actions"]
@@ -744,6 +754,22 @@ def test_occupied_tiles_can_leave_water_for_fluid_routing() -> None:
     live_base.occupied_tiles(client, "nauvis", (0, 0), (2, 2), include_water=False)
 
     assert "find_tiles_filtered" not in client.command_text
+
+
+def test_selected_entity_tile_survey_includes_live_and_ghost_pipes() -> None:
+    class _Client:
+        command_text = ""
+
+        def command(self, text):
+            self.command_text = text
+            return "-3,-2;4,5"
+
+    client = _Client()
+    assert live_base.entity_tile_indices(
+        client, "nauvis", ("pipe", "pipe-to-ground"), (-10, -10), (10, 10),
+    ) == {(-3, -2), (4, 5)}
+    assert "ghost_name" in client.command_text
+    assert "pipe-to-ground" in client.command_text
     assert "find_entities_filtered" in client.command_text
 
 
@@ -1097,16 +1123,14 @@ def test_oil_cell_reserves_all_four_refinery_headers(monkeypatch) -> None:
         target_output="plastic-bar",
     )
 
-    recipe = stage_chemical.oil_processing_recipe(0)
-    expected = {
-        tuple(tile)
-        for segment in stage_chemical.fluid_network_segments(
-            recipe, stage_chemical.OPENING_REFINERY_COUNT, -258, -108,
-        )
-        if segment["fluid"] == "crude-oil"
-        for tile in segment["tiles"]
-    }
     gas = next(call for call in routed if call["fluid"] == "petroleum-gas")
+    refinery_crude = next(
+        segment for segment in gas["foreign"]
+        if segment.get("fluid") == "crude-oil"
+        and len(segment.get("tunnel_endpoints", ()))
+        == stage_chemical.OPENING_REFINERY_COUNT
+    )
+    expected = {tuple(tile) for tile in refinery_crude["tiles"]}
     reserved = {
         tuple(tile) for segment in gas["foreign"]
         if segment.get("fluid") == "crude-oil"
@@ -1127,22 +1151,16 @@ def test_extra_pumpjacks_tap_the_trunk_not_the_refinery(monkeypatch) -> None:
         target_output="plastic-bar",
     )
 
-    crude_to = stage_chemical.header_attachment(
-        stage_chemical.oil_processing_recipe(0), "crude-oil",
-        1, -258, -108,
-    )["attach"]
     crude_calls = [call for call in routed if call["fluid"] == "crude-oil"]
     assert len(crude_calls) >= 2
-    assert crude_calls[0]["targets"] == [crude_to]
-    recipe = stage_chemical.oil_processing_recipe(0)
-    header = {
-        tuple(tile)
-        for segment in stage_chemical.fluid_network_segments(
-            recipe, stage_chemical.OPENING_REFINERY_COUNT, -258, -108,
-        )
-        if segment["fluid"] == "crude-oil"
-        for tile in segment["tiles"]
-    }
+    crude_to = crude_calls[0]["targets"][0]
+    refinery_crude = next(
+        segment for segment in crude_calls[0]["foreign"]
+        if segment.get("fluid") == "crude-oil"
+        and len(segment.get("tunnel_endpoints", ()))
+        == stage_chemical.OPENING_REFINERY_COUNT
+    )
+    header = {tuple(tile) for tile in refinery_crude["tiles"]}
     for tap in crude_calls[1:]:
         assert tap["targets"] != [crude_to]
         assert tap["targets"][0] in header

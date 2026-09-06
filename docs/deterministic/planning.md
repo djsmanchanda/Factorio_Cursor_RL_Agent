@@ -27,6 +27,12 @@ These names describe intended responsibilities, not permission to build speculat
   recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
+- Generate fluid-machine layouts through rotation, reflection, and structural
+  expansion operators. Reject collisions, unreachable attachments, and fluid
+  mixing first; among legal candidates minimize the complete routed pipe bill,
+  pole bill, occupied land, and expansion seam. A compatible even-sized row may
+  grow as two opposing half-rows sharing one same-fluid connector seam instead
+  of extending indefinitely in one direction.
 - Base capacity on rates and live game facts, not machine counts alone.
 - Site persistent refineries by the complete transport bill: preserve legal
   input/output flow, minimize ore-belt plus plate-belt length, then prefer the

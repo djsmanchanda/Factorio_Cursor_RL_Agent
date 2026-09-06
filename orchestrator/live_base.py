@@ -1027,6 +1027,37 @@ def occupied_tiles(
     return tiles
 
 
+def entity_tile_indices(
+    client: RconClient, surface: str, names: Sequence[str],
+    min_point: Point, max_point: Point,
+) -> set[tuple[int, int]]:
+    """Read tile indices for selected live/ghost entities in one bounded area."""
+    if not names:
+        return set()
+    lua_names = "{" + ",".join("'" + name + "'" for name in names) + "}"
+    ghost_names = "{" + ",".join("['" + name + "']=true" for name in names) + "}"
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
+        "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
+        "for _,e in pairs(s.find_entities_filtered{name=" + lua_names + ",area=area}) do "
+        "out[#out+1]=math.floor(e.position.x)..','..math.floor(e.position.y) end;"
+        "local wanted=" + ghost_names + ";"
+        "for _,e in pairs(s.find_entities_filtered{type='entity-ghost',area=area}) do "
+        "if wanted[e.ghost_name] then out[#out+1]=math.floor(e.position.x)..','.."
+        "math.floor(e.position.y) end end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    result: set[tuple[int, int]] = set()
+    for pair in raw.split(";"):
+        if not pair:
+            continue
+        x, _, y = pair.partition(",")
+        result.add((int(x), int(y)))
+    return result
+
+
 
 def water_tiles(
     client: RconClient, surface: str, min_point: Point, max_point: Point,

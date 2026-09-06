@@ -50,6 +50,16 @@ Store reward components separately so the observatory and autoresearch can ident
 
 The active mining profile is `mining-throughput-cost-v1`. Its primary signal is the measured terminal-stage rate: reward rises linearly to the demanded rate, then remains positive at one-tenth that slope above demand. Material cost is normalized against the scenario's legal construction budget and scaled by useful output, so equal-output candidates prefer lower cost while an empty cheap plan cannot beat productive work. Ramp-up time is normalized against the episode limit, rewarding factories that reach sustained demand sooner. The relative scales keep small production gains more valuable than similarly small increases in material or time cost. Candidate geometry separately records route efficiency, poles, occupied land, and productive drill use as secondary evidence.
 
+The shared fluid-structure candidate generator exposes the eight square
+symmetries (four rotations and their reflections) and both long-row and
+opposing-paired-row structures. Hard validation rejects entity
+collisions, unreachable fluid attachments, contamination, and disconnected
+required power. A fluid curriculum can record routed pipe entities, poles,
+occupied land, and the cost of the retained expansion seam as decomposed
+geometry evidence, allowing training to discover compact shared-header refinery
+and chemical-plant structures without selecting from a catalog of complete user
+blueprints.
+
 Policy promotion remains lexicographic. Safety, completion, and sustained output come first; productive capacity, route efficiency, time, materials, footprint, and poles distinguish otherwise successful policies. An attempt that does not sustain its complete production objective remains stored as structured failure evidence, but it cannot update or parent the next policy checkpoint. A cohort with no successful attempts retains its parent generation. Existing immutable `mining-delivery-v1` checkpoints ignore newly added audit fields, while fresh checkpoints use the richer `mining-efficiency-v1` feature registry.
 
 The next production curriculum should compare **upgrade versus expand**, not only repair versus duplicate. It should randomize assembler tier and quality, speed/productivity/efficiency modules, beacon support, inserter and belt tier, available footprint, capital budget, energy price, recipe demand, and research state. Rewards should use measured output and total lifecycle cost so an assembler-3, quality upgrade, module change, or added parallel machine wins only when its throughput, resource efficiency, energy, and land tradeoff is better on held-out scenarios. Repeatable productivity and mining research must enter observations as live modifiers; research cost and the downstream savings it creates are separate actions and reward evidence rather than hard-coded upgrade rules.
