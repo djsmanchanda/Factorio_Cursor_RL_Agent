@@ -65,6 +65,22 @@ For long live-debugging campaigns, use the restart-safe
 [OpenCode campaign prompt](opencode_campaign_prompt.md) and its bounded
 last-ten-runs journal.
 
+For unattended campaigns, `tools/opencode_campaign_orchestrator.py` owns the
+isolated fresh-run lifecycle and starts a **new OpenCode session for each
+run**. It records a controller/log/logistic-inventory snapshot every two
+minutes in `docs/deterministic/opencode_campaign_observations.md`, uses that
+run's session for the checkpoint reviews, then requires its final comparison
+against the preceding documented run before one focused edit can trigger the
+next episode. It stops on no justified edit or the same terminal failure twice:
+
+```bash
+.venv/bin/python tools/opencode_campaign_orchestrator.py \
+  --technology mining-productivity-4 --max-runtime-hours 8
+```
+
+The controller uses the isolated server managers and the loopback Operations
+Console endpoint only; it does not modify the source save or training runtime.
+
 ## Mission evidence
 
 Every runner invocation declares a versioned bootstrap supply profile:
