@@ -50,6 +50,7 @@ class Config:
     campaign_manager: Path
     dashboard_url: str
     dry_run: bool
+    resume_active_run: bool
 
 
 @dataclass
@@ -324,12 +325,30 @@ def run_campaign(config: Config) -> int:
             return 0
         cycle = state.completed_cycles + 1
         resuming = state.active_cycle == cycle and state.active_session_id is not None
+        adopt_active_run = config.resume_active_run and not resuming
         if resuming:
             session_id = state.active_session_id
             _append(
                 config.observations,
                 f"## Cycle {cycle} — controller resumed ({_now()})\n\n"
                 "The persisted OpenCode session will continue this same run; no fresh lifecycle was issued.\n",
+            )
+            offset = (config.state_root / "logs/autonomous-run.log").stat().st_size if (config.state_root / "logs/autonomous-run.log").exists() else 0
+        elif adopt_active_run:
+            complete, _ = _latest_run(config.state_root / "logs/autonomous-run.log")
+            if complete:
+                raise RuntimeError("--resume-active-run found a completed run; refuse to replace its final comparison")
+            session_id, _ = _ask(config, _initial_prompt(config, cycle), None, sequence)
+            sequence += 1
+            if session_id is None:
+                raise RuntimeError("OpenCode did not return a session ID; refusing to create an untracked observer session")
+            state.active_cycle = cycle
+            state.active_session_id = session_id
+            _save_state(config.state_file, state)
+            _append(
+                config.observations,
+                f"## Cycle {cycle} — observer attached ({_now()})\n\n"
+                "The controller adopted the already-running isolated episode without a reset.\n",
             )
             offset = (config.state_root / "logs/autonomous-run.log").stat().st_size if (config.state_root / "logs/autonomous-run.log").exists() else 0
         else:
@@ -387,7 +406,7 @@ def _config(args: argparse.Namespace) -> Config:
         post_run_wait_seconds=args.post_run_wait_seconds, max_cycles=args.max_cycles,
         max_runtime_seconds=args.max_runtime_hours * 3600, model=args.model, variant=args.variant,
         opencode_bin=args.opencode_bin, python=args.python.resolve(), campaign_manager=args.campaign_manager.resolve(),
-        dashboard_url=args.dashboard_url, dry_run=args.dry_run,
+        dashboard_url=args.dashboard_url, dry_run=args.dry_run, resume_active_run=args.resume_active_run,
     )
 
 
@@ -410,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--campaign-manager", type=Path, default=REPO_ROOT / "scripts/manage_linux_deterministic_campaign.sh")
     parser.add_argument("--dashboard-url", default="http://127.0.0.1:9137/api/logistic-inventory")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--resume-active-run", action="store_true", help="Attach an observer to an already-running isolated episode without resetting it.")
     args = parser.parse_args(argv)
     try:
         return run_campaign(_config(args))

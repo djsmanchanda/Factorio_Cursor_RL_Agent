@@ -47,7 +47,7 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
         interval_seconds=120, post_run_wait_seconds=120, max_cycles=0, max_runtime_seconds=0,
         model="model", variant="xhigh", opencode_bin="opencode", python=tmp_path / "python",
         campaign_manager=tmp_path / "campaign", dashboard_url="http://127.0.0.1:9137/api/logistic-inventory",
-        dry_run=False,
+        dry_run=False, resume_active_run=False,
     )
     prompt = campaign._completion_prompt(config, 3)
     assert "compare this completed run" in prompt
