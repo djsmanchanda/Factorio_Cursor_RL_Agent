@@ -91,3 +91,11 @@ def test_runner_resume_omits_the_optional_fresh_episode_manifest() -> None:
     assert 'manifest_args=(--episode-manifest "$EPISODE_MANIFEST")' in source
     assert '"${manifest_args[@]}"' in source
     assert '--episode-manifest "$EPISODE_MANIFEST" \\\n      --reference-point' not in source
+
+
+def test_fresh_retries_the_same_runner_episode_before_failing() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert 'start_runner_with_retry()' in source
+    assert 'for attempt in 1 2 3; do' in source
+    assert 'runner start attempt $attempt failed; retrying same episode' in source

@@ -105,6 +105,20 @@ execute() {
   fi
 }
 
+start_runner_with_retry() {
+  local attempt
+  for attempt in 1 2 3; do
+    if execute "$RUNNER_MANAGER" start "${RUNNER_OPTIONS[@]}" \
+      --episode-manifest "$STATE_ROOT/episode/current.json"; then
+      return 0
+    fi
+    [[ "$DRY_RUN" == true ]] && return 1
+    echo "native Linux deterministic campaign: runner start attempt $attempt failed; retrying same episode" >&2
+    sleep 3
+  done
+  die "runner failed to start after three attempts; inspect $STATE_ROOT/logs/autonomous-run-console.log"
+}
+
 case "$ACTION" in
   fresh|cycle)
     [[ -n "$SOURCE_SAVE" ]] || die "fresh requires --source-save"
@@ -116,8 +130,7 @@ case "$ACTION" in
       "${SERVER_OPTIONS[@]}" --source-save "$SOURCE_SAVE" \
       --episode-id "$EPISODE_ID" --technology "$TECHNOLOGY"
     execute "$SERVER_MANAGER" start "${SERVER_OPTIONS[@]}"
-    execute "$RUNNER_MANAGER" start "${RUNNER_OPTIONS[@]}" \
-      --episode-manifest "$STATE_ROOT/episode/current.json"
+    start_runner_with_retry
     ;;
   stop)
     execute "$RUNNER_MANAGER" stop "${RUNNER_OPTIONS[@]}"
