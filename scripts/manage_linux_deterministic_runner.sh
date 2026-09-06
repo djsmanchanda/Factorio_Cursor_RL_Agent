@@ -79,6 +79,13 @@ RUNNER_UNIT="factorio-rl-deterministic-runner-${RCON_PORT}.service"
 
 cd "$REPO_ROOT"
 
+# User services do not inherit an activated shell virtualenv. Preserve an
+# explicit selected venv so managed imports match direct runner imports.
+VENV_ROOT=""
+if [[ -f "$(dirname "$PYTHON_BIN")/../pyvenv.cfg" ]]; then
+  VENV_ROOT="$(cd "$(dirname "$PYTHON_BIN")/.." && pwd)"
+fi
+
 runner_pid() {
   "$PYTHON_BIN" - "$PID_PATH" <<'PY'
 import sys
@@ -133,11 +140,19 @@ start_runner() {
   if [[ -n "$EPISODE_MANIFEST" ]]; then
     manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
   fi
+  local environment_args=()
+  if [[ -n "$VENV_ROOT" ]]; then
+    environment_args=(
+      "--setenv=VIRTUAL_ENV=$VENV_ROOT"
+      "--setenv=PATH=$VENV_ROOT/bin:$PATH"
+    )
+  fi
   systemd-run --user --quiet \
     --unit="$RUNNER_UNIT" --collect \
     --description="Factorio RL deterministic runner on RCON port $RCON_PORT" \
     --working-directory="$REPO_ROOT" \
     --setenv=PYTHONUNBUFFERED=1 \
+    "${environment_args[@]}" \
     --property="StandardOutput=append:$CONSOLE_LOG" \
     --property="StandardError=append:$CONSOLE_LOG" \
     "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
