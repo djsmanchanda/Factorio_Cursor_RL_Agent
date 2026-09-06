@@ -1409,6 +1409,37 @@ def test_link_corridor_tiles_collects_only_pipe_tiles() -> None:
     assert stage_chemical._link_corridor_tiles(links) == {(-298, -58), (-291, -58)}
 
 
+def test_oil_cell_power_reserve_tiles_covers_machine_footprints() -> None:
+    """2026-09-06: power hops blocked both refinery-row pipe continuity tiles.
+
+    Link corridors plus growth reservations omitted future machine-row pipes,
+    so bridges landed at (-310.5,-37.5) and (-310.5,-43.5) before the later
+    refinery packet could ghost them.  Every machine footprint must be held
+    for the bridge, including each pipe along the shared column.
+    """
+    machine = {"phases": [{"name": "row", "actions": [
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": -310.5, "y": -37.5}},
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": -310.5, "y": -43.5}},
+        {"action_type": "place_ghost", "entity": "oil-refinery",
+         "position": {"x": -286.0, "y": -26.0}},
+    ]}], "reserved_tiles": [[-280, -30]]}
+    links = [("chemical_crude_pipeline", {"phases": [{"name": "link", "actions": [
+        {"action_type": "place_ghost", "entity": "pipe",
+         "position": {"x": -291.0, "y": -58.0}},
+    ]}]})]
+    reserved = stage_chemical._oil_cell_power_reserve_tiles([machine], links)
+    assert (-311, -38) in reserved  # refinery-row pipe tile
+    assert (-311, -44) in reserved  # shared-column pipe continuity tile
+    assert (-291, -58) in reserved  # link corridor tile
+    assert (-280, -30) in reserved  # growth reservation tile
+    assert any(
+        tile != (-311, -38) and tile != (-291, -58) and tile != (-280, -30)
+        for tile in reserved
+    )  # the refinery body itself, not just the named tiles
+
+
 def test_oil_power_connection_reserves_the_pipe_corridor(monkeypatch) -> None:
     """2026-09-05: the backbone power bridge chained through the just-routed
     crude corridor and the pipeline died on its pole. The corridor rides

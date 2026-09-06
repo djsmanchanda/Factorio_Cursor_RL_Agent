@@ -509,6 +509,29 @@ def _link_corridor_tiles(links: list[tuple[str, dict]]) -> set[tuple[int, int]]:
     return tiles
 
 
+def _oil_cell_power_reserve_tiles(
+    plans: list[dict], links: list[tuple[str, dict]],
+) -> set[tuple[int, int]]:
+    """Tiles mid-pass power chains must avoid while a district is in flight.
+
+    Power bridging runs right after the backbone packet while machine rows
+    and pipelines submit last. Link corridors and growth reservations were
+    already reserved, but the machine rows' own future footprint -- pipes
+    included -- was not: a chain hop landed on a refinery-row pipe tile
+    (live, 2026-09-06: the oil district died on a power-bridge pole at
+    -310.5,-37.5) and the later packet failed terminal. Reserve the complete
+    machine footprint so chains route around the district they connect.
+    """
+    return (
+        _link_corridor_tiles(links)
+        | planned_footprint_tiles(_merge(*plans))
+        | {
+            tuple(tile) for plan in plans
+            for tile in plan.get("reserved_tiles", ())
+        }
+    )
+
+
 def _connect_oil_cell_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     plans: list[dict], emit: Callable[[str], None], *,
@@ -926,7 +949,7 @@ def _extend_sulfur_stage(
         after_packet=lambda name: (
             _connect_oil_cell_power(
                 client, bridge, surface, force, [sulfur], emit,
-                reserved_tiles=_link_corridor_tiles(links),
+                reserved_tiles=_oil_cell_power_reserve_tiles([sulfur], links),
             )
             if name == "chemical_sulfur_power" else None
         ),
@@ -1669,13 +1692,7 @@ def ensure_oil_cell(
         after_packet=lambda name: (
             _connect_oil_cell_power(
                 client, bridge, surface, force, plans, emit,
-                reserved_tiles=(
-                    _link_corridor_tiles(links)
-                    | {
-                        tuple(tile) for plan in plans
-                        for tile in plan.get("reserved_tiles", ())
-                    }
-                ),
+                reserved_tiles=_oil_cell_power_reserve_tiles(plans, links),
             )
             if name == "chemical_power_backbone" else None
         ),
