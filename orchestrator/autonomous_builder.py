@@ -3548,6 +3548,27 @@ def _recover_partial_conversion_power(
         emit(f"  CONVERSION RECOVERY: power bridge unavailable: {error}")
 
 
+def _use_presteel_starter_power(plan: dict) -> dict:
+    """Keep the first steel furnace's power bill outside its own dependency.
+
+    The normal conversion scaffold uses a substation and medium poles.  Both
+    require steel, so making them material-funded made the first steel furnace
+    wait on the steel it was supposed to create.  A one-furnace starter fits
+    inside the existing low-tier pole geometry; retain that geometry but use
+    ordinary small poles, which remain normal construction ghosts and are
+    paid for through the material ledger.
+    """
+    replaced = 0
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("entity") == "medium-electric-pole":
+                action["entity"] = "small-electric-pole"
+                replaced += 1
+    if replaced == 0:
+        raise StuckError("steel starter layout has no local power anchors")
+    return plan
+
+
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
@@ -3591,6 +3612,10 @@ def build_conversion_stage(
         feed_style = "sideload"
     if not full_bus_ingredients.issubset(direct_sideload_ingredients):
         raise ValueError("full-bus ingredients must be direct sideload ingredients")
+    steel_starter = (
+        recipe == "steel-plate"
+        and machine_count == STEEL_BASELINE_FURNACES
+    )
     plan = planner.generate_line_layout(
         recipe, machine_count, ox, oy,
         belt_type=belt_type, inserter_type=inserter_type,
@@ -3602,7 +3627,7 @@ def build_conversion_stage(
         plan, recipe, machine_count, ox, oy, inserter_type,
         direct_sideload_ingredients, full_bus_ingredients,
     )
-    plan = strip_local_power(plan, remove_substations=False)
+    plan = strip_local_power(plan, remove_substations=steel_starter)
     output_position = (
         _side_sample_plate_output(
             plan, (ox, oy), machine_count, belt_type, flow_direction,
@@ -3615,6 +3640,8 @@ def build_conversion_stage(
             if action.get("entity") == "steel-chest"
         )
     )
+    if steel_starter:
+        plan = _use_presteel_starter_power(plan)
     _publish_output_chest(plan)
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
@@ -3629,10 +3656,11 @@ def build_conversion_stage(
         for phase in plan["phases"] for action in phase["actions"]
         if action["entity"] == machine
     ]
+    power_anchor = "small-electric-pole" if steel_starter else "substation"
     substation_position = next(
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
-        if action["entity"] == "substation"
+        if action["entity"] == power_anchor
     )
     plan["surface"], plan["force"] = surface, force
     try:
@@ -9577,6 +9605,7 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
             "goal_item": goal_item,
             "selected_task": signature[0],
             "progress_percent": signature[1],
+            "unbacked_draws": sorted(UNBACKED_DRAWS),
         },
     )
 

@@ -867,7 +867,7 @@ def _searched_bridge_hops(
 
 def _hookup_pole_position(
     client: RconClient, surface: str, consumer: Point,
-    blocked: set[tuple[int, int]], toward: Point,
+    blocked: set[tuple[int, int]], toward: Point, pole_name: str,
 ) -> Point | None:
     """Where to park the pole that will actually SUPPLY an unwired consumer.
 
@@ -878,7 +878,7 @@ def _hookup_pole_position(
     """
     entity = live_base.entity_at(client, surface, consumer)
     footprint = ENTITY_FOOTPRINTS.get(entity["name"], 1) if entity else 1
-    reach = POLE_SPECS["medium-electric-pole"]["supply"] + footprint / 2
+    reach = POLE_SPECS[pole_name]["supply"] + footprint / 2
     span = math.ceil(reach)
     candidates = [
         spot
@@ -951,6 +951,11 @@ def extend_power(
         target_name, POLE_SPECS["medium-electric-pole"],
     )["supply"]
     consumer = live_base.entity_at(client, surface, near_position)
+    bridge_pole = (
+        "small-electric-pole"
+        if consumer is not None and consumer.get("name") == "small-electric-pole"
+        else "medium-electric-pole"
+    )
     consumer_size = ENTITY_FOOTPRINTS.get(consumer["name"], 1) if consumer else 1
     if (
         own_network is None
@@ -968,19 +973,19 @@ def extend_power(
     else:
         emit(f"  power gap found: network {own_network} at {near_position} carries no "
              f"generation -- bridging to {target_name} at {target_position}")
-    # The first hop is limited by the shorter endpoint reach (small poles
-    # reach only 7.5 tiles). Medium-pole links otherwise use their full
-    # nine-tile wire reach; supply-area width is unrelated to this distance.
+    # A stranded low-tier pole must stay low-tier while it is being bridged:
+    # the first steel starter cannot require the medium poles that need its
+    # own output. Other consumers retain the normal medium-pole bridge.
     target_wire = POLE_SPECS.get(
         target_name, POLE_SPECS["medium-electric-pole"],
     )["wire"]
-    endpoint_wire = POLE_SPECS["medium-electric-pole"]["wire"]
+    endpoint_wire = POLE_SPECS[bridge_pole]["wire"]
     if own_network is not None and consumer is not None:
         endpoint_wire = POLE_SPECS.get(
             consumer["name"], POLE_SPECS["medium-electric-pole"],
         )["wire"]
     spacing = min(
-        POLE_SPECS["medium-electric-pole"]["wire"],
+        POLE_SPECS[bridge_pole]["wire"],
         target_wire,
         endpoint_wire,
     )
@@ -1001,6 +1006,7 @@ def extend_power(
         # to stop on a free tile whose supply area covers it.
         endpoint = _hookup_pole_position(
             client, surface, near_position, hookup_blocked, target_position,
+            bridge_pole,
         )
         if endpoint is None:
             raise StuckError(
@@ -1020,7 +1026,7 @@ def extend_power(
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")
     chain_positions = [target_position, *hops]
-    chain_names = [target_name, *(["medium-electric-pole"] * len(hops))]
+    chain_names = [target_name, *([bridge_pole] * len(hops))]
     if own_network is not None:
         chain_positions.append(endpoint)
         chain_names.append(
@@ -1040,7 +1046,7 @@ def extend_power(
                 "tile wire reach"
             )
     actions = [
-        {"action_type": "place_ghost", "entity": "medium-electric-pole", "position": {"x": x, "y": y}}
+        {"action_type": "place_ghost", "entity": bridge_pole, "position": {"x": x, "y": y}}
         for x, y in hops
     ]
     plan = {"phases": [{"name": "power_bridge", "actions": actions}], "surface": surface, "force": force}
@@ -1048,7 +1054,7 @@ def extend_power(
         _submit(client, bridge, surface, plan, "power_bridge", emit)
         _await_bot_built_infrastructure(
             client, surface,
-            tuple(("medium-electric-pole", position) for position in hops),
+            tuple((bridge_pole, position) for position in hops),
             emit,
         )
     except StuckError as error:

@@ -11,6 +11,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
+from orchestrator.material_reservations import plan_material_bill  # noqa: E402
+from planners.infrastructure import strip_local_power  # noqa: E402
+from planners.local_layout_planner import LocalLayoutPlanner  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -208,6 +211,25 @@ def test_one_furnace_steel_starter_uses_the_opening_iron_line(monkeypatch):
 
     assert expansions == []
     assert builds[0]["machine_count"] == 1
+
+
+def test_steel_starter_power_uses_only_presteel_poles() -> None:
+    """Its construction bill must not depend on the steel it starts."""
+    plan = LocalLayoutPlanner().generate_line_layout(
+        "steel-plate", 1, 0, 0,
+        belt_type="transport-belt", inserter_type="inserter",
+        feed_style="chest", terminal_collector=True,
+    )
+    plan = strip_local_power(plan, remove_substations=True)
+    builder._side_sample_plate_output(
+        plan, (0, 0), 1, "transport-belt", tap_inserter_type="inserter",
+    )
+
+    bill = plan_material_bill(builder._use_presteel_starter_power(plan))
+
+    assert bill.get("small-electric-pole") == 3
+    assert "medium-electric-pole" not in bill
+    assert "substation" not in bill
 
 
 def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):

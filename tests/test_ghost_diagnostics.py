@@ -690,6 +690,41 @@ def test_power_bridge_skips_consumer_on_medium_pole_supply_boundary(monkeypatch)
     )
 
 
+def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None:
+    """Connecting the first steel starter must not demand medium-pole steel."""
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submitted: list[dict] = []
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: 7)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((0.5, 0.5), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(
+        ss.live_base, "entity_at",
+        lambda *_a: {"name": "small-electric-pole"},
+    )
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+    )
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (14.5, 0.5),
+        lambda _message: None,
+    )
+    assert {
+        action["entity"]
+        for action in submitted[0]["phases"][0]["actions"]
+    } == {"small-electric-pole"}
+
+
 def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -> None:
     """Emergency power may not consume a belt tile planned by an expansion."""
     from orchestrator import autonomous_builder as builder_module
