@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 import time
@@ -11,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 THREAD = "01a07686-c131-7d93-81f5-bdb2a9e4f426"
+CODEX = Path.home() / ".local/share/mise/installs/codex/latest/bin/codex"
 
 
 def run(command: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
@@ -21,6 +21,35 @@ def report_path() -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
     sha = run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
     return ROOT / "docs/deterministic/campaign_runs" / f"{stamp}_{sha}.md"
+
+
+def transcript(report: Path, name: str, result: subprocess.CompletedProcess[str]) -> str:
+    """Persist every agent handoff, including failures, beside its run report."""
+    output = result.stdout + result.stderr
+    report.with_suffix(name).write_text(output, encoding="utf-8")
+    return output
+
+
+def revision() -> str:
+    return run(["git", "rev-parse", "HEAD"]).stdout.strip()
+
+
+def codefix(report: Path, thread: str) -> bool:
+    """Queue one focused fix and wait for its commit without interrupting it."""
+    prompt = f"""Read the completed observer report {report}. Implement exactly one focused, reusable fix backed by its evidence; add focused tests, commit the change, and end your response with `continue`, commit ID, validation, and the fresh-run command. Preserve unrelated worktree changes. Do not mutate a live Factorio server."""
+    before = revision()
+    queued = run([str(CODEX), "queue", "--thread", thread, "--message", prompt])
+    transcript(report, ".codefix-queue.txt", queued)
+    if queued.returncode:
+        print(f"Code-fix queue failed (exit={queued.returncode}).", file=sys.stderr)
+        return False
+    for minute in range(120):
+        if revision() != before:
+            print(f"Code-fix task committed a fix for {report.name}.")
+            return True
+        time.sleep(60)
+    print(f"Code-fix task did not commit within 120 minutes for {report.name}.", file=sys.stderr)
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -46,19 +75,18 @@ def main(argv: list[str] | None = None) -> int:
             "opencode", "run", "--dir", str(ROOT), "--format", "json", "--model",
             "opencode-go/muse-spark-1.3-contributor", "--variant", "xhigh", "--auto", prompt,
         ], timeout=4 * 3600)
-        (report.with_suffix(".opencode.jsonl")).write_text(observed.stdout + observed.stderr, encoding="utf-8")
+        transcript(report, ".opencode.jsonl", observed)
         if observed.returncode:
-            print(f"OpenCode observer failed; report retained: {report}", file=sys.stderr)
-            return observed.returncode
-        fix_prompt = f"""Read the completed observer report {report}. Implement exactly one focused, reusable fix backed by its evidence; add focused tests, commit the change, and end your response with `continue`, commit ID, validation, and the fresh-run command. Preserve unrelated worktree changes. Do not mutate a live Factorio server."""
-        fixed = run([
-            "codex", "exec", "resume", args.codefix_thread, fix_prompt,
-            "--output-last-message", str(report.with_suffix(".codefix.txt")),
-            "--json",
-        ], timeout=2 * 3600)
-        if fixed.returncode or "continue" not in (fixed.stdout + fixed.stderr).lower():
-            print(f"Code-fix handoff did not continue; report retained: {report}", file=sys.stderr)
-            return fixed.returncode or 1
+            print(f"OpenCode observer failed; retrying fresh run after retained report: {report}", file=sys.stderr)
+            time.sleep(60)
+            continue
+        if not codefix(report, args.codefix_thread):
+            print(f"Code-fix handoff exhausted retries; retaining report and retrying it before any new run.", file=sys.stderr)
+            time.sleep(300)
+            while not codefix(report, args.codefix_thread):
+                print(f"Code-fix handoff still unavailable; keeping this run queued.", file=sys.stderr)
+                time.sleep(300)
+            continue
     return 0
 
 
