@@ -225,10 +225,35 @@ def test_steel_starter_power_uses_only_presteel_poles() -> None:
         plan, (0, 0), 1, "transport-belt", tap_inserter_type="inserter",
     )
 
-    bill = plan_material_bill(builder._use_presteel_starter_power(plan))
+    plan, anchor = builder._use_presteel_starter_power(plan)
+    bill = plan_material_bill(plan)
 
+    assert anchor == "small-electric-pole"
     assert bill.get("small-electric-pole") == 3
     assert "medium-electric-pole" not in bill
+    assert "substation" not in bill
+
+
+def test_steel_starter_uses_fully_stocked_medium_poles_without_wood() -> None:
+    """Paid-for medium anchors avoid an impossible wood-gated pole batch."""
+    plan = LocalLayoutPlanner().generate_line_layout(
+        "steel-plate", 1, 0, 0,
+        belt_type="transport-belt", inserter_type="inserter",
+        feed_style="chest", terminal_collector=True,
+    )
+    plan = strip_local_power(plan, remove_substations=True)
+    builder._side_sample_plate_output(
+        plan, (0, 0), 1, "transport-belt", tap_inserter_type="inserter",
+    )
+
+    plan, anchor = builder._use_presteel_starter_power(
+        plan, {"medium-electric-pole": 3, "wood": 0},
+    )
+    bill = plan_material_bill(plan)
+
+    assert anchor == "medium-electric-pole"
+    assert bill.get("medium-electric-pole") == 3
+    assert "small-electric-pole" not in bill
     assert "substation" not in bill
 
 

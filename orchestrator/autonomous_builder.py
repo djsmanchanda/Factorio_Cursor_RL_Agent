@@ -3556,25 +3556,32 @@ def _recover_partial_conversion_power(
         emit(f"  CONVERSION RECOVERY: power bridge unavailable: {error}")
 
 
-def _use_presteel_starter_power(plan: dict) -> dict:
+def _use_presteel_starter_power(
+    plan: dict, stock: Mapping[str, int] | None = None,
+) -> tuple[dict, str]:
     """Keep the first steel furnace's power bill outside its own dependency.
 
     The normal conversion scaffold uses a substation and medium poles.  Both
     require steel, so making them material-funded made the first steel furnace
-    wait on the steel it was supposed to create.  A one-furnace starter fits
-    inside the existing low-tier pole geometry; retain that geometry but use
-    ordinary small poles, which remain normal construction ghosts and are
-    paid for through the material ledger.
+    wait on the steel it was supposed to create. Already-stocked medium poles
+    are not cyclic, however, and avoid the small-pole recipe's unproducible wood
+    leaf. Retain them only when stock funds every anchor; otherwise use an
+    all-small-pole plan paid for through the material ledger.
     """
-    replaced = 0
+    medium_actions = [
+        action
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "medium-electric-pole"
+    ]
+    if not medium_actions:
+        raise StuckError("steel starter layout has no local power anchors")
+    if int((stock or {}).get("medium-electric-pole", 0)) >= len(medium_actions):
+        return plan, "medium-electric-pole"
     for phase in plan["phases"]:
         for action in phase["actions"]:
             if action.get("entity") == "medium-electric-pole":
                 action["entity"] = "small-electric-pole"
-                replaced += 1
-    if replaced == 0:
-        raise StuckError("steel starter layout has no local power anchors")
-    return plan
+    return plan, "small-electric-pole"
 
 
 def build_conversion_stage(
@@ -3648,8 +3655,16 @@ def build_conversion_stage(
             if action.get("entity") == "steel-chest"
         )
     )
+    power_anchor = "substation"
     if steel_starter:
-        plan = _use_presteel_starter_power(plan)
+        plan, power_anchor = _use_presteel_starter_power(
+            plan, _transferable_or_available_stock(client, surface, force),
+        )
+        if power_anchor == "medium-electric-pole":
+            emit(
+                "  STEEL STARTER POWER: existing medium-pole stock funds all "
+                "local anchors; no wood-dependent small-pole batch is needed"
+            )
     _publish_output_chest(plan)
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
@@ -3664,7 +3679,6 @@ def build_conversion_stage(
         for phase in plan["phases"] for action in phase["actions"]
         if action["entity"] == machine
     ]
-    power_anchor = "small-electric-pole" if steel_starter else "substation"
     substation_position = next(
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
