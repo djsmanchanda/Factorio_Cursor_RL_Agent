@@ -962,7 +962,11 @@ def extend_power(
         and max(
             abs(target_position[0] - near_position[0]),
             abs(target_position[1] - near_position[1]),
-        ) <= target_supply + consumer_size / 2
+        # A consumer exactly touching the edge of a pole's nominal supply
+        # square can still report `no_power` (notably a 4x4 roboport). Treat
+        # the boundary as needing a real hookup instead of accepting a bridge
+        # that will never charge.
+        ) < target_supply + consumer_size / 2
     ):
         emit(f"  {near_position} is already inside the supply area of the powered "
              f"{target_name} at {target_position}; waiting for it to charge")

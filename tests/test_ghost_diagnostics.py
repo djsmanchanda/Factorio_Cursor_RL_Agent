@@ -670,8 +670,8 @@ def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) 
     )
 
 
-def test_power_bridge_skips_consumer_on_medium_pole_supply_boundary(monkeypatch) -> None:
-    """The seven-tile medium-pole supply width needs no extra bridge pole."""
+def test_power_bridge_skips_consumer_inside_medium_pole_supply_area(monkeypatch) -> None:
+    """A consumer clearly inside the seven-tile supply width needs no pole."""
     from orchestrator import stage_services as ss
 
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
@@ -685,9 +685,38 @@ def test_power_bridge_skips_consumer_on_medium_pole_supply_boundary(monkeypatch)
     )
 
     assert ss.extend_power(
-        object(), object(), "nauvis", "player", (4.0, 0.0),
+        object(), object(), "nauvis", "player", (3.5, 0.0),
         lambda _message: None,
     )
+
+
+def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
+    """Boundary contact is not enough to charge the remote coverage port."""
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submitted: list[dict] = []
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((0.0, 0.0), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: {"name": "roboport"})
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+    )
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (0.0, 5.5),
+        lambda _message: None,
+    )
+    assert submitted[0]["phases"][0]["actions"]
 
 
 def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None:
