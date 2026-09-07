@@ -34,8 +34,28 @@ def revision() -> str:
     return run(["git", "rev-parse", "HEAD"]).stdout.strip()
 
 
+def report_revision(report: Path) -> str | None:
+    """Return the abbreviated source revision embedded in a per-run filename."""
+    candidate = report.stem.rsplit("_", 1)[-1]
+    if len(candidate) >= 7 and all(char in "0123456789abcdef" for char in candidate):
+        return candidate
+    return None
+
+
+def report_has_fix_commit(report: Path) -> bool:
+    """A descendant commit is the durable continuation signal for this run."""
+    source = report_revision(report)
+    current = revision()
+    if source is None or current.startswith(source):
+        return False
+    return run(["git", "merge-base", "--is-ancestor", source, current]).returncode == 0
+
+
 def codefix(report: Path, thread: str) -> bool:
-    """Resume the focused-fix task and require either its handoff or a commit."""
+    """Resume the focused-fix task and accept its descendant commit as continue."""
+    if report_has_fix_commit(report):
+        print(f"Code-fix commit already recorded for {report.name}; revision={revision()[:12]}.")
+        return True
     prompt = f"""Read the completed observer report {report}. Implement exactly one focused, reusable fix backed by its evidence; add focused tests, commit the change, and end your response with `continue`, commit ID, validation, and the fresh-run command. Preserve unrelated worktree changes. Do not mutate a live Factorio server."""
     before = revision()
     fixed = run([
