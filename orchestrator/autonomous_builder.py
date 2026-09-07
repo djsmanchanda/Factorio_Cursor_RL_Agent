@@ -7780,6 +7780,7 @@ def _serve_mall_task(
         return
     emit(priorities.describe(task, tick))
     loan_revision_before = _BOOTSTRAP_LOAN_PROGRESS_REVISION
+    queued_before = dict(mall_targets)
     try:
         ready, output = _ensure_mall_item(
             client, bridge, surface, force, item, target, mall_targets,
@@ -7866,6 +7867,15 @@ def _serve_mall_task(
         except Exception:
             pass
         actual_prerequisites = _queued_mall_prerequisites(item)
+        # A producer build can discover construction material outside its
+        # recipe closure (the pre-steel starter's local small poles, for
+        # example).  Those targets were not known when this task was picked,
+        # but are just as binding as a declared cell bill: retrying the parent
+        # first would otherwise keep its new shortage at priority zero.
+        actual_prerequisites.update(
+            other for other, queued_target in mall_targets.items()
+            if other != item and queued_target > queued_before.get(other, 0)
+        )
         other_pending = {
             other for other, target in mall_targets.items()
             if (

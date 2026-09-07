@@ -238,6 +238,47 @@ def test_parent_defers_and_promotes_prerequisite_before_cell_delivery(
     assert events[1][0:3] == ("defer", "passive-provider-chest", 500)
 
 
+def test_parent_defers_behind_newly_discovered_construction_material(
+    monkeypatch,
+) -> None:
+    """A starter build's non-recipe material must run before its retry."""
+    task = SimpleNamespace(item="steel-plate", target=4)
+    targets = {"steel-plate": 4}
+    events: list[tuple] = []
+
+    class Priorities:
+        def describe(self, *_a):
+            return "steel"
+
+        def promote(self, item, target, tick):
+            events.append(("promote", item, target, tick))
+
+        def defer(self, item, tick, reason, **_kwargs):
+            events.append(("defer", item, tick, reason))
+
+    def ensure(*_args, **_kwargs):
+        targets["small-electric-pole"] = 3
+        return False, None
+
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
+    monkeypatch.setattr(builder, "_ensure_mall_item", ensure)
+    monkeypatch.setattr(builder, "_queued_mall_prerequisites", lambda *_a: set())
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 500)
+    monkeypatch.setattr(
+        builder, "_deliver_cell_ingredients",
+        lambda *_a, **_k: pytest.fail("parent retried before its new material"),
+    )
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 100, targets,
+        Priorities(), (0.0, 0.0), lambda _message: None,
+    )
+
+    assert events[0] == ("promote", "small-electric-pole", 3, 500)
+    assert events[1][0:3] == ("defer", "steel-plate", 500)
+
+
 def test_unrelated_queued_batches_are_not_reported_as_prerequisites(
     monkeypatch,
 ) -> None:
