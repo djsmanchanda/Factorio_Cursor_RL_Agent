@@ -8402,6 +8402,18 @@ def _prep_plate_foundation(
                 _reconcile_submitted_bootstrap_replacement(
                     client, bridge, surface, force, lifecycle, emit,
                 )
+            except ProductionPrerequisiteDeferred as deferred:
+                # Reconciliation deliberately advances ghost-built coverage
+                # one powered roboport wave at a time. That typed deferral is
+                # construction in progress, not an episode failure; retain the
+                # persisted district and retry it after the normal bounded poll.
+                emit(
+                    f"  PLATE FOUNDATION CONSTRUCTING: {plate} submitted "
+                    f"replacement waits: {deferred}; holding startup"
+                )
+                consume_wait(f"submitted_{plate}_foundation")
+                time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+                return True
             except MaterialShortage as shortage:
                 # A submitted district owns its exact ghosts, but it does not
                 # own construction stock that another project may have

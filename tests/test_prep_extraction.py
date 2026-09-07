@@ -686,6 +686,48 @@ def test_submitted_foundation_shortage_is_queued_for_the_mall(
     assert any("queued for the mall" in message for message in messages)
 
 
+def test_submitted_foundation_coverage_wave_holds_startup(monkeypatch) -> None:
+    """A bot-built coverage wave is retried, not raised out of reconciliation."""
+    state = type("State", (), {
+        "recipe": "iron-plate",
+        "lifecycle_state": "provisioning",
+        "replacement_submitted": True,
+    })()
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "direct_plate_starter", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_bootstrap_state",
+        lambda plate: state if plate == "iron-plate" else None,
+    )
+    deferred = autonomous_builder.ProductionPrerequisiteDeferred(
+        "construction coverage waits for bot-built roboport wave (63.0, -110.0)",
+        code="roboport_coverage_construction_wait", state="constructing",
+        details={
+            "purpose": "construction", "target": [82.0, -79.0],
+            "wave": [[63.0, -110.0]],
+        },
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_reconcile_submitted_bootstrap_replacement",
+        lambda *_a: (_ for _ in ()).throw(deferred),
+    )
+    waits: list[float] = []
+    wait_keys: list[str] = []
+    monkeypatch.setattr(autonomous_builder.time, "sleep", waits.append)
+    monkeypatch.setattr(autonomous_builder, "consume_wait", wait_keys.append)
+    messages: list[str] = []
+
+    assert autonomous_builder._prep_plate_foundation(
+        object(), object(), "nauvis", "player", set(), {}, {}, (0.0, 0.0),
+        messages.append, {}, {},
+    )
+
+    assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
+    assert wait_keys == ["submitted_iron-plate_foundation"]
+    assert any("(63.0, -110.0); holding startup" in message for message in messages)
+
+
 def test_plate_shortage_stops_later_plate_from_spending_belts() -> None:
     """The first blocked plate must not let the other baseline plate submit."""
     assert "plate in pending_plate_materials" in _LOOP
