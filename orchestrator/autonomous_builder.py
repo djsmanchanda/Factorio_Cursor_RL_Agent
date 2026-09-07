@@ -7275,6 +7275,37 @@ def _rationed_mall_batch(
     return True
 
 
+def _start_unproduced_rationed_shortage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    shortage: MaterialShortage, reference_point: Point, emit: Callable[[str], None],
+) -> bool:
+    """Open one finite producer for a conversion bill before yielding its parent.
+
+    Conversion stages discover their material bill during submission, after
+    core-mall preparation may already have queued the same target.  In that
+    shape a later priority pass cannot tell the target belongs to the blocked
+    conversion, so start its first unproduced rationed prerequisite now.  The
+    normal loan allocator still owns capacity, material checks, and restoration.
+    """
+    stock = _transferable_or_available_stock(client, surface, force)
+    for item, target in sorted(shortage.required.items()):
+        if item not in RATIONED_MALL_BATCH_ITEMS:
+            continue
+        if int(stock.get(item, 0)) >= target:
+            continue
+        if _production_started(client, surface, force, item):
+            continue
+        if _rationed_mall_batch(
+            client, bridge, surface, force, item, target, reference_point, emit,
+        ):
+            emit(
+                f"  CONVERSION MATERIAL BATCH: {shortage.stage} started "
+                f"{item}={target} before retrying its parent"
+            )
+            return True
+    return False
+
+
 def _ensure_mall_item(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, mall_targets: dict[str, int],
@@ -7305,6 +7336,9 @@ def _ensure_mall_item(
             return False, None
         except MaterialShortage as shortage:
             add_demands(mall_targets, shortage)
+            _start_unproduced_rationed_shortage(
+                client, bridge, surface, force, shortage, reference_point, emit,
+            )
             emit(
                 f"  STEEL STARTER DEMAND: {shortage.stage} needs "
                 + ", ".join(

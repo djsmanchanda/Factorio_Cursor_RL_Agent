@@ -740,6 +740,43 @@ def test_steel_target_bypasses_mall_reservation_policy(monkeypatch) -> None:
     assert messages[0].startswith("--- steel starter:")
 
 
+def test_steel_conversion_shortage_starts_small_pole_batch(monkeypatch) -> None:
+    """A conversion bill cannot leave its unproduced small poles queued idle."""
+    targets: dict[str, int] = {}
+    batches: list[tuple[str, int]] = []
+    messages: list[str] = []
+
+    def raise_conversion_shortage(*_args, **_kwargs):
+        raise MaterialShortage(
+            "conversion_steel-plate",
+            {"inserter": 20, "small-electric-pole": 3}, {},
+        )
+
+    monkeypatch.setattr(builder, "ensure_produced", raise_conversion_shortage)
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda *_a, **_k: _a[3] == "inserter",
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch",
+        lambda _c, _b, _s, _f, item, target, *_a, **_k:
+        batches.append((item, target)) or True,
+    )
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "steel-plate", 4, targets,
+        (0.0, 0.0), messages.append, background=False,
+    )
+
+    assert not ready and output is None
+    assert targets == {"inserter": 20, "small-electric-pole": 3}
+    assert batches == [("small-electric-pole", 3)]
+    assert any("CONVERSION MATERIAL BATCH" in message for message in messages)
+
+
 def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     monkeypatch,
 ) -> None:
