@@ -35,20 +35,24 @@ def revision() -> str:
 
 
 def codefix(report: Path, thread: str) -> bool:
-    """Queue one focused fix and wait for its commit without interrupting it."""
+    """Resume the focused-fix task and require either its handoff or a commit."""
     prompt = f"""Read the completed observer report {report}. Implement exactly one focused, reusable fix backed by its evidence; add focused tests, commit the change, and end your response with `continue`, commit ID, validation, and the fresh-run command. Preserve unrelated worktree changes. Do not mutate a live Factorio server."""
     before = revision()
-    queued = run([str(CODEX), "queue", "--thread", thread, "--message", prompt])
-    transcript(report, ".codefix-queue.txt", queued)
-    if queued.returncode:
-        print(f"Code-fix queue failed (exit={queued.returncode}).", file=sys.stderr)
-        return False
-    for minute in range(120):
-        if revision() != before:
-            print(f"Code-fix task committed a fix for {report.name}.")
-            return True
-        time.sleep(60)
-    print(f"Code-fix task did not commit within 120 minutes for {report.name}.", file=sys.stderr)
+    fixed = run([
+        str(CODEX), "exec", "resume", "--json",
+        "--output-last-message", str(report.with_suffix(".codefix-last.txt")),
+        thread, prompt,
+    ], timeout=2 * 3600)
+    output = transcript(report, ".codefix.jsonl", fixed)
+    after = revision()
+    if fixed.returncode == 0 and (after != before or "continue" in output.lower()):
+        print(f"Code-fix handoff completed for {report.name}; revision={after[:12]}.")
+        return True
+    print(
+        f"Code-fix execution did not complete (exit={fixed.returncode}, "
+        f"revision_changed={after != before}); retaining {report.name}.",
+        file=sys.stderr,
+    )
     return False
 
 
