@@ -1,0 +1,51 @@
+<!-- Path: tools/inventory.html -->
+<!-- Purpose: Chart retained per-run logistic inventory observations. -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inventory history · Factorio Operations Console</title>
+  <link rel="stylesheet" href="/inventory.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">LOCAL · NAUVIS · PLAYER FORCE</p>
+      <h1>Inventory history</h1>
+      <p class="subtitle">Raw logistic-network observations, split at every deterministic runner start.</p>
+    </div>
+    <a class="console-link" href="/">Operations Console</a>
+  </header>
+
+  <main>
+    <section class="panel controls" aria-label="Chart controls">
+      <label class="field" for="inventory-item">Item
+        <select id="inventory-item" disabled>
+          <option>Waiting for inventory data…</option>
+        </select>
+      </label>
+      <p id="inventory-status" class="status">WAITING FOR A RUN</p>
+      <p id="inventory-message" class="message">The first live inventory observation will appear when the runner is active.</p>
+      <div id="run-picker" class="run-picker" aria-label="Runs to compare"></div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="chart-heading">
+        <div>
+          <p class="eyebrow">LOGISTIC NETWORK</p>
+          <h2 id="chart-title">Available items over run time</h2>
+        </div>
+        <p id="sample-summary" class="status">0 SAMPLES</p>
+      </div>
+      <div id="chart-wrap" class="chart-wrap">
+        <svg id="inventory-chart" viewBox="0 0 900 420" role="img" aria-label="Inventory history chart"></svg>
+      </div>
+      <div id="chart-legend" class="legend"></div>
+    </section>
+  </main>
+
+  <footer>Up to five latest runs are retained. Each point is one distinct live Factorio game tick; starting a new run creates a fresh series.</footer>
+  <script src="/inventory.js"></script>
+</body>
+</html>

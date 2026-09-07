@@ -24,6 +24,8 @@ DEFAULT_PORT = 9137
 STATIC_FILES = {
     "/dashboard.css": (TOOLS_DIR / "dashboard.css", "text/css; charset=utf-8"),
     "/dashboard.js": (TOOLS_DIR / "dashboard.js", "text/javascript; charset=utf-8"),
+    "/inventory.css": (TOOLS_DIR / "inventory.css", "text/css; charset=utf-8"),
+    "/inventory.js": (TOOLS_DIR / "inventory.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -100,6 +102,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             page = page.replace("__ACTION_TOKEN__", self.action_token)
             self._send(200, "text/html; charset=utf-8", page.encode("utf-8"))
             return
+        if request.path in {"/inventory", "/inventory/", "/inventory.html"}:
+            page = (TOOLS_DIR / "inventory.html").read_text(encoding="utf-8")
+            self._send(200, "text/html; charset=utf-8", page.encode("utf-8"))
+            return
         static = STATIC_FILES.get(request.path)
         if static:
             path, content_type = static
@@ -131,6 +137,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._json(200, self.manager.logistic_inventory())
             except OperationError as exc:
                 self._json(500, {"error": str(exc)})
+            return
+        if request.path == "/api/inventory-history":
+            self._json(200, self.manager.inventory_history())
             return
         if request.path == "/api/logs":
             query = parse_qs(request.query)

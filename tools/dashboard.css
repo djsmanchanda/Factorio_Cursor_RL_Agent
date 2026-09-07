@@ -39,6 +39,8 @@ h1 { margin-bottom: 10px; font-size: clamp(2rem, 5vw, 4.6rem); line-height: .96;
 h2 { margin-bottom: 0; font-size: 1.45rem; }
 .eyebrow { margin-bottom: 9px; color: var(--orange); font: 700 .73rem/1.2 ui-monospace, monospace; letter-spacing: .15em; }
 .subtitle, .action-message, footer { color: var(--muted); }
+.inventory-link { color: var(--orange); font: .78rem/1.2 ui-monospace, monospace; text-decoration: none; }
+.inventory-link:hover { color: var(--text); text-decoration: underline; }
 .status-cluster { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .connection-cluster { display: grid; justify-items: end; gap: 12px; }
 .game-address { margin: 0; color: var(--muted); font: .72rem/1.2 ui-monospace, monospace; text-align: right; }

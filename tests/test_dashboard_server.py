@@ -92,3 +92,15 @@ def test_logistic_inventory_endpoint_returns_the_live_report() -> None:
     handler.do_GET()
 
     assert replies == [(200, {"ok": True, "tick": 99})]
+
+
+def test_inventory_history_endpoint_returns_retained_series() -> None:
+    handler = object.__new__(DashboardHandler)
+    handler.path = "/api/inventory-history"
+    handler.manager = SimpleNamespace(inventory_history=lambda: {"runs": [{"id": "run"}]})
+    replies: list[tuple[int, dict]] = []
+    handler._json = lambda code, body: replies.append((code, body))
+
+    handler.do_GET()
+
+    assert replies == [(200, {"runs": [{"id": "run"}]})]

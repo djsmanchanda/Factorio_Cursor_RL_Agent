@@ -32,6 +32,7 @@ from tools.run_log_format import (
     is_helper_agent_line, is_run_end_line, is_run_start_line,
 )
 from helper_agent import dashboard as helper_dashboard
+from tools.inventory_history import InventoryHistory
 from tools.runner_process import clear_runner_pid, running_runner_pid
 
 
@@ -72,6 +73,10 @@ class DashboardConfig:
         return self.server_data / "logs" / "research-queue.json"
 
     @property
+    def inventory_history_file(self) -> Path:
+        return self.server_data / "logs" / "inventory-history.json"
+
+    @property
     def server_save(self) -> Path:
         return self.server_data / "saves" / "mod_playground.zip"
 
@@ -98,6 +103,9 @@ class OperationManager:
         self._last_result = "No dashboard action has run yet."
         self._started_at: str | None = None
         self._runner: subprocess.Popen[bytes] | None = None
+        self._inventory_history = InventoryHistory(
+            config.inventory_history_file, config.runner_log,
+        )
         self.control_log = config.server_data / "logs" / "dashboard-control.log"
         if not self._runner_pids():
             try:
@@ -271,7 +279,20 @@ class OperationManager:
             bridge.close()
         if not report.get("ok"):
             raise OperationError(report.get("error", "Logistic inventory report failed"))
+        history = getattr(self, "_inventory_history", None)
+        if history is not None:
+            history.record(report)
         return report
+
+    def inventory_history(self) -> dict:
+        """Record the latest read-only report and return the retained run series."""
+        try:
+            self.logistic_inventory()
+        except OperationError as error:
+            history = self._inventory_history.view()
+            history["live_error"] = str(error)
+            return history
+        return self._inventory_history.view()
 
     @staticmethod
     def _level_parts(technology: str) -> tuple[str, int] | None:
