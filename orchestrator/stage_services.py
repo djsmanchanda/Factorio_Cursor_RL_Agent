@@ -23,7 +23,7 @@ from orchestrator.roboport_placement import clear_chain_positions
 from orchestrator.work_state import WorkStateSignal
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
-from planners.infrastructure_geometry import distance, l_route
+from planners.infrastructure_geometry import distance, footprint_tile_indices, l_route
 from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.sandbox_infrastructure import build_layout_authorization
@@ -880,13 +880,17 @@ def _hookup_pole_position(
     footprint = ENTITY_FOOTPRINTS.get(entity["name"], 1) if entity else 1
     reach = POLE_SPECS[pole_name]["supply"] + footprint / 2
     span = math.ceil(reach)
+    pole_size = int(POLE_SPECS[pole_name]["size"])
     candidates = [
         spot
         for tile_x in range(math.floor(consumer[0] - span), math.ceil(consumer[0] + span))
         for tile_y in range(math.floor(consumer[1] - span), math.ceil(consumer[1] + span))
-        for spot in [(tile_x + 0.5, tile_y + 0.5)]
+        for spot in [
+            (tile_x + 0.5, tile_y + 0.5)
+            if pole_size == 1 else (float(tile_x), float(tile_y))
+        ]
         if max(abs(spot[0] - consumer[0]), abs(spot[1] - consumer[1])) < reach
-        and (math.floor(spot[0]), math.floor(spot[1])) not in blocked
+        and footprint_tile_indices(spot, pole_size).isdisjoint(blocked)
     ]
     if not candidates:
         return None
@@ -983,7 +987,8 @@ def extend_power(
     target_wire = POLE_SPECS.get(
         target_name, POLE_SPECS["medium-electric-pole"],
     )["wire"]
-    endpoint_wire = POLE_SPECS[bridge_pole]["wire"]
+    endpoint_pole = bridge_pole
+    endpoint_wire = POLE_SPECS[endpoint_pole]["wire"]
     if own_network is not None and consumer is not None:
         endpoint_wire = POLE_SPECS.get(
             consumer["name"], POLE_SPECS["medium-electric-pole"],
@@ -1012,6 +1017,23 @@ def extend_power(
             client, surface, near_position, hookup_blocked, target_position,
             bridge_pole,
         )
+        if endpoint is None and bridge_pole == "medium-electric-pole":
+            # Dense stage layouts can fill every one-tile medium-pole site
+            # around a support entity. A substation reaches farther, so it can
+            # terminate the same material-funded bridge from outside that
+            # packed footprint. Keep the steel starter on small poles: its
+            # first connection may not ask for steel.
+            endpoint_pole = "substation"
+            endpoint_wire = POLE_SPECS[endpoint_pole]["wire"]
+            endpoint = _hookup_pole_position(
+                client, surface, near_position, hookup_blocked, target_position,
+                endpoint_pole,
+            )
+            if endpoint is not None:
+                emit(
+                    f"  power bridge terminal near {near_position} has no free "
+                    "medium-pole tile; using a substation outside the packed stage"
+                )
         if endpoint is None:
             raise StuckError(
                 f"nothing at {near_position} can be powered: every tile within a medium "
@@ -1024,13 +1046,15 @@ def extend_power(
         hops = _power_bridge_hops(target_position, endpoint, spacing, blocked)
     except ValueError as error:
         raise StuckError(f"power gap cannot be routed safely: {error}") from error
+    action_names = [bridge_pole] * len(hops)
     if own_network is None:
         hops = [*hops, endpoint]
+        action_names.append(endpoint_pole)
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")
     chain_positions = [target_position, *hops]
-    chain_names = [target_name, *([bridge_pole] * len(hops))]
+    chain_names = [target_name, *action_names]
     if own_network is not None:
         chain_positions.append(endpoint)
         chain_names.append(
@@ -1050,15 +1074,15 @@ def extend_power(
                 "tile wire reach"
             )
     actions = [
-        {"action_type": "place_ghost", "entity": bridge_pole, "position": {"x": x, "y": y}}
-        for x, y in hops
+        {"action_type": "place_ghost", "entity": entity, "position": {"x": x, "y": y}}
+        for entity, (x, y) in zip(action_names, hops)
     ]
     plan = {"phases": [{"name": "power_bridge", "actions": actions}], "surface": surface, "force": force}
     try:
         _submit(client, bridge, surface, plan, "power_bridge", emit)
         _await_bot_built_infrastructure(
             client, surface,
-            tuple((bridge_pole, position) for position in hops),
+            tuple(zip(action_names, hops)),
             emit,
         )
     except StuckError as error:

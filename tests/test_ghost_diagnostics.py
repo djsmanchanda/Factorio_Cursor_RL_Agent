@@ -719,6 +719,48 @@ def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
     assert submitted[0]["phases"][0]["actions"]
 
 
+def test_power_bridge_uses_substation_when_dense_stage_has_no_medium_terminal(
+    monkeypatch,
+) -> None:
+    """A packed support row still gets a material-funded power endpoint."""
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submitted: list[dict] = []
+    medium_terminal_tiles = {
+        (x, y) for x in range(-4, 4) for y in range(-4, 4)
+    }
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((20.0, 0.0), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a: None)
+    monkeypatch.setattr(
+        ss.live_base, "occupied_tiles", lambda *_a, **_k: medium_terminal_tiles,
+    )
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+    )
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
+
+    assert ss.extend_power(
+        object(), object(), "nauvis", "player", (0.0, 0.0),
+        lambda _message: None,
+    )
+
+    actions = submitted[0]["phases"][0]["actions"]
+    terminal = actions[-1]
+    assert terminal["entity"] == "substation"
+    terminal_position = (terminal["position"]["x"], terminal["position"]["y"])
+    assert max(abs(axis) for axis in terminal_position) < 9.5
+    assert not ss.footprint_tile_indices(terminal_position, 2) & medium_terminal_tiles
+
+
 def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None:
     """Connecting the first steel starter must not demand medium-pole steel."""
     from orchestrator import autonomous_builder as builder_module
