@@ -2888,6 +2888,12 @@ def test_chemical_handoff_parks_on_a_retry_horizon(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_production_started", lambda *_a: False,
     )
+    advanced: list[str] = []
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda _c, _b, _s, _f, item, *_a, **_k:
+        advanced.append(item) or None,
+    )
     priorities = PriorityList.__new__(PriorityList)
     priorities.items = {}
     deferred: list[tuple[str, int]] = []
@@ -2905,7 +2911,46 @@ def test_chemical_handoff_parks_on_a_retry_horizon(monkeypatch) -> None:
         lambda _message: None,
     )
 
+    assert advanced == ["plastic-bar"]
     assert deferred == [("bulk-inserter", 3600)]
+
+
+def test_chemical_handoff_queues_the_rungs_construction_bill(monkeypatch) -> None:
+    """A parked plastic handoff exposes oil equipment to the mall scheduler."""
+    from orchestrator.priority_list import PriorityList
+
+    def _handoff(*_args: object, **_kwargs: object) -> None:
+        raise builder.ProductionPrerequisiteDeferred(
+            "chemical ladder is establishing plastic-bar before bulk-inserter",
+            code="chemical_capability_handoff", state="supply_wait",
+            details={"target": "bulk-inserter", "rung": "plastic-bar"},
+        )
+
+    def _oil_bill(*_args: object, **_kwargs: object) -> None:
+        raise builder.MaterialShortage(
+            "oil_cell", {"chemical-plant": 2, "pumpjack": 1}, {},
+        )
+
+    monkeypatch.setattr(builder, "_ensure_mall_item", _handoff)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "ensure_produced", _oil_bill)
+    priorities = PriorityList.__new__(PriorityList)
+    priorities.items = {}
+    monkeypatch.setattr(priorities, "describe", lambda *_a: "")
+    monkeypatch.setattr(priorities, "defer", lambda *_a, **_k: None)
+    task = type("Task", (), {"item": "bulk-inserter", "target": 1})()
+    targets = {"bulk-inserter": 1}
+    messages: list[str] = []
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 1000,
+        targets, priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert targets == {
+        "bulk-inserter": 1, "chemical-plant": 2, "pumpjack": 1,
+    }
+    assert any("CHEMICAL HANDOFF DEMAND" in message for message in messages)
 
 
 def test_chemical_handoff_with_flowing_rung_serves_normally(

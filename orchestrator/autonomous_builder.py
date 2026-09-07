@@ -7822,6 +7822,40 @@ def _queue_starved_loan_ingredients(
             return
 
 
+def _advance_parked_chemical_rung(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    target: str, rung: str, mall_targets: dict[str, int],
+    reference_point: Point, emit: Callable[[str], None],
+) -> bool:
+    """Give a parked mall target one real chemical-capability action.
+
+    Parking prevents hot borrow/restore churn, but it cannot be the only
+    action: otherwise no controller path creates the oil stage the target is
+    waiting for. Advance the existing chemical ladder once, and expose any
+    resulting construction bill to the normal mall scheduler.
+    """
+    try:
+        output = ensure_produced(
+            client, bridge, surface, force, rung, reference_point, emit,
+            upgrade_bootstrap=False, stock_target=1, allow_promotion=False,
+        )
+    except MaterialShortage as shortage:
+        add_demands(mall_targets, shortage)
+        emit(
+            f"  CHEMICAL HANDOFF DEMAND: {target} advanced {rung}; "
+            + ", ".join(
+                f"{item}={count}"
+                for item, count in sorted(shortage.required.items())
+            )
+            + " -- queued"
+        )
+        return False
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(f"  CHEMICAL HANDOFF ACTIVE: {target} advanced {rung}; {deferred}")
+        return False
+    return output is not None
+
+
 def _serve_mall_task(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     task, tick: int, mall_targets: dict[str, int], priorities: PriorityList,
@@ -7889,6 +7923,16 @@ def _serve_mall_task(
             )
             ready, output = False, None
         else:
+            rung_ready = bool(rung) and _advance_parked_chemical_rung(
+                client, bridge, surface, force, item, str(rung), mall_targets,
+                reference_point, emit,
+            )
+            if rung_ready:
+                emit(
+                    f"  CHEMICAL HANDOFF READY: {item} rung {rung} now has "
+                    "a live output; retrying the target on the next pass"
+                )
+                return
             priorities.defer(item, tick, str(deferred), retry_ticks=3600)
             emit(
                 f"  CHEMICAL WAIT: {item} parked until {rung} establishes "
