@@ -291,6 +291,7 @@ def _reservation_supply_estimates(
 def assert_affordable(
     client: RconClient, surface: str, force: str, plan: dict, name: str,
     emit: Callable[[str], None], reserve_project: bool = False,
+    reservation_claimants: Sequence[str] = (),
 ) -> None:
     """Refuse to place ghosts the base cannot pay for.
 
@@ -322,9 +323,10 @@ def assert_affordable(
                 name, required, stock, source_producers=sources,
                 expected_rates=rates,
             )
-        available = ledger.allocatable_stock(
-            stock, claimant=name if project is not None else None,
-        )
+        claimant_names = set(reservation_claimants)
+        if project is not None:
+            claimant_names.add(name)
+        available = ledger.allocatable_stock(stock, claimants=claimant_names)
         if project is not None:
             short_targets = ledger.shortage_targets(name, stock)
         else:

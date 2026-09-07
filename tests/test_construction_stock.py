@@ -560,7 +560,7 @@ def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
     ) == 50
 
 
-def test_post_metal_reserve_queues_circuits_then_splitters(monkeypatch) -> None:
+def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
     """Splitter reserve is a 12-unit buffer, not a full stack.
 
     2026-09-04 (22:33 run): the 50-splitter reserve held the rotating
@@ -580,29 +580,59 @@ def test_post_metal_reserve_queues_circuits_then_splitters(monkeypatch) -> None:
     prepped: set[str] = set()
     targets: dict[str, int] = {}
     messages: list[str] = []
+    serviced: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda _client, _bridge, _surface, _force, item, target,
+        _targets, _reference, _emit, *, background: (
+            serviced.append((item, target, background)) or (False, None)
+        ),
+    )
 
     assert builder._prep_post_metal_stack_reserves(
-        object(), "nauvis", "player", prepped, targets, messages.append,
-    )
-    assert targets == {"electronic-circuit": 200}
+        object(), object(), "nauvis", "player", prepped, targets,
+        (0.0, 0.0), messages.append,
+    ) is None
+    assert serviced == [("electronic-circuit", 200, True)]
+    assert targets == {}
 
     stock["electronic-circuit"] = 200
-    targets.clear()
-    assert builder._prep_post_metal_stack_reserves(
-        object(), "nauvis", "player", prepped, targets, messages.append,
+    builder._prep_post_metal_stack_reserves(
+        object(), object(), "nauvis", "player", prepped, targets,
+        (0.0, 0.0), messages.append,
     )
-    assert targets == {"splitter": 12}
+    assert serviced[-1] == ("splitter", 12, True)
 
     stock["splitter"] = 12
-    targets.clear()
-    assert not builder._prep_post_metal_stack_reserves(
-        object(), "nauvis", "player", prepped, targets, messages.append,
+    builder._prep_post_metal_stack_reserves(
+        object(), object(), "nauvis", "player", prepped, targets,
+        (0.0, 0.0), messages.append,
     )
     assert prepped == {
         "_post_metal_stack:electronic-circuit",
         "_post_metal_stack:splitter",
     }
-    assert any("before stone" in message for message in messages)
+    assert any("alongside stone" in message for message in messages)
+
+
+def test_post_metal_reserve_yields_controller_to_construction_demand(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    serviced: list[str] = []
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_args, **_kwargs: serviced.append("reserve"),
+    )
+
+    builder._prep_post_metal_stack_reserves(
+        object(), object(), "nauvis", "player", set(), {"inserter": 12},
+        (0.0, 0.0), lambda _message: None,
+    )
+
+    assert serviced == []
 
 
 def test_rotating_machine_batch_keeps_two_bounded_spares(monkeypatch) -> None:
@@ -1554,12 +1584,33 @@ def test_stockout_without_producer_requeues_belts(monkeypatch, tmp_path) -> None
 
     builder._survey_pass(
         SimpleNamespace(), "nauvis", "player", targets, priorities,
+        {"transport-belt"},
     )
 
     assert targets == {"transport-belt": 200}
     assert priorities.items["transport-belt"].reason == (
         "restocked after stockout with no producer"
     )
+
+
+def test_cold_start_does_not_queue_evergreen_reserve_before_belt_prep(
+    monkeypatch, tmp_path,
+) -> None:
+    """The first foundation's exact belt bill must not inflate to 200."""
+    from orchestrator.priority_list import PriorityList
+
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 0)
+    priorities = PriorityList(tmp_path / "priorities.json", 0)
+    targets: dict[str, int] = {}
+
+    builder._survey_pass(
+        SimpleNamespace(), "nauvis", "player", targets, priorities, set(),
+    )
+
+    assert targets == {}
 
 
 def test_stockout_skips_when_covered(monkeypatch, tmp_path) -> None:

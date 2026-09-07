@@ -219,17 +219,19 @@ These names describe intended responsibilities, not permission to build speculat
   current step target and is refreshed on drift; a bill-frozen gate stranding
   a spare-phase loan is configuration drift, not progress. Foundation-blocked
   items rate 100 while queued and retire with their demand; a binding loan
-  below its blocking bill is shielded from preempt by non-binding batches. After both metal districts validate and release their
-  pioneers, the controller fills one stack of electronic circuits followed by
-  one stack of splitters before opening the stone district. This replenishes
-  the construction stock consumed by iron/copper while the rotating slot is
-   still available; other low-demand batches target their blocking bill plus
-   at least 20% spares (rounded up, covering requester/buffer WIP), and retire
-   only once that transferable stock exists. A demand whose bill is met in
-   transferable stock while its loan keeps advancing without accumulation
-   retires as drained; the cell finishes spares in the background. A lagging
-   build names its transferable shortfall, locked WIP, and pending ghosts
-   instead of waiting on force-wide stock that bots cannot spend.
+  below its blocking bill is shielded from preempt by non-binding batches.
+  After both metal districts validate and release their pioneers, the
+  controller starts one stack of electronic circuits followed by twelve
+  splitters as non-binding reserve work while the stone district opens. Stone's
+  exact construction bills remain binding and may preempt either reserve;
+  replenishment must not serialize the next foundation behind warehouse stock.
+  Other low-demand batches target their blocking bill plus at least 20% spares
+  (rounded up, covering requester/buffer WIP), and retire only once that
+  transferable stock exists. A demand whose bill is met in
+  transferable stock while its loan keeps advancing without accumulation
+  retires as drained; the cell finishes spares in the background. A lagging
+  build names its transferable shortfall, locked WIP, and pending ghosts
+  instead of waiting on force-wide stock that bots cannot spend.
   When either blocking stack has more than one minute of measured backlog, an
   existing one-machine producer may claim a second reservation-funded slot in
   the ten-assembler bootstrap pool. A lone transport-belt cell facing a large
@@ -238,7 +240,10 @@ These names describe intended responsibilities, not permission to build speculat
   A cell bill whose shortfall is reserved but flowing -- scheduled producer
   chain plus spendable stock on hand -- draws from that flow instead of
   waiting out the reserve; a stagnant stockpile with no scheduled producer
-  still blocks.
+  still blocks. A coherent foundation's combined preflight and its submitted
+  mine/refinery packets share one reservation transaction even when their
+  persisted project names differ; a retry may not count its child packet
+  reservations as foreign stock and demand a duplicate bill.
   The pre-logistics pool is a hard global ceiling of ten compact assemblers:
   core-mall requests may not bypass it; when the pool is full, core promotion
   reclaims an existing non-anchor temporary slot and converts it in place

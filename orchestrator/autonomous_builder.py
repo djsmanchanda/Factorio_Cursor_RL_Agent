@@ -206,7 +206,11 @@ class ProductionPrerequisiteDeferred(WorkStateSignal):
 # This counts consecutive passes that chose the same task at the same
 # completion -- real progress moves one of them.
 _MAX_UNCHANGED_PASSES = 12
-_PENDING_FOUNDATION_POLL_SECONDS = 30.0
+# Construction and charging continue in Factorio while the controller waits.
+# Ten seconds preserves the 120-second unchanged-pass safety horizon while
+# avoiding up to 30 seconds of dispatch latency at every cleared foundation
+# condition.
+_PENDING_FOUNDATION_POLL_SECONDS = 10.0
 _BOOTSTRAP_LOAN_POLL_SECONDS = 5.0
 _GAME_TICKS_PER_SECOND = 60.0
 _MAX_PRIORITY_SLEEP_SECONDS = 30.0
@@ -2250,6 +2254,10 @@ def _prepare_initial_refinery(
     try:
         assert_affordable(
             client, surface, force, combined, f"initial_{recipe}_system", emit,
+            False, (
+                f"mining_{extraction.ore}",
+                f"modular_{recipe}_refinery",
+            ),
         )
     except MaterialShortage as shortage:
         if not allow_unfunded_ghosts or not all(
@@ -9155,18 +9163,24 @@ def _upgrade_bootstrap_mall(
 
 
 def _prep_post_metal_stack_reserves(
-    client: RconClient, surface: str, force: str,
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
     prepped: set[str], mall_targets: dict[str, int],
-    emit: Callable[[str], None],
-) -> bool:
-    """Queue circuits, then splitters, before opening the stone district.
+    reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Keep circuits and splitters filling while stone opens concurrently.
 
     The opening iron/copper projects consume their small finite splitter batch.
-    Refilling only after stone requests drills is too late: the one rotating
-    assembler may already be loaned to drills when splitters are requested.
+    Start one reserve producer per pass so replenishment overlaps stone
+    planning and construction.  Actual stone bills remain normal blocking
+    mall targets and can preempt these non-binding batches.
     """
     if not _metal_starter_transition_complete(client, surface, force):
-        return False
+        return
+    if mall_targets:
+        # Critical construction work owns the controller pass.  A previously
+        # started reserve loan keeps crafting in Factorio and can be preempted
+        # normally; it does not need another controller poll first.
+        return
     stock = live_base.available_items(client, surface, force)
     for item in _POST_METAL_STACK_RESERVES:
         key = f"_post_metal_stack:{item}"
@@ -9182,14 +9196,15 @@ def _prep_post_metal_stack_reserves(
                 f"({target})"
             )
             continue
-        if mall_targets.get(item, 0) < target:
-            mall_targets[item] = target
-            emit(
-                f"  POST-METAL RESERVE: iron/copper transition is complete; "
-                f"stocking {item} to reserve ({target}) before stone"
-            )
-        return True
-    return False
+        emit(
+            f"  POST-METAL RESERVE: iron/copper transition is complete; "
+            f"stocking {item} to reserve ({target}) alongside stone"
+        )
+        _ensure_mall_item(
+            client, bridge, surface, force, item, target, mall_targets,
+            reference_point, emit, background=True,
+        )
+        return
 
 
 # `None` already means "built one stage, re-survey", so a shortage needs its own
@@ -9542,7 +9557,7 @@ def _loan_craft_proof_crafts(
 
 def _survey_pass(
     client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
-    priorities: PriorityList,
+    priorities: PriorityList, prepped: set[str] | frozenset[str] = frozenset(),
 ) -> tuple[int, object | None]:
     """Read the base, retire targets stock already covers, pick the next task.
 
@@ -9602,6 +9617,13 @@ def _survey_pass(
             )
             mall_targets.pop(stocked_item)
     for evergreen, (standing_target, restock_floor) in _EVERGREEN_STOCK.items():
+        # Before the standing cell exists, an exact project bill owns the
+        # bootstrap target.  Starting the watchdog at tick zero inflated the
+        # first 128-belt foundation bill to the 200-belt standing reserve and
+        # delayed every downstream stage.  Once prep has established the
+        # recipe, the original stockout recovery behavior resumes.
+        if evergreen not in prepped:
+            continue
         if evergreen in mall_targets:
             continue
         if int(stock.get(evergreen, 0)) > restock_floor:
@@ -10038,7 +10060,7 @@ def run(
         while budget.passes < max_iterations:
             budget.begin_pass()
             tick, task = _survey_pass(
-                client, surface, force, mall_targets, priorities,
+                client, surface, force, mall_targets, priorities, prepped,
             )
             signature = _pass_signature(
                 task, mall_targets, prepped, background_targets,
@@ -10116,18 +10138,10 @@ def run(
                 reference_point, emit,
             ):
                 continue
-            if _prep_post_metal_stack_reserves(
-                client, surface, force, prepped, mall_targets, emit,
-            ):
-                # This is a strict transition reserve, not opportunistic
-                # background stock. Serve it before the stone district can
-                # borrow the rotating slot for drills or inserters.
-                _serve_ready_pass(
-                    client, bridge, surface, force, task, tick, mall_targets,
-                    background_targets, priorities, reference_point,
-                    goal_item, emit, mission_items=mission_items,
-                )
-                continue
+            _prep_post_metal_stack_reserves(
+                client, bridge, surface, force, prepped, mall_targets,
+                reference_point, emit,
+            )
             # Establish iron, then copper, then stone-brick: beltless seeds
             # first (zero belt stock cannot fund a full foundation before
             # first plates), then direct foundations. The mall cells are

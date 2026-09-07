@@ -8,7 +8,7 @@ import os
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Collection, Mapping
 
 _ACTIVE_STATES = frozenset({"planned", "supply_wait", "ready"})
 _VALID_STATES = _ACTIVE_STATES | {"constructing", "completed", "failed"}
@@ -366,11 +366,23 @@ class MaterialReservationLedger:
 
     def allocatable_stock(
         self, stock: Mapping[str, int], *, claimant: str | None = None,
+        claimants: Collection[str] = (),
     ) -> dict[str, int]:
+        """Return stock not reserved outside the caller's transaction.
+
+        A coherent build may preflight under one parent name and submit its
+        mine/refinery packets under child names.  Those packets still belong
+        to one transaction: excluding all of them prevents a retry from
+        treating its own reservations as foreign stock and demanding a second
+        copy of the same bill.
+        """
         self._rebalance(stock)
+        allowed = set(claimants)
+        if claimant is not None:
+            allowed.add(claimant)
         reserved: Counter[str] = Counter()
         for project in self.projects.values():
-            if self._active(project) and project.project_id != claimant:
+            if self._active(project) and project.project_id not in allowed:
                 reserved.update(project.reserved)
         return {
             item: max(0, int(count) - reserved.get(item, 0))

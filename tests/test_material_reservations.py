@@ -138,6 +138,52 @@ def test_affordability_cannot_spend_stock_reserved_by_another_project(
     assert raised.value.required == {"passive-provider-chest": 3}
 
 
+def test_parent_preflight_can_claim_its_child_packet_reservations(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A foundation retry must not demand a second mine/refinery bill.
+
+    The combined ``initial_*_system`` preflight and the submitted
+    ``mining_*``/``modular_*_refinery`` packets describe the same physical
+    transaction under different persisted names.
+    """
+    ledger = _ledger(tmp_path)
+    stock = {"transport-belt": 128, "splitter": 3, "substation": 1}
+    ledger.declare(
+        "mining_iron-ore", {"transport-belt": 13, "substation": 1}, stock,
+    )
+    ledger.declare(
+        "modular_iron-plate_refinery",
+        {"transport-belt": 115, "splitter": 3}, stock,
+    )
+    set_active_material_ledger(ledger)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    plan = {"phases": [{"actions": [
+        *[
+            {"action_type": "place_ghost", "entity": "transport-belt"}
+            for _ in range(128)
+        ],
+        *[
+            {"action_type": "place_ghost", "entity": "splitter"}
+            for _ in range(3)
+        ],
+        {"action_type": "place_ghost", "entity": "substation"},
+    ]}]}
+    messages: list[str] = []
+    try:
+        stage_services.assert_affordable(
+            object(), "nauvis", "player", plan, "initial_iron-plate_system",
+            messages.append,
+            reservation_claimants=(
+                "mining_iron-ore", "modular_iron-plate_refinery",
+            ),
+        )
+    finally:
+        set_active_material_ledger(None)
+
+    assert any("132 ghost items allocated" in message for message in messages)
+
+
 def test_reused_submission_name_gets_a_fresh_transient_reservation(
     tmp_path: Path, monkeypatch,
 ) -> None:
