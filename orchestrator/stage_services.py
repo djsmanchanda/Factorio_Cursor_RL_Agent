@@ -292,6 +292,7 @@ def assert_affordable(
     client: RconClient, surface: str, force: str, plan: dict, name: str,
     emit: Callable[[str], None], reserve_project: bool = False,
     reservation_claimants: Sequence[str] = (),
+    reservation_priority: int = 50,
 ) -> None:
     """Refuse to place ghosts the base cannot pay for.
 
@@ -300,6 +301,9 @@ def assert_affordable(
     stage that never comes up. Naming the exact shortfall turns that into an
     actionable message -- and, once the builder can produce its own belts, into
     a decision about what to make next.
+
+    ``reservation_priority`` lets an upstream construction capability retain
+    finite stock ahead of downstream or concurrent projects.
     """
     required = _ghost_materials(plan)
     if not required:
@@ -321,7 +325,7 @@ def assert_affordable(
             )
             project = ledger.declare(
                 name, required, stock, source_producers=sources,
-                expected_rates=rates,
+                expected_rates=rates, priority=reservation_priority,
             )
         claimant_names = set(reservation_claimants)
         if project is not None:
@@ -430,6 +434,7 @@ def _submit(
     emit: Callable[[str], None], *, max_retries: int = 2,
     stage_coverage: Callable[[], None] | None = None,
     allow_unfunded_ghosts: bool = False,
+    reservation_priority: int = 50,
 ) -> dict:
     """Submit a plan; if a tile is blocked, clear it ONLY when it's obviously
     safe map clutter (a tree, a rock -- never anything a force built) and
@@ -443,7 +448,7 @@ def _submit(
     `allow_unfunded_ghosts` still marks a coherent queued expansion, but it does
     not bypass that supply-chain proof. Collision and ownership checks are
     unchanged; only the requirement to warehouse the entire bill first is
-    relaxed.
+    relaxed. ``reservation_priority`` is forwarded to that persisted bill.
     """
     if not any(phase.get("actions") for phase in plan.get("phases", [])):
         raise StuckError(f"{name}: proposed zero actions")
@@ -457,7 +462,7 @@ def _submit(
     try:
         assert_affordable(
             client, surface, plan.get("force", "player"), plan, name, emit,
-            True,
+            True, (), reservation_priority,
         )
     except MaterialShortage as shortage:
         ledger = active_material_ledger()

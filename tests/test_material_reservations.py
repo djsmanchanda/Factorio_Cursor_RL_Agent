@@ -138,6 +138,45 @@ def test_affordability_cannot_spend_stock_reserved_by_another_project(
     assert raised.value.required == {"passive-provider-chest": 3}
 
 
+def test_critical_prerequisite_keeps_its_stock_when_total_is_one_short(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Steel's three anchors outrank the downstream project they unlock."""
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 10}
+    ledger.declare(
+        "conversion_automation-science-pack",
+        {"medium-electric-pole": 4}, stock,
+    )
+    ledger.declare(
+        "modular_stone-brick_refinery",
+        {"medium-electric-pole": 4}, stock,
+    )
+    set_active_material_ledger(ledger)
+    monkeypatch.setattr(
+        stage_services.live_base, "transferable_items", lambda *_a: stock,
+    )
+    plan = {"phases": [{"actions": [
+        {"action_type": "place_ghost", "entity": "medium-electric-pole"}
+        for _ in range(3)
+    ]}]}
+    try:
+        stage_services.assert_affordable(
+            object(), "nauvis", "player", plan, "conversion_steel-plate",
+            lambda _m: None, True, reservation_priority=100,
+        )
+    finally:
+        set_active_material_ledger(None)
+
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 3,
+    }
+    assert ledger.shortage_targets("conversion_steel-plate", stock) == {}
+    assert ledger.projects["modular_stone-brick_refinery"].reserved == {
+        "medium-electric-pole": 3,
+    }
+
+
 def test_parent_preflight_can_claim_its_child_packet_reservations(
     tmp_path: Path, monkeypatch,
 ) -> None:

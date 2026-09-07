@@ -257,6 +257,35 @@ def test_steel_starter_uses_fully_stocked_medium_poles_without_wood() -> None:
     assert "substation" not in bill
 
 
+def test_steel_starter_submits_as_critical_material_prerequisite(monkeypatch) -> None:
+    """Downstream construction cannot reclaim the starter's cyclic pole stock."""
+    submitted: list[dict] = []
+    monkeypatch.setattr(builder, "_conversion_origin", lambda *_a, **_k: (0, 0))
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock",
+        lambda *_a: {"medium-electric-pole": 3},
+    )
+    monkeypatch.setattr(
+        builder, "_conversion_feed_plan",
+        lambda *_a, **_k: ({}, {}, {}, False),
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a, **kwargs: submitted.append(kwargs) or {},
+    )
+    monkeypatch.setattr(builder, "_power_and_raise_stage", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_connect_stage_feeds", lambda *_a, **_k: None)
+
+    builder.build_conversion_stage(
+        object(), object(), "nauvis", "player", "steel-plate",
+        {"iron-plate": (10.5, 10.5)}, (0.0, 0.0), lambda _m: None,
+        machine_count=builder.STEEL_BASELINE_FURNACES,
+        inserter_type="inserter",
+    )
+
+    assert submitted[0]["reservation_priority"] == 100
+
+
 def test_steel_starter_defers_a_loan_blocked_on_steel(monkeypatch) -> None:
     """Pipe capability ordering cannot trap the AM2 loan ahead of steel."""
     from orchestrator.mall_bootstrap import MallBootstrapLoan

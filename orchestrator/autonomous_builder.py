@@ -233,6 +233,10 @@ _REFINERY_SITE_RESERVATIONS: dict[
 ] = {}
 _BOOTSTRAP_DISTRICT_LEDGER: BootstrapDistrictLedger | None = None
 _MATERIAL_RESERVATION_LEDGER: MaterialReservationLedger | None = None
+# The first steel furnace is an upstream construction capability: once its
+# finite, steel-cyclic pole stock is selected, other projects must carry any
+# shared-stock shortfall instead of taking those anchors back.
+_STEEL_STARTER_RESERVATION_PRIORITY = 100
 
 
 def _bootstrap_lifecycle_stuck(
@@ -3690,6 +3694,9 @@ def build_conversion_stage(
             client, bridge, surface, plan, f"conversion_{recipe}", emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
+            ),
+            reservation_priority=(
+                _STEEL_STARTER_RESERVATION_PRIORITY if steel_starter else 50
             ),
         )
     except StuckError:
