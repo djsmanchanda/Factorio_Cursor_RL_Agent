@@ -11,7 +11,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 from orchestrator import autonomous_builder as builder  # noqa: E402
-from orchestrator.material_reservations import plan_material_bill  # noqa: E402
+from orchestrator.material_reservations import (  # noqa: E402
+    MaterialReservationLedger, plan_material_bill,
+)
 from planners.infrastructure import strip_local_power  # noqa: E402
 from planners.local_layout_planner import LocalLayoutPlanner  # noqa: E402
 
@@ -284,6 +286,58 @@ def test_steel_starter_submits_as_critical_material_prerequisite(monkeypatch) ->
     )
 
     assert submitted[0]["reservation_priority"] == 100
+
+
+def test_steel_pole_seed_is_reserved_before_concurrent_foundation_spend(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The mission fence exists before a later consumer drains pole stock."""
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-steel-seed", surface="nauvis", force="player",
+    )
+    stock = {"medium-electric-pole": 5}
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "ingredients": ["steel-plate", "iron-gear-wheel"],
+    })
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: stock,
+    )
+
+    builder._reserve_steel_starter_power_seed(
+        object(), "nauvis", "player", {"assembling-machine-2": 6},
+        lambda _m: None,
+    )
+    competing = ledger.declare(
+        "copper_foundation_power", {"medium-electric-pole": 3}, stock,
+    )
+
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 3,
+    }
+    assert competing.reserved == {"medium-electric-pole": 2}
+    assert ledger.shortage_targets(
+        "conversion_steel-plate", {"medium-electric-pole": 3},
+    ) == {}
+
+
+def test_steel_pole_seed_is_not_reserved_without_mission_steel_dependency(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-no-steel", surface="nauvis", force="player",
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+
+    builder._reserve_steel_starter_power_seed(
+        object(), "nauvis", "player", {"transport-belt": 200},
+        lambda _m: None,
+    )
+
+    assert "conversion_steel-plate" not in ledger.projects
 
 
 def test_steel_starter_defers_a_loan_blocked_on_steel(monkeypatch) -> None:

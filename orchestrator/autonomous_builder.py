@@ -3588,6 +3588,24 @@ def _use_presteel_starter_power(
     return plan, "small-electric-pole"
 
 
+def _steel_starter_power_seed_bill() -> dict[str, int]:
+    """Derive the finite pole seed from the actual one-furnace layout."""
+    plan = LocalLayoutPlanner().generate_line_layout(
+        "steel-plate", STEEL_BASELINE_FURNACES, 0, 0,
+        belt_type="transport-belt", inserter_type="inserter",
+        feed_style="chest", terminal_collector=True,
+    )
+    plan = strip_local_power(plan, remove_substations=True)
+    _side_sample_plate_output(
+        plan, (0, 0), STEEL_BASELINE_FURNACES, "transport-belt",
+        tap_inserter_type="inserter",
+    )
+    count = plan_material_bill(plan).get("medium-electric-pole", 0)
+    if count <= 0:
+        raise StuckError("steel starter layout has no reservable power anchors")
+    return {"medium-electric-pole": count}
+
+
 def build_conversion_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, recipe: str,
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
@@ -9758,6 +9776,45 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
     )
 
 
+def _reserve_steel_starter_power_seed(
+    client: RconClient, surface: str, force: str,
+    construction_targets: Mapping[str, int], emit: Callable[[str], None],
+) -> None:
+    """Fence the steel starter's cyclic pole seed before foundations spend it.
+
+    The mission's construction targets are known at run open, long before the
+    steel stage is selected. Use their recipe closure as the intent signal and
+    declare the eventual conversion project with only its planner-derived pole
+    bill. The normal submission later expands this same project to the complete
+    stage bill without losing its critical reservation priority.
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    needs_steel = any(
+        item == "steel-plate"
+        or "steel-plate" in _recipe_ingredient_closure(item)
+        for item in construction_targets
+    )
+    if ledger is None or not needs_steel:
+        return
+    if _production_started(client, surface, force, "steel-plate"):
+        return
+    bill = _steel_starter_power_seed_bill()
+    stock = _transferable_or_available_stock(client, surface, force)
+    sources, rates = _material_sources_and_rates(
+        client, surface, force, bill, stock,
+    )
+    project = ledger.declare(
+        "conversion_steel-plate", bill, stock, target_item="steel-plate",
+        source_producers=sources, expected_rates=rates,
+        priority=_STEEL_STARTER_RESERVATION_PRIORITY,
+    )
+    emit(
+        "STEEL STARTER RESERVE: held "
+        f"{project.reserved.get('medium-electric-pole', 0)}/"
+        f"{bill['medium-electric-pole']} medium poles before foundation spending"
+    )
+
+
 def _open_the_run(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
@@ -9844,6 +9901,9 @@ def _open_the_run(
             )
     background_targets = mission_mall_targets(
         mission_items or (goal_item,), LINE_RECIPES,
+    )
+    _reserve_steel_starter_power_seed(
+        client, surface, force, background_targets, emit,
     )
     mall_targets: dict[str, int] = {}
     emit(
