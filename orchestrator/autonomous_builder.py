@@ -1018,7 +1018,23 @@ def _rebuild_stale_ghost(
     for ghost in ghosts:
         position = tuple(ghost["position"])  # type: ignore[arg-type]
         entity = str(ghost.get("entity", ""))
-        if not live_base.remove_entity_at(client, surface, position):
+        removal = live_base.remove_ghost_at(
+            client, surface, force, entity, position,
+        )
+        if not removal.cleared:
+            raise StuckError(
+                f"exact stale ghost removal did not clear {entity}@{position}",
+                code="stale_ghost_removal_failed", classification="bug",
+                state="failed",
+                details={
+                    "entity": entity,
+                    "position": list(position),
+                    "reason": str(ghost.get("reason", "unknown")),
+                    "found": removal.found,
+                    "cleared": removal.cleared,
+                },
+            )
+        if not removal.found:
             continue
         removed += 1
         actions.append(
@@ -1026,7 +1042,11 @@ def _rebuild_stale_ghost(
              "position": {"x": position[0], "y": position[1]}},
         )
     if not actions:
-        return False
+        emit(
+            "  STALE GHOST: target resolved before exact removal; no "
+            "replacement ghost required"
+        )
+        return True
     plan = {"phases": [{"name": "rebuild_stale_ghost", "actions": actions}]}
     plan["surface"], plan["force"] = surface, force
     report = _submit(

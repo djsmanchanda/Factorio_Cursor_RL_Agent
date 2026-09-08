@@ -53,6 +53,14 @@ class DirectPlateStarter:
     additional_drill_positions: tuple[Point, ...] = ()
 
 
+@dataclass(frozen=True)
+class GhostRemovalResult:
+    """Whether an exact force-owned entity ghost existed and was cleared."""
+
+    found: bool
+    cleared: bool
+
+
 def find_line(
     client: RconClient, surface: str, force: str, recipe: str, machine: str,
     *, exact_machine: bool = False, exclude_upgrade_ordered: bool = False,
@@ -797,6 +805,32 @@ def remove_entity_at(client: RconClient, surface: str, position: Point) -> bool:
         "if e then e.destroy();rcon.print('OK') else rcon.print('NONE') end"
     )
     return _sc(client, lua) == "OK"
+
+
+def remove_ghost_at(
+    client: RconClient, surface: str, force: str, entity: str, position: Point,
+) -> GhostRemovalResult:
+    """Remove only the named force-owned ghost and verify that it disappeared."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local x,y=" + str(position[0]) + "," + str(position[1]) + ";"
+        "local function target() local found=s.find_entities_filtered{"
+        "type='entity-ghost',ghost_name='" + entity + "',force=f,"
+        "position={x,y},radius=0.01};"
+        "for _,g in pairs(found) do if math.abs(g.position.x-x)<0.001 and "
+        "math.abs(g.position.y-y)<0.001 then return g end end end;"
+        "local g=target();if not g then rcon.print('MISSING') return end;"
+        "g.destroy();if target() then rcon.print('STILL_PRESENT') "
+        "else rcon.print('REMOVED') end"
+    )
+    raw = _sc(client, lua)
+    if raw == "REMOVED":
+        return GhostRemovalResult(found=True, cleared=True)
+    if raw == "MISSING":
+        return GhostRemovalResult(found=False, cleared=True)
+    if raw == "STILL_PRESENT":
+        return GhostRemovalResult(found=True, cleared=False)
+    raise TelemetryError(f"malformed exact ghost removal response: {raw!r}")
 
 
 def entity_status_name(client: RconClient, surface: str, position: Point) -> str | None:

@@ -459,8 +459,11 @@ def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
     )
     removed: list = []
     monkeypatch.setattr(
-        builder.live_base, "remove_entity_at",
-        lambda _c, _s, pos: removed.append(pos) or True,
+        builder.live_base, "remove_ghost_at",
+        lambda _c, _s, _f, _e, pos: (
+            removed.append(pos)
+            or builder.live_base.GhostRemovalResult(found=True, cleared=True)
+        ),
     )
     submitted: list[str] = []
     monkeypatch.setattr(
@@ -493,7 +496,9 @@ def test_lone_ghost_rebuild_reports_a_typed_zero_placement_failure(
         builder.live_base, "ghost_blockages", lambda *_a, **_k: [ghost],
     )
     monkeypatch.setattr(
-        builder.live_base, "remove_entity_at", lambda *_a, **_k: True,
+        builder.live_base, "remove_ghost_at", lambda *_a, **_k: (
+            builder.live_base.GhostRemovalResult(found=True, cleared=True)
+        ),
     )
     monkeypatch.setattr(
         builder, "_submit", lambda *_a, **_k: {
@@ -526,6 +531,69 @@ def test_lone_ghost_rebuild_reports_a_typed_zero_placement_failure(
         "placement_failures": [],
     }
     assert not any("STALE GHOST: rebuilt" in message for message in messages)
+
+
+def test_stale_rebuild_stops_before_submit_when_exact_removal_does_not_clear(
+    monkeypatch,
+) -> None:
+    ghost = {
+        "position": (36.5, 32.5),
+        "entity": "assembling-machine-1",
+        "reason": "pending",
+    }
+    monkeypatch.setattr(
+        builder.live_base, "ghost_blockages", lambda *_a, **_k: [ghost],
+    )
+    monkeypatch.setattr(
+        builder.live_base, "remove_ghost_at", lambda *_a, **_k: (
+            builder.live_base.GhostRemovalResult(found=True, cleared=False)
+        ),
+    )
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: submitted.append({}),
+    )
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._rebuild_stale_ghost(
+            object(), object(), "nauvis", "player",
+            ((33.0, 30.0), (47.0, 38.0)), lambda _message: None,
+        )
+
+    assert raised.value.code == "stale_ghost_removal_failed"
+    assert raised.value.details == {
+        "entity": "assembling-machine-1",
+        "position": [36.5, 32.5],
+        "reason": "pending",
+        "found": True,
+        "cleared": False,
+    }
+    assert submitted == []
+
+
+def test_exact_ghost_removal_is_entity_and_force_scoped() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        def command(self, command: str) -> str:
+            self.commands.append(command)
+            return "REMOVED"
+
+    client = Client()
+
+    result = builder.live_base.remove_ghost_at(
+        client, "nauvis", "player", "assembling-machine-1", (36.5, 32.5),
+    )
+
+    assert result == builder.live_base.GhostRemovalResult(
+        found=True, cleared=True,
+    )
+    lua = client.commands[0]
+    assert "type='entity-ghost'" in lua
+    assert "ghost_name='assembling-machine-1'" in lua
+    assert "force=f" in lua
+    assert "if target() then rcon.print('STILL_PRESENT')" in lua
 
 
 def test_run_loop_checks_generation_proactively(monkeypatch) -> None:
