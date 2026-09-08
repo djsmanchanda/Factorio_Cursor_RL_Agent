@@ -8,10 +8,11 @@ from collections import Counter
 from collections.abc import Callable, Mapping
 
 from orchestrator import live_base, resource_patches
+from orchestrator.extraction_transport import planned_footprint_tiles
 from orchestrator.game_bridge import GameBridge
 from orchestrator.material_reservations import plan_material_bill
-from orchestrator.stage_services import StuckError, _submit
-from planners.mall_layout import generate_paired_mall_layout
+from orchestrator.stage_services import StuckError, _submit, extend_power
+from planners.mall_layout import generate_paired_mall_layout, recipe_group_name
 from planners.recipe_data import LINE_RECIPES
 from tools.rcon_client import RconClient
 
@@ -31,6 +32,38 @@ _INCOMPATIBLE_PAIRS = frozenset({
     frozenset({"electronic-circuit", "transport-belt"}),
     frozenset({"copper-cable"}),
 })
+
+
+def _clear_stale_side_requests(
+    client: RconClient, surface: str, requester_action: dict,
+    recipe: str, side: str,
+) -> None:
+    """Remove old permanent groups for the half being (re)assigned.
+
+    The opposite half shares this chest and is deliberately preserved. A
+    prior recipe on the same side is not: leaving its labelled section behind
+    is how a two-machine cell accumulated three or more recipe groups.
+    """
+    if not hasattr(client, "command"):
+        return
+    position = (
+        float(requester_action["position"]["x"]),
+        float(requester_action["position"]["y"]),
+    )
+    desired = recipe_group_name(recipe, side)
+    suffix = f":{side}"
+    stale = [
+        group for group in live_base.requester_logistic_groups(
+            client, surface, position,
+        )
+        if group.startswith("mall:")
+        and group.endswith(suffix)
+        and group != desired
+    ]
+    cleared = requester_action.setdefault("clear_logistic_groups", [])
+    for group in stale:
+        if group not in cleared:
+            cleared.append(group)
 
 
 def compact_mall_project_bill(
@@ -434,10 +467,17 @@ def refresh_paired_mall_requests(
             action for phase in plan["phases"] for action in phase["actions"]
             if action.get("entity") == "requester-chest"
         )
+        _clear_stale_side_requests(
+            client, surface, action, recipe, side,
+        )
         position = (action["position"]["x"], action["position"]["y"])
         merged = requesters.setdefault(position, {
             **action, "logistic_sections": [],
         })
+        cleared = merged.setdefault("clear_logistic_groups", [])
+        for group in action.get("clear_logistic_groups", []):
+            if group not in cleared:
+                cleared.append(group)
         merged["logistic_sections"].extend(action["logistic_sections"])
     if not requesters:
         return False
@@ -492,7 +532,35 @@ def build_compact_mall_stage(
         origin[1] + (0.5 if side == "left" or shared_provider else 2.5),
     )
     substation = (origin[0] + 4.0, origin[1] + 5.0)
+    requester_action = next(
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "requester-chest"
+    )
+    _clear_stale_side_requests(
+        client, surface, requester_action, recipe, side,
+    )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
+    if hasattr(client, "command"):
+        existing_network = live_base.pole_network_id(
+            client, surface, substation,
+        )
+        existing_generation = (
+            live_base.network_generation_kw(
+                client, surface, force, substation,
+            )
+            if existing_network is not None else None
+        )
+        if (
+            (existing_generation is None or existing_generation <= 0)
+            and not extend_power(
+                client, bridge, surface, force, substation, emit,
+                reserved_tiles=planned_footprint_tiles(plan),
+            )
+        ):
+            raise StuckError(
+                f"compact mall for {recipe} cannot stage generated power beside "
+                f"its planned substation at {substation}"
+            )
     _submit(client, bridge, surface, plan, f"paired_mall_{recipe}", emit)
     chests = [
         (action["position"]["x"], action["position"]["y"])

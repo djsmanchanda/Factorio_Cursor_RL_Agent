@@ -2282,6 +2282,76 @@ def _prepare_initial_refinery(
     return plan, foundation, interface.provider, belt_type, belt_tiles
 
 
+def _retire_unused_starter_power_branch(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    starter_poles: Sequence[tuple[str, Point]], recipe: str,
+    emit: Callable[[str], None],
+) -> int:
+    """Peel only the now-empty leaf branch that powered a retired starter.
+
+    A pole is removed only after it supplies no real or ghost consumer and has
+    at most one copper-wire neighbour. Re-observing after every bot removal
+    lets a two-pole starter and its bridge peel back toward the trunk, then
+    stops at the first live consumer or branching junction.
+    """
+    if not hasattr(client, "command"):
+        return 0
+    removable_names = {"small-electric-pole", "medium-electric-pole"}
+    pending = {
+        position: name for name, position in starter_poles
+        if name in removable_names
+    }
+    removed = 0
+    while pending:
+        progressed = False
+        for position, expected_name in tuple(pending.items()):
+            context = live_base.pole_context(client, surface, position)
+            if context is None or context.get("name") != expected_name:
+                pending.pop(position, None)
+                continue
+            neighbours = tuple(context.get("neighbours", ()))
+            if context.get("supplied") or len(neighbours) > 1:
+                continue
+            plan = {
+                "surface": surface,
+                "force": force,
+                "phases": [{
+                    "name": f"retire_unused_{recipe}_starter_power",
+                    "actions": [{
+                        "action_type": "remove_entity",
+                        "entity": expected_name,
+                        "position": {"x": position[0], "y": position[1]},
+                    }],
+                }],
+            }
+            retire_entities_via_bots(
+                client, bridge, surface, force, plan,
+                f"unused_{recipe}_starter_power", emit,
+            )
+            pending.pop(position, None)
+            removed += 1
+            progressed = True
+            for neighbour in neighbours:
+                neighbour_context = live_base.pole_context(
+                    client, surface, neighbour,
+                )
+                if (
+                    neighbour_context is not None
+                    and neighbour_context.get("name") in removable_names
+                ):
+                    pending.setdefault(
+                        neighbour, str(neighbour_context["name"]),
+                    )
+        if not progressed:
+            break
+    if removed:
+        emit(
+            f"BOOTSTRAP POWER RETIRE: recovered {removed} unused pole(s) from "
+            f"the dead {recipe} starter branch; stopped at live load or junction"
+        )
+    return removed
+
+
 def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
@@ -2344,6 +2414,19 @@ def _retire_standing_bootstrap_cells(
             except BootstrapLifecycleError as error:
                 raise _bootstrap_lifecycle_stuck(recipe, error) from error
     if starter is not None:
+        starter_plan = generate_direct_smelter(
+            recipe, ore, starter.drill_position, starter.output_direction,
+            pole_side=starter.pole_side,
+        )
+        starter_poles = [
+            (
+                str(action["entity"]),
+                (float(action["position"]["x"]), float(action["position"]["y"])),
+            )
+            for phase in starter_plan["phases"]
+            for action in phase["actions"]
+            if action.get("entity") == "medium-electric-pole"
+        ]
         plan = retire_direct_smelter_plan(
             recipe, ore, starter.drill_position, starter.output_direction,
             pole_side=starter.pole_side,
@@ -2361,6 +2444,9 @@ def _retire_standing_bootstrap_cells(
                 details={"recipe": recipe, "starter_kind": "direct"},
             ) from error
         removed += 1
+        _retire_unused_starter_power_branch(
+            client, bridge, surface, force, starter_poles, recipe, emit,
+        )
         emit(
             f"BOOTSTRAP SWAP: full {recipe} system is healthy; construction "
             f"bots recovered the direct starter at {starter.drill_position}"
@@ -2960,11 +3046,39 @@ def _serve_direct_plate_starter(
     )
     plan["surface"], plan["force"] = surface, force
     if submit:
+        # Connect the local pole island first, while its whole footprint is
+        # still known and clear. Coverage may legitimately defer on a remote
+        # roboport wave after submission; power must not be sequenced behind
+        # that unrelated wait or the stone starter remains visibly unpowered
+        # for most of the run.
+        if hasattr(client, "command"):
+            # Claim the starter's own poles before its extra bridge spends
+            # construction stock; otherwise staging power first can consume
+            # the exact two anchors the stone blueprint still needs.
+            assert_affordable(
+                client, surface, force, plan, f"direct_{recipe}_starter",
+                emit, reserve_project=True,
+            )
+            if not extend_power(
+                client, bridge, surface, force, positions["power"], emit,
+                reserved_tiles=planned_footprint_tiles(plan),
+                avoid_resources=False,
+            ):
+                raise StuckError(
+                    f"direct {recipe} starter cannot stage generated power beside "
+                    f"its planned anchor at {positions['power']}"
+                )
         _submit(
             client, bridge, surface, plan, f"direct_{recipe}_starter", emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
             ),
+        )
+    else:
+        _ensure_power_anchor_on_generated_network(
+            client, bridge, surface, force, positions["power"],
+            f"direct {recipe} starter", emit,
+            reserved_tiles=planned_footprint_tiles(plan),
         )
     area = _plan_area(plan, padding=10.0)
     machines = [

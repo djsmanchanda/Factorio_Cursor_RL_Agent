@@ -935,6 +935,86 @@ def test_covered_target_skips_chaining_entirely(monkeypatch) -> None:
         lambda _message: None, purpose="logistic",
     ) is False
 
+
+def test_pending_roboport_wave_is_credited_before_planning_a_near_duplicate(
+    monkeypatch,
+) -> None:
+    """The (34,27) mall wave already covers the concurrent copper blueprint."""
+    from orchestrator import stage_services
+
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    source = (3.0, -1.0)
+    pending = (34.0, 27.0)
+    target = (55.5, 24.5)
+    monkeypatch.setattr(
+        stage_services, "_repair_existing_roboport_power", lambda *_a: (),
+    )
+    monkeypatch.setattr(
+        live_base, "nearest_roboport", lambda *_a: source,
+    )
+    monkeypatch.setattr(
+        live_base, "roboport_ghost_positions", lambda *_a: [pending],
+    )
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions",
+        lambda *_a, **_k: pytest.fail("must wait for the pending wave"),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        stage_services.extend_roboport_coverage(
+            _LiveClient(), object(), "nauvis", "player", target,
+            lambda _message: None,
+        )
+
+    assert deferred.value.details["wave"] == [[34.0, 27.0]]
+
+
+def test_roboport_power_branch_is_submitted_before_the_port_ghost(monkeypatch) -> None:
+    from orchestrator import stage_services
+
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    source, port, target = (3.0, -1.0), (34.0, 27.0), (39.5, 31.5)
+    events: list[tuple[str, object]] = []
+    nearest = iter((source, port))
+    monkeypatch.setattr(
+        stage_services, "_repair_existing_roboport_power", lambda *_a: (),
+    )
+    monkeypatch.setattr(
+        live_base, "nearest_roboport", lambda *_a: next(nearest),
+    )
+    monkeypatch.setattr(live_base, "roboport_ghost_positions", lambda *_a: [])
+    monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(
+        stage_services, "clear_chain_positions", lambda *_a, **_k: [port],
+    )
+    monkeypatch.setattr(
+        stage_services, "extend_power",
+        lambda *_a, **kwargs: events.append(("power", kwargs["reserved_tiles"])) or True,
+    )
+    monkeypatch.setattr(
+        stage_services, "_submit",
+        lambda *_a, **_k: events.append(("roboport", None)) or {},
+    )
+    monkeypatch.setattr(
+        stage_services, "_await_built_status", lambda *_a, **_k: "working",
+    )
+    monkeypatch.setattr(stage_services, "_await_roboport_charge", lambda *_a: None)
+
+    assert stage_services.extend_roboport_coverage(
+        _LiveClient(), object(), "nauvis", "player", target,
+        lambda _message: None, purpose="logistic", reserved_tiles={(1, 2)},
+    )
+    assert [event[0] for event in events] == ["power", "roboport"]
+    power_reserved = events[0][1]
+    assert (1, 2) in power_reserved
+    assert footprint_tile_indices(port, 4).issubset(power_reserved)
+
 def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> None:
     """2026-09-05: the bridged roboport dodged the pipe corridor but its
     power chain marched through it, and the crude pipeline died on the pole

@@ -49,6 +49,62 @@ def test_complete_matching_pair_migrates_to_two_request_sections(
     assert sum(section["multiplier"] for section in sections) == 46
 
 
+def test_pair_refresh_merges_stale_groups_from_both_sides(monkeypatch) -> None:
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    captured = {}
+    monkeypatch.setattr(
+        mall_builder.live_base, "requester_logistic_groups",
+        lambda *_a: (
+            "mall:iron-gear-wheel:left",
+            "mall:inserter:right",
+        ),
+    )
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda *_args, **_kwargs: captured.setdefault("plan", _args[3]),
+    )
+
+    mall_builder.refresh_paired_mall_requests(
+        _LiveClient(), object(), "nauvis", "player", "copper-cable",
+        [(36.5, 32.5), (42.5, 32.5)], (3.0, -1.0),
+        lambda _message: None,
+    )
+
+    requester = captured["plan"]["phases"][0]["actions"][0]
+    assert "mall:iron-gear-wheel:left" in requester["clear_logistic_groups"]
+    assert "mall:inserter:right" in requester["clear_logistic_groups"]
+
+
+def test_reassigned_half_clears_only_its_stale_recipe_group(monkeypatch) -> None:
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    monkeypatch.setattr(
+        mall_builder.live_base, "requester_logistic_groups",
+        lambda *_a: (
+            "mall:iron-gear-wheel:left",
+            "mall:copper-cable:left",
+            "mall:electronic-circuit:right",
+        ),
+    )
+    action = {
+        "position": {"x": 39.5, "y": 32.5},
+        "clear_logistic_groups": ["mall:copper-cable"],
+    }
+
+    mall_builder._clear_stale_side_requests(
+        _LiveClient(), "nauvis", action, "copper-cable", "left",
+    )
+
+    assert action["clear_logistic_groups"] == [
+        "mall:copper-cable", "mall:iron-gear-wheel:left",
+    ]
+
+
 def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None:
     """The live fault: two valid mall gear assemblers were passed to line
     recovery, which rejected their six-tile spacing as invalid line geometry."""

@@ -1497,6 +1497,28 @@ def roboport_positions(client: RconClient, surface: str, force: str) -> list[Poi
     return [tuple(float(v) for v in record.split()) for record in raw.split(";")]
 
 
+def roboport_ghost_positions(
+    client: RconClient, surface: str, force: str,
+) -> list[Point]:
+    """Every pending force-owned roboport ghost, in one round trip.
+
+    Coverage planning must see these separately from built ports: a ghost does
+    not provide service yet, but forgetting it exists lets a concurrent stage
+    request place a second port a few tiles away from the first wave.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for _,e in pairs(s.find_entities_filtered{"
+        "type='entity-ghost',ghost_name='roboport',force=f}) do "
+        "out[#out+1]=string.format('%.2f %.2f',e.position.x,e.position.y) end;"
+        "rcon.print(table.concat(out,';'))"
+    )
+    raw = _sc(client, lua)
+    if not raw:
+        return []
+    return [tuple(float(v) for v in record.split()) for record in raw.split(";")]
+
+
 _GENERATOR_TYPES = (
     "'generator','electric-energy-interface','fusion-generator','burner-generator'"
 )
@@ -2183,7 +2205,8 @@ def pole_context(
         "local sup={};"
         "for _,e in pairs(s.find_entities_filtered{area={{p.position.x-r,p.position.y-r},"
         "{p.position.x+r,p.position.y+r}}}) do "
-        "if e.type~='electric-pole' and e.valid and e.prototype.electric_energy_source_prototype then "
+        "local proto=e.type=='entity-ghost' and e.ghost_prototype or e.prototype;"
+        "if e.type~='electric-pole' and e.valid and proto and proto.electric_energy_source_prototype then "
         "sup[#sup+1]=string.format('%.1f,%.1f',e.position.x,e.position.y) end end;"
         "local nb={};"
         "for _,n in pairs(p.neighbours and p.neighbours.copper or {}) do "
@@ -2477,3 +2500,25 @@ def requester_requesting(
     if len(parts) == 2:
         return (float(parts[0]), float(parts[1]))
     return None
+
+
+def requester_logistic_groups(
+    client: RconClient, surface: str, position: Point,
+) -> tuple[str, ...]:
+    """Named request sections currently attached to one requester chest."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];"
+        "local c=s.find_entities_filtered{position={"
+        + str(position[0]) + "," + str(position[1]) + "},radius=0.4,"
+        "name='requester-chest',limit=1}[1];"
+        "if not c then rcon.print('NONE') return end;"
+        "local sections=c.get_logistic_sections();local out={};"
+        "if sections then for _,section in pairs(sections.sections) do "
+        "if section.valid and section.group and section.group~='' then "
+        "out[#out+1]=section.group end end end;table.sort(out);"
+        "rcon.print(table.concat(out,'|'))"
+    )
+    raw = _sc(client, lua)
+    if raw in {"", "NONE"}:
+        return ()
+    return tuple(group for group in raw.split("|") if group)

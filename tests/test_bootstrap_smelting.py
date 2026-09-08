@@ -3,6 +3,8 @@
 
 import pytest
 
+from orchestrator import autonomous_builder as builder
+from orchestrator import live_base
 from planners.bootstrap_smelting import (
     direct_smelter_positions,
     generate_direct_smelter,
@@ -134,6 +136,90 @@ def test_direct_starter_retirement_keeps_only_its_shared_power_pole() -> None:
         "passive-provider-chest",
     }
     assert all(action["action_type"] == "remove_entity" for action in actions)
+
+
+def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> None:
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    events: list[str] = []
+    starter = live_base.DirectPlateStarter((54.5, -64.5), "north", 1)
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: events.append("power") or True,
+    )
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda *_a, **_k: events.append("blueprint") or {},
+    )
+    monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(builder, "_record_bootstrap_pioneer", lambda *_a: None)
+
+    builder._serve_direct_plate_starter(
+        _LiveClient(), object(), "nauvis", "player", "stone-brick", "stone",
+        starter, lambda _message: None, submit=True,
+    )
+
+    assert events[:2] == ["power", "blueprint"]
+
+
+def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch) -> None:
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    active = {"starter-a", "starter-b", "bridge", "junction"}
+    positions = {
+        "starter-a": (0.5, 0.5),
+        "starter-b": (0.5, 7.5),
+        "bridge": (8.5, 0.5),
+        "junction": (16.5, 0.5),
+    }
+    edges = {
+        "starter-a": {"starter-b", "bridge"},
+        "starter-b": {"starter-a"},
+        "bridge": {"starter-a", "junction"},
+        "junction": {"bridge"},
+    }
+
+    def context(_client, _surface, position):
+        name = next((key for key, value in positions.items() if value == position), None)
+        if name not in active:
+            return None
+        return {
+            "name": "medium-electric-pole",
+            "supplied": [(20.5, 0.5)] if name == "junction" else [],
+            "neighbours": [
+                positions[other] for other in edges[name] if other in active
+            ],
+        }
+
+    removed: list[str] = []
+
+    def retire(_client, _bridge, _surface, _force, plan, *_args, **_kwargs):
+        position = plan["phases"][0]["actions"][0]["position"]
+        point = (position["x"], position["y"])
+        name = next(key for key, value in positions.items() if value == point)
+        active.remove(name)
+        removed.append(name)
+        return 1
+
+    monkeypatch.setattr(builder.live_base, "pole_context", context)
+    monkeypatch.setattr(builder, "retire_entities_via_bots", retire)
+
+    count = builder._retire_unused_starter_power_branch(
+        _LiveClient(), object(), "nauvis", "player",
+        [("medium-electric-pole", positions["starter-a"]),
+         ("medium-electric-pole", positions["starter-b"])],
+        "stone-brick", lambda _message: None,
+    )
+
+    assert count == 3
+    assert set(removed) == {"starter-a", "starter-b", "bridge"}
+    assert active == {"junction"}
 
 
 def test_legacy_logistic_cell_remains_recognizable_for_retirement_only() -> None:

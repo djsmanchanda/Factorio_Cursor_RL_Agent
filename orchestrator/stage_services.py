@@ -909,6 +909,7 @@ def extend_power(
     near_position: Point, emit: Callable[[str], None], *,
     reserved_tiles: set[tuple[int, int]] | None = None,
     detailed: bool = False,
+    avoid_resources: bool = True,
     _retried: bool = False,
 ) -> bool | PowerExtensionResult:
     """Connect `near_position` to a network that actually generates power.
@@ -927,6 +928,11 @@ def extend_power(
     once on fresh ground instead of ending the run. `reserved_tiles` are a
     sibling plan's future footprint: an emergency pole must route around that
     footprint just as it would around built infrastructure.
+
+    ``avoid_resources=False`` is reserved for temporary direct-starter
+    hookup: its planned poles intentionally stand on the same disposable ore
+    patch and are leaf-pruned when the starter retires. Persistent power
+    corridors continue to preserve mineable resource tiles.
     """
     bridge_key = (surface, force)
     pending_since = _PENDING_POWER_BRIDGES.pop(bridge_key, None)
@@ -941,7 +947,7 @@ def extend_power(
     own_network = live_base.pole_network_id(client, surface, near_position)
     target = live_base.nearest_powered_pole(
         client, surface, force, near_position, exclude_network_id=own_network,
-        avoid_resources=True,
+        avoid_resources=avoid_resources,
     )
     if target is None:
         # A bridge submission can race another stage: enough of the first
@@ -1012,7 +1018,7 @@ def extend_power(
          min(target_position[1], near_position[1]) - margin),
         (max(target_position[0], near_position[0]) + margin,
          max(target_position[1], near_position[1]) + margin),
-        include_resources=True,
+        include_resources=avoid_resources,
     )
     blocked |= reserved_tiles or set()
     hookup_blocked = set(blocked)
@@ -1106,6 +1112,7 @@ def extend_power(
             client, bridge, surface, force, near_position, emit,
             reserved_tiles=reserved_tiles,
             detailed=detailed,
+            avoid_resources=avoid_resources,
             _retried=True,
         )
     generation = live_base.network_generation_kw(
@@ -1121,6 +1128,7 @@ def extend_power(
                 client, bridge, surface, force, near_position, emit,
                 reserved_tiles=reserved_tiles,
                 detailed=detailed,
+                avoid_resources=avoid_resources,
                 _retried=True,
             )
         raise StuckError(
@@ -1286,6 +1294,28 @@ def extend_roboport_coverage(
     nearest = live_base.nearest_roboport(client, surface, force, target_position)
     if nearest is None:
         return False
+    if client is not None and hasattr(client, "command"):
+        # A ghost is not service yet, but it is already the active coverage
+        # transaction. Credit a reachable in-flight hop and let the next pass
+        # reobserve it instead of planning from the older built port. This is
+        # what prevents one logistic request at (39.5,31.5) and a concurrent
+        # construction request at (55.5,24.5) from producing ports at
+        # (34,27) and (40,26), only six tiles apart.
+        pending = [
+            position
+            for position in live_base.roboport_ghost_positions(
+                client, surface, force,
+            )
+            if math.dist(position, nearest) <= _ROBOPORT_LINK_DISTANCE
+            and math.dist(position, target_position) < math.dist(
+                nearest, target_position,
+            )
+        ]
+        if pending:
+            wave = [min(pending, key=lambda p: math.dist(p, target_position))]
+            _defer_roboport_coverage_wave(
+                target_position, purpose, wave, state="constructing",
+            )
     if (
         client is not None
         and live_base.entity_status_name(client, surface, nearest) == "low_power"
@@ -1322,6 +1352,23 @@ def extend_roboport_coverage(
     )
     for wave_start in wave_starts:
         wave = placed[wave_start:wave_start + _ROBOPORT_WAVE]
+        if client is not None and hasattr(client, "command"):
+            # Stage the electrical branch while the future port is still
+            # inside the current port's construction reach. The port then
+            # lands beside a generated pole in the same controller pass,
+            # rather than spending a later pass discovering `no_power` and
+            # building the very same branch after the fact.
+            for position in wave:
+                power_reserved = set(reserved_tiles or ())
+                power_reserved.update(footprint_tile_indices(position, 4))
+                if not extend_power(
+                    client, bridge, surface, force, position, emit,
+                    reserved_tiles=power_reserved,
+                ):
+                    raise StuckError(
+                        f"roboport at {position} cannot be connected to generated "
+                        "power before its coverage ghost is submitted"
+                    )
         actions = [
             {"action_type": "place_ghost", "entity": "roboport", "position": {"x": x, "y": y}}
             for x, y in wave
@@ -1350,7 +1397,16 @@ def extend_roboport_coverage(
                 _defer_roboport_coverage_wave(
                     target_position, purpose, wave, state="constructing",
                 )
-            if status in {"no_power", "low_power"}:
+            generation = (
+                live_base.network_generation_kw(
+                    client, surface, force, position,
+                )
+                if status == "low_power" and hasattr(client, "command") else None
+            )
+            if status == "no_power" or (
+                status == "low_power"
+                and (generation is None or generation <= 0)
+            ):
                 emit(f"  bridged roboport at {position} is {status} -- connecting it")
                 # The roboport dodged reserved tiles, but its power chain has
                 # to dodge them too: a hop through a sibling plan's future

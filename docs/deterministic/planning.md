@@ -59,8 +59,11 @@ These names describe intended responsibilities, not permission to build speculat
   built and observed healthy. Only then may the starter drill, furnace,
   inserter, and provider chest receive exact deconstruction orders. Retirement
   waits for construction bots to recover those entities and their contents into
-  logistics; it must never destroy them. Its grid pole may remain as shared
-  service infrastructure. Legacy requester cells and their recognized mine-side
+  logistics; it must never destroy them. After the production entities are
+  gone, an empty starter-pole leaf is pruned back one pole at a time; pruning
+  stops at the first pole that still supplies a real/ghost consumer or has two
+  wire neighbours, so a shared grid branch remains intact. Legacy requester
+  cells and their recognized mine-side
   intake follow the same recoverable teardown, but are recognized only so old
   saves can retire them; new starts must not create one.
 - Once provisioning records a replacement origin, mine haul head, exact
@@ -160,6 +163,10 @@ These names describe intended responsibilities, not permission to build speculat
   This is recovery after the mall has duplicate cells, not the cold-start
   source: `reduced-v1` supplies exactly two requester chests once per episode
   before production prep, and the material ledger prevents replenishment.
+  A permanent half-cell refresh also surveys its shared requester and clears
+  obsolete `mall:*:<side>` sections for that half only. The opposite machine's
+  side remains untouched, so one chest converges to at most its two live
+  recipe groups instead of accumulating retired recipes.
 - Reduced supply begins entirely on assembling-machine-1 and regular inserters;
   neither upgraded tier is part of the starter contract. Solid compact cells,
   including the permanent assembling-machine-2 and fast-inserter producers,
@@ -325,10 +332,15 @@ These names describe intended responsibilities, not permission to build speculat
   upstream synchronous intent that the submit boundary converts, or in
   non-production sandbox fixtures.
 - Construction coverage advances one reachable roboport at a time. The current
-  network builds that port and its pole bridge, observed power makes the port
-  usable, and only then can its new construction radius build the following
-  hop. Planning a distant destination never licenses a complete live pole line
-  ahead of the bots.
+  network first builds a funded pole branch beside the planned port, then the
+  port ghost lands powered in the same controller pass. A reachable in-flight
+  port is credited by concurrent coverage requests even though it does not yet
+  provide service; they wait for it rather than placing a near-duplicate.
+  Observed power makes the port usable, and only then can its new construction
+  radius build the following hop. Planning a distant destination never licenses
+  a complete live pole line ahead of the bots. Direct plate starters and compact
+  mall cells use the same power-first submission order so a coverage wait cannot
+  strand their local machine grid.
 - Emergency pole chains are planned at Factorio's actual half-tile medium-pole
   centres, and every adjacent edge is checked against the shorter endpoint's
   wire reach before submission. A successful placement report is still not
