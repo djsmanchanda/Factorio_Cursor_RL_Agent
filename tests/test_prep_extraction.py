@@ -771,33 +771,29 @@ def test_plate_foundation_gate_runs_before_demand_driven_extraction() -> None:
     assert foundation < expansion
 
 
-def test_material_blocked_plate_waits_for_its_exact_construction_bill(monkeypatch) -> None:
+def test_material_blocked_plate_earmarks_before_its_supply_chain_exists(
+    monkeypatch,
+) -> None:
     available = {"fast-transport-belt": 73}
-    attempts: list[str] = []
+    attempts: list[dict] = []
     pending = {"iron-plate": {"fast-transport-belt": 74}}
     monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: available)
     monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: None)
     monkeypatch.setattr(
         autonomous_builder, "build_mining_stage",
-        lambda *_a, **_k: attempts.append("build"),
+        lambda *_a, **kwargs: attempts.append(kwargs),
     )
     prepped: set[str] = set()
     deferred: dict[str, int] = {}
 
-    assert not autonomous_builder._prep_plate_extraction(
-        object(), object(), "nauvis", "player", "iron-plate", prepped,
-        deferred, {"fast-transport-belt": 74}, (0.0, 0.0), lambda _m: None,
-        pending_materials=pending,
-    )
-    assert attempts == [] and pending
-
-    available["fast-transport-belt"] = 74
     assert autonomous_builder._prep_plate_extraction(
         object(), object(), "nauvis", "player", "iron-plate", prepped,
         deferred, {"fast-transport-belt": 74}, (0.0, 0.0), lambda _m: None,
         pending_materials=pending,
     )
-    assert attempts == ["build"] and not pending
+    assert len(attempts) == 1
+    assert attempts[0]["earmark_unfunded"] is True
+    assert not pending
 
 
 def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatch) -> None:
@@ -826,6 +822,57 @@ def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatc
     assert len(attempts) == 1
     assert attempts[0]["earmark_unfunded"] is True
     assert pending == {}
+
+
+def test_new_plate_shortage_submits_its_additive_blueprint_immediately(
+    monkeypatch,
+) -> None:
+    attempts: list[bool] = []
+    shortage = autonomous_builder.MaterialShortage(
+        "initial_iron-plate_system",
+        {"electric-mining-drill": 6, "transport-belt": 128},
+        {},
+    )
+
+    def build(*_args, **kwargs):
+        earmarked = bool(kwargs.get("earmark_unfunded"))
+        attempts.append(earmarked)
+        if not earmarked:
+            raise shortage
+        return None
+
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "find_line", lambda *_a: None,
+    )
+    monkeypatch.setattr(autonomous_builder, "build_mining_stage", build)
+    binding: list[autonomous_builder.MaterialShortage] = []
+    monkeypatch.setattr(
+        autonomous_builder, "_mark_binding_demands", binding.append,
+    )
+    targets: dict[str, int] = {}
+    pending: dict[str, dict[str, int]] = {}
+    messages: list[str] = []
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(), {},
+        targets, (0.0, 0.0), messages.append,
+        pending_materials=pending, furnace_target=6,
+    )
+
+    assert attempts == [False, True]
+    assert targets == {
+        "electric-mining-drill": 6,
+        "transport-belt": 128,
+    }
+    assert pending == {}
+    assert binding == [shortage]
+    assert any(
+        "exact missing construction bill now has binding priority" in message
+        for message in messages
+    )
 
 
 def test_fast_belts_wait_for_an_electric_furnace_producer(monkeypatch) -> None:

@@ -513,12 +513,12 @@ def _submit(
     of bulldozing real infrastructure.
 
     `stage_coverage` runs after the material check and before any ghost is
-    submitted. A short plan may proceed when every missing item already has a
-    scheduled producer and its complete solid prerequisite chain is active.
-    `allow_unfunded_ghosts` still marks a coherent queued expansion, but it does
-    not bypass that supply-chain proof. Collision and ownership checks are
-    unchanged; only the requirement to warehouse the entire bill first is
-    relaxed. ``reservation_priority`` is forwarded to that persisted bill.
+    submitted. An explicitly additive ``allow_unfunded_ghosts`` plan may place
+    its legal, ownership-checked ghosts before missing construction items have
+    producers; its persisted bill then drives those items through the mall.
+    Synchronous service infrastructure and destructive cutovers retain their
+    funded boundaries. ``reservation_priority`` is forwarded to that persisted
+    bill.
     ``require_funded`` is for infrastructure that the caller must observe
     synchronously: waiting inside that call would otherwise prevent the outer
     controller from producing a known shortage.
@@ -538,24 +538,39 @@ def _submit(
             True, (), reservation_priority,
         )
     except MaterialShortage as shortage:
-        if require_funded or converted_infrastructure:
+        converted_items = {
+            entity for entity, _position in converted_infrastructure
+        }
+        if require_funded or (
+            converted_infrastructure
+            and (
+                not allow_unfunded_ghosts
+                or bool(converted_items.intersection(shortage.required))
+            )
+        ):
             raise
         ledger = active_material_ledger()
         project = ledger.projects.get(name) if ledger is not None else None
         if project is not None and project.hold_until_producing:
             raise
-        producer_backed = _shortage_has_complete_supply_chains(
-            client, surface, plan.get("force", "player"), shortage,
-        )
-        if not producer_backed:
-            raise
+        if not allow_unfunded_ghosts:
+            producer_backed = _shortage_has_complete_supply_chains(
+                client, surface, plan.get("force", "player"), shortage,
+            )
+            if not producer_backed:
+                raise
         emit(
             f"  CONSTRUCTION BACKLOG: {name} is short "
             + ", ".join(
                 f"{item}={count - shortage.available.get(item, 0)}"
                 for item, count in sorted(shortage.required.items())
             )
-            + "; placing coherent ghosts while scheduled producers catch up"
+            + (
+                "; placing the additive blueprint now so its exact bill "
+                "drives mall priority"
+                if allow_unfunded_ghosts else
+                "; placing coherent ghosts while scheduled producers catch up"
+            )
         )
     if stage_coverage is not None:
         stage_coverage()

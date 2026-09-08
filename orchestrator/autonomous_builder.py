@@ -2385,16 +2385,12 @@ def _prepare_initial_refinery(
             ),
         )
     except MaterialShortage as shortage:
-        if not allow_unfunded_ghosts or not all(
-            construction_supply_chain_is_scheduled(
-                client, surface, force, item,
-            )
-            for item in shortage.required
-        ):
+        if not allow_unfunded_ghosts:
             raise
         emit(
             f"  BLUEPRINT EARMARK: coherent {recipe} mine/refinery foundation "
-            "has scheduled construction supply chains; placing ghosts now"
+            "passed hard layout and ownership checks; placing its additive "
+            "ghosts now so the exact missing bill drives mall work"
         )
     belt_tiles = sum(
         1 for action in route_actions
@@ -8734,18 +8730,24 @@ def _prep_plate_extraction(
     }
     pipeline_ready = False
     if missing_pending:
-        if not all(
+        supply_ready = all(
             construction_supply_chain_is_scheduled(
                 client, surface, force, item,
             )
             for item in missing_pending
-        ):
-            return False
-        pipeline_ready = True
-        emit(
-            f"  PLATE FOUNDATION PIPELINE READY: {short_plate} construction "
-            "items are being produced; releasing its coherent blueprint"
         )
+        pipeline_ready = True
+        if supply_ready:
+            emit(
+                f"  PLATE FOUNDATION PIPELINE READY: {short_plate} construction "
+                "items are being produced; releasing its coherent blueprint"
+            )
+        else:
+            emit(
+                f"  PLATE FOUNDATION BLUEPRINT PRESSURE: {short_plate} still "
+                "has unproduced construction items; releasing its legal additive "
+                "ghosts so their exact bill stays binding"
+            )
     if pending_materials is not None:
         pending_materials.pop(short_plate, None)
     plate_line = live_base.find_line(
@@ -8879,26 +8881,33 @@ def _prep_plate_extraction(
             )
             + " -- queued for the mall"
         )
-        if furnace_target is None and plate_line is not None and not bootstrap_line:
-            try:
-                output_source = build_mining_stage(
-                    client, bridge, surface, force, short_plate,
-                    reference_point, emit, expand=True, earmark_unfunded=True,
-                    excluded_drill_positions=excluded_drill_positions,
-                )
-                if output_source is not None:
-                    MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
-                emit(
-                    f"  BLUEPRINT EARMARK: {short_plate} mine/refinery expansion "
-                    "is staged; "
-                    "construction may finish asynchronously"
-                )
-                return True
-            except (ProductionPrerequisiteDeferred, MaterialShortage, StuckError) as error:
-                # A coherent ghost plan may now exist even though its machines
-                # are not healthy yet. The next prep pass re-surveys pending
-                # ghosts and will not submit a duplicate.
-                emit(f"  BLUEPRINT EARMARK pending: {error}")
+        try:
+            output_source = build_mining_stage(
+                client, bridge, surface, force, short_plate,
+                reference_point, emit,
+                expand=(
+                    furnace_target is None
+                    and plate_line is not None
+                    and not bootstrap_line
+                ),
+                earmark_unfunded=True,
+                excluded_drill_positions=excluded_drill_positions,
+            )
+            if output_source is not None:
+                MANAGED_INTERMEDIATE_SOURCES[short_plate] = output_source
+            _mark_binding_demands(shortage)
+            if pending_materials is not None:
+                pending_materials.pop(short_plate, None)
+            emit(
+                f"  BLUEPRINT EARMARK: {short_plate} mine/refinery is staged; "
+                "its exact missing construction bill now has binding priority"
+            )
+            return True
+        except (ProductionPrerequisiteDeferred, MaterialShortage, StuckError) as error:
+            # Coverage/service prerequisites may still prevent submission.
+            # Keep the exact bill queued and retry without discarding the
+            # collision-checked plan or allowing a later plate to spend it.
+            emit(f"  BLUEPRINT EARMARK pending: {error}")
         return False
     except (StuckError, ValueError) as error:
         deferred_targets[short_plate] = wanted_furnaces

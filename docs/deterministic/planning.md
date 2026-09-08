@@ -325,14 +325,18 @@ These names describe intended responsibilities, not permission to build speculat
   first makes any missing gears, then switches to belts, while the two baseline
   gear assemblers and one cable assembler remain assigned. The loan restores
   the cable recipe when its reserve is full or another batch needs the slot.
-- The same complete-chain condition applies to every other coherent blueprint.
-  The initial construction window is five minutes. Diagnose and remedy its
-  local ghost backlog throughout that window; only a flat unresolved job may
-  fail at the end (upstream production, delivery, bot or roboport capacity,
-  coverage, or power). Synchronously awaited poles and roboports diagnose a
-  flat ghost tail after ten seconds; if its construction item has no live
-  supply chain, that item returns to the normal mall scheduler immediately
-  instead of holding the controller for the remaining window.
+- A collision-checked additive blueprint does not wait for every construction
+  item to have a producer. Stage its reachable construction coverage, submit
+  the ghosts, and promote the persisted exact shortfall as binding mall work;
+  bots and producers then finish the job concurrently. Destructive cutovers
+  and synchronous service infrastructure remain fully funded boundaries. The
+  initial construction window is five minutes. Diagnose and remedy its local
+  ghost backlog throughout that window; only a flat unresolved job may fail at
+  the end (upstream production, delivery, bot or roboport capacity, coverage,
+  or power). Synchronously awaited poles and roboports diagnose a flat ghost
+  tail after ten seconds; if its construction item has no live supply chain,
+  that item returns to the normal mall scheduler immediately instead of
+  holding the controller for the remaining window.
 - A partially built or unconfigured furnace cluster is pending construction,
   not recoverable capacity. Recovery may adopt only an exact planner-shaped
   six-furnace module; until a direct refinery has produced plates, repair its

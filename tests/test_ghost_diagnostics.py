@@ -121,13 +121,26 @@ def test_configuration_only_plan_is_not_logged_as_zero_placement_churn(
     ]
 
 
-def test_explicit_earmark_cannot_bypass_a_missing_supply_chain(monkeypatch) -> None:
+def test_explicit_additive_earmark_can_precede_a_missing_supply_chain(
+    monkeypatch,
+) -> None:
     plan = {"force": "player", "phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "pipe",
         "position": {"x": 10.5, "y": 20.5},
     }]}]}
+    reports: list[dict] = []
+    bridge = type("Bridge", (), {
+        "build_layout": lambda _self, _authorization, candidate: (
+            reports.append(candidate) or {
+                "ok": True, "attempted_placements": 1,
+                "succeeded_placements": 1, "placed_ghosts": 1,
+                "placed_entities": 0,
+            }
+        ),
+    })()
     monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
     monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
     monkeypatch.setattr(
         stage_services, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
@@ -138,12 +151,86 @@ def test_explicit_earmark_cannot_bypass_a_missing_supply_chain(monkeypatch) -> N
         stage_services, "_shortage_has_complete_supply_chains",
         lambda *_a: False,
     )
+    messages: list[str] = []
+
+    stage_services._submit(
+        object(), bridge, "nauvis", plan, "oil-cell", messages.append,
+        allow_unfunded_ghosts=True,
+    )
+
+    assert reports == [plan]
+    assert any("exact bill drives mall priority" in message for message in messages)
+
+
+def test_additive_earmark_still_funds_synchronously_awaited_infrastructure(
+    monkeypatch,
+) -> None:
+    plan = {"force": "player", "phases": [{"actions": [
+        {
+            "action_type": "place_entity", "entity": "substation",
+            "position": {"x": 8.0, "y": 8.0},
+        },
+        {
+            "action_type": "place_ghost", "entity": "electric-mining-drill",
+            "position": {"x": 12.5, "y": 8.5},
+        },
+    ]}]}
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a: (_ for _ in ()).throw(MaterialShortage(
+            "iron-foundation", {"substation": 1}, {},
+        )),
+    )
 
     with pytest.raises(MaterialShortage):
         stage_services._submit(
-            object(), object(), "nauvis", plan, "oil-cell",
+            object(), object(), "nauvis", plan, "iron-foundation",
             lambda _message: None, allow_unfunded_ghosts=True,
         )
+
+
+def test_funded_service_anchor_does_not_block_an_unfunded_additive_machine(
+    monkeypatch,
+) -> None:
+    plan = {"force": "player", "phases": [{"actions": [
+        {
+            "action_type": "place_entity", "entity": "substation",
+            "position": {"x": 8.0, "y": 8.0},
+        },
+        {
+            "action_type": "place_ghost", "entity": "electric-mining-drill",
+            "position": {"x": 12.5, "y": 8.5},
+        },
+    ]}]}
+    submitted: list[dict] = []
+    bridge = type("Bridge", (), {
+        "build_layout": lambda _self, _authorization, candidate: (
+            submitted.append(candidate) or {
+                "ok": True, "attempted_placements": 2,
+                "succeeded_placements": 2, "placed_ghosts": 2,
+                "placed_entities": 0,
+            }
+        ),
+    })()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a: (_ for _ in ()).throw(MaterialShortage(
+            "iron-foundation", {"electric-mining-drill": 6}, {},
+        )),
+    )
+
+    stage_services._submit(
+        object(), bridge, "nauvis", plan, "iron-foundation",
+        lambda _message: None, allow_unfunded_ghosts=True,
+    )
+
+    assert len(submitted) == 1
+    assert submitted[0]["phases"][0]["actions"][0]["action_type"] == "place_ghost"
 
 
 def test_unfunded_blueprint_requires_the_complete_solid_supply_chain(monkeypatch) -> None:
