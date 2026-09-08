@@ -228,13 +228,19 @@ These names describe intended responsibilities, not permission to build speculat
   items rate 100 while queued and retire with their demand; a binding loan
   below its blocking bill is shielded from preempt by non-binding batches.
   After both metal districts validate and release their pioneers, the
-  controller starts one stack of electronic circuits followed by twelve
-  splitters as non-binding reserve work while the stone district opens. Stone's
-  exact construction bills remain binding and may preempt either reserve;
-  replenishment must not serialize the next foundation behind warehouse stock.
-  Other low-demand batches target their blocking bill plus at least 20% spares
+  controller stops scarcity-sized recipe switching. Every assembled mall
+  demand rounds up to a complete item stack (and to additional complete stacks
+  when the bill is larger); that stack-rounded amount is the blocking batch,
+  so a rotating cell does not switch after making only the few items named by
+  the immediate shortage. Electronic circuits and splitters begin filling as
+  non-binding reserve work while the stone district opens. Before that phase,
+  low-demand batches target their blocking bill plus at least 20% spares
   (rounded up, covering requester/buffer WIP), and retire only once that
-  transferable stock exists. A demand whose bill is met in
+  transferable stock exists. Upstream belt batches additionally reserve the
+  recipe-derived draw of queued belt consumers plus two crafts of input that a
+  stock-capped assembler can preload; three splitters therefore add 20 belts
+  (12 consumed and 8 retained) before the ordinary spare/WIP margin. A demand
+  whose bill is met in
   transferable stock while its loan keeps advancing without accumulation
   retires as drained; the cell finishes spares in the background. A lagging
   build names its transferable shortfall, locked WIP, and pending ghosts

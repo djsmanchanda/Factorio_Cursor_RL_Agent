@@ -524,23 +524,35 @@ def test_automation_science_allows_measured_transition_before_retirement(
     assert any("transition_health" in message for message in messages)
 
 
-def test_transition_reserves_use_one_stack_after_starter_migration(monkeypatch) -> None:
+def test_post_starter_demands_round_up_to_complete_stacks(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
     monkeypatch.setattr(
         builder, "ITEM_STACK_SIZES", {
-            "electronic-circuit": 200, "splitter": 50,
-            "underground-belt": 50,
+            "fast-inserter": 50,
+            "electronic-circuit": 200,
+            "assembling-machine-1": 50,
+            "transport-belt": 100,
+            "splitter": 50,
         },
     )
     monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
 
-    for item in ("electronic-circuit", "splitter", "underground-belt"):
+    expected = {
+        ("fast-inserter", 1): 50,
+        ("electronic-circuit", 5): 200,
+        ("assembling-machine-1", 4): 50,
+        ("transport-belt", 128): 200,
+        ("splitter", 51): 100,
+    }
+    for (item, target), rounded in expected.items():
         assert builder.mall_reserve_for(
-            object(), "nauvis", "player", item, 200,
+            object(), "nauvis", "player", item, target,
         ) == MallReserve(
-            builder.ITEM_STACK_SIZES[item], builder.ITEM_STACK_SIZES[item], 1,
+            rounded,
+            rounded,
+            rounded // builder.ITEM_STACK_SIZES[item],
         )
 
 
@@ -560,13 +572,56 @@ def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
     ) == 50
 
 
-def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
-    """Splitter reserve is a 12-unit buffer, not a full stack.
+def test_every_rotating_batch_uses_full_stacks_after_metal_transition(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"fast-inserter": 50},
+    )
 
-    2026-09-04 (22:33 run): the 50-splitter reserve held the rotating
-    assembler +1538s to +1950s before stone, while measured refinery demand
-    is 3 per plate project.
-    """
+    assert builder._rationed_mall_spare_target(
+        object(), "nauvis", "player", "fast-inserter", 1,
+    ) == 50
+
+
+def test_post_starter_stack_is_required_before_recipe_switch(monkeypatch) -> None:
+    """A one-item fast-inserter demand becomes a blocking 50-item batch."""
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "fast-inserter",
+        {
+            "ingredients": ["inserter"], "amounts": [1],
+            "machine": "assembling-machine-1", "set_recipe": True,
+        },
+    )
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"fast-inserter": 50},
+    )
+    observed: list[int] = []
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch",
+        lambda _client, _bridge, _surface, _force, _item, target, *_a,
+        **_k: observed.append(target) or True,
+    )
+    messages: list[str] = []
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "fast-inserter", 1, {},
+        (0.0, 0.0), messages.append, background=False,
+    )
+
+    assert (ready, output) == (False, None)
+    assert observed == [50]
+    assert any("finish the complete stack" in message for message in messages)
+
+
+def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
+    """After starter retirement, background reserves fill whole stacks."""
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: True,
     )
@@ -601,9 +656,9 @@ def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> Non
         object(), object(), "nauvis", "player", prepped, targets,
         (0.0, 0.0), messages.append,
     )
-    assert serviced[-1] == ("splitter", 12, True)
+    assert serviced[-1] == ("splitter", 50, True)
 
-    stock["splitter"] = 12
+    stock["splitter"] = 50
     builder._prep_post_metal_stack_reserves(
         object(), object(), "nauvis", "player", prepped, targets,
         (0.0, 0.0), messages.append,

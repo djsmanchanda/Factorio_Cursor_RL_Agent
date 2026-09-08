@@ -114,6 +114,74 @@ def test_live_belt_output_keeps_the_blueprint_reserve(monkeypatch) -> None:
     ) is not None
 
 
+def test_belt_batch_reserves_splitter_recipe_and_capped_machine_wip(
+    monkeypatch,
+) -> None:
+    """Three splitters commit 12 belts plus two preloaded crafts (8 belts)."""
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {
+            "ingredients": ["iron-plate", "transport-belt"],
+            "amounts": [5, 4],
+            "product_amount": 1,
+            "machine": "assembling-machine-1",
+            "set_recipe": True,
+        },
+    )
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+
+    total, consumers = builder._queued_downstream_input_commitment(
+        object(), "nauvis", "player", "transport-belt", {"splitter": 3},
+    )
+
+    assert total == 20
+    assert consumers == (("splitter", 20),)
+
+
+def test_mall_service_adds_downstream_draw_before_belt_spares(monkeypatch) -> None:
+    """The run's 128-belt foundation is produced against a 148-belt bill."""
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {
+            "ingredients": ["transport-belt"],
+            "amounts": [4],
+            "product_amount": 1,
+            "machine": "assembling-machine-1",
+            "set_recipe": True,
+        },
+    )
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(builder, "_belt_starved_consumer", lambda *_a: None)
+    ensured: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda _client, _bridge, _surface, _force, item, target, *_a,
+        **_k: ensured.append((item, target)) or (True, None),
+    )
+    completed: list[str] = []
+    priorities = SimpleNamespace(
+        describe=lambda _task, _tick: "belt task",
+        complete=lambda item, _tick: completed.append(item),
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 1)
+    targets = {"transport-belt": 128, "splitter": 3}
+    messages: list[str] = []
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player",
+        SimpleNamespace(item="transport-belt", target=128), 0,
+        targets, priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert ensured == [("transport-belt", 148)]
+    assert completed == ["transport-belt"]
+    assert any("bill 128 + splitter=20" in message for message in messages)
+
+
 def test_mall_task_defers_a_belt_starved_consumer(monkeypatch) -> None:
     deferred = []
 

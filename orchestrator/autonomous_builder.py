@@ -4500,17 +4500,7 @@ _STARTUP_MALL_ITEM_CAPS = {
     "splitter": 2,
     "underground-belt": 5,
 }
-_POST_STARTER_ONE_STACK_ITEMS = frozenset({
-    "electronic-circuit", "splitter", "underground-belt",
-})
 _POST_METAL_STACK_RESERVES = ("electronic-circuit", "splitter")
-# Explicit reserve targets where a full stack is pure overstock. Measured
-# 2026-09-04 (22:33 run): the splitter full-stack reserve held the single
-# rotating assembler from +1538s to +1950s (~412s, including its 200-belt
-# prerequisite ladder) before stone could start, yet the only plate project
-# that requests splitters asks for 3 (iron PREP DEMAND) and refinery ghosts
-# needed 2 more. 12 covers 3-per-refinery across all four plates.
-_POST_METAL_RESERVE_TARGETS = {"splitter": 12}
 _STARTUP_MALL_REQUESTER_ITEMS = frozenset({"splitter", "underground-belt"})
 
 
@@ -7140,9 +7130,12 @@ def _rationed_mall_spare_target(
 ) -> int:
     """Bound optional rotating-slot output without delaying its current bill."""
     reserve = mall_reserve_for(client, surface, force, item, required)
+    if _metal_starter_transition_complete(client, surface, force):
+        # Once the temporary metal starters are gone, recipe switching costs
+        # more time than carrying inventory. Finish the whole stack-rounded
+        # reserve even while this item still uses a rotating pre-core cell.
+        return max(required, reserve.storage_count)
     if item == "splitter":
-        if _metal_starter_transition_complete(client, surface, force):
-            return max(required, reserve.storage_count)
         iron_available = (
             live_base.available_items(client, surface, force).get("iron-plate", 0)
             if hasattr(client, "command") else 0
@@ -7581,6 +7574,20 @@ def _ensure_mall_item(
             f"Parts mall needs {target} {item}, but no executable recipe "
             "knowledge exists for that construction item"
         )
+    if (
+        LINE_RECIPES[item].get("machine") in live_base.ASSEMBLER_TIERS
+        and _metal_starter_transition_complete(client, surface, force)
+    ):
+        stack_target = mall_reserve_for(
+            client, surface, force, item, target,
+        ).storage_count
+        if stack_target > target:
+            emit(
+                f"  POST-STARTER STACK BATCH: {item} demand {target} rounds "
+                f"to {stack_target}; finish the complete stack before "
+                "switching recipes"
+            )
+            target = stack_target
     mode = "background reserve" if background else "stock target"
     if item == "steel-plate":
         emit(
@@ -7808,6 +7815,46 @@ _BELT_RESERVE_FLOORS = {
     "transport-belt": 50,
     "fast-transport-belt": 50,
 }
+
+# A stock-capped assembler can finish its requested batch after its input
+# inserter has already loaded two more crafts. Those ingredients are not
+# transferable again until the rotating cell changes recipe. The 14:47 run
+# made three splitters (12 belts) and retained two more splitter crafts (8
+# belts), so the iron foundation's upstream belt bill must reserve all 20.
+_CAPPED_ASSEMBLER_WIP_CRAFTS = 2
+
+
+def _queued_downstream_input_commitment(
+    client: RconClient, surface: str, force: str, ingredient: str,
+    mall_targets: dict[str, int],
+) -> tuple[int, tuple[tuple[str, int], ...]]:
+    """Recipe-derived ingredient draw from queued capped mall batches."""
+    try:
+        stock = _transferable_or_available_stock(client, surface, force)
+    except Exception:
+        stock = {}
+    commitments: list[tuple[str, int]] = []
+    for consumer, target in mall_targets.items():
+        if consumer == ingredient or target < 1:
+            continue
+        spec = LINE_RECIPES.get(consumer)
+        if spec is None or not spec.get("set_recipe", True):
+            continue
+        try:
+            ingredient_index = list(spec["ingredients"]).index(ingredient)
+            amount = float(spec["amounts"][ingredient_index])
+            product_amount = max(1.0, float(spec.get("product_amount", 1)))
+            missing = max(0, int(target) - int(stock.get(consumer, 0)))
+            crafts = math.ceil(missing / product_amount)
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        if crafts <= 0 or amount <= 0:
+            continue
+        committed = math.ceil(
+            amount * (crafts + _CAPPED_ASSEMBLER_WIP_CRAFTS)
+        )
+        commitments.append((str(consumer), committed))
+    return sum(count for _consumer, count in commitments), tuple(commitments)
 
 
 def _belt_starved_consumer(
@@ -8084,6 +8131,20 @@ def _serve_mall_task(
     bottleneck is pushed back a step onto the thing that actually limits it.
     """
     item, target = task.item, task.target
+    if item in _BELT_RESERVE_FLOORS:
+        downstream, consumers = _queued_downstream_input_commitment(
+            client, surface, force, item, mall_targets,
+        )
+        if downstream > 0:
+            base_target = target
+            target += downstream
+            emit(
+                f"  DOWNSTREAM RESERVE: {item} bill {base_target} + "
+                + ", ".join(
+                    f"{consumer}={count}" for consumer, count in consumers
+                )
+                + f" capped-consumer draw => {target} before spare/WIP margin"
+            )
     starved_on = _belt_starved_consumer(client, surface, force, item)
     if starved_on is not None:
         tick_now = live_base.game_tick(client)
@@ -9497,9 +9558,7 @@ def _prep_post_metal_stack_reserves(
         key = f"_post_metal_stack:{item}"
         if key in prepped:
             continue
-        target = _POST_METAL_RESERVE_TARGETS.get(
-            item, ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE),
-        )
+        target = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
         if int(stock.get(item, 0)) >= target:
             prepped.add(key)
             emit(
@@ -9739,9 +9798,13 @@ def mall_reserve_for(
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
     if startup_cap is not None:
         return MallReserve(startup_cap, startup_cap, None)
-    if transitioned and item in _POST_STARTER_ONE_STACK_ITEMS:
+    if transitioned:
         stack_size = ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
-        return MallReserve(stack_size, stack_size, 1)
+        stack_count = max(1, math.ceil(max(1, target) / stack_size))
+        stack_target = stack_count * stack_size
+        return MallReserve(
+            stack_target, stack_target, stack_count,
+        )
     return mall_reserve(
         item,
         target,
