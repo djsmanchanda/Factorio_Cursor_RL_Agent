@@ -28,11 +28,9 @@ STARTER_MALL_TARGETS = (
     ("underground-belt", 20),
     ("inserter", 20),
     ("assembling-machine-1", 6),
-    # Power starvation is most expensive before oil. Panels remain opening
-    # stock, while accumulator demand waits until plastic production proves
-    # the chemical ladder can reach batteries without hijacking the mission.
-    ("solar-panel", 12),
 )
+# Generation stock is demand-driven only after advanced-circuit output proves
+# the mission-critical oil and electronics ladder is already operating.
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,
     "chemical-plant": 4,

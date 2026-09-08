@@ -48,8 +48,8 @@ def test_electric_furnaces_are_not_a_background_bootstrap_reserve() -> None:
     assert "electric-furnace" not in _OPENING
 
 
-def test_opening_power_stock_avoids_the_pre_plastic_accumulator_gate() -> None:
-    assert _OPENING["solar-panel"] >= 12
+def test_opening_stock_does_not_compete_with_the_advanced_circuit_ladder() -> None:
+    assert "solar-panel" not in _OPENING
     assert "accumulator" not in _OPENING
 
 

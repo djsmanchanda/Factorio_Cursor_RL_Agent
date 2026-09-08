@@ -368,6 +368,9 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
     monkeypatch, tmp_path,
 ) -> None:
     monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: True,
+    )
+    monkeypatch.setattr(
         builder.live_base, "network_firm_generation_kw", lambda *_a: 500.0,
     )
     monkeypatch.setattr(
@@ -409,6 +412,46 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
     assert any("full unit materials" in message for message in messages)
     assert mall_targets == power.EARLY_SOLAR_ONLY_UNIT.materials
     assert "accumulator" not in mall_targets
+
+
+def test_power_generation_waits_for_advanced_circuit_output(
+    monkeypatch, tmp_path,
+) -> None:
+    messages: list[str] = []
+    mall_targets: dict[str, int] = {}
+    monkeypatch.setattr(builder, "extend_power", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_power_capacity",
+        lambda **_k: pytest.fail(
+            "capacity sizing must not run before advanced circuits",
+        ),
+    )
+
+    assert builder._top_up_solar_generation(
+        SimpleNamespace(command=lambda *_a: ""),
+        SimpleNamespace(script_output=tmp_path),
+        "nauvis", "player", (0.0, 0.0), messages.append,
+        mall_targets=mall_targets,
+    ) is False
+    assert mall_targets == {}
+    assert messages[-1] == (
+        "POWER DISTRICT DEFERRED: generation construction waits until "
+        "advanced-circuit production is proven"
+    )
+
+
+def test_advanced_circuit_output_releases_power_generation(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "advanced-circuit", {
+        "machine": "assembling-machine-2",
+    })
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
+
+    assert builder._power_generation_capability_started(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "player",
+    )
 
 
 def test_power_sizing_joins_the_primary_grid_before_building_more_panels(monkeypatch, tmp_path) -> None:

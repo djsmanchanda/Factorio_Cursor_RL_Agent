@@ -448,11 +448,11 @@ generation and measured connected accumulator storage with bounded peak demand,
 including night energy and recharge surplus; it stops when that metric converges.
 Every Nauvis template contains one accumulator per solar panel; the power bill
 and the placed geometry use the same 1:1 ratio.
-Before plastic production proves the chemical ladder can reach batteries,
-opening background stock contains panels but not accumulators. Power expansion
-uses the same complete pole-and-panel lattice with its accumulator positions
-omitted, giving the early factory daytime capacity without pulling oil work onto
-the critical path. After plastic is live, subsequent units use the full 1:1
+Until advanced-circuit production is proven, the controller performs required
+grid-connection repairs but postpones all generation construction. It does not
+size a solar district or queue solar panels or accumulators, preventing a small
+early power deficit from outranking the iron foundation and chemical ladder.
+After advanced circuits are live, power expansion uses the full 1:1
 panel/accumulator template. If a measured deficit selects a unit whose materials
 are short, the controller queues that unit's exact materials through the normal
 mall scheduler instead of merely rechecking the same unfunded atomic bill.

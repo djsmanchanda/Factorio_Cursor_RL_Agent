@@ -3494,6 +3494,12 @@ def _top_up_solar_generation(
             )
             if primary is not None:
                 capacity_near = primary[0]
+    if not _power_generation_capability_started(client, surface, force):
+        emit(
+            "POWER DISTRICT DEFERRED: generation construction waits until "
+            "advanced-circuit production is proven"
+        )
+        return False
     script_output = getattr(bridge, "script_output", Path(""))
     include_storage = (
         True
@@ -9235,6 +9241,17 @@ def _power_storage_capability_started(
     ):
         return True
     return _independent_mall_ready(client, surface, force)
+
+
+def _power_generation_capability_started(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether advanced circuits have released power-unit construction."""
+    if not hasattr(client, "command"):
+        return True
+    return "advanced-circuit" in LINE_RECIPES and _production_started(
+        client, surface, force, "advanced-circuit",
+    )
 
 
 def _independent_mall_ready(
