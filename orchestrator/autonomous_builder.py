@@ -1197,14 +1197,21 @@ def bring_stage_up(
     if rebuilt_stale and remaining:
         pending = live_base.ghost_blockages(client, surface, force, area)
         if pending:
-            ghost_details = [
-                {
+            ghost_details = []
+            for ghost in pending:
+                detail = {
                     "entity": str(ghost.get("entity", "")),
                     "position": list(ghost["position"]),
                     "reason": str(ghost.get("reason", "unknown")),
                 }
-                for ghost in pending
-            ]
+                for key in (
+                    "network_id", "construction_robots",
+                    "available_construction_robots", "item", "required",
+                    "network_item_count",
+                ):
+                    if key in ghost:
+                        detail[key] = ghost[key]
+                ghost_details.append(detail)
             raise StuckError(
                 f"{name}: {remaining} ghost(s) remained after an exact "
                 f"remove-and-resubmit cycle: {ghost_details}",

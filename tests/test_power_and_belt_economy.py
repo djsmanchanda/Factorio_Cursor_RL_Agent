@@ -602,7 +602,13 @@ def test_rebuilt_ghost_that_remains_pending_gets_a_typed_construction_failure(
     ghost = {
         "position": (36.5, 32.5),
         "entity": "assembling-machine-1",
-        "reason": "pending",
+        "reason": "no_available_construction_robots",
+        "network_id": 2,
+        "construction_robots": 50,
+        "available_construction_robots": 0,
+        "item": "assembling-machine-1",
+        "required": 1,
+        "network_item_count": 4,
     }
     waits = iter([1, 1])
     monkeypatch.setattr(
@@ -637,7 +643,13 @@ def test_rebuilt_ghost_that_remains_pending_gets_a_typed_construction_failure(
         "ghosts": [{
             "entity": "assembling-machine-1",
             "position": [36.5, 32.5],
-            "reason": "pending",
+            "reason": "no_available_construction_robots",
+            "network_id": 2,
+            "construction_robots": 50,
+            "available_construction_robots": 0,
+            "item": "assembling-machine-1",
+            "required": 1,
+            "network_item_count": 4,
         }],
         "remaining": 1,
         "rounds": 2,

@@ -1137,25 +1137,34 @@ def ghost_blockages(
         "local out={};"
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force=f"
         + area_clause + "}) do "
-        "local reason='pending';"
+        "local reason='pending';local netid='-';local bots='-';local free='-';"
+        "local item_name='-';local need='-';local stock='-';"
         "local ok,network=pcall(function() return s.find_logistic_network_by_position(g.position,f) end);"
         "if not ok or not network then reason='out_of_construction_range' else "
-        "local bots_ok,bots=pcall(function() return network.all_construction_robots end);"
-        "if not bots_ok or bots==0 then reason='no_construction_robots' else "
+        "netid=tostring(network.network_id or '-');"
+        "local bots_ok,all_bots=pcall(function() return network.all_construction_robots end);"
+        "if bots_ok then bots=tostring(all_bots) end;"
+        "local free_ok,free_bots=pcall(function() return network.available_construction_robots end);"
+        "if free_ok then free=tostring(free_bots) end;"
+        "if not bots_ok or all_bots==0 then reason='no_construction_robots' else "
         "local proto_ok,proto=pcall(function() return g.ghost_prototype end);"
         "if proto_ok and proto and proto.items_to_place_this and proto.items_to_place_this[1] then "
-        "local item=proto.items_to_place_this[1];"
+        "local item=proto.items_to_place_this[1];item_name=item.name;"
+        "need=tostring(item.count or 1);"
         "local have_ok,have=pcall(function() return network.get_item_count(item.name) end);"
-        "if have_ok and have < (item.count or 1) then "
-        "reason='missing_material:'..item.name..':'..tostring(item.count or 1)..':'..tostring(have) end end end end;"
-        "out[#out+1]=string.format('%.1f|%.1f|%s|%s',g.position.x,g.position.y,g.ghost_name,reason) end;"
+        "if have_ok then stock=tostring(have);if have < (item.count or 1) then "
+        "reason='missing_material:'..item.name..':'..need..':'..stock end end end;"
+        "if reason=='pending' and free_ok and free_bots==0 then "
+        "reason='no_available_construction_robots' end end end;"
+        "out[#out+1]=string.format('%.1f|%.1f|%s|%s|%s|%s|%s|%s|%s|%s',"
+        "g.position.x,g.position.y,g.ghost_name,reason,netid,bots,free,item_name,need,stock) end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = _sc(client, lua)
     records: list[dict[str, object]] = []
     for record in raw.split(";"):
-        fields = record.split("|", 3)
-        if len(fields) != 4:
+        fields = record.split("|")
+        if len(fields) not in {4, 10}:
             continue
         try:
             position = (float(fields[0]), float(fields[1]))
@@ -1167,6 +1176,22 @@ def ghost_blockages(
             "entity": fields[2],
             "reason": reason,
         }
+        if len(fields) >= 10:
+            numeric_fields = {
+                "network_id": fields[4],
+                "construction_robots": fields[5],
+                "available_construction_robots": fields[6],
+                "required": fields[8],
+                "network_item_count": fields[9],
+            }
+            for key, value in numeric_fields.items():
+                if value != "-":
+                    try:
+                        detail[key] = int(value)
+                    except ValueError:
+                        pass
+            if fields[7] != "-":
+                detail["item"] = fields[7]
         if reason.startswith("missing_material:"):
             _, item, required, available = reason.split(":", 3)
             detail.update({

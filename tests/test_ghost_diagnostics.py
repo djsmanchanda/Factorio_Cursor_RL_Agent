@@ -420,6 +420,30 @@ def test_ghost_blockages_decodes_missing_material() -> None:
     assert "area={{70.0,-25.0},{80.0,-10.0}}" in client.commands[0]
 
 
+def test_ghost_blockages_decodes_construction_dispatch_state() -> None:
+    client = _Client(
+        "36.5|32.5|assembling-machine-1|no_available_construction_robots|"
+        "2|50|0|assembling-machine-1|1|4"
+    )
+
+    result = live_base.ghost_blockages(
+        client, "nauvis", "player", ((33.0, 30.0), (47.0, 38.0)),
+    )
+
+    assert result == [{
+        "position": (36.5, 32.5),
+        "entity": "assembling-machine-1",
+        "reason": "no_available_construction_robots",
+        "network_id": 2,
+        "construction_robots": 50,
+        "available_construction_robots": 0,
+        "item": "assembling-machine-1",
+        "required": 1,
+        "network_item_count": 4,
+    }]
+    assert "network.available_construction_robots" in client.commands[0]
+
+
 def test_diagnosis_promotes_missing_ghost_material_to_mall_demand(monkeypatch) -> None:
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *_a: (0.0, 0.0))
     monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
