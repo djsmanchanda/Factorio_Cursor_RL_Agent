@@ -1029,7 +1029,46 @@ def _rebuild_stale_ghost(
         return False
     plan = {"phases": [{"name": "rebuild_stale_ghost", "actions": actions}]}
     plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, "rebuild_stale_ghost", emit)
+    report = _submit(
+        client, bridge, surface, plan, "rebuild_stale_ghost", emit,
+    )
+    placed = int(report.get("succeeded_placements", 0))
+    if placed != removed:
+        remaining_ghosts = live_base.ghost_blockages(
+            client, surface, force, area,
+        )
+        if not remaining_ghosts:
+            emit(
+                "  STALE GHOST: target resolved before its replacement was "
+                "submitted; no rebuilt ghost claimed"
+            )
+            return True
+        ghost_details = [
+            {
+                "entity": str(ghost.get("entity", "")),
+                "position": list(ghost["position"]),
+                "reason": str(ghost.get("reason", "unknown")),
+            }
+            for ghost in remaining_ghosts
+        ]
+        raise StuckError(
+            f"stale ghost rebuild placed {placed}/{removed} replacement "
+            f"ghost(s): {ghost_details}",
+            code="stale_ghost_rebuild_failed", classification="bug",
+            state="failed",
+            details={
+                "ghosts": ghost_details,
+                "attempted_placements": int(
+                    report.get("attempted_placements", 0)
+                ),
+                "succeeded_placements": placed,
+                "already_present_placements": int(
+                    report.get("already_present_placements", 0)
+                ),
+                "failed_placements": int(report.get("failed_placements", 0)),
+                "placement_failures": report.get("placement_failures", []),
+            },
+        )
     emit(
         f"  STALE GHOST: rebuilt {removed} unbuilt ghost(s) despite healthy "
         "network evidence"

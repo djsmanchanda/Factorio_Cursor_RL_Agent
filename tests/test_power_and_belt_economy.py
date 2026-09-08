@@ -465,7 +465,9 @@ def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
     submitted: list[str] = []
     monkeypatch.setattr(
         builder, "_submit",
-        lambda _c, _b, _s, plan, name, _e: submitted.append(name),
+        lambda _c, _b, _s, plan, name, _e: (
+            submitted.append(name) or {"succeeded_placements": 1}
+        ),
     )
 
     builder.bring_stage_up(
@@ -477,6 +479,53 @@ def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
 
     assert removed == [(5.5, 22.5)]
     assert submitted == ["rebuild_stale_ghost"]
+
+
+def test_lone_ghost_rebuild_reports_a_typed_zero_placement_failure(
+    monkeypatch,
+) -> None:
+    ghost = {
+        "position": (39.0, 36.0),
+        "entity": "medium-electric-pole",
+        "reason": "pending",
+    }
+    monkeypatch.setattr(
+        builder.live_base, "ghost_blockages", lambda *_a, **_k: [ghost],
+    )
+    monkeypatch.setattr(
+        builder.live_base, "remove_entity_at", lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        builder, "_submit", lambda *_a, **_k: {
+            "attempted_placements": 1,
+            "succeeded_placements": 0,
+            "already_present_placements": 1,
+            "failed_placements": 0,
+            "placement_failures": [],
+        },
+    )
+    messages: list[str] = []
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._rebuild_stale_ghost(
+            object(), object(), "nauvis", "player",
+            ((33.0, 30.0), (47.0, 38.0)), messages.append,
+        )
+
+    assert raised.value.code == "stale_ghost_rebuild_failed"
+    assert raised.value.details == {
+        "ghosts": [{
+            "entity": "medium-electric-pole",
+            "position": [39.0, 36.0],
+            "reason": "pending",
+        }],
+        "attempted_placements": 1,
+        "succeeded_placements": 0,
+        "already_present_placements": 1,
+        "failed_placements": 0,
+        "placement_failures": [],
+    }
+    assert not any("STALE GHOST: rebuilt" in message for message in messages)
 
 
 def test_run_loop_checks_generation_proactively(monkeypatch) -> None:
