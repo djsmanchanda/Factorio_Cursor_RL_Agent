@@ -67,6 +67,10 @@ _GHOST_BUILD_SECONDS = 60.0
 # while making the entities honest construction jobs by allowing one normal
 # five-minute construction window for the ghosts to be revived by bots.
 _INFRASTRUCTURE_BUILD_SECONDS = 300.0
+# A synchronous infrastructure wait blocks the controller that would create a
+# missing construction item. Diagnose a flat tail early enough to return that
+# shortage to the mall instead of spending the whole five-minute window.
+_INFRASTRUCTURE_DIAGNOSIS_SECONDS = 10.0
 # Live-verified this session: roboport construction radius 55, link (chain)
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
@@ -218,14 +222,18 @@ def _ghostify_direct_infrastructure(plan: dict) -> tuple[tuple[str, Point], ...]
 
 
 def _await_bot_built_infrastructure(
-    client: RconClient, surface: str,
+    client: RconClient, surface: str, force: str,
     placements: Sequence[tuple[str, Point]], emit: Callable[[str], None],
+    *, owner: str,
 ) -> None:
     """Wait for formerly-direct infrastructure to be built by real bots."""
     if not placements or not hasattr(client, "command"):
         return
     expected = {position: entity for entity, position in placements}
     deadline = time.monotonic() + _INFRASTRUCTURE_BUILD_SECONDS
+    last_pending: tuple[tuple[str, Point], ...] | None = None
+    flat_since = time.monotonic()
+    diagnostics: list[dict[str, object]] = []
     consume_wait("bot_built_infrastructure")
     while True:
         observed = live_base.entity_names_at(
@@ -238,7 +246,66 @@ def _await_bot_built_infrastructure(
         ]
         if not pending:
             return
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        pending_key = tuple(pending)
+        if pending_key != last_pending:
+            last_pending = pending_key
+            flat_since = now
+        if now - flat_since >= _INFRASTRUCTURE_DIAGNOSIS_SECONDS:
+            min_x = min(position[0] for _entity, position in pending) - 1.0
+            min_y = min(position[1] for _entity, position in pending) - 1.0
+            max_x = max(position[0] for _entity, position in pending) + 1.0
+            max_y = max(position[1] for _entity, position in pending) + 1.0
+            try:
+                surveyed = live_base.ghost_blockages(
+                    client, surface, force, ((min_x, min_y), (max_x, max_y)),
+                )
+                wanted = {(entity, position) for entity, position in pending}
+                diagnostics = [
+                    record for record in surveyed
+                    if (
+                        str(record.get("entity")),
+                        tuple(record.get("position", ())),
+                    ) in wanted
+                ]
+            except Exception:
+                diagnostics = []
+            shortages: dict[str, int] = {}
+            available: dict[str, int] = {}
+            for record in diagnostics:
+                reason = str(record.get("reason", ""))
+                if not reason.startswith("missing_material:"):
+                    continue
+                item = str(record.get("item", ""))
+                if not item:
+                    continue
+                try:
+                    supply_scheduled = construction_supply_chain_is_scheduled(
+                        client, surface, force, item,
+                    )
+                except Exception:
+                    # A failed diagnostic must not invent a shortage.
+                    supply_scheduled = True
+                if supply_scheduled:
+                    continue
+                shortages[item] = shortages.get(item, 0) + int(
+                    record.get("required", 1),
+                )
+                available[item] = max(
+                    available.get(item, 0),
+                    int(record.get("network_item_count", 0)),
+                )
+            if shortages:
+                emit(
+                    f"  INFRASTRUCTURE SUPPLY WAIT: {owner} has "
+                    + ", ".join(
+                        f"{count} pending {item} ghost(s) with no live supply"
+                        for item, count in sorted(shortages.items())
+                    )
+                    + "; returning the bill to the mall"
+                )
+                raise MaterialShortage(owner, shortages, available)
+        if now >= deadline:
             raise StuckError(
                 "bot-built infrastructure did not finish inside the construction "
                 "window: " + ", ".join(
@@ -251,6 +318,8 @@ def _await_bot_built_infrastructure(
                         {"entity": entity, "position": list(position)}
                         for entity, position in pending
                     ],
+                    "owner": owner,
+                    "diagnostics": diagnostics,
                 },
             )
         time.sleep(2.0)
@@ -538,7 +607,8 @@ def _submit(
                     ),
                 )
             _await_bot_built_infrastructure(
-                client, surface, converted_infrastructure, emit,
+                client, surface, plan.get("force", "player"),
+                converted_infrastructure, emit, owner=name,
             )
             return report
         cleared_any = False
@@ -1103,9 +1173,8 @@ def extend_power(
             require_funded=True,
         )
         _await_bot_built_infrastructure(
-            client, surface,
-            tuple(zip(action_names, hops)),
-            emit,
+            client, surface, force, tuple(zip(action_names, hops)), emit,
+            owner="power_bridge",
         )
     except StuckError as error:
         if (

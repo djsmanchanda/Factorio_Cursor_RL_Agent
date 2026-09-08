@@ -329,7 +329,10 @@ These names describe intended responsibilities, not permission to build speculat
   The initial construction window is five minutes. Diagnose and remedy its
   local ghost backlog throughout that window; only a flat unresolved job may
   fail at the end (upstream production, delivery, bot or roboport capacity,
-  coverage, or power).
+  coverage, or power). Synchronously awaited poles and roboports diagnose a
+  flat ghost tail after ten seconds; if its construction item has no live
+  supply chain, that item returns to the normal mall scheduler immediately
+  instead of holding the controller for the remaining window.
 - A partially built or unconfigured furnace cluster is pending construction,
   not recoverable capacity. Recovery may adopt only an exact planner-shaped
   six-furnace module; until a direct refinery has produced plates, repair its

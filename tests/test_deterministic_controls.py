@@ -23,6 +23,7 @@ from orchestrator.controller_budget import (
 from orchestrator.stage_services import (
     StuckError, _ghost_materials, _ghostify_direct_infrastructure, _submit,
 )
+from orchestrator.parts_mall import MaterialShortage
 from tools.autonomous_run import (
     REPO_ROOT, _directory_hash, _patch_episode_manifest, _validate_episode_manifest,
 )
@@ -230,6 +231,131 @@ def test_submit_waits_for_a_formerly_direct_pole_to_be_bot_built(
     _submit(client, bridge, "nauvis", plan, "pole", lambda _message: None)
 
     assert waits == ["bot_built_infrastructure"]
+
+
+def test_infrastructure_wait_returns_an_unbacked_pole_bill_to_the_mall(
+    monkeypatch,
+) -> None:
+    """A legal reachable ghost must not hold the controller for five minutes
+    when the network has no item and no producer can replenish it."""
+    from orchestrator import stage_services
+
+    clock = [0.0]
+    messages: list[str] = []
+    monkeypatch.setattr(stage_services.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage_services.time, "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_names_at",
+        lambda *_a: {(57.5, 46.5): "entity-ghost"},
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "ghost_blockages", lambda *_a: [{
+            "position": (57.5, 46.5),
+            "entity": "medium-electric-pole",
+            "reason": "missing_material:medium-electric-pole:1:0",
+            "item": "medium-electric-pole",
+            "required": 1,
+            "network_item_count": 0,
+            "network_id": 2,
+            "construction_robots": 50,
+            "available_construction_robots": 50,
+            "can_revive": True,
+        }],
+    )
+    monkeypatch.setattr(
+        stage_services, "construction_supply_chain_is_scheduled",
+        lambda *_a: False,
+    )
+
+    with pytest.raises(MaterialShortage) as caught:
+        stage_services._await_bot_built_infrastructure(
+            SimpleNamespace(command=lambda *_a: ""),
+            "nauvis", "player",
+            (("medium-electric-pole", (57.5, 46.5)),),
+            messages.append, owner="power_bridge",
+        )
+
+    assert clock[0] == stage_services._INFRASTRUCTURE_DIAGNOSIS_SECONDS
+    assert caught.value.required == {"medium-electric-pole": 1}
+    assert caught.value.available == {"medium-electric-pole": 0}
+    assert messages == [
+        "  INFRASTRUCTURE SUPPLY WAIT: power_bridge has 1 pending "
+        "medium-electric-pole ghost(s) with no live supply; returning the "
+        "bill to the mall"
+    ]
+
+
+def test_recovered_post_starter_pole_shortage_builds_a_complete_stack(
+    monkeypatch,
+) -> None:
+    observed_targets: list[int] = []
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"medium-electric-pole": 50},
+    )
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "medium-electric-pole",
+        {"machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch",
+        lambda _c, _b, _s, _f, _item, target, *_a, **_k:
+            observed_targets.append(target) or True,
+    )
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "medium-electric-pole", 1,
+        {}, (0.0, 0.0), lambda _message: None, background=False,
+    )
+
+    assert (ready, output) == (False, None)
+    assert observed_targets == [50]
+
+
+def test_infrastructure_timeout_carries_owner_and_live_ghost_diagnostics(
+    monkeypatch,
+) -> None:
+    from orchestrator import stage_services
+
+    clock = [0.0]
+    blockage = {
+        "position": (4.5, 5.5),
+        "entity": "medium-electric-pole",
+        "reason": "no_available_construction_robots",
+        "network_id": 7,
+        "construction_robots": 10,
+        "available_construction_robots": 0,
+        "can_revive": True,
+    }
+    monkeypatch.setattr(stage_services, "_INFRASTRUCTURE_BUILD_SECONDS", 12.0)
+    monkeypatch.setattr(stage_services.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage_services.time, "sleep",
+        lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "entity_names_at",
+        lambda *_a: {(4.5, 5.5): "entity-ghost"},
+    )
+    monkeypatch.setattr(
+        stage_services.live_base, "ghost_blockages", lambda *_a: [blockage],
+    )
+
+    with pytest.raises(StuckError) as caught:
+        stage_services._await_bot_built_infrastructure(
+            SimpleNamespace(command=lambda *_a: ""),
+            "nauvis", "player",
+            (("medium-electric-pole", (4.5, 5.5)),),
+            lambda _message: None, owner="mall_power",
+        )
+
+    assert caught.value.details["owner"] == "mall_power"
+    assert caught.value.details["diagnostics"] == [blockage]
 
 
 def test_removal_only_plans_are_not_churn(monkeypatch) -> None:
