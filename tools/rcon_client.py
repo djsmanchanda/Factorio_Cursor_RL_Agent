@@ -58,9 +58,18 @@ class RconClient:
             raise RconError("RCON authentication failed")
 
     def command(self, text: str) -> str:
-        self._send_packet(SERVERDATA_EXECCOMMAND, text)
-        _, _, body = self._recv_packet()
-        return body
+        sent_id = self._send_packet(SERVERDATA_EXECCOMMAND, text)
+        while True:
+            packet_id, packet_type, body = self._recv_packet()
+            if packet_id != sent_id:
+                # A long prior response can leave another packet queued.  It
+                # belongs to that request, never to the command just sent.
+                continue
+            if packet_type != SERVERDATA_RESPONSE_VALUE:
+                raise RconError(
+                    f"Unexpected RCON response type {packet_type} for request {sent_id}"
+                )
+            return body
 
     def close(self) -> None:
         self._sock.close()
