@@ -734,7 +734,12 @@ def ensure_coal_mine(
     plan = strip_local_power(plan, remove_substations=False)
     _publish_output_chest(plan)
     plan["surface"], plan["force"] = surface, force
-    _submit(client, bridge, surface, plan, "mining_coal", emit)
+    _submit(
+        client, bridge, surface, plan, "mining_coal", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, plan, emit,
+        ),
+    )
     service_origin, area, substation, drills = existing_mine_service_geometry(
         output, count, shared_belt_y=output[1] + 2,
     )

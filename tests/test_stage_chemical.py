@@ -305,14 +305,33 @@ def test_new_local_coal_mine_flows_toward_plastic(monkeypatch) -> None:
         lambda *_a, **_k: ((-350.0, 12.0), 2),
     )
 
+    coal_plan = {"phases": [{"name": "coal", "actions": [{
+        "action_type": "place_entity", "entity": "substation",
+        "position": {"x": -329.0, "y": 7.0},
+    }]}]}
+
     def direct_plan(origin, count, **kwargs):
         captured.update(origin=origin, count=count, kwargs=kwargs)
-        return {"phases": []}, (-342.5, 12.5)
+        return coal_plan, (-342.5, 12.5)
 
     monkeypatch.setattr(stage_chemical, "direct_mine_plan", direct_plan)
     monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
     monkeypatch.setattr(stage_chemical, "_publish_output_chest", lambda _plan: None)
-    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a: None)
+    events: list[str] = []
+
+    def cover(_client, _bridge, _surface, _force, plan, _emit):
+        assert plan is coal_plan
+        events.append("coverage")
+
+    def submit(_client, _bridge, _surface, plan, name, _emit, *, stage_coverage):
+        assert plan is coal_plan
+        assert name == "mining_coal"
+        events.append("affordable")
+        stage_coverage()
+        events.append("submitted")
+
+    monkeypatch.setattr(stage_chemical, "_ensure_plan_construction_coverage", cover)
+    monkeypatch.setattr(stage_chemical, "_submit", submit)
     monkeypatch.setattr(
         stage_chemical, "existing_mine_service_geometry",
         lambda *_a, **_k: ((0.0, 0.0), ((-1.0, -1.0), (1.0, 1.0)),
@@ -330,6 +349,7 @@ def test_new_local_coal_mine_flows_toward_plastic(monkeypatch) -> None:
     assert captured["count"] == 2
     assert captured["kwargs"]["output_side"] == "east"
     assert captured["kwargs"]["continuation_tiles"] == 0
+    assert events == ["affordable", "coverage", "submitted"]
 
 
 def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:

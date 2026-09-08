@@ -643,7 +643,7 @@ def test_coal_direct_belt_endpoint_is_not_checked_as_a_logistic_chest(monkeypatc
     monkeypatch.setattr(stage_chemical, "direct_mine_plan", lambda *_a, **_k: ({"phases": []}, (7.5, 12.5)))
     monkeypatch.setattr(stage_chemical, "strip_local_power", lambda plan, **_k: plan)
     monkeypatch.setattr(stage_chemical, "_publish_output_chest", lambda _plan: None)
-    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a: None)
+    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a, **_k: None)
     monkeypatch.setattr(
         stage_chemical, "existing_mine_service_geometry",
         lambda *_a, **_k: ((0, 0), ((-1, -1), (1, 1)), (0, 0), []),
