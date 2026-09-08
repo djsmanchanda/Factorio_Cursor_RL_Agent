@@ -1194,6 +1194,29 @@ def bring_stage_up(
             area, emit,
         )
         acted_ever |= bool(acted)
+    if rebuilt_stale and remaining:
+        pending = live_base.ghost_blockages(client, surface, force, area)
+        if pending:
+            ghost_details = [
+                {
+                    "entity": str(ghost.get("entity", "")),
+                    "position": list(ghost["position"]),
+                    "reason": str(ghost.get("reason", "unknown")),
+                }
+                for ghost in pending
+            ]
+            raise StuckError(
+                f"{name}: {remaining} ghost(s) remained after an exact "
+                f"remove-and-resubmit cycle: {ghost_details}",
+                code="stale_ghost_construction_failed", classification="bug",
+                state="constructing",
+                details={
+                    "ghosts": ghost_details,
+                    "remaining": remaining,
+                    "rounds": total_rounds,
+                    "seconds": total_rounds * interval,
+                },
+            )
     progress = (
         f", area ghosts {local_baseline} -> {remaining}"
         if local_baseline is not None else ""

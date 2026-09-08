@@ -596,6 +596,55 @@ def test_exact_ghost_removal_is_entity_and_force_scoped() -> None:
     assert "if target() then rcon.print('STILL_PRESENT')" in lua
 
 
+def test_rebuilt_ghost_that_remains_pending_gets_a_typed_construction_failure(
+    monkeypatch,
+) -> None:
+    ghost = {
+        "position": (36.5, 32.5),
+        "entity": "assembling-machine-1",
+        "reason": "pending",
+    }
+    waits = iter([1, 1])
+    monkeypatch.setattr(
+        builder, "_wait_for_ghosts", lambda *_a, **_k: next(waits),
+    )
+    monkeypatch.setattr(
+        builder, "extend_roboport_coverage", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_logistic_coverage", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(builder, "_diagnose_blockage", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_rebuild_stale_ghost", lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "ghost_blockages", lambda *_a, **_k: [ghost],
+    )
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder.bring_stage_up(
+            object(), object(), "nauvis", "player",
+            "compact mall for iron-gear-wheel", (35.0, 31.0),
+            ((33.0, 30.0), (47.0, 38.0)), (39.0, 36.0),
+            [(36.5, 32.5)], lambda _message: None,
+            rounds=1, interval=30.0,
+        )
+
+    assert raised.value.code == "stale_ghost_construction_failed"
+    assert raised.value.state == "constructing"
+    assert raised.value.details == {
+        "ghosts": [{
+            "entity": "assembling-machine-1",
+            "position": [36.5, 32.5],
+            "reason": "pending",
+        }],
+        "remaining": 1,
+        "rounds": 2,
+        "seconds": 60.0,
+    }
+
+
 def test_run_loop_checks_generation_proactively(monkeypatch) -> None:
     """Live run 36 (2026-08-23): every solar top-up trigger was a power-bridge
     event, and no bridge came while the grid browned out -- the run burned its
