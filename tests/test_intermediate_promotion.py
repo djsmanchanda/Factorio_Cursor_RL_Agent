@@ -135,6 +135,73 @@ def test_an_idle_cell_under_the_rate_limit_is_left_alone() -> None:
     assert promoted_line_machine_count(GEARS, 1.0, 1) is None
 
 
+def test_post_plastic_demand_above_five_forces_first_six_machine_line(
+    monkeypatch,
+) -> None:
+    existing = SimpleNamespace(
+        machine_count=1, working_count=1, produced_count=10,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "logistic_request_total", lambda *_a: 0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line", lambda *_a, **_k: existing,
+    )
+    monkeypatch.setattr(builder, "_mall_request_multiplier", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "live_intermediate_demand", lambda *_a: 5.01)
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(
+        builder, "promoted_line_machine_count", lambda *_a, **_k: None,
+    )
+
+    plan = builder._plan_line(
+        object(), "nauvis", "player", GEARS, lambda _message: None,
+        upgrade_bootstrap=False, stock_target=100, minimum_machines=1,
+        allow_promotion=True,
+    )
+
+    assert plan.promote_to_line
+    assert plan.promoted_count == 6
+
+
+def test_post_plastic_six_machine_promotion_has_no_logistic_inputs(
+    monkeypatch,
+) -> None:
+    plan = SimpleNamespace(
+        existing=None,
+        spec=builder.LINE_RECIPES[GEARS],
+        promote_to_line=True,
+        promoted_count=6,
+        mall_storage_limit=100,
+    )
+    monkeypatch.setattr(
+        builder, "_ingredient_sources",
+        lambda *_a, **_k: {"iron-plate": (1.5, 1.5)},
+    )
+    monkeypatch.setattr(
+        builder, "_promotion_upstream_shortfall", lambda *_a: None,
+    )
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    built: list[dict] = []
+    monkeypatch.setattr(
+        builder, "build_conversion_stage",
+        lambda *_a, **kwargs: built.append(kwargs) or (20.5, 20.5),
+    )
+
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", GEARS, (0.0, 0.0),
+        lambda _message: None, plan, None, upgrade_bootstrap=False,
+    )
+
+    assert built[0]["machine_count"] == 6
+    assert built[0]["allow_logistic_inputs"] is False
+
+
 def test_only_promotable_intermediates_are_scaled_this_way() -> None:
     """iron-plate scales by opening mines, not by promoting a mall cell."""
     assert promoted_line_machine_count("iron-plate", 99.0, 1, saturated=True) is None

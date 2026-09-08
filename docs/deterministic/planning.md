@@ -90,7 +90,12 @@ These names describe intended responsibilities, not permission to build speculat
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
-  Mine, transport, and refinery capacity move as one coherent increment.
+  After plastic output releases the independent mall, iron demand continues
+  the same doubling policy beyond 96 and may advance into later validated
+  refinery generations. New iron transport uses fast belts once their producer
+  is proven; held fast belts, undergrounds, and splitters replace exact
+  ledger-owned yellow infrastructure opportunistically. Collision, ownership,
+  and coherent mine/refinery checks still apply to every increment.
 - Managed paired mines own their power grid. One substation sits immediately
   outside each three-column/six-drill module and directly wires adjacent mine
   modules; its wires may cross the ore patch. Mine planning must not replace
@@ -175,14 +180,12 @@ These names describe intended responsibilities, not permission to build speculat
   counts plus a four-item construction reserve and orders native in-place bot
   upgrades. Pending upgrades are excluded from later batches, and mixed AM1/AM2
   recipe rows remain one observable line throughout the transition.
-  Until assembling-machine-2,
-  fast-inserter, passive-provider-chest, requester-chest, and substation each
-  have independent production, low-demand construction items are finite
+  Until plastic has produced output, low-demand construction items are finite
   batches made by a recoverable recipe loan in an existing mall assembler.
   The loan changes the existing requester group and output gate, may mix the
   temporary product with earlier contents in the same provider, and restores
   the original recipe and requests after the batch. Permanent one-recipe mall
-  slots resume only after those five core producers are live.
+  slots become permanent only after plastic releases the independent mall.
   A finite cell's requester buffer is capped to the crafts in its current
   need-plus-margin batch plus 20% headroom (rounded up); it may not use the
   normal throughput window to warehouse construction components. Requester
@@ -260,13 +263,19 @@ These names describe intended responsibilities, not permission to build speculat
   mine/refinery packets share one reservation transaction even when their
   persisted project names differ; a retry may not count its child packet
   reservations as foreign stock and demand a duplicate bill.
-  The pre-logistics pool is a hard global ceiling of eight compact assemblers
-  while direct metal starters carry the base, then sixteen after both starters
-  retire. The second bank lets independent full-stack construction batches run
-  concurrently once metal is no longer scarce. Core-mall requests may not
-  bypass the active ceiling; when the pool is full, core promotion or a blocked
-  ordinary demand reclaims an idle completed non-anchor temporary slot and
-  converts it in place. Once a circuit request exceeds the
+  Before plastic, the compact mall has a hard global ceiling of twelve
+  assemblers shared by anchors, permanent prerequisites, and rotating demand.
+  After plastic, the layout separates forty-eight permanent per-item halves
+  from twelve demand-driven halves. A recipe's first cell is allocated from
+  the permanent bank; temporary duplicate capacity may use only the demand
+  bank, and reclaims never take a permanent cell. Before plastic, core-mall
+  requests may not bypass the shared ceiling; when it is full, core promotion
+  or a blocked ordinary demand reclaims an idle completed non-anchor temporary
+  slot and converts it in place. After plastic, any promotable solid item with
+  measured demand above 5/s leaves the mall for a complete six-assembler direct
+  line. This commonly applies to gears, copper cable, circuits, and belts. Its
+  inputs use line-to-line belt delivery with logistic requesters disabled. Once
+  a circuit request exceeds the
   capacity of two circuit cells (by live rate or queued work beyond their
   patience window), it is not assigned a third mall half.  The controller
   builds the first dedicated block instead: six electronic-circuit assemblers
@@ -285,11 +294,9 @@ These names describe intended responsibilities, not permission to build speculat
   a consumed gear/circuit/belt batch advances toward the parent recipe instead
   of being manufactured again. Once a parent step starts, incidental stock
   churn cannot push the rotating assembler backward into a completed child.
-  Pipe has an additional lifecycle boundary. While any iron, copper, or stone
-  pioneer remains, or while the five core mall producers are not independently
-  working, pipe is a finite rotating batch and the borrowed slot is restored.
-  Only after all three district ledgers reach `released` **and** the core mall
-  is self-sufficient may pipe become permanent; at that point the controller
+  Pipe has an additional lifecycle boundary. Before plastic output, pipe is a
+  finite rotating batch and the borrowed slot is restored. Once plastic
+  releases independent cells, pipe may become permanent; at that point the controller
   converts a stocked low-demand building slot in place, reusing its assembler,
   requester, inserters, provider, and power instead of funding another compact
   cell.

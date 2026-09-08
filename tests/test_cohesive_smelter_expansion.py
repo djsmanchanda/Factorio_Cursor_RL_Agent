@@ -19,9 +19,166 @@ from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 from orchestrator.stage_services import StuckError  # noqa: E402
 from planners.plan_validation import actions  # noqa: E402
 from planners.smelter_block import (  # noqa: E402
+    REFINERY_CAPACITY_SCHEDULES,
     generate_managed_refinery_plan,
     refinery_interfaces,
 )
+
+
+def test_post_plastic_iron_expansion_uses_fast_unbounded_generation(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
+    monkeypatch.setattr(builder, "_upgrade_owned_plate_transport", lambda *_a: 0)
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a, **_k: SimpleNamespace(machine_count=48),
+    )
+
+    def deferred(*_args, **kwargs):
+        captured.update(kwargs)
+        raise builder.stage_extraction.PendingSystemDeferred("survey waits")
+
+    monkeypatch.setattr(builder, "plan_local_extraction", deferred)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="survey waits"):
+        builder.build_mining_stage(
+            object(), object(), "nauvis", "player", "iron-plate",
+            (0.0, 0.0), lambda _message: None, expand=True,
+        )
+
+    assert captured["belt_type"] == "fast-transport-belt"
+    assert captured["unbounded_growth"] is True
+    assert captured["refinery_reserve_furnaces"] == REFINERY_CAPACITY_SCHEDULES[1][-1]
+
+
+def test_post_plastic_iron_advances_beyond_generation_one(monkeypatch) -> None:
+    captured: dict[str, int] = {}
+    existing = SimpleNamespace(furnace_count=48)
+    extraction = SimpleNamespace(
+        smelter_origin=(0.0, 0.0), system_drill_count_before=96,
+        drill_count=96, mining_productivity_bonus=0.0, ore="iron-ore",
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a, **_k: SimpleNamespace(machine_positions=((0.5, 0.5),)),
+    )
+    monkeypatch.setattr(
+        builder, "_refinery_machine_positions",
+        lambda *_a: ((0.5, 0.5),),
+    )
+    monkeypatch.setattr(builder, "_bootstrap_owned_actions", lambda *_a: ())
+    monkeypatch.setattr(
+        builder, "recover_managed_refinery", lambda *_a, **_k: existing,
+    )
+    monkeypatch.setattr(builder, "smelter_count_for_drills", lambda *_a: 54)
+    monkeypatch.setattr(
+        builder, "planned_smelter_count_for_drills", lambda *_a: 54,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+
+    def scheduled(_current, _required, *, generation):
+        captured["generation"] = generation
+        return 54
+
+    monkeypatch.setattr(builder, "scheduled_refinery_target", scheduled)
+
+    recovered, target = builder._cohesive_smelter_target(
+        object(), "nauvis", "player", "iron-plate", extraction, True,
+        lambda _message: None,
+    )
+
+    assert recovered is existing
+    assert target == 54
+    assert captured["generation"] == 2
+
+
+def test_owned_iron_transport_upgrades_only_ledger_positions(monkeypatch) -> None:
+    actions = tuple({
+        "action_type": "place_ghost", "entity": entity,
+        "position": {"x": float(index), "y": 5.5},
+    } for index, entity in enumerate(
+        ("transport-belt", "underground-belt", "splitter"), start=1,
+    ))
+    state = SimpleNamespace(transport_actions=actions, replacement_actions=())
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: state)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {
+            "fast-transport-belt": 20,
+            "fast-underground-belt": 20,
+            "fast-splitter": 20,
+        },
+    )
+    by_position = {
+        (action["position"]["x"], action["position"]["y"]): action["entity"]
+        for action in actions
+    }
+    monkeypatch.setattr(
+        builder.live_base, "entity_at",
+        lambda _c, _s, position: {"name": by_position[position]},
+    )
+    submitted: list[dict] = []
+
+    monkeypatch.setattr(builder, "load_json", lambda report: report)
+
+    def execute(_authorization, plan, **_kwargs):
+        submitted.append(plan)
+        return {
+            "actions": [{"status": "success"} for _action in plan["actions"]],
+        }
+
+    bridge = SimpleNamespace(execute_upgrade_plan=execute)
+    client = SimpleNamespace(command=lambda *_a: "")
+
+    assert builder._upgrade_owned_plate_transport(
+        client, bridge, "nauvis", "player", "iron-plate",
+        lambda _message: None,
+    ) == 3
+    assert {
+        (plan["actions"][0]["from_name"], plan["actions"][0]["to_name"])
+        for plan in submitted
+    } == {
+        ("transport-belt", "fast-transport-belt"),
+        ("underground-belt", "fast-underground-belt"),
+        ("splitter", "fast-splitter"),
+    }
+
+
+def test_post_plastic_iron_refinery_has_no_final_schedule_cap(monkeypatch) -> None:
+    existing = SimpleNamespace(furnace_count=576)
+    extraction = SimpleNamespace(
+        smelter_origin=(20.0, 20.0), system_drill_count_before=576,
+        drill_count=24, mining_productivity_bonus=0.0, ore="iron-ore",
+    )
+    monkeypatch.setattr(
+        builder.live_base, "find_line", lambda *_a, **_k: SimpleNamespace(
+            machine_positions=((1.5, 1.5),),
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_refinery_machine_positions", lambda *_a: ((1.5, 1.5),),
+    )
+    monkeypatch.setattr(builder, "_bootstrap_owned_actions", lambda *_a: ())
+    monkeypatch.setattr(builder, "recover_managed_refinery", lambda *_a, **_k: existing)
+    monkeypatch.setattr(builder, "smelter_count_for_drills", lambda *_a: 600)
+    monkeypatch.setattr(
+        builder, "planned_smelter_count_for_drills", lambda *_a: 600,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+
+    recovered, target = builder._cohesive_smelter_target(
+        object(), "nauvis", "player", "iron-plate", extraction, True,
+        lambda _message: None,
+    )
+
+    assert recovered is existing
+    assert target == 600
 
 
 def _furnaces(plan: dict) -> tuple[tuple[float, float], ...]:

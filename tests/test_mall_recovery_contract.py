@@ -315,7 +315,7 @@ def test_anchor_backlog_can_fund_one_bounded_temporary_slot(monkeypatch) -> None
 
 
 def test_new_compact_cell_cannot_escape_the_global_bootstrap_slot_cap(monkeypatch) -> None:
-    """Core-mall promotion used to bypass the eight-slot bootstrap budget."""
+    """Core-mall promotion may not bypass the pre-plastic shared budget."""
     plan = builder._LinePlan(
         existing=None, spec=builder.LINE_RECIPES["transport-belt"],
         production_target=1, mall_storage_limit=1, fill_provider=False,
@@ -338,6 +338,57 @@ def test_new_compact_cell_cannot_escape_the_global_bootstrap_slot_cap(monkeypatc
         )
 
     assert raised.value.code == "bootstrap_mall_slot_cap"
+
+
+def test_post_plastic_per_item_cell_bypasses_demand_bank_cap(monkeypatch) -> None:
+    plan = builder._LinePlan(
+        existing=None, spec=builder.LINE_RECIPES["transport-belt"],
+        production_target=1, mall_storage_limit=1, fill_provider=False,
+        mall_request_multiplier=None, demand=0.0, saturated=False,
+        promoted_count=None, promote_to_line=False, at_size=True,
+        demand_slot=False,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "mall_demand_slot_count",
+        lambda *_a: builder.DEMAND_MALL_SLOT_TARGET,
+    )
+    monkeypatch.setattr(builder, "_ingredient_sources", lambda *_a, **_k: None)
+
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (3.0, -1.0), lambda _message: None, plan, None,
+        upgrade_bootstrap=False,
+    )
+
+
+def test_post_plastic_demand_cell_stops_at_twelve(monkeypatch) -> None:
+    plan = builder._LinePlan(
+        existing=SimpleNamespace(machine_count=1),
+        spec=builder.LINE_RECIPES["transport-belt"],
+        production_target=1, mall_storage_limit=1, fill_provider=False,
+        mall_request_multiplier=None, demand=0.0, saturated=False,
+        promoted_count=None, promote_to_line=False, at_size=False,
+        demand_slot=True,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "mall_demand_slot_count",
+        lambda *_a: builder.DEMAND_MALL_SLOT_TARGET,
+    )
+    monkeypatch.setattr(
+        builder, "_ingredient_sources",
+        lambda *_a, **_k: pytest.fail("capped demand must not spend inputs"),
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as raised:
+        builder._build_assembled_stage(
+            object(), object(), "nauvis", "player", "transport-belt",
+            (3.0, -1.0), lambda _message: None, plan, None,
+            upgrade_bootstrap=False,
+        )
+
+    assert raised.value.details["slot_cap"] == 12
 
 
 def test_under_sized_existing_line_cannot_escape_the_global_slot_cap(monkeypatch) -> None:

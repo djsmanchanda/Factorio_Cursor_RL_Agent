@@ -138,7 +138,7 @@ def test_reduced_supply_chemical_capabilities_have_one_explicit_order() -> None:
         "assembling-machine-2", "fast-inserter", "passive-provider-chest",
         "requester-chest", "substation",
     )
-    assert BOOTSTRAP_MALL_SLOT_TARGET == 8
+    assert BOOTSTRAP_MALL_SLOT_TARGET == 12
 
 
 @pytest.mark.parametrize("plate", BASELINE_PLATES)

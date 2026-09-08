@@ -24,11 +24,27 @@ def affordable_prebuilt_columns(belt_stock: int, maximum: int) -> int:
     return maximum
 
 
-def next_drill_phase(current_drills: int) -> int | None:
-    """Return the next whole-system drill target, or None at final capacity."""
+def next_drill_phase(
+    current_drills: int, *, unbounded: bool = False,
+) -> int | None:
+    """Return the next whole-system drill target.
+
+    Bootstrap keeps the finite opening ladder. Once a caller has an
+    independently supplied post-plastic factory, ``unbounded`` continues the
+    same doubling policy instead of turning 96 drills into an arbitrary cap.
+    """
     if current_drills < 0:
         raise ValueError("current_drills cannot be negative")
-    return next((phase for phase in EXTRACTION_DRILL_PHASES if phase > current_drills), None)
+    fixed = next(
+        (phase for phase in EXTRACTION_DRILL_PHASES if phase > current_drills),
+        None,
+    )
+    if fixed is not None or not unbounded:
+        return fixed
+    phase = EXTRACTION_DRILL_PHASES[-1]
+    while phase <= current_drills:
+        phase *= 2
+    return phase
 
 
 def expandable_mine(mines: list[ResourceMine]) -> ResourceMine | None:

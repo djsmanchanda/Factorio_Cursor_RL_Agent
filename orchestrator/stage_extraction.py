@@ -766,6 +766,8 @@ def plan_local_extraction(
     owned_smelter_origin: Point | None = None,
     owned_smelter_vertical_mirror: bool = False,
     defer_pending_owned_refinery: bool = False,
+    unbounded_growth: bool = False,
+    refinery_reserve_furnaces: int = REFINERY_GENERATION_1_CAPACITIES[-1],
     observe: Callable[[str], None] | None = None,
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
@@ -807,7 +809,9 @@ def plan_local_extraction(
             client, surface, force, ore, excluded_drill_positions,
         ),
     )
-    phase_target = extraction_capacity.next_drill_phase(system_before)
+    phase_target = extraction_capacity.next_drill_phase(
+        system_before, unbounded=unbounded_growth,
+    )
     if not reuse_existing and phase_target is None:
         raise ValueError(
             f"{ore} extraction is already at the final "
@@ -963,7 +967,7 @@ def plan_local_extraction(
             vertical_mirror,
         )
         maximum_bounds, _maximum_feed, _maximum_output = _smelter_layout_geometry(
-            recipe, REFINERY_GENERATION_1_CAPACITIES[-1], belt_type,
+            recipe, refinery_reserve_furnaces, belt_type,
             inserter_type, "east", vertical_mirror,
         )
         geometries[vertical_mirror] = (

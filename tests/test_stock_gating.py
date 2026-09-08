@@ -171,7 +171,7 @@ def test_real_build_uses_the_reserve_for_both_the_bar_and_gate(monkeypatch) -> N
         promoted_count=None,
     )
     monkeypatch.setattr(builder, "_ingredient_sources", lambda *_a, **_k: {})
-    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_args: True)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_args: True)
 
     def capture(*_args, **kwargs) -> None:
         observed.update(kwargs)

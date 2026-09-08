@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator import autonomous_builder, extraction_state, live_base, resource_patches, stage_extraction
+from orchestrator import (
+    autonomous_builder, extraction_capacity, extraction_state, live_base,
+    resource_patches, stage_extraction,
+)
 from orchestrator.extraction_state import (
     ExtractionEntity,
     ResourceMine,
@@ -40,6 +43,12 @@ def _entities(plan: dict) -> list[str]:
         for phase in plan["phases"]
         for action in phase["actions"]
     ]
+
+
+def test_post_plastic_drill_ladder_keeps_doubling_past_bootstrap() -> None:
+    assert extraction_capacity.next_drill_phase(96) is None
+    assert extraction_capacity.next_drill_phase(96, unbounded=True) == 192
+    assert extraction_capacity.next_drill_phase(193, unbounded=True) == 384
 
 
 def _clear_areas_at(position):

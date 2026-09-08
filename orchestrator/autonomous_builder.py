@@ -52,9 +52,12 @@ from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
 from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
+    DEMAND_MALL_SLOT_TARGET,
     locate_mall_cell,
     mall_cell_needs_rebuild,
+    mall_demand_slot_count,
     mall_entity_positions,
+    mall_slot_is_demand,
     mall_slot_count,
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
@@ -80,7 +83,9 @@ from orchestrator.parts_mall import (
 )
 from orchestrator.intermediate_scaling import (
     backlog_seconds,
+    is_promotable,
     live_intermediate_demand, promoted_companion_machine_count,
+    PROMOTED_LINE_MIN_MACHINES,
     promoted_line_belt_type, promoted_line_machine_count,
 )
 from orchestrator.priority_list import PriorityList
@@ -178,7 +183,8 @@ from planners.recipe_data import (
     machine_ingredient_rates,
 )
 from planners.smelter_block import (
-    FURNACES_PER_MODULE, generate_managed_refinery_extension_plan,
+    FURNACES_PER_MODULE, REFINERY_CAPACITY_SCHEDULES,
+    generate_managed_refinery_extension_plan,
     generate_managed_refinery_plan, refinery_interfaces, scheduled_refinery_target,
     split_managed_refinery_extension_plan,
 )
@@ -1501,6 +1507,7 @@ def _planned_entity_positions(*plans: dict) -> set[tuple[str, float, float]]:
 _BELT_TIER_PAIRS = {
     "transport-belt": "fast-transport-belt",
     "underground-belt": "fast-underground-belt",
+    "splitter": "fast-splitter",
 }
 _BELT_TIER_UPGRADES = _BELT_TIER_PAIRS
 
@@ -2211,10 +2218,33 @@ def _cohesive_smelter_target(
     supported = planned_smelter_count_for_drills(
         recipe, total_drills, extraction.mining_productivity_bonus,
     )
-    target = scheduled_refinery_target(existing.furnace_count, supported)
+    generation: int | None = 1
+    if recipe == "iron-plate" and _independent_mall_ready(
+        client, surface, force,
+    ):
+        generation = next(
+            (
+                index
+                for index, schedule in enumerate(
+                    REFINERY_CAPACITY_SCHEDULES, start=1,
+                )
+                if existing.furnace_count < schedule[-1]
+            ),
+            None,
+        )
+    target = (
+        max(
+            existing.furnace_count,
+            FURNACES_PER_MODULE * math.ceil(supported / FURNACES_PER_MODULE),
+        )
+        if generation is None else
+        scheduled_refinery_target(
+            existing.furnace_count, supported, generation=generation,
+        )
+    )
     if target is None:
         raise StuckError(
-            f"{recipe} refinery reached its generation-1 cap at "
+            f"{recipe} refinery reached its generation-{generation} cap at "
             f"{existing.furnace_count} furnace(s); refusing to overbuild this "
             "footprint before a new refinery site is planned"
         )
@@ -2776,7 +2806,49 @@ def build_mining_stage(
     # built and healthy. Removing the only live source before prerequisite
     # machines are available can strand the entire supply chain.
     try:
+        post_plastic_iron = bool(
+            recipe == "iron-plate"
+            and _independent_mall_ready(client, surface, force)
+        )
+        if expand and post_plastic_iron:
+            _upgrade_owned_plate_transport(
+                client, bridge, surface, force, recipe, emit,
+            )
         belt_type = _essential_belt_type(client, surface, force)
+        if (
+            post_plastic_iron
+            and _production_started(
+                client, surface, force, "fast-transport-belt",
+            )
+        ):
+            belt_type = "fast-transport-belt"
+        refinery_reserve_furnaces = REFINERY_CAPACITY_SCHEDULES[0][-1]
+        if post_plastic_iron:
+            existing_line = live_base.find_line(
+                client, surface, force, recipe,
+                LINE_RECIPES[recipe]["machine"],
+            )
+            current_furnaces = (
+                existing_line.machine_count if existing_line is not None else 0
+            )
+            next_generation_cap = next(
+                (
+                    schedule[-1]
+                    for schedule in REFINERY_CAPACITY_SCHEDULES
+                    if current_furnaces < schedule[-1]
+                ),
+                None,
+            )
+            refinery_reserve_furnaces = (
+                next_generation_cap
+                if next_generation_cap is not None else
+                FURNACES_PER_MODULE * math.ceil(
+                    max(
+                        current_furnaces + FURNACES_PER_MODULE,
+                        current_furnaces * 2,
+                    ) / FURNACES_PER_MODULE
+                )
+            )
         bootstrap = _bootstrap_state(recipe)
         if not excluded_drill_positions and not expand:
             starter_drills: set[Point] = set()
@@ -2831,6 +2903,8 @@ def build_mining_stage(
             owned_smelter_origin=owned_smelter_origin,
             owned_smelter_vertical_mirror=owned_smelter_vertical_mirror,
             defer_pending_owned_refinery=expand,
+            unbounded_growth=post_plastic_iron,
+            refinery_reserve_furnaces=refinery_reserve_furnaces,
             observe=emit,
             reserved_refinery_areas=tuple(
                 area for (reserved_surface, reserved_force, reserved_recipe), area
@@ -2989,6 +3063,10 @@ def build_mining_stage(
         bootstrap_cap is not None
         and planned_furnaces > bootstrap_cap
         and not _electric_furnace_producer_started(client, surface, force)
+        and not (
+            recipe == "iron-plate"
+            and _independent_mall_ready(client, surface, force)
+        )
     ):
         emit(
             f"BOOTSTRAP FURNACE CAP: deferring {recipe} expansion at "
@@ -3300,13 +3378,85 @@ def _essential_belt_type(
     return _DEFAULT_BELT
 
 
+def _upgrade_owned_plate_transport(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, emit: Callable[[str], None],
+) -> int:
+    """Upgrade exact controller-owned plate transport from held fast stock.
+
+    Ownership comes from the bootstrap district ledger; no area scan is used,
+    so neighboring user infrastructure cannot be captured by an upgrade order.
+    The operation is opportunistic and may upgrade a subset while production
+    replenishes the fast-tier construction reserve.
+    """
+    state = _bootstrap_state(recipe)
+    if state is None or not hasattr(client, "command"):
+        return 0
+    owned = (*state.transport_actions, *state.replacement_actions)
+    stock = live_base.available_items(client, surface, force)
+    upgraded = 0
+    for source, target in _BELT_TIER_UPGRADES.items():
+        if not _production_started(client, surface, force, target):
+            continue
+        positions = []
+        for action in owned:
+            if action.get("entity") != source or "position" not in action:
+                continue
+            position = (
+                float(action["position"]["x"]),
+                float(action["position"]["y"]),
+            )
+            standing = live_base.entity_at(client, surface, position)
+            if standing is not None and standing.get("name") == source:
+                positions.append(position)
+        available = max(0, int(stock.get(target, 0)) - UPGRADE_RESERVE)
+        selected = positions[:available]
+        if not selected:
+            continue
+        block = f"owned-{recipe}-{source}-to-{target}"
+        plan = entity_upgrade_plan(selected, source=source, target=target)
+        for action in plan["actions"]:
+            action["block"] = block
+        authorization = {
+            "approved_actions": ["apply_upgrades"],
+            "denied_actions": [],
+            "scope_limits": {
+                "max_count": len(selected),
+                "block_filter": [block],
+            },
+            "authorization_timestamp": datetime.now(timezone.utc).isoformat(),
+            "authorization_source": "policy",
+        }
+        report = load_json(bridge.execute_upgrade_plan(
+            authorization, plan, surface=surface, force=force,
+        ))
+        failed = [
+            action for action in report.get("actions", ())
+            if action.get("status") not in {"success", "skipped"}
+        ]
+        if failed:
+            raise StuckError(
+                f"Owned {recipe} transport upgrade {source} -> {target} "
+                f"rejected {len(failed)}/{len(selected)} exact order(s)",
+                code="plate_transport_upgrade_rejected",
+                classification="bug",
+                details={"recipe": recipe, "failures": failed},
+            )
+        upgraded += len(selected)
+        stock[target] = int(stock.get(target, 0)) - len(selected)
+        emit(
+            f"  IRON TRANSPORT UPGRADE: ordered {len(selected)} exact owned "
+            f"{source} -> {target} replacement(s)"
+        )
+    return upgraded
+
+
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
-# The scarce opening stays deliberately compact. Once both direct metal
-# starters have retired, material flow can support a second eight-cell bank;
-# keeping the opening cap at that point only serializes independent expansion
-# batches and forces recipe churn on already useful producers.
-_POST_STARTER_MALL_SLOT_TARGET = 16
+# Before plastic, permanent and rotating work share one bounded pool. Plastic
+# releases permanent per-item cells into their own bank; twelve reserved halves
+# remain available for demand-driven duplicate capacity.
+_PRE_PLASTIC_MALL_SLOT_TARGET = DEMAND_MALL_SLOT_TARGET
 _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
     *BULK_CONSTRUCTION_ITEMS,
     "electronic-circuit",
@@ -3316,10 +3466,9 @@ _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
 def _bootstrap_mall_slot_limit(
     client: RconClient, surface: str, force: str,
 ) -> int:
-    """Bounded compact-mall capacity for the current bootstrap phase."""
-    if _metal_starter_transition_complete(client, surface, force):
-        return _POST_STARTER_MALL_SLOT_TARGET
-    return BOOTSTRAP_MALL_SLOT_TARGET
+    """Shared pre-plastic capacity or post-plastic demand-bank capacity."""
+    del client, surface, force
+    return _PRE_PLASTIC_MALL_SLOT_TARGET
 
 
 def _top_up_solar_generation(
@@ -4049,6 +4198,7 @@ class _LinePlan:
     promote_to_line: bool
     at_size: bool
     shared_provider: bool = False
+    demand_slot: bool = False
 
 
 def _plan_line(
@@ -4081,6 +4231,11 @@ def _plan_line(
             client, surface, force, item,
         )
     existing = live_base.find_line(client, surface, force, item, spec["machine"])
+    demand_slot = bool(
+        _independent_mall_ready(client, surface, force)
+        and existing is not None
+        and existing.machine_count < minimum_machines
+    )
     mall_request_multiplier = _mall_request_multiplier(
         client, surface, force, item, spec, mall_storage_limit,
         finite_batch=(
@@ -4115,6 +4270,14 @@ def _plan_line(
         item, demand, existing.machine_count if existing else 0, saturated=saturated,
         backlog=backlog, machine_name=spec["machine"],
     )
+    if (
+        allow_promotion
+        and _independent_mall_ready(client, surface, force)
+        and demand > 5.0
+        and is_promotable(item)
+        and (existing.machine_count if existing else 0) < PROMOTED_LINE_MIN_MACHINES
+    ):
+        promoted_count = PROMOTED_LINE_MIN_MACHINES
     # Production prep asks for a standing number of MALL cells and must be
     # allowed to finish. Promotion outranking it turned "copper-cable to 2
     # machines" into a 6-machine dedicated line on the second pass, which then
@@ -4141,6 +4304,7 @@ def _plan_line(
         promote_to_line=promote_to_line,
         at_size=existing is None or existing.machine_count >= minimum_machines,
         shared_provider=shared_provider,
+        demand_slot=demand_slot,
     )
 
 
@@ -4572,7 +4736,7 @@ def _mall_request_multiplier(
     """Keep startup requesters from claiming more inputs than their batch.
 
     Permanent cells keep a throughput-sized ten-second input window. Before
-    core-mall readiness, every non-anchor output is finite; its requester may
+    plastic releases the independent mall, every non-anchor output is finite; its requester may
     therefore ask for at most the crafts needed by that bounded batch. This
     prevents a one-item fast-inserter construction need from warehousing ten
     or more regular inserters needed by an already planned refinery.
@@ -4771,25 +4935,23 @@ def _is_pre_core_temporary_mall_item(
 
     Gear and cable each keep one permanent anchor cell. Every other recipe in
     ``RATIONED_MALL_BATCH_ITEMS`` -- including the second gear/cable cells,
-    circuits, and belts -- is rotational until the five core mall producers
-    are independently working; persistent intermediates keep their
+    circuits, and belts -- is rotational until plastic output releases the
+    independent mall; persistent intermediates keep their
     dedicated-source path instead of being turned into rotating loans.
     """
     return bool(
         item in RATIONED_MALL_BATCH_ITEMS
         and item not in _MALL_RECIPE_ANCHORS
         and item not in PERSISTENT_INTERMEDIATES
-        and not _core_mall_ready(client, surface, force)
+        and not _independent_mall_ready(client, surface, force)
     )
 
 
 def _pipe_is_temporary_batch(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Keep pipe in the rotating mall until both bootstrap gates release."""
-    return not _all_plate_pioneers_released() or not _core_mall_ready(
-        client, surface, force,
-    )
+    """Keep pipe rotating only until plastic releases independent cells."""
+    return not _independent_mall_ready(client, surface, force)
 
 
 def _recipe_depends_on_fast_transport_belt(item: str) -> bool:
@@ -5022,7 +5184,11 @@ def _emit_loan_cell_telemetry(
         contents = {}
     try:
         committed = (
-            mall_slot_count(client, surface, reference_point)
+            (
+                mall_demand_slot_count(client, surface, reference_point)
+                if _independent_mall_ready(client, surface, force)
+                else mall_slot_count(client, surface, reference_point)
+            )
             if reference_point is not None else None
         )
     except Exception:
@@ -5342,8 +5508,8 @@ def _submit_bootstrap_loan(
             _MALL_REFRESH_SIGNATURES.clear()
             _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add("pipe")
             emit(
-                "  PIPE MALL PERMANENT: plate pioneers are released and the "
-                "core mall is self-sufficient; "
+                "  PIPE MALL PERMANENT: plastic output released independent "
+                "per-item cells; "
                 f"converted the stocked {loan.original_recipe} demand slot at "
                 f"{loan.machine_position} without funding another cell"
             )
@@ -6354,26 +6520,31 @@ def _build_assembled_stage(
     stock_gate_target: int | None = None,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
-    # The bootstrap budget is global.  Previously only optional demand cells
+    # The pre-plastic budget is global. Previously only optional demand cells
     # consulted it, while core-mall promotion kept allocating permanent cells
     # outside the budget; the latest run therefore reached thirteen mall
     # assemblers before the first logistic chest existed.  A running line is
     # never blocked here -- only a genuinely new compact slot, including an
     # extra half for an under-sized existing line, waits.
+    independent_mall = _independent_mall_ready(client, surface, force)
     if (
         not upgrade_bootstrap
         and plan.spec.get("machine") in live_base.ASSEMBLER_TIERS
-        and not _core_mall_ready(client, surface, force)
         and not plan.promote_to_line
         and (plan.existing is None or not plan.at_size)
+        and (not independent_mall or getattr(plan, "demand_slot", False))
     ):
-        committed = mall_slot_count(client, surface, reference_point)
+        committed = (
+            mall_demand_slot_count(client, surface, reference_point)
+            if independent_mall else
+            mall_slot_count(client, surface, reference_point)
+        )
         slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
         if committed >= slot_limit:
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
                 f"{slot_limit} assemblers are committed; "
-                f"deferring new {item} cell until a line promotion frees a slot"
+                f"deferring new {item} cell until a completed demand frees a slot"
             )
             raise ProductionPrerequisiteDeferred(
                 f"bootstrap mall is capped at {slot_limit} assemblers",
@@ -6565,6 +6736,7 @@ def _build_assembled_stage(
             request_multiplier_override=plan.mall_request_multiplier,
             shared_provider=getattr(plan, "shared_provider", False),
             machine_name=spec["machine"],
+            demand_slot=getattr(plan, "demand_slot", False),
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -6604,7 +6776,7 @@ def _chemical_uses_rotating_batch(
 ) -> bool:
     if item == "pipe":
         return _pipe_is_temporary_batch(client, surface, force)
-    return item in _CHEMICAL_BATCH_TARGETS and not _core_mall_ready(
+    return item in _CHEMICAL_BATCH_TARGETS and not _independent_mall_ready(
         client, surface, force,
     )
 
@@ -6882,7 +7054,7 @@ def ensure_produced(
         # and rate-sizes five requester feeders for this recipe, which is
         # wasteful for a one-chest seed and can never be a mall expansion
         # decision. Route early requests through the compact/loan path; once
-        # the core mall is ready it may allocate a normal permanent cell.
+        # plastic is live it may allocate a normal permanent cell.
         upgrade_bootstrap = False
         temporary_mall = True
     if not upgrade_bootstrap:
@@ -6981,7 +7153,7 @@ def ensure_produced(
         shared_provider=(
             not upgrade_bootstrap
             and item in _BOOTSTRAP_SHARED_PROVIDER_ITEMS
-            and not _core_mall_ready(client, surface, force)
+            and not _independent_mall_ready(client, surface, force)
         ),
     )
     mall_provider = _refresh_mall_cell(
@@ -7260,12 +7432,17 @@ def _bootstrap_demand_cell_affordable(
     reference_point: Point,
 ) -> tuple[bool, dict[str, int]]:
     """Whether one more shared-output cell can be funded without stealing."""
-    if mall_slot_count(
-        client, surface, reference_point,
-    ) >= _bootstrap_mall_slot_limit(client, surface, force):
+    independent_mall = _independent_mall_ready(client, surface, force)
+    committed = (
+        mall_demand_slot_count(client, surface, reference_point)
+        if independent_mall else
+        mall_slot_count(client, surface, reference_point)
+    )
+    if committed >= _bootstrap_mall_slot_limit(client, surface, force):
         return False, {}
     allocation = preview_mall_allocation(
         client, surface, item, reference_point,
+        demand_slot=independent_mall,
     )
     if allocation is None:
         return False, {}
@@ -7321,7 +7498,7 @@ def _bootstrap_reserve_machine_target(
     cells when a large construction reserve needs them; their protected anchor
     remains. Exact cell materials and the active pool limit remain hard gates.
     """
-    if background or _core_mall_ready(client, surface, force):
+    if background:
         return 1
     capability = BaseCapability(
         produces_tier2=_production_started(
@@ -7433,7 +7610,7 @@ def _rationed_mall_batch(
     )
     if item not in RATIONED_MALL_BATCH_ITEMS and not pipe_batch:
         return False
-    if not pipe_batch and _core_mall_ready(client, surface, force):
+    if not pipe_batch and _independent_mall_ready(client, surface, force):
         return False
     if (
         _recipe_depends_on_fast_transport_belt(item)
@@ -7730,10 +7907,10 @@ def _ensure_mall_item(
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
         if temporary_precore and _scarce_metal_startup(client, surface, force):
-            # Scarce opening only: a pre-core construction item is a demand
+            # Scarce opening only: a pre-plastic construction item is a demand
             # batch, not a one-stack standing reserve. Keep the current bill
-            # plus at least a 20% spare margin (rounded up); the core mall
-            # earns permanent slots after it is live.
+            # plus at least a 20% spare margin (rounded up); plastic output
+            # releases permanent per-item slots.
             temporary_target = _rationed_mall_spare_target(
                 client, surface, force, item, target,
             )
@@ -7747,7 +7924,7 @@ def _ensure_mall_item(
             emit(
                 f"  MALL TEMPORARY RESERVE: {item} is limited to "
                 f"need {target} + margin {temporary_target - target} "
-                "until the core mall is self-sufficient"
+                "until plastic releases the independent mall"
             )
         elif temporary_precore:
             emit(
@@ -8599,6 +8776,10 @@ def _prep_plate_extraction(
     if (
         short_plate in BOOTSTRAP_FURNACE_CAPS
         and not _electric_furnace_producer_started(client, surface, force)
+        and not (
+            short_plate == "iron-plate"
+            and _independent_mall_ready(client, surface, force)
+        )
     ):
         cap = BOOTSTRAP_FURNACE_CAPS[short_plate]
         if wanted_furnaces > cap:
@@ -9053,6 +9234,15 @@ def _power_storage_capability_started(
         client, surface, force, "accumulator",
     ):
         return True
+    return _independent_mall_ready(client, surface, force)
+
+
+def _independent_mall_ready(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether plastic output has released permanent per-item mall cells."""
+    if not hasattr(client, "command"):
+        return False
     return "plastic-bar" in LINE_RECIPES and _production_started(
         client, surface, force, "plastic-bar",
     )
@@ -9192,9 +9382,13 @@ def _reclaim_spent_demand_slot_for_prep(
     stock gate in place -- no ghosts, no churn -- and leaves a paired
     companion half untouched. Returns whether a conversion was submitted.
     """
-    if mall_slot_count(
-        client, surface, reference_point,
-    ) < _bootstrap_mall_slot_limit(client, surface, force):
+    independent_mall = _independent_mall_ready(client, surface, force)
+    committed = (
+        mall_demand_slot_count(client, surface, reference_point)
+        if independent_mall else
+        mall_slot_count(client, surface, reference_point)
+    )
+    if committed < _bootstrap_mall_slot_limit(client, surface, force):
         return False
     try:
         stock = _transferable_or_available_stock(client, surface, force)
@@ -9241,6 +9435,10 @@ def _reclaim_spent_demand_slot_for_prep(
             if located is None:
                 continue
             origin, side = located
+            if independent_mall and not mall_slot_is_demand(
+                machine_position, reference_point,
+            ):
+                continue
             if origin in busy_origins:
                 continue
             return _convert_mall_cell_to_recipe(
@@ -9495,9 +9693,12 @@ def _prep_core_mall(
         # _build_assembled_stage sees 10/10 and defers forever.  Force the
         # rotating-batch path so it can borrow an existing non-anchor cell;
         # completion promotes that same cell in _submit_bootstrap_loan.
-        if mall_slot_count(
-            client, surface, reference_point,
-        ) >= _bootstrap_mall_slot_limit(client, surface, force):
+        if (
+            not _independent_mall_ready(client, surface, force)
+            and mall_slot_count(
+                client, surface, reference_point,
+            ) >= _bootstrap_mall_slot_limit(client, surface, force)
+        ):
             try:
                 if _rationed_mall_batch(
                     client, bridge, surface, force, item, 1,

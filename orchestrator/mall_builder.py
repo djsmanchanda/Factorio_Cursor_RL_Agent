@@ -23,7 +23,9 @@ Point = tuple[float, float]
 # input inserter.
 _CELL_PITCH = (11, 6)
 _CELL_COLUMNS = 3
-_CELL_ROWS = 8
+_CELL_ROWS = 10
+DEMAND_MALL_SLOT_TARGET = 12
+_DEMAND_CELL_COUNT = DEMAND_MALL_SLOT_TARGET // 2
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
@@ -116,6 +118,19 @@ def mall_slot_count(
     )
 
 
+def mall_demand_slot_count(
+    client: RconClient, surface: str, reference_point: Point,
+) -> int:
+    """Live or ghosted slots in the post-plastic demand-capacity bank."""
+    origins = _cell_origins(reference_point)[-_DEMAND_CELL_COUNT:]
+    states = _district_state(client, surface, origins)
+    return sum(
+        recipe != "-"
+        for left, right, _requester in states.values()
+        for recipe in (left, right)
+    )
+
+
 def mall_entity_positions(
     client: RconClient, surface: str, force: str, reference_point: Point,
     entity_name: str,
@@ -142,10 +157,24 @@ def mall_entity_positions(
 
 
 def preview_mall_allocation(
-    client: RconClient, surface: str, recipe: str, reference_point: Point,
+    client: RconClient, surface: str, recipe: str, reference_point: Point, *,
+    demand_slot: bool = False,
 ) -> tuple[tuple[int, int], str] | None:
     """Expose the allocator's next stable cell half for exact bill pricing."""
-    return _choose_slot(client, surface, recipe, reference_point)
+    return _choose_slot(
+        client, surface, recipe, reference_point, demand_slot=demand_slot,
+    )
+
+
+def mall_slot_is_demand(
+    machine_position: Point, reference_point: Point,
+) -> bool:
+    """Whether a machine occupies the reserved post-plastic demand bank."""
+    located = locate_mall_cell(machine_position, reference_point)
+    if located is None:
+        return False
+    origin, _side = located
+    return origin in set(_cell_origins(reference_point)[-_DEMAND_CELL_COUNT:])
 
 
 def mall_slot_uses_shared_provider(
@@ -309,7 +338,8 @@ def _side_clear(
 
 
 def _choose_slot(
-    client: RconClient, surface: str, recipe: str, reference_point: Point,
+    client: RconClient, surface: str, recipe: str, reference_point: Point, *,
+    demand_slot: bool = False,
 ) -> tuple[tuple[int, int], str] | None:
     """Pick a cell half for `recipe`.
 
@@ -317,7 +347,12 @@ def _choose_slot(
     own labelled request group and the executor upserts it, so what the other
     half already asked for neither has to be known here nor merged in.
     """
-    origins = _cell_origins(reference_point)
+    all_origins = _cell_origins(reference_point)
+    origins = (
+        all_origins[-_DEMAND_CELL_COUNT:]
+        if demand_slot
+        else all_origins[:-_DEMAND_CELL_COUNT]
+    )
     states = _district_state(client, surface, origins)
     preferred_open: list[tuple[tuple[int, int], str]] = []
     related_open: list[tuple[tuple[int, int], str]] = []
@@ -498,6 +533,7 @@ def build_compact_mall_stage(
     request_multiplier_override: int | None = None,
     shared_provider: bool = False,
     machine_name: str | None = None,
+    demand_slot: bool = False,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     spec = LINE_RECIPES[recipe]
@@ -512,7 +548,9 @@ def build_compact_mall_stage(
             "what is inserted, so a mall cell for it could never be counted again "
             "and would be rebuilt every pass. It needs a smelting stage."
         )
-    allocation = _choose_slot(client, surface, recipe, reference_point)
+    allocation = _choose_slot(
+        client, surface, recipe, reference_point, demand_slot=demand_slot,
+    )
     if allocation is None:
         raise StuckError(f"No assignable slot remains in the compact parts mall for {recipe}")
     origin, side = allocation

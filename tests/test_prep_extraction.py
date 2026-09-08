@@ -389,6 +389,36 @@ def test_fixed_foundation_target_suppresses_iron_proactive_growth(monkeypatch) -
     assert calls == []
 
 
+def test_post_plastic_iron_demand_bypasses_the_bootstrap_furnace_cap(
+    monkeypatch,
+) -> None:
+    line = type("Line", (), {
+        "machine_count": 6,
+        "machine_positions": (),
+    })()
+    calls: list[bool] = []
+    monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(autonomous_builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(autonomous_builder, "smelter_count_for_draw", lambda *_a: 24)
+    monkeypatch.setattr(
+        autonomous_builder, "_electric_furnace_producer_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_independent_mall_ready", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "build_mining_stage",
+        lambda *_a, **kwargs: calls.append(kwargs["expand"]) or (10.5, 10.5),
+    )
+
+    assert autonomous_builder._prep_plate_extraction(
+        object(), object(), "nauvis", "player", "iron-plate", set(), {}, {},
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert calls == [True]
+    autonomous_builder.MANAGED_INTERMEDIATE_SOURCES.clear()
+
+
 def test_foundation_ready_merges_fed_and_unset_furnaces(monkeypatch) -> None:
     """A furnace has no recipe until ore reaches it, so four fed plus two
     unset machines can still be the complete opening module."""

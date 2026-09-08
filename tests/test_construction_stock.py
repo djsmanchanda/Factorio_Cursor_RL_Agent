@@ -252,6 +252,13 @@ def test_blocking_project_bill_overrides_the_starter_idle_cap(monkeypatch) -> No
     monkeypatch.setattr(
         builder, "mall_reserve_for", lambda *_args: MallReserve(5, 5, None),
     )
+    monkeypatch.setattr(builder, "_rationed_mall_batch", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_reserve_machine_target", lambda *_a, **_k: 1,
+    )
     monkeypatch.setattr(
         builder, "ensure_produced",
         lambda *_args, **kwargs: captured.update(kwargs),
@@ -332,6 +339,10 @@ def test_starter_circuit_cap_is_applied_to_new_and_existing_assembler_gates(
 ) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_args: False,
+    )
+    monkeypatch.setattr(builder, "_rationed_mall_batch", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_a: False,
     )
     observed: dict[str, int | None] = {}
     line_plan = SimpleNamespace(existing=None, at_size=True, promote_to_line=False)
@@ -696,7 +707,7 @@ def test_capped_intermediate_reclaims_completed_demand_cell(monkeypatch) -> None
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
     def _capped(*_a, **_k):
         raise builder.ProductionPrerequisiteDeferred(
-            "bootstrap mall is capped at 16 assemblers",
+            "bootstrap mall is capped at 12 assemblers",
             code="bootstrap_mall_slot_cap", state="supply_wait", details={},
         )
     monkeypatch.setattr(builder, "ensure_produced", _capped)
@@ -715,20 +726,20 @@ def test_capped_intermediate_reclaims_completed_demand_cell(monkeypatch) -> None
     assert reclaimed == [{"minimum_machines": 1, "stock_target": 4}]
 
 
-def test_mall_slot_limit_doubles_only_after_metal_transition(monkeypatch) -> None:
+def test_pre_plastic_and_demand_banks_each_have_twelve_slots(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_a: False,
     )
     assert builder._bootstrap_mall_slot_limit(
         object(), "nauvis", "player",
-    ) == builder.BOOTSTRAP_MALL_SLOT_TARGET
+    ) == 12
 
     monkeypatch.setattr(
         builder, "_metal_starter_transition_complete", lambda *_a: True,
     )
     assert builder._bootstrap_mall_slot_limit(
         object(), "nauvis", "player",
-    ) == 16
+    ) == 12
 
 
 def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
@@ -2428,13 +2439,16 @@ def test_half_without_provider_chest_is_not_borrowed(monkeypatch) -> None:
 
 def _reclaim_world(monkeypatch, *, pool_full=True, donor_stock=6,
                    working=0):
-    """8/8 pool with one idle spent drill cell beside the standing set."""
+    """Full pre-plastic pool with one idle spent drill cell."""
     monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
         "machine": "assembling-machine-1",
         "ingredients": ["iron-plate", "iron-gear-wheel", "electronic-circuit"],
         "amounts": [10, 5, 3], "product_amount": 1, "craft_time": 2.0,
     })
-    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 8 if pool_full else 7)
+    monkeypatch.setattr(
+        builder, "mall_slot_count",
+        lambda *_a: 12 if pool_full else 11,
+    )
     monkeypatch.setattr(
         builder, "_transferable_or_available_stock", lambda *_a: {
             "electric-mining-drill": donor_stock,

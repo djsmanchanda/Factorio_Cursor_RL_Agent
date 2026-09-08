@@ -18,8 +18,8 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 # not a target. The opening mall is six fixed cells: one permanent anchor
 # each for iron-gear-wheel and copper-cable (never borrowed or reconfigured),
 # plus four rotational cells starting as a second gear, a second cable, one
-# electronic-circuit, and one transport-belt. A new need below the eight-slot
-# cap adds another rotational cell; at the cap the six rotational slots rotate
+# electronic-circuit, and one transport-belt. A new need below the twelve-slot
+# cap adds another rotational cell; at the cap the shared slots rotate
 # instead. Steel-plate is deliberately NOT here. It is smelted, not assembled:
 # a furnace takes its recipe from what is inserted, so an idle one reports no
 # recipe and find_line can never count it. Prep saw zero however many it had
@@ -86,20 +86,20 @@ CORE_MALL_PRODUCERS = (
     "substation",
 )
 
-# Bootstrap owns at most eight mall assemblers: two permanent anchors (one
-# gear, one cable) plus up to six rotational slots. A new construction need
+# Bootstrap owns at most twelve mall assemblers: two permanent anchors (one
+# gear, one cable) plus up to ten rotational slots. A new construction need
 # below the cap adds a rotational cell for it; at the cap the rotational slots
-# borrow and restore instead, and the two anchors are never touched. Eight
-# recovered the useful pre-plastic parallelism seen before finite-stock
+# borrow and restore instead, and the two anchors are never touched. Twelve
+# preserves useful pre-plastic parallelism while finite-stock
 # rationing, without making every demand an unconditional permanent mall
 # allocation.
-BOOTSTRAP_MALL_SLOT_TARGET = 8
+BOOTSTRAP_MALL_SLOT_TARGET = 12
 
 RATIONED_MALL_BATCH_ITEMS = frozenset({
     *CORE_MALL_PRODUCERS,
     # Before the core mall can build its own machines, every construction
     # output below is a demand-owned, need-plus-margin batch.  It may claim a
-    # free half of the eight-slot pool, or borrow an existing half when the pool
+    # free half of the twelve-slot pool, or borrow an existing half when the pool
     # is full; it must not become a permanent one-recipe cell and consume the
     # slot needed to make the core mall self-sufficient.
     "assembling-machine-1",

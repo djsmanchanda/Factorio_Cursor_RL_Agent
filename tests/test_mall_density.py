@@ -88,6 +88,37 @@ def test_cables_split_between_circuits_and_transport_belts(monkeypatch) -> None:
     ) == (belt_cell, "left")
 
 
+def test_post_plastic_demand_bank_reserves_twelve_separate_slots(
+    monkeypatch,
+) -> None:
+    reference = (3.0, -1.0)
+    origins = mall_builder._cell_origins(reference)
+    demand_origins = origins[-6:]
+    states = {origin: ("-", "-", "-") for origin in origins}
+    monkeypatch.setattr(mall_builder, "_district_state", lambda *_args: states)
+    monkeypatch.setattr(
+        mall_builder.live_base, "area_clear", lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        mall_builder.resource_patches,
+        "box_has_reserved_patch",
+        lambda *_a, **_k: False,
+    )
+
+    permanent = mall_builder._choose_slot(
+        object(), "nauvis", "iron-gear-wheel", reference,
+    )
+    demand = mall_builder._choose_slot(
+        object(), "nauvis", "iron-gear-wheel", reference,
+        demand_slot=True,
+    )
+
+    assert len(origins) == 30
+    assert permanent == (origins[0], "left")
+    assert demand == (demand_origins[0], "left")
+    assert mall_builder.DEMAND_MALL_SLOT_TARGET == 12
+
+
 def test_shared_output_right_half_gets_one_permanent_provider(monkeypatch) -> None:
     reference = (3.0, -1.0)
     origin, *_rest = mall_builder._cell_origins(reference)

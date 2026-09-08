@@ -682,7 +682,7 @@ def test_released_plate_districts_convert_a_stocked_demand_slot_for_pipe(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
-    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
     monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", lambda *_a: None)
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
     monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
@@ -720,7 +720,7 @@ def test_completed_pipe_loan_is_promoted_only_from_a_demand_slot(
     )
     submitted: list[str] = []
     monkeypatch.setattr(builder, "_all_plate_pioneers_released", lambda: True)
-    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock",
         lambda *_a: ({"pipe": 100}, {"pipe": 100}),
@@ -894,7 +894,7 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     assert builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS == {
         "electric-mining-drill",
     }
-    assert any("8-assembler pool" in message for message in messages)
+    assert any("12-assembler pool" in message for message in messages)
 
 
 def test_post_starter_demand_claims_free_slot_while_another_loan_runs(
@@ -1538,7 +1538,8 @@ def test_reserved_but_flowing_input_funds_another_mall_cell(monkeypatch) -> None
     with a scheduled producer and spendable stock funds the cell from flow."""
     monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 5)
     monkeypatch.setattr(
-        builder, "preview_mall_allocation", lambda *_a: ((0.0, 0.0), "left"),
+        builder, "preview_mall_allocation",
+        lambda *_a, **_k: ((0.0, 0.0), "left"),
     )
     monkeypatch.setattr(
         builder, "compact_mall_project_bill",
@@ -1560,6 +1561,7 @@ def test_reserved_but_flowing_input_funds_another_mall_cell(monkeypatch) -> None
         builder, "construction_supply_chain_is_scheduled", lambda *_a: True,
     )
     client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
 
     affordable, shortage = builder._bootstrap_demand_cell_affordable(
         client, "nauvis", "player", "transport-belt", 122, (0.0, 0.0),
@@ -1573,7 +1575,8 @@ def test_stagnant_reserve_still_blocks_another_mall_cell(monkeypatch) -> None:
     producer the reserved shortage still waits."""
     monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 5)
     monkeypatch.setattr(
-        builder, "preview_mall_allocation", lambda *_a: ((0.0, 0.0), "left"),
+        builder, "preview_mall_allocation",
+        lambda *_a, **_k: ((0.0, 0.0), "left"),
     )
     monkeypatch.setattr(
         builder, "compact_mall_project_bill",
@@ -1595,6 +1598,7 @@ def test_stagnant_reserve_still_blocks_another_mall_cell(monkeypatch) -> None:
         builder, "construction_supply_chain_is_scheduled", lambda *_a: False,
     )
     client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
 
     affordable, shortage = builder._bootstrap_demand_cell_affordable(
         client, "nauvis", "player", "transport-belt", 122, (0.0, 0.0),
@@ -2148,8 +2152,8 @@ def test_completed_bill_enters_durable_spare_phase(monkeypatch) -> None:
     assert ":splitter:50:43:50:0:" in group
 
 
-def test_rationing_ends_after_core_mall_producers_are_live(monkeypatch) -> None:
-    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: True)
+def test_rationing_ends_after_plastic_releases_independent_mall(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
     monkeypatch.setattr(
         builder, "_start_bootstrap_loan",
         lambda *_a: pytest.fail("self-sustaining mall must not borrow a cell"),
