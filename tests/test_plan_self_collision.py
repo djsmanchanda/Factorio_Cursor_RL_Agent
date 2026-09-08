@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+from orchestrator.extraction_transport import planned_footprint_tiles  # noqa: E402
 from planners.infrastructure_geometry import boxes_overlap  # noqa: E402
 from planners.local_layout_planner import LocalLayoutPlanner  # noqa: E402
 from planners.plan_validation import (  # noqa: E402
@@ -68,6 +69,32 @@ def test_a_two_by_two_over_a_one_by_one_counts_as_a_collision() -> None:
     CENTRE is identical, and a 2x2 over a 1x1 never has the same centre."""
     assert boxes_overlap((49.0, 47.0), 2, (49.5, 47.5), 1)
     assert (49.0, 47.0) != (49.5, 47.5)
+
+
+@pytest.mark.parametrize(
+    "entity",
+    ["assembling-machine-1", "assembling-machine-2", "assembling-machine-3"],
+)
+def test_assemblers_reserve_their_full_three_by_three_footprint(entity: str) -> None:
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost",
+        "entity": entity,
+        "position": {"x": 36.5, "y": 32.5},
+    }]}]}
+
+    assert planned_footprint_tiles(plan) == {
+        (x, y) for x in range(35, 38) for y in range(31, 34)
+    }
+
+
+def test_observed_mall_bridge_pole_tile_is_reserved_by_assembler() -> None:
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost",
+        "entity": "assembling-machine-1",
+        "position": {"x": 36.5, "y": 32.5},
+    }]}]}
+
+    assert (35, 32) in planned_footprint_tiles(plan)
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PLACEMENTS = {"place_entity", "place_ghost"}
 INFINITY_ENTITIES = {"infinity-chest", "infinity-pipe"}
 ENTITY_FOOTPRINTS = {
+    "assembling-machine-1": 3,
     "assembling-machine-2": 3,
+    "assembling-machine-3": 3,
     "electric-furnace": 3,
     "electric-mining-drill": 3,
     "chemical-plant": 3,
