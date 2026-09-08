@@ -231,7 +231,7 @@ def test_steel_starter_power_uses_only_presteel_poles() -> None:
     bill = plan_material_bill(plan)
 
     assert anchor == "small-electric-pole"
-    assert bill.get("small-electric-pole") == 3
+    assert bill.get("small-electric-pole") == 2
     assert "medium-electric-pole" not in bill
     assert "substation" not in bill
 
@@ -249,12 +249,17 @@ def test_steel_starter_uses_fully_stocked_medium_poles_without_wood() -> None:
     )
 
     plan, anchor = builder._use_presteel_starter_power(
-        plan, {"medium-electric-pole": 3, "wood": 0},
+        plan, {"medium-electric-pole": 2, "wood": 0},
     )
     bill = plan_material_bill(plan)
 
     assert anchor == "medium-electric-pole"
-    assert bill.get("medium-electric-pole") == 3
+    assert bill.get("medium-electric-pole") == 2
+    assert {
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "medium-electric-pole"
+    } == {(0.5, 1.5), (3.5, 7.5)}
     assert "small-electric-pole" not in bill
     assert "substation" not in bill
 
@@ -265,7 +270,7 @@ def test_steel_starter_submits_as_critical_material_prerequisite(monkeypatch) ->
     monkeypatch.setattr(builder, "_conversion_origin", lambda *_a, **_k: (0, 0))
     monkeypatch.setattr(
         builder, "_transferable_or_available_stock",
-        lambda *_a: {"medium-electric-pole": 3},
+        lambda *_a: {"medium-electric-pole": 2},
     )
     monkeypatch.setattr(
         builder, "_conversion_feed_plan",
@@ -315,11 +320,11 @@ def test_steel_pole_seed_is_reserved_before_concurrent_foundation_spend(
     )
 
     assert ledger.projects["conversion_steel-plate"].reserved == {
-        "medium-electric-pole": 3,
+        "medium-electric-pole": 2,
     }
-    assert competing.reserved == {"medium-electric-pole": 2}
+    assert competing.reserved == {"medium-electric-pole": 3}
     assert ledger.shortage_targets(
-        "conversion_steel-plate", {"medium-electric-pole": 3},
+        "conversion_steel-plate", {"medium-electric-pole": 2},
     ) == {}
 
 

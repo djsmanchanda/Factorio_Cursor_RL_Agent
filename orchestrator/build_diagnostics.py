@@ -67,6 +67,24 @@ def _side_sample_plate_output(
         "position": {"x": provider[0], "y": provider[1] - 1},
         "direction": "north",
     })
+    furnaces = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "electric-furnace"
+    ]
+    compact_power = len(furnaces) == 1
+    if compact_power:
+        # One furnace does not need both generic pole rows plus a remote tap
+        # pole. Keep the upper pole for the feed/input side and put the tap
+        # pole beside the output inserter, where it also powers the furnace's
+        # lower inserter. The two poles remain comfortably within wire reach.
+        for phase in plan["phases"]:
+            phase["actions"] = [
+                action for action in phase["actions"]
+                if not (
+                    action.get("entity") == "medium-electric-pole"
+                    and action["position"]["y"] == oy + 5.5
+                )
+            ]
     collector_phase = next(
         phase for phase in plan["phases"] if terminal_chest in phase["actions"]
     )
@@ -88,7 +106,11 @@ def _side_sample_plate_output(
         },
         {
             "action_type": "place_ghost", "entity": "medium-electric-pole",
-            "position": {"x": provider[0], "y": provider[1] + 2},
+            "position": (
+                {"x": inserter_x, "y": oy + 7.5}
+                if compact_power
+                else {"x": provider[0], "y": provider[1] + 2}
+            ),
         },
     ])
     return provider
