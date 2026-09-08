@@ -12,12 +12,12 @@ planner or coding agent.
    OpenCode Helper process for that run.
 2. The helper creates one OpenCode session and one findings document at
    `docs/deterministic/opencode_helper_runs/<episode-id>/findings.md`.
-3. Every two minutes it sends that same session only new runner-log output,
+3. Every minute it sends that same session only new runner-log output,
    read-only manifest facts, and the loopback logistic-inventory snapshot.
 4. When it sees `RUN END`, it steers the same session with the terminal log and
    requests a final wrap-up: outcome, timeline, inventory/mall state, code
-   correlations, comparison to the preceding helper report, and a structured
-   coding handoff.
+   correlations, comparison to the preceding helper report, recent commit
+   history, and a structured coding handoff.
 5. After the final document is written, the helper appends a short absolute
    findings path to `autonomous-run.log`:
 
@@ -39,6 +39,10 @@ transcripts live under `~/.local/share/factorio-rl/opencode_helper/runs/`.
   evidence for a later coding task.
 - One run gets one session and one findings document. A helper restart resumes
   the saved session for that same run.
+- A failed or timed-out OpenCode request is resumed with a `continue` prompt up
+  to three times. After the third retry the helper stops and appends that
+  explicit failure to the runner log; it never starts a replacement session.
+- Helper prompts prohibit sleep commands longer than 90 seconds.
 
 ## Operations
 

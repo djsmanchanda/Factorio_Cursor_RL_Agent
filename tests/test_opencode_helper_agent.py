@@ -52,12 +52,12 @@ def test_completed_run_wraps_findings_and_appends_runner_pointer(tmp_path: Path,
 
 def test_helper_rejects_sub_two_minute_observation_intervals(tmp_path: Path) -> None:
     config = _config(tmp_path, tmp_path / "run.log")
-    config = helper.Config(**{**config.__dict__, "interval_seconds": 119})
+    config = helper.Config(**{**config.__dict__, "interval_seconds": 59})
 
     try:
         helper.run_helper(config)
     except ValueError as error:
-        assert "at least 120" in str(error)
+        assert "at least 60" in str(error)
     else:
         raise AssertionError("short interval was accepted")
 
@@ -90,3 +90,25 @@ def test_runner_starts_the_permanent_helper_at_run_start(monkeypatch, tmp_path: 
     assert messages == [
         "OPENCODE HELPER: started read-only observer pid=123 run=episode-test",
     ]
+
+
+def test_helper_retries_by_resuming_the_same_session(monkeypatch, tmp_path: Path) -> None:
+    config = _config(tmp_path, tmp_path / "run.log")
+    state = helper.State(session_id="session-1", checkpoints=2)
+    commands: list[list[str]] = []
+    results = iter([
+        SimpleNamespace(returncode=1, stdout="first failure", stderr=""),
+        SimpleNamespace(returncode=0, stdout="continued", stderr=""),
+    ])
+
+    def fake_run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        return next(results)
+
+    monkeypatch.setattr(helper, "_run", fake_run)
+
+    helper._ask(config, "checkpoint evidence", state)
+
+    assert commands[0][-1] == "checkpoint evidence"
+    assert "--session" in commands[1]
+    assert "Continue the same read-only helper run" in commands[1][-1]
