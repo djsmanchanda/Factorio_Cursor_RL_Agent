@@ -17,7 +17,7 @@ import time
 import traceback
 from collections import Counter
 from copy import copy
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +31,7 @@ from orchestrator.mission_state import BOOTSTRAP_PROFILES, MissionStateLedger
 from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
 from helper_agent.cli import launch_processor as launch_helper_agent_processor
 from helper_agent.packet_builder import build_case_packet, write_packet
+from tools.opencode_helper_agent import launch_helper as launch_opencode_helper
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
 
@@ -255,6 +256,33 @@ def _queue_helper_agent_review(
     return packet_path
 
 
+def _start_opencode_helper(
+    args: argparse.Namespace, *, log_path: Path, emit: Callable[[str], None],
+) -> str | None:
+    """Start the permanent read-only observer for this runner invocation."""
+    if getattr(args, "no_opencode_helper", False):
+        return None
+    run_id = getattr(args, "episode_id", None) or (
+        "direct-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    )
+    try:
+        identity = launch_opencode_helper(
+            run_id=run_id,
+            log_path=log_path,
+            manifest_path=getattr(args, "episode_manifest", None),
+            data_root=getattr(args, "opencode_helper_data_root", None),
+            report_root=getattr(args, "opencode_helper_report_root", None),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        emit(
+            "OPENCODE HELPER: could not start observer: "
+            f"{type(error).__name__}: {error}"
+        )
+        return None
+    emit(f"OPENCODE HELPER: started read-only observer {identity} run={run_id}")
+    return identity
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -423,7 +451,19 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
     )
     helper.add_argument(
         "--no-helper-agent-review", action="store_true",
-        help="Do not queue a post-run Helper Agent review (intended for tests).",
+        help="Deprecated legacy Helper Agent switch; post-run packet reviews are no longer launched.",
+    )
+    parser.add_argument(
+        "--opencode-helper-data-root", type=Path,
+        help="Write permanent OpenCode Helper state outside the repository.",
+    )
+    parser.add_argument(
+        "--opencode-helper-report-root", type=Path,
+        help="Write one OpenCode Helper findings directory per deterministic run.",
+    )
+    parser.add_argument(
+        "--no-opencode-helper", action="store_true",
+        help="Do not start the read-only OpenCode Helper observer (intended for tests).",
     )
 
 
@@ -635,6 +675,7 @@ def main(argv: list[str] | None = None) -> int:
             started_at=datetime.now().astimezone().isoformat(timespec="seconds"),
             bootstrap_profile=args.bootstrap_profile,
         )
+        _start_opencode_helper(args, log_path=log_path, emit=logger.emit)
         if archived is not None:
             logger.emit(
                 f"LOG RETENTION: archived {archived.session_count} older run(s) "
@@ -737,25 +778,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             logger.flush_compaction()
             logger.emit("RUN END")
-            if (
-                mission_state_path is not None
-                and not getattr(args, "no_helper_agent_review", False)
-            ):
-                try:
-                    _queue_helper_agent_review(
-                        log_path=log_path,
-                        mission_state_path=mission_state_path,
-                        blocker_events_path=blocker_events_path,
-                        episode_manifest_path=getattr(args, "episode_manifest", None),
-                        structured_events_path=logger.events_path,
-                        emit=logger.emit,
-                        data_root=getattr(args, "helper_agent_data_root", None),
-                    )
-                except Exception as helper_error:
-                    logger.emit(
-                        "HELPER AGENT: could not queue post-run review packet: "
-                        f"{type(helper_error).__name__}: {helper_error}"
-                    )
             logger.close()
             heartbeat_path.unlink(missing_ok=True)
 

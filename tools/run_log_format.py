@@ -63,7 +63,13 @@ def is_run_end_line(line: str | bytes) -> bool:
 
 
 def is_helper_agent_line(line: str | bytes) -> bool:
-    """Recognize post-run Helper Agent handoff messages in either time format."""
+    """Recognize legacy and OpenCode Helper handoffs in either time format."""
     if isinstance(line, bytes):
-        return line.startswith(b"HELPER AGENT:") or b" HELPER AGENT:" in line
-    return line.startswith("HELPER AGENT:") or " HELPER AGENT:" in line
+        return (
+            line.startswith(b"HELPER AGENT:") or b" HELPER AGENT:" in line
+            or line.startswith(b"OPENCODE HELPER:") or b" OPENCODE HELPER:" in line
+        )
+    return (
+        line.startswith("HELPER AGENT:") or " HELPER AGENT:" in line
+        or line.startswith("OPENCODE HELPER:") or " OPENCODE HELPER:" in line
+    )

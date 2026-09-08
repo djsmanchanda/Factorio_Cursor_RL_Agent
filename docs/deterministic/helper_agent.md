@@ -1,4 +1,8 @@
-# Helper Agent feature plan
+# Legacy Helper Agent feature plan
+
+> Retired for new deterministic runs on 2026-09-08. The Freetoken packet
+> processor remains as historical/source compatibility only; runner lifecycle
+> now uses the read-only [OpenCode Helper Agent](opencode_helper_agent.md).
 
 ## Purpose
 
