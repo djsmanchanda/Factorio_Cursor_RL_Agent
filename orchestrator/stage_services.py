@@ -435,6 +435,7 @@ def _submit(
     stage_coverage: Callable[[], None] | None = None,
     allow_unfunded_ghosts: bool = False,
     reservation_priority: int = 50,
+    require_funded: bool = False,
 ) -> dict:
     """Submit a plan; if a tile is blocked, clear it ONLY when it's obviously
     safe map clutter (a tree, a rock -- never anything a force built) and
@@ -449,6 +450,9 @@ def _submit(
     not bypass that supply-chain proof. Collision and ownership checks are
     unchanged; only the requirement to warehouse the entire bill first is
     relaxed. ``reservation_priority`` is forwarded to that persisted bill.
+    ``require_funded`` is for infrastructure that the caller must observe
+    synchronously: waiting inside that call would otherwise prevent the outer
+    controller from producing a known shortage.
     """
     if not any(phase.get("actions") for phase in plan.get("phases", [])):
         raise StuckError(f"{name}: proposed zero actions")
@@ -465,6 +469,8 @@ def _submit(
             True, (), reservation_priority,
         )
     except MaterialShortage as shortage:
+        if require_funded or converted_infrastructure:
+            raise
         ledger = active_material_ledger()
         project = ledger.projects.get(name) if ledger is not None else None
         if project is not None and project.hold_until_producing:
@@ -1092,7 +1098,10 @@ def extend_power(
     ]
     plan = {"phases": [{"name": "power_bridge", "actions": actions}], "surface": surface, "force": force}
     try:
-        _submit(client, bridge, surface, plan, "power_bridge", emit)
+        _submit(
+            client, bridge, surface, plan, "power_bridge", emit,
+            require_funded=True,
+        )
         _await_bot_built_infrastructure(
             client, surface,
             tuple(zip(action_names, hops)),

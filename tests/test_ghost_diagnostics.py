@@ -404,6 +404,47 @@ def test_producer_backed_shortage_places_blueprint_without_explicit_override(
     assert reports == [plan]
 
 
+@pytest.mark.parametrize(
+    ("action_type", "require_funded"),
+    (("place_ghost", True), ("place_entity", False)),
+    ids=("explicit-wait", "converted-direct-intent"),
+)
+def test_synchronous_infrastructure_rejects_producer_backed_shortage(
+    monkeypatch, action_type: str, require_funded: bool,
+) -> None:
+    plan = {
+        "force": "player",
+        "phases": [{"actions": [{
+            "action_type": action_type, "entity": "medium-electric-pole",
+            "position": {"x": -91.5, "y": 0.5},
+        }]}],
+    }
+    submitted = []
+    bridge = type("Bridge", (), {
+        "build_layout": lambda _self, _authorization, _plan: submitted.append(_plan),
+    })()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(
+        stage_services, "assert_affordable",
+        lambda *_a, **_k: (_ for _ in ()).throw(MaterialShortage(
+            "power_bridge", {"medium-electric-pole": 5}, {},
+        )),
+    )
+    monkeypatch.setattr(
+        stage_services, "_shortage_has_complete_supply_chains",
+        lambda *_a: True,
+    )
+
+    with pytest.raises(MaterialShortage):
+        stage_services._submit(
+            object(), bridge, "nauvis", plan, "power_bridge",
+            lambda _message: None, require_funded=require_funded,
+        )
+
+    assert submitted == []
+
+
 def test_ghost_blockages_decodes_missing_material() -> None:
     client = _Client("77.5|-18.5|transport-belt|missing_material:transport-belt:4:0")
 
@@ -703,10 +744,10 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
         surveys["n"] += 1
         return set() if surveys["n"] == 1 else {(48, -70)}
 
-    submits: list[str] = []
+    submits: list[tuple[str, bool]] = []
 
-    def fake_submit(_c, _b, _s, plan, name, _emit):
-        submits.append(name)
+    def fake_submit(_c, _b, _s, plan, name, _emit, *, require_funded):
+        submits.append((name, require_funded))
         if len(submits) == 1:
             raise ss.StuckError(
                 "power_bridge: blocked by real infrastructure "
@@ -732,7 +773,7 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
     )
 
     assert acted
-    assert submits.count("power_bridge") == 2
+    assert submits == [("power_bridge", True), ("power_bridge", True)]
 
 
 def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) -> None:
@@ -788,7 +829,7 @@ def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
     monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
@@ -824,7 +865,7 @@ def test_power_bridge_uses_substation_when_dense_stage_has_no_medium_terminal(
     monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
@@ -862,7 +903,7 @@ def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None
     monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
@@ -902,7 +943,7 @@ def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -
     )
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
@@ -956,7 +997,7 @@ def test_power_bridge_retries_when_placed_chain_is_still_disconnected(
     )
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submissions.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submissions.append(plan),
     )
     monkeypatch.setattr(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
@@ -1017,7 +1058,7 @@ def test_neighboring_power_remedy_waits_for_the_first_bridge_to_settle(
     monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
     monkeypatch.setattr(
         ss, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
     )
     monkeypatch.setattr(builder_module, "_top_up_solar_generation", lambda *_a, **_k: False)
     monkeypatch.setattr(ss.time, "monotonic", lambda: clock[0])
