@@ -29,7 +29,9 @@ from orchestrator.bootstrap_profiles import bootstrap_profile
 from orchestrator.bootstrap_supply import (
     BootstrapSupplyError, ensure_bootstrap_supply,
 )
-from orchestrator.construction_stock import FALLBACK_STACK_SIZE, MallReserve, mall_reserve
+from orchestrator.construction_stock import (
+    BULK_CONSTRUCTION_ITEMS, FALLBACK_STACK_SIZE, MallReserve, mall_reserve,
+)
 from orchestrator.baseline_production import (
     BASELINE_MACHINES, BASELINE_PLATES, BOOTSTRAP_FURNACE_CAPS,
     BOOTSTRAP_MALL_SLOT_TARGET,
@@ -3300,11 +3302,31 @@ def _essential_belt_type(
 
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
+# The scarce opening stays deliberately compact. Once both direct metal
+# starters have retired, material flow can support a second eight-cell bank;
+# keeping the opening cap at that point only serializes independent expansion
+# batches and forces recipe churn on already useful producers.
+_POST_STARTER_MALL_SLOT_TARGET = 16
+_POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
+    *BULK_CONSTRUCTION_ITEMS,
+    "electronic-circuit",
+})
+
+
+def _bootstrap_mall_slot_limit(
+    client: RconClient, surface: str, force: str,
+) -> int:
+    """Bounded compact-mall capacity for the current bootstrap phase."""
+    if _metal_starter_transition_complete(client, surface, force):
+        return _POST_STARTER_MALL_SLOT_TARGET
+    return BOOTSTRAP_MALL_SLOT_TARGET
+
 
 def _top_up_solar_generation(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near: Point, emit: Callable[[str], None], *,
     ensure_main_connection: bool = True,
+    mall_targets: dict[str, int] | None = None,
 ) -> bool:
     """Join the primary grid, then build one validated power unit if needed."""
     capacity_near = near
@@ -3324,9 +3346,30 @@ def _top_up_solar_generation(
             if primary is not None:
                 capacity_near = primary[0]
     script_output = getattr(bridge, "script_output", Path(""))
+    include_storage = (
+        True
+        if not hasattr(client, "command")
+        else _power_storage_capability_started(client, surface, force)
+    )
+
+    def queue_power_materials(targets: dict[str, int]) -> None:
+        if mall_targets is None:
+            return
+        for item, target in targets.items():
+            mall_targets[item] = max(int(mall_targets.get(item, 0)), target)
+            _BLOCKING_MALL_ITEMS.add(item)
+        emit(
+            "  POWER DISTRICT DEMAND: queued complete unit materials -- "
+            + ", ".join(
+                f"{item}={target}" for item, target in sorted(targets.items())
+            )
+        )
+
     return ensure_power_capacity(
         client=client, bridge=bridge, surface=surface, force=force,
         near=capacity_near, script_output=script_output, emit=emit, submit=_submit,
+        on_material_shortage=queue_power_materials,
+        include_storage=include_storage,
     )
 
 
@@ -5012,9 +5055,9 @@ def _emit_loan_cell_telemetry(
         net = ",".join(
             f"{item}={int(actual.get(item, 0))}" for item, _ in ingredients
         ) or "-"
+        slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
         pool = (
-            f"{max(0, BOOTSTRAP_MALL_SLOT_TARGET - int(committed))}"
-            f"/{BOOTSTRAP_MALL_SLOT_TARGET}"
+            f"{max(0, slot_limit - int(committed))}/{slot_limit}"
             if committed is not None else "?"
         )
         table = ",".join(
@@ -6325,20 +6368,21 @@ def _build_assembled_stage(
         and (plan.existing is None or not plan.at_size)
     ):
         committed = mall_slot_count(client, surface, reference_point)
-        if committed >= BOOTSTRAP_MALL_SLOT_TARGET:
+        slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
+        if committed >= slot_limit:
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
-                f"{BOOTSTRAP_MALL_SLOT_TARGET} assemblers are committed; "
+                f"{slot_limit} assemblers are committed; "
                 f"deferring new {item} cell until a line promotion frees a slot"
             )
             raise ProductionPrerequisiteDeferred(
-                f"bootstrap mall is capped at {BOOTSTRAP_MALL_SLOT_TARGET} assemblers",
+                f"bootstrap mall is capped at {slot_limit} assemblers",
                 code="bootstrap_mall_slot_cap",
                 state="supply_wait",
                 details={
                     "item": item,
                     "committed_slots": committed,
-                    "slot_cap": BOOTSTRAP_MALL_SLOT_TARGET,
+                    "slot_cap": slot_limit,
                 },
             )
     sources = _ingredient_sources(
@@ -7131,10 +7175,14 @@ def _rationed_mall_spare_target(
     """Bound optional rotating-slot output without delaying its current bill."""
     reserve = mall_reserve_for(client, surface, force, item, required)
     if _metal_starter_transition_complete(client, surface, force):
-        # Once the temporary metal starters are gone, recipe switching costs
-        # more time than carrying inventory. Finish the whole stack-rounded
-        # reserve even while this item still uses a rotating pre-core cell.
-        return max(required, reserve.storage_count)
+        # Once starter metal is gone, cheap high-volume construction stock is
+        # cheaper to carry than to recipe-switch repeatedly. Expensive
+        # production machines retain their exact deployment bill: a stack of
+        # 50 AM2s consumed minutes and starved useful expansion in the 15:59
+        # run without any downstream need for those machines.
+        if item in _POST_STARTER_FULL_STACK_BATCH_ITEMS:
+            return max(required, reserve.storage_count)
+        return required
     if item == "splitter":
         iron_available = (
             live_base.available_items(client, surface, force).get("iron-plate", 0)
@@ -7214,7 +7262,7 @@ def _bootstrap_demand_cell_affordable(
     """Whether one more shared-output cell can be funded without stealing."""
     if mall_slot_count(
         client, surface, reference_point,
-    ) >= BOOTSTRAP_MALL_SLOT_TARGET:
+    ) >= _bootstrap_mall_slot_limit(client, surface, force):
         return False, {}
     allocation = preview_mall_allocation(
         client, surface, item, reference_point,
@@ -7266,12 +7314,12 @@ def _bootstrap_reserve_machine_target(
 ) -> int:
     """Fund temporary capacity when a transition reserve is slow.
 
-    The eight-slot bootstrap pool is capacity, not just recipe coverage. Once a
-    producer exists, a blocking one-stack circuit or splitter reserve may use
-    one additional shared-output slot when its remaining backlog exceeds a
-    minute. Gear and cable may likewise grow by bounded temporary cells when a
-    large construction reserve needs them; their protected anchor remains.
-    Exact cell materials and the pool limit remain hard gates.
+    The phase-bounded bootstrap pool is capacity, not just recipe coverage.
+    Once a producer exists, a blocking one-stack circuit or splitter reserve
+    may use one additional shared-output slot when its remaining backlog
+    exceeds a minute. Gear and cable may likewise grow by bounded temporary
+    cells when a large construction reserve needs them; their protected anchor
+    remains. Exact cell materials and the active pool limit remain hard gates.
     """
     if background or _core_mall_ready(client, surface, force):
         return 1
@@ -7322,10 +7370,11 @@ def _bootstrap_reserve_machine_target(
             return existing_count
         wanted = existing_count + 1
         _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
+        slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
         emit(
             f"  DYNAMIC ANCHOR CAPACITY: {item} has {backlog:.0f}s of "
             f"blocking backlog; funding {wanted} temporary producers "
-            f"within the {BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool"
+            f"within the {slot_limit}-assembler pool"
         )
         return wanted
     if item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS:
@@ -7357,10 +7406,11 @@ def _bootstrap_reserve_machine_target(
             )
         return existing_count
     _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
+    slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
     emit(
         f"  DYNAMIC MALL CAPACITY: {item} has {backlog:.0f}s of blocking "
         f"backlog; funding 2 producers within the "
-        f"{BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool"
+        f"{slot_limit}-assembler pool"
     )
     return 2
 
@@ -7468,7 +7518,11 @@ def _rationed_mall_batch(
                     },
                 )
             return True
-    if not active:
+    own_loan = any(loan.target_item == item for loan in active)
+    if not active or (
+        not own_loan
+        and _metal_starter_transition_complete(client, surface, force)
+    ):
         spec = LINE_RECIPES[item]
         existing = live_base.find_line(
             client, surface, force, item, str(spec["machine"]),
@@ -7480,9 +7534,10 @@ def _rationed_mall_batch(
         )
         if affordable:
             _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add(item)
+            slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
             emit(
                 f"  BOOTSTRAP MALL CAPACITY: assigning a demand-owned {item} "
-                f"slot within the {BOOTSTRAP_MALL_SLOT_TARGET}-assembler pool; "
+                f"slot within the {slot_limit}-assembler pool; "
                 "paired halves share one passive provider"
             )
             return False
@@ -7575,7 +7630,8 @@ def _ensure_mall_item(
             "knowledge exists for that construction item"
         )
     if (
-        LINE_RECIPES[item].get("machine") in live_base.ASSEMBLER_TIERS
+        item in _POST_STARTER_FULL_STACK_BATCH_ITEMS
+        and LINE_RECIPES[item].get("machine") in live_base.ASSEMBLER_TIERS
         and _metal_starter_transition_complete(client, surface, force)
     ):
         stack_target = mall_reserve_for(
@@ -7765,6 +7821,18 @@ def _ensure_mall_item(
             allow_promotion=allow_promotion,
         )
     except ProductionPrerequisiteDeferred as deferred:
+        if (
+            getattr(deferred, "code", "") == "bootstrap_mall_slot_cap"
+            and _reclaim_spent_demand_slot_for_prep(
+                client, bridge, surface, force, item, reference_point, emit,
+                mall_targets, minimum_machines=1, stock_target=target,
+            )
+        ):
+            emit(
+                f"  MALL DEMAND RECLAIM: {item} reused a completed demand "
+                "cell instead of waiting on the compact-mall cap"
+            )
+            return False, None
         emit(f"  MALL DEFERRED: {deferred}")
         return False, None
     except MaterialShortage as shortage:
@@ -8977,6 +9045,19 @@ def _production_started(
     )
 
 
+def _power_storage_capability_started(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether accumulator demand can advance without opening oil early."""
+    if "accumulator" in LINE_RECIPES and _production_started(
+        client, surface, force, "accumulator",
+    ):
+        return True
+    return "plastic-bar" in LINE_RECIPES and _production_started(
+        client, surface, force, "plastic-bar",
+    )
+
+
 def _core_mall_prerequisites(
     client: RconClient, surface: str, force: str, item: str,
 ) -> tuple[str, ...]:
@@ -9096,11 +9177,12 @@ def _reclaim_spent_demand_slot_for_prep(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, reference_point: Point, emit: Callable[[str], None],
     mall_targets: dict[str, int], *, minimum_machines: int,
+    stock_target: int | None = None,
 ) -> bool:
-    """Convert one spent demand-owned cell in place to a slot-capped standing recipe.
+    """Convert one spent demand-owned cell in place to a slot-capped recipe.
 
-    The eight-slot pool fills with demand-owned cells whose demands complete
-    (drills, assemblers), and then a standing prep cell can never claim a
+    A phase-bounded pool can fill with demand-owned cells whose demands
+    complete (drills, assemblers), and then another recipe cannot claim a
     slot: the cap deferral spins forever because no line promotion frees one
     (2026-09-04: circuit prep blocked at 8/8 while the drill/AM1 cells sat
     idle with their demands met). A cell is convertible only when it makes a
@@ -9110,7 +9192,9 @@ def _reclaim_spent_demand_slot_for_prep(
     stock gate in place -- no ghosts, no churn -- and leaves a paired
     companion half untouched. Returns whether a conversion was submitted.
     """
-    if mall_slot_count(client, surface, reference_point) < BOOTSTRAP_MALL_SLOT_TARGET:
+    if mall_slot_count(
+        client, surface, reference_point,
+    ) < _bootstrap_mall_slot_limit(client, surface, force):
         return False
     try:
         stock = _transferable_or_available_stock(client, surface, force)
@@ -9163,6 +9247,7 @@ def _reclaim_spent_demand_slot_for_prep(
                 client, bridge, surface, force, donor, machine_position,
                 origin, side, recipe, reference_point, emit,
                 minimum_machines=minimum_machines,
+                stock_target=stock_target,
             )
     return False
 
@@ -9171,7 +9256,7 @@ def _convert_mall_cell_to_recipe(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     donor: str, machine_position: Point, origin: tuple[int, int], side: str,
     recipe: str, reference_point: Point, emit: Callable[[str], None], *,
-    minimum_machines: int,
+    minimum_machines: int, stock_target: int | None = None,
 ) -> bool:
     """Reconfigure one demand-owned half in place to a standing recipe."""
     requester_position = (origin[0] + 4.5, origin[1] + 1.5)
@@ -9206,8 +9291,9 @@ def _convert_mall_cell_to_recipe(
             ),
         }],
     }
+    target = max(1, stock_target or minimum_machines)
     gate_action = generate_mall_stock_gate_update(
-        recipe, machine_name, [machine_position], max(1, minimum_machines),
+        recipe, machine_name, [machine_position], target,
     )["phases"][0]["actions"]
     actions: list[dict] = [requester_action]
     actions.extend(
@@ -9236,7 +9322,7 @@ def _convert_mall_cell_to_recipe(
             provider_action = generate_mall_provider_limit_update(
                 recipe, provider_position,
                 _canonical_mall_provider_limit(
-                    surface, force, recipe, max(1, minimum_machines),
+                    surface, force, recipe, target,
                 ),
             )["phases"][0]["actions"][0]
         actions.append({**provider_action, "action_type": "configure_entity"})
@@ -9404,14 +9490,14 @@ def _prep_core_mall(
         if prerequisite_pass is not None:
             return prerequisite_pass
         # Core promotion is the one pre-logistics demand that must be able to
-        # reclaim capacity from the hard eight-slot pool.  A stocked seed item
+        # reclaim capacity from the active phase-bounded pool. A stocked seed item
         # would otherwise make _rationed_mall_batch return early, after which
         # _build_assembled_stage sees 10/10 and defers forever.  Force the
         # rotating-batch path so it can borrow an existing non-anchor cell;
         # completion promotes that same cell in _submit_bootstrap_loan.
         if mall_slot_count(
             client, surface, reference_point,
-        ) >= BOOTSTRAP_MALL_SLOT_TARGET:
+        ) >= _bootstrap_mall_slot_limit(client, surface, force):
             try:
                 if _rationed_mall_batch(
                     client, bridge, surface, force, item, 1,
@@ -10542,6 +10628,7 @@ def run(
                 if (
                     _top_up_solar_generation(
                         client, bridge, surface, force, reference_point, emit,
+                        mall_targets=mall_targets,
                     )
                 ):
                     continue

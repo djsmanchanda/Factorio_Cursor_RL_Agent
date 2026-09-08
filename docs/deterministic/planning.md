@@ -228,11 +228,14 @@ These names describe intended responsibilities, not permission to build speculat
   items rate 100 while queued and retire with their demand; a binding loan
   below its blocking bill is shielded from preempt by non-binding batches.
   After both metal districts validate and release their pioneers, the
-  controller stops scarcity-sized recipe switching. Every assembled mall
-  demand rounds up to a complete item stack (and to additional complete stacks
-  when the bill is larger); that stack-rounded amount is the blocking batch,
-  so a rotating cell does not switch after making only the few items named by
-  the immediate shortage. Electronic circuits and splitters begin filling as
+  controller stops scarcity-sized recipe switching. Cheap, high-volume
+  construction consumables (belts, inserters, poles, pipes, splitters, and
+  circuits) round up to a complete item stack and to additional complete stacks
+  when the bill is larger. Expensive production machines retain their exact
+  deployment bill: four required AM2s must not become a fifty-machine batch.
+  Other recipe intermediates also retain their exact blocking bill, so four
+  required iron sticks cannot delay expansion behind a hundred-stick batch.
+  Electronic circuits and splitters begin filling as
   non-binding reserve work while the stone district opens. Before that phase,
   low-demand batches target their blocking bill plus at least 20% spares
   (rounded up, covering requester/buffer WIP), and retire only once that
@@ -247,7 +250,7 @@ These names describe intended responsibilities, not permission to build speculat
   instead of waiting on force-wide stock that bots cannot spend.
   When either blocking stack has more than one minute of measured backlog, an
   existing one-machine producer may claim a second reservation-funded slot in
-  the ten-assembler bootstrap pool. A lone transport-belt cell facing a large
+  the phase-bounded bootstrap pool. A lone transport-belt cell facing a large
   backlog may do the same. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
   A cell bill whose shortfall is reserved but flowing -- scheduled producer
@@ -257,10 +260,13 @@ These names describe intended responsibilities, not permission to build speculat
   mine/refinery packets share one reservation transaction even when their
   persisted project names differ; a retry may not count its child packet
   reservations as foreign stock and demand a duplicate bill.
-  The pre-logistics pool is a hard global ceiling of ten compact assemblers:
-  core-mall requests may not bypass it; when the pool is full, core promotion
-  reclaims an existing non-anchor temporary slot and converts it in place
-  rather than waiting for an eleventh slot.  Once a circuit request exceeds the
+  The pre-logistics pool is a hard global ceiling of eight compact assemblers
+  while direct metal starters carry the base, then sixteen after both starters
+  retire. The second bank lets independent full-stack construction batches run
+  concurrently once metal is no longer scarce. Core-mall requests may not
+  bypass the active ceiling; when the pool is full, core promotion or a blocked
+  ordinary demand reclaims an idle completed non-anchor temporary slot and
+  converts it in place. Once a circuit request exceeds the
   capacity of two circuit cells (by live rate or queued work beyond their
   patience window), it is not assigned a third mall half.  The controller
   builds the first dedicated block instead: six electronic-circuit assemblers
@@ -435,6 +441,11 @@ generation and measured connected accumulator storage with bounded peak demand,
 including night energy and recharge surplus; it stops when that metric converges.
 Every Nauvis template contains one accumulator per solar panel; the power bill
 and the placed geometry use the same 1:1 ratio.
-Opening background stock funds the concrete unit selected when substations are
-available: twelve panels and twelve accumulators, not a smaller reserve that can
-never pass that unit's atomic preflight.
+Before plastic production proves the chemical ladder can reach batteries,
+opening background stock contains panels but not accumulators. Power expansion
+uses the same complete pole-and-panel lattice with its accumulator positions
+omitted, giving the early factory daytime capacity without pulling oil work onto
+the critical path. After plastic is live, subsequent units use the full 1:1
+panel/accumulator template. If a measured deficit selects a unit whose materials
+are short, the controller queues that unit's exact materials through the normal
+mall scheduler instead of merely rechecking the same unfunded atomic bill.

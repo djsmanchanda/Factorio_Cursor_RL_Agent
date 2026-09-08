@@ -28,17 +28,10 @@ STARTER_MALL_TARGETS = (
     ("underground-belt", 20),
     ("inserter", 20),
     ("assembling-machine-1", 6),
-    # Power starvation ended every observed run before its second science
-    # pack; once the starter's own panels are placed the mall keeps the array
-    # growing. Accumulators joined the reserve after live runs 26-36 (2026-08-22/23)
-    # showed nights collapsing a 1000 kW panel nameplate to zero output with no
-    # buffer -- their battery prerequisite resolves through the explicit
-    # water -> sulfuric-acid -> battery cell once the oil sulfur line is up.
-    # With substations available, power planning selects the 12/12 unit. Keep
-    # background stock aligned with the concrete bill so the selected remedy
-    # can start instead of repeating a permanent 8/12 shortage.
+    # Power starvation is most expensive before oil. Panels remain opening
+    # stock, while accumulator demand waits until plastic production proves
+    # the chemical ladder can reach batteries without hijacking the mission.
     ("solar-panel", 12),
-    ("accumulator", 12),
 )
 _MACHINE_STOCK_TARGETS = {
     "assembling-machine-2": 6,

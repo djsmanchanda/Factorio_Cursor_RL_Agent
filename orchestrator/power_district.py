@@ -130,14 +130,42 @@ LARGER_SUBSTATION_UNIT = UnitTemplate(
 )
 
 
+def _without_accumulators(template: UnitTemplate) -> UnitTemplate:
+    """Keep a unit's powered panel geometry while storage is unavailable."""
+    return UnitTemplate(
+        # Keep the lattice identity stable. When storage unlocks, the persisted
+        # next index advances into a full unit instead of trying to rebuild the
+        # already useful panel-only unit in place.
+        name=template.name,
+        width=template.width,
+        height=template.height,
+        stride_x=template.stride_x,
+        stride_y=template.stride_y,
+        placements=tuple(
+            placement
+            for placement in template.placements
+            if placement[0] != "accumulator"
+        ),
+        connection_points=template.connection_points,
+    )
+
+
+EARLY_SOLAR_ONLY_UNIT = _without_accumulators(EARLY_MEDIUM_UNIT)
+LARGER_SOLAR_ONLY_UNIT = _without_accumulators(LARGER_SUBSTATION_UNIT)
+
+
 TEMPLATES = {
     "early": EARLY_MEDIUM_UNIT,
     "substation": LARGER_SUBSTATION_UNIT,
 }
 
 
-def template_for(substation_available: bool) -> UnitTemplate:
-    return LARGER_SUBSTATION_UNIT if substation_available else EARLY_MEDIUM_UNIT
+def template_for(
+    substation_available: bool, *, include_storage: bool = True,
+) -> UnitTemplate:
+    if substation_available:
+        return LARGER_SUBSTATION_UNIT if include_storage else LARGER_SOLAR_ONLY_UNIT
+    return EARLY_MEDIUM_UNIT if include_storage else EARLY_SOLAR_ONLY_UNIT
 
 
 def district_origin(reference: Point, substation_available: bool) -> Point:
@@ -297,7 +325,11 @@ def validate_candidate(
 
 
 def coverage_faults(index: int, origin: Point, template: UnitTemplate) -> list[str]:
-    supply_radius = 3.5 if template is EARLY_MEDIUM_UNIT else 9.0
+    supply_radius = (
+        9.0
+        if any(name == "substation" for name, _x, _y in template.placements)
+        else 3.5
+    )
     poles = [
         (x, y) for name, x, y in absolute_placements(index, origin, template)
         if name in {"medium-electric-pole", "substation"}
@@ -568,6 +600,8 @@ def ensure_power_capacity(
     *, client: RconClient, bridge: object, surface: str, force: str,
     near: Point, script_output: Path | str, emit: Emit,
     submit: Callable[..., dict], max_units: int = 128,
+    on_material_shortage: Callable[[dict[str, int]], None] | None = None,
+    include_storage: bool = True,
 ) -> bool:
     """Build at most one validated template unit per call; stop when sizing converges."""
     from orchestrator import live_base
@@ -593,7 +627,9 @@ def ensure_power_capacity(
         int(stock.get("substation", 0)) > 0
         or _has_built(client, surface, force, "substation")
     )
-    template = template_for(substation_available)
+    template = template_for(
+        substation_available, include_storage=include_storage,
+    )
     origin = district_origin(near, substation_available)
     state = load_state(script_output)
     if state.get("version") != 1 or state.get("origin") != list(origin) or state.get("template") != template.name:
@@ -601,13 +637,20 @@ def ensure_power_capacity(
                  "next_index": 0, "blocked_indices": {}, "active_index": None}
     next_index = int(state.get("next_index", 0))
     try:
-        measured_required = required_units(
-            template,
-            firm_generation_kw=firm,
-            solar_generation_kw=solar,
-            storage_mj=storage_mj,
-            peak_load_kw=max(peak, 100.0),
-        )
+        if include_storage:
+            measured_required = required_units(
+                template,
+                firm_generation_kw=firm,
+                solar_generation_kw=solar,
+                storage_mj=storage_mj,
+                peak_load_kw=max(peak, 100.0),
+            )
+        else:
+            target_kw = max(peak, 100.0) * SAFETY_MARGIN
+            deficit_kw = max(0.0, target_kw - (firm + solar * 0.7))
+            measured_required = math.ceil(
+                deficit_kw / max(1.0, template.generation_kw * 0.7)
+            )
     except (TelemetryError, ValueError) as exc:
         emit(f"  POWER DISTRICT skipped: {exc}")
         return False
@@ -619,12 +662,21 @@ def ensure_power_capacity(
         )
     if desired <= 0:
         metrics = usable_metrics(firm, solar, storage_mj, peak)
-        emit(
-            "POWER DISTRICT converged: "
-            f"usable={metrics['usable_generation_kw']:.0f}kW/"
-            f"{metrics['generation_target_kw']:.0f}kW, "
-            f"storage={metrics['storage_mj']:.1f}MJ/{metrics['storage_target_mj']:.1f}MJ"
-        )
+        if include_storage:
+            emit(
+                "POWER DISTRICT converged: "
+                f"usable={metrics['usable_generation_kw']:.0f}kW/"
+                f"{metrics['generation_target_kw']:.0f}kW, "
+                f"storage={metrics['storage_mj']:.1f}MJ/"
+                f"{metrics['storage_target_mj']:.1f}MJ"
+            )
+        else:
+            emit(
+                "POWER DISTRICT generation-only converged: "
+                f"usable={metrics['usable_generation_kw']:.0f}kW/"
+                f"{metrics['generation_target_kw']:.0f}kW; accumulator "
+                "units wait for the chemical ladder"
+            )
         if state.get("active_index") is not None:
             state["active_index"] = None
             save_state(script_output, state)
@@ -693,6 +745,12 @@ def ensure_power_capacity(
             if int(stock.get(item, 0)) < count
         }
         if missing:
+            if on_material_shortage is not None:
+                on_material_shortage({
+                    item: count
+                    for item, count in template.materials.items()
+                    if int(stock.get(item, 0)) < count
+                })
             emit(
                 "POWER UNIT deferred; full unit materials unavailable: " +
                 ", ".join(f"{item} short {count}" for item, count in sorted(missing.items()))

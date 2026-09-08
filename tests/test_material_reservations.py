@@ -897,6 +897,43 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     assert any("8-assembler pool" in message for message in messages)
 
 
+def test_post_starter_demand_claims_free_slot_while_another_loan_runs(
+    monkeypatch,
+) -> None:
+    """Independent full-stack batches should run concurrently after scarcity."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [10], "craft_time": 2.0, "product_amount": 1,
+        "set_recipe": True,
+    })
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"iron-plate": 60},
+    )
+    active = SimpleNamespace(target_item="assembling-machine-2")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (active,))
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (True, {}),
+    )
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: pytest.fail("free post-starter slot should run in parallel"),
+    )
+
+    assert not builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 50,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS == {
+        "electric-mining-drill",
+    }
+
+
 def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
     monkeypatch,
 ) -> None:

@@ -12,7 +12,9 @@ from orchestrator import live_base
 from orchestrator.live_base import TelemetryError
 from orchestrator.power_district import (
     EARLY_MEDIUM_UNIT,
+    EARLY_SOLAR_ONLY_UNIT,
     LARGER_SUBSTATION_UNIT,
+    LARGER_SOLAR_ONLY_UNIT,
     absolute_placements,
     cell_origin,
     classify_unit,
@@ -60,6 +62,13 @@ def test_templates_are_rectangular_grid_aligned_and_adjacent() -> None:
         assert max(x for x, _y in first_tiles) < first_max_x
         assert not first_tiles & second_tiles
         assert cell_origin(1, (100, 100), template)[0] > first_max_x
+        assert coverage_faults(0, (100, 100), template) == []
+
+
+def test_generation_only_templates_keep_powered_panels_without_accumulators() -> None:
+    for template in (EARLY_SOLAR_ONLY_UNIT, LARGER_SOLAR_ONLY_UNIT):
+        assert template.panels > 0
+        assert template.accumulators == 0
         assert coverage_faults(0, (100, 100), template) == []
 
 
@@ -401,6 +410,65 @@ def test_one_atomic_unit_is_submitted_then_convergence_stops(
     )
     assert acted_again is False
     assert len(submissions) == 1
+
+
+def test_pre_plastic_power_builds_atomic_generation_only_unit(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    origin = district_origin((0.0, 0.0), False)
+    surveys = iter([
+        [],
+        [
+            _record(name, x, y)
+            for name, x, y in absolute_placements(
+                0, origin, EARLY_SOLAR_ONLY_UNIT,
+            )
+        ],
+    ])
+    monkeypatch.setattr(
+        live_base, "network_firm_generation_kw", lambda *_a: 167.0,
+    )
+    monkeypatch.setattr(
+        live_base, "network_generation_kw", lambda *_a: 167.0,
+    )
+    monkeypatch.setattr(
+        live_base, "network_accumulator_storage_mj", lambda *_a: 0.0,
+    )
+    monkeypatch.setattr(
+        live_base, "available_items",
+        lambda *_a: dict(EARLY_SOLAR_ONLY_UNIT.materials),
+    )
+    monkeypatch.setattr(
+        live_base, "area_entity_records", lambda *_a, **_k: next(surveys),
+    )
+    monkeypatch.setattr(live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(live_base, "deconstruction_tiles", lambda *_a: set())
+    import orchestrator.power_district as power
+    monkeypatch.setattr(
+        power, "network_peak_consumption_kw", lambda *_a, **_k: 500.0,
+    )
+    monkeypatch.setattr(power, "_has_built", lambda *_a: False)
+    submissions: list[dict] = []
+
+    assert ensure_power_capacity(
+        client=object(),
+        bridge=SimpleNamespace(script_output=tmp_path),
+        surface="nauvis",
+        force="player",
+        near=(0.0, 0.0),
+        script_output=tmp_path,
+        emit=lambda _message: None,
+        submit=lambda _c, _b, _s, plan, _name, _emit:
+        submissions.append(plan) or {"ok": True},
+        include_storage=False,
+    )
+    entities = {
+        action["entity"]
+        for phase in submissions[0]["phases"]
+        for action in phase["actions"]
+    }
+    assert "solar-panel" in entities
+    assert "accumulator" not in entities
 
 
 def test_invalid_consumer_telemetry_fails_cleanly_before_submission(

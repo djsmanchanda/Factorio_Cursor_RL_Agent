@@ -620,6 +620,117 @@ def test_post_starter_stack_is_required_before_recipe_switch(monkeypatch) -> Non
     assert any("finish the complete stack" in message for message in messages)
 
 
+def test_post_starter_expensive_machine_keeps_deployment_sized_batch(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ITEM_STACK_SIZES", {"assembling-machine-2": 50},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+
+    assert builder._rationed_mall_spare_target(
+        object(), "nauvis", "player", "assembling-machine-2", 4,
+    ) == 4
+
+
+def test_post_starter_intermediate_keeps_exact_blocking_target(monkeypatch) -> None:
+    """A four-stick recipe bill must not become a blocking 100-stick batch."""
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    observed_batches: list[int] = []
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch",
+        lambda _c, _b, _s, _f, _item, target, *_a, **_k:
+        observed_batches.append(target) or False,
+    )
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "mall_reserve_for", lambda *_a: MallReserve(100, 100, 1),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_reserve_machine_target", lambda *_a, **_k: 1,
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *_a, **kwargs: captured.update(kwargs) or (10.5, 10.5),
+    )
+    messages: list[str] = []
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "iron-stick", 4, {},
+        (0.0, 0.0), messages.append, background=False,
+    )
+
+    assert ready and output == (10.5, 10.5)
+    assert observed_batches == [4]
+    assert captured["stock_target"] == 4
+    assert captured["blocking_stock_target"] == 4
+    assert captured["stock_gate_target"] == 100
+    assert not any("POST-STARTER STACK BATCH" in message for message in messages)
+
+
+def test_capped_intermediate_reclaims_completed_demand_cell(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_batch", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "mall_reserve_for", lambda *_a: MallReserve(100, 100, 1),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_reserve_machine_target", lambda *_a, **_k: 1,
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    def _capped(*_a, **_k):
+        raise builder.ProductionPrerequisiteDeferred(
+            "bootstrap mall is capped at 16 assemblers",
+            code="bootstrap_mall_slot_cap", state="supply_wait", details={},
+        )
+    monkeypatch.setattr(builder, "ensure_produced", _capped)
+    reclaimed: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        builder, "_reclaim_spent_demand_slot_for_prep",
+        lambda *_a, **kwargs: reclaimed.append(kwargs) or True,
+    )
+
+    ready, output = builder._ensure_mall_item(
+        object(), object(), "nauvis", "player", "iron-stick", 4, {},
+        (0.0, 0.0), lambda _message: None, background=False,
+    )
+
+    assert (ready, output) == (False, None)
+    assert reclaimed == [{"minimum_machines": 1, "stock_target": 4}]
+
+
+def test_mall_slot_limit_doubles_only_after_metal_transition(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: False,
+    )
+    assert builder._bootstrap_mall_slot_limit(
+        object(), "nauvis", "player",
+    ) == builder.BOOTSTRAP_MALL_SLOT_TARGET
+
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+    assert builder._bootstrap_mall_slot_limit(
+        object(), "nauvis", "player",
+    ) == 16
+
+
 def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
     """After starter retirement, background reserves fill whole stacks."""
     monkeypatch.setattr(
@@ -2384,6 +2495,29 @@ def test_capped_prep_reclaims_a_spent_demand_cell(monkeypatch) -> None:
     )
     cleared = by_entity["requester-chest"]["clear_logistic_groups"]
     assert "mall:electric-mining-drill:left" in cleared
+
+
+def test_capped_demand_reclaim_uses_the_actual_bill_target(monkeypatch) -> None:
+    """Reusing a slot for four sticks must gate on four, not one machine."""
+    _reclaim_world(monkeypatch)
+    submitted: list[dict] = []
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    assert builder._reclaim_spent_demand_slot_for_prep(
+        object(), object(), "nauvis", "player", "iron-stick",
+        (3.0, -1.0), lambda _message: None, {}, minimum_machines=1,
+        stock_target=4,
+    )
+
+    machine = next(
+        action for action in submitted[0]["phases"][0]["actions"]
+        if action["entity"] == "assembling-machine-1"
+    )
+    assert machine["recipe"] == "iron-stick"
+    assert machine["logistic_condition"]["constant"] == 4
 
 
 def test_reclaim_skips_rooms_and_busy_cells(monkeypatch) -> None:

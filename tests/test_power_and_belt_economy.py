@@ -389,18 +389,26 @@ def test_missing_full_unit_materials_do_not_submit_a_partial_unit(
             power, "network_peak_consumption_kw", lambda *_a, **_k: 1000.0,
         )
     monkeypatch.setattr(power, "_has_built", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_power_storage_capability_started", lambda *_a: False,
+    )
     messages: list[str] = []
     monkeypatch.setattr(
         builder, "_submit",
         lambda *_a: pytest.fail("partial or unfunded power units are forbidden"),
     )
     monkeypatch.setattr(builder, "extend_power", lambda *_a, **_k: False)
+    mall_targets: dict[str, int] = {}
+    client = SimpleNamespace(command=lambda *_a: "")
     assert builder._top_up_solar_generation(
-        object(), SimpleNamespace(script_output=tmp_path), "nauvis", "player",
+        client, SimpleNamespace(script_output=tmp_path), "nauvis", "player",
         (0.0, 0.0),
         messages.append,
+        mall_targets=mall_targets,
     ) is False
     assert any("full unit materials" in message for message in messages)
+    assert mall_targets == power.EARLY_SOLAR_ONLY_UNIT.materials
+    assert "accumulator" not in mall_targets
 
 
 def test_power_sizing_joins_the_primary_grid_before_building_more_panels(monkeypatch, tmp_path) -> None:
