@@ -145,6 +145,14 @@ def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> No
 
     events: list[str] = []
     starter = live_base.DirectPlateStarter((54.5, -64.5), "north", 1)
+    coverage_reservations: list[set[tuple[int, int]]] = []
+    monkeypatch.setattr(
+        builder, "_ensure_plan_construction_coverage",
+        lambda *_a, **kwargs: (
+            events.append("coverage")
+            or coverage_reservations.append(kwargs["reserved_tiles"])
+        ),
+    )
     monkeypatch.setattr(
         builder, "extend_power",
         lambda *_a, **_k: events.append("power") or True,
@@ -163,7 +171,41 @@ def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> No
         starter, lambda _message: None, submit=True,
     )
 
-    assert events[:2] == ["power", "blueprint"]
+    assert events[:3] == ["coverage", "power", "blueprint"]
+    assert coverage_reservations == [
+        builder.planned_footprint_tiles(
+            generate_direct_smelter(
+                "stone-brick", "stone", (54.5, -64.5), "north",
+                pole_side=1,
+            )
+        )
+    ]
+
+
+def test_uncovered_direct_starter_never_submits_a_power_chain(monkeypatch) -> None:
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    starter = live_base.DirectPlateStarter((54.5, -64.5), "north", 1)
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_ensure_plan_construction_coverage",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            builder.StuckError("coverage unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: pytest.fail("uncovered power chain was submitted"),
+    )
+
+    with pytest.raises(builder.StuckError, match="coverage unavailable"):
+        builder._serve_direct_plate_starter(
+            _LiveClient(), object(), "nauvis", "player",
+            "stone-brick", "stone", starter, lambda _message: None,
+            submit=True,
+        )
 
 
 def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch) -> None:

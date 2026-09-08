@@ -3135,22 +3135,29 @@ def _serve_direct_plate_starter(
     )
     plan["surface"], plan["force"] = surface, force
     if submit:
-        # Connect the local pole island first, while its whole footprint is
-        # still known and clear. Coverage may legitimately defer on a remote
-        # roboport wave after submission; power must not be sequenced behind
-        # that unrelated wait or the stone starter remains visibly unpowered
-        # for most of the run.
+        # Stage construction service and connect the local pole island while
+        # the complete future footprint is still known and clear. The starter
+        # blueprint follows only after those dependencies are usable.
         if hasattr(client, "command"):
             # Claim the starter's own poles before its extra bridge spends
             # construction stock; otherwise staging power first can consume
             # the exact two anchors the stone blueprint still needs.
+            starter_footprint = planned_footprint_tiles(plan)
             assert_affordable(
                 client, surface, force, plan, f"direct_{recipe}_starter",
                 emit, reserve_project=True,
             )
+            # A remote starter's bridge is bot-built too. Give every future
+            # chain hop construction coverage before extend_power waits for
+            # those poles; deferring coverage to blueprint submission leaves
+            # out-of-range terminal poles unable to dispatch forever.
+            _ensure_plan_construction_coverage(
+                client, bridge, surface, force, plan, emit,
+                reserved_tiles=starter_footprint,
+            )
             if not extend_power(
                 client, bridge, surface, force, positions["power"], emit,
-                reserved_tiles=planned_footprint_tiles(plan),
+                reserved_tiles=starter_footprint,
                 avoid_resources=False,
             ):
                 raise StuckError(
@@ -3161,6 +3168,7 @@ def _serve_direct_plate_starter(
             client, bridge, surface, plan, f"direct_{recipe}_starter", emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
+                reserved_tiles=planned_footprint_tiles(plan),
             ),
         )
     else:
