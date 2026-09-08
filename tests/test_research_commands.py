@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,9 +20,14 @@ from orchestrator.game_bridge import (
 def _recording_bridge() -> tuple[GameBridge, list[tuple[str, Path, float]]]:
     bridge = GameBridge.__new__(GameBridge)
     calls: list[tuple[str, Path, float]] = []
+    bridge.expected_names = []
 
-    def collect(command: str, subdir: Path, timeout: float) -> Path:
+    def collect(
+        command: str, subdir: Path, timeout: float, *,
+        expected_name: str | None = None,
+    ) -> Path:
         calls.append((command, subdir, timeout))
+        bridge.expected_names.append(expected_name)
         return Path("report.json")
 
     bridge._run_and_collect = collect  # type: ignore[method-assign]
@@ -38,14 +44,28 @@ def test_set_research_sends_explicit_existing_force() -> None:
     ]
 
 
-def test_research_status_sends_force_and_requested_technology() -> None:
+def test_research_status_correlates_force_and_technology_report(
+    monkeypatch,
+) -> None:
+    import orchestrator.game_bridge as game_bridge
+
+    monkeypatch.setattr(
+        game_bridge.uuid, "uuid4",
+        lambda: SimpleNamespace(hex="request42"),
+    )
     bridge, calls = _recording_bridge()
 
     bridge.research_status(force="player", technology="logistics")
 
     assert calls == [
-        ('/research_status {"force":"player","technology":"logistics"}', RESEARCH_REPORT_SUBDIR, 60.0)
+        (
+            '/research_status {"force":"player","technology":"logistics",'
+            '"request_id":"request42"}',
+            RESEARCH_REPORT_SUBDIR,
+            60.0,
+        )
     ]
+    assert bridge.expected_names == ["research_status_request42.json"]
 
 
 def test_research_status_preserves_legacy_planner_command_when_unscoped() -> None:
@@ -54,6 +74,7 @@ def test_research_status_preserves_legacy_planner_command_when_unscoped() -> Non
     bridge.research_status()
 
     assert calls == [("/research_status", RESEARCH_REPORT_SUBDIR, 60.0)]
+    assert bridge.expected_names == [None]
 
 
 def test_research_options_sends_existing_force() -> None:

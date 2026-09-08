@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -89,13 +90,18 @@ class GameBridge:
 
     def _wait_for_new_file(
         self, subdir: Path, known: dict[str, tuple[int, int]], timeout: float,
+        *, expected_name: str | None = None,
     ) -> Path:
         directory = self.script_output / subdir
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if directory.is_dir():
                 fresh: list[tuple[int, str, Path]] = []
-                for item in directory.glob("*.json"):
+                candidates = (
+                    [directory / expected_name]
+                    if expected_name is not None else directory.glob("*.json")
+                )
+                for item in candidates:
                     try:
                         stat = item.stat()
                     except OSError:
@@ -198,15 +204,21 @@ class GameBridge:
             return collected
         return previous
 
-    def _run_and_collect(self, command_text: str, subdir: Path, timeout: float) -> Path:
+    def _run_and_collect(
+        self, command_text: str, subdir: Path, timeout: float, *,
+        expected_name: str | None = None,
+    ) -> Path:
         known = self._existing_files(subdir)
         response = self.command(command_text)
         if response.strip():
             lowered = response.lower()
             if "error" in lowered or "blocked" in lowered:
                 raise BridgeError(f"Command {command_text!r} failed: {response.strip()}")
-        collected = self._wait_for_new_file(subdir, known, timeout)
-        collected = self._dedupe_unchanged_report(subdir, collected)
+        collected = self._wait_for_new_file(
+            subdir, known, timeout, expected_name=expected_name,
+        )
+        if expected_name is None:
+            collected = self._dedupe_unchanged_report(subdir, collected)
         self._prune_reports(subdir, collected)
         return collected
 
@@ -334,9 +346,16 @@ class GameBridge:
             "force": force, "technology": technology,
         }.items() if value is not None}
         command = "/research_status"
+        expected_name = None
         if payload:
+            request_id = uuid.uuid4().hex
+            payload["request_id"] = request_id
+            expected_name = f"research_status_{request_id}.json"
             command += " " + json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            command, RESEARCH_REPORT_SUBDIR, timeout,
+            expected_name=expected_name,
+        )
 
     def research_options(
         self, timeout: float = 60.0, *, force: str | None = None,

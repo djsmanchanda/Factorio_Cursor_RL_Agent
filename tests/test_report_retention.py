@@ -156,6 +156,31 @@ def _collect_with_fresh_report(
     return bridge._run_and_collect("/research_options {}", SUBDIR, timeout=5.0)
 
 
+def test_collect_waits_for_expected_report_instead_of_newer_concurrent_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / SUBDIR
+    directory.mkdir(parents=True)
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    def _fake_command(_text: str) -> str:
+        expected = directory / "research_status_request42.json"
+        expected.write_text('{"technology":{"requested_name":"logistics"}}')
+        unrelated = directory / "research_status_other.json"
+        unrelated.write_text('{"technology":null}')
+        os.utime(unrelated, ns=(2_000_000_000, 2_000_000_000))
+        return ""
+
+    monkeypatch.setattr(bridge, "command", _fake_command)
+
+    collected = bridge._run_and_collect(
+        "/research_status {}", SUBDIR, timeout=5.0,
+        expected_name="research_status_request42.json",
+    )
+
+    assert collected.name == "research_status_request42.json"
+
+
 def test_collect_drops_report_identical_to_previous_ignoring_tick(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

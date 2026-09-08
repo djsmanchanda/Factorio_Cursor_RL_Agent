@@ -50,6 +50,12 @@ local function parse_status_payload(json_text)
   if payload.technology ~= nil and (type(payload.technology) ~= "string" or payload.technology == "") then
     return nil, "Research technology must be a non-empty string"
   end
+  if payload.request_id ~= nil and (
+    type(payload.request_id) ~= "string" or payload.request_id == ""
+    or #payload.request_id > 64 or not payload.request_id:match("^[%w_-]+$")
+  ) then
+    return nil, "Research request_id must contain 1-64 filename-safe characters"
+  end
   return payload, nil
 end
 
@@ -219,7 +225,7 @@ local function science_pack_totals_for(technology, research_unit_count)
   return totals
 end
 
-local function build_research_status(force_name, technology_name)
+local function build_research_status(force_name, technology_name, request_id)
   local force = get_or_create_planner_force(force_name)
   local current = force.current_research
   local queue = {}
@@ -258,7 +264,8 @@ local function build_research_status(force_name, technology_name)
     research_queue = queue,
     current_target = research_targets()[force.name],
     science_packs = current and science_packs_for(current) or {},
-    technology = technology
+    technology = technology,
+    request_id = request_id
   }
 end
 
@@ -364,7 +371,7 @@ commands.add_command("research_status", "Export research state. Parameter: optio
     status.error = parse_err
   else
     local ok, result = pcall(function()
-      return build_research_status(payload.force, payload.technology)
+      return build_research_status(payload.force, payload.technology, payload.request_id)
     end)
     if ok then
       status = result
@@ -379,7 +386,8 @@ commands.add_command("research_status", "Export research state. Parameter: optio
   if status.research_queue and #status.research_queue == 0 then
     json = json:gsub('"research_queue":{}', '"research_queue":[]')
   end
-  local path = "factorio_mod/research_reports/research_status_" .. game.tick .. ".json"
+  local suffix = status.request_id or tostring(game.tick)
+  local path = "factorio_mod/research_reports/research_status_" .. suffix .. ".json"
   helpers.write_file(path, json, false)
 end)
 

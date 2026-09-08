@@ -24,3 +24,12 @@ def test_research_mod_allows_only_the_immediate_repeatable_level() -> None:
     assert 'requested_level == technology.level + 1' in source
     assert 'return false, "future"' in source
     assert 'if state == "future" then' in source
+
+
+def test_research_status_report_is_named_by_validated_request_id() -> None:
+    source = MODULE.read_text(encoding="utf-8")
+
+    assert 'payload.request_id:match("^[%w_-]+$")' in source
+    assert 'request_id = request_id' in source
+    assert 'local suffix = status.request_id or tostring(game.tick)' in source
+    assert 'research_status_" .. suffix .. ".json"' in source
