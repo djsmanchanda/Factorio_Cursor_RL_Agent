@@ -1122,8 +1122,8 @@ def ghost_blockages(
     """Explain why the remaining construction ghosts are not reviving.
 
     This is deliberately read-only.  It mirrors the mod's live ghost probe:
-    coverage, construction-bot availability, and the first required item are
-    checked in the same logistic network that would build each ghost.
+    coverage, construction-bot availability, the first required item, and
+    Factorio's own ghost-revival collision check are observed together.
     """
     area_clause = ""
     if area is not None:
@@ -1139,6 +1139,21 @@ def ghost_blockages(
         + area_clause + "}) do "
         "local reason='pending';local netid='-';local bots='-';local free='-';"
         "local item_name='-';local need='-';local stock='-';"
+        "local can_revive='-';local overlaps='-';"
+        "local revive_ok,revive=pcall(function() return s.can_place_entity{"
+        "name=g.ghost_name,position=g.position,direction=g.direction,force=f,"
+        "build_check_type=defines.build_check_type.ghost_revive} end);"
+        "if revive_ok then can_revive=revive and '1' or '0';"
+        "if not revive then local names={};"
+        "local box_ok,box=pcall(function() return g.bounding_box end);"
+        "if box_ok and box then for _,e in pairs(s.find_entities_filtered{area=box}) do "
+        "if e.valid and e~=g and e.type~='character' and "
+        "e.type~='construction-robot' and e.type~='logistic-robot' then "
+        "local name=e.type=='entity-ghost' and e.ghost_name or e.name;"
+        "names[#names+1]=string.format('%s@%.1f,%.1f',name,e.position.x,e.position.y) "
+        "end end end;table.sort(names);"
+        "if #names>8 then for i=#names,9,-1 do table.remove(names,i) end end;"
+        "if #names>0 then overlaps=table.concat(names,'~') end end end;"
         "local ok,network=pcall(function() return s.find_logistic_network_by_position(g.position,f) end);"
         "if not ok or not network then reason='out_of_construction_range' else "
         "netid=tostring(network.network_id or '-');"
@@ -1154,17 +1169,20 @@ def ghost_blockages(
         "local have_ok,have=pcall(function() return network.get_item_count(item.name) end);"
         "if have_ok then stock=tostring(have);if have < (item.count or 1) then "
         "reason='missing_material:'..item.name..':'..need..':'..stock end end end;"
+        "if reason=='pending' and revive_ok and not revive then "
+        "reason='placement_blocked' end;"
         "if reason=='pending' and free_ok and free_bots==0 then "
         "reason='no_available_construction_robots' end end end;"
-        "out[#out+1]=string.format('%.1f|%.1f|%s|%s|%s|%s|%s|%s|%s|%s',"
-        "g.position.x,g.position.y,g.ghost_name,reason,netid,bots,free,item_name,need,stock) end;"
+        "out[#out+1]=string.format('%.1f|%.1f|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s',"
+        "g.position.x,g.position.y,g.ghost_name,reason,netid,bots,free,item_name,"
+        "need,stock,can_revive,overlaps) end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = _sc(client, lua)
     records: list[dict[str, object]] = []
     for record in raw.split(";"):
         fields = record.split("|")
-        if len(fields) not in {4, 10}:
+        if len(fields) not in {4, 10, 12}:
             continue
         try:
             position = (float(fields[0]), float(fields[1]))
@@ -1192,6 +1210,11 @@ def ghost_blockages(
                         pass
             if fields[7] != "-":
                 detail["item"] = fields[7]
+        if len(fields) >= 12:
+            if fields[10] in {"0", "1"}:
+                detail["can_revive"] = fields[10] == "1"
+            if fields[11] != "-":
+                detail["overlap_entities"] = fields[11].split("~")
         if reason.startswith("missing_material:"):
             _, item, required, available = reason.split(":", 3)
             detail.update({

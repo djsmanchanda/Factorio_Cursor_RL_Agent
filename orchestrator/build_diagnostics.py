@@ -182,6 +182,31 @@ def _diagnose_blockage(
         for ghost in ghosts:
             reason = str(ghost.get("reason", "pending"))
             position = ghost["position"]
+            if reason == "placement_blocked":
+                overlaps = list(ghost.get("overlap_entities", []))
+                blocker = "overlapping " + ", ".join(overlaps) if overlaps else (
+                    "terrain or an unreported collision"
+                )
+                detail = {
+                    "entity": str(ghost.get("entity", "entity")),
+                    "position": list(position),
+                    "reason": reason,
+                    "can_revive": bool(ghost.get("can_revive", False)),
+                    "overlap_entities": overlaps,
+                }
+                for key in (
+                    "network_id", "construction_robots",
+                    "available_construction_robots", "item", "required",
+                    "network_item_count",
+                ):
+                    if key in ghost:
+                        detail[key] = ghost[key]
+                raise StuckError(
+                    f"ghost {detail['entity']} at {position} cannot be revived: "
+                    f"{blocker}",
+                    code="ghost_placement_blocked", classification="bug",
+                    state="failed", details={"ghost": detail},
+                )
             if reason == "out_of_construction_range":
                 covering = [
                     port for port in live_base.roboport_positions(

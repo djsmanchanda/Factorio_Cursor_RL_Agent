@@ -444,6 +444,64 @@ def test_ghost_blockages_decodes_construction_dispatch_state() -> None:
     assert "network.available_construction_robots" in client.commands[0]
 
 
+def test_ghost_blockages_decodes_physical_placement_blocker() -> None:
+    client = _Client(
+        "36.5|32.5|assembling-machine-1|placement_blocked|"
+        "2|50|49|assembling-machine-1|1|4|0|inserter@35.5,32.5"
+    )
+
+    result = live_base.ghost_blockages(
+        client, "nauvis", "player", ((33.0, 30.0), (47.0, 38.0)),
+    )
+
+    assert result == [{
+        "position": (36.5, 32.5),
+        "entity": "assembling-machine-1",
+        "reason": "placement_blocked",
+        "network_id": 2,
+        "construction_robots": 50,
+        "available_construction_robots": 49,
+        "item": "assembling-machine-1",
+        "required": 1,
+        "network_item_count": 4,
+        "can_revive": False,
+        "overlap_entities": ["inserter@35.5,32.5"],
+    }]
+    lua = client.commands[0]
+    assert "build_check_type=defines.build_check_type.ghost_revive" in lua
+    assert "g.bounding_box" in lua
+
+
+def test_diagnosis_types_a_physically_blocked_ghost(monkeypatch) -> None:
+    ghost = {
+        "position": (36.5, 32.5),
+        "entity": "assembling-machine-1",
+        "reason": "placement_blocked",
+        "network_id": 2,
+        "construction_robots": 50,
+        "available_construction_robots": 49,
+        "item": "assembling-machine-1",
+        "required": 1,
+        "network_item_count": 4,
+        "can_revive": False,
+        "overlap_entities": ["inserter@35.5,32.5"],
+    }
+    monkeypatch.setattr(live_base, "nearest_roboport", lambda *_a: (34.0, 27.0))
+    monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(live_base, "ghost_blockages", lambda *_a: [ghost])
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._diagnose_blockage(
+            object(), "nauvis", "player", (35.0, 31.0), (39.0, 36.0),
+            [(36.5, 32.5)], area=((33.0, 30.0), (47.0, 38.0)),
+        )
+
+    assert raised.value.code == "ghost_placement_blocked"
+    assert raised.value.classification == "bug"
+    assert raised.value.state == "failed"
+    assert raised.value.details == {"ghost": ghost | {"position": [36.5, 32.5]}}
+
+
 def test_diagnosis_promotes_missing_ghost_material_to_mall_demand(monkeypatch) -> None:
     monkeypatch.setattr(live_base, "nearest_roboport", lambda *_a: (0.0, 0.0))
     monkeypatch.setattr(live_base, "entity_status_name", lambda *_a: "working")
