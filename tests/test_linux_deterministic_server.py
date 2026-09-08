@@ -16,12 +16,25 @@ def test_linux_deterministic_server_uses_an_isolated_root_and_copied_save() -> N
 
     assert 'STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"' in source
     assert 'SAVE_PATH="$DATA_ROOT/saves/mod_playground.zip"' in source
+    assert 'REPO_SAVE_PATH="$REPO_ROOT/saves/mod_playground.zip"' in source
     assert '[[ -n "$SOURCE_SAVE" ]] || die "bootstrap requires --source-save"' in source
     assert 'mkdir -p "$DATA_ROOT/saves"' in source
     assert 'if [[ ! -f "$SAVE_PATH" ]]; then' in source
     assert 'cp -p "$SOURCE_SAVE" "$SAVE_PATH"' in source
     assert 'rm -f "$SOURCE_SAVE"' not in source
     assert 'write-data=$DATA_ROOT' in source
+
+
+def test_linux_deterministic_server_snapshots_the_save_before_start() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert 'snapshot_save_to_repository()' in source
+    assert 'snapshot_source="$SOURCE_SAVE"' in source
+    assert 'snapshot_source="$SAVE_PATH"' in source
+    assert 'cp -p "$snapshot_source" "$temporary"' in source
+    assert 'cmp -s "$snapshot_source" "$temporary"' in source
+    assert 'mv "$temporary" "$REPO_SAVE_PATH"' in source
+    assert 'snapshot_save_to_repository' in source.split('start_server()', 1)[1]
 
 
 def test_linux_deterministic_server_keeps_game_and_rcon_loopback_with_local_secret() -> None:

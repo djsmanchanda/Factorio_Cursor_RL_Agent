@@ -27,7 +27,8 @@ exist. It never modifies the source save or the normal ~/.factorio profile.
 reset backs up the isolated save before replacing it from --source-save.
 deploy replaces both project mods on the isolated server and matching Linux GUI
 profile; it requires a stopped server. It never restarts the GUI client. start
-requires a completed bootstrap.
+requires a completed bootstrap and snapshots the selected save into
+<repository>/saves/mod_playground.zip for reproducible handoff.
 EOF
 }
 
@@ -96,6 +97,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="$STATE_ROOT"
 MODS_PATH="$DATA_ROOT/mods"
 SAVE_PATH="$DATA_ROOT/saves/mod_playground.zip"
+REPO_SAVE_PATH="$REPO_ROOT/saves/mod_playground.zip"
 SECRET_PATH="$DATA_ROOT/rcon-password"
 PID_PATH="$DATA_ROOT/factorio.pid"
 STDIN_PATH="$DATA_ROOT/factorio.stdin"
@@ -230,6 +232,21 @@ ensure_secret() {
   chmod 600 "$SECRET_PATH"
 }
 
+snapshot_save_to_repository() {
+  local snapshot_source="$SOURCE_SAVE"
+  [[ -n "$snapshot_source" ]] || snapshot_source="$SAVE_PATH"
+  [[ -f "$snapshot_source" ]] || die "save snapshot source is missing: $snapshot_source"
+  mkdir -p "$(dirname "$REPO_SAVE_PATH")"
+  local temporary="$REPO_SAVE_PATH.start.$$"
+  cp -p "$snapshot_source" "$temporary"
+  cmp -s "$snapshot_source" "$temporary" || {
+    rm -f "$temporary"
+    die "repository save snapshot does not match source save"
+  }
+  mv "$temporary" "$REPO_SAVE_PATH"
+  echo "snapshotted server save to repository at $REPO_SAVE_PATH"
+}
+
 bootstrap() {
   [[ -x "$FACTORIO_BIN" ]] || die "Factorio executable is missing: $FACTORIO_BIN"
   [[ -d "$READ_DATA/base" ]] || die "Factorio read-data root is invalid: $READ_DATA"
@@ -331,6 +348,7 @@ start_server() {
   [[ -f "$CONFIG_PATH" && -f "$SERVER_SETTINGS" ]] || die "server configuration is missing; run bootstrap first"
   port_available "$GAME_PORT" || die "game port $GAME_PORT is already in use"
   port_available "$RCON_PORT" || die "RCON port $RCON_PORT is already in use"
+  snapshot_save_to_repository
   mkdir -p "$DATA_ROOT/logs"
   : > "$DATA_ROOT/factorio-current.log"
   : > "$DATA_ROOT/logs/factorio-console.log"

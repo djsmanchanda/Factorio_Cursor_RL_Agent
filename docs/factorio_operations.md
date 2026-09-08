@@ -67,6 +67,12 @@ save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
 
+Every `start` also snapshots the selected save into the tracked repository
+artifact `saves/mod_playground.zip`. When `--source-save` is supplied, that
+source is copied; otherwise the current isolated save is copied. This keeps
+the latest reproducible base save available to collaborators without changing
+the normal Factorio profile.
+
 Run `deploy-if-required` only while stopped, then `start`. It compares and, when changed, copies both project mods
 (`factorio_cursor_rl_agent` and `factorio_training_lab`) into the isolated
 server and configured Linux GUI mods directory (default `~/.factorio/mods`),
