@@ -293,6 +293,63 @@ def test_steel_starter_submits_as_critical_material_prerequisite(monkeypatch) ->
     assert submitted[0]["reservation_priority"] == 100
 
 
+def test_conversion_waits_for_local_poles_before_repairing_support(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [
+        {"entity": "inserter", "position": {"x": 112.5, "y": 50.5}},
+        {"entity": "medium-electric-pole", "position": {"x": 111.5, "y": 50.5}},
+    ]}]}
+    stage_ready = False
+    repairs: list[tuple[float, float]] = []
+
+    def raise_stage(*_args, **_kwargs):
+        nonlocal stage_ready
+        stage_ready = True
+
+    monkeypatch.setattr(builder, "bring_stage_up", raise_stage)
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name",
+        lambda *_a: "working" if stage_ready else "no_power",
+    )
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: repairs.append(_a[4]) or True,
+    )
+
+    builder._power_and_raise_stage(
+        object(), object(), "nauvis", "player", "steel-plate", plan,
+        [(109.5, 46.5)], (108.5, 44.5), {"iron-plate": (90.5, 30.5)},
+        {"iron-plate": "belt"}, 1, 108.0, 43.0, lambda _message: None,
+    )
+
+    assert stage_ready
+    assert repairs == []
+
+
+def test_conversion_repairs_support_still_unpowered_after_stage(monkeypatch) -> None:
+    plan = {"phases": [{"actions": [{
+        "entity": "inserter", "position": {"x": 112.5, "y": 50.5},
+    }]}]}
+    events: list[object] = []
+    monkeypatch.setattr(
+        builder, "bring_stage_up", lambda *_a, **_k: events.append("stage"),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name", lambda *_a: "no_power",
+    )
+    monkeypatch.setattr(
+        builder, "extend_power",
+        lambda *_a, **_k: events.append(_a[4]) or True,
+    )
+
+    builder._power_and_raise_stage(
+        object(), object(), "nauvis", "player", "steel-plate", plan,
+        [(109.5, 46.5)], (108.5, 44.5), {"iron-plate": (90.5, 30.5)},
+        {"iron-plate": "belt"}, 1, 108.0, 43.0, lambda _message: None,
+    )
+
+    assert events == ["stage", (112.5, 50.5)]
+
+
 def test_steel_pole_seed_is_reserved_before_concurrent_foundation_spend(
     tmp_path: Path, monkeypatch,
 ) -> None:

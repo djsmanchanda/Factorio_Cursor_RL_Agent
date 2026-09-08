@@ -3651,25 +3651,19 @@ def _power_and_raise_stage(
     ingredient_sources: dict[str, Point], modes: dict, machine_count: int,
     ox: float, oy: float, emit: Callable[[str], None],
 ) -> None:
-    """Connect any stranded support entity, then work the stage up."""
+    """Work the stage up, then connect any residual stranded support."""
     length = machine_count * 3
     stage_area = ((ox - 15, oy - 15), (ox + length + 15, oy + 15))
-    # Buffer chests themselves are passive; the inserters that load/unload
-    # them are not. Check planned support inserters immediately after submit
-    # so a buffer cannot silently starve a stage while its machines are powered.
+    # Let the stage's own pole ghosts build before judging support power. A
+    # direct support inserter exists immediately after submission, while its
+    # adjacent planned pole may still be a ghost; repairing in that interval
+    # creates a redundant bridge and can abandon an otherwise valid stage on
+    # the bridge's material shortage.
     support_positions = {
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity", "").endswith("inserter")
     }
-    for position in sorted(support_positions):
-        if live_base.entity_status_name(client, surface, position) == "no_power":
-            emit(f"  support inserter at {position} has no power -- connecting it")
-            if not extend_power(client, bridge, surface, force, position, emit):
-                raise StuckError(
-                    f"support inserter at {position} is unpowered and cannot be "
-                    "reached by a pole chain from any generating network"
-                )
     # The UPSTREAM provider chest of every bot-served ingredient needs supply-area
     # coverage just as much as this stage's own requesters do: a provider outside
     # every network hands out nothing, and the only symptom downstream is
@@ -3683,6 +3677,17 @@ def _power_and_raise_stage(
     bring_stage_up(client, bridge, surface, force, f"conversion stage for {recipe}",
                     (ox, oy), stage_area, substation_position, machine_positions, emit,
                     logistic_chest_positions=logistic_chests)
+    # Buffer chests themselves are passive; the inserters that load/unload
+    # them are not. Any inserter still unpowered after local construction has
+    # settled needs a real external repair.
+    for position in sorted(support_positions):
+        if live_base.entity_status_name(client, surface, position) == "no_power":
+            emit(f"  support inserter at {position} has no power -- connecting it")
+            if not extend_power(client, bridge, surface, force, position, emit):
+                raise StuckError(
+                    f"support inserter at {position} is unpowered and cannot be "
+                    "reached by a pole chain from any generating network"
+                )
 
 
 def _connect_stage_feeds(
