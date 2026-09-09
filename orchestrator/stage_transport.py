@@ -485,9 +485,8 @@ def _survey_belt_route(
     # phantom as a west-flow terminal drove the haul backwards into the head
     # belt, and the route died on a corner it could never own (live run of
     # 2026-08-24 14:12).
-    through_belt_stands = _entity_or_ghost_is(
-        live_base.entity_at(client, surface, route_source), "transport-belt",
-    )
+    source_entity = live_base.entity_at(client, surface, route_source)
+    through_belt_stands = _entity_or_ghost_is(source_entity, "transport-belt")
     blocked = live_base.occupied_tiles(
         client, surface,
         (min(route_source[0], feed_position[0]) - _BRIDGE_SURVEY_MARGIN,
@@ -544,6 +543,13 @@ def _survey_belt_route(
             )
             else None
         ) or _clear_side(route_source, direction, blocked)
+    if source_entity and source_entity.get("type") == "transport-belt" and hasattr(client, "command"):
+        # A live output belt is an immutable interface, including plate
+        # side taps feeding conversion chests. Never turn it toward the target.
+        observed_exit = live_base.transport_belt_direction_at(client, surface, route_source)
+        if observed_exit not in DIRECTION_VECTORS:
+            raise StuckError(f"Cannot observe output belt direction at {route_source}")
+        exit_direction = observed_exit
     entry_direction = _clear_side(feed_position, opposite(direction), blocked)
     if destination_is_belt:
         _release_owned_destination_approach(
@@ -592,6 +598,7 @@ def _route_belt_actions(
             belt_source, feed_position, entry_direction=entry_direction,
             belt_type=tier, inserter_type=_DEFAULT_INSERTER,
             blocked_tiles=blocked, max_route_tiles=max_belt_route_tiles,
+            exit_direction=exit_direction,
         )
         return _replace_existing_source_belt(
             client, surface, belt_source, actions,

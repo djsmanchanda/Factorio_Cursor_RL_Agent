@@ -913,6 +913,7 @@ def bridge_belt_to_chest(
     inserter_type: str = "fast-inserter",
     blocked_tiles: set[tuple[int, int]] | None = None,
     max_route_tiles: int | None = None,
+    exit_direction: str | None = None,
 ) -> list[dict]:
     """Continue an existing output belt into a destination chest.
 
@@ -926,6 +927,7 @@ def bridge_belt_to_chest(
     belt_end = _add(dest_position, _scaled(entry_vector, 2))
     route = _aligned_final_route(
         source_belt, belt_end, entry_direction, blocked_tiles,
+        exit_direction=exit_direction,
     )
     route_tiles = len(_route_points(route))
     if max_route_tiles is not None and route_tiles > max_route_tiles:
@@ -942,6 +944,7 @@ def bridge_belt_to_chest(
     actions.extend(
         _route_or_detour(
             route, belt_type, blocked_tiles or set(),
+            initial_direction=exit_direction,
             final_direction=entry_direction,
         )[0]
     )

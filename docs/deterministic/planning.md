@@ -15,6 +15,9 @@ These names describe intended responsibilities, not permission to build speculat
 
 - Plan machines, inputs, outputs, power, logistics, and expansion space together.
 - Prefer a continuous direct belt over chest and inserter hops when both solve the same transport problem.
+- Bridges from existing output belts preserve their observed heading, including
+  belt-to-chest conversion feeds. The first turn belongs on clear ground, not
+  on the live source belt; detours retain the same source-direction constraint.
 - Route around established infrastructure. A blocked endpoint should trigger another candidate or a safe failure.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.

@@ -24,6 +24,29 @@ _PLAN = inspect.getsource(stage_transport._plan_belt_transport)
 _ROUTE = inspect.getsource(stage_transport._route_belt_actions)
 
 
+@pytest.mark.parametrize("heading", ["east", "west", "north", "south"])
+def test_conversion_feed_preserves_observed_source_direction(monkeypatch, heading):
+    from types import SimpleNamespace
+    source, target = (112.5, 27.5), (111.5, 47.5)
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(stage_transport, "_through_belt_source", lambda *_a, **_k: source)
+    monkeypatch.setattr(live_base, "entity_at", lambda *_a: {"name": "transport-belt", "type": "transport-belt"})
+    monkeypatch.setattr(live_base, "occupied_tiles", lambda *_a: {(112, 27)})
+    monkeypatch.setattr(live_base, "transport_belt_direction_at", lambda *_a: heading)
+    belt, origin, blocked, entry, exit_direction = stage_transport._survey_belt_route(
+        client, "nauvis", "player", "iron-plate", source, target,
+        reuse_existing=False, additional_blocked=None, upstream_shift=1,
+        destination_is_belt=False, destination_belt_direction="east", planned_belt_source=None,
+    )
+    actions = stage_transport._route_belt_actions(
+        client, "nauvis", "iron-plate", source, target, belt, origin,
+        blocked, entry, exit_direction, "transport-belt", None, False, "east",
+    )
+    start = next(a for a in actions if a["position"] == {"x": source[0], "y": source[1]})
+    assert start["direction"] == heading
+    assert not any(a["action_type"] == "remove_entity" for a in actions)
+
+
 def _shape(fn, **kwargs) -> Counter:
     return Counter(
         action["entity"]
