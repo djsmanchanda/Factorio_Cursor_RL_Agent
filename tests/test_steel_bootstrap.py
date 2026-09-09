@@ -17,7 +17,7 @@ def test_seed_has_no_feed_belt_and_fits(direction, mined):
     actions = plan["phases"][0]["actions"]
     assert not any("belt" in a["entity"] or "requester" in a["entity"] for a in actions)
     assert sum(a["entity"] == "electric-furnace" for a in actions) == (2 if mined else 1)
-    assert sum(a.get("recipe") == "steel-plate" for a in actions) == 1
+    assert all("recipe" not in a for a in actions if a["entity"] == "electric-furnace")
 
 
 def test_seed_cannot_precede_iron_retirement(monkeypatch):

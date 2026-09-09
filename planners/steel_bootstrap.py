@@ -18,10 +18,11 @@ def steel_seed(source, direction, *, mined=False, pole_side=1):
     offset = 4 if mined else 0
     if mined:
         place("electric-mining-drill", source, direction=direction)
-        place("electric-furnace", point(3), recipe="iron-plate")
+        # Furnaces infer recipes from input; explicit set_recipe is invalid.
+        place("electric-furnace", point(3))
         place("medium-electric-pole", point(1, 2 * pole_side))
     place("inserter", point(1 + offset), direction=OPPOSITE[direction])
-    place("electric-furnace", point(3 + offset), recipe="steel-plate")
+    place("electric-furnace", point(3 + offset))
     place("inserter", point(5 + offset), direction=OPPOSITE[direction])
     place("passive-provider-chest", point(6 + offset))
     place("medium-electric-pole", point(3 + offset, 2 * pole_side))
