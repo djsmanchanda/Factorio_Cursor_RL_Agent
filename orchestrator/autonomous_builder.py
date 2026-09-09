@@ -4000,6 +4000,223 @@ def _recover_partial_conversion_power(
         emit(f"  CONVERSION RECOVERY: power bridge unavailable: {error}")
 
 
+def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
+    """Fund and remember a belt-side seed, falling back to direct mining."""
+    from planners.steel_bootstrap import steel_seed, VECTORS
+    state = _bootstrap_state("iron-plate")
+    if state is None or state.lifecycle_state != "released":
+        raise ProductionPrerequisiteDeferred(
+            "compact steel waits for verified iron production and starter retirement",
+            code="steel_iron_retirement_wait", state="retiring",
+        )
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        raise StuckError("compact steel requires an episode material ledger")
+    path = ledger.path.with_suffix(".steel-seed.json")
+    if path.exists():
+        plan = json.loads(path.read_text())
+    else:
+        x, y = provider
+        lua = (
+            "local s=game.surfaces[" + json.dumps(surface) + "];local out={};"
+            "for _,b in pairs(s.find_entities_filtered{type='transport-belt',force="
+            + json.dumps(force) + ",area={{" + str(x-32) + "," + str(y-32)
+            + "},{" + str(x+32) + "," + str(y+32) + "}}}) do local iron=false;"
+            "for i=1,2 do for _,c in pairs(b.get_transport_line(i).get_contents()) do "
+            "if c.name=='iron-plate' then iron=true end end end;"
+            "if iron then out[#out+1]={b.position.x,b.position.y} end end;"
+            "rcon.print(helpers.table_to_json(out))"
+        )
+        sources = [tuple(p) for p in json.loads(client.command("/sc " + lua).strip())]
+        sources.sort(key=lambda p: math.dist(p, reference_point))
+        blocked = live_base.occupied_tiles(client, surface, (x-45, y-45), (x+45, y+45))
+        # Reserve the complete future refinery, not only today's live bodies.
+        for tiles in state.reservations.values():
+            blocked.update(tiles)
+        plan = None
+        for source in sources:
+            for direction in VECTORS:
+                for side in (-1, 1):
+                    candidate = steel_seed(source, direction, pole_side=side)
+                    if not planned_footprint_tiles(candidate) & blocked:
+                        plan = candidate
+                        break
+                if plan is not None:
+                    break
+            if plan is not None:
+                break
+        if plan is None:
+            site = live_base.direct_plate_starter_site(client, surface, force, "iron-ore", reference_point)
+            if site is not None:
+                candidate = steel_seed(site.drill_position, site.output_direction, mined=True)
+                area = _plan_area(candidate, padding=1)
+                occupied = live_base.occupied_tiles(client, surface, *area)
+                if not planned_footprint_tiles(candidate) & occupied:
+                    plan = candidate
+        if plan is None:
+            raise ProductionPrerequisiteDeferred(
+                "no collision-free compact steel seed fits beside iron or on a free patch",
+                code="steel_seed_site_wait", state="planned",
+            )
+        plan.update(surface=surface, force=force)
+        assert_affordable(client, surface, force, plan, "compact_steel_seed", emit, reserve_project=True)
+        path.write_text(json.dumps(plan, sort_keys=True))
+    _submit(client, bridge, surface, plan, "compact_steel_seed", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, plan, emit,
+                reserved_tiles=planned_footprint_tiles(plan)))
+    actions = plan["phases"][0]["actions"]
+    positions = lambda name: [(a["position"]["x"], a["position"]["y"]) for a in actions if a["entity"] == name]
+    furnaces = positions("electric-furnace")
+    poles = positions("medium-electric-pole")
+    output = positions("passive-provider-chest")[0]
+    bring_stage_up(client, bridge, surface, force, "compact steel seed", furnaces[-1],
+                   _plan_area(plan, padding=5), poles[-1], furnaces, emit,
+                   logistic_chest_positions=[output])
+    for pole in poles:
+        _ensure_power_anchor_on_generated_network(client, bridge, surface, force, pole,
+                                                  "compact steel seed", emit)
+    stuck = _diagnose_machines(client, surface, furnaces, emit, bridge=bridge, force=force, grace_seconds=60)
+    if stuck:
+        raise ProductionPrerequisiteDeferred(str(stuck), code="steel_seed_output_wait", state="producing")
+    return output
+
+
+def _promote_compact_steel(client, bridge, surface, force, reference_point, emit):
+    """Build a complete splitter-fed replacement before recovering its seed."""
+    from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
+    from planners.belt_bridge import DIRECTION_VECTORS
+    from orchestrator.stage_transport import _plan_belt_transport, _through_belt_source
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return None
+    seed_path = ledger.path.with_suffix(".steel-seed.json")
+    if not seed_path.exists():
+        return None
+    path = ledger.path.with_suffix(".steel-district.json")
+    if path.exists():
+        record = json.loads(path.read_text())
+        if record.get("complete"):
+            return tuple(record["provider"])
+    else:
+        iron = _bootstrap_state("iron-plate")
+        if iron is None or iron.replacement_provider is None:
+            raise ProductionPrerequisiteDeferred("steel district waits for its iron source")
+        source = _through_belt_source(client, surface, "iron-plate", iron.replacement_provider)
+        if source is None:
+            raise ProductionPrerequisiteDeferred("steel district has no observed iron output belt")
+        # Follow the existing output to an unused terminal. Branch beyond it,
+        # never replace/reverse a live belt or interrupt the provider side tap.
+        terminal = None
+        for _ in range(64):
+            heading = live_base.transport_belt_direction_at(client, surface, source)
+            if heading not in DIRECTION_VECTORS:
+                break
+            dx, dy = DIRECTION_VECTORS[heading]
+            nxt = (source[0] + dx, source[1] + dy)
+            entity = live_base.entity_at(client, surface, nxt)
+            if entity is None:
+                terminal = (source, heading)
+                break
+            if entity.get("type") != "transport-belt":
+                break
+            source = nxt
+        if terminal is None:
+            raise ProductionPrerequisiteDeferred("steel district needs an unused iron-output terminal")
+        source, heading = terminal
+        dx, dy = DIRECTION_VECTORS[heading]
+        plans = []
+        for side in (-1, 1):
+            px, py = -dy * side, dx * side
+            split = (source[0]+dx+px/2, source[1]+dy+py/2)
+            branch = (source[0]+2*dx+px, source[1]+2*dy+py)
+            split_plan = {"phases": [{"name": "steel_iron_split", "actions": [{
+                "action_type": "place_ghost", "entity": "splitter", "direction": heading,
+                "position": {"x": split[0], "y": split[1]},
+            }]}]}
+            for radius in (16, 32, 48):
+                for sx, sy in ((1,0),(-1,0),(0,1),(0,-1)):
+                    ox, oy = round(reference_point[0]+sx*radius), round(reference_point[1]+sy*radius)
+                    plan = generate_managed_refinery_plan("steel-plate", 6, origin_x=ox, origin_y=oy, variant="basic")
+                    footprint = planned_footprint_tiles(plan) | planned_footprint_tiles(split_plan)
+                    area = _plan_area({"phases": plan["phases"]+split_plan["phases"]}, padding=2)
+                    if footprint & live_base.occupied_tiles(client, surface, *area):
+                        continue
+                    interface = refinery_interfaces(6, origin_x=ox, origin_y=oy, variant="basic")
+                    try:
+                        route, _, _ = _plan_belt_transport(
+                            client, surface, force, "iron-plate", branch, interface.ore_inputs[0],
+                            reuse_existing=False, additional_blocked=footprint,
+                            max_belt_route_tiles=256, destination_is_belt=True,
+                            planned_belt_source=branch, through_flow_direction=heading,
+                            required_belt_type="transport-belt", defer_required_tier_affordability=True,
+                        )
+                    except (StuckError, ValueError):
+                        continue
+                    plan["phases"] = split_plan["phases"] + plan["phases"] + [{"name":"steel_iron_feed", "actions":route}]
+                    plan.update(surface=surface, force=force)
+                    plans.append((len(route), plan, interface))
+        if not plans:
+            raise ProductionPrerequisiteDeferred("no clear splitter-fed steel district fits near the mall")
+        _, plan, interface = min(plans, key=lambda p: p[0])
+        record = {"plan": plan, "provider": interface.provider, "power": interface.power_anchor}
+        assert_affordable(client, surface, force, plan, "steel_district", emit, reserve_project=True)
+        path.write_text(json.dumps(record, sort_keys=True))
+    plan = record["plan"]
+    _submit(client, bridge, surface, plan, "steel_district", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(client, bridge, surface, force, plan, emit,
+                reserved_tiles=planned_footprint_tiles(plan)))
+    machines = [(a["position"]["x"], a["position"]["y"]) for p in plan["phases"] for a in p["actions"] if a["entity"]=="electric-furnace"]
+    output = tuple(record["provider"])
+    bring_stage_up(client, bridge, surface, force, "steel district", machines[0], _plan_area(plan, padding=5),
+                   tuple(record["power"]), machines, emit, logistic_chest_positions=[output])
+    if _diagnose_machines(client, surface, machines, emit, bridge=bridge, force=force, grace_seconds=60):
+        raise ProductionPrerequisiteDeferred("steel replacement waits for output", state="producing")
+    _, progress = live_base.machine_health(client, surface, machines)
+    if not any(progress.get(p, 0) >= 1000 for p in machines):
+        raise ProductionPrerequisiteDeferred("steel replacement has not completed a craft", state="producing")
+    seed = json.loads(seed_path.read_text())
+    poles = []
+    removal = []
+    for phase in seed["phases"]:
+        for action in phase["actions"]:
+            if action["entity"] == "medium-electric-pole":
+                poles.append((action["entity"], (action["position"]["x"], action["position"]["y"])))
+            else:
+                removal.append({"action_type":"remove_entity", "entity":action["entity"], "position":action["position"]})
+    retire_entities_via_bots(client, bridge, surface, force,
+        {"surface":surface,"force":force,"phases":[{"name":"retire_steel_seed","actions":removal}]}, "retire_steel_seed", emit)
+    _retire_unused_starter_power_branch(client, bridge, surface, force, poles, "steel-plate", emit)
+    record["complete"] = True
+    path.write_text(json.dumps(record, sort_keys=True))
+    return output
+
+
+def _prep_steel_district(client, bridge, surface, force, reference_point, mall_targets, emit):
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None or not ledger.path.with_suffix(".steel-seed.json").exists():
+        return False
+    path = ledger.path.with_suffix(".steel-district.json")
+    if path.exists() and json.loads(path.read_text()).get("complete"):
+        return False
+    if not _power_generation_capability_started(client, surface, force):
+        return False
+    try:
+        output = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
+    except MaterialShortage as shortage:
+        add_demands(mall_targets, shortage)
+        _mark_binding_demands(shortage)
+        emit(f"STEEL DISTRICT SUPPLY: {shortage.required}; keeping the compact seed")
+        return False
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(f"STEEL DISTRICT WAIT: {deferred}; keeping the compact seed")
+        return False
+    if output is not None:
+        MANAGED_INTERMEDIATE_SOURCES["steel-plate"] = output
+        return True
+    return False
+
+
 def _use_presteel_starter_power(
     plan: dict, stock: Mapping[str, int] | None = None,
 ) -> tuple[dict, str]:
@@ -6693,10 +6910,8 @@ def _build_assembled_stage(
         if missing == 0:
             return
         line_reference = sources["iron-plate"]
-        output = build_conversion_stage(
-            client, bridge, surface, force, item, sources, line_reference, emit,
-            machine_count=missing, allow_logistic_inputs=False,
-            side_tap_output=True,
+        output = _build_compact_steel_seed(
+            client, bridge, surface, force, line_reference, reference_point, emit,
         )
         MANAGED_INTERMEDIATE_SOURCES[item] = output
         emit(
@@ -6905,6 +7120,9 @@ def _chemical_capability_started(
 
 
 def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
+    if item == "steel-plate":
+        # The beltless seed needs iron, not the oil district's pipe bootstrap.
+        return ()
     if item in CHEMICAL_BOOTSTRAP_LADDER:
         stop = CHEMICAL_BOOTSTRAP_LADDER.index(item)
     elif item in {"battery", "processing-unit"}:
@@ -7008,6 +7226,9 @@ def _ensure_chemical_ladder_predecessor(
     item: str, reference_point: Point, emit: Callable[[str], None],
 ) -> None:
     """Advance at most one missing rung before constructing `item`."""
+    if item == "steel-plate":
+        _defer_steel_blocked_loan(client, bridge, surface, force, reference_point, emit)
+        return
     predecessors = _chemical_ladder_predecessors(item)
     if not predecessors:
         return
@@ -7015,17 +7236,6 @@ def _ensure_chemical_ladder_predecessor(
         client, surface, force, item,
     )
     if predecessor is None:
-        return
-    if (
-        item == "steel-plate"
-        and predecessor == "pipe"
-        and _defer_steel_blocked_loan(
-            client, bridge, surface, force, reference_point, emit,
-        )
-    ):
-        # Steel is a dedicated conversion, not a borrowed mall batch. Its
-        # first furnace can start now; the restored AM2 loan is retried only
-        # after that producer has a chance to make its missing prerequisite.
         return
     stop = len(predecessors)
     if predecessor is not None:
@@ -7082,6 +7292,10 @@ def ensure_produced(
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
+    if item == "steel-plate" and hasattr(client, "command") and _power_generation_capability_started(client, surface, force):
+        promoted = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
+        if promoted is not None:
+            MANAGED_INTERMEDIATE_SOURCES[item] = promoted
     if item in MANAGED_INTERMEDIATE_SOURCES:
         _complete_material_producer(item)
         return MANAGED_INTERMEDIATE_SOURCES[item]
@@ -11027,6 +11241,10 @@ def run(
             if _BELT_CELL_PREP_KEY not in prepped and _prep_the_belt_cell(
                 client, bridge, surface, force, prepped, mall_targets,
                 reference_point, emit,
+            ):
+                continue
+            if _prep_steel_district(
+                client, bridge, surface, force, reference_point, mall_targets, emit,
             ):
                 continue
             # Reduced stock cannot afford one permanent cell for every

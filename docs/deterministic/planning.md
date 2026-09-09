@@ -129,13 +129,22 @@ These names describe intended responsibilities, not permission to build speculat
   The provider is a construction-storage side tap, not the main output path.
   It retains a fast inserter as the refinery grows; sizing that tap for all
   furnace output must not force a bulk-inserter/advanced-circuit dependency.
-- Steel begins as one electric furnace beside and belt-fed from the persistent
-  iron provider. This produces the first construction steel without reserving
-  six scarce furnaces; measured demand may expand it only after first output.
-  Its local power uses funded medium poles or an already-stocked substation
-  before falling back to small poles; missing steel must not force a wood
-  dependency while usable power hardware is held. Existing iron supply is
-  retained; a new steel chest is not a prerequisite for first steel.
+- Steel begins only after the opening iron district is verified and its pioneer
+  retired. One compact furnace takes plates directly from an existing iron
+  belt through an inserter and outputs to a provider; it has no feed belt or
+  requester. Siting checks its complete footprint and the iron district's
+  expansion reservations. If no belt-side site fits, a free ore patch may host
+  a compact drill -> iron furnace -> inserter -> steel furnace seed instead.
+  The funded seed and its exact identity persist per episode across retries.
+  Pipe production is not a prerequisite for this beltless steel seed.
+  After advanced-circuit production is proven, a complete six-furnace steel
+  refinery replaces it. A normal splitter is added beyond an unused iron-belt
+  terminal, preserving the existing provider and leaving the second output
+  available; no existing belt is reversed or removed. Candidate sites near
+  the mall are compared by full feed-route cost before placement. Steel's
+  measured furnace demand joins ordinary iron-capacity planning. Bots recover
+  the seed only after the complete replacement is healthy and has crafted
+  steel; shared power remains protected. Both stages remain fully funded.
   Steel is a persistent conversion stage, not a mall recipe: it never claims a
   compact assembler slot or passes through mall reserve policy.
 - Planner-owned roboports are movable service infrastructure. When one blocks

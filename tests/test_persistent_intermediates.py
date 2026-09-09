@@ -139,7 +139,7 @@ def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):
     )
     calls = []
     monkeypatch.setattr(
-        builder, "build_conversion_stage",
+        builder, "_build_compact_steel_seed",
         lambda *args, **kwargs: calls.append((args, kwargs)) or (9.5, 8.5),
     )
     plan = SimpleNamespace(
@@ -153,9 +153,7 @@ def test_steel_stage_records_its_output_as_a_persistent_source(monkeypatch):
     )
 
     assert builder.MANAGED_INTERMEDIATE_SOURCES == {"steel-plate": (9.5, 8.5)}
-    assert calls[0][0][6] == (1.5, 2.5)
-    assert calls[0][1]["machine_count"] == 1
-    assert calls[0][1]["allow_logistic_inputs"] is False
+    assert calls[0][0][4] == (1.5, 2.5)
 
 
 def test_existing_single_steel_furnace_completes_the_starter(monkeypatch):
@@ -198,8 +196,8 @@ def test_one_furnace_steel_starter_uses_the_opening_iron_line(monkeypatch):
     )
     builds = []
     monkeypatch.setattr(
-        builder, "build_conversion_stage",
-        lambda *_args, **kwargs: builds.append(kwargs) or (9.5, 8.5),
+        builder, "_build_compact_steel_seed",
+        lambda *args, **kwargs: builds.append(args) or (9.5, 8.5),
     )
     plan = SimpleNamespace(
         existing=None, spec={"machine": "electric-furnace"},
@@ -212,7 +210,7 @@ def test_one_furnace_steel_starter_uses_the_opening_iron_line(monkeypatch):
     )
 
     assert expansions == []
-    assert builds[0]["machine_count"] == 1
+    assert builds[0][4] == (4.5, 5.5)
 
 
 def test_steel_starter_power_uses_only_presteel_poles() -> None:
