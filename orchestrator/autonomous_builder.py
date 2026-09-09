@@ -588,6 +588,25 @@ def _reconcile_submitted_bootstrap_replacement(
         f"BOOTSTRAP DISTRICT: reconciling submitted {state.recipe} replacement; "
         "checking construction, coverage, power, transport, and measured output"
     )
+    if state.lifecycle_state in {"provisioning", "validating"}:
+        if (
+            _measured_bootstrap_replacement_output(client, surface, state.recipe, state) > 0
+            and live_base.chest_contents(client, surface, state.replacement_provider).get(state.recipe, 0) > 0
+        ):
+            anchor = refinery_interfaces(
+                state.replacement_furnaces, origin_x=state.replacement_origin[0],
+                origin_y=state.replacement_origin[1], variant="basic",
+                vertical_mirror=vertical_mirror,
+            ).power_anchor
+            _ensure_power_anchor_on_generated_network(
+                client, bridge, surface, force, anchor, "first-output replacement", emit,
+            )
+            # Recover starter materials before waiting for the rest of this
+            # blueprint. Retirement does not cancel its remaining ghosts/bill.
+            _retire_standing_bootstrap_cells(
+                client, bridge, surface, force, state.recipe, state.ore,
+                state.transport_source, emit,
+            )
     _bring_modular_refinery_up(
         client, bridge, surface, force, state.recipe, plan,
         state.replacement_furnaces, state.replacement_origin, emit,
@@ -1110,6 +1129,7 @@ def bring_stage_up(
     machine_positions: list[Point], emit: Callable[[str], None],
     *, rounds: int = _BLOCKAGE_ROUNDS, interval: float = _BLOCKAGE_INTERVAL,
     logistic_chest_positions: Sequence[Point] = (),
+    on_observation: Callable[[], None] | None = None,
 ) -> None:
     """Work a stage until it is physically alive, like an open ticket.
 
@@ -1179,6 +1199,8 @@ def bring_stage_up(
         remaining = _wait_for_ghosts(
             client, surface, force, area, timeout_seconds=interval,
         )
+        if on_observation is not None:
+            on_observation()
         if local_baseline is None:
             local_baseline = remaining
         issue = _diagnose_blockage(
@@ -1826,6 +1848,19 @@ def _bring_modular_refinery_up(
     )
     machines = _modular_machine_positions(plan, recipe)
     reserved = planned_footprint_tiles(plan)
+    def retire_delivered_starter():
+        state = _bootstrap_state(recipe)
+        if (state is None or state.lifecycle_state not in {"provisioning", "validating"}
+                or state.replacement_origin != origin
+                or state.replacement_provider != interface.provider):
+            return
+        if (_measured_bootstrap_replacement_output(client, surface, recipe, state) <= 0
+                or live_base.chest_contents(client, surface, interface.provider).get(recipe, 0) <= 0):
+            return
+        _ensure_power_anchor_on_generated_network(client, bridge, surface, force,
+            interface.power_anchor, "first-output replacement", emit)
+        _retire_standing_bootstrap_cells(client, bridge, surface, force, recipe,
+            state.ore, state.transport_source, emit)
     support_positions = {
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
@@ -1843,6 +1878,7 @@ def _bring_modular_refinery_up(
         client, bridge, surface, force, f"modular refinery for {recipe}",
         origin, _plan_area(plan), interface.power_anchor, machines, emit,
         logistic_chest_positions=[interface.provider],
+        on_observation=retire_delivered_starter,
     )
     _ensure_power_anchor_on_generated_network(
         client, bridge, surface, force, interface.power_anchor,
@@ -2489,7 +2525,7 @@ def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
 ) -> int:
-    """Retire recognized temporary plate producers after replacement is healthy.
+    """Retire temporary producers after replacement craft and chest evidence.
 
     The caller invokes this only after the direct refinery is healthy. Keeping
     the temporary path until then preserves the only working plate source when
@@ -2530,10 +2566,14 @@ def _retire_standing_bootstrap_cells(
             measured = _measured_bootstrap_replacement_output(
                 client, surface, recipe, lifecycle,
             )
-            if measured <= 0:
+            delivered = (
+                measured > 0 and lifecycle.replacement_provider is not None
+                and live_base.chest_contents(client, surface, lifecycle.replacement_provider).get(recipe, 0) > 0
+            )
+            if measured <= 0 or not delivered:
                 emit(
                     f"BOOTSTRAP DISTRICT: {recipe} replacement has no measured "
-                    "output; keeping its pioneer"
+                    "output in its provider; keeping its pioneer"
                 )
                 consume_wait(f"measured_{recipe}_replacement_output")
                 return 0
@@ -2581,7 +2621,7 @@ def _retire_standing_bootstrap_cells(
             client, bridge, surface, force, starter_poles, recipe, emit,
         )
         emit(
-            f"BOOTSTRAP SWAP: full {recipe} system is healthy; construction "
+            f"BOOTSTRAP SWAP: {recipe} replacement has delivered output; construction "
             f"bots recovered the direct starter at {starter.drill_position}"
         )
         if recipe in {"iron-plate", "copper-plate"}:
@@ -4168,13 +4208,26 @@ def _promote_compact_steel(client, bridge, surface, force, reference_point, emit
                 reserved_tiles=planned_footprint_tiles(plan)))
     machines = [(a["position"]["x"], a["position"]["y"]) for p in plan["phases"] for a in p["actions"] if a["entity"]=="electric-furnace"]
     output = tuple(record["provider"])
-    bring_stage_up(client, bridge, surface, force, "steel district", machines[0], _plan_area(plan, padding=5),
-                   tuple(record["power"]), machines, emit, logistic_chest_positions=[output])
-    if _diagnose_machines(client, surface, machines, emit, bridge=bridge, force=force, grace_seconds=60):
-        raise ProductionPrerequisiteDeferred("steel replacement waits for output", state="producing")
     _, progress = live_base.machine_health(client, surface, machines)
-    if not any(progress.get(p, 0) >= 1000 for p in machines):
-        raise ProductionPrerequisiteDeferred("steel replacement has not completed a craft", state="producing")
+    delivered = record.get("delivery_observed", False) or (
+        any(progress.get(p, 0) >= 1000 for p in machines)
+        and live_base.chest_contents(client, surface, output).get("steel-plate", 0) > 0)
+    if not delivered and not record.get("seed_retired"):
+        def first_steel_delivery():
+            _, counters = live_base.machine_health(client, surface, machines)
+            if (any(counters.get(p, 0) >= 1000 for p in machines)
+                    and live_base.chest_contents(client, surface, output).get("steel-plate", 0) > 0):
+                record["delivery_observed"] = True
+                path.write_text(json.dumps(record, sort_keys=True))
+                raise ProductionPrerequisiteDeferred(
+                    "steel first delivery observed; retiring seed on next pass",
+                    code="steel_seed_retirement_ready", state="retiring")
+        bring_stage_up(client, bridge, surface, force, "steel district", machines[0], _plan_area(plan, padding=5),
+                       tuple(record["power"]), machines, emit, logistic_chest_positions=[output],
+                       on_observation=first_steel_delivery)
+        raise ProductionPrerequisiteDeferred("steel replacement waits for first delivery to its provider", state="producing")
+    _ensure_power_anchor_on_generated_network(client, bridge, surface, force,
+        tuple(record["power"]), "steel first-output replacement", emit)
     seed = json.loads(seed_path.read_text())
     poles = []
     removal = []
@@ -4184,9 +4237,16 @@ def _promote_compact_steel(client, bridge, surface, force, reference_point, emit
                 poles.append((action["entity"], (action["position"]["x"], action["position"]["y"])))
             else:
                 removal.append({"action_type":"remove_entity", "entity":action["entity"], "position":action["position"]})
-    retire_entities_via_bots(client, bridge, surface, force,
-        {"surface":surface,"force":force,"phases":[{"name":"retire_steel_seed","actions":removal}]}, "retire_steel_seed", emit)
-    _retire_unused_starter_power_branch(client, bridge, surface, force, poles, "steel-plate", emit)
+    if not record.get("seed_retired"):
+        retire_entities_via_bots(client, bridge, surface, force,
+            {"surface":surface,"force":force,"phases":[{"name":"retire_steel_seed","actions":removal}]}, "retire_steel_seed", emit)
+        _retire_unused_starter_power_branch(client, bridge, surface, force, poles, "steel-plate", emit)
+        record["seed_retired"] = True
+        path.write_text(json.dumps(record, sort_keys=True))
+    bring_stage_up(client, bridge, surface, force, "steel district", machines[0], _plan_area(plan, padding=5),
+                   tuple(record["power"]), machines, emit, logistic_chest_positions=[output])
+    if _diagnose_machines(client, surface, machines, emit, bridge=bridge, force=force, grace_seconds=60):
+        raise ProductionPrerequisiteDeferred("steel replacement waits for remaining capacity", state="producing")
     record["complete"] = True
     path.write_text(json.dumps(record, sort_keys=True))
     return output
@@ -9336,9 +9396,13 @@ def _prep_plate_foundation(
         lifecycle = _bootstrap_state(plate)
         if (
             lifecycle is not None
-            and lifecycle.lifecycle_state in {
-                "provisioning", "validating", "retiring",
-            }
+            and (
+                lifecycle.lifecycle_state in {"provisioning", "validating", "retiring"}
+                or (
+                    lifecycle.lifecycle_state == "released"
+                    and not _direct_plate_foundation_ready(client, surface, force, plate)
+                )
+            )
             and lifecycle.replacement_submitted
         ):
             # Real furnace bodies may finish before their ore route and output

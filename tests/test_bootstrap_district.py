@@ -18,6 +18,33 @@ from orchestrator import autonomous_builder as builder
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_first_delivery_retires_before_remaining_ghost_wait(monkeypatch):
+    from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
+    origin = (20.0, 30.0)
+    interface = refinery_interfaces(6, origin_x=20, origin_y=30, variant="basic")
+    plan = generate_managed_refinery_plan("iron-plate", 6, origin_x=20, origin_y=30, variant="basic")
+    state = SimpleNamespace(lifecycle_state="provisioning", replacement_origin=origin,
+        replacement_provider=interface.provider, ore="iron-ore", transport_source=(0,0))
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: state)
+    monkeypatch.setattr(builder, "_measured_bootstrap_replacement_output", lambda *_a: 1)
+    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {"iron-plate": 1})
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a: None)
+    events = []
+    monkeypatch.setattr(builder, "_retire_standing_bootstrap_cells", lambda *_a: events.append("retire"))
+    def wait(*args, **kwargs):
+        kwargs["on_observation"]()
+        events.append("unfinished_drills_and_inserters")
+        raise builder.ProductionPrerequisiteDeferred("still constructing", state="constructing")
+    monkeypatch.setattr(builder, "bring_stage_up", wait)
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder._bring_modular_refinery_up(object(), object(), "nauvis", "player", "iron-plate",
+            plan, 6, origin, print, variant="basic")
+    assert events == ["retire", "unfinished_drills_and_inserters"]
+
+
 SCHEMA = json.loads(
     (ROOT / "schemas" / "bootstrap_district_state.schema.json").read_text(
         encoding="utf-8",
@@ -407,12 +434,14 @@ def test_science_transition_names_power_or_transport_remedy_before_output(
     )
 
 
+@pytest.mark.parametrize("delivered", [False, True])
 def test_controller_releases_pioneer_only_after_exact_replacement_output(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path, monkeypatch, delivered,
 ) -> None:
     ledger, _state = _provisioned(tmp_path)
     monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
     starter = builder.live_base.DirectPlateStarter((1.5, 2.5), "north", 1)
+    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {"iron-plate": int(delivered)})
     surveys = iter((starter, None))
     monkeypatch.setattr(
         builder.live_base, "direct_plate_starter", lambda *_a, **_k: next(surveys),
@@ -439,10 +468,10 @@ def test_controller_releases_pioneer_only_after_exact_replacement_output(
     )
 
     state = ledger.load("iron-plate")
-    assert removed == 1
-    assert retirements == ["direct_iron-plate_starter"]
-    assert state is not None and state.lifecycle_state == "released"
-    assert state.measured_output_count == 3
+    assert removed == int(delivered)
+    assert retirements == (["direct_iron-plate_starter"] if delivered else [])
+    assert state is not None and state.lifecycle_state == ("released" if delivered else "provisioning")
+    assert state.measured_output_count == (3 if delivered else 0)
 
 
 def test_controller_keeps_pioneer_when_replacement_has_not_produced(

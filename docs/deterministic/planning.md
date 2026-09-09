@@ -57,9 +57,12 @@ These names describe intended responsibilities, not permission to build speculat
 - A starter drill is temporary bootstrap capacity, not a one-drill persistent
   resource district. Exclude it from managed-mine discovery and phase counts
   while the independent six-drill belt collector and refinery are built.
-- Migration is build -> validate -> retire. The bootstrap remains intact until
-  the direct mine, continuous ore belt, refinery, power, and plate output are
-  built and observed healthy. Only then may the starter drill, furnace,
+- Migration is build -> first delivered output -> retire. The bootstrap may
+  retire once an owned replacement furnace completes a craft and the matching
+  item is observed in its exact provider chest, with generated power verified.
+  Remaining drills, furnaces, or inserters need not be complete; their ghosts,
+  reservations, and mall bills remain active. Check delivery during construction
+  polling, not only after the full blueprint finishes. Then the starter drill, furnace,
   inserter, and provider chest receive exact deconstruction orders. Retirement
   waits for construction bots to recover those entities and their contents into
   logistics; it must never destroy them. After the production entities are
@@ -143,8 +146,10 @@ These names describe intended responsibilities, not permission to build speculat
   available; no existing belt is reversed or removed. Candidate sites near
   the mall are compared by full feed-route cost before placement. Steel's
   measured furnace demand joins ordinary iron-capacity planning. Bots recover
-  the seed only after the complete replacement is healthy and has crafted
-  steel; shared power remains protected. Both stages remain fully funded.
+  the seed after first replacement steel is observed in its provider, even
+  while remaining machines construct; the delivery witness and retirement
+  persist separately from full completion. Shared power remains protected.
+  Both stages remain fully funded.
   Steel is a persistent conversion stage, not a mall recipe: it never claims a
   compact assembler slot or passes through mall reserve policy.
 - Planner-owned roboports are movable service infrastructure. When one blocks

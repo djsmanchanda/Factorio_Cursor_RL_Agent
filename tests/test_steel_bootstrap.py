@@ -58,6 +58,8 @@ def test_replacement_must_produce_before_seed_retirement(monkeypatch, tmp_path, 
     monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
     monkeypatch.setattr(builder, "_diagnose_machines", lambda *_a, **_k: [])
     monkeypatch.setattr(builder.live_base, "machine_health", lambda _c,_s,ps: ({}, {p:1000 if crafted else 0.5 for p in ps}))
+    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {"steel-plate": int(crafted)})
+    monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a: None)
     retired = []
     monkeypatch.setattr(builder, "retire_entities_via_bots", lambda *args: retired.append(args[4]))
     monkeypatch.setattr(builder, "_retire_unused_starter_power_branch", lambda *_a: None)
