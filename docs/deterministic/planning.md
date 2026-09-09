@@ -225,7 +225,14 @@ These names describe intended responsibilities, not permission to build speculat
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking
-  bill was made. The borrowed machine's stock gate always tracks the loan's
+  bill was made. Binding construction retires at its exact transferable bill,
+  without waiting for the optional spare margin. Completing that bill or
+  proving a batch complete while another construction bill is binding releases
+  spare production without waiting for a competing allocator call. Standing
+  mall topology yields to binding work, including the pass that retires its
+  final material, so the district can observe completion first. Required
+  feeders still follow the selected batch's dependency path.
+  The borrowed machine's stock gate always tracks the loan's
   current step target and is refreshed on drift; a bill-frozen gate stranding
   a spare-phase loan is configuration drift, not progress. Foundation-blocked
   items rate 100 while queued and retire with their demand; a binding loan
@@ -303,8 +310,8 @@ These names describe intended responsibilities, not permission to build speculat
 - The controller's outer pass limit counts non-progress decisions. A pass is
   credited back when required stock grows, pending ghosts fall, a recipe loan
   advances, or the outstanding-work state changes. A pass serves up to three
-  ready mall tasks: serving continues while tasks complete or advance without
-  an explicit defer, and stops at the first task that stays queued behind one,
+  ready mall tasks: each item is attempted at most once, and a deferred task
+  does not prevent another ready peer from using the remaining pass budget,
   so independent cells and loans build concurrently instead of one per pass. The consecutive unchanged
   pass guard remains the tighter detector for real contradictions. Unchanged
   mall requester, provider-limit, and stock-gate configurations are submitted
@@ -328,7 +335,11 @@ These names describe intended responsibilities, not permission to build speculat
 - A collision-checked additive blueprint does not wait for every construction
   item to have a producer. Stage its reachable construction coverage, submit
   the ghosts, and promote the persisted exact shortfall as binding mall work;
-  bots and producers then finish the job concurrently. Destructive cutovers
+  bots and producers then finish the job concurrently. Retrying an already
+  submitted direct-belt mine in this
+  additive mode services its power anchor without synchronously waiting for
+  every drill before submitting the refinery; full district validation still
+  gates starter retirement. Destructive cutovers
   and synchronous service infrastructure remain fully funded boundaries. The
   initial construction window is five minutes. Diagnose and remedy its local
   ghost backlog throughout that window; only a flat unresolved job may fail at

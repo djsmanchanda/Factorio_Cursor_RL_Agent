@@ -1029,8 +1029,8 @@ def test_ready_pass_serves_peer_tasks_after_a_completion(monkeypatch) -> None:
     assert targets == {}
 
 
-def test_ready_pass_stops_at_first_deferred_task(monkeypatch) -> None:
-    """A task that stays queued behind a defer keeps single-serve behavior."""
+def test_ready_pass_serves_peers_after_a_deferred_task(monkeypatch) -> None:
+    """One deferred batch must not hide an executable peer."""
     served: list[str] = []
     targets = {"transport-belt": 128, "inserter": 3}
     priorities = _pipeline_priorities(targets)
@@ -1050,7 +1050,7 @@ def test_ready_pass_stops_at_first_deferred_task(monkeypatch) -> None:
     )
 
     assert result is builder._SHORTAGE
-    assert served == ["transport-belt"]
+    assert served == ["transport-belt", "inserter"]
 
 
 def test_ready_pass_serves_at_most_three_tasks(monkeypatch) -> None:

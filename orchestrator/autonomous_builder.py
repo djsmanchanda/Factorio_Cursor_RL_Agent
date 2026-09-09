@@ -1358,7 +1358,8 @@ def _reuse_expansion_row(
 
 def _service_legacy_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    extraction, ore_output: Point, emit: Callable[[str], None],
+    extraction, ore_output: Point, emit: Callable[[str], None], *,
+    allow_unfunded_ghosts: bool = False,
 ) -> None:
     """Service a mine built before side taps, upgrading its terminal chest."""
     direct_belt = False
@@ -1390,6 +1391,19 @@ def _service_legacy_mine(
         extraction.expansion_step, shared_belt_y=extraction.shared_belt_y,
         first_column_x=getattr(extraction, "first_column_x", None),
     )
+    if allow_unfunded_ghosts and direct_belt:
+        # An additive retry must reach the refinery submission even while
+        # the existing collector's drills are still ghosts. Validation and
+        # starter retirement remain gated on the complete district later.
+        _ensure_power_anchor_on_generated_network(
+            client, bridge, surface, force, substation_position,
+            f"{extraction.ore} mine", emit,
+        )
+        emit(
+            "  BLUEPRINT EARMARK: existing direct mine construction continues; "
+            "releasing refinery"
+        )
+        return
     bring_stage_up(
         client, bridge, surface, force, f"existing mine for {extraction.ore}",
         origin, area, substation_position, machines, emit,
@@ -1420,6 +1434,7 @@ def _submit_mining_plan(
     else:
         _service_legacy_mine(
             client, bridge, surface, force, extraction, ore_output, emit,
+            allow_unfunded_ghosts=allow_unfunded_ghosts,
         )
     if submitted_new_capacity:
         resource_patches.invalidate_patch_cache(
@@ -5343,7 +5358,17 @@ def _submit_bootstrap_loan(
         products_finished = _bootstrap_loan_products_finished(
             client, surface, loan,
         )
-    preempted = bool(
+    if preempt_for is None and minimum_fulfilled:
+        # Construction pressure is itself a handoff event; do not wait for
+        # a competing batch to reach the allocator before releasing extras.
+        preempt_for = next(
+            iter(sorted(_BLOCKING_MALL_ITEMS - {loan.target_item})), None,
+        )
+    binding_bill_met = bool(
+        loan.target_item in _BLOCKING_MALL_ITEMS
+        and int(actual.get(loan.target_item, 0)) >= loan.target_count
+    )
+    preempted = binding_bill_met or bool(
         preempt_for is not None
         and preempt_for != loan.target_item
         and minimum_fulfilled
@@ -5355,7 +5380,7 @@ def _submit_bootstrap_loan(
         emit(
             f"  MALL BOOTSTRAP LOAN PREEMPT: {loan.target_item} fulfilled its "
             f"required {loan.target_count}; releasing spare production through "
-            f"{loan.production_target} for {preempt_for}"
+            f"{loan.production_target} for {preempt_for or 'construction handoff'}"
         )
         step = None
     starting_spare_phase = bool(
@@ -5708,6 +5733,32 @@ def _submit_bootstrap_loan(
         f"borrowed {loan.original_recipe} cell is producing temporary "
         f"{step.recipe} for the {loan.target_item} seed"
     )
+
+
+def _release_completed_construction_loans(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Release completed optional work even when its demand was just retired."""
+    if not _BLOCKING_MALL_ITEMS:
+        return
+    stock = _transferable_or_available_stock(client, surface, force)
+    for loan in active_bootstrap_loans(client, surface, force):
+        if loan.production_target <= loan.target_count:
+            continue
+        if not _bootstrap_loan_minimum_fulfilled(
+            loan, stock, _bootstrap_loan_products_finished(client, surface, loan),
+        ):
+            continue
+        if (
+            not (_BLOCKING_MALL_ITEMS - {loan.target_item})
+            and int(stock.get(loan.target_item, 0)) < loan.target_count
+        ):
+            continue
+        _submit_bootstrap_loan(
+            client, bridge, surface, force, loan, emit,
+            reference_point=reference_point,
+        )
 
 
 def _service_bootstrap_loan(
@@ -7377,13 +7428,16 @@ def _rationed_mall_spare_target(
 def _rationed_mall_completion_target(
     client: RconClient, surface: str, force: str, item: str, required: int,
 ) -> int:
-    """Transferable stock that retires a rationed batch, spares included.
+    """Transferable stock that retires a batch; binding bills exclude spares.
 
-    A batch is done only when the base holds the exact bill PLUS its spare
-    margin as spendable provider/storage stock. Checking the exact bill
+    A non-binding batch includes its spare margin in spendable
+    provider/storage stock. Binding work needs only its exact bill.
+    Checking the exact bill
     against force-wide stock (requester WIP included) is how 148 available
     belts read as done while the stone foundation sat at 89% transferable.
     """
+    if item in _BLOCKING_MALL_ITEMS:
+        return required
     try:
         if not _is_pre_core_temporary_mall_item(client, surface, force, item):
             return required
@@ -9606,9 +9660,15 @@ def _prep_intermediate(
     and construction shortages route to the mall and the plate foundations
     through the usual shortage/deferral handoffs below.
 
-    Returns whether it spent the pass; False means the prep set is complete
-    and the caller should move on to the goal item.
+    Returns whether it spent the pass; False yields to construction or the
+    goal, including when the prep set is complete.
     """
+    if _BLOCKING_MALL_ITEMS:
+        # Required feeders are established by the selected batch's dependency
+        # path. Standing topology must not intercept an already binding bill.
+        # Keep this handoff even if the survey just retired the last item:
+        # the foundation must observe completion before prep consumes the pass.
+        return False
     pending = [r for r in baseline_build_order() if r not in prepped]
     if pending:
         recipe = pending[0]
@@ -10676,10 +10736,8 @@ def _serve_ready_pass(
     if task is not None:
         # Serve a few ready tasks per pass instead of exactly one: completed
         # tasks pop out of mall_targets, so peers advance in the same pass
-        # while independent cells and loans build concurrently. Serving stops
-        # at the first task that stays queued behind an explicit defer, which
-        # keeps today's behavior for genuinely blocked work, and no item is
-        # served twice in one pass.
+        # while independent cells and loans build concurrently. A deferred
+        # task does not block ready peers; no item is served twice per pass.
         served: set[str] = set()
         for _ in range(_MAX_MALL_TASKS_PER_PASS):
             if task.item in served:
@@ -10697,8 +10755,13 @@ def _serve_ready_pass(
                         background_targets, priorities, goal_item,
                         mission_items, emit,
                     )
-                    break
-            task = priorities.next(mall_targets, tick)
+            task = priorities.next(
+                {
+                    item: count for item, count in mall_targets.items()
+                    if item not in served
+                },
+                tick,
+            )
             if task is None:
                 break
         return _SHORTAGE
@@ -10859,6 +10922,9 @@ def run(
                     )
                 ):
                     continue
+            _release_completed_construction_loans(
+                client, bridge, surface, force, reference_point, emit,
+            )
             # Mall-first opening: prep attempts the six standing cells at once,
             # ungated. Plate and construction shortages route to the mall and
             # the foundations below; prep cannot recursively decide which raw
