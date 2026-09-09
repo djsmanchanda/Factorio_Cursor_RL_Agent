@@ -159,12 +159,6 @@ def validate_underground_span(a: tuple, b: tuple) -> None:
         )
 
 
-def _orthogonally_adjacent(a: tuple, b: tuple) -> bool:
-    ax, ay = a
-    bx, by = b
-    return (ax == bx and abs(ay - by) == 1) or (ay == by and abs(ax - bx) == 1)
-
-
 _NEIGHBOUR_OFFSETS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 

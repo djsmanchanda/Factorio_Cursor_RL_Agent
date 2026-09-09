@@ -181,7 +181,7 @@ def generate_mall_stock_gate_update(
 ) -> dict:
     """Apply a construction readiness target to existing mall machines."""
     updates = [{
-        "action_type": "place_ghost",
+        "action_type": "configure_entity",
         "entity": machine,
         "position": {"x": x, "y": y},
         "recipe": recipe,

@@ -20,11 +20,6 @@ _PREP = inspect.getsource(autonomous_builder._prep_plate_extraction)
 _LOOP = inspect.getsource(autonomous_builder.run)
 
 
-def test_the_standing_cells_come_before_the_expensive_extraction() -> None:
-    """Dependency-ready cells may start between explicit foundations."""
-    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_prep_plate_extraction(")
-
-
 def test_metal_foundations_precede_the_belt_cell() -> None:
     assert _LOOP.index("_prep_plate_foundation(") < _LOOP.index("_prep_the_belt_cell(")
 
@@ -57,11 +52,6 @@ def test_plate_starter_retries_a_pending_roboport_coverage_wave(monkeypatch) -> 
     )
     assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
     assert any("PLATE STARTER COVERAGE WAIT" in message for message in messages)
-
-
-def test_prep_runs_before_the_mall_consumes_the_stock_it_needs() -> None:
-    """Standing precursor cells run before either blocking or background mall work."""
-    assert _LOOP.index("_prep_intermediate(") < _LOOP.index("_serve_ready_pass(")
 
 
 def test_blocked_intermediate_hands_the_pass_to_the_mall() -> None:

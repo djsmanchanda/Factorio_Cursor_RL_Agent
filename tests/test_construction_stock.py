@@ -3491,13 +3491,12 @@ def test_ladder_rungs_establish_themselves(monkeypatch) -> None:
     ) is None
 
 
-def test_stocked_rung_does_not_gate(monkeypatch) -> None:
-    """Spendable advanced circuits fund the batch even while plastic-bar
-    has never run."""
+def test_stocked_chemicals_do_not_replace_production_capability(monkeypatch) -> None:
+    """Stock alone must not admit a batch before its chemical producers."""
     _ladder_recipes(monkeypatch)
     monkeypatch.setattr(
         builder, "_transferable_or_available_stock",
-        lambda *_a: {"advanced-circuit": 5},
+        lambda *_a: {"advanced-circuit": 5, "plastic-bar": 5},
     )
     monkeypatch.setattr(
         builder, "_chemical_capability_started", lambda *_a: False,
@@ -3509,7 +3508,7 @@ def test_stocked_rung_does_not_gate(monkeypatch) -> None:
 
 
 def test_flowing_ladder_never_parks(monkeypatch) -> None:
-    """Started rungs (or survey failures) leave the batch alone."""
+    """Started rungs admit the batch; unknown production defers safely."""
     _ladder_recipes(monkeypatch)
     monkeypatch.setattr(
         builder, "_transferable_or_available_stock", lambda *_a: {},
@@ -3526,9 +3525,11 @@ def test_flowing_ladder_never_parks(monkeypatch) -> None:
         raise RuntimeError("survey offline")
 
     monkeypatch.setattr(
-        builder, "_transferable_or_available_stock", _boom,
+        builder, "_chemical_capability_started", _boom,
     )
 
-    assert builder._unfunded_ladder_ingredient(
-        object(), "nauvis", "player", "bulk-inserter",
-    ) is None
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._unfunded_ladder_ingredient(
+            object(), "nauvis", "player", "bulk-inserter",
+        )
+    assert caught.value.code == "capability_observation_wait"

@@ -963,6 +963,44 @@ def _searched_bridge_hops(
     raise ValueError("no unobstructed power route is available")
 
 
+def _long_reach_bridge_hops(
+    start: Point, end: Point, start_name: str, end_name: str,
+    pole_name: str, blocked: set[tuple[int, int]],
+) -> list[Point] | None:
+    """Fewest stocked 2x2 poles along a legal corridor, with honest end reach."""
+    try:
+        corridor = _power_bridge_hops(start, end, 4.0, blocked)
+    except ValueError:
+        return None
+    candidates = list(dict.fromkeys(
+        (float(round(x)), float(round(y))) for x, y in corridor
+    ))
+    candidates = [
+        point for point in candidates
+        if not (footprint_tile_indices(point, 2) & blocked)
+        and point not in {start, end}
+    ]
+    points = [start, *candidates, end]
+    names = [start_name, *([pole_name] * len(candidates)), end_name]
+    paths: dict[int, list[Point]] = {0: []}
+    for right in range(1, len(points)):
+        options = [
+            paths[left] + ([] if right == len(points) - 1 else [points[right]])
+            for left in range(right) if left in paths
+            if distance(points[left], points[right]) <= min(
+                POLE_SPECS[names[left]]["wire"], POLE_SPECS[names[right]]["wire"],
+            )
+            # Wire reach permits overlap; entity footprints do not.
+            and not (
+                footprint_tile_indices(points[left], int(POLE_SPECS[names[left]]["size"]))
+                & footprint_tile_indices(points[right], int(POLE_SPECS[names[right]]["size"]))
+            )
+        ]
+        if options:
+            paths[right] = min(options, key=lambda path: (len(path), path))
+    return paths.get(len(points) - 1)
+
+
 def _hookup_pole_position(
     client: RconClient, surface: str, consumer: Point,
     blocked: set[tuple[int, int]], toward: Point, pole_name: str,
@@ -1154,6 +1192,41 @@ def extend_power(
     if own_network is None:
         hops = [*hops, endpoint]
         action_names.append(endpoint_pole)
+    if bridge_pole == "medium-electric-pole" and hasattr(client, "command"):
+        stock = live_base.transferable_items(client, surface, force)
+        alternatives = []
+        for trunk in ("big-electric-pole", "substation"):
+            if stock.get(trunk, 0) <= 0:
+                continue
+            terminal = endpoint
+            terminal_name = consumer["name"] if own_network is not None and consumer else endpoint_pole
+            terminal_actions = []
+            if own_network is None:
+                terminal_name = "substation" if stock.get("substation", 0) else endpoint_pole
+                terminal = _hookup_pole_position(
+                    client, surface, near_position, hookup_blocked,
+                    target_position, terminal_name,
+                )
+                if terminal is None:
+                    continue
+                terminal_actions = [(terminal_name, terminal)]
+            route = _long_reach_bridge_hops(
+                target_position, terminal, target_name, terminal_name, trunk,
+                blocked | footprint_tile_indices(terminal, int(POLE_SPECS[terminal_name]["size"])),
+            )
+            if route is None:
+                continue
+            placements = [(trunk, point) for point in route] + terminal_actions
+            bill = {name: sum(n == name for n, _p in placements) for name, _p in placements}
+            if placements and all(stock.get(name, 0) >= count for name, count in bill.items()):
+                alternatives.append(placements)
+        if alternatives:
+            selected = min(alternatives, key=lambda placements: (len(placements), placements))
+            baseline_funded = all(stock.get(name, 0) >= action_names.count(name) for name in action_names)
+            if len(selected) < len(hops) or not baseline_funded:
+                action_names = [name for name, _point in selected]
+                hops = [point for _name, point in selected]
+                emit(f"  POWER ROUTE: using {len(hops)} stocked long-reach pole(s) instead of a medium-pole chain")
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")

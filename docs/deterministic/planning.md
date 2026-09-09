@@ -121,9 +121,16 @@ These names describe intended responsibilities, not permission to build speculat
   iron/copper open three drills per row while stone-brick opens six, so 12
   drills feed 6 stone furnaces at the same tightness; narrow patches still
   fall back through patch-fit.
+  The provider is a construction-storage side tap, not the main output path.
+  It retains a fast inserter as the refinery grows; sizing that tap for all
+  furnace output must not force a bulk-inserter/advanced-circuit dependency.
 - Steel begins as one electric furnace beside and belt-fed from the persistent
   iron provider. This produces the first construction steel without reserving
   six scarce furnaces; measured demand may expand it only after first output.
+  Its local power uses funded medium poles or an already-stocked substation
+  before falling back to small poles; missing steel must not force a wood
+  dependency while usable power hardware is held. Existing iron supply is
+  retained; a new steel chest is not a prerequisite for first steel.
   Steel is a persistent conversion stage, not a mall recipe: it never claims a
   compact assembler slot or passes through mall reserve policy.
 - Planner-owned roboports are movable service infrastructure. When one blocks
@@ -172,6 +179,8 @@ These names describe intended responsibilities, not permission to build speculat
   obsolete `mall:*:<side>` sections for that half only. The opposite machine's
   side remains untouched, so one chest converges to at most its two live
   recipe groups instead of accumulating retired recipes.
+  Stock-gate refreshes configure existing machines only: they reserve no
+  replacement assembler and fail if the expected machine is absent.
 - Reduced supply begins entirely on assembling-machine-1 and regular inserters;
   neither upgraded tier is part of the starter contract. Solid compact cells,
   including the permanent assembling-machine-2 and fast-inserter producers,
@@ -222,6 +231,9 @@ These names describe intended responsibilities, not permission to build speculat
   Permanent core-mall cells are not loan donors. Advanced-circuit admission
   still walks the chemical ladder through oil and plastic first, so a borrowed
   chest cell never requests an input that the base cannot yet make.
+  Downstream chemical-dependent batches require observed predecessor
+  production, not merely a few held ingredients. Unknown production telemetry
+  defers admission explicitly; it must not silently authorize the recipe.
   Every loan persists both its blocking bill and an optional spare ceiling:
   it may keep producing useful extras while the slot is idle, but a competing
   batch preempts it as soon as monotonic craft progress proves the blocking
@@ -383,6 +395,11 @@ These names describe intended responsibilities, not permission to build speculat
   wire reach before submission. A successful placement report is still not
   connectivity evidence: the repaired target must observe generation, and a
   disconnected roboport remains eligible for repair on every later survey.
+  Before committing a medium-pole chain, compare fully stocked big-pole and
+  substation routes along a clear corridor. Prefer fewer placements, or a
+  stocked route when medium poles are unavailable. Long-reach routes check
+  complete 2x2 footprints and the shorter endpoint's wire reach, and remain
+  subject to the same material reservation and observed-connectivity gates.
 - The base has one primary electric grid: every new pole, substation, roboport,
   mine, and production district connects to the highest-generation network.
   Capacity telemetry measures that same network, never a nearer island.

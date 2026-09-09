@@ -3994,8 +3994,8 @@ def _use_presteel_starter_power(
     require steel, so making them material-funded made the first steel furnace
     wait on the steel it was supposed to create. Already-stocked medium poles
     are not cyclic, however, and avoid the small-pole recipe's unproducible wood
-    leaf. Retain them only when stock funds every anchor; otherwise use an
-    all-small-pole plan paid for through the material ledger.
+    leaf. Retain them when stock funds every anchor, otherwise use the
+    layout's stocked substation before resorting to small poles.
     """
     medium_actions = [
         action
@@ -4005,7 +4005,25 @@ def _use_presteel_starter_power(
     if not medium_actions:
         raise StuckError("steel starter layout has no local power anchors")
     if int((stock or {}).get("medium-electric-pole", 0)) >= len(medium_actions):
-        return plan, "medium-electric-pole"
+        return strip_local_power(plan, remove_substations=True), "medium-electric-pole"
+    substations = [
+        action for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") == "substation"
+    ]
+    if substations and int((stock or {}).get("substation", 0)) >= len(substations):
+        # Keep the planner's collision-checked, full-row supply geometry.
+        # Stocked substations do not depend on steel we have yet to make.
+        for phase in plan["phases"]:
+            phase["actions"] = [
+                action for action in phase["actions"]
+                if action.get("entity") != "medium-electric-pole"
+            ]
+        return plan, "substation"
+    for phase in plan["phases"]:
+        phase["actions"] = [
+            action for action in phase["actions"]
+            if action.get("entity") != "substation"
+        ]
     for phase in plan["phases"]:
         for action in phase["actions"]:
             if action.get("entity") == "medium-electric-pole":
@@ -4089,7 +4107,7 @@ def build_conversion_stage(
         plan, recipe, machine_count, ox, oy, inserter_type,
         direct_sideload_ingredients, full_bus_ingredients,
     )
-    plan = strip_local_power(plan, remove_substations=steel_starter)
+    plan = strip_local_power(plan, remove_substations=False)
     output_position = (
         _side_sample_plate_output(
             plan, (ox, oy), machine_count, belt_type, flow_direction,
@@ -4112,6 +4130,8 @@ def build_conversion_stage(
                 "  STEEL STARTER POWER: existing medium-pole stock funds all "
                 "local anchors; no wood-dependent small-pole batch is needed"
             )
+        elif power_anchor == "substation":
+            emit("  STEEL STARTER POWER: using the stocked substation; no new pole recipe required")
     _publish_output_chest(plan)
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
@@ -6865,7 +6885,7 @@ def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
 def _unfunded_ladder_ingredient(
     client: RconClient, surface: str, force: str, item: str,
 ) -> str | None:
-    """First unstarted, unstocked ladder rung in `item`'s recipe closure.
+    """First unstarted chemical rung in `item`'s recipe closure.
 
     Mall batches for items whose advanced chemical ingredients cannot exist
     yet (no producer, no stock, upstream cell unbuilt) spin borrow/restore
@@ -6875,38 +6895,27 @@ def _unfunded_ladder_ingredient(
     (pipe through pumpjack) have dedicated establishment flows that the
     batch path actively drives, so parking on them would just idle. Ladder
     rungs establish themselves and are never gated; everything else parks
-    until its rung flows. Returns None when the item is fundable --
-    including when any survey fails, since a blind park is worse than a
-    wasted borrow.
+    until its rung flows. A few held advanced ingredients do not establish
+    their production capability. Unknown telemetry defers admission rather
+    than authorizing a downstream batch blindly.
     """
     if item in CHEMICAL_BOOTSTRAP_LADDER:
         return None
-    try:
-        oil_half = CHEMICAL_BOOTSTRAP_LADDER[
-            CHEMICAL_BOOTSTRAP_LADDER.index("plastic-bar"):
-        ]
-    except ValueError:
-        return None
-    try:
-        closure = _recipe_ingredient_closure(item)
-    except Exception:
-        return None
-    try:
-        stock = _transferable_or_available_stock(client, surface, force)
-    except Exception:
-        return None
+    oil_half = CHEMICAL_BOOTSTRAP_LADDER[
+        CHEMICAL_BOOTSTRAP_LADDER.index("plastic-bar"):
+    ]
+    closure = _recipe_ingredient_closure(item)
     for rung in oil_half:
         if rung not in closure:
             continue
         try:
-            if int(stock.get(rung, 0)) > 0:
-                continue
-        except Exception:
-            continue
-        try:
             started = _chemical_capability_started(client, surface, force, rung)
-        except Exception:
-            continue
+        except Exception as error:
+            raise ProductionPrerequisiteDeferred(
+                f"{item} waits for a valid production observation of {rung}",
+                code="capability_observation_wait", state="supply_wait",
+                details={"item": item, "prerequisite": rung},
+            ) from error
         if not started:
             return rung
     return None

@@ -38,15 +38,6 @@ class PowerMetrics:
     estimated_peak_draw: Optional[float]
 
 
-def _count_by_name(entities: Iterable[dict]) -> Dict[str, int]:
-    counter = Counter()
-    for entity in entities:
-        name = entity.get("name")
-        if name:
-            counter[name] += 1
-    return dict(counter)
-
-
 def _count_by_name_filter(entities: Iterable[dict], predicate) -> Dict[str, int]:
     counter = Counter()
     for entity in entities:

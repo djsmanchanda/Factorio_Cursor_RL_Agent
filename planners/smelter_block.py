@@ -11,7 +11,7 @@ from typing import Iterable
 from planners.plan_validation import actions as plan_actions
 from planners.plan_validation import validate_build_plan
 from planners.refinery_blueprints import template_actions, template_name
-from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS, inserter_for_demand
+from planners.recipe_data import LINE_RECIPES
 
 
 FURNACES_PER_MODULE = 6
@@ -358,16 +358,6 @@ def refinery_interfaces(
     )
 
 
-def _output_adapter_inserter(recipe: str, furnaces: int, variant: str) -> str:
-    """Choose a collector tier for the complete refinery output rate."""
-    if variant != "basic":
-        return "fast-inserter"
-    spec = LINE_RECIPES[recipe]
-    crafts = furnaces * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
-    output_rate = spec.get("product_amount", 1) * crafts
-    return inserter_for_demand(output_rate)
-
-
 def _output_adapter_actions(
     furnaces: int, *, origin_x: float, origin_y: float, variant: str,
     recipe: str, vertical_mirror: bool = False,
@@ -376,7 +366,10 @@ def _output_adapter_actions(
         furnaces, origin_x=origin_x, origin_y=origin_y, variant=variant,
     )
     belt = "transport-belt" if variant == "basic" else "fast-transport-belt"
-    inserter = _output_adapter_inserter(recipe, furnaces, variant)
+    # This is a storage side tap, not the refinery's full-throughput output.
+    # The continuous belt carries downstream demand; growth must not require
+    # advanced circuits merely to fill a construction provider faster.
+    inserter = "fast-inserter"
     actions = [
         {"action_type": "place_ghost", "entity": belt,
          "position": {"x": x, "y": y}, "direction": "east"}
