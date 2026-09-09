@@ -163,6 +163,11 @@ def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> No
         lambda *_a, **_k: events.append("blueprint") or {},
     )
     monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
+    verified = []
+    monkeypatch.setattr(
+        builder, "_ensure_power_anchor_on_generated_network",
+        lambda *args, **_kwargs: verified.append(args[4]),
+    )
     monkeypatch.setattr(builder, "_diagnose_machines", lambda *_a, **_k: [])
     monkeypatch.setattr(builder, "_record_bootstrap_pioneer", lambda *_a: None)
 
@@ -172,6 +177,7 @@ def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> No
     )
 
     assert events[:3] == ["coverage", "power", "blueprint"]
+    assert len(set(verified)) == 2
     assert coverage_reservations == [
         builder.planned_footprint_tiles(
             generate_direct_smelter(
@@ -208,7 +214,8 @@ def test_uncovered_direct_starter_never_submits_a_power_chain(monkeypatch) -> No
         )
 
 
-def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch) -> None:
+@pytest.mark.parametrize("loop", [False, True])
+def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch, loop) -> None:
     class _LiveClient:
         def command(self, _text: str) -> str:
             return ""
@@ -226,6 +233,9 @@ def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch) -> Non
         "bridge": {"starter-a", "junction"},
         "junction": {"bridge"},
     }
+    if loop:
+        edges["starter-b"].add("bridge")
+        edges["bridge"].add("starter-b")
 
     def context(_client, _surface, position):
         name = next((key for key, value in positions.items() if value == position), None)
@@ -262,6 +272,25 @@ def test_retired_starter_power_prunes_only_empty_leaf_branch(monkeypatch) -> Non
     assert count == 3
     assert set(removed) == {"starter-a", "starter-b", "bridge"}
     assert active == {"junction"}
+
+
+@pytest.mark.parametrize("alternate", [True, False])
+def test_pole_cleanup_requires_existing_alternate_wires(monkeypatch, alternate):
+    removed, left, right, detour = (0, 0), (1, 0), (2, 0), (1, 1)
+    edges = {
+        left: [removed, detour], right: [removed, detour] if alternate else [removed],
+        detour: [left, right] if alternate else [left],
+    }
+    monkeypatch.setattr(
+        live_base, "pole_context",
+        lambda _c, _s, point: {"neighbours": edges[point]},
+    )
+    assert live_base.pole_has_alternate_wire_path(
+        object(), "nauvis", removed, [left, right],
+    ) is alternate
+    assert not live_base.pole_has_alternate_wire_path(
+        object(), "nauvis", removed, [left, right], max_poles=1,
+    )
 
 
 def test_legacy_logistic_cell_remains_recognizable_for_retirement_only() -> None:

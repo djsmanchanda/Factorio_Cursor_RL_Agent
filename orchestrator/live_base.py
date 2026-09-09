@@ -2288,7 +2288,7 @@ def pole_context(
         "for _,e in pairs(s.find_entities_filtered{area={{p.position.x-r,p.position.y-r},"
         "{p.position.x+r,p.position.y+r}}}) do "
         "local proto=e.type=='entity-ghost' and e.ghost_prototype or e.prototype;"
-        "if e.type~='electric-pole' and e.valid and proto and proto.electric_energy_source_prototype then "
+        "if e.valid and proto and proto.type~='electric-pole' and proto.electric_energy_source_prototype then "
         "sup[#sup+1]=string.format('%.1f,%.1f',e.position.x,e.position.y) end end;"
         "local nb={};"
         "for _,n in pairs(p.neighbours and p.neighbours.copper or {}) do "
@@ -2311,6 +2311,35 @@ def pole_context(
         "supplied": _points(supplied_raw),
         "neighbours": _points(neighbours_raw),
     }
+
+
+def pole_has_alternate_wire_path(
+    client: RconClient, surface: str, position: Point,
+    neighbours: Sequence[Point], *, max_poles: int = 64,
+) -> bool:
+    """Prove all neighbours remain connected without this pole; fail closed.
+
+    Use existing copper edges, never geometric reach or assumed auto-rewiring.
+    The bounded survey keeps cleanup from traversing the whole factory.
+    """
+    if len(neighbours) < 2:
+        return True
+    pending = [neighbours[0]]
+    seen = {position}
+    reached: set[Point] = set()
+    while pending and len(reached) < max_poles:
+        point = pending.pop()
+        if point in seen:
+            continue
+        seen.add(point)
+        context = pole_context(client, surface, point)
+        if context is None:
+            return False
+        reached.add(point)
+        if set(neighbours).issubset(reached):
+            return True
+        pending.extend(p for p in context.get("neighbours", ()) if p not in seen)
+    return False
 
 
 def poles_in_area(

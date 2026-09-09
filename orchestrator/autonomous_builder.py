@@ -2421,10 +2421,9 @@ def _retire_unused_starter_power_branch(
 ) -> int:
     """Peel only the now-empty leaf branch that powered a retired starter.
 
-    A pole is removed only after it supplies no real or ghost consumer and has
-    at most one copper-wire neighbour. Re-observing after every bot removal
-    lets a two-pole starter and its bridge peel back toward the trunk, then
-    stops at the first live consumer or branching junction.
+    Keep every consumer-supplying pole and every articulation point. Redundant
+    loops may peel too, but only through an observed alternate copper path.
+    Re-observe after each bot removal, never assume automatic rewiring.
     """
     if not hasattr(client, "command"):
         return 0
@@ -2442,7 +2441,9 @@ def _retire_unused_starter_power_branch(
                 pending.pop(position, None)
                 continue
             neighbours = tuple(context.get("neighbours", ()))
-            if context.get("supplied") or len(neighbours) > 1:
+            if context.get("supplied") or not live_base.pole_has_alternate_wire_path(
+                client, surface, position, neighbours,
+            ):
                 continue
             plan = {
                 "surface": surface,
@@ -2479,7 +2480,7 @@ def _retire_unused_starter_power_branch(
     if removed:
         emit(
             f"BOOTSTRAP POWER RETIRE: recovered {removed} unused pole(s) from "
-            f"the dead {recipe} starter branch; stopped at live load or junction"
+            f"the dead {recipe} starter branch; preserved loads and grid connectivity"
         )
     return removed
 
@@ -3279,6 +3280,20 @@ def _serve_direct_plate_starter(
         starter.drill_position, area, positions["power"], machines, emit,
         logistic_chest_positions=[positions["provider"]],
     )
+    # Pre-build supply coverage is not evidence that the built pole island
+    # joined the grid. Check every actual anchor after construction, including
+    # the second stone/iron pole, before accepting machine/output health.
+    if hasattr(client, "command"):
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                if action.get("entity") != "medium-electric-pole":
+                    continue
+                point = action["position"]
+                _ensure_power_anchor_on_generated_network(
+                    client, bridge, surface, force, (point["x"], point["y"]),
+                    f"direct {recipe} starter", emit,
+                    reserved_tiles=planned_footprint_tiles(plan),
+                )
     stuck = _diagnose_machines(
         client, surface, machines, emit, bridge=bridge, force=force,
         grace_seconds=60.0,

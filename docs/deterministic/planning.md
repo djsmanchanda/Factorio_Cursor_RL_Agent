@@ -61,8 +61,10 @@ These names describe intended responsibilities, not permission to build speculat
   waits for construction bots to recover those entities and their contents into
   logistics; it must never destroy them. After the production entities are
   gone, an empty starter-pole leaf is pruned back one pole at a time; pruning
-  stops at the first pole that still supplies a real/ghost consumer or has two
-  wire neighbours, so a shared grid branch remains intact. Legacy requester
+  stops at a consumer-supplying pole or a pole needed for connectivity. Empty
+  poles with multiple neighbours require an observed alternate copper path
+  excluding that pole (bounded to 64 surveyed poles); geometric reach alone
+  never licenses removal. Each removal is followed by a fresh survey. Legacy requester
   cells and their recognized mine-side
   intake follow the same recoverable teardown, but are recognized only so old
   saves can retire them; new starts must not create one.
@@ -389,7 +391,9 @@ These names describe intended responsibilities, not permission to build speculat
   radius build the following hop. Planning a distant destination never licenses
   a complete live pole line ahead of the bots. Direct plate starters and compact
   mall cells use the same power-first submission order so a coverage wait cannot
-  strand their local machine grid.
+  strand their local machine grid. After starter construction, every local
+  pole must also pass exact-anchor generation verification; pre-build supply
+  coverage alone cannot certify the new starter's network.
 - Emergency pole chains are planned at Factorio's actual half-tile medium-pole
   centres, and every adjacent edge is checked against the shorter endpoint's
   wire reach before submission. A successful placement report is still not
