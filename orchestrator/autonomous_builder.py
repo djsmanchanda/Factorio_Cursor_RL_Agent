@@ -8928,6 +8928,17 @@ def _prep_plate_extraction(
         if deferred.state in {
             "constructing", "coverage_wait", "power_wait", "producing",
         }:
+            if any(target > 0 for target in mall_targets.values()):
+                # Ghost waits must not suppress their own suppliers. Keep
+                # this district selected so the caller serves the mall, not
+                # another expansion, without weakening the duplicate guard.
+                if pending_materials is not None:
+                    pending_materials[short_plate] = dict(pending or {})
+                emit(
+                    f"  PREP {deferred.state.upper()}: {short_plate} -- "
+                    f"{deferred}; yielding to queued mall production"
+                )
+                return False
             emit(
                 f"  PREP {deferred.state.upper()}: {short_plate} foundation -- "
                 f"{deferred}; holding startup instead of advancing the goal"
@@ -8985,6 +8996,8 @@ def _prep_plate_extraction(
             # Coverage/service prerequisites may still prevent submission.
             # Keep the exact bill queued and retry without discarding the
             # collision-checked plan or allowing a later plate to spend it.
+            if isinstance(error, ProductionPrerequisiteDeferred) and error.state == "constructing":
+                _mark_binding_demands(shortage)
             emit(f"  BLUEPRINT EARMARK pending: {error}")
         return False
     except (StuckError, ValueError) as error:
@@ -9782,6 +9795,10 @@ def _prep_core_mall(
     emit: Callable[[str], None],
 ) -> bool:
     """Promote the rationed mall into five self-sustaining core cells."""
+    if _BLOCKING_MALL_ITEMS:
+        # Required feeders still run through the selected batch's dependency
+        # path; optional permanent-cell promotion cannot outrank construction.
+        return False
     for item in CORE_MALL_PRODUCERS:
         key = f"_core_mall:{item}"
         if key in prepped:

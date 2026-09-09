@@ -152,6 +152,12 @@ These names describe intended responsibilities, not permission to build speculat
   first, and missing items stay queued. Submit the non-destructive mine growth
   once before waiting on refinery-growth ghosts; a later survey defers while
   those mine ghosts are pending instead of opening a duplicate batch. A
+  construction/coverage/power/output wait yields to queued mall work instead
+  of spending the whole pass polling. The pending district retains its bill
+  and prevents another expansion from taking that pass; optional core-mall
+  promotion also yields to binding construction. A submitted growth packet
+  waiting for safe cutover retains binding material priority. No timeout
+  increase or duplicate blueprint is needed to let its suppliers run. A
   supply-starved refinery triggers mine or transport repair, never an isolated
   furnace block.
 - Construction stock is allocated through an episode-scoped material ledger.

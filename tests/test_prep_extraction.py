@@ -496,7 +496,8 @@ def test_a_blocked_corridor_defers_instead_of_ending_the_run() -> None:
     assert "PREP DEFERRED" in _PREP
 
 
-def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) -> None:
+@pytest.mark.parametrize("queued", [False, True])
+def test_pending_foundation_yields_to_queued_construction(monkeypatch, queued) -> None:
     waits: list[float] = []
     deferred: dict[str, int] = {}
     monkeypatch.setattr(autonomous_builder.live_base, "available_items", lambda *_a: {})
@@ -515,14 +516,22 @@ def test_pending_foundation_holds_startup_on_a_construction_poll(monkeypatch) ->
 
     monkeypatch.setattr(autonomous_builder, "build_mining_stage", pending)
 
+    targets = {"electric-mining-drill": 6, "inserter": 12, "splitter": 2} if queued else {}
+    pending_bill = {"iron-plate": dict(targets)}
+    monkeypatch.setattr(
+        autonomous_builder, "construction_supply_chain_is_scheduled", lambda *_a: False,
+    )
     spent = autonomous_builder._prep_plate_extraction(
         object(), object(), "nauvis", "player", "iron-plate", set(),
-        deferred, {}, (0.0, 0.0), lambda _message: None, furnace_target=6,
+        deferred, targets, (0.0, 0.0), lambda _message: None,
+        pending_materials=pending_bill, furnace_target=6,
     )
 
-    assert spent is True
+    assert spent is (not queued)
     assert deferred == {}
-    assert waits == [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS]
+    assert waits == ([] if queued else [autonomous_builder._PENDING_FOUNDATION_POLL_SECONDS])
+    if queued:
+        assert pending_bill == {"iron-plate": targets}
 
 
 @pytest.mark.parametrize(
@@ -814,8 +823,9 @@ def test_plate_blueprint_releases_when_pending_material_chain_is_live(monkeypatc
     assert pending == {}
 
 
+@pytest.mark.parametrize("constructing", [False, True])
 def test_new_plate_shortage_submits_its_additive_blueprint_immediately(
-    monkeypatch,
+    monkeypatch, constructing,
 ) -> None:
     attempts: list[bool] = []
     shortage = autonomous_builder.MaterialShortage(
@@ -829,6 +839,10 @@ def test_new_plate_shortage_submits_its_additive_blueprint_immediately(
         attempts.append(earmarked)
         if not earmarked:
             raise shortage
+        if constructing:
+            raise autonomous_builder.ProductionPrerequisiteDeferred(
+                "growth ghosts must finish before cutover", state="constructing",
+            )
         return None
 
     monkeypatch.setattr(
@@ -846,20 +860,21 @@ def test_new_plate_shortage_submits_its_additive_blueprint_immediately(
     pending: dict[str, dict[str, int]] = {}
     messages: list[str] = []
 
-    assert autonomous_builder._prep_plate_extraction(
+    spent = autonomous_builder._prep_plate_extraction(
         object(), object(), "nauvis", "player", "iron-plate", set(), {},
         targets, (0.0, 0.0), messages.append,
         pending_materials=pending, furnace_target=6,
     )
+    assert spent is (not constructing)
 
     assert attempts == [False, True]
     assert targets == {
         "electric-mining-drill": 6,
         "transport-belt": 128,
     }
-    assert pending == {}
+    assert pending == ({"iron-plate": shortage.required} if constructing else {})
     assert binding == [shortage]
-    assert any(
+    assert constructing or any(
         "exact missing construction bill now has binding priority" in message
         for message in messages
     )

@@ -30,6 +30,14 @@ def test_binding_construction_bypasses_standing_topology(monkeypatch, targets):
         object(), object(), "nauvis", "player", set(),
         targets, (0, 0), lambda _m: None,
     )
+    monkeypatch.setattr(
+        builder, "_prepare_core_mall_prerequisite",
+        lambda *_a: pytest.fail("core promotion intercepted construction"),
+    )
+    assert not builder._prep_core_mall(
+        object(), object(), "nauvis", "player", set(),
+        targets, (0, 0), lambda _m: None,
+    )
 
 
 @pytest.mark.parametrize("held,other_binding,finished,release", [
