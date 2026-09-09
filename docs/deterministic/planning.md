@@ -188,7 +188,10 @@ These names describe intended responsibilities, not permission to build speculat
   side remains untouched, so one chest converges to at most its two live
   recipe groups instead of accumulating retired recipes.
   Stock-gate refreshes configure existing machines only: they reserve no
-  replacement assembler and fail if the expected machine is absent.
+  replacement assembler. Resolve actual per-position tiers in one survey,
+  including mixed upgrade rows, and refresh the gate again when a tier changes.
+  Missing or ghost targets defer for re-observation rather than becoming a
+  collision error or silently placing a replacement.
 - Reduced supply begins entirely on assembling-machine-1 and regular inserters;
   neither upgraded tier is part of the starter contract. Solid compact cells,
   including the permanent assembling-machine-2 and fast-inserter producers,

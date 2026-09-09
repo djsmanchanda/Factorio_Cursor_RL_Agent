@@ -148,6 +148,47 @@ def test_science_call_repairs_starved_paired_mall_transport(monkeypatch) -> None
     assert repaired == []
 
 
+@pytest.mark.parametrize("second", ["assembling-machine-2", None, "entity-ghost"])
+def test_stock_gate_uses_live_tiers_and_reobserves_upgrades(monkeypatch, second):
+    machines = ((50.5, 32.5), (56.5, 32.5))
+    names = dict(zip(machines, ["assembling-machine-1", second]))
+    plan = SimpleNamespace(
+        existing=SimpleNamespace(machine_positions=machines),
+        spec={"machine": "assembling-machine-2"}, production_target=50,
+        mall_storage_limit=50, fill_provider=False,
+    )
+    monkeypatch.setattr(builder, "_MALL_REFRESH_SIGNATURES", set())
+    monkeypatch.setattr(builder, "_paired_mall_provider", lambda *_a: (53.5, 31.5))
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "entity_names_at", lambda *_a: names)
+    submitted = []
+    monkeypatch.setattr(builder, "_submit", lambda *args: submitted.append(args[3]))
+
+    def refresh():
+        builder._refresh_mall_cell(
+            SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player",
+            "transport-belt", plan, lambda _m: None, upgrade_bootstrap=False,
+            stock_gate_target=50,
+        )
+
+    if second != "assembling-machine-2":
+        with pytest.raises(builder.ProductionPrerequisiteDeferred) as error:
+            refresh()
+        assert error.value.code == "mall_stock_gate_target_pending"
+        assert all("stock_gate" not in p["phases"][0]["name"] for p in submitted)
+        return
+    refresh()
+    refresh()
+    names[machines[0]] = "assembling-machine-2"
+    refresh()
+    gates = [p["phases"][0]["actions"] for p in submitted if "stock_gate" in p["phases"][0]["name"]]
+    assert [[a["entity"] for a in actions] for actions in gates] == [
+        ["assembling-machine-1", "assembling-machine-2"],
+        ["assembling-machine-2", "assembling-machine-2"],
+    ]
+    assert all(a["action_type"] == "configure_entity" for actions in gates for a in actions)
+
+
 def test_upgrade_call_still_detects_the_paired_mall_provider(monkeypatch) -> None:
     provider = (53.5, 31.5)
     existing = SimpleNamespace(machine_positions=((50.5, 32.5), (56.5, 32.5)))

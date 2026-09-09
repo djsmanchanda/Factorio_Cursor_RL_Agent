@@ -4513,11 +4513,28 @@ def _refresh_mall_cell(
                 item, spec["machine"], list(existing.machine_positions),
                 stock_gate_target,
             )
+            if hasattr(client, "command"):
+                # Recipe defaults describe new builds, not the tiers already
+                # installed. One batch survey also handles mixed upgrade rows.
+                names = live_base.entity_names_at(
+                    client, surface, existing.machine_positions,
+                )
+                for action in gate_plan["phases"][0]["actions"]:
+                    point = (action["position"]["x"], action["position"]["y"])
+                    actual = names.get(point)
+                    if actual not in live_base.ASSEMBLER_TIERS:
+                        raise ProductionPrerequisiteDeferred(
+                            f"{item} stock gate waits for its existing assembler at {point}",
+                            code="mall_stock_gate_target_pending", state="constructing",
+                            details={"item": item, "position": list(point), "observed": actual},
+                        )
+                    action["entity"] = actual
             gate_plan["surface"], gate_plan["force"] = surface, force
             _submit_mall_refresh_once(
                 (
                     "stock_gate", surface, force, item,
                     tuple(existing.machine_positions), stock_gate_target,
+                    tuple(a["entity"] for a in gate_plan["phases"][0]["actions"]),
                 ),
                 lambda: _submit(
                     client, bridge, surface, gate_plan,
