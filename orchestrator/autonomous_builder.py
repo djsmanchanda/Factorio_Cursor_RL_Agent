@@ -7586,7 +7586,7 @@ def _core_mall_ready(
 ) -> bool:
     """Whether the mall can now afford permanent one-recipe cell ownership."""
     return all(
-        _production_started(client, surface, force, item)
+        _core_mall_producer_ready(client, surface, force, item)
         for item in CORE_MALL_PRODUCERS
     )
 
@@ -9627,6 +9627,23 @@ def _production_started(
     )
 
 
+def _core_mall_producer_ready(client, surface, force, item):
+    """Installed, stocked mall capacity is ready even before its first craft.
+
+    This is not chemical-capability proof. Temporary recipe loans also remain
+    excluded from the stock-capped permanent-cell exception.
+    """
+    if _production_started(client, surface, force, item):
+        return True
+    if not hasattr(client, "command"):
+        return False
+    capped = live_base.stock_capped_mall_positions(client, surface, force, item)
+    if not capped:
+        return False
+    borrowed = {loan.machine_position for loan in active_bootstrap_loans(client, surface, force)}
+    return any(position not in borrowed for position in capped)
+
+
 def _power_storage_capability_started(
     client: RconClient, surface: str, force: str,
 ) -> bool:
@@ -10098,9 +10115,9 @@ def _prep_core_mall(
         key = f"_core_mall:{item}"
         if key in prepped:
             continue
-        if _production_started(client, surface, force, item):
+        if _core_mall_producer_ready(client, surface, force, item):
             prepped.add(key)
-            emit(f"  CORE MALL READY: {item} has independent production")
+            emit(f"  CORE MALL READY: {item} has independent production or a satisfied stock cap")
             return True
         emit(f"--- core mall promotion: permanent {item} producer ---")
         prerequisite_pass = _prepare_core_mall_prerequisite(
@@ -10650,6 +10667,14 @@ def _survey_pass(
     """
     stock = _transferable_or_available_stock(client, surface, force)
     tick = live_base.game_tick(client)
+    ghost_bill = (
+        live_base.pending_construction_items(client, surface, force)
+        if hasattr(client, "command") else {}
+    )
+    for item, count in ghost_bill.items():
+        if count > stock.get(item, 0):
+            mall_targets[item] = max(mall_targets.get(item, 0), count)
+            _BLOCKING_MALL_ITEMS.add(item)
     priorities.sync(mall_targets, stock, tick)
     # Binding demands outrank standing reserves while they block placed
     # ghosts; entries retire with their demand so a past bottleneck cannot
@@ -10684,6 +10709,9 @@ def _survey_pass(
             client, surface, force, stocked_item, stock,
             loans=_survey_loans,
         ):
+            if ghost_bill.get(stocked_item, 0) > stock.get(stocked_item, 0):
+                # Crafts spent elsewhere cannot pay for still-visible ghosts.
+                continue
             proved = _loan_craft_proof_crafts(
                 client, surface, force, stocked_item, stock,
                 loans=_survey_loans,

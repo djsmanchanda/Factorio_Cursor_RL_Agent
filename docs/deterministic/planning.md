@@ -178,6 +178,10 @@ These names describe intended responsibilities, not permission to build speculat
   supply-starved refinery triggers mine or transport repair, never an isolated
   furnace block.
 - Construction stock is allocated through an episode-scoped material ledger.
+  Each controller survey also reconciles the live remaining entity-ghost bill.
+  Unfunded ghosts restore binding mall demand even after a producer batch was
+  credited or a starter retired; historical crafts cannot satisfy still-visible
+  unfunded ghosts. Stock-covered ghosts do not demand duplicate production.
   Every named project records its complete item bill, current reservation,
   source producer, expected rate, and ETA. A compact producer reserves its
   whole standalone cell plus one recipe craft before it recursively schedules
@@ -360,6 +364,11 @@ These names describe intended responsibilities, not permission to build speculat
   monotonic: a smaller incidental demand cannot shrink a reserve already being
   filled. Deliberate shared-provider loan mode remains uncapped and restores the
   dedicated policy after the loan.
+- Core-mall readiness distinguishes installed capacity from current crafting.
+  A real powered, non-loaned assembler stopped by its verified item-specific
+  logistic stock cap is ready when that same network holds the cap quantity.
+  This exception does not prove chemical production or unlock plastic/advanced
+  circuit milestones; those still require observed production.
 - Pending mall batches are peers unless one appears in the selected item's
   recipe closure or declared compact-cell bill. A drill batch must therefore
   continue while splitter and inserter batches are also queued; treating every

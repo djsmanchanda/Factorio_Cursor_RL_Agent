@@ -1975,6 +1975,39 @@ def occupied_tile_owners(
     return owners
 
 
+def pending_construction_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
+    """Remaining entity-ghost bill, independent of completed producer batches."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local counts={};"
+        "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force='" + force + "'}) do "
+        "local items=g.ghost_prototype.items_to_place_this;local item=items and items[1];"
+        "if item then counts[item.name]=(counts[item.name] or 0)+(item.count or 1) end end;"
+        "local out={};for name,count in pairs(counts) do out[#out+1]=name..'='..count end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    return {name: int(count) for name, count in (part.split('=') for part in raw.split(',') if part)}
+
+
+def stock_capped_mall_positions(client: RconClient, surface: str, force: str, recipe: str) -> list[Point]:
+    """Real powered assemblers deliberately stopped by a satisfied item cap."""
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for _,e in pairs(s.find_entities_filtered{type='assembling-machine',force='" + force + "'}) do "
+        "local r=e.get_recipe();local b=e.get_control_behavior();"
+        "if r and r.name=='" + recipe + "' and e.energy>0 and "
+        "e.status==defines.entity_status.disabled_by_control_behavior and b and b.connect_to_logistic_network then "
+        "local c=b.logistic_condition; c=c and (c.condition or c);"
+        "local net=s.find_logistic_network_by_position(e.position,e.force);"
+        "if c and c.first_signal and c.first_signal.name==r.name and c.comparator=='<' "
+        "and c.constant and c.constant>0 and net and net.get_item_count(r.name)>=c.constant then "
+        "out[#out+1]=e.position.x..':'..e.position.y end end end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    return [tuple(map(float, part.split(':'))) for part in raw.split(',') if part]
+
+
 def pending_ghost_count(
     client: RconClient, surface: str, force: str,
 ) -> int:

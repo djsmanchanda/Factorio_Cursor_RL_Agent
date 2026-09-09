@@ -8,6 +8,46 @@ import pytest
 from orchestrator import autonomous_builder as builder
 
 
+def test_visible_splitter_ghosts_restore_demand_despite_old_craft_proof(monkeypatch, tmp_path):
+    from orchestrator.priority_list import PriorityList
+    ghost_bill = {"splitter": 2}
+    stock = {}
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    monkeypatch.setattr(builder, "_CRAFT_PROOF_CONSUMED", {})
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    monkeypatch.setattr(builder.live_base, "pending_construction_items", lambda *_a: ghost_bill)
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 100)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_loan_craft_proof_complete", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_loan_craft_proof_crafts", lambda *_a, **_k: 100)
+    client = SimpleNamespace(command=lambda *_a: "")
+    targets = {}
+    priorities = PriorityList(tmp_path / "priorities.json", 0)
+    for _ in range(2):
+        _, task = builder._survey_pass(client, "nauvis", "player", targets, priorities)
+        assert targets == {"splitter": 2}
+        assert task.item == "splitter" and task.base_rating == 100
+    stock["splitter"] = 2
+    builder._survey_pass(client, "nauvis", "player", targets, priorities)
+    assert targets == {}
+    # Bots spend the bill and remove the ghosts. No stale demand is rebuilt.
+    stock.clear()
+    ghost_bill.clear()
+    _, task = builder._survey_pass(client, "nauvis", "player", targets, priorities)
+    assert targets == {} and task is None
+
+
+@pytest.mark.parametrize("capped,borrowed,ready", [(False,False,False),(True,True,False),(True,False,True)])
+def test_stock_capped_core_capacity_is_not_chemical_production(monkeypatch, capped, borrowed, ready):
+    point = (36.5, 44.5)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder.live_base, "stock_capped_mall_positions", lambda *_a: [point] if capped else [])
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [SimpleNamespace(machine_position=point)] if borrowed else [])
+    client = SimpleNamespace(command=lambda *_a: "")
+    assert builder._core_mall_producer_ready(client,"nauvis","player","fast-inserter") is ready
+    assert not builder._power_generation_capability_started(client,"nauvis","player")
+
+
 def test_binding_bill_does_not_wait_for_spare_margin(monkeypatch):
     monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", {"transport-belt"})
     monkeypatch.setattr(
