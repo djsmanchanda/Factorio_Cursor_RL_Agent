@@ -12,6 +12,8 @@ import pytest
 from orchestrator import extraction_state, live_base, resource_patches, stage_chemical
 from orchestrator import autonomous_builder
 from orchestrator.stage_services import _ghost_materials
+from planners import pumpjack_siting
+from planners.resource_layouts import verified_pumpjack_output_tile
 
 Point = tuple[float, float]
 
@@ -91,8 +93,8 @@ def test_existing_battery_cell_is_serviced_before_reuse(monkeypatch) -> None:
 
 
 def test_pumpjack_faces_the_local_oil_cell() -> None:
-    east = stage_chemical._pumpjack_site_nearest((-286.5, -98.5), (-220.0, -98.0))
-    north = stage_chemical._pumpjack_site_nearest((-286.5, -98.5), (-286.0, -160.0))
+    east = pumpjack_siting.pumpjack_site_nearest((-286.5, -98.5), (-220.0, -98.0))
+    north = pumpjack_siting.pumpjack_site_nearest((-286.5, -98.5), (-286.0, -160.0))
 
     assert east["direction"] == "east"
     assert east["output"] == (-285, -100)
@@ -107,19 +109,19 @@ def test_pumpjack_blueprint_rotation_and_mirror_map_to_real_connectors() -> None
     tiles must rotate with the 3x3 body, not remain at the default location.
     """
     position = (-286.5, -98.5)
-    assert stage_chemical.verified_pumpjack_output_tile({
+    assert verified_pumpjack_output_tile({
         "position": position, "direction": "north",
     }) == (-288, -101)
-    assert stage_chemical.verified_pumpjack_output_tile({
+    assert verified_pumpjack_output_tile({
         "position": position, "direction": "east",
     }) == (-285, -100)
-    assert stage_chemical.verified_pumpjack_output_tile({
+    assert verified_pumpjack_output_tile({
         "position": position, "direction": "south",
     }) == (-286, -97)
 
 
 def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
-    site = stage_chemical._pumpjack_site_nearest(
+    site = pumpjack_siting.pumpjack_site_nearest(
         (-268.5, -98.5), (-237.0, -91.0),
     )
 
@@ -950,7 +952,7 @@ def test_extra_pumpjack_spots_fill_the_patch_without_overlap() -> None:
         (-285.0, -89.0), (-280.0, -85.0), (-279.0, -91.0),
         (-277.0, -95.0), (-276.0, -92.0), (-277.0, -85.0),
     ]
-    spots = stage_chemical._extra_pumpjack_spots(
+    spots = pumpjack_siting.extra_pumpjack_spots(
         tiles, (-269.0, -99.0), (-237.0, -91.0),
     )
 
@@ -968,12 +970,12 @@ def test_extra_pumpjack_spots_fill_the_patch_without_overlap() -> None:
 def test_extra_pumpjack_spots_respect_the_draw_ceiling() -> None:
     """A dense field still caps at refinery draw, not at tile count."""
     tiles = [(float(x), float(y)) for x in range(-300, -240) for y in range(-110, -80, 3)]
-    spots = stage_chemical._extra_pumpjack_spots(
+    spots = pumpjack_siting.extra_pumpjack_spots(
         tiles, (-269.0, -99.0), (-237.0, -91.0),
     )
 
     assert len(spots) == 2
-    assert stage_chemical._extra_pumpjack_spots(
+    assert pumpjack_siting.extra_pumpjack_spots(
         [], (-269.0, -99.0), (-237.0, -91.0),
     ) == []
 
@@ -981,7 +983,7 @@ def test_extra_pumpjack_spots_respect_the_draw_ceiling() -> None:
 def test_patch_pumpjack_selection_skips_blocked_footprints() -> None:
     """A closer well is not legal when its 3x3 body hits infrastructure."""
     blocked = stage_chemical.footprint_tile_indices((8.5, 0.5), 3)
-    sites = stage_chemical._pumpjack_sites_for_patch(
+    sites = pumpjack_siting.pumpjack_sites_for_patch(
         [(4.5, 0.5), (8.5, 0.5)], (0.5, 0.5), (12.0, 0.0),
         blocked_tiles=blocked, draw_per_second=8.0, max_jacks=1,
     )
@@ -1504,3 +1506,71 @@ def test_oil_link_dives_under_a_pole_before_failing() -> None:
         if a.get("entity") == "pipe-to-ground"
     } == {(3, 0): "west", (5, 0): "east"}
     assert stage_chemical._link_dive_tiles(segments, hard) == {(4, 0)}
+
+
+@pytest.mark.parametrize("selector", ["patch", "extra"])
+@pytest.mark.parametrize("offset", [(0, 0), (300, 100)])
+def test_pumpjack_siting_reserves_sibling_output_stubs(selector, offset):
+    from planners.plan_validation import validate_no_collisions
+    from planners.resource_layouts import generate_pumpjack_source
+
+    dx, dy = offset
+    tiles = [(x + dx, y + dy) for x, y in [
+        (-279.5, -84.5), (-276.5, -84.5), (-275.5, -81.5),
+    ]]
+    target = (-220 + dx, -84 + dy)
+    if selector == "patch":
+        sites = pumpjack_siting.pumpjack_sites_for_patch(tiles, tiles[0], target)
+    else:
+        sites = pumpjack_siting.extra_pumpjack_spots(tiles, None, target)
+    assert len(sites) >= 2
+    plan = generate_pumpjack_source(sites, [s["output"] for s in sites])
+    validate_no_collisions([("source", plan)])
+
+
+def test_pumpjack_rotates_when_preferred_connector_is_blocked():
+    from planners.plan_validation import validate_no_collisions
+    from planners.resource_layouts import generate_pumpjack_source
+
+    position, target = (0.5, 0.5), (20, 0)
+    preferred = pumpjack_siting.pumpjack_site_nearest(position, target)
+    sites = pumpjack_siting.pumpjack_sites_for_patch(
+        [position], position, target, blocked_tiles={preferred["output"]},
+    )
+    assert len(sites) == 1
+    assert sites[0]["output"] != preferred["output"]
+    validate_no_collisions([("source", generate_pumpjack_source(sites, [sites[0]["output"]]))])
+
+
+def test_pumpjack_siting_is_repeatable_and_preserves_obstacles():
+    positions = [(x + 0.5, y + 0.5) for x in range(0, 10, 3) for y in range(0, 10, 3)]
+    blocked = {(2, -1), (5, 5)}
+    original = set(blocked)
+    first = pumpjack_siting.pumpjack_sites_for_patch(positions, positions[0], (20, 0), blocked_tiles=blocked)
+    second = pumpjack_siting.pumpjack_sites_for_patch(list(reversed(positions)), positions[0], (20, 0), blocked_tiles=blocked)
+    assert first == second
+    assert blocked == original
+    for site in first:
+        assert site["output"] not in blocked
+        assert stage_chemical.footprint_tile_indices(site["position"], 3).isdisjoint(blocked)
+
+
+def test_pumpjack_siting_rejects_all_blocked_connectors():
+    position = (0.5, 0.5)
+    blocked = {verified_pumpjack_output_tile({"position": position, "direction": direction})
+               for direction in ("north", "east", "south", "west")}
+    assert pumpjack_siting.pumpjack_sites_for_patch([position], position, (20, 0), blocked_tiles=blocked) == []
+    assert pumpjack_siting.extra_pumpjack_spots([position], None, (20, 0), blocked_tiles=blocked) == []
+
+
+def test_extra_pumpjacks_preserve_unknown_existing_orientation():
+    position = (0.5, 0.5)
+    existing_tiles = stage_chemical.footprint_tile_indices(position, 3)
+    existing_tiles.update(verified_pumpjack_output_tile({"position": position, "direction": d})
+                          for d in ("north", "east", "south", "west"))
+    tiles = [(x + 0.5, y + 0.5) for x in range(-6, 7, 3) for y in range(-6, 7, 3)]
+    sites = pumpjack_siting.extra_pumpjack_spots(tiles, position, (20, 0))
+    assert len(sites) == 2
+    for site in sites:
+        assert site["output"] not in existing_tiles
+        assert stage_chemical.footprint_tile_indices(site["position"], 3).isdisjoint(existing_tiles)

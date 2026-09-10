@@ -461,7 +461,12 @@ These names describe intended responsibilities, not permission to build speculat
   chemical block near the selected crude-oil source, rotate the pumpjack toward
   that block, and start the pipe on the exact external tile beyond the complete
   3x3 pumpjack footprint before extending a long power, construction, or pipe
-  corridor back toward the factory.
+  corridor back toward the factory. Pumpjack siting reserves each complete
+  3x3 body and its external output stub together. Later bodies and outlets
+  avoid both reservations; if a preferred outlet is blocked, try the other
+  rotations before rejecting that well. The opening and expansion selectors
+  share this pure geometry policy in `planners/pumpjack_siting.py`; full plan
+  collision validation remains mandatory.
 - The first refinery may use basic oil processing as bootstrap. Every later oil
   expansion uses advanced oil processing as one complete refinery-and-cracking
   block; heavy and light outputs may not be left without cracking consumers.

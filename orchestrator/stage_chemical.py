@@ -45,7 +45,11 @@ from planners.infrastructure_geometry import footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS, occupied_tile_indices
 from planners.resource_layouts import (
     generate_offshore_pump_source, generate_pumpjack_source,
-    verified_offshore_pump_output_tile, verified_pumpjack_output_tile,
+    verified_offshore_pump_output_tile,
+)
+from planners.pumpjack_siting import (
+    ESTIMATED_CRUDE_PER_PUMPJACK, REFINERY_CRUDE_DRAW_PER_SECOND,
+    extra_pumpjack_spots, pumpjack_sites_for_patch,
 )
 from tools.rcon_client import RconClient
 
@@ -91,10 +95,6 @@ def _merge(*plans: dict) -> dict:
     return merged
 
 
-#: Crude/s one basic-or-advanced refinery draws (100 crude per 5s either way).
-#: Pumpjacks are sized to saturate the built refinery; a second refinery
-#: without the wells to feed it is not capacity (and vice versa).
-REFINERY_CRUDE_DRAW_PER_SECOND = 20.0
 #: Opening refinery row: four basic refineries make ~36 petroleum/s, matching
 #: the two plastic plants' 40/s draw (user standard 2026-09-04). Advanced
 #: processing arrives through the existing ladder, not by overbuilding basic.
@@ -109,18 +109,6 @@ _CRUDE_EXPANSION_FAILED_CELLS: set[tuple[int, int]] = set()
 #: Radius around the plastic chest inside which pumpjacks count as district
 #: supply. Remote patches join through their own pipelines.
 DISTRICT_JACK_RADIUS = 120.0
-#: Conservative crude/s per pumpjack for build-time sizing (live-measured 9/s
-#: at +30% productivity on a middling patch; minimum yield floors near 2/s).
-#: Post-build starvation still expands later; this only sizes the opening set.
-ESTIMATED_CRUDE_PER_PUMPJACK = 8.0
-#: Hard ceiling on opening pumpjacks: patch-bounded, bill-bounded, and enough
-#: for one refinery at the estimate above. More wells join on measured
-#: starvation, never on speculation.
-MAX_OPENING_PUMPJACKS = 4
-#: Centre spacing between pumpjack 3x3 footprints: no overlap, with working
-#: room for each connector pipe. The fluid router and plan preflight still
-#: validate; spacing only proposes.
-PUMPJACK_SPOT_PITCH = 4.0
 
 
 def _crude_patch_tiles(
@@ -148,159 +136,6 @@ def _crude_patch_tiles(
         except (ValueError, TypeError):
             continue
     return tiles
-
-
-def _extra_pumpjack_spots(
-    tiles: list[tuple[float, float]], existing: Point | None, target: Point, *,
-    draw_per_second: float = REFINERY_CRUDE_DRAW_PER_SECOND,
-    est_per_jack: float = ESTIMATED_CRUDE_PER_PUMPJACK,
-    max_jacks: int = MAX_OPENING_PUMPJACKS,
-    blocked_tiles: set[tuple[int, int]] = frozenset(),
-) -> list[dict]:
-    """Extra pumpjack sites on the same patch, nearest first.
-
-    One refinery draws 20 crude/s; a lone 9/s well leaves it (and both
-    plastic plants behind it) idle most of the time (2026-09-04: plastic
-    crawled on 9/s against 40/s of plant draw). Sites cover at least one
-    crude tile, keep footprint pitch from each other and the existing jack,
-    and rotate their connector toward the cell. Returns site dicts ready for
-    generate_pumpjack_source; empty when the patch holds no more spots.
-    With no existing jack (a fresh remote patch), every spot is new and
-    tiles sort toward the refinery instead.
-    """
-    wanted = max(1, min(max_jacks, math.ceil(draw_per_second / est_per_jack)))
-    chosen: list[tuple[float, float]] = (
-        [(float(existing[0]), float(existing[1]))] if existing is not None else []
-    )
-    if existing is None:
-        order: Callable[[tuple[float, float]], float] = (
-            lambda t: (t[0] - target[0]) ** 2 + (t[1] - target[1]) ** 2
-        )
-    else:
-        order = (
-            lambda t: (t[0] - existing[0]) ** 2 + (t[1] - existing[1]) ** 2
-        )
-    spots: list[dict] = []
-    for tile in sorted(tiles, key=order):
-        if len(chosen) >= wanted:
-            break
-        candidate = (float(tile[0]), float(tile[1]))
-        # A crude tile only grants the resource overlap required by a
-        # pumpjack; it does not make a 3x3 pumpjack legal over an existing
-        # pole, pipe, rock, or water.  This used to be checked only after the
-        # whole oil packet was assembled, when one bad extra well could reject
-        # its source packet and leave the other wells on disconnected stubs.
-        footprint = footprint_tile_indices(candidate, ENTITY_FOOTPRINTS["pumpjack"])
-        if footprint & blocked_tiles:
-            continue
-        if any(
-            math.dist(candidate, placed) < PUMPJACK_SPOT_PITCH
-            for placed in chosen
-        ):
-            continue
-        site = _pumpjack_site_nearest(candidate, target)
-        if site.get("output") is None or site["output"] in blocked_tiles:
-            continue
-        chosen.append(candidate)
-        spots.append(site)
-    return spots
-
-
-def _pumpjack_sites_for_patch(
-    tiles: list[tuple[float, float]], primary: Point, target: Point, *,
-    blocked_tiles: set[tuple[int, int]] = frozenset(),
-    draw_per_second: float = REFINERY_CRUDE_DRAW_PER_SECOND,
-    est_per_jack: float = ESTIMATED_CRUDE_PER_PUMPJACK,
-    max_jacks: int = MAX_OPENING_PUMPJACKS,
-) -> list[dict]:
-    """Choose a legal, compact crude network for one patch.
-
-    The first pumpjack owns the long run to the refinery; each following one
-    joins that trunk.  Rank the first output by its route to the refinery and
-    each later output by its distance to the growing local network.  This is a
-    cheap deterministic proxy for the routed pipe bill, while the fluid router
-    remains the authority on a path around remote obstacles.
-    """
-    wanted = max(1, min(max_jacks, math.ceil(draw_per_second / est_per_jack)))
-    candidates = [tuple(map(float, primary))] + [
-        (float(x), float(y)) for x, y in tiles
-    ]
-    unique = list(dict.fromkeys(candidates))
-    legal = []
-    for candidate in unique:
-        if footprint_tile_indices(candidate, ENTITY_FOOTPRINTS["pumpjack"]) & blocked_tiles:
-            continue
-        site = _pumpjack_site_nearest(candidate, target)
-        if site.get("output") is not None and site["output"] not in blocked_tiles:
-            legal.append(site)
-    if not legal:
-        return []
-
-    def _target_cost(site: dict) -> int:
-        output = site["output"]
-        return abs(output[0] - target[0]) + abs(output[1] - target[1])
-
-    # The long trunk matters more than any later branch, so settle its source
-    # first.  Position/direction make ties repeatable across identical seeds.
-    legal.sort(key=lambda site: (_target_cost(site), site["position"], site["direction"]))
-    chosen = [legal.pop(0)]
-    while legal and len(chosen) < wanted:
-        chosen_tiles = set().union(*(
-            footprint_tile_indices(
-                tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
-            ) for site in chosen
-        ))
-        viable = [
-            site for site in legal
-            if footprint_tile_indices(
-                tuple(site["position"]), ENTITY_FOOTPRINTS["pumpjack"],
-            ).isdisjoint(chosen_tiles)
-        ]
-        if not viable:
-            break
-        # Branches tap the nearest already-owned crude tile, so this is the
-        # incremental pipe cost, with the refinery distance as a stable tie.
-        viable.sort(key=lambda site: (
-            min(
-                abs(site["output"][0] - prior["output"][0])
-                + abs(site["output"][1] - prior["output"][1])
-                for prior in chosen
-            ),
-            _target_cost(site), site["position"], site["direction"],
-        ))
-        selected = viable[0]
-        chosen.append(selected)
-        legal.remove(selected)
-    return chosen
-
-
-def _pumpjack_site_nearest(oil_position: Point, target: Point) -> dict:
-    """Rotate a pumpjack so its real connector is closest to the local cell."""
-    sites = []
-    directions = ("north", "east", "south", "west")
-    vectors = {
-        "north": (0, -1), "east": (1, 0),
-        "south": (0, 1), "west": (-1, 0),
-    }
-    for direction in directions:
-        site = {
-            "position": oil_position, "resource": "crude-oil",
-            "direction": direction,
-        }
-        site["output"] = verified_pumpjack_output_tile(site)
-        sites.append(site)
-    return min(
-        sites,
-        key=lambda site: (
-            -(
-                vectors[site["direction"]][0] * (target[0] - oil_position[0])
-                + vectors[site["direction"]][1] * (target[1] - oil_position[1])
-            ),
-            abs(site["output"][0] - target[0])
-            + abs(site["output"][1] - target[1]),
-            directions.index(site["direction"]),
-        ),
-    )
 
 
 def _find_oil_cell_site(
@@ -411,14 +246,22 @@ _POWER_ENTITIES = frozenset({
 })
 
 
-def _filter_plan_actions(plan: dict, predicate: Callable[[dict], bool]) -> dict:
-    """Copy the phases whose actions match one construction packet."""
-    phases = []
+def _split_plan_power(plan: dict) -> tuple[dict, dict]:
+    """Partition power from construction while retaining plan/phase metadata."""
+    power_phases, construction_phases = [], []
     for phase in plan["phases"]:
-        actions = [action for action in phase["actions"] if predicate(action)]
-        if actions:
-            phases.append({**phase, "actions": actions})
-    return {**plan, "phases": phases}
+        power, construction = [], []
+        for action in phase["actions"]:
+            target = power if action.get("entity") in _POWER_ENTITIES else construction
+            target.append(action)
+        if power:
+            power_phases.append({**phase, "actions": power})
+        if construction:
+            construction_phases.append({**phase, "actions": construction})
+    return (
+        {**plan, "phases": power_phases},
+        {**plan, "phases": construction_phases},
+    )
 
 
 def _submit_oil_cell_packets(
@@ -938,12 +781,7 @@ def _extend_sulfur_stage(
                 "instead of detouring"
             )
 
-    power = _filter_plan_actions(
-        sulfur, lambda action: action.get("entity") in _POWER_ENTITIES,
-    )
-    machines = _filter_plan_actions(
-        sulfur, lambda action: action.get("entity") not in _POWER_ENTITIES,
-    )
+    power, machines = _split_plan_power(sulfur)
     packets = [
         ("chemical_sulfur_power", power),
         ("chemical_sulfur_machines", machines),
@@ -1210,7 +1048,7 @@ def _expand_remote_crude_if_starved(
             ) if tiles else set()
         except Exception:
             placement_blocked = set()
-        spots = _extra_pumpjack_spots(
+        spots = extra_pumpjack_spots(
             tiles, None, crude_to,
             draw_per_second=max(
                 1.0, OPENING_CRUDE_TARGET_PER_SECOND - capacity,
@@ -1364,7 +1202,7 @@ def ensure_oil_cell(
         )
     except Exception:
         pumpjack_blocked = set()
-    pumpjack_sites = _pumpjack_sites_for_patch(
+    pumpjack_sites = pumpjack_sites_for_patch(
         patch_tiles, oil_pos, cell_centre, blocked_tiles=pumpjack_blocked,
     )
     if not pumpjack_sites:
@@ -1643,18 +1481,9 @@ def ensure_oil_cell(
     coal_plan = {"phases": [{
         "name": "bridge_coal_to_plastic-bar", "actions": coal_actions,
     }]}
-    power_plan = _merge(*(
-        _filter_plan_actions(
-            plan, lambda action: action.get("entity") in _POWER_ENTITIES,
-        )
-        for plan in plans
-    ))
-    unpowered = [
-        _filter_plan_actions(
-            plan, lambda action: action.get("entity") not in _POWER_ENTITIES,
-        )
-        for plan in plans
-    ]
+    split_plans = [_split_plan_power(plan) for plan in plans]
+    power_plan = _merge(*(power for power, _construction in split_plans))
+    unpowered = [construction for _power, construction in split_plans]
     crude_source_stage, water_source_stage, refinery_stage, plastic_stage, sulfur_stage = (
         unpowered
     )
@@ -1833,18 +1662,9 @@ def ensure_sulfuric_acid_cell(
     except ValueError as error:
         raise StuckError(f"water cannot be routed to sulfuric acid: {error}") from error
 
-    power = _merge(*(
-        _filter_plan_actions(
-            plan, lambda action: action.get("entity") in _POWER_ENTITIES,
-        )
-        for plan in plans
-    ))
-    water_stage, acid_stage = [
-        _filter_plan_actions(
-            plan, lambda action: action.get("entity") not in _POWER_ENTITIES,
-        )
-        for plan in plans
-    ]
+    split_plans = [_split_plan_power(plan) for plan in plans]
+    power = _merge(*(power for power, _construction in split_plans))
+    water_stage, acid_stage = [construction for _power, construction in split_plans]
     packets = [
         ("acid_power_backbone", power),
         ("acid_water_source_and_machine", _merge(water_stage, acid_stage)),
@@ -1916,12 +1736,7 @@ def _attach_battery_to_acid(
         )
     except ValueError as error:
         raise StuckError(f"acid cannot be routed to battery: {error}") from error
-    power = _filter_plan_actions(
-        battery, lambda action: action.get("entity") in _POWER_ENTITIES,
-    )
-    machine = _filter_plan_actions(
-        battery, lambda action: action.get("entity") not in _POWER_ENTITIES,
-    )
+    power, machine = _split_plan_power(battery)
     _submit_oil_cell_packets(
         client, bridge, surface, force,
         [
