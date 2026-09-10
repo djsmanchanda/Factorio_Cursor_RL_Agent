@@ -3685,3 +3685,120 @@ def test_empty_cell_delivery_names_the_delivery_time_stock_triple(
         landed.append, requester_position=chest,
     ) is True
     assert not any("CELL DELIVERY STOCK" in message for message in landed)
+
+
+def test_rotating_switch_wait_names_usable_vs_available_stock(monkeypatch) -> None:
+    """Cycle 13 repeated `needs steel-plate=2, with no stock` while the net
+    held 2: the shortage predicate reads usable (ledger-allocatable) stock,
+    so flowing-but-locked units look absent on the SWITCH line. The wait must
+    carry its usable/available pair beside the prerequisite requester, free
+    pool capacity, and active loan state adjacently; a missing prerequisite
+    loan reads `none` instead of raising."""
+    loan = SimpleNamespace(
+        target_item="steel-chest", step_recipe="steel-plate",
+        current_recipe="steel-chest",
+        machine_position=(36.5, 32.5), requester_position=(39.5, 32.5),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents", lambda *_a: {"steel-plate": 0},
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+    messages: list[str] = []
+
+    assert builder._emit_rotating_switch_stock(
+        object(), "nauvis", "player", "assembling-machine-2",
+        "steel-plate", 2, {"steel-plate": 2}, {"steel-plate": 0},
+        (loan,), (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 1
+    line = messages[0]
+    assert "ROTATING MALL STOCK" in line
+    assert "steel-plate=2" in line
+    assert "usable=0" in line
+    assert "available=2" in line
+    assert "requester=0" in line
+    assert "6/12" in line
+    assert "steel-chest:steel-plate@(36.5,32.5)" in line
+
+    lonely: list[str] = []
+
+    assert builder._emit_rotating_switch_stock(
+        object(), "nauvis", "player", "assembling-machine-2",
+        "steel-plate", 2, {"steel-plate": 0}, {"steel-plate": 0},
+        (), None, lonely.append,
+    ) is None
+
+    assert len(lonely) == 1
+    assert "requester=none" in lonely[0]
+    assert "pool ? free" in lonely[0]
+    assert "loans -" in lonely[0]
+
+
+def test_no_progress_verdict_names_work_loans_and_pool(monkeypatch) -> None:
+    """Cycle 14 died on `electric-furnace 88%` with a true ladder reason
+    while establishment advanced elsewhere: the fatal verdict must carry
+    the frozen work keys, the selected item's transferable count, per-loan
+    fulfillment distances, each loan cell's requester contents, and free
+    pool capacity adjacently; a null task with no loans or pool reads safe
+    markers instead of raising."""
+    loan = SimpleNamespace(
+        target_item="pipe", step_recipe="pipe",
+        current_recipe="pipe", machine_position=(36.5, 32.5),
+        requester_position=(39.5, 32.5), target_count=100,
+        spare_target_count=100,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"pipe": 81, "electric-furnace": 23},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents",
+        lambda *_a: {"iron-plate": 0},
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan,),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 7)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+    messages: list[str] = []
+    signature = (
+        "electric-furnace", 88, ("electric-furnace", "pipe"), (), (),
+        (("iron-plate", (("electric-furnace", 6),)),), (),
+    )
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        12, 5, 1234, (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 1
+    line = messages[0]
+    assert "NO PROGRESS VERDICT" in line
+    assert "task=electric-furnace" in line
+    assert "progress=88%" in line
+    assert "passes=12" in line
+    assert "mall=[electric-furnace,pipe]" in line
+    assert "plates=[iron-plate]" in line
+    assert "have=23" in line
+    assert "ghosts=5" in line
+    assert "stock=1234" in line
+    assert "5/12" in line
+    assert "pipe:pipe@(36.5,32.5) 81/100+100" in line
+    assert "iron-plate=0" in line
+
+    lonely: list[str] = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", (None, None, (), (), (), (), ()),
+        "automation-science-pack", 12, 0, 0, None, lonely.append,
+    ) is None
+
+    assert len(lonely) == 1
+    assert "task=automation-science-pack" in lonely[0]
+    assert "loans -" in lonely[0]
+    assert "cells -" in lonely[0]

@@ -8160,6 +8160,15 @@ def _rationed_mall_batch(
                     f"{external.count}, with no stock or live producer; "
                     "establishing that prerequisite before borrowing a slot"
                 )
+                # Cycle 13 repeated this "no stock" claim while the net held
+                # 2 steel-plate: the predicate reads usable (allocatable)
+                # stock, so flowing-but-locked units look absent. Emit-only;
+                # planning is unchanged.
+                _emit_rotating_switch_stock(
+                    client, surface, force, item, external.item,
+                    external.count, actual, usable, active, reference_point,
+                    emit,
+                )
             # Establishing the prerequisite is not optional: restoring the
             # loan and merely deferring re-borrows it every pass while the
             # prerequisite is never built (2026-09-04: an AM2 loan borrowed
@@ -8674,6 +8683,202 @@ def _emit_cell_delivery_stock(
         )
     except Exception as error:
         emit(f"  CELL DELIVERY STOCK skipped: {error}")
+
+
+def _emit_rotating_switch_stock(
+    client: RconClient, surface: str, force: str, item: str,
+    external_item: str, external_count: int,
+    actual: Mapping[str, int], usable: Mapping[str, int],
+    loans, reference_point: Point | None,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic for a rotating-mall prerequisite wait. Zero
+    behavior change: every probe is guarded, nothing is submitted, and any
+    failure emits a skip marker instead of raising.
+
+    Cycle 13 died repeating `needs steel-plate=2, with no stock` while the
+    net held 2: the shortage predicate reads ledger-allocatable (`usable`)
+    stock, so flowing-but-locked units look absent on the SWITCH line. Naming
+    the usable/available pair beside the prerequisite cell's requester
+    contents, free pool capacity, and the active loan table lets the next
+    identical verdict separate establishment latency (flowing but unspendable)
+    from a true stall (nothing anywhere) without cross-pass pairing.
+    """
+    try:
+        prerequisite = next(
+            (
+                loan for loan in (loans or ())
+                if loan.target_item == external_item
+                or getattr(loan, "step_recipe", None) == external_item
+            ),
+            None,
+        )
+    except Exception:
+        prerequisite = None
+    try:
+        requester = (
+            getattr(prerequisite, "requester_position", None)
+            if prerequisite is not None else None
+        )
+        contents = (
+            live_base.chest_contents(client, surface, requester)
+            if requester is not None else None
+        )
+    except Exception:
+        contents = None
+    try:
+        committed = (
+            (
+                mall_demand_slot_count(client, surface, reference_point)
+                if _independent_mall_ready(client, surface, force)
+                else mall_slot_count(client, surface, reference_point)
+            )
+            if reference_point is not None else None
+        )
+    except Exception:
+        committed = None
+    try:
+        slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
+    except Exception:
+        slot_limit = None
+    try:
+        if prerequisite is None:
+            prereq_requester = "none"
+        elif contents is None:
+            prereq_requester = "?"
+        else:
+            prereq_requester = str(int(contents.get(external_item, 0)))
+        table = ",".join(
+            f"{holder.target_item}:{holder.step_recipe or holder.current_recipe}"
+            f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
+            for holder in (loans or ())
+        ) or "-"
+        emit(
+            f"  ROTATING MALL STOCK: {item} waits on {external_item}="
+            f"{external_count} usable={int(usable.get(external_item, 0))} "
+            f"available={int(actual.get(external_item, 0))} | prereq "
+            f"requester={prereq_requester} | pool "
+            f"{f'{max(0, slot_limit - int(committed))}/{slot_limit}' if committed is not None and slot_limit is not None else '?'}"
+            f" free | loans {table}"
+        )
+    except Exception as error:
+        emit(f"  ROTATING MALL STOCK skipped: {error}")
+
+
+def _emit_no_progress_verdict_stock(
+    client: RconClient, surface: str, force: str, signature: tuple,
+    goal_item: str, unchanged_passes: int, ghosts_now, items_now,
+    reference_point: Point | None,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic on the fatal no-progress pass. Zero behavior
+    change: every probe is guarded, nothing is submitted, and any failure
+    emits a skip marker instead of raising.
+
+    Cycle 14 died on `electric-furnace 88%` with the TRUE deferred reason
+    `chemical ladder is establishing plastic-bar before electric-furnace`
+    while the coal-coverage chain and pipe crafts advanced elsewhere: the
+    verdict names the frozen headline but not the frozen work, the blocked
+    cells, or each loan's distance to fulfill/restore. Carrying the
+    outstanding work keys, the selected item's transferable count, per-loan
+    have/target+spare fulfillment distances, each loan cell's requester
+    contents, and free pool capacity adjacently lets the next identical
+    verdict separate genuine establishment (holders advancing toward
+    fulfill) from a true stall (flat bills, empty cells) without
+    cross-pass pairing.
+    """
+    try:
+        item = signature[0] if signature else None
+        progress = signature[1] if len(signature) > 1 else None
+        mall_keys = ",".join(signature[2]) if len(signature) > 2 else ""
+        background_keys = (
+            ",".join(signature[3]) if len(signature) > 3 else ""
+        )
+        plate_keys = ",".join(
+            plate for plate, _ in (signature[5] if len(signature) > 5 else ())
+        )
+    except Exception:
+        item, progress = None, None
+        mall_keys, background_keys, plate_keys = "", "", ""
+    try:
+        actual = live_base.available_items(client, surface, force)
+    except Exception:
+        actual = {}
+    try:
+        loans = active_bootstrap_loans(client, surface, force)
+    except Exception:
+        loans = ()
+    try:
+        committed = (
+            (
+                mall_demand_slot_count(client, surface, reference_point)
+                if _independent_mall_ready(client, surface, force)
+                else mall_slot_count(client, surface, reference_point)
+            )
+            if reference_point is not None else None
+        )
+    except Exception:
+        committed = None
+    try:
+        slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
+    except Exception:
+        slot_limit = None
+    try:
+        have = (
+            str(int((actual or {}).get(item, 0))) if item is not None
+            else "-"
+        )
+        table_parts: list[str] = []
+        cell_parts: list[str] = []
+        for holder in (loans or ()):
+            try:
+                target = holder.target_item
+                step = holder.step_recipe or holder.current_recipe
+                held = int((actual or {}).get(target, 0))
+                need = int(holder.target_count or 0)
+                spare = getattr(holder, "spare_target_count", None)
+                ceiling = int(spare) if spare is not None else need
+                machine = holder.machine_position
+                table_parts.append(
+                    f"{target}:{step}@({machine[0]:.1f},{machine[1]:.1f}) "
+                    f"{held}/{need}+{ceiling}"
+                )
+            except Exception:
+                continue
+            try:
+                requester = holder.requester_position
+                contents = live_base.chest_contents(
+                    client, surface, requester,
+                )
+                inner = ",".join(
+                    f"{key}={int(value)}"
+                    for key, value in sorted(contents.items())
+                ) or "-"
+                cell_parts.append(
+                    f"{target}@({requester[0]:.1f},{requester[1]:.1f})"
+                    f"{{{inner}}}"
+                )
+            except Exception:
+                cell_parts.append(f"{getattr(holder, 'target_item', '?')}@?=?")
+        try:
+            pool_free: str = (
+                f"{max(0, slot_limit - int(committed))}/{slot_limit}"
+                if committed is not None and slot_limit is not None
+                else "?"
+            )
+        except Exception:
+            pool_free = "?"
+        emit(
+            f"  NO PROGRESS VERDICT: task={item or goal_item} "
+            f"progress={progress}% passes={unchanged_passes} | work "
+            f"mall=[{mall_keys}] bg=[{background_keys}] "
+            f"plates=[{plate_keys}] | have={have} ghosts={ghosts_now} "
+            f"stock={items_now} | pool {pool_free} free | loans "
+            f"{','.join(table_parts) or '-'} | cells "
+            f"{';'.join(cell_parts) or '-'}"
+        )
+    except Exception as error:
+        emit(f"  NO PROGRESS VERDICT skipped: {error}")
 
 
 def _deliver_cell_ingredients(
@@ -11452,6 +11657,12 @@ def run(
                     deferred_reason = (
                         str(getattr(deferred_entry, "reason", "") or "") or None
                     )
+            if unchanged_passes >= _MAX_UNCHANGED_PASSES:
+                _emit_no_progress_verdict_stock(
+                    client, surface, force, signature, goal_item,
+                    unchanged_passes, ghosts_now, items_now,
+                    reference_point, emit,
+                )
             _refuse_to_spin(
                 unchanged_passes, signature, goal_item,
                 deferred_reason=deferred_reason,
