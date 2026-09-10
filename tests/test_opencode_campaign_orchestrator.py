@@ -52,8 +52,11 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
         dry_run=False, resume_active_run=False,
     )
     prompt = campaign._completion_prompt(config, 3)
-    assert "compare this completed run" in prompt
+    assert "compare this\ncompleted run against three references" in prompt
     assert "exactly one small reusable fix" in prompt
+    assert "competing explanation" in prompt
+    assert "request the specific missing observation instead" in prompt
+    assert "No code change is required" in prompt
     assert "CAMPAIGN_DECISION:" in prompt
 
 
@@ -69,8 +72,9 @@ def test_telemetry_prompt_allows_only_a_zero_behavior_discriminator(tmp_path: Pa
 
     prompt = campaign._telemetry_prompt(config, 4)
 
-    assert "zero-behavior observability patch" in prompt
+    assert "zero-behavior" in prompt
     assert "Do not alter planning behavior" in prompt
+    assert "Never manufacture telemetry just to unlock another run" in prompt
 
 
 def test_dry_run_completes_without_touching_live_services(tmp_path: Path) -> None:

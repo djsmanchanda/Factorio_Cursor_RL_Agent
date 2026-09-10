@@ -37,6 +37,11 @@ transcripts live under `~/.local/share/factorio-rl/opencode_helper/runs/`.
   the factory.
 - It makes no run-continuation or code-fix decision. Its final handoff is
   evidence for a later coding task.
+- It separates observation from interpretation: checkpoints record timestamped
+  facts, deltas, and evidence references first, with hypotheses explicitly
+  labeled. Repeated unchanged observations collapse into one interval with a
+  repetition count. It never converts "unknown" into zero and never infers
+  adequate supply from aggregate stock.
 - One run gets one session and one findings document. A helper restart resumes
   the saved session for that same run.
 - A failed or timed-out OpenCode request is resumed with a `continue` prompt up

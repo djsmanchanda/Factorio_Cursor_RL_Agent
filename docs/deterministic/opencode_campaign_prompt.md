@@ -52,7 +52,7 @@ Crash/restart protocol:
 4. Write a concise checkpoint after every completed run so another session can
    resume without the transcript.
 
-Observation timing:
+Observation timing and recording:
 - Never sleep longer than 120 seconds while observing.
 - Prefer 30-60 seconds while construction is active; use 120 seconds only for a
   measured slow phase.
@@ -60,6 +60,17 @@ Observation timing:
   changed, continue the bounded loop without reprinting old output.
 - Stop waiting immediately on RUN END, STUCK, ERROR, research completion, or a
   user-visible invalid layout.
+- Separate observation from interpretation. Record timestamped facts, deltas,
+  and evidence references; label hypotheses explicitly. Never convert
+  "unknown" into zero, and never infer adequate supply from aggregate stock
+  (total, accessible, and allocated stock are different claims).
+- Summaries report milestone transitions, newly blocked dependencies, changes
+  in production/delivery rates, and contradictions. Repeated unchanged
+  observations become one interval with a repetition count.
+- Capture a blocked dependency whole: recipe and required quantities,
+  requester contents, machine input/output inventories, assembler/inserter
+  status, power, transferable stock, reservations, ghost backlog, and
+  craft/delivery deltas.
 
 Run journal:
 - Keep at most the latest ten runs in:
@@ -86,17 +97,29 @@ Failure loop:
 2. Read the first hard failure, not the final repeated symptom.
 3. Trace observation -> decision -> plan -> execution -> outcome.
 4. Before editing, state:
-   - verified evidence;
-   - root cause;
-   - reusable invariant being violated;
-   - smallest coherent fix;
-   - focused test that will fail before and pass after.
+   - observed failure;
+   - causal hypothesis;
+   - supporting evidence;
+   - competing explanation;
+   - smallest reusable fix;
+   - predicted measurable result.
+   If the evidence cannot distinguish the explanations, request the specific
+   missing observation instead of guessing.
 5. Prefer a better observation, rate model, action, validator, or planner
    primitive. Do not accumulate recipe-, coordinate-, or run-specific branches.
-6. Run focused tests. Run the full suite only at a durable milestone or before a
+6. Inspect the preserved failed episode before resetting, with read-only
+   probes where possible. A telemetry-only rerun is allowed only when the
+   missing evidence requires execution — specify what each possible result
+   would mean first.
+7. Verify the failure mechanism locally before another full episode: prefer a
+   focused behavioral reproduction, then the predicted milestone under
+   matching starting conditions. Periodically confirm improvements on another
+   scenario.
+8. Run focused tests. Run the full suite only at a durable milestone or before a
    commit.
-7. Perform only the lifecycle action required by the changed files.
-8. Run once, observe, update the journal, and compare against the previous run.
+9. Perform only the lifecycle action required by the changed files.
+10. Run once, observe, update the journal, and compare against all three
+    references below.
 
 When a clean reset, deployment, server restart, and runner start are all
 required, use one bounded tool call instead of issuing six separate calls:
@@ -109,9 +132,13 @@ required, use one bounded tool call instead of issuing six separate calls:
 Use `--dry-run` first whenever the resolved paths or target are uncertain. Do
 not use `cycle` when only a Python runner restart is required.
 
-Trend gates:
-- A run is better only when it reaches new live evidence, completes the mission,
-  or removes the prior failure without losing an earlier milestone.
+Trend gates and comparison:
+- Compare every run against three references: the preceding run, the best
+  verified milestone run, and previous runs with the same failure mechanism.
+  A changed terminal item alone does not establish a different cause.
+- Classify each outcome separately: factory improvement, useful diagnostic
+  evidence, regression, or inconclusive. Longer survival and larger
+  inventories do not establish factory improvement.
 - Test count, elapsed time, or "the runner stayed alive" alone do not prove an
   improvement.
 - If the same normalized failure occurs twice, do not launch a third retry until
@@ -120,6 +147,11 @@ Trend gates:
   patches, and propose simplification or rollback before continuing.
 - Keep one active root cause. Do not patch several speculative causes between
   runs.
+- No code change is required every cycle. A cycle may end with a diagnosis, a
+  rejected hypothesis, or an unresolved evidence request. Never manufacture
+  changes just to unlock another run.
+- One journal entry per episode, with exact provenance: episode ID, commit,
+  dirty-patch hash, save/configuration/profile, tests, and activated code.
 
 Planning invariants:
 - Size production from measured input/output rates, not machine counts alone.

@@ -257,29 +257,55 @@ The sole live scope is `{config.state_root}` on `nauvis` / `player`.
 
 Read AGENTS.md, docs/system_invariants.md, docs/factorio_operations.md, docs/deterministic/README.md,
 docs/deterministic/planning.md, docs/deterministic/opencode_campaign_prompt.md, git status, and the prior sections of
-`{config.observations}`. For every checkpoint, read only its new section and append a compact code-correlated assessment:
-progress, bottleneck, mall target/stock signals, implicated code, and one hypothesis. Use read-only live observation and
+`{config.observations}`. For every checkpoint, read only its new section and append a compact assessment below it.
+
+Separate observation from interpretation. Record timestamped facts, deltas, and evidence references (log offsets,
+report ticks, inventory snapshots). Label every hypothesis as one, and keep raw observations in the transcript;
+summaries report only milestone transitions, newly blocked dependencies, production/delivery-rate changes, and
+contradictions. Collapse repeated unchanged observations into one interval with a repetition count. Never convert
+"unknown" into zero, and never infer adequate supply from aggregate stock: total, accessible, and already-allocated
+stock are different claims. A blocked dependency is captured whole: recipe and required quantities, requester
+contents, machine input/output inventories, assembler/inserter status, power, transferable stock, reservations,
+ghost backlog, and craft/delivery deltas.
+
+Compare against three references, not one: the preceding run, the best verified milestone run, and previous runs
+with the same failure mechanism. A changed terminal item alone does not establish a different cause. Classify each
+outcome separately: factory improvement, useful diagnostic evidence, regression, or inconclusive. Longer survival
+and larger inventories do not establish factory improvement. Use read-only live observation and
 GET `{config.dashboard_url}`; do not change code or execute server lifecycle/factory actions while the run is active.
 
-At RUN END, the parent will ask you to compare this run with the immediately previous documented run. That final comparison
-is the only basis for one small reusable focused fix and focused test. Do not manually repair the factory or add coordinate/
-recipe-specific exceptions. Reply briefly after this setup observation."""
+At RUN END, the parent will ask you to compare this run on all three references. That comparison is the only basis
+for a fix, and a fix is not mandatory: a diagnosis, a rejected hypothesis, or an unresolved evidence request is a
+complete cycle outcome. Reply briefly after this setup observation."""
 
 
 def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
     return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and append
-its code-correlated assessment below it. The runner remains active: make no code, lifecycle, deployment, reset, or factory
-changes. If nothing changed, state that once and name the next measurable signal rather than repeating old logs."""
+its assessment below it: timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
+dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
+reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
+count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
+lifecycle, deployment, reset, or factory changes."""
 
 
 def _completion_prompt(config: Config, cycle: int) -> str:
-    return f"""Cycle {cycle} has RUN END. Read its final run block, wait up to {config.post_run_wait_seconds} seconds for helper
-output if it is still arriving, and compare this completed run to the immediately preceding run in `{config.observations}`.
-Append the comparison, root cause, implicated code, and next plan to the document.
+    return f"""Cycle {cycle} has RUN END. Before anything else, inspect the preserved failed episode with read-only probes
+where possible: the isolated save is still in place until the parent starts the next fresh run. Read its final run
+block, wait up to {config.post_run_wait_seconds} seconds for helper output if it is still arriving, and compare this
+completed run against three references in `{config.observations}`: the preceding run, the best verified milestone run,
+and previous runs with the same failure mechanism. Then classify the outcome: factory improvement, useful diagnostic
+evidence, regression, or inconclusive. Survival time and inventory size alone decide nothing.
 
-Only when that comparison supports it, implement exactly one small reusable fix, add/update its narrow regression test, and
-run the focused test. Do not start/reset/redeploy Factorio; the parent owns the next fresh run. Preserve unrelated dirty
-files. If no safe focused change is justified, make no code change. End exactly with:
+Only when the evidence supports a fix, implement exactly one small reusable fix, add/update its narrow regression
+test, and run the focused test. Before editing, state: observed failure -> causal hypothesis -> supporting evidence
+-> competing explanation -> smallest reusable fix -> predicted measurable result. If the evidence cannot distinguish
+the explanations, do not guess: request the specific missing observation instead. A telemetry-only rerun is allowed
+only when the missing evidence requires execution, and you must specify what each possible result would mean. Prefer
+verifying the failure mechanism locally (a focused behavioral reproduction, then the predicted milestone under
+matching starting conditions) over another full episode. Do not start/reset/redeploy Factorio; the parent owns the
+next fresh run. Preserve unrelated dirty files. No code change is required: a diagnosis, a rejected hypothesis, or
+an unresolved evidence request ends the cycle legitimately. Record exact provenance in the journal entry (one entry
+per episode): episode ID, commit, dirty-patch hash, save/configuration/profile, tests, and activated code. End exactly with:
 
 CAMPAIGN_DECISION:
 status: change|no-change|stop
@@ -290,12 +316,12 @@ reason: one sentence
 
 
 def _telemetry_prompt(config: Config, cycle: int) -> str:
-    return f"""Cycle {cycle}'s final comparison correctly declined a speculative behavior change, but the campaign needs
-a non-speculative discriminator before its next fresh run. Implement one minimal zero-behavior observability patch for
-the identified terminal bottleneck, with a narrow regression test. Prefer explicit live facts that distinguish the
-blocked loan cell's missing ingredient/requester contents, free pool capacity, active loan state, and restore/fulfillment
-decision. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files. Append why this
-telemetry is sufficient to `{config.observations}`. End exactly with:
+    return f"""Cycle {cycle}'s final comparison declined a behavior change. A follow-up observability patch is allowed
+only to resolve one specifically named evidence gap from that comparison: implement the minimal zero-behavior
+telemetry that captures it, with a narrow regression test, and state what each possible reading would mean for the
+competing explanations. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files.
+Never manufacture telemetry just to unlock another run: if no evidence gap names telemetry as its resolution, make
+no change and say so. Append the outcome to `{config.observations}`. End exactly with:
 
 CAMPAIGN_DECISION:
 status: change|no-change|stop
