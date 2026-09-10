@@ -324,11 +324,16 @@ def _tree_fingerprint(observations: Path) -> str:
 
 
 def _decision(output: str) -> str:
-    match = DECISION.search(output)
-    if not match:
-        return "no-change"
-    fields = dict(line.split(":", 1) for line in match.group(1).splitlines() if ":" in line)
-    return fields.get("status", "no-change").strip().lower()
+    # The session transcript also echoes the prompt template
+    # ("status: change|no-change|stop"), so the first match is not the
+    # verdict. Take the last match with a real status instead.
+    best = "no-change"
+    for match in DECISION.finditer(output):
+        fields = dict(line.split(":", 1) for line in match.group(1).splitlines() if ":" in line)
+        status = fields.get("status", "").strip().lower()
+        if status in {"change", "no-change", "stop"}:
+            best = status
+    return best
 
 
 def run_campaign(config: Config) -> int:
