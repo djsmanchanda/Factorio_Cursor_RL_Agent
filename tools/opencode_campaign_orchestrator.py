@@ -28,6 +28,10 @@ DEFAULT_OBSERVATIONS = REPO_ROOT / "docs/deterministic/opencode_campaign_observa
 DEFAULT_MODEL = "opencode-go/muse-spark-1.3-contributor"
 RUN_START = "RUN START:"
 RUN_END = "RUN END"
+# Real terminal lines look like `+2443s RUN END` at line start. The helper
+# agent's start prompt quotes "RUN END" mid-line, so a substring test would
+# declare every live run complete on its first checkpoint.
+_RUN_END_LINE = re.compile(r"(?m)^\+\d+s RUN END$")
 DECISION = re.compile(r"CAMPAIGN_DECISION:\s*(.*)", re.DOTALL)
 
 
@@ -147,7 +151,7 @@ def _latest_run(path: Path) -> tuple[bool, str]:
     if latest < 0:
         return False, ""
     current = contents[latest:]
-    return RUN_END in current, current[-12000:]
+    return _RUN_END_LINE.search(current) is not None, current[-12000:]
 
 
 def _terminal_key(run_text: str) -> str:
@@ -427,7 +431,11 @@ def _config(args: argparse.Namespace) -> Config:
         technology=args.technology, interval_seconds=args.interval_seconds,
         post_run_wait_seconds=args.post_run_wait_seconds, max_cycles=args.max_cycles,
         max_runtime_seconds=args.max_runtime_hours * 3600, model=args.model, variant=args.variant,
-        opencode_bin=args.opencode_bin, python=args.python.resolve(), campaign_manager=args.campaign_manager.resolve(),
+        # Keep --python unresolved: the runner manager detects the venv via
+        # `<python-dir>/../pyvenv.cfg`, and resolving `.venv/bin/python` to
+        # the underlying uv interpreter breaks that detection, leaving the
+        # systemd runner without its site-packages (ModuleNotFoundError).
+        opencode_bin=args.opencode_bin, python=args.python, campaign_manager=args.campaign_manager.resolve(),
         dashboard_url=args.dashboard_url, dry_run=args.dry_run, resume_active_run=args.resume_active_run,
     )
 
