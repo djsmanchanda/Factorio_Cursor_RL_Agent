@@ -58,6 +58,22 @@ def test_the_abort_names_what_was_stuck_and_at_what_completion() -> None:
     assert raised.value.details["progress_percent"] == 45
 
 
+def test_the_abort_records_unbacked_draws_in_details() -> None:
+    """Cycle 6 died on steel-plate while the message named electronic-circuit:
+    the blocker record must carry the unbacked set structurally so the next
+    identical verdict discriminates a true unbacked draw from a ladder cycle."""
+    signature = _pass_signature(_Task("steel-plate", 0), {"steel-plate": 6}, set())
+    autonomous_builder.UNBACKED_DRAWS.update({"electronic-circuit"})
+    try:
+        with pytest.raises(StuckError) as raised:
+            _refuse_to_spin(_MAX_UNCHANGED_PASSES, signature, "automation-science-pack")
+    finally:
+        autonomous_builder.UNBACKED_DRAWS.clear()
+
+    assert raised.value.details["selected_task"] == "steel-plate"
+    assert raised.value.details["unbacked_draws"] == ["electronic-circuit"]
+
+
 def test_the_goal_item_is_named_when_no_task_was_selected() -> None:
     signature = _pass_signature(None, {}, set())
 

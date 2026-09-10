@@ -3358,6 +3358,46 @@ def test_current_step_progress_still_shields_yield(monkeypatch) -> None:
     ) is None
 
 
+def test_progress_yields_when_holder_is_blocked_behind_its_waiter(monkeypatch) -> None:
+    """2026-09-07 (cycle 7): an AM2 loan at 1/2 crafts on missing steel held
+    its cell while steel admission waited on the pipe rung, and the pipe loan
+    needed the AM2 loan's own cell. Partial progress can never become
+    completion without the waiter, so the holder yields despite progress and
+    binding status -- yielding sequences the dependency, like the feeder
+    path, instead of time-slicing."""
+    from orchestrator.mall_bootstrap import MallBootstrapLoan
+    loan = MallBootstrapLoan(
+        original_recipe="iron-gear-wheel",
+        target_item="assembling-machine-2", target_count=2, side="left",
+        requester_position=(39.5, 32.5),
+        current_recipe="assembling-machine-2",
+        step_recipe="assembling-machine-2",
+        step_baseline_finished=100,
+        step_required_crafts=2,
+        step_minimum_crafts=2,
+    )
+    monkeypatch.setattr(builder, "_recipe_inputs_flowing", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "_binding_loan_shields_preempt", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_loan_blocked_inputs", lambda *_a: ["steel-plate"],
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 101,
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor",
+        lambda _client, _surface, _force, item: (
+            "pipe" if item == "steel-plate" else None
+        ),
+    )
+
+    assert builder._blocked_loan_to_yield(
+        object(), "nauvis", "player", [loan], "pipe",
+    ) is loan
+
+
 def test_feeder_fires_despite_completed_prerequisite_steps(monkeypatch) -> None:
     """Same stale-credit shape through the feeder path: the holder yields
     so its feeder runs first."""

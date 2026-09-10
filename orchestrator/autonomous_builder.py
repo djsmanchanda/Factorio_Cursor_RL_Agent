@@ -6358,6 +6358,16 @@ def _blocked_loan_to_yield(
     until the run died). Loans with advancing current steps, binding
     shields, or dry harnesses keep their cells; each yield produces real
     output, so the waiter cannot ping-pong back.
+
+    Partial progress does not shield when it can never become completion:
+    a holder blocked on an input whose missing ladder predecessor IS the
+    waiter (2026-09-07 cycle 7: an AM2 loan sat at 1/2 crafts on missing
+    steel while steel admission waited on the pipe rung, and the pipe loan
+    needed the AM2 loan's own cell) yields despite progress or binding
+    status. Yielding sequences the dependency instead of time-slicing -- the
+    waiter banks rung output, then the holder resumes -- like the feeder
+    path, which is already deaf to the binding shield for the mirrored
+    shape.
     """
     try:
         waiter_flowing = _recipe_inputs_flowing(client, surface, force, waiter)
@@ -6367,24 +6377,101 @@ def _blocked_loan_to_yield(
         return None
     for loan in loans:
         try:
-            if _binding_loan_shields_preempt(
-                client, surface, force, loan, waiter,
-            ):
-                continue
-            if not _loan_blocked_inputs(client, surface, force, loan):
+            blocked = _loan_blocked_inputs(client, surface, force, loan)
+            if not blocked:
                 continue
             if loan.step_recipe is None:
                 continue
-            finished = _bootstrap_loan_products_finished(
-                client, surface, loan,
-            )
-            baseline = loan.step_baseline_finished or 0
-            if finished is None or finished > baseline:
-                continue
+            needs_waiter = False
+            for missing in blocked:
+                try:
+                    if _missing_chemical_ladder_predecessor(
+                        client, surface, force, missing,
+                    ) == waiter:
+                        needs_waiter = True
+                        break
+                except Exception:
+                    continue
+            if not needs_waiter:
+                if _binding_loan_shields_preempt(
+                    client, surface, force, loan, waiter,
+                ):
+                    continue
+                finished = _bootstrap_loan_products_finished(
+                    client, surface, loan,
+                )
+                baseline = loan.step_baseline_finished or 0
+                if finished is None or finished > baseline:
+                    continue
             return loan
         except Exception:
             continue
     return None
+
+
+def _emit_loan_yield_decision(
+    client: RconClient, surface: str, force: str,
+    loans: Sequence[MallBootstrapLoan], waiter: str,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic line for a serial-handoff decision. Zero
+    behavior change: every probe is guarded, nothing is submitted, and any
+    failure emits a skip marker instead of raising.
+
+    A HANDOFF line alone cannot distinguish why neither the yield path nor
+    the feeder path fired (2026-09-07 cycle 7: an AM2 holder at 1/2 crafts
+    on missing steel while steel admission waited on the pipe rung needed
+    the holder's own cell). Waiter flow, each holder's blocked inputs and
+    ladder predecessor, the binding shield, and current-step progress decide
+    it, so this names all five from explicit live facts on every handoff.
+    """
+    try:
+        try:
+            flowing = _recipe_inputs_flowing(client, surface, force, waiter)
+        except Exception:
+            flowing = None
+        holders = []
+        for loan in loans:
+            try:
+                blocked = _loan_blocked_inputs(client, surface, force, loan)
+            except Exception:
+                blocked = []
+            ladder: dict[str, str | None] = {}
+            for missing in blocked:
+                try:
+                    ladder[missing] = _missing_chemical_ladder_predecessor(
+                        client, surface, force, missing,
+                    )
+                except Exception:
+                    continue
+            try:
+                shield = _binding_loan_shields_preempt(
+                    client, surface, force, loan, waiter,
+                )
+            except Exception:
+                shield = None
+            try:
+                finished = _bootstrap_loan_products_finished(
+                    client, surface, loan,
+                )
+            except Exception:
+                finished = None
+            baseline = loan.step_baseline_finished or 0
+            holders.append(
+                f"{loan.target_item}:{loan.step_recipe or loan.current_recipe}"
+                f"@({loan.machine_position[0]:.1f},{loan.machine_position[1]:.1f})"
+                f" blocked=[{','.join(blocked)}]"
+                f" ladder={{{','.join(f'{item}:{ladder[item]}' for item in ladder)}}}"
+                f" binding_shield={shield}"
+                f" progress={finished if finished is not None else '?'}/{baseline}"
+            )
+        emit(
+            f"  LOAN YIELD DECISION: waiter={waiter} flowing={flowing} "
+            f"| holders {' ; '.join(holders) or '-'} "
+            f"| decision=handoff (yield=None feeder=None)"
+        )
+    except Exception as error:
+        emit(f"  LOAN YIELD DECISION skipped: {error}")
 
 
 def _feeder_waiter_preempts(
@@ -6535,6 +6622,9 @@ def _start_bootstrap_loan(
         # its finite stock exists this call restores the original recipe and
         # the next pass may borrow the cell for ``target_item``.
         loan = existing[0]
+        _emit_loan_yield_decision(
+            client, surface, force, existing, target_item, emit,
+        )
         emit(
             f"  MALL BOOTSTRAP LOAN HANDOFF: {target_item} waits while "
             f"the active {loan.target_item} batch at {loan.machine_position} "

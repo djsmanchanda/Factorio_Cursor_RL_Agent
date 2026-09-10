@@ -2337,6 +2337,31 @@ def test_loan_on_the_same_cell_falls_back_to_handoff(monkeypatch) -> None:
     assert any("LOAN HANDOFF" in message for message in messages)
 
 
+def test_handoff_emits_yield_decision_without_changing_behavior(monkeypatch) -> None:
+    """The handoff names why yield/feeder did not fire; the decision is unchanged."""
+    _parallel_loan_world(monkeypatch, (46, 31))
+    submitted: list[builder.MallBootstrapLoan] = []
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: submitted.append(_a[4]) or "handoff served",
+    )
+
+    result = builder._start_bootstrap_loan(
+        object(), object(), "nauvis", "player", "electric-mining-drill", 6,
+        (0.0, 0.0), messages.append,
+    )
+
+    assert result == "handoff served"
+    assert submitted[0].target_item == "splitter"
+    decision = next(
+        message for message in messages if "LOAN YIELD DECISION" in message
+    )
+    assert "waiter=electric-mining-drill" in decision
+    assert "splitter:splitter" in decision
+    assert "decision=handoff" in decision
+
+
 def test_service_routes_to_the_matching_loan(monkeypatch) -> None:
     """With several loans, each batch services its own cell."""
     splitter_loan = builder.MallBootstrapLoan(
