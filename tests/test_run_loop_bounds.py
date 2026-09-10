@@ -74,6 +74,37 @@ def test_the_abort_records_unbacked_draws_in_details() -> None:
     assert raised.value.details["unbacked_draws"] == ["electronic-circuit"]
 
 
+def test_the_abort_records_the_deferred_reason_in_details() -> None:
+    """Cycle 10 died on fast-transport-belt behind a capability gate while cycle 9
+    died on splitter behind a supply stall: the blocker record must carry the
+    deferred reason structurally so the next identical verdict discriminates a
+    gate wait from a starved prerequisite."""
+    signature = _pass_signature(
+        _Task("fast-transport-belt", 0), {"fast-transport-belt": 3}, set())
+
+    with pytest.raises(StuckError) as raised:
+        _refuse_to_spin(
+            _MAX_UNCHANGED_PASSES, signature, "automation-science-pack",
+            deferred_reason="its recipe consumes transport-belt and only 0 remain",
+        )
+
+    assert raised.value.details["selected_task"] == "fast-transport-belt"
+    assert raised.value.details["deferred_reason"] == (
+        "its recipe consumes transport-belt and only 0 remain"
+    )
+
+
+def test_the_abort_defaults_to_an_unknown_deferred_reason() -> None:
+    """Older callers record an explicit unknown instead of omitting the field,
+    so the blocker schema stays stable across runs."""
+    signature = _pass_signature(_Task("inserter", 45), {"inserter": 20}, set())
+
+    with pytest.raises(StuckError) as raised:
+        _refuse_to_spin(_MAX_UNCHANGED_PASSES, signature, "inserter")
+
+    assert raised.value.details["deferred_reason"] is None
+
+
 def test_the_goal_item_is_named_when_no_task_was_selected() -> None:
     signature = _pass_signature(None, {}, set())
 

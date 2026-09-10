@@ -5760,6 +5760,15 @@ def _submit_bootstrap_loan(
                     f"{predecessor}"
                 ),
             )
+            # Cycle 11 refused a stocked refinery cell while its nearest
+            # telemetry was passes stale: name the refusal-time missing
+            # ingredient, requester contents, free pool capacity, and
+            # active loan state adjacently so the next identical verdict
+            # needs no archaeology. Emit-only; planning is unchanged.
+            _emit_loan_cell_telemetry(
+                client, surface, force, loan, step, actual,
+                products_finished, emit, reference_point=reference_point,
+            )
             emit(
                 f"  CHEMICAL LADDER HANDOFF: restored {loan.original_recipe} "
                 f"before establishing {predecessor}; {step.recipe} is not "
@@ -6423,7 +6432,12 @@ def _emit_loan_yield_decision(
     on missing steel while steel admission waited on the pipe rung needed
     the holder's own cell). Waiter flow, each holder's blocked inputs and
     ladder predecessor, the binding shield, and current-step progress decide
-    it, so this names all five from explicit live facts on every handoff.
+    it, so this names all six from explicit live facts on every handoff.
+    The sixth is producer coverage for each blocked input: whether a live
+    producer exists and which active loans borrow that input's anchor cells
+    (2026-09-10 cycle 9: a shielded splitter holder starved on copper-cable
+    while both cable anchors were borrowed by progressing pipe/drill loans,
+    which neither the yield nor the feeder rule covers).
     """
     try:
         try:
@@ -6437,10 +6451,24 @@ def _emit_loan_yield_decision(
             except Exception:
                 blocked = []
             ladder: dict[str, str | None] = {}
+            producers: dict[str, str] = {}
             for missing in blocked:
                 try:
                     ladder[missing] = _missing_chemical_ladder_predecessor(
                         client, surface, force, missing,
+                    )
+                except Exception:
+                    continue
+                try:
+                    started = _production_started(client, surface, force, missing)
+                    borrowers = sorted({
+                        other.target_item
+                        for other in loans
+                        if other is not loan and other.original_recipe == missing
+                    })
+                    producers[missing] = (
+                        f"{'started' if started else 'stopped'}"
+                        f"|borrowers={','.join(borrowers) if borrowers else '-'}"
                     )
                 except Exception:
                     continue
@@ -6462,6 +6490,7 @@ def _emit_loan_yield_decision(
                 f"@({loan.machine_position[0]:.1f},{loan.machine_position[1]:.1f})"
                 f" blocked=[{','.join(blocked)}]"
                 f" ladder={{{','.join(f'{item}:{ladder[item]}' for item in ladder)}}}"
+                f" producers={{{','.join(f'{item}:{producers[item]}' for item in producers)}}}"
                 f" binding_shield={shield}"
                 f" progress={finished if finished is not None else '?'}/{baseline}"
             )
@@ -8614,6 +8643,39 @@ def _belt_reserve_shortfall(
     return None
 
 
+def _emit_cell_delivery_stock(
+    client: RconClient, surface: str, force: str, item: str, ingredient: str,
+    chest: Point, local: int | None, emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic for an empty cell delivery. Zero behavior
+    change: every probe is guarded, nothing is submitted, and any failure
+    emits a skip marker instead of raising.
+
+    A bare `moved 0` cannot distinguish a routing stall (stock exists but
+    never lands beside the requester) from consumed stock (nothing exists
+    anywhere at delivery time). This names the delivery-time requester,
+    local-network, and force-wide triple from explicit live facts, so the
+    next identical verdict needs no cross-pass pairing.
+    """
+    try:
+        contents = live_base.chest_contents(client, surface, chest)
+    except Exception:
+        contents = {}
+    try:
+        stock = live_base.available_items(client, surface, force)
+    except Exception:
+        stock = {}
+    try:
+        emit(
+            f"  CELL DELIVERY STOCK: {ingredient} for the {item} cell "
+            f"at {chest} requester={int(contents.get(ingredient, 0))} "
+            f"local={int(local) if local is not None else '?'} "
+            f"net={int(stock.get(ingredient, 0))}"
+        )
+    except Exception as error:
+        emit(f"  CELL DELIVERY STOCK skipped: {error}")
+
+
 def _deliver_cell_ingredients(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, near: Point, emit: Callable[[str], None],
@@ -8685,6 +8747,15 @@ def _deliver_cell_ingredients(
                 f"  CELL DELIVERY: moved {moved} {ingredient} beside the "
                 f"{item} cell's requester at {chest}"
             )
+            if moved == 0:
+                # Cycle 12 died with `moved 0 steel-plate` beside a requester
+                # reading 0 while the net held 2-5. A landed delivery is
+                # self-explanatory; only the empty one needs its stock triple
+                # adjacently. Emit-only; planning is unchanged.
+                _emit_cell_delivery_stock(
+                    client, surface, force, item, ingredient, chest, local,
+                    emit,
+                )
     except Exception as error:  # delivery is opportunistic
         emit(f"  CELL DELIVERY skipped: {error}")
     return moved_total > 0
@@ -10898,8 +10969,18 @@ def _livelock_step(
     return 0 if signature_changed else unchanged_passes + 1
 
 
-def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> None:
-    """Stop once repeating has stopped telling us anything new."""
+def _refuse_to_spin(
+    unchanged_passes: int, signature: tuple, goal_item: str, *,
+    deferred_reason: str | None = None,
+) -> None:
+    """Stop once repeating has stopped telling us anything new.
+
+    The selected task's deferred reason travels in the record so the next
+    identical verdict discriminates a capability-gate wait (cycle 10 died on
+    fast-transport-belt behind the electric-furnace gate with belts stocked)
+    from a starved prerequisite (cycle 9 died on splitter with cable
+    drained) without log archaeology.
+    """
     if unchanged_passes < _MAX_UNCHANGED_PASSES:
         return
     unbacked = (
@@ -10922,6 +11003,7 @@ def _refuse_to_spin(unchanged_passes: int, signature: tuple, goal_item: str) -> 
             "selected_task": signature[0],
             "progress_percent": signature[1],
             "unbacked_draws": sorted(UNBACKED_DRAWS),
+            "deferred_reason": deferred_reason,
         },
     )
 
@@ -11361,7 +11443,19 @@ def run(
             last_ghost_count = ghosts_now
             last_items_total = items_now
             last_loan_progress_revision = _BOOTSTRAP_LOAN_PROGRESS_REVISION
-            _refuse_to_spin(unchanged_passes, signature, goal_item)
+            deferred_reason = None
+            if task is not None:
+                deferred_entry = getattr(priorities, "items", {}).get(task.item)
+                if deferred_entry is not None and getattr(
+                    deferred_entry, "status", ""
+                ) == "deferred":
+                    deferred_reason = (
+                        str(getattr(deferred_entry, "reason", "") or "") or None
+                    )
+            _refuse_to_spin(
+                unchanged_passes, signature, goal_item,
+                deferred_reason=deferred_reason,
+            )
             # Generation is mission infrastructure, not a side effect of
             # bridges: live run 36 (2026-08-23) burned its whole iteration
             # budget waiting through brownouts while every top-up trigger was

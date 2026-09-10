@@ -3573,3 +3573,115 @@ def test_flowing_ladder_never_parks(monkeypatch) -> None:
             object(), "nauvis", "player", "bulk-inserter",
         )
     assert caught.value.code == "capability_observation_wait"
+
+
+def test_chemical_handoff_refusal_names_the_blocked_cell_facts(
+    monkeypatch,
+) -> None:
+    """Cycle 11 refused a stocked oil-refinery cell on zero pipe production,
+    but pairing that refusal with the cell's missing/requester/pool/loan
+    facts needed archaeology across checkpoints. The refusal must carry the
+    refusal-time cell telemetry adjacently."""
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="oil-refinery",
+        target_count=1, side="left", requester_position=(50.5, 32.5),
+        current_recipe="oil-refinery",
+    )
+    step = SimpleNamespace(
+        recipe="oil-refinery", target_count=1, crafts=1,
+    )
+    submitted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 0,
+    )
+    monkeypatch.setattr(builder, "next_bootstrap_step", lambda *_a: step)
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor",
+        lambda *_a: "pipe",
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, name, _e, **_k: submitted.append((name, plan)),
+    )
+    messages: list[str] = []
+
+    with pytest.raises(
+        builder.ProductionPrerequisiteDeferred,
+        match="retrying after re-observation",
+    ) as deferred:
+        builder._submit_bootstrap_loan(
+            object(), object(), "nauvis", "player", loan,
+            messages.append, reference_point=(3.0, -1.0),
+        )
+
+    assert deferred.value.code == "chemical_capability_handoff"
+    assert any("CHEMICAL LADDER HANDOFF" in message for message in messages)
+    cell_lines = [
+        message for message in messages
+        if "LOAN CELL TELEMETRY" in message and "oil-refinery" in message
+    ]
+    assert cell_lines, (
+        "the refusal must name the blocked cell's missing ingredient, "
+        "requester contents, free pool capacity, and active loan state"
+    )
+
+
+def test_empty_cell_delivery_names_the_delivery_time_stock_triple(
+    monkeypatch,
+) -> None:
+    """Cycle 12 died with `moved 0 steel-plate` beside a requester reading 0
+    while the net held 2-5: pairing that moved-0 with the delivery-time
+    requester/net facts needed archaeology across passes. An empty delivery
+    must carry its stock triple adjacently; a landed delivery stays quiet."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "ingredients": ["steel-plate"], "amounts": [8],
+    })
+    chest = (39.5, 32.5)
+    monkeypatch.setattr(
+        builder.live_base, "network_item_count", lambda *_a: 0,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "nearest_container",
+        lambda *_a, **_k: (40.5, 32.5),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents",
+        lambda *_a: {"steel-plate": 0},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"steel-plate": 4},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transfer_stock", lambda *_a: 0,
+    )
+    messages: list[str] = []
+
+    assert builder._deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "steel-chest", chest,
+        messages.append, requester_position=chest,
+    ) is False
+
+    stock_lines = [
+        message for message in messages
+        if "CELL DELIVERY STOCK" in message and "steel-plate" in message
+    ]
+    assert stock_lines, (
+        "an empty delivery must name requester/local/net adjacently"
+    )
+    assert "requester=0" in stock_lines[0]
+    assert "net=4" in stock_lines[0]
+
+    monkeypatch.setattr(
+        builder.live_base, "transfer_stock", lambda *_a: 5,
+    )
+    landed: list[str] = []
+
+    assert builder._deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "steel-chest", chest,
+        landed.append, requester_position=chest,
+    ) is True
+    assert not any("CELL DELIVERY STOCK" in message for message in landed)

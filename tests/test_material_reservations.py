@@ -2362,6 +2362,49 @@ def test_handoff_emits_yield_decision_without_changing_behavior(monkeypatch) -> 
     assert "decision=handoff" in decision
 
 
+def test_yield_decision_names_borrowed_producer_cells(monkeypatch) -> None:
+    """A holder blocked on an input with no producer names the borrowing loans."""
+    holder = builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="splitter",
+        target_count=50, side="left",
+        requester_position=(39.5, 32.5), current_recipe="electronic-circuit",
+        step_recipe="electronic-circuit", step_baseline_finished=907,
+    )
+    borrower = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="pipe",
+        target_count=100, side="left",
+        requester_position=(39.5, 38.5), current_recipe="pipe",
+    )
+    loans = (holder, borrower)
+    monkeypatch.setattr(
+        builder, "_loan_blocked_inputs",
+        lambda _c, _s, _f, loan: ["copper-cable"] if loan is holder else [],
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        builder, "_binding_loan_shields_preempt", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 999,
+    )
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_recipe_inputs_flowing", lambda *_a: True)
+    messages: list[str] = []
+    builder._emit_loan_yield_decision(
+        object(), "nauvis", "player", loans, "chemical-plant",
+        messages.append,
+    )
+    decision = next(
+        message for message in messages if "LOAN YIELD DECISION" in message
+    )
+    assert "waiter=chemical-plant" in decision
+    assert "blocked=[copper-cable]" in decision
+    assert "copper-cable:stopped|borrowers=pipe" in decision
+    assert "decision=handoff" in decision
+
+
 def test_service_routes_to_the_matching_loan(monkeypatch) -> None:
     """With several loans, each batch services its own cell."""
     splitter_loan = builder.MallBootstrapLoan(
