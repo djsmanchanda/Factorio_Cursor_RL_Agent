@@ -418,8 +418,8 @@ def run_campaign(config: Config) -> int:
             sequence += 1
             after = _tree_fingerprint(config.observations)
             decision = _decision(output)
-        if decision in {"stop", "no-change"} and before == after:
-            _append(config.observations, "## Campaign stop\n\nNo focused code change was justified.\n")
+        if decision != "change" or before == after:
+            _append(config.observations, "## Campaign stop\n\nObserver stopped or no explicit change verdict with a tree change was recorded.\n")
             return 0
         if len(state.terminal_keys) == 2 and state.terminal_keys[0] == state.terminal_keys[1]:
             _append(config.observations, "## Campaign stop\n\nThe same terminal failure occurred twice; a third retry is blocked.\n")

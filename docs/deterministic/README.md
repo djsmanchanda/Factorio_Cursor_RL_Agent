@@ -79,7 +79,9 @@ that same session rather than duplicating an hour-long run. It records a control
 minutes in `docs/deterministic/opencode_campaign_observations.md`, uses that
 run's session for the checkpoint reviews, then requires its final comparison
 against the preceding documented run before one focused edit can trigger the
-next episode. It stops on no justified edit or the same terminal failure twice:
+next episode. Continuation requires both an explicit `change` verdict and a detected
+edit; `stop` and `no-change` cannot be overridden by changed files. It also stops
+on the same terminal failure twice:
 
 ```bash
 .venv/bin/python tools/opencode_campaign_orchestrator.py \

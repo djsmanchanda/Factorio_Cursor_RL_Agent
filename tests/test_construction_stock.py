@@ -3802,3 +3802,269 @@ def test_no_progress_verdict_names_work_loans_and_pool(monkeypatch) -> None:
     assert "task=automation-science-pack" in lonely[0]
     assert "loans -" in lonely[0]
     assert "cells -" in lonely[0]
+
+
+def test_iteration_limit_verdict_carries_frozen_work(monkeypatch) -> None:
+    """Cycle 15 died on the outer 100-pass budget with the inner 12-pass
+    guard silent all run: the fatal iteration-limit verdict must carry the
+    same frozen-work snapshot adjacently; a missing signature degrades to
+    safe markers instead of raising."""
+    loan = SimpleNamespace(
+        target_item="chemical-plant", step_recipe="chemical-plant",
+        current_recipe="chemical-plant", machine_position=(36.5, 32.5),
+        requester_position=(39.5, 32.5), target_count=2,
+        spare_target_count=2,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"chemical-plant": 2, "pipe": 101, "steel-plate": 44},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents",
+        lambda *_a: {"electronic-circuit": 19, "steel-plate": 1},
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan,),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 7)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+    messages: list[str] = []
+    signature = (
+        "chemical-plant", None, ("chemical-plant", "pipe"), (), (),
+        (("copper-plate", (("electric-furnace", 6),)),), (),
+    )
+
+    assert builder._emit_iteration_limit_verdict(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        100, 3, 5678, (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 1
+    line = messages[0]
+    assert "NO PROGRESS VERDICT" in line
+    assert "task=chemical-plant" in line
+    assert "passes=100" in line
+    assert "mall=[chemical-plant,pipe]" in line
+    assert "plates=[copper-plate]" in line
+    assert "have=2" in line
+    assert "ghosts=3" in line
+    assert "stock=5678" in line
+    assert "5/12" in line
+    assert "chemical-plant:chemical-plant@(36.5,32.5) 2/2+2" in line
+    assert "electronic-circuit=19" in line
+
+    lonely: list[str] = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+
+    assert builder._emit_iteration_limit_verdict(
+        object(), "nauvis", "player", (), "automation-science-pack",
+        0, 0, 0, None, lonely.append,
+    ) is None
+
+    assert len(lonely) == 1
+    assert "task=automation-science-pack" in lonely[0]
+    assert "passes=0" in lonely[0]
+    assert "loans -" in lonely[0]
+    assert "cells -" in lonely[0]
+
+
+def test_no_progress_verdict_names_starved_ingredient_and_fulfill_state(monkeypatch) -> None:
+    """Cycle 16 died on `splitter 0%` with copper-cable at net 0 freezing
+    the e-circuit step: each loan entry must name its fulfill/restore
+    state under the same `actual >= target_count` predicate the
+    preempt/restore path uses, plus the first step-recipe ingredient
+    missing from that cell with its net stock (`-` when the cell holds
+    every ingredient or the recipe is unknown)."""
+    starved = SimpleNamespace(
+        target_item="splitter", step_recipe="electronic-circuit",
+        current_recipe="electronic-circuit",
+        machine_position=(36.5, 32.5), requester_position=(39.5, 32.5),
+        target_count=50, spare_target_count=50,
+    )
+    fulfilled = SimpleNamespace(
+        target_item="pipe", step_recipe="pipe",
+        current_recipe="pipe",
+        machine_position=(36.5, 38.5), requester_position=(39.5, 38.5),
+        target_count=100, spare_target_count=100,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {
+            "splitter": 0, "pipe": 100, "copper-cable": 0,
+            "iron-plate": 439,
+        },
+    )
+
+    def _contents(_client, _surface, position):
+        if tuple(position) == (39.5, 32.5):
+            return {"iron-plate": 166}
+        return {"iron-plate": 135}
+
+    monkeypatch.setattr(builder.live_base, "chest_contents", _contents)
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (starved, fulfilled),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 7)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+    messages: list[str] = []
+    signature = ("splitter", 0, ("splitter", "pipe"), (), (), (), ())
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        12, 2, 489, (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 1
+    line = messages[0]
+    assert "NO PROGRESS VERDICT" in line
+    assert "task=splitter" in line
+    assert "passes=12" in line
+    assert (
+        "splitter:electronic-circuit@(36.5,32.5) 0/50+50 "
+        "st=building miss=copper-cable(containers=0,transferable=?)"
+    ) in line
+    assert "pipe:pipe@(36.5,38.5) 100/100+100 st=fulfilled miss=-" in line
+    assert "iron-plate=166" in line
+    assert "iron-plate=135" in line
+
+    unknown: list[str] = []
+    stranger = SimpleNamespace(
+        target_item="splitter", step_recipe="splitter",
+        current_recipe="splitter",
+        machine_position=(36.5, 32.5), requester_position=(39.5, 32.5),
+        target_count=3, spare_target_count=None,
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (stranger,),
+    )
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        12, 2, 489, (3.0, -1.0), unknown.append,
+    ) is None
+
+    assert len(unknown) == 1
+    assert "st=building miss=?" in unknown[0]
+
+
+def test_no_progress_verdict_names_borrowed_assembler_status(monkeypatch) -> None:
+    """Cycle 17 died on `splitter 0%` with the e-circuit loan frozen at
+    177/202 crafts while both intakes read satisfied (cable net 81 with
+    requester 0, plate net 731 with requester 0): each loan entry must
+    name the borrowed assembler's live entity status (`none` when no
+    entity sits at the loan machine position, `?` when the probe
+    fails), so the next identical verdict separates an output block
+    from input starvation, power loss, or a vanished machine."""
+    stalled = SimpleNamespace(
+        target_item="splitter", step_recipe="electronic-circuit",
+        current_recipe="electronic-circuit",
+        machine_position=(36.5, 32.5), requester_position=(39.5, 32.5),
+        target_count=50, spare_target_count=50,
+    )
+    healthy = SimpleNamespace(
+        target_item="pipe", step_recipe="pipe",
+        current_recipe="pipe",
+        machine_position=(36.5, 38.5), requester_position=(39.5, 38.5),
+        target_count=100, spare_target_count=100,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {
+            "splitter": 0, "pipe": 100, "copper-cable": 81,
+            "iron-plate": 731,
+        },
+    )
+
+    def _contents(_client, _surface, position):
+        if tuple(position) == (39.5, 32.5):
+            return {}
+        return {"iron-plate": 135}
+
+    monkeypatch.setattr(builder.live_base, "chest_contents", _contents)
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (stalled, healthy),
+    )
+
+    def _status(_client, _surface, position):
+        if tuple(position) == (36.5, 32.5):
+            return "full_output"
+        return None
+
+    monkeypatch.setattr(builder.live_base, "entity_status_name", _status)
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 7)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+    messages: list[str] = []
+    signature = ("splitter", 0, ("splitter", "pipe"), (), (), (), ())
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        12, 2, 576, (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 1
+    line = messages[0]
+    assert (
+        "splitter:electronic-circuit@(36.5,32.5) 0/50+50 "
+        "st=building miss=copper-cable(containers=81,transferable=?) asm=full_output"
+    ) in line
+    assert "pipe:pipe@(36.5,38.5) 100/100+100 st=fulfilled miss=- asm=none" in line
+
+    unreadable: list[str] = []
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name",
+        lambda *_a: (_ for _ in ()).throw(RuntimeError("rcon down")),
+    )
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        12, 2, 576, (3.0, -1.0), unreadable.append,
+    ) is None
+
+    assert len(unreadable) == 1
+    assert "asm=?" in unreadable[0]
+
+
+@pytest.mark.parametrize(
+    "contents,stock,free,expected",
+    [
+        ({"copper-cable": 1, "iron-plate": 10}, {"copper-cable": 81}, {},
+         "miss=copper-cable(containers=81,transferable=0)"),
+        ({}, None, None, "st=? miss=copper-cable(containers=?,transferable=?)"),
+        (None, {}, {}, "miss=?"),
+    ],
+)
+def test_verdict_distinguishes_reserved_partial_and_unreadable_stock(
+    monkeypatch, contents, stock, free, expected,
+) -> None:
+    loan = SimpleNamespace(
+        target_item="splitter", step_recipe="electronic-circuit",
+        current_recipe="electronic-circuit", target_count=50,
+        spare_target_count=50, machine_position=(0, 0), requester_position=(3, 0),
+    )
+
+    def probe(value):
+        def read(*_args):
+            if value is None:
+                raise RuntimeError("unreadable")
+            return value
+        return read
+
+    monkeypatch.setattr(builder.live_base, "available_items", probe(stock))
+    monkeypatch.setattr(builder.live_base, "transferable_items", probe(free))
+    monkeypatch.setattr(builder.live_base, "chest_contents", probe(contents))
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_: "no_ingredients")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_: (loan,))
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_: 12)
+    messages = []
+    builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", ("splitter", 0), "automation-science-pack",
+        12, 2, 576, None, messages.append,
+    )
+    assert expected in messages[0]
+    if stock is None:
+        assert "have=?" in messages[0]
+    if contents is None:
+        assert "splitter@(3.0,0.0){?}" in messages[0]

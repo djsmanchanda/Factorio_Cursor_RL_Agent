@@ -8771,21 +8771,12 @@ def _emit_no_progress_verdict_stock(
     reference_point: Point | None,
     emit: Callable[[str], None],
 ) -> None:
-    """One read-only diagnostic on the fatal no-progress pass. Zero behavior
-    change: every probe is guarded, nothing is submitted, and any failure
-    emits a skip marker instead of raising.
+    """Snapshot blocked work without changing planner decisions.
 
-    Cycle 14 died on `electric-furnace 88%` with the TRUE deferred reason
-    `chemical ladder is establishing plastic-bar before electric-furnace`
-    while the coal-coverage chain and pipe crafts advanced elsewhere: the
-    verdict names the frozen headline but not the frozen work, the blocked
-    cells, or each loan's distance to fulfill/restore. Carrying the
-    outstanding work keys, the selected item's transferable count, per-loan
-    have/target+spare fulfillment distances, each loan cell's requester
-    contents, and free pool capacity adjacently lets the next identical
-    verdict separate genuine establishment (holders advancing toward
-    fulfill) from a true stall (flat bills, empty cells) without
-    cross-pass pairing.
+    Container stock includes other cells' reserved inputs; transferable stock
+    excludes requester/buffer inventories. Neither proves delivery to this
+    cell. Missing ingredients compare requester stock with one recipe craft;
+    machine status is separate evidence, and failed probes remain unknown.
     """
     try:
         item = signature[0] if signature else None
@@ -8803,7 +8794,11 @@ def _emit_no_progress_verdict_stock(
     try:
         actual = live_base.available_items(client, surface, force)
     except Exception:
-        actual = {}
+        actual = None
+    try:
+        transferable = live_base.transferable_items(client, surface, force)
+    except Exception:
+        transferable = None
     try:
         loans = active_bootstrap_loans(client, surface, force)
     except Exception:
@@ -8825,7 +8820,7 @@ def _emit_no_progress_verdict_stock(
         slot_limit = None
     try:
         have = (
-            str(int((actual or {}).get(item, 0))) if item is not None
+            (str(int(actual.get(item, 0))) if actual is not None else "?") if item is not None
             else "-"
         )
         table_parts: list[str] = []
@@ -8834,15 +8829,12 @@ def _emit_no_progress_verdict_stock(
             try:
                 target = holder.target_item
                 step = holder.step_recipe or holder.current_recipe
-                held = int((actual or {}).get(target, 0))
+                held = int(actual.get(target, 0)) if actual is not None else "?"
                 need = int(holder.target_count or 0)
                 spare = getattr(holder, "spare_target_count", None)
                 ceiling = int(spare) if spare is not None else need
                 machine = holder.machine_position
-                table_parts.append(
-                    f"{target}:{step}@({machine[0]:.1f},{machine[1]:.1f}) "
-                    f"{held}/{need}+{ceiling}"
-                )
+                state = ("fulfilled" if held >= need else "building") if actual is not None else "?"
             except Exception:
                 continue
             try:
@@ -8850,16 +8842,49 @@ def _emit_no_progress_verdict_stock(
                 contents = live_base.chest_contents(
                     client, surface, requester,
                 )
+            except Exception:
+                contents = None
+            try:
                 inner = ",".join(
                     f"{key}={int(value)}"
-                    for key, value in sorted(contents.items())
-                ) or "-"
+                    for key, value in sorted((contents or {}).items())
+                ) or ("-" if contents is not None else "?")
                 cell_parts.append(
                     f"{target}@({requester[0]:.1f},{requester[1]:.1f})"
                     f"{{{inner}}}"
                 )
             except Exception:
                 cell_parts.append(f"{getattr(holder, 'target_item', '?')}@?=?")
+                contents = None
+            if contents is None:
+                missing = "?"
+            else:
+                try:
+                    spec = LINE_RECIPES.get(step)
+                    missing = "-" if spec else "?"
+                    for ingredient, amount in zip(
+                        (spec or {}).get("ingredients", ()),
+                        (spec or {}).get("amounts", ()), strict=True,
+                    ):
+                        if int(contents.get(ingredient, 0)) < math.ceil(float(amount)):
+                            stock = actual.get(ingredient, 0) if actual is not None else "?"
+                            free = transferable.get(ingredient, 0) if transferable is not None else "?"
+                            missing = f"{ingredient}(containers={stock},transferable={free})"
+                            break
+                except Exception:
+                    missing = "?"
+            try:
+                asm_status = live_base.entity_status_name(
+                    client, surface, machine,
+                )
+                asm = asm_status if asm_status is not None else "none"
+            except Exception:
+                asm = "?"
+            table_parts.append(
+                f"{target}:{step}@({machine[0]:.1f},{machine[1]:.1f}) "
+                f"{held}/{need}+{ceiling} st={state} miss={missing} "
+                f"asm={asm}"
+            )
         try:
             pool_free: str = (
                 f"{max(0, slot_limit - int(committed))}/{slot_limit}"
@@ -8879,6 +8904,29 @@ def _emit_no_progress_verdict_stock(
         )
     except Exception as error:
         emit(f"  NO PROGRESS VERDICT skipped: {error}")
+
+
+def _emit_iteration_limit_verdict(
+    client: RconClient, surface: str, force: str, signature: tuple,
+    goal_item: str, passes: int, ghosts_now, items_now,
+    reference_point: Point | None,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic on the fatal outer-budget pass. Zero behavior
+    change: delegates to the frozen-guard snapshot, which only reads live
+    state and emits a skip marker instead of raising.
+
+    Cycle 15 died on the outer 100-pass budget with the inner 12-pass guard
+    silent all run (loan/pipe micro-progress kept resetting it): the fatal
+    `controller_iteration_limit` verdict carries only goal/max/credits, so
+    the frozen work keys, loan distances, cell contents, and pool capacity
+    are emitted adjacently here instead. `passes` is the exhausted budget
+    count, which identifies the outer fire next to the STUCK line.
+    """
+    _emit_no_progress_verdict_stock(
+        client, surface, force, signature or (), goal_item,
+        passes, ghosts_now, items_now, reference_point, emit,
+    )
 
 
 def _deliver_cell_ingredients(
@@ -11800,6 +11848,11 @@ def run(
             if position is not None:
                 emit(f"GOAL MET: {goal_item} is producing at {position}")
                 return {"ok": True, "iterations": iteration, "output_position": position}
+        _emit_iteration_limit_verdict(
+            client, surface, force, last_signature or (), goal_item,
+            budget.passes, last_ghost_count, last_items_total,
+            reference_point, emit,
+        )
         raise StuckError(
             f"Did not reach a working {goal_item} line within "
             f"{max_iterations} non-progress control passes",

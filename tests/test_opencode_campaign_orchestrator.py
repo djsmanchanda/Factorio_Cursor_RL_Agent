@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tools import opencode_campaign_orchestrator as campaign
 
 
@@ -15,9 +17,9 @@ def test_session_reader_ignores_unrelated_ids() -> None:
 
 def test_latest_run_scopes_end_marker_to_newest_run(tmp_path: Path) -> None:
     log = tmp_path / "autonomous-run.log"
-    log.write_text("RUN START: old\nRUN END\nRUN START: new\nworking\n", encoding="utf-8")
+    log.write_text("RUN START: old\n+1s RUN END\nRUN START: new\nworking\n", encoding="utf-8")
     assert campaign._latest_run(log) == (False, "RUN START: new\nworking\n")
-    log.write_text("RUN START: old\nRUN END\nRUN START: new\nSTUCK: belts 4\nRUN END\n", encoding="utf-8")
+    log.write_text("RUN START: old\n+1s RUN END\nRUN START: new\nSTUCK: belts 4\n+2s RUN END\n", encoding="utf-8")
     complete, text = campaign._latest_run(log)
     assert complete is True
     assert "STUCK: belts 4" in text
@@ -93,3 +95,25 @@ def test_state_preserves_active_session_for_long_run_resume(tmp_path: Path) -> N
 
     assert restored.active_cycle == 3
     assert restored.active_session_id == "ses_long_run"
+
+
+@pytest.mark.parametrize(
+    "decision,changed,expected_cycles",
+    [("stop", True, 1), ("no-change", True, 1),
+     ("change", False, 1), ("change", True, 2)],
+)
+def test_campaign_requires_explicit_change_and_edit_to_retry(
+    tmp_path, monkeypatch, decision, changed, expected_cycles,
+):
+    fingerprints = iter(["before", "after" if changed else "before"] * 2)
+    monkeypatch.setattr(campaign, "_tree_fingerprint", lambda *_: next(fingerprints))
+    monkeypatch.setattr(campaign, "_ask", lambda *_: (
+        "session", f"CAMPAIGN_DECISION:\nstatus: {decision}\nfiles: file.py\ntest: passed\nreason: test\n",
+    ))
+    state_root = tmp_path / "state"
+    assert campaign.main([
+        "--dry-run", "--max-cycles", "2", "--state-root", str(state_root),
+        "--source-save", str(tmp_path / "source.zip"),
+        "--observations", str(tmp_path / "notes.md"),
+    ]) == 0
+    assert campaign._load_state(state_root / "logs/opencode-campaign-state.json").completed_cycles == expected_cycles
