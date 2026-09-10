@@ -1159,23 +1159,6 @@ def extend_power(
             client, surface, near_position, hookup_blocked, target_position,
             bridge_pole,
         )
-        if endpoint is None and bridge_pole == "medium-electric-pole":
-            # Dense stage layouts can fill every one-tile medium-pole site
-            # around a support entity. A substation reaches farther, so it can
-            # terminate the same material-funded bridge from outside that
-            # packed footprint. Keep the steel starter on small poles: its
-            # first connection may not ask for steel.
-            endpoint_pole = "substation"
-            endpoint_wire = POLE_SPECS[endpoint_pole]["wire"]
-            endpoint = _hookup_pole_position(
-                client, surface, near_position, hookup_blocked, target_position,
-                endpoint_pole,
-            )
-            if endpoint is not None:
-                emit(
-                    f"  power bridge terminal near {near_position} has no free "
-                    "medium-pole tile; using a substation outside the packed stage"
-                )
         if endpoint is None:
             raise StuckError(
                 f"nothing at {near_position} can be powered: every tile within a medium "
@@ -1195,14 +1178,20 @@ def extend_power(
     if bridge_pole == "medium-electric-pole" and hasattr(client, "command"):
         stock = live_base.transferable_items(client, surface, force)
         alternatives = []
-        for trunk in ("big-electric-pole", "substation"):
+        # Transmission uses big poles; substations belong to local machine
+        # layouts, even when bootstrap stock makes them appear "free".
+        trunk = "big-electric-pole"
+        terminal_names = (
+            ("medium-electric-pole", "big-electric-pole")
+            if own_network is None
+            else (consumer["name"] if consumer else endpoint_pole,)
+        )
+        for terminal_name in terminal_names:
             if stock.get(trunk, 0) <= 0:
                 continue
             terminal = endpoint
-            terminal_name = consumer["name"] if own_network is not None and consumer else endpoint_pole
             terminal_actions = []
             if own_network is None:
-                terminal_name = "substation" if stock.get("substation", 0) else endpoint_pole
                 terminal = _hookup_pole_position(
                     client, surface, near_position, hookup_blocked,
                     target_position, terminal_name,
@@ -1226,7 +1215,10 @@ def extend_power(
             if len(selected) < len(hops) or not baseline_funded:
                 action_names = [name for name, _point in selected]
                 hops = [point for _name, point in selected]
-                emit(f"  POWER ROUTE: using {len(hops)} stocked long-reach pole(s) instead of a medium-pole chain")
+                bill_text = ", ".join(
+                    f"{name}={action_names.count(name)}" for name in sorted(set(action_names))
+                )
+                emit(f"  POWER ROUTE: stocked corridor ({bill_text}) instead of a medium-pole chain")
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")

@@ -434,9 +434,16 @@ These names describe intended responsibilities, not permission to build speculat
   wire reach before submission. A successful placement report is still not
   connectivity evidence: the repaired target must observe generation, and a
   disconnected roboport remains eligible for repair on every later survey.
-  Before committing a medium-pole chain, compare fully stocked big-pole and
-  substation routes along a clear corridor. Prefer fewer placements, or a
-  stocked route when medium poles are unavailable. Long-reach routes check
+  Before committing a medium-pole chain, compare fully stocked big-pole
+  routes with medium- or big-pole consumer hookups along a clear corridor.
+  Substations are local distribution for building clusters, never new bridge
+  trunks or bridge terminals, including remote chemical/coal roboport waves.
+  Existing substations remain valid connection anchors. Seeded substations
+  may fund local layouts; manufacturing replacements requires observed
+  advanced-circuit production through the chemical capability gate. A packed
+  consumer with no legal pole hookup fails safely instead of upgrading to a
+  substation. Prefer fewer placements, or a stocked route when medium poles
+  are unavailable. Long-reach routes check
   complete 2x2 footprints and the shorter endpoint's wire reach, and remain
   subject to the same material reservation and observed-connectivity gates.
 - The base has one primary electric grid: every new pole, substation, roboport,

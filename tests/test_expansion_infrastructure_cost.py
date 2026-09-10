@@ -3,6 +3,8 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from orchestrator import autonomous_builder as builder, stage_services as services
 from orchestrator.material_reservations import plan_material_bill
 from planners.infrastructure import POLE_SPECS, strip_local_power
@@ -68,3 +70,47 @@ def test_long_reach_route_checks_entire_pole_footprint():
     assert path is not None and path
     assert all(not footprint_tile_indices(p, 2).intersection(blocked) for p in path)
     assert distance((0, 0), path[0]) <= 9
+
+
+@pytest.mark.parametrize("medium,big", [(50, 0), (50, 20), (0, 20)])
+def test_remote_roboport_corridor_preserves_stocked_substations(monkeypatch, medium, big):
+    monkeypatch.setattr(services, "_PENDING_POWER_BRIDGES", {})
+    monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_: None)
+    monkeypatch.setattr(services.live_base, "nearest_powered_pole", lambda *_, **__: ((0, 0), "substation"))
+    monkeypatch.setattr(services.live_base, "entity_at", lambda *_: {"name": "roboport"})
+    monkeypatch.setattr(services.live_base, "occupied_tiles", lambda *_, **__: footprint_tile_indices((100, 0), 4))
+    monkeypatch.setattr(services.live_base, "transferable_items", lambda *_: {
+        "substation": 100, "medium-electric-pole": medium, "big-electric-pole": big,
+    })
+    monkeypatch.setattr(services.live_base, "network_generation_kw", lambda *_: 1000)
+    monkeypatch.setattr(services, "_await_bot_built_infrastructure", lambda *_, **__: None)
+    submitted = []
+    monkeypatch.setattr(services, "_submit", lambda _c, _b, _s, p, *_, **__: submitted.append(p))
+    services.extend_power(SimpleNamespace(command=lambda *_: ""), object(), "nauvis", "player", (100, 0), lambda _: None)
+    actions = submitted[0]["phases"][0]["actions"]
+    names = [a["entity"] for a in actions]
+    assert set(names) <= {"medium-electric-pole", "big-electric-pole"}
+    assert ("big-electric-pole" in names) == bool(big)
+    if not medium:
+        assert set(names) == {"big-electric-pole"}
+    points = [(0, 0)] + [(a["position"]["x"], a["position"]["y"]) for a in actions]
+    edge_names = ["substation", *names]
+    for left, right, ln, rn in zip(points, points[1:], edge_names, edge_names[1:]):
+        assert distance(left, right) <= min(POLE_SPECS[ln]["wire"], POLE_SPECS[rn]["wire"])
+    terminal = points[-1]
+    assert max(abs(terminal[0] - 100), abs(terminal[1])) < POLE_SPECS[names[-1]]["supply"] + 2
+
+
+def test_substation_manufacturing_requires_advanced_circuit_production(monkeypatch):
+    import json
+    from pathlib import Path
+
+    catalog = json.loads((Path(__file__).parent / "fixtures/player_recipe_catalog.json").read_text())
+    recipe = next(r for r in catalog["recipes"] if r["name"] == "substation")
+    monkeypatch.setitem(builder.LINE_RECIPES, "substation", {
+        "ingredients": [i["name"] for i in recipe["ingredients"]],
+    })
+    monkeypatch.setattr(builder, "_chemical_capability_started", lambda _c, _s, _f, item: item != "advanced-circuit")
+    assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "substation") == "advanced-circuit"
+    monkeypatch.setattr(builder, "_chemical_capability_started", lambda *_: True)
+    assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "substation") is None

@@ -929,10 +929,10 @@ def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
     assert submitted[0]["phases"][0]["actions"]
 
 
-def test_power_bridge_uses_substation_when_dense_stage_has_no_medium_terminal(
+def test_power_bridge_refuses_dense_stage_without_transmission_pole_terminal(
     monkeypatch,
 ) -> None:
-    """A packed support row still gets a material-funded power endpoint."""
+    """A packed layout needs repair, not an implicit substation upgrade."""
     from orchestrator import autonomous_builder as builder_module
     from orchestrator import stage_services as ss
 
@@ -958,17 +958,12 @@ def test_power_bridge_uses_substation_when_dense_stage_has_no_medium_terminal(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
     )
 
-    assert ss.extend_power(
-        object(), object(), "nauvis", "player", (0.0, 0.0),
-        lambda _message: None,
-    )
-
-    actions = submitted[0]["phases"][0]["actions"]
-    terminal = actions[-1]
-    assert terminal["entity"] == "substation"
-    terminal_position = (terminal["position"]["x"], terminal["position"]["y"])
-    assert max(abs(axis) for axis in terminal_position) < 9.5
-    assert not ss.footprint_tile_indices(terminal_position, 2) & medium_terminal_tiles
+    with pytest.raises(ss.StuckError, match="every tile within a medium"):
+        ss.extend_power(
+            object(), object(), "nauvis", "player", (0.0, 0.0),
+            lambda _message: None,
+        )
+    assert submitted == []
 
 
 def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None:
