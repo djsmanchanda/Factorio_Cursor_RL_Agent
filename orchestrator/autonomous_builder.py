@@ -4189,6 +4189,43 @@ def _promote_compact_steel(client, bridge, surface, force, reference_point, emit
     return output
 
 
+_OIL_LADDER_STEEL_ITEMS = frozenset({
+    "oil-refinery", "chemical-plant", "pumpjack", "offshore-pump",
+})
+
+
+def _oil_ladder_waits_on_steel_seed(client, surface, force) -> bool:
+    """Whether the oil ladder is underway while steel is still seed-only.
+
+    2026-09-11: an episode died after 100 non-progress passes with its
+    oil-refinery loan building at 0/1 on steel-plate (22 in containers, 1
+    transferable) while the 6-furnace steel promotion waited on
+    advanced-circuit production -- which itself waits on plastic, oil, and
+    steel. A live oil-ladder loan plus proven seed steel breaks that
+    circular gate; the normal advanced-circuit gate still governs otherwise.
+    """
+    try:
+        loans = active_bootstrap_loans(client, surface, force)
+    except Exception:
+        return False
+    if not any(
+        getattr(loan, "target_item", None) in _OIL_LADDER_STEEL_ITEMS
+        for loan in loans or ()
+    ):
+        return False
+    try:
+        if not _production_started(client, surface, force, "steel-plate"):
+            return False
+    except Exception:
+        return False
+    try:
+        if _power_generation_capability_started(client, surface, force):
+            return False
+    except Exception:
+        pass
+    return True
+
+
 def _prep_steel_district(client, bridge, surface, force, reference_point, mall_targets, emit):
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None or not ledger.path.with_suffix(".steel-seed.json").exists():
@@ -4197,7 +4234,12 @@ def _prep_steel_district(client, bridge, surface, force, reference_point, mall_t
     if path.exists() and json.loads(path.read_text()).get("complete"):
         return False
     if not _power_generation_capability_started(client, surface, force):
-        return False
+        if not _oil_ladder_waits_on_steel_seed(client, surface, force):
+            return False
+        emit(
+            "STEEL DISTRICT LADDER: oil ladder underway on seed steel; "
+            "promoting before advanced circuits"
+        )
     try:
         output = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
     except MaterialShortage as shortage:

@@ -71,3 +71,73 @@ def test_replacement_must_produce_before_seed_retirement(monkeypatch, tmp_path, 
         with pytest.raises(builder.ProductionPrerequisiteDeferred):
             builder._promote_compact_steel(object(),object(),"nauvis","player",(0,0),print)
         assert retired == []
+
+
+def _ladder_loan(item):
+    return SimpleNamespace(target_item=item)
+
+
+def test_oil_ladder_breaks_steel_promotion_gate(monkeypatch):
+    """2026-09-11: oil-refinery loan built at 0/1 on steel-plate while the
+    6-furnace promotion waited on advanced circuits (which wait on oil)."""
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: [_ladder_loan("oil-refinery")],
+    )
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item == "steel-plate",
+    )
+    monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: False,
+    )
+    assert builder._oil_ladder_waits_on_steel_seed(object(), "nauvis", "player") is True
+
+
+def test_steel_gate_holds_without_ladder_or_seed(monkeypatch):
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, _i: True)
+    monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: False,
+    )
+    assert builder._oil_ladder_waits_on_steel_seed(object(), "nauvis", "player") is False
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: [_ladder_loan("chemical-plant")],
+    )
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, _i: False)
+    assert builder._oil_ladder_waits_on_steel_seed(object(), "nauvis", "player") is False
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, _i: True)
+    monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: True,
+    )
+    assert builder._oil_ladder_waits_on_steel_seed(object(), "nauvis", "player") is False
+
+
+def test_prep_promotes_for_ladder_before_advanced_circuits(monkeypatch, tmp_path):
+    """The prep reaches promotion (not the early False) when the ladder waits."""
+    path = tmp_path / "episode.json"
+    monkeypatch.setattr(
+        builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(path=path)
+    )
+    path.with_suffix(".steel-seed.json").write_text(json.dumps({"phases": []}))
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: [_ladder_loan("pumpjack")],
+    )
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item == "steel-plate",
+    )
+    monkeypatch.setattr(
+        builder, "_power_generation_capability_started", lambda *_a: False,
+    )
+    monkeypatch.setattr(builder, "MANAGED_INTERMEDIATE_SOURCES", {})
+    promoted = []
+    monkeypatch.setattr(
+        builder, "_promote_compact_steel",
+        lambda *_a: promoted.append(True) or (7, 8),
+    )
+    assert builder._prep_steel_district(
+        object(), object(), "nauvis", "player", (0, 0), {}, print
+    ) is True
+    assert promoted == [True]
+    assert builder.MANAGED_INTERMEDIATE_SOURCES["steel-plate"] == (7, 8)
