@@ -375,3 +375,98 @@ def test_an_unroutable_bridge_files_a_typed_contract(monkeypatch, tmp_path) -> N
     persisted = json.loads((tmp_path / "blockers.jsonl").read_text())
     assert persisted["code"] == "belt_bridge_unroutable"
     assert persisted["details"] == details
+
+
+def test_direct_belt_tap_uses_the_downstream_head_for_west_flow(monkeypatch) -> None:
+    """Episode-20260911T151719Z-18290 terminal: a west-flow coal line tapped
+    one tile east (upstream) handed the router a source whose immediate west
+    step landed on its own downstream belt, so the detour failed with the
+    exact `entry=east exit=west destination=west` signature. The tap must be
+    the downstream straight-run head, where the forced tile is free ground."""
+    from types import SimpleNamespace
+
+    belts = {(0.5, 0.5), (1.5, 0.5), (-0.5, 0.5), (-1.5, 0.5)}
+
+    def entity_at(_client, _surface, position):
+        if position in belts:
+            return {"name": "transport-belt", "type": "transport-belt"}
+        return None
+
+    monkeypatch.setattr(live_base, "entity_at", entity_at)
+    monkeypatch.setattr(
+        live_base, "transport_belt_direction_at",
+        lambda _c, _s, p: "west" if p in belts else None,
+    )
+
+    assert stage_transport._through_belt_source(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "coal", (0.5, 0.5),
+    ) == (-1.5, 0.5)
+
+
+def test_east_flow_tap_advances_to_the_straight_run_head(monkeypatch) -> None:
+    """The same head walk must not regress east-flow collectors: a middle
+    tap still starts on its own downstream run, so the head is further east."""
+    from types import SimpleNamespace
+
+    belts = {(0.5, 0.5), (1.5, 0.5), (2.5, 0.5)}
+
+    def entity_at(_client, _surface, position):
+        if position in belts:
+            return {"name": "transport-belt", "type": "transport-belt"}
+        return None
+
+    monkeypatch.setattr(live_base, "entity_at", entity_at)
+    monkeypatch.setattr(
+        live_base, "transport_belt_direction_at",
+        lambda _c, _s, p: "east" if p in belts else None,
+    )
+
+    assert stage_transport._through_belt_source(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "iron-ore", (0.5, 0.5),
+    ) == (2.5, 0.5)
+
+
+def test_west_flow_coal_bridge_routes_from_the_head(monkeypatch) -> None:
+    """End-to-end shape of the +3447s terminal: west-flow coal at
+    (-325.5,12.5) feeding a westbound plastic bus at (-262.5,-16.5). The
+    legacy upstream tap raises `belt_bridge_unroutable`; the head tap routes."""
+    import math
+    from types import SimpleNamespace
+
+    belts = {(-327.5, 12.5), (-326.5, 12.5), (-325.5, 12.5), (-324.5, 12.5)}
+
+    def entity_at(_client, _surface, position):
+        if position in belts:
+            return {
+                "name": "transport-belt", "type": "transport-belt",
+                "direction": 12,
+            }
+        return None
+
+    def belt_direction(_client, _surface, position):
+        return "west" if position in belts else None
+
+    def occupied(_client, _surface, lo, hi, **_kwargs):
+        return {
+            (math.floor(x), math.floor(y)) for x, y in belts
+            if lo[0] - 1 <= x <= hi[0] + 1 and lo[1] - 1 <= y <= hi[1] + 1
+        }
+
+    monkeypatch.setattr(live_base, "entity_at", entity_at)
+    monkeypatch.setattr(live_base, "transport_belt_direction_at", belt_direction)
+    monkeypatch.setattr(live_base, "occupied_tiles", occupied)
+    monkeypatch.setattr(
+        live_base, "available_items",
+        lambda *_a: {"transport-belt": 500, "fast-transport-belt": 500},
+    )
+
+    actions, tier, reused = stage_transport._plan_belt_transport(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "player", "coal",
+        (-325.5, 12.5), (-262.5, -16.5), reuse_existing=False,
+        max_belt_route_tiles=400, destination_is_belt=True,
+        destination_belt_direction="west",
+    )
+
+    assert tier == "transport-belt"
+    assert reused is True
+    assert any("transport-belt" in action["entity"] for action in actions)

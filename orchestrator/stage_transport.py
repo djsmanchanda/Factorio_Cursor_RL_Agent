@@ -96,6 +96,46 @@ def _release_owned_destination_approach(
             blocked.discard(tile)
 
 
+def _downstream_belt_head(
+    client: RconClient, surface: str, provider: Point, observed: str,
+) -> Point:
+    """Last straight-run belt tile downstream of `provider`.
+
+    A bridge must continue from the head of the live belt, not from one tile
+    upstream of it. Tapping one tile east of a west-flow line hands the router
+    an upstream tile whose immediate west step lands on the line's own
+    downstream belt: the forced tile is occupied, the first turn sits on the
+    live belt instead of clear ground, and `search_clear_route` fails with
+    `no route satisfies the source and destination belt directions` even
+    though free ground exists one head further along (live
+    `episode-20260911T151719Z-18290` coal bridge `(-324.5,12.5) ->
+    (-261.5,-16.5)` entry=east exit=west destination=west). Walking the
+    straight run to its head puts the forced tile on free ground beyond the
+    line while preserving the observed heading.
+    """
+    position = provider
+    for _ in range(64):
+        vector = DIRECTION_VECTORS[observed]
+        following = (position[0] + vector[0], position[1] + vector[1])
+        try:
+            entity = live_base.entity_at(client, surface, following)
+        except Exception:
+            break
+        if not _entity_or_ghost_is(entity, "transport-belt"):
+            break
+        if entity.get("type") == "transport-belt":
+            try:
+                following_direction = live_base.transport_belt_direction_at(
+                    client, surface, following,
+                )
+            except Exception:
+                break
+            if following_direction != observed:
+                break
+        position = following
+    return position
+
+
 def _through_belt_source(
     client: RconClient, surface: str, ingredient: str, provider: Point, *,
     upstream_shift: int = 1,
@@ -108,6 +148,15 @@ def _through_belt_source(
     """
     direct_belt = live_base.entity_at(client, surface, provider)
     if _entity_or_ghost_is(direct_belt, "transport-belt"):
+        if direct_belt.get("type") == "transport-belt" and hasattr(client, "command"):
+            try:
+                observed = live_base.transport_belt_direction_at(
+                    client, surface, provider,
+                )
+            except Exception:
+                observed = None
+            if observed in DIRECTION_VECTORS:
+                return _downstream_belt_head(client, surface, provider, observed)
         return (provider[0] + 1, provider[1])
 
     mine_inserter = (provider[0], provider[1] + 1)
