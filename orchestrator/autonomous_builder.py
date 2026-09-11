@@ -6129,19 +6129,23 @@ def _release_completed_construction_loans(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference_point: Point, emit: Callable[[str], None],
 ) -> None:
-    """Release completed optional work even when its demand was just retired."""
-    if not _BLOCKING_MALL_ITEMS:
+    """Service completed batches even after their stock demand leaves the queue."""
+    loans = active_bootstrap_loans(client, surface, force)
+    if not loans:
         return
     stock = _transferable_or_available_stock(client, surface, force)
-    for loan in active_bootstrap_loans(client, surface, force):
-        if loan.production_target <= loan.target_count:
+    for loan in loans:
+        optional_spares = loan.production_target > loan.target_count
+        ceiling_met = int(stock.get(loan.target_item, 0)) >= loan.production_target
+        if optional_spares and not ceiling_met and not _BLOCKING_MALL_ITEMS:
             continue
         if not _bootstrap_loan_minimum_fulfilled(
             loan, stock, _bootstrap_loan_products_finished(client, surface, loan),
         ):
             continue
         if (
-            not (_BLOCKING_MALL_ITEMS - {loan.target_item})
+            optional_spares
+            and not (_BLOCKING_MALL_ITEMS - {loan.target_item})
             and int(stock.get(loan.target_item, 0)) < loan.target_count
         ):
             continue

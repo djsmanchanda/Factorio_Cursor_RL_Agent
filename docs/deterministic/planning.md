@@ -253,7 +253,13 @@ These names describe intended responsibilities, not permission to build speculat
   different batch service the active loan through measured completion and
   restoration, defer the new batch, and retry it on the next pass; a busy or
   completed prior loan is never classified as an absence of borrowable
-  capacity.
+  capacity. Every controller pass also services completed finite loans after
+  their stock demand retires, including batches with no optional spare margin.
+  Their original recipe and requester group must be restored through the normal
+  loan lifecycle; stock completion alone must not leave upstream capacity
+  borrowed indefinitely. Completed spare ceilings also release without unrelated
+  construction pressure; unfinished optional spares retain the existing handoff
+  policy.
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
   ends the current pass, and the predecessor loan begins only after the next
   live observation confirms that restoration.

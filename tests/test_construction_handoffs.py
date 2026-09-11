@@ -136,3 +136,35 @@ def test_existing_direct_mine_earmark_does_not_wait_before_refinery(monkeypatch,
         allow_unfunded_ghosts=earmark,
     )
     assert calls == (["power"] if earmark else ["wait"])
+
+
+@pytest.mark.parametrize('blocking', [set(), {'assembling-machine-2'}])
+@pytest.mark.parametrize('held,finished,spares,restored', [(3, 40, 3, True), (0, 43, 3, True), (2, 42, 3, False), (5, 45, 5, True)])
+def test_finite_completed_loan_restores_circuit_producer(monkeypatch, blocking, held, finished, spares, restored):
+    """A retired splitter demand must not strand its borrowed circuit cell."""
+    loan = builder.MallBootstrapLoan(
+        original_recipe='electronic-circuit', target_item='splitter', target_count=3,
+        spare_target_count=spares, side='right', requester_position=(50.5, 32.5),
+        current_recipe='splitter', step_recipe='splitter', step_target_count=3,
+        step_baseline_finished=40, step_required_crafts=3, step_minimum_crafts=3,
+    )
+    stock = {'splitter': held, 'electronic-circuit': 0}
+    monkeypatch.setattr(builder, '_BLOCKING_MALL_ITEMS', blocking)
+    monkeypatch.setattr(builder, 'active_bootstrap_loans', lambda *_: [loan])
+    monkeypatch.setattr(builder, '_transferable_or_available_stock', lambda *_: stock)
+    monkeypatch.setattr(builder, '_bootstrap_loan_stock', lambda *_: (dict(stock), dict(stock)))
+    monkeypatch.setattr(builder, '_bootstrap_loan_products_finished', lambda *_: finished)
+    monkeypatch.setattr(builder, 'mall_slot_uses_shared_provider', lambda *_: True)
+    monkeypatch.setattr(builder, '_deliver_cell_ingredients', lambda *_a, **_k: pytest.fail('completion must restore, not relocate ingredients'))
+    plans = []
+    monkeypatch.setattr(builder, '_submit', lambda _c, _b, _s, plan, *_a, **_k: plans.append(plan))
+    builder._release_completed_construction_loans(object(), object(), 'nauvis', 'player', (3, -1), lambda _: None)
+    assert bool(plans) is restored
+    if restored:
+        actions = [a for p in plans for phase in p['phases'] for a in phase['actions']]
+        machine = next(a for a in actions if a.get('recipe') == 'electronic-circuit')
+        assert machine['action_type'] == 'configure_entity'
+        assert machine['clear_logistic_condition'] is True
+        requester = next(a for a in actions if 'clear_logistic_groups' in a)
+        assert requester['clear_logistic_groups'] == [loan.group]
+        assert all(a['action_type'] == 'configure_entity' for a in actions)
