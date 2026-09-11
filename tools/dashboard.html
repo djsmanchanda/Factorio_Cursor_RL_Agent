@@ -15,7 +15,7 @@
       <p class="eyebrow">LOCAL · NAUVIS · PLAYER FORCE</p>
       <h1>Factorio Operations Console</h1>
       <p class="subtitle">Watch the autonomous builder think, build, wait, and fail in real time.</p>
-      <p><a class="inventory-link" href="/inventory">Open inventory history →</a></p>
+      <p><a class="inventory-link" href="/inventory">Open inventory history →</a> · <a class="inventory-link" href="#run-evidence">Run evidence &amp; history →</a></p>
     </div>
     <div class="connection-cluster">
       <div class="status-cluster">
@@ -28,6 +28,31 @@
   </header>
 
   <main>
+    <section id="run-evidence" class="panel evidence-panel" aria-labelledby="evidence-heading">
+      <div class="panel-heading">
+        <div><p class="eyebrow">RUN OBSERVABILITY</p><h2 id="evidence-heading">Evidence &amp; recurring failures</h2></div>
+        <span id="evidence-freshness" class="operation-state" role="status">Loading evidence…</span>
+      </div>
+      <p class="research-help">Current blockers, decision excerpts and inventory changes. Read-only; updates every 10 seconds. Stock changes are not production rates.</p>
+      <div class="evidence-actions">
+        <button id="evidence-refresh" type="button">Refresh evidence</button>
+        <button id="evidence-copy" type="button" disabled>Copy agent handoff</button>
+        <button id="evidence-download" type="button" disabled>Download handoff</button>
+        <a class="inventory-link" href="/inventory">Explore inventory history →</a>
+      </div>
+      <p id="evidence-message" class="action-message" role="status"></p>
+      <details open><summary>Current run · bounded evidence packet</summary>
+        <pre id="evidence-packet" class="evidence-text">Waiting for the current run…</pre>
+      </details>
+      <form id="evidence-search" class="evidence-search">
+        <label for="evidence-query">Find similar past runs</label>
+        <div><input id="evidence-query" maxlength="200" required placeholder="e.g. electric-mining-drill or no_progress">
+        <button id="evidence-search-button" type="submit">Search history</button></div>
+      </form>
+      <p id="evidence-history-state" class="action-message">Checking history index…</p>
+      <pre id="evidence-results" class="evidence-text" aria-live="polite" hidden></pre>
+    </section>
+
     <section class="panel controls">
       <div class="panel-heading">
         <div>

@@ -104,3 +104,19 @@ def test_inventory_history_endpoint_returns_retained_series() -> None:
     handler.do_GET()
 
     assert replies == [(200, {"runs": [{"id": "run"}]})]
+
+
+def test_evidence_routes_use_fixed_manager_sources():
+    from types import SimpleNamespace
+    handler = object.__new__(DashboardHandler)
+    calls = []
+    handler._json = lambda status, payload: calls.append((status, payload))
+    handler.manager = SimpleNamespace(
+        run_context=lambda: {'text': 'current evidence'},
+        search_run_history=lambda query: {'text': query},
+    )
+    handler.path = '/api/run-context'
+    handler.do_GET()
+    handler.path = '/api/run-history?q=electric-mining-drill'
+    handler.do_GET()
+    assert calls == [(200, {'text': 'current evidence'}), (200, {'text': 'electric-mining-drill'})]

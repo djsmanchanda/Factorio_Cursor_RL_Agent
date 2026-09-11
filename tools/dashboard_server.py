@@ -138,6 +138,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except OperationError as exc:
                 self._json(500, {"error": str(exc)})
             return
+        if request.path == "/api/run-context":
+            self._json(200, self.manager.run_context())
+            return
+        if request.path == "/api/run-history":
+            query = parse_qs(request.query).get("q", [""])[0]
+            try:
+                self._json(200, self.manager.search_run_history(query))
+            except OperationError as exc:
+                self._json(400, {"error": str(exc)})
+            return
         if request.path == "/api/inventory-history":
             self._json(200, self.manager.inventory_history())
             return

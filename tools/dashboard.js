@@ -507,3 +507,58 @@ refreshHelper();
 refreshLogisticInventory();
 setInterval(refreshHelper, 3000);
 setInterval(refreshLogisticInventory, 5000);
+
+// Evidence uses local files only; it remains useful when the game is stopped.
+let evidenceText = '';
+let evidenceLoading = false;
+const evidenceMessage = document.querySelector('#evidence-message');
+async function refreshEvidence() {
+  if (evidenceLoading) return;
+  evidenceLoading = true;
+  const button = document.querySelector('#evidence-refresh');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/run-context', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Evidence unavailable. Restart the Operations Console if it has not loaded the new endpoints.');
+    const data = await response.json();
+    evidenceText = data.text;
+    document.querySelector('#evidence-packet').textContent = evidenceText;
+    document.querySelector('#evidence-freshness').textContent = data.log_modified_at
+      ? `Log updated ${new Date(data.log_modified_at * 1000).toLocaleString()}` : 'No runner log yet';
+    document.querySelector('#evidence-history-state').textContent = data.history_available
+      ? 'History index available · search returns up to five cited runs.'
+      : 'No history index yet. The campaign builds it after a run ends.';
+    document.querySelector('#evidence-copy').disabled = !evidenceText;
+    document.querySelector('#evidence-download').disabled = !evidenceText;
+    evidenceMessage.textContent = '';
+  } catch (error) {
+    evidenceMessage.textContent = error.message;
+    document.querySelector('#evidence-freshness').textContent = 'Refresh failed · displayed evidence may be stale';
+  } finally { evidenceLoading = false; button.disabled = false; }
+}
+document.querySelector('#evidence-refresh').addEventListener('click', refreshEvidence);
+document.querySelector('#evidence-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(evidenceText); evidenceMessage.textContent = 'Agent handoff copied.'; }
+  catch { evidenceMessage.textContent = 'Clipboard unavailable. Use Download handoff instead.'; }
+});
+document.querySelector('#evidence-download').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([evidenceText], {type: 'text/markdown;charset=utf-8'}));
+  const link = document.createElement('a'); link.href = url; link.download = 'factorio-run-context.md'; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+document.querySelector('#evidence-search').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.querySelector('#evidence-search-button');
+  const results = document.querySelector('#evidence-results');
+  button.disabled = true; results.hidden = false; results.textContent = 'Searching run history…';
+  try {
+    const query = document.querySelector('#evidence-query').value.trim();
+    const response = await fetch(`/api/run-history?q=${encodeURIComponent(query)}`, {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'History search failed.');
+    results.textContent = data.text;
+  } catch (error) { results.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+refreshEvidence();
+setInterval(refreshEvidence, 10000);

@@ -83,3 +83,13 @@ search result when comparing repeated failures, and one batched evidence lookup
 when entity ownership or plan provenance is disputed. This avoids both a giant
 prompt and a long sequence of one-line searches. The SQLite cache can be rebuilt
 from raw logs; raw reports and manifests remain authoritative.
+
+## Operations Console
+
+The home page's **Run evidence & history** link opens a read-only panel with
+10-second packet refresh, last log modification time, copy/download handoff
+controls, and up to five historical search matches. It works from local files
+while Factorio is stopped. Missing history and refresh failures are shown
+explicitly; failed refreshes retain the last packet with a stale warning.
+Restart the Operations Console after Python endpoint changes, then refresh the
+browser. This does not require restarting Factorio or the campaign runner.

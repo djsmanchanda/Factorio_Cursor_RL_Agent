@@ -284,6 +284,33 @@ class OperationManager:
             history.record(report)
         return report
 
+    def run_context(self) -> dict:
+        """Build current evidence offline; never query or mutate Factorio."""
+        from tools.run_context import build_context
+
+        log = self.config.runner_log
+        try:
+            modified = log.stat().st_mtime
+        except OSError:
+            modified = None
+        return {
+            "text": build_context(log, self.config.inventory_history_file),
+            "log_modified_at": modified,
+            "history_available": (log.parent / "run-history.sqlite").is_file(),
+        }
+
+    def search_run_history(self, query: str) -> dict:
+        from tools.run_history import search
+        import sqlite3
+
+        query = query.strip()
+        if not query or len(query) > 200:
+            raise OperationError("Enter a search of 1–200 characters.")
+        try:
+            return {"text": search(self.config.runner_log.parent / "run-history.sqlite", query, limit=5)}
+        except (OSError, ValueError, sqlite3.Error) as error:
+            raise OperationError(f"History search unavailable: {error}") from error
+
     def inventory_history(self) -> dict:
         """Record the latest read-only report and return the retained run series."""
         try:

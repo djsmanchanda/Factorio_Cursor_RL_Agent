@@ -478,3 +478,19 @@ def test_fresh_campaign_invokes_atomic_native_campaign_manager(monkeypatch) -> N
         "--game-port", "34199",
         "--rcon-port", "27017",
     ]]
+
+
+def test_run_context_works_offline_and_missing_history_is_explicit(tmp_path):
+    log = tmp_path / "autonomous-run.log"
+    log.write_text('RUN START: ts=2026-09-11T00:00:00Z\n+1s BLOCKER: stalled\n+1s RUN END\n')
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(runner_log=log, inventory_history_file=tmp_path / 'missing.json')
+    packet = manager.run_context()
+    assert 'BLOCKER: stalled' in packet['text']
+    assert packet['log_modified_at'] == log.stat().st_mtime
+    assert packet['history_available'] is False
+    assert 'UNKNOWN' in manager.search_run_history('splitter')['text']
+    with pytest.raises(dashboard_runtime.OperationError):
+        manager.search_run_history(' ')
+    with pytest.raises(dashboard_runtime.OperationError):
+        manager.search_run_history('x' * 201)
