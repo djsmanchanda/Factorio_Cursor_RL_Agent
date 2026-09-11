@@ -10733,7 +10733,7 @@ def _upgrade_bootstrap_mall(
                     f"native replacement; stocking {target} to {wanted}"
                 )
             return False
-        selected = list(positions[:min(len(positions), held - UPGRADE_RESERVE)])
+        selected = list(positions[:1])
         if not selected:
             return False
         block = f"bootstrap-mall-{source}-to-{target}"

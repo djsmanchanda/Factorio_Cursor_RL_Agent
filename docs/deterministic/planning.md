@@ -234,7 +234,7 @@ These names describe intended responsibilities, not permission to build speculat
   plastic, logistics-chest production, or the complete core mall. AM2 orders
   require proven AM2 production and transferable stock remaining after material
   reservations plus a four-item construction reserve. Fast-inserter upgrades
-  retain their later core-mall gate. Upgrades use native in-place bot orders. Pending upgrades are excluded from later batches, and mixed AM1/AM2
+  retain their later core-mall gate. Upgrades use native in-place bot orders, limited to one machine per pass. Pending upgrades are excluded from later batches, and mixed AM1/AM2
   recipe rows remain one observable line throughout the transition.
   Until plastic has produced output, low-demand construction items are finite
   batches made by a recoverable recipe loan in an existing mall assembler.

@@ -60,7 +60,7 @@ def test_bootstrap_mall_orders_only_self_funded_upgrade_surplus(monkeypatch) -> 
 
     monkeypatch.setattr(
         builder.live_base, "transferable_items",
-        lambda *_a: {"assembling-machine-2": builder.UPGRADE_RESERVE + 1},
+        lambda *_a: {"assembling-machine-2": builder.UPGRADE_RESERVE + 20},
     )
     monkeypatch.setattr(
         builder, "_production_started",
