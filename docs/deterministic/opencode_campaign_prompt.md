@@ -104,7 +104,7 @@ Failure loop:
    - smallest reusable fix;
    - predicted measurable result.
    If the evidence cannot distinguish the explanations, request the specific
-   missing observation instead of guessing.
+   missing observation yourself through read-only inspection or local reproduction; ask the user only if the needed input or authority is unavailable.
 5. Prefer a better observation, rate model, action, validator, or planner
    primitive. Do not accumulate recipe-, coordinate-, or run-specific branches.
 6. Inspect the preserved failed episode before resetting, with read-only
@@ -147,9 +147,14 @@ Trend gates and comparison:
   patches, and propose simplification or rollback before continuing.
 - Keep one active root cause. Do not patch several speculative causes between
   runs.
-- No code change is required every cycle. A cycle may end with a diagnosis, a
-  rejected hypothesis, or an unresolved evidence request. Never manufacture
-  changes just to unlock another run.
+- The main OpenCode agent owns diagnosis through implementation. Subagents
+  return evidence, reproductions and reviews; verify their decisive claims,
+  implement the supported reusable fix, test, review and commit it yourself.
+  Do not hand a known fix back to the user or ask whether to implement it.
+  The controller process owns lifecycle; that does not reserve code decisions
+  for a human. If no safe fix is supported, investigate the missing evidence
+  before stopping and record the concrete unresolved gap. Never invent a fix
+  just to continue. Existing repeated-failure and runtime guards remain active.
 - One journal entry per episode, with exact provenance: episode ID, commit,
   dirty-patch hash, save/configuration/profile, tests, and activated code.
 
@@ -169,8 +174,9 @@ Context discipline:
   classes disappeared, persisted, or regressed.
 - Keep durable facts in the journal and CURRENT_STATUS.md only at real
   milestones; do not rely on the conversation as memory.
-- If a fix needs more than roughly 200 net lines, pause and explain why a small
-  reusable refactor is preferable to another recovery branch.
+- If a fix needs more than roughly 200 net lines, explain its scope and use a
+  bounded reusable refactor with focused verification; size alone is not a
+  reason to request human approval for already authorized repository work.
 
 Live acceptance criteria:
 - The selected research is queued or completed on nauvis/player.

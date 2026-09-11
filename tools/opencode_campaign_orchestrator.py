@@ -251,7 +251,7 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int) ->
 
 
 def _initial_prompt(config: Config, cycle: int) -> str:
-    return f"""You are the observer/editor for fresh deterministic Factorio cycle {cycle}, using one session for this run only.
+    return f"""You are the accountable investigator and implementer for fresh deterministic Factorio cycle {cycle}, using one session for this run only.
 The parent controller already started the isolated run for `{config.technology}` and will send this same session a
 durable checkpoint every {config.interval_seconds} seconds. Work in `{REPO_ROOT}`; preserve unrelated dirty files.
 The sole live scope is `{config.state_root}` on `nauvis` / `player`.
@@ -275,14 +275,15 @@ outcome separately: factory improvement, useful diagnostic evidence, regression,
 and larger inventories do not establish factory improvement. Use read-only live observation and
 GET `{config.dashboard_url}`; do not change code or execute server lifecycle/factory actions while the run is active.
 
-At RUN END, the parent will ask you to compare this run on all three references. That comparison is the only basis
-for a fix, and a fix is not mandatory: a diagnosis, a rejected hypothesis, or an unresolved evidence request is a
-complete cycle outcome. Reply briefly after this setup observation."""
+At RUN END, compare all three references and own the investigation through implementation. Delegate bounded
+observation, reproduction or review to subagents; verify their decisive claims against raw evidence and code.
+When the cause and reusable fix are supported, implement, test and commit without asking the user to approve
+routine repository work. An analysis-only handoff is not completion when a justified fix is available.
+The parent process controls lifecycle and the next run; it is not a human approval gate. Reply briefly after setup."""
 
 
 def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
-    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and append
-read the referenced rolling context packet and append its assessment below it (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
+    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and append its assessment below it (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
 dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
 reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
 count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
@@ -300,12 +301,18 @@ evidence, regression, or inconclusive. Survival time and inventory size alone de
 Only when the evidence supports a fix, implement exactly one small reusable fix, add/update its narrow regression
 test, and run the focused test. Before editing, state: observed failure -> causal hypothesis -> supporting evidence
 -> competing explanation -> smallest reusable fix -> predicted measurable result. If the evidence cannot distinguish
-the explanations, do not guess: request the specific missing observation instead. A telemetry-only rerun is allowed
+the explanations, obtain the missing read-only observation or local reproduction yourself, using subagents when
+useful. Ask the user only for genuinely unavailable input or authority outside the campaign scope. A telemetry-only rerun is allowed
 only when the missing evidence requires execution, and you must specify what each possible result would mean. Prefer
 verifying the failure mechanism locally (a focused behavioral reproduction, then the predicted milestone under
 matching starting conditions) over another full episode. Do not start/reset/redeploy Factorio; the parent owns the
-next fresh run. Preserve unrelated dirty files. No code change is required: a diagnosis, a rejected hypothesis, or
-an unresolved evidence request ends the cycle legitimately. Record exact provenance in the journal entry (one entry
+next fresh run. Preserve unrelated dirty files. You own the code fix: verify subagent findings, implement the
+supported correction, run focused tests, address test failures, review the diff, and create one scoped commit.
+Do not end with "want me to implement?", "parent-owned fix", or an analysis-only handoff when you have a supported
+fix within repository scope. Report status: change only after implementation and verification. Stop or no-change
+is appropriate only for a concrete unresolved evidence gap, failed verification, exhausted budget, mission
+completion, or authority outside scope; explain the blocker and investigation already attempted. Never invent a
+fix merely to continue. Respect the controller's existing repeated-failure and runtime guards. Record exact provenance in the journal entry (one entry
 per episode): episode ID, commit, dirty-patch hash, save/configuration/profile, tests, and activated code. End exactly with:
 
 CAMPAIGN_DECISION:
@@ -322,7 +329,7 @@ only to resolve one specifically named evidence gap from that comparison: implem
 telemetry that captures it, with a narrow regression test, and state what each possible reading would mean for the
 competing explanations. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files.
 Never manufacture telemetry just to unlock another run: if no evidence gap names telemetry as its resolution, make
-no change and say so. Append the outcome to `{config.observations}`. End exactly with:
+no change and say so. If implemented, verify and commit the telemetry patch yourself. Append the outcome to `{config.observations}`. End exactly with:
 
 CAMPAIGN_DECISION:
 status: change|no-change|stop
@@ -334,7 +341,8 @@ reason: one sentence
 
 def _tree_fingerprint(observations: Path) -> str:
     """Fingerprint code/test changes while excluding the mandatory campaign journal."""
-    command = ["git", "diff", "--binary", "--no-ext-diff", "--", "."]
+    command = ["git", "diff", "HEAD", "--binary", "--no-ext-diff", "--", "."]
+    head_tree = _run(["git", "rev-parse", "HEAD^{tree}"], timeout=120).stdout
     try:
         relative_notes = observations.resolve().relative_to(REPO_ROOT)
     except ValueError:
@@ -347,7 +355,7 @@ def _tree_fingerprint(observations: Path) -> str:
         untracked = "\n".join(
             line for line in untracked.splitlines() if line != relative_notes.as_posix()
         )
-    return hashlib.sha256((tracked + "\n--untracked--\n" + untracked).encode("utf-8", errors="replace")).hexdigest()
+    return hashlib.sha256((head_tree + tracked + "\n--untracked--\n" + untracked).encode("utf-8", errors="replace")).hexdigest()
 
 
 def _decision(output: str) -> str:

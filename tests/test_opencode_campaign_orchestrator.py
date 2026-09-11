@@ -55,8 +55,9 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
     assert "compare this\ncompleted run against three references" in prompt
     assert "exactly one small reusable fix" in prompt
     assert "competing explanation" in prompt
-    assert "request the specific missing observation instead" in prompt
-    assert "No code change is required" in prompt
+    assert "obtain the missing read-only observation or local reproduction yourself" in prompt
+    assert "create one scoped commit" in prompt
+    assert "verify subagent findings" in prompt
     assert "CAMPAIGN_DECISION:" in prompt
 
 
@@ -138,3 +139,30 @@ def test_checkpoint_links_bounded_packet_without_copying_raw_log(tmp_path, monke
     assert "raw-repeat" not in snapshot
     assert str(log_dir / "latest-context.md") in snapshot
     assert len((log_dir / "latest-context.md").read_text()) <= 12000
+
+
+def test_fingerprint_detects_staged_and_committed_fix(tmp_path, monkeypatch):
+    import subprocess
+
+    def git(*args):
+        subprocess.run(['git', *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git('init')
+    git('config', 'user.name', 'Test')
+    git('config', 'user.email', 'test@example.invalid')
+    code = tmp_path / 'fix.py'
+    code.write_text('value = 1\n')
+    git('add', 'fix.py')
+    git('commit', '-m', 'baseline')
+    monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
+    notes = tmp_path / 'notes.md'
+    before = campaign._tree_fingerprint(notes)
+    code.write_text('value = 2\n')
+    git('add', 'fix.py')
+    assert campaign._tree_fingerprint(notes) != before
+    git('commit', '-m', 'verified fix')
+    after = campaign._tree_fingerprint(notes)
+    assert after != before
+    assert after == campaign._tree_fingerprint(notes)
+    notes.write_text('checkpoint only\n')
+    assert campaign._tree_fingerprint(notes) == after
