@@ -29,7 +29,7 @@ Raw console Lua and build commands can mutate state. Start diagnosis with read-o
 
 ## Failure workflow
 
-1. Read the complete latest log and identify the first hard failure, not the last repeated symptom.
+1. Start with the bounded [run context](deterministic/run_context.md), then inspect cited raw evidence to identify the first hard failure, not the last repeated symptom.
 2. Verify the runner is connected to the intended server, port, save, surface, and force.
 3. Verify the running mod copy matches the repository copy when Lua behavior appears stale.
 4. Trace observation -> planner/policy decision -> submitted action -> Factorio result.

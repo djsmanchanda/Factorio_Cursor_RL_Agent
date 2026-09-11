@@ -76,7 +76,8 @@ For unattended campaigns, `tools/opencode_campaign_orchestrator.py` owns the
 isolated fresh-run lifecycle and starts a **new OpenCode session for each
 run**. It persists the active run's session ID, so a controller restart resumes
 that same session rather than duplicating an hour-long run. It records a controller/log/logistic-inventory snapshot every two
-minutes in `docs/deterministic/opencode_campaign_observations.md`, uses that
+minutes with a rolling `logs/latest-context.md` packet and short references in
+`docs/deterministic/opencode_campaign_observations.md`, uses that
 run's session for the checkpoint reviews, then requires its final comparison
 against the preceding documented run before one focused edit can trigger the
 next episode. Continuation requires both an explicit `change` verdict and a detected
@@ -135,3 +136,5 @@ Unhandled tracebacks retain only their final 24 frames. Helper packets remove
 duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
 model calls above a 36,000-character prompt ceiling so a 16K local review
 context retains room for the system rubric and structured answer.
+
+For compact handoffs and cross-run lookup, use the [run context workflow](run_context.md).

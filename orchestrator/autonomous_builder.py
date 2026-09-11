@@ -1541,66 +1541,11 @@ def _planned_entity_positions(*plans: dict) -> set[tuple[str, float, float]]:
     }
 
 
-_BELT_TIER_PAIRS = {
+_BELT_TIER_UPGRADES = {
     "transport-belt": "fast-transport-belt",
     "underground-belt": "fast-underground-belt",
     "splitter": "fast-splitter",
 }
-_BELT_TIER_UPGRADES = _BELT_TIER_PAIRS
-
-
-def _prefer_stocked_belt_tiers(plan: dict, available: Mapping[str, int]) -> int:
-    """Rebalance a plan's belt tiers toward whatever the base actually stocks.
-
-    Belts are drop-in compatible across tiers (same footprint, same geometry),
-    so the plan should follow INVENTORY, not the other way round. Two failure
-    directions observed live: run 6 built on regular while fast sat unused;
-    run 11 demanded fast it could not produce while regular belts were
-    plentiful. For each tier pair, swaps actions from the short side to the
-    covered side and returns the swap count."""
-    planned: dict[str, list[dict]] = {}
-    for phase in plan.get("phases", []):
-        for action in phase["actions"]:
-            entity = action.get("entity")
-            if entity in _BELT_TIER_PAIRS or entity in _BELT_TIER_PAIRS.values():
-                planned.setdefault(entity, []).append(action)
-    if not planned:
-        return 0
-    swapped = 0
-    # A tier may substitute the other AFTER covering its own plan needs:
-    # surplus = stocked minus what this plan directly requires of it.
-    for base, fast in _BELT_TIER_PAIRS.items():
-        base_actions = planned.get(base, [])
-        fast_actions = planned.get(fast, [])
-        spare_base = max(
-            0, available.get(base, 0) - len(base_actions),
-        )
-        spare_fast = max(
-            0, available.get(fast, 0) - len(fast_actions),
-        )
-
-        def swap(actions: list[dict], from_tier: str, to_tier: str,
-                 count: int) -> int:
-            moved = 0
-            for action in actions:
-                if moved >= count:
-                    break
-                if action.get("entity") == from_tier:
-                    action["entity"] = to_tier
-                    moved += 1
-            return moved
-
-        deficit_base = max(0, len(base_actions) - available.get(base, 0))
-        deficit_fast = max(0, len(fast_actions) - available.get(fast, 0))
-        if deficit_base and spare_fast:
-            swapped += swap(
-                base_actions, base, fast, min(deficit_base, spare_fast),
-            )
-        if deficit_fast and spare_base:
-            swapped += swap(
-                fast_actions, fast, base, min(deficit_fast, spare_base),
-            )
-    return swapped
 
 
 def _own_service_infrastructure(
@@ -2122,18 +2067,10 @@ def _assert_atomic_plate_expansion_affordable(
         plans.insert(0, foundation)
     if extraction.build_plan is not None:
         plans.insert(0, extraction.build_plan)
-    try:
-        belt_stock = live_base.available_items(client, surface, force)
-        swapped = sum(
-            _prefer_stocked_belt_tiers(staged, belt_stock) for staged in plans
-        )
-        if swapped:
-            emit(
-                f"  BELT ECONOMY: upgraded {swapped} regular belt action(s) to "
-                "stocked fast tiers"
-            )
-    except Exception as error:  # economy upgrade is opportunistic
-        emit(f"  BELT ECONOMY skipped: {error}")
+    # Preserve the selected transport prototypes: this delta includes existing
+    # collector tiles and exact removal identities. Stock substitutions here
+    # can collide with the live tier and invalidate the ownership preflight.
+    # Later tier changes use the explicit native-upgrade path instead.
     combined = {
         "force": force,
         "phases": [phase for plan in plans for phase in plan["phases"]],

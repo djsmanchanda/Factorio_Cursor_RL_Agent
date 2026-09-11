@@ -653,6 +653,41 @@ def test_atomic_preflight_counts_mine_and_modular_delta(monkeypatch) -> None:
     ] == ["electric-mining-drill", "electric-furnace"]
 
 
+@pytest.mark.parametrize("belt_type,stocked_tier", [
+    ("transport-belt", "fast-transport-belt"),
+    ("fast-transport-belt", "transport-belt"),
+])
+def test_expansion_preflight_preserves_transport_identity(monkeypatch, belt_type, stocked_tier) -> None:
+    # A preflight includes existing/removal actions, so stock cannot rewrite
+    # the selected prototype. Native ownership-checked upgrades are separate.
+    from copy import deepcopy
+
+    mine = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": belt_type,
+        "position": {"x": 46.5, "y": -11.5}, "direction": "east",
+    }]}]}
+    delta = {"phases": [{"actions": [{
+        "action_type": "remove_entity", "entity": belt_type,
+        "position": {"x": 70.5, "y": -11.5},
+    }]}]}
+    original = deepcopy((mine, delta))
+    monkeypatch.setattr(builder, "generate_managed_refinery_extension_plan", lambda *_a, **_k: delta)
+    monkeypatch.setattr(builder, "assert_refinery_removals_owned", lambda *_a: None)
+    monkeypatch.setattr(builder, "_plate_expansion_foundation", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "live_refinery_placements", lambda *_a: set())
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {stocked_tier: 100})
+    captured = []
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a: captured.append(deepcopy(_a[3])))
+
+    builder._assert_atomic_plate_expansion_affordable(
+        object(), "nauvis", "player", "iron-plate",
+        SimpleNamespace(build_plan=mine), _state(), 60, lambda _message: None,
+    )
+
+    assert (mine, delta) == original
+    assert [a["entity"] for phase in captured[0]["phases"] for a in phase["actions"]] == [belt_type, belt_type]
+
+
 def test_unmanaged_refinery_expansion_defers_without_opening_replacement(monkeypatch) -> None:
     calls = []
     extraction = SimpleNamespace(

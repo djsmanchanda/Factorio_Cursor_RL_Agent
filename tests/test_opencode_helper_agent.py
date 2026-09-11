@@ -112,3 +112,64 @@ def test_helper_retries_by_resuming_the_same_session(monkeypatch, tmp_path: Path
     assert commands[0][-1] == "checkpoint evidence"
     assert "--session" in commands[1]
     assert "Continue the same read-only helper run" in commands[1][-1]
+
+
+def test_completion_detection_survives_verbose_output_and_ignores_quoted_marker(tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    log.write_text('+1s HELPER: wait for RUN END before wrapping findings\n')
+    ended, offset = helper._new_log(log, 0)
+    assert not ended
+    with log.open("a") as handle:
+        handle.write('+2s RUN END\n' + 'observer cleanup\n' * 1000)
+    ended, final_offset = helper._new_log(log, offset)
+    assert ended
+    assert final_offset == log.stat().st_size
+    assert helper._new_log(log, final_offset) == (False, final_offset)
+
+
+def test_checkpoint_uses_rolling_offline_packet_without_log_or_live_stock_flood(tmp_path: Path, monkeypatch) -> None:
+    log = tmp_path / "logs" / "run.log"
+    log.parent.mkdir()
+    config = _config(tmp_path, log)
+    calls = []
+
+    def fake_context(log_path, inventory_path=None):
+        calls.append((log_path, inventory_path))
+        return f"bounded evidence version {len(calls)}\n"
+
+    monkeypatch.setattr(helper, "build_context", fake_context)
+    packet = helper._refresh_context(config)
+    assert packet.read_text() == "bounded evidence version 1\n"
+    prompt = helper._checkpoint_prompt(config, helper._report_path(config), 2, packet)
+    assert str(packet) in prompt
+    assert "bounded evidence version" not in prompt
+    assert "New runner output" not in prompt
+    assert helper._refresh_context(config) == packet
+    assert packet.read_text() == "bounded evidence version 2\n"
+    assert calls == [(log, log.parent / "inventory-history.json")] * 2
+
+
+def test_completed_prior_episode_does_not_finish_current_helper(tmp_path: Path, monkeypatch) -> None:
+    log = tmp_path / "run.log"
+    log.write_text(
+        'RUN START: ts=old command=research\n+2s RUN END\n'
+        'RUN START: ts=new command=research\n+1s waiting for a delivery\n'
+    )
+    prompts = []
+
+    def fake_ask(config, message, state):
+        prompts.append(message)
+        state.session_id = "session-1"
+
+    def finish_run(_seconds):
+        with log.open("a") as handle:
+            handle.write('+3s RUN END\n')
+
+    monkeypatch.setattr(helper, "_ask", fake_ask)
+    monkeypatch.setattr(helper, "_recent_commits", lambda: "test revision")
+    monkeypatch.setattr(helper, "build_context", lambda *_args, **_kwargs: "bounded packet\n")
+    monkeypatch.setattr(helper.time, "sleep", finish_run)
+    assert helper.run_helper(_config(tmp_path, log)) == 0
+    assert len(prompts) == 3
+    assert prompts[1].startswith("Checkpoint")
+    assert prompts[2].startswith("RUN END")

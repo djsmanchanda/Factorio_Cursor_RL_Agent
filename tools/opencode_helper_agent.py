@@ -11,15 +11,14 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
-from urllib.error import URLError
-from urllib.request import urlopen
+from tools.run_context import build_context
+from tools.run_log_format import is_run_end_line
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_ROOT = Path.home() / ".local/share/factorio-rl/opencode_helper"
 DEFAULT_REPORT_ROOT = REPO_ROOT / "docs/deterministic/opencode_helper_runs"
 DEFAULT_MODEL = "opencode-go/muse-spark-1.3-contributor"
-RUN_END = "RUN END"
 
 
 @dataclass(frozen=True)
@@ -97,35 +96,29 @@ def _session_id(output: str) -> str | None:
     return None
 
 
-def _new_log(path: Path, offset: int, *, limit: int = 8000) -> tuple[str, int]:
+def _new_log(path: Path, offset: int) -> tuple[bool, int]:
+    """Scan new raw evidence for completion independently of context compaction."""
     try:
-        contents = path.read_bytes()
+        with path.open("rb") as handle:
+            size = handle.seek(0, 2)
+            handle.seek(offset if 0 <= offset <= size else 0)
+            contents = handle.read()
     except FileNotFoundError:
-        return "Runner log is not present yet.", 0
-    if offset < 0 or offset > len(contents):
-        offset = 0
-    text = contents[offset:].decode("utf-8", errors="replace")
-    if len(text) > limit:
-        text = "… [older new output omitted] …\n" + text[-limit:]
-    return text or "No new runner output.", len(contents)
+        return False, 0
+    return any(is_run_end_line(line) for line in contents.splitlines()), size
 
 
-def _inventory(url: str) -> str:
-    try:
-        with urlopen(url, timeout=15) as response:  # noqa: S310 -- loopback endpoint supplied by caller.
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, URLError, ValueError, json.JSONDecodeError) as error:
-        return f"Unavailable: {error}"
-    if not isinstance(payload, dict) or not payload.get("ok"):
-        return f"Unavailable: {payload.get('error', 'invalid response') if isinstance(payload, dict) else 'invalid response'}"
-    items = payload.get("total_items", {})
-    pairs = items.items() if isinstance(items, dict) else []
-    top = sorted(
-        ((str(name), count) for name, count in pairs if isinstance(count, (int, float)) and count > 0),
-        key=lambda pair: (-pair[1], pair[0]),
-    )[:30]
-    contents = ", ".join(f"{name}={count:g}" for name, count in top) or "no logistic items"
-    return f"tick={payload.get('tick', 'unknown')}; top logistic items: {contents}"
+def _context_path(config: Config) -> Path:
+    return config.data_root / "runs" / config.run_id / "context.md"
+
+
+def _refresh_context(config: Config) -> Path:
+    """Keep one bounded evidence packet without embedding it in every prompt."""
+    path = _context_path(config)
+    _atomic_write(path, build_context(
+        config.log_path, inventory_path=config.log_path.parent / "inventory-history.json",
+    ))
+    return path
 
 
 def _manifest(path: Path | None) -> str:
@@ -209,7 +202,7 @@ def _initial_prompt(config: Config, report: Path) -> str:
     return f"""You are the permanent read-only OpenCode Helper Agent for one isolated deterministic Factorio run.
 Run ID: {config.run_id}. Work in {REPO_ROOT}. The runner will send this same session a new evidence checkpoint every {config.interval_seconds} seconds.
 
-Write the complete run document at {report}. It is the only findings document for this run. At each checkpoint, append a compact dated observation: progress, bottleneck, mall targets and logistic inventory, code correlations, and a falsifiable next signal. Read only supplied log evidence, the manifest, and GET {config.dashboard_url}; do not edit code, commit, deploy, restart, reset, send RCON, or alter the factory.
+Write the complete run document at {report}. It is the only findings document for this run. At each checkpoint, append only changed milestones, blocked dependencies, or contradictions with timestamped evidence references and a falsifiable next signal. Do not repeat unchanged state. Separate observed facts from hypotheses; unknown is not zero, inventory change is not production rate, and total stock is not transferable supply. Read the rolling evidence packet when requested, its cited log lines, relevant repository code, the manifest, and GET {config.dashboard_url}; do not edit code, commit, deploy, restart, reset, send RCON, or alter the factory.
 
 Continuously compare this run to the previous helper findings document when present: {prior}. Review the recent committed change history before forming a hypothesis:
 ```text
@@ -219,30 +212,18 @@ Do not issue a sleep command longer than 90 seconds.
 
 Run identity: {_manifest(config.manifest_path)}
 
-At RUN END you will receive the terminal log section and must wrap this document with a concise final diagnosis, comparison with the prior helper report if one exists, and a structured handoff for a later coding task. Do not implement any fix yourself."""
+At RUN END you will receive the final evidence packet path and must wrap this document with a concise final diagnosis, comparison with the prior helper report if one exists, and a structured handoff for a later coding task. Do not implement any fix yourself."""
 
 
-def _checkpoint_prompt(config: Config, report: Path, checkpoint: int, log: str) -> str:
-    return f"""Checkpoint {checkpoint} for run {config.run_id}. Append a compact observation to {report}; remain read-only. Read the new log and inventory, identify bottlenecks or changed behavior against the prior run, and state how the system could improve. Do not issue a sleep command longer than 90 seconds.
-
-New runner output:
-```text
-{log}
-```
-
-Logistic inventory: {_inventory(config.dashboard_url)}
+def _checkpoint_prompt(config: Config, report: Path, checkpoint: int, context: Path) -> str:
+    return f"""Checkpoint {checkpoint} for run {config.run_id}. Read the current bounded evidence packet at {context} (it is replaced each checkpoint), then append only meaningful changes to {report}; remain read-only. Do not paste the packet or raw log into findings. Cite source lines for claims, distinguish stock from throughput and transferable supply, and state one falsifiable next signal. Follow cited source lines only when needed to resolve a specific uncertainty. Do not issue a sleep command longer than 90 seconds.
 
 Manifest: {_manifest(config.manifest_path)}"""
 
 
-def _completion_prompt(config: Config, report: Path, final_log: str) -> str:
+def _completion_prompt(config: Config, report: Path, context: Path) -> str:
     previous = _previous_report(config, report)
-    return f"""RUN END for {config.run_id}. Read the final evidence below and finish {report} now. Include terminal outcome, key timeline, mall/logistic state, exact code correlations, and a concise structured coding handoff. Compare to {previous} when it exists. Remain read-only: no code edits, commits, lifecycle actions, RCON, or factory mutation.
-
-Final runner output:
-```text
-{final_log}
-```"""
+    return f"""RUN END for {config.run_id}. Read the final bounded evidence packet at {context} and finish {report} now. Include terminal outcome, milestone timeline, blocked dependency, evidence references, hypotheses and competing explanations, and a concise structured coding handoff with a predicted measurable result. Compare to {previous} when it exists; distinguish improved factory behavior from useful diagnostic evidence. Do not paste raw logs or repeat checkpoint history. Remain read-only: no code edits, commits, lifecycle actions, RCON, or factory mutation."""
 
 
 def _previous_report(config: Config, report: Path) -> Path | None:
@@ -283,15 +264,16 @@ def run_helper(config: Config) -> int:
         _ask(config, _initial_prompt(config, report), state)
         _save_state(state_path, state)
     while True:
-        log, state.offset = _new_log(config.log_path, state.offset)
+        ended, state.offset = _new_log(config.log_path, state.offset)
+        context = _refresh_context(config)
         state.checkpoints += 1
-        if RUN_END in log:
-            _ask(config, _completion_prompt(config, report, log), state)
+        if ended:
+            _ask(config, _completion_prompt(config, report, context), state)
             state.completed = True
             _save_state(state_path, state)
             _append_runner_log(config.log_path, f"findings complete {report} (run directory {report.parent})")
             return 0
-        _ask(config, _checkpoint_prompt(config, report, state.checkpoints, log), state)
+        _ask(config, _checkpoint_prompt(config, report, state.checkpoints, context), state)
         _save_state(state_path, state)
         time.sleep(config.interval_seconds)
 

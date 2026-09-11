@@ -889,7 +889,7 @@ def plan_local_extraction(
             drill_xs = sorted({x for x, _y in positions})
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
             build_plan = generate_shared_belt_batch_expansion(
-                drill_xs, active.shared_belt_y,
+                drill_xs, active.shared_belt_y, belt_type=belt_type,
                 belt_direction="east" if active.first_column_x is not None or active.expansion_step > 0 else "west",
             )
             drill_count = len(positions)

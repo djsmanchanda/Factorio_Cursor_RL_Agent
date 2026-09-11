@@ -1,72 +1,64 @@
 ---
 name: factorio-mod-troubleshooting
-description: Diagnose this repository's Factorio mod command registration, deployment/restart drift, script-output pairing, report schemas, live-state invariants, and autonomous-run failures. Use when RCON connects but commands, reports, or workflows misbehave. Do NOT use to redeploy mods, restart/quit/save/reset a server, or mutate a live base without explicit user authorization.
+description: Diagnose Factorio campaign stalls, unexpected placements, stale reports, command failures, and deployment drift using bounded run context and targeted evidence. Does not authorize live mutation or lifecycle actions.
 ---
 # Path: .agents/skills/factorio-mod-troubleshooting/SKILL.md
-# Purpose: Provide a fail-closed troubleshooting sequence for the repository's Factorio mod.
+# Purpose: Diagnose the first failing decision with compact, run-scoped evidence.
 
-# Factorio Mod Troubleshooting
+# Factorio troubleshooting
 
-Classify the failure before changing anything.
+Read [operations](../../../docs/factorio_operations.md) for runtime paths and
+[context workflow](../../../docs/deterministic/run_context.md) for packet creation.
+Respect authorization already given in the session; this skill grants none.
 
-## When to Activate
+## Start with the relevant evidence
 
-- Diagnose a missing or unknown registered command
-- Reconcile source code with the deployed mod revision
-- Trace a missing or stale `script-output` report
-- Validate a mod-generated JSON artifact against its schema
-- Investigate a GameBridge wait timeout
-- Measure live factory invariants without mutation
-- Separate autonomous-run code failures from live-state failures
-- Determine whether a restart boundary explains drift
+For a campaign failure, generate/read `logs/latest-context.md` before reading
+whole logs. The packet is a bounded index, not a complete diagnosis. Check the
+run header, completion state, terminal evidence, milestone references and
+inventory sample ticks. Missing or truncated fields remain unknown. Helper
+findings cover only their observed interval; a timeout does not describe the
+rest of the run.
 
-## Failure Routing
+For command/report failures, first identify the failing layer:
 
-| First failing layer | Evidence | Next read-only action |
-| --- | --- | --- |
-| Transport | Auth error/refused connection | Verify endpoint and launch settings |
-| Registration | Tick works; `/help` fails | Compare loaded mod and source revisions |
-| Output | Command runs; no new JSON | Verify same-server `script-output` and subdir |
-| Contract | New JSON fails validation | Compare tick, schema, mod revision |
-| Live state | Valid report says `ok: false` | Inspect reported surface/force/invariant |
-| Orchestrator | Inputs valid; Python traceback | Capture revision, traceback, process provenance |
+| Layer | Targeted check |
+| --- | --- |
+| Transport | Confirm endpoint/process; one tick probe |
+| Registration | `/help <command>` and loaded/source mod versions |
+| Output | Same-server script-output path, filename/request ID and freshness |
+| Contract | Report tick, scope, schema and matching version |
+| Planning/execution | Exact decision, submitted plan, executor report, observed entity |
+| Production | Blocked dependency, stock ownership, input/output flow and status |
 
-Use [the authoritative runbook](../../../docs/factorio_operations.md)
-for command inventory, output directories, recipes, and the full failure matrix.
+Do not probe every layer when a planner reproduction already identifies the
+failure. Do not reset a preserved episode merely to get more observations.
 
-## Fail-closed Sequence
+## Investigate one causal chain
 
-1. Record endpoint, server data directory, repo revision, and deployed-mod revision.
-2. Run one tick probe and `/help <command>`.
-3. Inspect the expected output directory without deleting artifacts.
-4. Validate the newest report's tick and JSON/schema.
-5. Use `python -m tools.verify_factory_invariants`; the direct form is broken.
-6. Compare the failure to current source before blaming live state.
-7. Ask before redeploy, save/reset, restart, quit, or autonomous retry.
+- Trace observation → decision → submitted plan → execution → outcome. A
+  terminal task name is a symptom until tied to its blocked dependency.
+- For an unexpected entity, search the exact coordinate in submitted plans and
+  execution reports. Establish entity versus ghost, direction, owning project,
+  placement time and tier-selection inputs before editing geometry.
+- Keep requester/buffer WIP, transferable stock and logistic network stock
+  distinct. Stock in another cell does not feed this cell. Net inventory change
+  combines production, consumption, transfers and construction; it is not a
+  production rate. Use measured craft/output counters for throughput claims.
+- Read the cited raw lines and the smallest relevant report window. Expand
+  evidence when a packet omits a field needed to distinguish hypotheses.
+- Compare against the previous run, best verified milestone and same-mechanism
+  runs. Longer survival and more stock are not acceptance criteria.
 
-BAD:
+## Fix and verify
 
-```text
-No report appeared, so redeploy the mod, reset the surface, and rerun.
-```
+State the mechanism, competing explanation, smallest reusable change and
+predicted observable result. Reproduce locally before a full rerun when
+possible. Preserve validators and existing infrastructure; never repair a live
+base to conceal a planner bug. A telemetry-only rerun needs a specific missing
+measurement that cannot be obtained from the preserved evidence.
 
-GOOD:
-
-```text
-RCON tick works; /help snapshot works; no new snapshot appeared in the supplied
-script-output tree. Verify that tree belongs to this server before any retry.
-```
-
-A stale autonomous log may reference code that differs from the current worktree.
-Record revision/import provenance; do not treat a fresh rerun as harmless.
-
-## Before You Ship
-
-- [ ] Failure is assigned to transport, registration, output, contract, live state, or orchestrator
-- [ ] Source and deployed revisions are distinguished
-- [ ] Report path and tick are captured
-- [ ] Schema validation uses the matching repository schema
-- [ ] Real-base checks use `nauvis` and `player`
-- [ ] Repeated mutating retries were avoided
-- [ ] Deployment/lifecycle/mutation next steps request explicit authorization
-- [ ] Findings separate verified evidence from inference
+Report test evidence separately from deployed and live evidence. Python needs
+the affected runner/controller restarted; Lua needs deliberate deployment and
+runtime reload. Perform live actions only within explicit session authority.
+Do not request authorization again when it already covers the exact action.

@@ -55,11 +55,14 @@ def is_run_start_line(line: str | bytes) -> bool:
 
 
 def is_run_end_line(line: str | bytes) -> bool:
-    """Recognize compact, legacy, and unprefixed terminal boundaries."""
+    """Recognize actual terminal records, never quoted helper/prompt text."""
+    if isinstance(line, bytes):
+        line = line.decode("utf-8", errors="replace")
     stripped = line.rstrip()
-    if isinstance(stripped, bytes):
-        return stripped == b"RUN END" or stripped.endswith(b" RUN END")
-    return stripped == "RUN END" or stripped.endswith(" RUN END")
+    if stripped == "RUN END" or re.fullmatch(r"\+\d+s RUN END", stripped):
+        return True
+    parsed = parse_timed_run_log_line(stripped, run_started_at=None)
+    return parsed is not None and parsed.message == "RUN END"
 
 
 def is_helper_agent_line(line: str | bytes) -> bool:

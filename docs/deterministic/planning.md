@@ -122,6 +122,10 @@ These names describe intended responsibilities, not permission to build speculat
   complete mine, haul, and refinery bill is queued against the working regular
   belt producer; partial fast-belt stock cannot promote the blueprint into a
   tier whose producer is still gated.
+  Longitudinal mine expansion preserves the selected belt tier as well.
+  Affordability checks never substitute transport prototypes in an expansion
+  delta: existing collector tiles and exact removal actions keep their
+  identities. Later changes use the ownership-checked native upgrade path.
 - Metal refineries grow with their mine in complete six-furnace modules. A
   12-drill phase targets 12 furnaces and a 24-drill phase targets 24; mining
   productivity headroom must not skip a module or double the requested block.

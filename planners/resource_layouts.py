@@ -516,9 +516,12 @@ def generate_shared_belt_column_expansion(
 
 def generate_shared_belt_batch_expansion(
     drill_xs: list[float], shared_belt_y: float, *,
+    belt_type: str = "transport-belt",
     belt_direction: str = "west",
 ) -> dict:
     """Populate reserved drill columns and only their required belt tiles."""
+    if belt_type not in BELT_TIERS:
+        raise ValueError(f"Unknown belt tier: {belt_type}")
     if not drill_xs:
         raise ValueError("Batch mine expansion needs at least one drill column")
     if belt_direction not in {"east", "west"}:
@@ -537,7 +540,7 @@ def generate_shared_belt_batch_expansion(
              "direction": direction}
             for x in columns for dy, direction in ((-2, "south"), (2, "north"))
         ] + [
-            {"action_type": "place_ghost", "entity": "fast-transport-belt",
+            {"action_type": "place_ghost", "entity": belt_type,
              "position": {"x": x + offset, "y": shared_belt_y},
              "direction": belt_direction}
             for x in columns for offset in range(3)

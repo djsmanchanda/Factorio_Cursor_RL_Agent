@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sqlite3
 import sys
 import time
 from dataclasses import asdict, dataclass, field
@@ -22,6 +23,11 @@ from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.run_context import build_context
+from tools.run_history import index_log
 DEFAULT_STATE_ROOT = Path.home() / ".local/share/factorio-rl/deterministic"
 DEFAULT_SOURCE_SAVE = Path.home() / ".factorio/saves/mod_playground.zip"
 DEFAULT_OBSERVATIONS = REPO_ROOT / "docs/deterministic/opencode_campaign_observations.md"
@@ -129,19 +135,6 @@ def _status_command(config: Config) -> list[str]:
     ]
 
 
-def _new_log(path: Path, offset: int, *, limit: int = 7000) -> tuple[str, int]:
-    try:
-        contents = path.read_bytes()
-    except FileNotFoundError:
-        return "Runner log is not present yet.", 0
-    if offset < 0 or offset > len(contents):
-        offset = 0
-    text = contents[offset:].decode("utf-8", errors="replace")
-    if len(text) > limit:
-        text = "… [older new output omitted] …\n" + text[-limit:]
-    return text or "No new runner output.", len(contents)
-
-
 def _latest_run(path: Path) -> tuple[bool, str]:
     try:
         contents = path.read_text(encoding="utf-8", errors="replace")
@@ -189,13 +182,21 @@ def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple
         inventory = "Dry run: Operations Console probe skipped."
     else:
         status = _run(_status_command(config), timeout=60)
-        log, next_offset = _new_log(config.state_root / "logs/autonomous-run.log", offset)
-        status_text = (status.stdout + status.stderr).strip() or "No status output."
         inventory = _inventory(config.dashboard_url)
+        log_path = config.state_root / "logs/autonomous-run.log"
+        packet_path = config.state_root / "logs/latest-context.md"
+        packet = build_context(log_path, config.state_root / "logs/inventory-history.json")
+        packet_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = packet_path.with_suffix(".tmp")
+        temporary.write_text(packet, encoding="utf-8")
+        temporary.replace(packet_path)
+        log = f"Read current bounded context: {packet_path}. Raw evidence: {log_path}."
+        next_offset = log_path.stat().st_size if log_path.exists() else 0
+        status_text = (status.stdout + status.stderr).strip() or "No status output."
     return (
         f"## Cycle {cycle} — checkpoint {checkpoint} ({_now()})\n\n"
         f"### Controller status\n\n```text\n{status_text[-4000:]}\n```\n\n"
-        f"### New runner output\n\n```text\n{log}\n```\n\n"
+        f"### Run context\n\n```text\n{log}\n```\n\n"
         f"### Logistic inventory (`nauvis` / `player`)\n\n{inventory}\n\n"
         "### OpenCode assessment\n\nPending this session's review.\n",
         next_offset,
@@ -256,11 +257,11 @@ durable checkpoint every {config.interval_seconds} seconds. Work in `{REPO_ROOT}
 The sole live scope is `{config.state_root}` on `nauvis` / `player`.
 
 Read AGENTS.md, docs/system_invariants.md, docs/factorio_operations.md, docs/deterministic/README.md,
-docs/deterministic/planning.md, docs/deterministic/opencode_campaign_prompt.md, git status, and the prior sections of
-`{config.observations}`. For every checkpoint, read only its new section and append a compact assessment below it.
+docs/deterministic/planning.md, docs/deterministic/opencode_campaign_prompt.md, git status, and the prior run summaries in
+`{config.observations}`. Read `docs/deterministic/run_context.md` for evidence scope. For every checkpoint, read only its new section and append a compact assessment below it.
 
 Separate observation from interpretation. Record timestamped facts, deltas, and evidence references (log offsets,
-report ticks, inventory snapshots). Label every hypothesis as one, and keep raw observations in the transcript;
+report ticks, inventory snapshots). Label every hypothesis as one; retain raw observations in source artifacts, not copied into the transcript;
 summaries report only milestone transitions, newly blocked dependencies, production/delivery-rate changes, and
 contradictions. Collapse repeated unchanged observations into one interval with a repetition count. Never convert
 "unknown" into zero, and never infer adequate supply from aggregate stock: total, accessible, and already-allocated
@@ -281,7 +282,7 @@ complete cycle outcome. Reply briefly after this setup observation."""
 
 def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
     return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and append
-its assessment below it: timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
+read the referenced rolling context packet and append its assessment below it (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
 dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
 reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
 count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
@@ -291,9 +292,9 @@ lifecycle, deployment, reset, or factory changes."""
 def _completion_prompt(config: Config, cycle: int) -> str:
     return f"""Cycle {cycle} has RUN END. Before anything else, inspect the preserved failed episode with read-only probes
 where possible: the isolated save is still in place until the parent starts the next fresh run. Read its final run
-block, wait up to {config.post_run_wait_seconds} seconds for helper output if it is still arriving, and compare this
+block in `{config.state_root}/logs/latest-context.md`, follow decisive raw line references, wait up to {config.post_run_wait_seconds} seconds for helper output if it is still arriving, and compare this
 completed run against three references in `{config.observations}`: the preceding run, the best verified milestone run,
-and previous runs with the same failure mechanism. Then classify the outcome: factory improvement, useful diagnostic
+and previous runs with the same failure mechanism. Use `python -m tools.run_history search --db {config.state_root}/logs/run-history.sqlite --query "<blocker or dependency>"` for matching historical evidence. Then classify the outcome: factory improvement, useful diagnostic
 evidence, regression, or inconclusive. Survival time and inventory size alone decide nothing.
 
 Only when the evidence supports a fix, implement exactly one small reusable fix, add/update its narrow regression
@@ -429,6 +430,16 @@ def run_campaign(config: Config) -> int:
                 _append(config.observations, "## Campaign stop\n\nWall-clock limit reached during an active run.\n")
                 return 0
             time.sleep(config.interval_seconds)
+        if not config.dry_run:
+            history_db = config.state_root / "logs/run-history.sqlite"
+            history_sources = sorted((config.state_root / "logs/archive").glob("autonomous-run-*.log"))
+            history_sources.append(config.state_root / "logs/autonomous-run.log")
+            try:
+                for source in history_sources:
+                    if source.exists():
+                        index_log(history_db, source)
+            except (OSError, ValueError, sqlite3.Error) as error:
+                _append(config.observations, f"History index unavailable: {error}\n")
         before = _tree_fingerprint(config.observations)
         _, output = _ask(config, _completion_prompt(config, cycle), session_id, sequence)
         sequence += 1

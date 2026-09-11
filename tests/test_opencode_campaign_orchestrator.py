@@ -121,3 +121,20 @@ def test_campaign_requires_explicit_change_and_edit_to_retry(
         "--observations", str(tmp_path / "notes.md"),
     ]) == 0
     assert campaign._load_state(state_root / "logs/opencode-campaign-state.json").completed_cycles == expected_cycles
+
+
+def test_checkpoint_links_bounded_packet_without_copying_raw_log(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log = log_dir / "autonomous-run.log"
+    log.write_text("RUN START: ts=2026-09-11T00:00:00Z\n+1s raw-repeat " + "x" * 15000)
+    monkeypatch.setattr(campaign, "_status_command", lambda _: [])
+    monkeypatch.setattr(campaign, "_run", lambda *_, **__: SimpleNamespace(stdout="stopped", stderr=""))
+    monkeypatch.setattr(campaign, "_inventory", lambda _: "UNKNOWN")
+    cfg = SimpleNamespace(dry_run=False, state_root=tmp_path, dashboard_url="unused")
+    snapshot, offset = campaign._snapshot(cfg, 1, 1, 0)
+    assert offset == log.stat().st_size
+    assert "raw-repeat" not in snapshot
+    assert str(log_dir / "latest-context.md") in snapshot
+    assert len((log_dir / "latest-context.md").read_text()) <= 12000

@@ -1,20 +1,13 @@
 # Path: tests/test_power_and_belt_economy.py
 # Purpose: User standards of 2026-08-22 -- belts go to the active blueprint
-# before belt-consuming cells, stocked fast tiers substitute for scarce regular
-# ones, a visibly-filling blueprint earns patience, and lean grids get solar.
+# before belt-consuming cells, a visibly-filling blueprint earns patience,
+# and lean grids get solar. Transport identity tests live with expansion tests.
 
 from types import SimpleNamespace
 
 import pytest
 
 from orchestrator import autonomous_builder as builder
-
-
-def _plan(belt: str = "transport-belt", count: int = 3) -> dict:
-    return {"phases": [{"name": "p", "actions": [
-        {"action_type": "place_ghost", "entity": belt, "position": {"x": i, "y": 0}}
-        for i in range(count)
-    ]}]}
 
 
 # --- belt reserve floor ------------------------------------------------------
@@ -249,53 +242,6 @@ def test_mall_keeps_stalled_producer_demand_until_it_makes_output(monkeypatch) -
 
     assert targets == {"transport-belt": 132}
     assert events == [("defer", "producer exists but has not produced yet")]
-
-
-# --- fast tier substitution --------------------------------------------------
-
-def test_regular_belts_substitute_to_stocked_fast_tiers() -> None:
-    plan = _plan("transport-belt", 3)
-    swapped = builder._prefer_stocked_belt_tiers(
-        plan, {"fast-transport-belt": 100},
-    )
-    assert swapped == 3
-    actions = plan["phases"][0]["actions"]
-    assert all(a["entity"] == "fast-transport-belt" for a in actions)
-
-
-def test_partial_fast_coverage_upgrades_what_it_can() -> None:
-    """Bidirectional economy: cover actions with stocked surplus where it
-    exists -- a buildable mixed-tier plan beats an unaffordable pure one."""
-    plan = _plan("transport-belt", 5)
-    swapped = builder._prefer_stocked_belt_tiers(
-        plan, {"fast-transport-belt": 4},
-    )
-    assert swapped == 4
-    tiers = [a["entity"] for a in plan["phases"][0]["actions"]]
-    assert tiers.count("fast-transport-belt") == 4
-    assert tiers.count("transport-belt") == 1
-
-
-def test_fast_shortfall_downgrades_to_covering_regular() -> None:
-    """Run 11: the landfill blueprint demanded 16 fast belts the gate would
-    not produce, while regular belts sat plentiful -- the plan follows
-    inventory, not the reverse."""
-    plan = _plan("fast-transport-belt", 16)
-    swapped = builder._prefer_stocked_belt_tiers(
-        plan, {"transport-belt": 86, "fast-transport-belt": 9},
-    )
-    assert swapped == 7
-    tiers = [a["entity"] for a in plan["phases"][0]["actions"]]
-    assert tiers.count("transport-belt") == 7
-    assert tiers.count("fast-transport-belt") == 9
-
-
-def test_plans_without_belts_are_untouched() -> None:
-    plan = {"phases": [{"name": "p", "actions": [
-        {"action_type": "place_entity", "entity": "electric-mining-drill",
-         "position": {"x": 0, "y": 0}},
-    ]}]}
-    assert builder._prefer_stocked_belt_tiers(plan, {}) == 0
 
 
 # --- patience while a blueprint fills ----------------------------------------

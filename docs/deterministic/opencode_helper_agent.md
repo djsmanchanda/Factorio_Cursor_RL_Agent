@@ -12,9 +12,8 @@ planner or coding agent.
    OpenCode Helper process for that run.
 2. The helper creates one OpenCode session and one findings document at
    `docs/deterministic/opencode_helper_runs/<episode-id>/findings.md`.
-3. Every minute it sends that same session only new runner-log output,
-   read-only manifest facts, and the loopback logistic-inventory snapshot.
-4. When it sees `RUN END`, it steers the same session with the terminal log and
+3. Every minute it refreshes a bounded offline `context.md` under the helper run directory and sends that session its path plus manifest facts. The packet joins matching inventory history; raw log lines are retrieved only to resolve a specific question.
+4. When it sees `RUN END`, it steers the same session with the terminal context packet and
    requests a final wrap-up: outcome, timeline, inventory/mall state, code
    correlations, comparison to the preceding helper report, recent commit
    history, and a structured coding handoff.
@@ -31,8 +30,8 @@ transcripts live under `~/.local/share/factorio-rl/opencode_helper/runs/`.
 
 ## Boundaries
 
-- The helper may read runner logs, the episode manifest, and
-  `http://127.0.0.1:9137/api/logistic-inventory` only.
+- The helper may read the bounded context packet, its cited runner logs, matching inventory history, relevant repository code, the episode manifest, and
+  `http://127.0.0.1:9137/api/logistic-inventory`.
 - It must not edit code, commit, deploy, restart, reset, issue RCON, or mutate
   the factory.
 - It makes no run-continuation or code-fix decision. Its final handoff is

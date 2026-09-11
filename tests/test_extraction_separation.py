@@ -805,6 +805,29 @@ def test_planner_reuses_existing_direct_mine_on_retry(monkeypatch) -> None:
     assert planned.ore_output == (18.5, 20.5)
 
 
+@pytest.mark.parametrize("belt_type", ["transport-belt", "fast-transport-belt"])
+def test_longitudinal_expansion_preserves_selected_belt_tier(monkeypatch, belt_type) -> None:
+    # The opening collector is already paved through the next drill module.
+    # Expansion must reconcile that tier instead of ghosting fast over yellow.
+    mine = ResourceMine(
+        output=(36.5, -11.5), drill_count=3, row_capacity=6,
+        belt_y=-11.5, first_column_x=49.5, haul_head=(61.5, -11.5),
+        growth_direction=-1,
+    )
+    _patch_and_rates(monkeypatch, existing=mine)
+    monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
+    monkeypatch.setattr(live_base, "drill_siting_conflicts", lambda *_a: [])
+
+    planned = plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 12,
+        belt_type=belt_type, inserter_type="inserter", reuse_existing=False,
+    )
+    belts = [a for a in actions(planned.build_plan) if a["entity"].endswith("transport-belt")]
+    assert len(belts) == 9
+    assert {a["entity"] for a in belts} == {belt_type}
+    assert next(a for a in belts if a["position"] == {"x": 46.5, "y": -11.5})["entity"] == belt_type
+
+
 def test_full_straight_corridor_uses_parallel_splitter_band(monkeypatch) -> None:
     mine = ResourceMine(
         output=(36.5, -1.5), drill_count=3, row_capacity=3,
