@@ -5280,6 +5280,58 @@ def _bootstrap_loan_stock(
     return actual, usable
 
 
+def _loan_step_cell_fed(
+    client: RconClient, surface: str, force: str,
+    loan: MallBootstrapLoan, step,
+) -> bool:
+    """Whether the stalled loan cell could run one craft right now.
+
+    A disabled gate with deliverable ingredients is configuration drift (or
+    a genuine stall); a disabled gate with nothing deliverable is supply
+    starvation, and re-applying the gate cannot help (2026-09-11: an AM2
+    loan's e-circuit step sat disabled through 3 refreshes with cable net
+    4, requester 0, crafts 0/2, on the same cell/shape as the 2026-09-03
+    and 2026-09-04 gate_mismatch terminals). Spendable transferable stock
+    plus what already sits in the cell's requester is the honest scope:
+    available stock includes requester/buffer WIP locked inside other
+    consumers. Unknown telemetry fails open to the legacy counting path
+    so dry harnesses keep their behavior.
+    """
+    try:
+        spec = LINE_RECIPES.get(step.recipe, {})
+        needs = [
+            (str(item), float(amount))
+            for item, amount in zip(
+                spec.get("ingredients", ()), spec.get("amounts", ()),
+                strict=True,
+            )
+        ]
+    except Exception:
+        return True
+    if not needs:
+        return True
+    try:
+        spendable = live_base.transferable_items(client, surface, force)
+    except Exception:
+        return True
+    try:
+        held = live_base.chest_contents(
+            client, surface, loan.requester_position,
+        )
+    except Exception:
+        held = {}
+    for item, amount in needs:
+        try:
+            if (
+                float(spendable.get(item, 0)) + float(held.get(item, 0))
+                < float(amount)
+            ):
+                return False
+        except Exception:
+            return True
+    return True
+
+
 def _bootstrap_loan_products_finished(
     client: RconClient, surface: str, loan: MallBootstrapLoan,
 ) -> int | None:
@@ -5952,6 +6004,27 @@ def _submit_bootstrap_loan(
                 # step that ignores repeated refreshes is genuinely stuck
                 # (2026-09-04: a drill loan's circuit step sat disabled at
                 # 11/18 and ended the run).
+                #
+                # A disabled cell with no deliverable ingredients is starved,
+                # not mis-gated: re-applying the same gate cannot help while
+                # transfer_stock keeps moving 0 (2026-09-11: an AM2 loan's
+                # e-circuit step burned all 3 refreshes with cable net 4,
+                # requester 0, crafts 0/2). Wait for supply without consuming
+                # refresh budget; only a fed cell that ignores refreshes is
+                # genuinely stuck.
+                if not _loan_step_cell_fed(client, surface, force, loan, step):
+                    emit(
+                        f"  MALL BOOTSTRAP LOAN SUPPLY WAIT: {step.recipe} "
+                        f"at {loan.machine_position} is disabled below "
+                        f"{step.target_count} with no deliverable "
+                        "ingredients; yielding to mall production without "
+                        "consuming gate-refresh budget"
+                    )
+                    return (
+                        f"borrowed {loan.original_recipe} cell waits for "
+                        f"{step.recipe} ingredients for the "
+                        f"{loan.target_item} seed"
+                    )
                 refresh_key = (
                     live_loan_group, step.recipe, step.target_count,
                 )

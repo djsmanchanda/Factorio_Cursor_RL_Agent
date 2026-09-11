@@ -2403,6 +2403,72 @@ def test_ignored_gate_refreshes_eventually_raise(monkeypatch) -> None:
     assert failure.value.code == "mall_loan_gate_mismatch"
 
 
+def _starved_gate_loan(monkeypatch):
+    """The 2026-09-11 +1899s shape: an AM2 loan's e-circuit step (target 3)
+    sits disabled with cable net 4, requester 0, crafts 0/2."""
+    from orchestrator.mall_bootstrap import MallBootstrapLoan, MallBootstrapStep
+    loan = MallBootstrapLoan(
+        original_recipe="iron-gear-wheel",
+        target_item="assembling-machine-2", target_count=1, side="left",
+        requester_position=(39.5, 32.5),
+        current_recipe="electronic-circuit",
+        step_recipe="electronic-circuit",
+        step_target_count=3,
+        step_baseline_finished=862,
+        step_required_crafts=2,
+        step_minimum_crafts=2,
+    )
+    stock = {"electronic-circuit": 1, "copper-cable": 4, "iron-plate": 956}
+    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
+    )
+    monkeypatch.setattr(
+        builder, "next_bootstrap_step",
+        lambda *_a, **_k: MallBootstrapStep("electronic-circuit", 3, 2),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "progress_counters",
+        lambda *_a, **_k: {(36.5, 32.5): 862000},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "entity_status_name",
+        lambda *_a: "disabled_by_control_behavior",
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_persisted_step", lambda *_a: None,
+    )
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    # Nothing deliverable: providers drained, cell requester empty.
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a, **_k: {},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents", lambda *_a, **_k: {},
+    )
+    return loan
+
+
+def test_starved_loan_gate_waits_without_refresh_budget(monkeypatch) -> None:
+    """2026-09-11: a starved AM2 loan step burned 3 no-op gate refreshes
+    (cable net 4, requester 0, crafts 0/2) and ended the run. Starvation
+    must wait for supply without consuming refresh budget or raising."""
+    loan = _starved_gate_loan(monkeypatch)
+    messages: list[str] = []
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: None)
+
+    for _ in range(5):
+        remedy = builder._submit_bootstrap_loan(
+            object(), object(), "nauvis", "player", loan, messages.append,
+        )
+
+    assert "waits for" in remedy
+    assert any("SUPPLY WAIT" in message for message in messages)
+    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {}
+
+
 def test_half_without_provider_chest_is_not_borrowed(monkeypatch) -> None:
     """2026-09-04: a loan on the provider-less half of a shared cell died at
     submit with configure_target_missing. Only complete halves borrow."""
