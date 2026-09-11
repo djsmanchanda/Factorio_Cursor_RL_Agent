@@ -64,6 +64,7 @@ def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(command, 1 if 'pytest' in command else 0, '', '')
     monkeypatch.setattr(campaign, '_run', run)
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
+    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
     monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
     cfg = SimpleNamespace(observations=tmp_path / 'notes.md', state_root=tmp_path, python=Path('python'), opencode_log_dir=tmp_path)
     assert not campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: fix.py', set(), 1)
@@ -79,3 +80,20 @@ def test_expired_persisted_deadline_cannot_start_fresh(tmp_path, monkeypatch):
     assert campaign.main(['--plastic-reliability', '--dry-run', '--state-root', str(root),
                           '--observations', str(tmp_path / 'notes.md')]) == 0
     assert json.loads(state_file.read_text())['deadline_utc'] == '2000-01-01T00:00:00+00:00'
+
+
+def test_declared_regression_files_run_without_cost_marker_filter(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    commands = []
+    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
+    monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
+    def run(command, **_):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, '', '')
+    monkeypatch.setattr(campaign, '_run', run)
+    cfg = SimpleNamespace(observations=tmp_path / 'notes.md', state_root=tmp_path, python=Path('python'), opencode_log_dir=tmp_path)
+    assert campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: tests/test_reliability_campaign.py', set(), 1)
+    gates = [command for command in commands if 'pytest' in command]
+    assert gates[0][-2:] == ['-m', 'not slow and not exhaustive']
+    assert gates[1] == ['python', '-m', 'pytest', '-q', '--tb=short', 'tests/test_reliability_campaign.py']

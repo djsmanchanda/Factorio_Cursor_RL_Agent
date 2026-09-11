@@ -28,6 +28,16 @@ const logisticInventoryStatus = document.querySelector('#logistic-inventory-stat
 const logisticInventorySummary = document.querySelector('#logistic-inventory-summary');
 const logisticInventoryBody = document.querySelector('#logistic-inventory-body');
 let latestHelperRun = null;
+let supervisedLoopRunning = false;
+let dashboardActionBusy = false;
+function updateActionAvailability() {
+  actionButtons.forEach(button => {
+    const action = button.dataset.action;
+    button.disabled = dashboardActionBusy || (supervisedLoopRunning && action !== 'stop_observation_loop');
+    if (action === 'stop_observation_loop' && !supervisedLoopRunning) button.disabled = true;
+  });
+  researchButtons.forEach(button => { button.disabled = dashboardActionBusy || supervisedLoopRunning; });
+}
 const titles = {
   runner: 'Autonomous runner',
   control: 'Dashboard actions',
@@ -179,7 +189,8 @@ async function refreshStatus() {
     const busy = Boolean(state.operation.active);
     operationState.textContent = busy ? `RUNNING · ${state.operation.active}` : 'READY';
     operationState.classList.toggle('busy', busy);
-    [...actionButtons, ...researchButtons].forEach(button => { button.disabled = busy; });
+    dashboardActionBusy = busy;
+    updateActionAvailability();
     actionMessage.textContent = state.operation.last_result;
   } catch (error) {
     operationState.textContent = 'DASHBOARD API OFFLINE';
@@ -397,7 +408,13 @@ async function submitResearch(mode) {
 
 async function runAction(action) {
   let confirmation = '';
-  if (action === 'fresh_campaign') {
+  if (action === 'start_observation_loop') {
+    if (!confirm('Start a new 12-hour autonomous loop? This authorizes tested code fixes and commits, and fresh resets of the isolated campaign world.')) return;
+  } else if (action === 'resume_observation_loop') {
+    if (!confirm('Resume the supervised loop with its original deadline and remaining budget?')) return;
+  } else if (action === 'stop_observation_loop') {
+    if (!confirm('Stop the supervised loop and its owned work? Check the resulting status before operating the current world.')) return;
+  } else if (action === 'fresh_campaign') {
     if (!confirm('Stop the current episode, verify the immutable source save, restore it, and start a new deterministic campaign?')) return;
     confirmation = 'START_FRESH_CAMPAIGN';
   } else if (action === 'resume_runner') {
@@ -562,3 +579,34 @@ document.querySelector('#evidence-search').addEventListener('submit', async even
 });
 refreshEvidence();
 setInterval(refreshEvidence, 10000);
+
+// Bounded plain text prevents agent notes from becoming executable page content.
+let loopLoading = false;
+function loopText(value, limit = 12000) {
+  return (typeof value === 'string' ? value : JSON.stringify(value ?? [], null, 2)).slice(0, limit);
+}
+async function refreshObservationLoop() {
+  if (loopLoading) return;
+  loopLoading = true;
+  try {
+    const response = await fetch('/api/observation-loop', {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Supervisor status unavailable');
+    supervisedLoopRunning = Boolean(data.running);
+    updateActionAvailability();
+    document.querySelector('#loop-phase').textContent = loopText(data.phase || (data.running ? 'Running' : 'Stopped'), 100);
+    const deadline = data.deadline ? new Date(typeof data.deadline === 'number' ? data.deadline * 1000 : data.deadline).toLocaleString() : 'Not started';
+    document.querySelector('#loop-summary').textContent = `Deadline: ${deadline} · Resolved cycles: ${data.completed_runs ?? 0} · Plastic acceptance: ${data.acceptance_streak ?? 0}/3. ${loopText(data.reason || '', 1000)}`;
+    document.querySelector('#loop-milestones').textContent = (data.milestones || []).map(run => {
+      const achieved = Object.entries(run.milestones || {}).map(([name, seconds]) => `${name.replaceAll('_', ' ')} +${seconds}s`).join(' · ');
+      return `${run.episode_id}: ${run.passed ? 'plastic accepted' : 'not accepted'}\n${achieved || 'No milestone timings recorded'}\n${run.reason || ''}`;
+    }).join('\n\n') || 'No milestone evidence yet.';
+    const agentStatus = Object.entries(data.agents || {}).map(([role, state]) => `${role}: ${state.status || 'unknown'} · checkpoint ${state.checkpoint ?? '—'}${state.error ? ' · ' + state.error : ''}`).join('\n');
+    document.querySelector('#loop-board').textContent = loopText(agentStatus + '\n\n' + (data.notes || 'No observer findings yet.'), 16000);
+  } catch (error) {
+    document.querySelector('#loop-phase').textContent = 'Unavailable · status may be stale';
+    document.querySelector('#loop-summary').textContent = error.message;
+  } finally { loopLoading = false; }
+}
+refreshObservationLoop();
+setInterval(refreshObservationLoop, 10000);

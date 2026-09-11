@@ -93,6 +93,7 @@ class OperationManager:
     ACTIONS = {
         "deploy_mod", "restart_server", "stop_runner",
         "fresh_campaign", "resume_runner", "stop_factorio",
+        "start_observation_loop", "resume_observation_loop", "stop_observation_loop",
     }
 
     def __init__(self, config: DashboardConfig):
@@ -147,11 +148,37 @@ class OperationManager:
             raise OperationError(f"Unknown action: {action}")
         if action == "stop_factorio" and confirmation != "STOP_FACTORIO_SERVER":
             raise OperationError("Stopping Factorio requires confirmation.")
+        if action not in {"start_observation_loop", "resume_observation_loop", "stop_observation_loop"}:
+            self._require_campaign_idle()
         if not self._lock.acquire(blocking=False):
             raise OperationError(f"Another action is already running: {self._active}")
         self._active = action
         self._started_at = datetime.now().astimezone().isoformat(timespec="seconds")
         threading.Thread(target=self._run_action, args=(action,), daemon=True).start()
+
+    def _require_campaign_idle(self) -> None:
+        root = getattr(self.config, "server_data", None)
+        if sys.platform != "linux" or root is None:
+            return
+        from tools import campaign_supervisor
+        if campaign_supervisor.controller_busy(self.config):
+            raise OperationError("The campaign owns this runtime. Stop the observation loop before individual lifecycle or research actions.")
+
+    def observation_loop(self) -> dict:
+        from tools import campaign_supervisor
+        return campaign_supervisor.status(self.config)
+
+    def _start_observation_loop(self) -> None:
+        from tools import campaign_supervisor
+        campaign_supervisor.start(self.config)
+
+    def _resume_observation_loop(self) -> None:
+        from tools import campaign_supervisor
+        campaign_supervisor.resume(self.config)
+
+    def _stop_observation_loop(self) -> None:
+        from tools import campaign_supervisor
+        campaign_supervisor.stop(self.config)
 
     def read_log(self, name: str, offset: int) -> dict:
         path = self.logs.get(name)
@@ -376,6 +403,7 @@ class OperationManager:
 
     def queue_research(self, technologies: list[str], *, mode: str = "replace") -> None:
         """Persist a queue and restart the native runner in queue mode."""
+        self._require_campaign_idle()
         if not self._uses_native_runner_manager:
             raise OperationError("Research queue controls are currently Linux-only.")
         try:

@@ -350,6 +350,7 @@ def test_public_actions_separate_fresh_campaign_from_controller_resume() -> None
     assert dashboard_runtime.OperationManager.ACTIONS == {
         "deploy_mod", "restart_server", "stop_runner",
         "fresh_campaign", "resume_runner", "stop_factorio",
+        "start_observation_loop", "resume_observation_loop", "stop_observation_loop",
     }
     html = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.html").read_text()
     javascript = (dashboard_runtime.REPO_ROOT / "tools" / "dashboard.js").read_text()
@@ -494,3 +495,47 @@ def test_run_context_works_offline_and_missing_history_is_explicit(tmp_path):
         manager.search_run_history(' ')
     with pytest.raises(dashboard_runtime.OperationError):
         manager.search_run_history('x' * 201)
+
+
+@pytest.mark.parametrize('operation', ['start', 'resume', 'stop'])
+def test_supervised_loop_dispatch_uses_fixed_manager_config(monkeypatch, operation):
+    calls = []
+    supervisor = SimpleNamespace(**{
+        operation: lambda config: calls.append(config),
+    })
+    from tools import campaign_supervisor
+    monkeypatch.setattr(campaign_supervisor, operation, getattr(supervisor, operation))
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(server_data=Path('/isolated'))
+    getattr(manager, f'_{operation}_observation_loop')()
+    assert calls == [manager.config]
+    assert f'{operation}_observation_loop' in OperationManager.ACTIONS
+
+
+def test_supervised_loop_status_is_read_only(monkeypatch):
+    config = SimpleNamespace(server_data=Path('/isolated'))
+    expected = {'phase': 'paused', 'completed_runs': 2, 'acceptance_streak': 1}
+    from tools import campaign_supervisor
+    monkeypatch.setattr(campaign_supervisor, 'status', lambda actual: expected if actual is config else None)
+    manager = object.__new__(OperationManager)
+    manager.config = config
+    assert manager.observation_loop() == expected
+
+
+@pytest.mark.parametrize("action", ["fresh_campaign", "resume_runner", "stop_runner", "deploy_mod"])
+def test_campaign_owner_blocks_competing_runtime_actions(tmp_path, monkeypatch, action):
+    from tools import campaign_supervisor
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(server_data=tmp_path)
+    monkeypatch.setattr(campaign_supervisor, "controller_busy", lambda config: True)
+    with pytest.raises(dashboard_runtime.OperationError, match="campaign owns"):
+        manager.start(action)
+
+
+def test_campaign_owner_blocks_research_before_live_access(tmp_path, monkeypatch):
+    from tools import campaign_supervisor
+    manager = object.__new__(OperationManager)
+    manager.config = SimpleNamespace(server_data=tmp_path)
+    monkeypatch.setattr(campaign_supervisor, "controller_busy", lambda config: True)
+    with pytest.raises(dashboard_runtime.OperationError, match="campaign owns"):
+        manager.queue_research(["automation"])

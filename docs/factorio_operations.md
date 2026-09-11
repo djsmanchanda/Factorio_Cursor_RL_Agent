@@ -112,6 +112,9 @@ a bounded Linux command—never PowerShell:
 | Stop operations console | Gracefully shut down `tools/dashboard_server.py`; Factorio and the runner are unchanged |
 | Redeploy mod | `manage_linux_deterministic_server.sh deploy` (both project mods to server plus GUI copy) |
 | Restart server | `manage_linux_deterministic_server.sh stop`, then `start` |
+| Start new 12h loop | User systemd supervisor; four aspect observers, primary fixer, independent review/tests and scoped commits; see [reliability workflow](deterministic/reliability_workflow.md) |
+| Resume remaining time | Resume the recorded window, episode and pending fix with its original deadline |
+| Stop loop | Stop owned controller/model processes; separately managed runner/server remain unchanged |
 | Start fresh campaign | campaign manager `fresh`: runner stop, server stop, changed-mod deployment, verified reset, server start, manifest-gated controller start |
 
 The live-output toolbar's **Copy last run** control copies the newest complete

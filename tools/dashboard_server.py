@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import secrets
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -113,6 +114,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if request.path == "/api/status":
             self._json(200, self.manager.status())
+            return
+        if request.path == "/api/observation-loop":
+            try:
+                self._json(200, self.manager.observation_loop())
+            except (OSError, ValueError, OperationError, subprocess.SubprocessError) as exc:
+                self._json(500, {"error": str(exc)})
             return
         if request.path == "/api/priorities":
             try:

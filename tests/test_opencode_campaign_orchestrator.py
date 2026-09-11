@@ -105,8 +105,8 @@ def test_state_preserves_active_session_for_long_run_resume(tmp_path: Path) -> N
 
 @pytest.mark.parametrize(
     "decision,changed,expected_cycles",
-    [("stop", True, 1), ("no-change", True, 1),
-     ("change", False, 1), ("change", True, 2)],
+    [("stop", True, 0), ("no-change", True, 0),
+     ("change", False, 0), ("change", True, 2)],
 )
 def test_campaign_requires_explicit_change_and_edit_to_retry(
     tmp_path, monkeypatch, decision, changed, expected_cycles,
@@ -167,3 +167,137 @@ def test_fingerprint_detects_staged_and_committed_fix(tmp_path, monkeypatch):
     assert after == campaign._tree_fingerprint(notes)
     notes.write_text('checkpoint only\n')
     assert campaign._tree_fingerprint(notes) == after
+
+
+def _restart_config(tmp_path):
+    return campaign.Config(
+        state_root=tmp_path, source_save=tmp_path / 'source.zip', observations=tmp_path / 'notes.md',
+        state_file=tmp_path / 'state.json', opencode_log_dir=tmp_path / 'opencode', technology='target',
+        interval_seconds=120, post_run_wait_seconds=120, max_cycles=1, max_runtime_seconds=600,
+        model='model', variant='xhigh', opencode_bin='opencode', python=tmp_path / 'python',
+        campaign_manager=tmp_path / 'manager', dashboard_url='unused', dry_run=True, resume_active_run=False,
+    )
+
+
+def test_model_failure_after_fresh_does_not_reset_episode_on_restart(tmp_path, monkeypatch):
+    cfg = _restart_config(tmp_path)
+    calls = []
+    def ask(*args):
+        calls.append(args)
+        raise RuntimeError('provider unavailable')
+    monkeypatch.setattr(campaign, '_ask', ask)
+    with pytest.raises(RuntimeError, match='provider'):
+        campaign.run_campaign(cfg)
+    state = campaign._load_state(cfg.state_file)
+    assert state.active_cycle == 1 and state.active_session_id is None
+    assert state.lifecycle_intent is None
+    monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not repeat reset'))
+    with pytest.raises(RuntimeError, match='provider'):
+        campaign.run_campaign(cfg)
+    assert len(calls) == 2
+
+
+def test_unresolved_fresh_intent_blocks_second_reset(tmp_path, monkeypatch):
+    cfg = _restart_config(tmp_path)
+    campaign._save_state(cfg.state_file, campaign.State(lifecycle_intent={'previous_episode': None, 'cycle': 1}))
+    monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not repeat reset'))
+    with pytest.raises(RuntimeError, match='unresolved'):
+        campaign.run_campaign(cfg)
+
+
+def test_read_only_model_denies_mutating_tools_and_preserves_timeout_transport(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from dataclasses import replace
+    cfg = replace(_restart_config(tmp_path), dry_run=False, read_only=True, model_timeout_seconds=7)
+    def run(command, **kwargs):
+        assert '--auto' not in command
+        policy = json.loads(command[1].split('=', 1)[1])
+        assert policy['permission']['*'] == 'deny'
+        assert policy['permission']['read'] == 'allow'
+        assert policy['agent']['build']['permission'] == policy['permission']
+        assert kwargs['timeout'] == 7
+        raise subprocess.TimeoutExpired(command, 7, output=b'{"sessionID":"recoverable"}\n')
+    monkeypatch.setattr(campaign, '_run', run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        campaign._ask(cfg, 'inspect', None, 4)
+    assert campaign._session_id((cfg.opencode_log_dir / 'opencode-0004.jsonl').read_text()) == 'recoverable'
+
+
+def test_fixer_interruption_retains_original_dirty_baseline(tmp_path, monkeypatch):
+    cfg = _restart_config(tmp_path)
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'original')
+    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0))
+    def ask(config, prompt, session, sequence):
+        if config.read_only:
+            return 'observer', ''
+        raise RuntimeError('fixer interrupted after partial edit')
+    monkeypatch.setattr(campaign, '_ask', ask)
+    with pytest.raises(RuntimeError, match='fixer interrupted'):
+        campaign.run_campaign(cfg)
+    state = campaign._load_state(cfg.state_file)
+    assert state.active_cycle == 1
+    assert state.pending_fix['phase'] == 'fixing'
+    assert state.pending_fix['before'] == 'original'
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: pytest.fail('must not replace original baseline'))
+    with pytest.raises(RuntimeError, match='fixer interrupted'):
+        campaign.run_campaign(cfg)
+
+
+def test_reset_manifest_without_matching_run_cannot_be_adopted(tmp_path, monkeypatch):
+    import json
+    cfg = _restart_config(tmp_path)
+    (tmp_path / 'episode').mkdir()
+    (tmp_path / 'episode/current.json').write_text(json.dumps({'episode_id': 'expected'}))
+    (tmp_path / 'logs').mkdir()
+    (tmp_path / 'logs/autonomous-run.log').write_text('RUN START: episode=old\n+10s RUN END\n')
+    campaign._save_state(cfg.state_file, campaign.State(lifecycle_intent={'previous_episode': 'old', 'expected_episode': 'expected', 'cycle': 1}))
+    monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not reset'))
+    with pytest.raises(RuntimeError, match='unresolved'):
+        campaign.run_campaign(cfg)
+
+
+def test_reviewer_receives_diff_and_prediction_artifact(tmp_path, monkeypatch):
+    import subprocess
+    cfg = _restart_config(tmp_path)
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'same')
+    monkeypatch.setattr(campaign, '_run', lambda command, **_: subprocess.CompletedProcess(command, 0,
+        '+ producer.restore()\n' if command[:2] == ['git', 'diff'] and 'HEAD' in command and '--name-only' not in command else '', ''))
+    def ask(config, prompt, session, sequence):
+        assert config.read_only
+        evidence = config.opencode_log_dir / f'review-{sequence:04d}.md'
+        assert str(evidence) in prompt
+        assert 'prediction: sustained plastic' in evidence.read_text()
+        assert '+ producer.restore()' in evidence.read_text()
+        return 'review', 'REVIEW_DECISION:\nstatus: rejected\nreason: missing coverage'
+    monkeypatch.setattr(campaign, '_ask', ask)
+    assert not campaign._review_and_commit(cfg,
+        'CAMPAIGN_DECISION:\nstatus: change\nfiles: tools/run_context.py\nprediction: sustained plastic', set(), 1)
+
+
+def test_declined_partial_fix_resumes_investigation_without_new_episode(tmp_path, monkeypatch):
+    cfg = _restart_config(tmp_path)
+    hashes = iter(['original', 'partial'])
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: next(hashes))
+    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0))
+    monkeypatch.setattr(campaign, '_ask', lambda config, *_: ('observer' if config.read_only else 'fixer',
+        '' if config.read_only else 'CAMPAIGN_DECISION:\nstatus: no-change\nreason: partial candidate needs investigation'))
+    assert campaign.run_campaign(cfg) == 0
+    state = campaign._load_state(cfg.state_file)
+    assert state.active_cycle == 1
+    assert state.pending_fix['phase'] == 'fixing'
+    assert state.pending_fix['before'] == 'original'
+    monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not reset unverified candidate'))
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'partial')
+    assert campaign.run_campaign(cfg) == 0
+    assert campaign._load_state(cfg.state_file).completed_cycles == 0
+
+
+def test_review_rejects_undeclared_new_code_before_model_or_commit(tmp_path, monkeypatch):
+    cfg = _restart_config(tmp_path)
+    monkeypatch.setattr(campaign, '_dirty_paths', lambda: {'tools/run_context.py', 'tools/hidden_change.py'})
+    monkeypatch.setattr(campaign, '_ask', lambda *_: pytest.fail('undeclared candidate must not reach review'))
+    monkeypatch.setattr(campaign, '_run', lambda *_a, **_k: pytest.fail('must not stage or commit'))
+    assert not campaign._review_and_commit(cfg,
+        'CAMPAIGN_DECISION:\nstatus: change\nfiles: tools/run_context.py', set(), 1)
+    assert 'tools/hidden_change.py' in cfg.observations.read_text()

@@ -16,6 +16,7 @@ import sqlite3
 import sys
 import time
 import shutil
+import uuid
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,14 @@ class Config:
     stop_after_acceptance: bool = False
     checkpoint_failures: bool = False
     rcon_port: int = 27017
+    game_port: int = 34199
+    runtime_root: Path | None = None
+    gui_mods: Path | None = None
+    aspect_observers: bool = False
+    progress_file: Path | None = None
+    read_only: bool = False
+    episode_id: str | None = None
+    model_timeout_seconds: int = 1800
 
 
 @dataclass
@@ -82,6 +91,8 @@ class State:
     deadline_utc: str | None = None
     pending_fix: dict | None = None
     active_code_hash: str | None = None
+    active_episode_id: str | None = None
+    lifecycle_intent: dict | None = None
 
 
 def _now() -> str:
@@ -103,6 +114,8 @@ def _load_state(path: Path) -> State:
     if not isinstance(payload, dict):
         raise ValueError(f"campaign state must be an object: {path}")
     return State(
+        active_episode_id=payload.get("active_episode_id"),
+        lifecycle_intent=payload.get("lifecycle_intent"),
         deadline_utc=payload.get("deadline_utc"),
         pending_fix=payload.get("pending_fix"),
         active_code_hash=payload.get("active_code_hash"),
@@ -151,6 +164,13 @@ def _fresh_command(config: Config) -> list[str]:
         "--root", str(config.state_root), "--python", str(config.python), "--technology", config.technology, "--rcon-port", str(config.rcon_port),
     ]
 
+    command += ["--game-port", str(config.game_port)]
+    if config.episode_id:
+        command += ["--episode-id", config.episode_id]
+    if config.runtime_root is not None:
+        command += ["--runtime-root", str(config.runtime_root)]
+    if config.gui_mods is not None:
+        command += ["--gui-mods", str(config.gui_mods)]
     if config.plastic_reliability and config.technology == "plastic-bar":
         command += ["--produce", "plastic-bar", "--acceptance-seconds", str(config.acceptance_seconds)]
     return command
@@ -276,13 +296,47 @@ def _opencode_command(config: Config, message: str, session_id: str | None) -> l
 def _ask(config: Config, message: str, session_id: str | None, sequence: int) -> tuple[str | None, str]:
     if config.dry_run:
         return session_id or "dry-run-session", "CAMPAIGN_DECISION:\nstatus: dry-run\n"
-    result = _run(_opencode_command(config, message, session_id), timeout=1800)
-    output = result.stdout + result.stderr
+    command = _opencode_command(config, message, session_id)
+    if config.read_only:
+        # Installed OpenCode SDK supports OPENCODE_CONFIG_CONTENT and permission
+        # maps. Deny every tool except file readers; bash/MCP/task cannot mutate.
+        permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow", "external_directory": "allow"}
+        policy = {"permission": permissions, "agent": {"build": {"permission": permissions}}}
+        command.remove("--auto")
+        command[2:2] = ["--agent", "build"]
+        command = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(policy), *command]
     config.opencode_log_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write(config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl", output)
+    transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
+    try:
+        result = _run(command, timeout=config.model_timeout_seconds)
+        output = result.stdout + result.stderr
+    except subprocess.TimeoutExpired as exc:
+        def decode(value):
+            return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else (value or "")
+        _atomic_write(transport, decode(exc.stdout) + decode(exc.stderr))
+        raise
+    _atomic_write(transport, output)
     if result.returncode:
-        raise RuntimeError(f"OpenCode exited {result.returncode}; inspect opencode-{sequence:04d}.jsonl")
+        raise RuntimeError(f"OpenCode exited {result.returncode}; inspect {transport}")
     return session_id or _session_id(output), output
+
+
+def _progress(config: Config, phase: str, state: State, **details) -> None:
+    if config.progress_file is not None:
+        _atomic_write(config.progress_file, json.dumps({"phase": phase, "updated_at": _now(),
+            "episode_id": state.active_episode_id, "cycle": state.active_cycle,
+            "completed_cycles": state.completed_cycles, "deadline_utc": state.deadline_utc, **details}, indent=2) + "\n")
+
+
+def _episode_id(config: Config) -> str | None:
+    try:
+        return json.loads((config.state_root / "episode/current.json").read_text()).get("episode_id")
+    except (OSError, ValueError):
+        return None
+
+
+def _readonly(config: Config) -> Config:
+    return replace(config, read_only=True, model_timeout_seconds=min(config.model_timeout_seconds, 240))
 
 
 def _initial_prompt(config: Config, cycle: int) -> str:
@@ -293,7 +347,7 @@ The sole live scope is `{config.state_root}` on `nauvis` / `player`.
 
 Read AGENTS.md, docs/system_invariants.md, docs/factorio_operations.md, docs/deterministic/README.md,
 docs/deterministic/planning.md, docs/deterministic/opencode_campaign_prompt.md, git status, and the prior run summaries in
-`{config.observations}`. Read `docs/deterministic/run_context.md` for evidence scope. For every checkpoint, read only its new section and append a compact assessment below it.
+`{config.observations}`. Read `docs/deterministic/run_context.md` for evidence scope. For every checkpoint, read its new section and return a compact assessment for the controller to append.
 
 Separate observation from interpretation. Record timestamped facts, deltas, and evidence references (log offsets,
 report ticks, inventory snapshots). Label every hypothesis as one; retain raw observations in source artifacts, not copied into the transcript;
@@ -319,7 +373,7 @@ The parent process controls lifecycle and the next run; it is not a human approv
 
 
 def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
-    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and append its assessment below it (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
+    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and return its assessment for the controller (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
 dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
 reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
 count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
@@ -356,6 +410,7 @@ CAMPAIGN_DECISION:
 status: change|no-change|stop
 files: comma-separated paths or none
 test: command/result or not-run
+prediction: falsifiable next production milestone and supporting local regression evidence
 reason: one sentence
 """
 
@@ -372,6 +427,7 @@ CAMPAIGN_DECISION:
 status: change|no-change|stop
 files: comma-separated paths or none
 test: command/result or not-run
+prediction: falsifiable next production milestone and supporting local regression evidence
 reason: one sentence
 """
 
@@ -461,27 +517,62 @@ def _review_and_commit(config: Config, output: str, protected: set[str], sequenc
                         not (REPO_ROOT / p).resolve().is_relative_to(REPO_ROOT.resolve()) for p in paths):
         _append(config.observations, "Fix requires review: missing/unsafe file list or pre-existing dirty file was touched.\n")
         return False
+    permitted = set(paths) | protected
+    if config.observations.resolve().is_relative_to(REPO_ROOT.resolve()):
+        permitted.add(config.observations.resolve().relative_to(REPO_ROOT.resolve()).as_posix())
+    undeclared = _dirty_paths() - permitted
+    if undeclared:
+        _append(config.observations, "Fix requires review: undeclared new changes: " + ", ".join(sorted(undeclared)) + "\n")
+        return False
     if _run(["git", "diff", "--cached", "--name-only"], timeout=120).stdout.strip():
         _append(config.observations, "Fix requires review: index already contains staged work.\n")
         return False
     digest = _tree_fingerprint(config.observations)
-    _, review = _ask(config, f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
+    evidence = config.opencode_log_dir / f"review-{sequence:04d}.md"
+    diff = _run(["git", "diff", "HEAD", "--", *paths], timeout=120).stdout
+    additions = []
+    for path in paths:
+        if _run(["git", "ls-files", "--error-unmatch", "--", path], timeout=120).returncode:
+            additions.append(f"\nNew file: {path}\n" + (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
+    _atomic_write(evidence, "# Candidate evidence\n\n" + output + "\n\n## Diff\n\n" + diff + "\n".join(additions))
+    _, review = _ask(_readonly(config), f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
 {config.state_root}/logs/latest-context.md and the changed files: {', '.join(paths)}.
+Read the parent-captured candidate diff, new files, prediction and test claim at {evidence}.
 Read-only review: do not edit, commit or operate Factorio. Check causal evidence, invariants,
-regression coverage and the predicted plastic milestone. Do not approve merely because tests pass.
+regression coverage and the predicted plastic milestone. Verify the prediction is cause-specific and backed by the regression; a repeated terminal permits another episode only with this evidence. Do not approve merely because tests pass.
 Finish exactly with REVIEW_DECISION:
 status: approved|rejected
 reason: one sentence""", None, sequence)
     if _decision_fields(review, "REVIEW_DECISION").get("status") != "approved" or _tree_fingerprint(config.observations) != digest:
         return False
-    validation = _run([str(config.python), "-m", "pytest", "-q", "--tb=short"], timeout=900)
-    _atomic_write(config.opencode_log_dir / f"verification-{sequence:04d}.log", validation.stdout + validation.stderr)
-    if validation.returncode or _run(["git", "diff", "--check"], timeout=120).returncode:
+    pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
+    # Do not spend every repair cycle on exhaustive unrelated training sweeps.
+    # Changed regression files run unfiltered, including any slow-marked case.
+    changed_tests = [p for p in paths if Path(p).parts[0] == "tests"
+                     and Path(p).name.startswith("test_") and Path(p).suffix == ".py"]
+    commands = [pytest + ["-m", "not slow and not exhaustive"]]
+    if changed_tests:
+        commands.append(pytest + changed_tests)
+    verification_log = config.opencode_log_dir / f"verification-{sequence:04d}.log"
+    _atomic_write(verification_log, "")
+    for command in commands:
+        validation = _run(command, timeout=900)
+        with verification_log.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(command) + "\n" + validation.stdout + validation.stderr)
+        if validation.returncode:
+            return False
+    if _run(["git", "diff", "--check"], timeout=120).returncode:
         return False
     # Primary controller owns the scoped commit; fixer and reviewer remain separate.
     if _run(["git", "add", "--", *paths], timeout=120).returncode:
         return False
-    return _run(["git", "commit", "-m", "fix(deterministic): verified campaign repair"], timeout=120).returncode == 0
+    committed = _run(["git", "commit", "-m", "fix(deterministic): verified campaign repair"], timeout=120)
+    if committed.returncode:
+        return False
+    revision = _run(["git", "rev-parse", "HEAD"], timeout=120).stdout.strip()
+    _append(config.observations, f"Verified commit: {revision or 'inspect git log'}; files: {', '.join(paths)}. "
+            f"Prediction: {fields.get('prediction', 'not provided')}. Independent review and pytest passed.\n")
+    return True
 
 
 def _milestones(run_text: str) -> dict:
@@ -533,15 +624,17 @@ def _run_campaign(config: Config) -> int:
     base_config = config
     existing_sequences = [int(p.stem.split("-")[-1]) for p in config.opencode_log_dir.glob("opencode-*.jsonl") if p.stem.split("-")[-1].isdigit()]
     sequence = max(existing_sequences, default=0) + 1
-    if state.pending_fix and config.plastic_reliability:
+    if state.pending_fix and state.pending_fix.get("phase", "review") == "review" and config.plastic_reliability:
         pending = state.pending_fix
         if time.time() >= deadline or not _review_and_commit(config, pending["output"], set(pending["protected"]), sequence):
+            _progress(config, "parked", state, reason="pending review could not complete")
             return 0
         state.pending_fix = None
         _save_state(config.state_file, state)
         sequence += 1
     while config.max_cycles == 0 or state.completed_cycles < config.max_cycles:
         if time.time() >= deadline:
+            _progress(config, "deadline", state, reason="campaign deadline reached")
             _append(config.observations, "## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
             return 0
         if base_config.plastic_reliability:
@@ -556,67 +649,97 @@ def _run_campaign(config: Config) -> int:
                     reliability.update(phase="plastic", streak=[])
                     reliability_state.atomic_json(reliability_path, reliability)
             if reliability["phase"] == "research" and base_config.stop_after_acceptance:
+                _progress(config, "complete", state, reason="plastic acceptance certified")
                 return 0
             config = replace(base_config, technology="plastic-bar" if reliability["phase"] == "plastic" else base_config.technology)
         if config.plastic_reliability and not config.dry_run:
             config = replace(config, source_save=_pin_source(config))
         attempt_hash = _code_hash() if config.plastic_reliability else ""
         cycle = state.completed_cycles + 1
-        resuming = state.active_cycle == cycle and state.active_session_id is not None
+        # A saved active cycle is sufficient to resume even if the first model
+        # call crashed before returning a session. Never infer reset permission
+        # from the absence of a model session ID.
+        resuming = state.active_cycle == cycle
+        if state.lifecycle_intent:
+            current_episode = _episode_id(config)
+            run_log = config.state_root / "logs/autonomous-run.log"
+            current_log = _current_run_text(run_log.read_text(encoding="utf-8", errors="replace")) if run_log.exists() else ""
+            if (current_episode and current_episode == state.lifecycle_intent.get("expected_episode")
+                    and current_episode in current_log):
+                state.active_cycle = cycle
+                state.active_episode_id = current_episode
+                state.lifecycle_intent = None
+                _save_state(config.state_file, state)
+                resuming = True
+            else:
+                _progress(config, "blocked", state, reason="fresh lifecycle interrupted; inspect before retrying")
+                raise RuntimeError("fresh lifecycle intent is unresolved; refusing an automatic second reset")
         if resuming and config.plastic_reliability:
             attempt_hash = state.active_code_hash or "unknown-start-code"
         adopt_active_run = config.resume_active_run and not resuming
         if resuming:
+            if state.active_episode_id and _episode_id(config) != state.active_episode_id and not config.dry_run:
+                raise RuntimeError("active episode provenance changed; refuse to adopt another world")
             session_id = state.active_session_id
-            _append(
-                config.observations,
-                f"## Cycle {cycle} — controller resumed ({_now()})\n\n"
-                "The persisted OpenCode session will continue this same run; no fresh lifecycle was issued.\n",
-            )
-            offset = (config.state_root / "logs/autonomous-run.log").stat().st_size if (config.state_root / "logs/autonomous-run.log").exists() else 0
-        elif adopt_active_run:
-            complete, _ = _latest_run(config.state_root / "logs/autonomous-run.log")
-            if complete:
-                raise RuntimeError("--resume-active-run found a completed run; refuse to replace its final comparison")
-            session_id, _ = _ask(config, _initial_prompt(config, cycle), None, sequence)
-            sequence += 1
-            if session_id is None:
-                raise RuntimeError("OpenCode did not return a session ID; refusing to create an untracked observer session")
-            state.active_cycle = cycle
-            state.active_code_hash = attempt_hash
-            state.active_session_id = session_id
-            _save_state(config.state_file, state)
-            _append(
-                config.observations,
-                f"## Cycle {cycle} — observer attached ({_now()})\n\n"
-                "The controller adopted the already-running isolated episode without a reset.\n",
-            )
-            offset = (config.state_root / "logs/autonomous-run.log").stat().st_size if (config.state_root / "logs/autonomous-run.log").exists() else 0
-        else:
-            fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
-            if fresh.returncode:
-                raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
-            _append(config.observations, f"## Cycle {cycle} — fresh lifecycle ({_now()})\n\n```text\n{(fresh.stdout + fresh.stderr).strip()}\n```\n")
-            session_id, _ = _ask(config, _initial_prompt(config, cycle), None, sequence)
-            sequence += 1
-            if session_id is None:
-                raise RuntimeError("OpenCode did not return a session ID; refusing to create an untracked observer session")
-            state.active_cycle = cycle
-            state.active_code_hash = attempt_hash
-            state.active_session_id = session_id
-            _save_state(config.state_file, state)
+            _append(config.observations, f"## Cycle {cycle} — resumed ({_now()}); no fresh lifecycle issued.\n")
             offset = 0
+        else:
+            if adopt_active_run:
+                complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
+                if complete or not run_text or not _episode_id(config):
+                    raise RuntimeError("--resume-active-run requires an identified unfinished episode")
+            else:
+                config = replace(config, episode_id="episode-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8])
+                state.lifecycle_intent = {"previous_episode": _episode_id(config), "expected_episode": config.episode_id, "cycle": cycle}
+                state.active_code_hash = attempt_hash
+                _save_state(config.state_file, state)
+                _progress(config, "starting", state)
+                fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
+                if fresh.returncode:
+                    raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
+                _append(config.observations, f"## Cycle {cycle} — fresh lifecycle ({_now()})\n\n```text\n{(fresh.stdout + fresh.stderr).strip()}\n```\n")
+            state.active_cycle = cycle
+            state.active_episode_id = _episode_id(config) or (f"dry-run-{cycle}" if config.dry_run else None)
+            state.active_code_hash = attempt_hash
+            state.lifecycle_intent = None
+            state.active_session_id = None
+            _save_state(config.state_file, state)
+            session_id = None
+            offset = 0
+        _progress(config, "observing", state)
+        if session_id is None:
+            try:
+                session_id, _ = _ask(_readonly(config), _initial_prompt(config, cycle) + "\nRead-only: return findings; do not edit files. The controller owns journal writes.", None, sequence)
+            except Exception:
+                transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
+                if transport.exists():
+                    state.active_session_id = _session_id(transport.read_text())
+                    _save_state(config.state_file, state)
+                raise
+            sequence += 1
+            if session_id is None:
+                raise RuntimeError("OpenCode did not return a session ID; active episode retained")
+            state.active_session_id = session_id
+            _save_state(config.state_file, state)
         checkpoint = 0
         while True:
             checkpoint += 1
             snapshot, offset = _snapshot(config, cycle, checkpoint, offset)
             _append(config.observations, snapshot)
-            _, _ = _ask(config, _checkpoint_prompt(config, cycle, checkpoint), session_id, sequence)
+            if config.aspect_observers and state.active_episode_id and not config.dry_run:
+                from tools.campaign_observers import observe_team
+                board = observe_team(config, state.active_episode_id, checkpoint)
+                _append(config.observations, f"Aspect evidence board: {board}\n")
+            _, assessment = _ask(_readonly(config), _checkpoint_prompt(config, cycle, checkpoint) + "\nReturn findings only; do not edit the journal.", session_id, sequence)
+            from tools.campaign_observers import _assistant_text
+            if _assistant_text(assessment):
+                _append(config.observations, _assistant_text(assessment))
             sequence += 1
             complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
             if complete or config.dry_run:
                 break
             if time.time() >= deadline:
+                _progress(config, "deadline", state, reason="deadline reached during active episode")
                 _append(config.observations, "## Campaign stop\n\nWall-clock limit reached during an active run.\n")
                 return 0
             time.sleep(min(config.interval_seconds, max(0, deadline - time.time())))
@@ -652,11 +775,12 @@ def _run_campaign(config: Config) -> int:
                 milestones=_milestones(full_log))
             if reliability["runs"][-1]["passed"]:
                 state.completed_cycles += 1
-                state.active_cycle = state.active_session_id = None
+                state.active_cycle = state.active_session_id = state.active_episode_id = None
                 state.terminal_keys = []
                 _save_state(config.state_file, state)
                 _append(config.observations, f"Plastic acceptance: {len(reliability['streak'])}/{config.required_successes} same-candidate fresh runs passed.\n")
                 if reliability["phase"] == "research" and config.stop_after_acceptance:
+                    _progress(config, "complete", state, reason="plastic acceptance certified")
                     return 0
                 continue
         if config.plastic_reliability and config.technology != "plastic-bar" and not config.dry_run:
@@ -664,8 +788,9 @@ def _run_campaign(config: Config) -> int:
             manifest = json.loads((config.state_root / "episode/current.json").read_text())
             if mission.get("episode_id", mission.get("mission_id")) == manifest.get("episode_id") and mission.get("status") == "completed":
                 state.completed_cycles += 1
-                state.active_cycle = state.active_session_id = None
+                state.active_cycle = state.active_session_id = state.active_episode_id = None
                 _save_state(config.state_file, state)
+                _progress(config, "complete", state, reason="research runner contract completed; research completion needs live proof")
                 _append(config.observations, "Research runner completed its contract; research queued is not proof of research completion.\n")
                 return 0
         if config.plastic_reliability and config.checkpoint_failures and not config.dry_run:
@@ -677,37 +802,77 @@ def _run_campaign(config: Config) -> int:
                 _append(config.observations, f"Failed-world checkpoint: {bundle}\n")
             finally:
                 client.close()
-        protected = _dirty_paths() if config.plastic_reliability else set()
-        before = _tree_fingerprint(config.observations)
-        _, output = _ask(config, _completion_prompt(config, cycle), session_id, sequence)
+        _progress(config, "fixing", state)
+        board_context = ""
+        if config.aspect_observers and state.active_episode_id and not config.dry_run:
+            from tools.campaign_observers import observe_team
+            board = observe_team(config, state.active_episode_id, checkpoint + 1, terminal=True)
+            board = observe_team(config, state.active_episode_id, checkpoint + 2, terminal=True)
+            board_context = f"\nConvene over all four role findings in {board}; verify their raw evidence and resolve disagreements before fixing."
+        if not state.pending_fix:
+            state.pending_fix = {"phase": "fixing", "protected": sorted(_dirty_paths()) if config.plastic_reliability else [],
+                                 "before": _tree_fingerprint(config.observations)}
+            _save_state(config.state_file, state)
+        protected = set(state.pending_fix["protected"])
+        before = state.pending_fix["before"]
+        try:
+            fixer_session, output = _ask(config, _completion_prompt(config, cycle) + board_context +
+                         "\nContinue any partial candidate from the previous interrupted attempt; preserve pre-existing dirty files: " + ", ".join(sorted(protected)), state.pending_fix.get("session_id"), sequence)
+            state.pending_fix["session_id"] = fixer_session
+            _save_state(config.state_file, state)
+        except Exception:
+            transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
+            if transport.exists() and not state.pending_fix.get("session_id"):
+                state.pending_fix["session_id"] = _session_id(transport.read_text())
+                _save_state(config.state_file, state)
+            raise
         sequence += 1
         after = _tree_fingerprint(config.observations)
-        state.completed_cycles += 1
-        state.terminal_keys = (state.terminal_keys + [_terminal_key(run_text)])[-2:]
-        state.active_cycle = None
-        state.active_session_id = None
-        _save_state(config.state_file, state)
         decision = _decision(output)
+        if not _decision_fields(output).get("status") and not config.dry_run:
+            _, output = _ask(config, "Your response omitted CAMPAIGN_DECISION. Continue this same investigation and any partial edit; do not operate lifecycle. Return the required status/files/test/prediction/reason fields after verifying the candidate, or identify a concrete blocker.", state.pending_fix.get("session_id"), sequence)
+            sequence += 1
+            after = _tree_fingerprint(config.observations)
+            decision = _decision(output)
         if decision == "no-change" and before == after:
-            _, output = _ask(config, _telemetry_prompt(config, cycle), session_id, sequence)
+            _, output = _ask(config, _telemetry_prompt(config, cycle), state.pending_fix.get("session_id"), sequence)
             sequence += 1
             after = _tree_fingerprint(config.observations)
             decision = _decision(output)
         if decision != "change" or before == after:
-            _append(config.observations, "## Campaign stop\n\nObserver stopped or no explicit change verdict with a tree change was recorded.\n")
+            # Resume must return to this investigation, especially when a model
+            # leaves a partial diff without a valid verdict. It cannot authorize
+            # running that unverified candidate or resetting its failed world.
+            _save_state(config.state_file, state)
+            _progress(config, "parked", state, reason="no verified change verdict; resume continues this investigation")
+            _append(config.observations, "## Campaign parked\n\nNo verified change verdict. Episode and pending investigation retained; no next reset authorized.\n")
             return 0
+        state.completed_cycles += 1
+        state.terminal_keys = (state.terminal_keys + [_terminal_key(run_text)])[-2:]
+        state.active_cycle = state.active_session_id = state.active_episode_id = None
+        state.pending_fix = ({"phase": "review", "output": output, "protected": sorted(protected)}
+                             if decision == "change" and before != after and config.plastic_reliability else None)
+        _save_state(config.state_file, state)
         if config.plastic_reliability and not config.dry_run:
-            state.pending_fix = {"output": output, "protected": sorted(protected)}
+            _progress(config, "reviewing", state)
+            state.pending_fix = {"phase": "review", "output": output, "protected": sorted(protected)}
             _save_state(config.state_file, state)
             if not _review_and_commit(config, output, protected, sequence):
+                _progress(config, "parked", state, reason="review, verification or commit failed")
                 _append(config.observations, "Campaign parked: independent review, verification or scoped commit did not pass.\n")
                 return 0
             sequence += 1
             state.pending_fix = None
             _save_state(config.state_file, state)
-        if len(state.terminal_keys) == 2 and state.terminal_keys[0] == state.terminal_keys[1]:
+        repeated = len(state.terminal_keys) == 2 and state.terminal_keys[0] == state.terminal_keys[1]
+        fields = _decision_fields(output)
+        justified_retry = (config.plastic_reliability and not config.dry_run and
+                           bool(fields.get("prediction", "").strip()) and fields.get("test", "not-run") != "not-run")
+        if repeated and not justified_retry:
+            _progress(config, "blocked", state, reason="repeated terminal without reviewed distinguishing prediction")
             _append(config.observations, "## Campaign stop\n\nThe same terminal failure occurred twice; a third retry is blocked.\n")
             return 0
+    _progress(config, "complete", state, reason="configured cycle limit reached")
     return 0
 
 
@@ -729,6 +894,8 @@ def _config(args: argparse.Namespace) -> Config:
         plastic_reliability=args.plastic_reliability, acceptance_seconds=args.acceptance_seconds,
         required_successes=args.required_successes, stop_after_acceptance=args.stop_after_acceptance,
         checkpoint_failures=args.checkpoint_failures, rcon_port=args.rcon_port,
+        game_port=args.game_port, runtime_root=args.runtime_root, gui_mods=args.gui_mods,
+        aspect_observers=args.aspect_observers, progress_file=args.progress_file,
     )
 
 
@@ -736,6 +903,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint-failures", action="store_true", help="Save failed world and durable sidecars before fixing or resetting (reliability mode).")
     parser.add_argument("--rcon-port", type=int, default=27017)
+    parser.add_argument("--game-port", type=int, default=34199)
+    parser.add_argument("--runtime-root", type=Path)
+    parser.add_argument("--gui-mods", type=Path)
+    parser.add_argument("--aspect-observers", action="store_true")
+    parser.add_argument("--progress-file", type=Path)
     parser.add_argument("--plastic-reliability", action="store_true", help="Require three sustained plastic fresh runs before research; review/test/commit fixes automatically.")
     parser.add_argument("--acceptance-seconds", type=int, default=120)
     parser.add_argument("--required-successes", type=int, default=3)

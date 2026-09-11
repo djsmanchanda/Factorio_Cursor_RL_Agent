@@ -120,3 +120,30 @@ def test_evidence_routes_use_fixed_manager_sources():
     handler.path = '/api/run-history?q=electric-mining-drill'
     handler.do_GET()
     assert calls == [(200, {'text': 'current evidence'}), (200, {'text': 'electric-mining-drill'})]
+
+
+def test_observation_loop_status_endpoint():
+    handler = object.__new__(DashboardHandler)
+    handler.path = '/api/observation-loop'
+    expected = {'phase': 'observing', 'completed_runs': 1, 'acceptance_streak': 0}
+    handler.manager = SimpleNamespace(observation_loop=lambda: expected)
+    replies = []
+    handler._json = lambda code, body: replies.append((code, body))
+    handler.do_GET()
+    assert replies == [(200, expected)]
+
+
+@pytest.mark.parametrize('action', ['start_observation_loop', 'resume_observation_loop', 'stop_observation_loop'])
+@pytest.mark.parametrize('authorized', [True, False])
+def test_loop_actions_require_token_and_use_existing_action_dispatch(action, authorized):
+    handler = object.__new__(DashboardHandler)
+    handler.path = f'/api/actions/{action}'
+    handler.headers = {'X-Action-Token': 'secret' if authorized else 'wrong', 'Content-Length': '2'}
+    handler.action_token = 'secret'
+    handler.rfile = io.BytesIO(b'{}')
+    calls, replies = [], []
+    handler.manager = SimpleNamespace(start=lambda *args: calls.append(args))
+    handler._json = lambda code, body: replies.append((code, body))
+    handler.do_POST()
+    assert calls == ([(action, '')] if authorized else [])
+    assert replies[0][0] == (202 if authorized else 403)

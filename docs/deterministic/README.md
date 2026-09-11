@@ -82,7 +82,11 @@ run's session for the checkpoint reviews, then requires its final comparison
 against the preceding documented run before one focused edit can trigger the
 next episode. Continuation requires both an explicit `change` verdict and a detected
 edit; `stop` and `no-change` cannot be overridden by changed files. It also stops
-on the same terminal failure twice:
+on the same terminal failure twice in legacy mode. In reliability mode, another
+run requires an independently reviewed and tested change with a falsifiable
+production prediction. The [console supervisor](reliability_workflow.md#operations-console-supervised-12-hour-loop)
+adds four aspect observers and bounded process recovery while preserving the
+secondary helper role:
 
 ```bash
 .venv/bin/python tools/opencode_campaign_orchestrator.py \
