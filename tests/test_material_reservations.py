@@ -944,11 +944,15 @@ def test_core_promotion_reclaims_a_slot_when_the_bootstrap_pool_is_full(
         lambda *_a: builder.BOOTSTRAP_MALL_SLOT_TARGET,
     )
     calls: list[tuple[str, int, dict]] = []
-    monkeypatch.setattr(
-        builder,
-        "_rationed_mall_batch",
-        lambda *args, **kwargs: calls.append((args[4], args[5], kwargs)) or True,
-    )
+    def reclaim(*args, **kwargs):
+        calls.append((args[4], args[5], kwargs))
+        monkeypatch.setattr(
+            builder, "_BOOTSTRAP_LOAN_CONFIGURATION_REVISION",
+            builder._BOOTSTRAP_LOAN_CONFIGURATION_REVISION + 1,
+        )
+        return True
+
+    monkeypatch.setattr(builder, "_rationed_mall_batch", reclaim)
     monkeypatch.setattr(
         builder,
         "ensure_produced",
@@ -1175,7 +1179,7 @@ def test_logistic_chest_core_waits_for_advanced_circuit_ladder(
     monkeypatch.setattr(builder, "ensure_produced", defer)
     messages: list[str] = []
 
-    assert builder._prep_core_mall(
+    assert not builder._prep_core_mall(
         object(), object(), "nauvis", "player",
         {"_core_mall:assembling-machine-2", "_core_mall:fast-inserter"},
         {}, (0.0, 0.0), messages.append,
@@ -1197,16 +1201,16 @@ def test_core_promotion_catches_forced_loan_prerequisite_deferral(
         builder,
         "_rationed_mall_batch",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            builder.ProductionPrerequisiteDeferred("restore then reobserve")
+            builder.ProductionPrerequisiteDeferred("waiting for ingredients")
         ),
     )
     messages: list[str] = []
 
-    assert builder._prep_core_mall(
+    assert not builder._prep_core_mall(
         object(), object(), "nauvis", "player", set(), {},
         (0.0, 0.0), messages.append,
     )
-    assert any("waits while restore then reobserve" in message for message in messages)
+    assert any("waits while waiting for ingredients" in message for message in messages)
 
 
 def test_completed_core_loan_is_promoted_in_place_even_when_seed_is_stocked(

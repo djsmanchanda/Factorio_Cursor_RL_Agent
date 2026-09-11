@@ -5191,6 +5191,8 @@ _PIPE_PERMANENT_DONORS = frozenset(
 )
 _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
+# Configuration changes require re-observation even when they do not prove output.
+_BOOTSTRAP_LOAN_CONFIGURATION_REVISION = 0
 #: Consecutive gate refreshes per loan step without craft progress. A
 #: bill-frozen gate refreshes and continues; only a step that ignores
 #: repeated refreshes raises mall_loan_gate_mismatch.
@@ -5471,6 +5473,7 @@ def _restore_bootstrap_loan(
     reference_point: Point | None = None,
 ) -> None:
     """Restore the borrowed cell before another dependency may claim it."""
+    global _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
     try:
         shared_provider = mall_slot_uses_shared_provider(
             client, surface, loan.machine_position,
@@ -5492,6 +5495,7 @@ def _restore_bootstrap_loan(
         client, bridge, surface, plan,
         f"restore_bootstrap_loan_{loan.target_item}", emit,
     )
+    _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
     _MALL_REFRESH_SIGNATURES.clear()
     emit(
         f"  MALL BOOTSTRAP LOAN RESTORED: {loan.original_recipe} at "
@@ -5626,7 +5630,7 @@ def _submit_bootstrap_loan(
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
     preempt_for: str | None = None, reference_point: Point | None = None,
 ) -> str:
-    global _BOOTSTRAP_LOAN_PROGRESS_REVISION
+    global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
     live_loan_group = loan.group
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
@@ -5859,6 +5863,7 @@ def _submit_bootstrap_loan(
                     client, bridge, surface, plan,
                     f"promote_bootstrap_loan_{loan.target_item}", emit,
                 )
+                _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
                 _MALL_REFRESH_SIGNATURES.clear()
                 _BOOTSTRAP_SHARED_PROVIDER_ITEMS.discard(loan.target_item)
                 emit(
@@ -5901,6 +5906,7 @@ def _submit_bootstrap_loan(
                 client, bridge, surface, plan,
                 "promote_bootstrap_loan_pipe", emit,
             )
+            _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
             _MALL_REFRESH_SIGNATURES.clear()
             _BOOTSTRAP_SHARED_PROVIDER_ITEMS.add("pipe")
             emit(
@@ -5972,6 +5978,7 @@ def _submit_bootstrap_loan(
             client, bridge, surface, plan,
             f"bootstrap_loan_{loan.target_item}", emit,
         )
+        _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
         _MALL_REFRESH_SIGNATURES.clear()
         _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
         emit(
@@ -6107,6 +6114,7 @@ def _submit_bootstrap_loan(
                     client, bridge, surface, plan,
                     f"bootstrap_loan_{loan.target_item}", emit,
                 )
+                _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
                 _MALL_REFRESH_SIGNATURES.clear()
                 _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
                 emit(
@@ -10198,6 +10206,18 @@ def _core_mall_prerequisites(
     return tuple(prerequisites)
 
 
+def _core_mall_wait_spent_pass(
+    configuration_before: int, deferred: ProductionPrerequisiteDeferred | None = None,
+    *, wait_key: str = "core_mall",
+) -> bool:
+    """Yield supply waits to ready peers; re-observe changed cells and coverage."""
+    if deferred is not None and deferred.code == "roboport_coverage_construction_wait":
+        consume_wait(wait_key)
+        time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+        return True
+    return _BOOTSTRAP_LOAN_CONFIGURATION_REVISION != configuration_before
+
+
 def _prepare_core_mall_prerequisite(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, mall_targets: dict[str, int], reference_point: Point,
@@ -10205,10 +10225,10 @@ def _prepare_core_mall_prerequisite(
 ) -> bool | None:
     """Start one missing chest prerequisite and spend the current pass.
 
-    ``True`` means a stage or wait consumed this pass; ``False`` hands a
-    material shortage to the mall in the same pass; ``None`` means the core
-    recipe is admitted. Steel chests are a finite borrowed-mall batch; the
-    advanced-circuit prerequisite remains a dedicated capability line.
+    ``True`` means a stage, changed cell, or coverage wait consumed this pass;
+    ``False`` hands a supply wait or shortage to the mall in the same pass;
+    ``None`` means the core recipe is admitted. Steel chests are a finite
+    borrowed-mall batch; advanced circuits remain a dedicated capability line.
     """
     prerequisites = _core_mall_prerequisites(client, surface, force, item)
     if not prerequisites:
@@ -10218,6 +10238,7 @@ def _prepare_core_mall_prerequisite(
         f"  CORE MALL WAIT: {item} is gated on {prerequisite}; "
         "establishing the prerequisite before admitting its recipe"
     )
+    configuration_before = _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
     try:
         # Steel chests must stay inside the temporary mall until it is
         # self-sustaining. In particular, never upgrade this one-chest seed
@@ -10248,16 +10269,9 @@ def _prepare_core_mall_prerequisite(
             f"  CORE MALL WAIT: {item} prerequisite {prerequisite} -- "
             f"{deferred}"
         )
-        if deferred.code == "roboport_coverage_construction_wait":
-            # Bot-built coverage waves advance one hop per build/charge cycle.
-            # Without a poll sleep this wait spins ~1s passes and the
-            # pass-counted livelock bound fires mid-wave (cycle 21 and the
-            # identical Sep-10 run died on the coal wave at 128/86 tiles).
-            # Pace like the plate-starter coverage wait so the bound keeps
-            # its ~120s horizon; hop builds still reset it via ghost falls.
-            consume_wait(f"coverage_{item}_prerequisite")
-            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
-        return True
+        return _core_mall_wait_spent_pass(
+            configuration_before, deferred, wait_key=f"coverage_{item}_prerequisite",
+        )
     return True
 
 
@@ -10605,6 +10619,7 @@ def _prep_core_mall(
         )
         if prerequisite_pass is not None:
             return prerequisite_pass
+        configuration_before = _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
         # Core promotion is the one pre-logistics demand that must be able to
         # reclaim capacity from the active phase-bounded pool. A stocked seed item
         # would otherwise make _rationed_mall_batch return early, after which
@@ -10622,7 +10637,7 @@ def _prep_core_mall(
                     client, bridge, surface, force, item, 1,
                     reference_point, emit, force_temporary=True,
                 ):
-                    return True
+                    return _core_mall_wait_spent_pass(configuration_before)
             except MaterialShortage as shortage:
                 add_demands(mall_targets, shortage)
                 emit(
@@ -10639,7 +10654,7 @@ def _prep_core_mall(
                 # forced path used to let this signal escape and terminate the
                 # controller before it could re-observe the restored cell.
                 emit(f"  CORE MALL BATCH: {item} waits while {deferred}")
-                return True
+                return _core_mall_wait_spent_pass(configuration_before, deferred)
         try:
             ensure_produced(
                 client, bridge, surface, force, item, reference_point, emit,
@@ -10659,30 +10674,49 @@ def _prep_core_mall(
             return False
         except ProductionPrerequisiteDeferred as deferred:
             emit(f"  CORE MALL BATCH: {item} waits while {deferred}")
-            return True
+            return _core_mall_wait_spent_pass(configuration_before, deferred)
         return True
     return False
+
+
+def _promote_mall_after_iron(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    mall_targets: dict[str, int], reference_point: Point,
+    emit: Callable[[str], None],
+) -> bool:
+    """Start AM2 replacement after the owned iron foundation proves output."""
+    iron = _bootstrap_state("iron-plate")
+    if iron is None or iron.measured_output_count <= 0:
+        return False
+    if not _direct_plate_foundation_ready(client, surface, force, "iron-plate"):
+        return False
+    return _upgrade_bootstrap_mall(
+        client, bridge, surface, force, mall_targets, reference_point, emit,
+        assemblers_only=True,
+    )
 
 
 def _upgrade_bootstrap_mall(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     mall_targets: dict[str, int], reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], *, assemblers_only: bool = False,
 ) -> bool:
     """Self-fund and order in-place tier upgrades for the compact mall.
 
     The controller starts exclusively from assembler-1s and regular inserters.
-    Once their permanent upgrade producers have demonstrably run, it holds a
+    Once the upgrade producer has demonstrably run, it holds a
     small construction reserve and consumes only the surplus in exact native
     bot upgrade orders. Pending orders are excluded from the next survey.
     """
-    stock = live_base.available_items(client, surface, force)
+    stock = live_base.transferable_items(client, surface, force)
+    if _MATERIAL_RESERVATION_LEDGER is not None:
+        stock = _MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)
     upgrades = (
         ("assembling-machine-1", "assembling-machine-2"),
         ("inserter", "fast-inserter"),
     )
     for source, target in upgrades:
-        if not _production_started(client, surface, force, target):
+        if assemblers_only and source != "assembling-machine-1":
             continue
         positions = mall_entity_positions(
             client, surface, force, reference_point, source,
@@ -10691,7 +10725,7 @@ def _upgrade_bootstrap_mall(
             continue
         wanted = len(positions) + UPGRADE_RESERVE
         held = int(stock.get(target, 0))
-        if held <= UPGRADE_RESERVE:
+        if held <= UPGRADE_RESERVE or not _production_started(client, surface, force, target):
             if mall_targets.get(target, 0) < wanted:
                 mall_targets[target] = wanted
                 emit(
@@ -11804,6 +11838,10 @@ def run(
             if _prep_intermediate(
                 client, bridge, surface, force, prepped, mall_targets,
                 reference_point, emit,
+            ):
+                continue
+            if _promote_mall_after_iron(
+                client, bridge, surface, force, mall_targets, reference_point, emit,
             ):
                 continue
             _prep_post_metal_stack_reserves(

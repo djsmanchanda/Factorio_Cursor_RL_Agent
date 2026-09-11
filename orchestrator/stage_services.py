@@ -117,7 +117,6 @@ _LOGISTIC_CHEST_ENTITIES = frozenset({
     "active-provider-chest", "buffer-chest", "passive-provider-chest",
     "requester-chest", "storage-chest",
 })
-_BOT_BUILT_INFRASTRUCTURE = frozenset({*POLE_SPECS, "roboport"})
 # How far from a stage's machines its own collection chest can be. A stage's
 # chest sits at the end of its machine row; a container farther away than a
 # whole stage footprint belongs to something else and is not ours to cover.
@@ -180,8 +179,8 @@ def validate_builder_target(
 
 def _ghost_materials(plan: dict) -> dict[str, int]:
     """Items construction bots must consume to revive this plan's ghosts.
-    Direct placements are excluded because they are existing-entity
-    configuration/removal operations, never new power or coverage entities."""
+    Call after normalizing legacy direct placements; configuration and
+    removal operations consume no new construction item."""
     required: dict[str, int] = {}
     for phase in plan["phases"]:
         for action in phase["actions"]:
@@ -193,24 +192,17 @@ def _ghost_materials(plan: dict) -> dict[str, int]:
 
 
 def _ghostify_direct_infrastructure(plan: dict) -> tuple[tuple[str, Point], ...]:
-    """Turn every server-side pole/roboport placement into a bot-built ghost.
+    """Normalize every legacy direct placement to a material-funded ghost.
 
-    Planner generators still use ``place_entity`` for a mixture of sandbox
-    scaffolding and existing-entity configuration.  The deterministic submit
-    boundary is therefore the reusable enforcement point: no active real-base
-    path can accidentally gain a free pole, substation, or roboport because a
-    caller retained the old action type.
-
-    The returned identities are the actions whose former synchronous contract
-    must be preserved after submission.  Pre-existing ``place_ghost`` actions
-    remain asynchronous as their caller intended.
+    The name is retained for callers; this boundary covers all construction,
+    not a whitelist of poles. Existing matching entities are reconciled by the
+    executor without creation. Original ghosts remain asynchronous.
     """
     converted: list[tuple[str, Point]] = []
     for phase in plan.get("phases", []):
         for action in phase.get("actions", []):
             if (
                 action.get("action_type") == "place_entity"
-                and action.get("entity") in _BOT_BUILT_INFRASTRUCTURE
             ):
                 action["action_type"] = "place_ghost"
                 position = action["position"]
@@ -529,6 +521,37 @@ def _submit(
     # material attempt may retry the same object later and must be converted
     # again so its synchronous infrastructure contract is not silently lost.
     plan = copy.deepcopy(plan)
+    forbidden = {"infinity-chest", "infinity-pipe", "electric-energy-interface"}
+    for phase in plan.get("phases", []):
+        for action in phase.get("actions", []):
+            if action.get("entity") in forbidden and action.get("action_type") in {"place_entity", "place_ghost"}:
+                raise StuckError(
+                    f"{name}: sandbox supply entity cannot be constructed in the deterministic runtime",
+                    code="direct_construction_forbidden", details={"entity": action["entity"]},
+                )
+    direct_actions = [a for phase in plan.get("phases", []) for a in phase.get("actions", [])
+                      if a.get("action_type") == "place_entity"]
+    if direct_actions and hasattr(client, "command"):
+        positions = tuple((a["position"]["x"], a["position"]["y"]) for a in direct_actions)
+        existing = live_base.entity_names_at(client, surface, positions)
+        for action, position in zip(direct_actions, positions):
+            if existing.get(position) == action["entity"]:
+                action["action_type"] = "configure_entity"
+    # Chest inventories/request sections may not exist on ghosts. Apply those
+    # settings only after bots build the actual entity; never revive it here.
+    pending_configuration = []
+    setting_fields = {
+        "logistic_request", "logistic_requests", "logistic_sections",
+        "clear_logistic_groups", "inventory_limit", "logistic_condition",
+        "clear_logistic_condition", "input_priority", "output_priority", "recipe",
+    }
+    for action in direct_actions:
+        if action["action_type"] == "place_entity" and setting_fields.intersection(action):
+            configured = copy.deepcopy(action)
+            configured["action_type"] = "configure_entity"
+            pending_configuration.append(configured)
+            for field in setting_fields:
+                action.pop(field, None)
     converted_infrastructure = _ghostify_direct_infrastructure(plan)
     consume_plan_submission(name)
     clear_plan_clutter(client, surface, plan, emit)
@@ -625,6 +648,12 @@ def _submit(
                 client, surface, plan.get("force", "player"),
                 converted_infrastructure, emit, owner=name,
             )
+            if pending_configuration:
+                configuration_plan = {
+                    "surface": surface, "force": plan.get("force", "player"),
+                    "phases": [{"name": "configure_bot_built", "actions": pending_configuration}],
+                }
+                _submit(client, bridge, surface, configuration_plan, name + "_configure", emit)
             return report
         cleared_any = False
         blocking = []

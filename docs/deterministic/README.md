@@ -102,11 +102,12 @@ Every runner invocation declares a versioned bootstrap supply profile:
 `reduced-v1` for the current reduced-stock contract or `supplied-v1` for the
 control contract. Managed episode manifests carry the profile; direct runner
 calls may select it with `--bootstrap-profile` and otherwise default to
-`reduced-v1`. The reduced profile contains one explicit finite exception: two
-requester chests are seeded into an existing connected provider before
-production prep, because the first compact producer and the requester-chest
-producer each reserve one before any mall assembler exists. The material
-ledger records this once per episode so later controllers cannot refill it.
+`reduced-v1`. Neither profile grants items. All new deterministic construction
+is submitted as blueprint ghosts funded by actual inventory and built by bots.
+Existing entities may be configured, but the player-force executor refuses new
+direct placements. The former two-requester bootstrap subsidy and post-build
+requester replacement are removed. A starting save without enough materials
+must expose its shortage; the runtime cannot manufacture the missing seed.
 
 The runner persists one mission across its per-science-pack controller calls in
 `deterministic-mission-state.json`. The ledger records episode/save provenance,

@@ -39,7 +39,7 @@ from planners.fluid_layout_search import (
     transform_direction,
 )
 from planners.fluid_routing import (
-    generate_shortest_fluid_chain_link, shortest_fluid_chain_segments,
+    plan_shortest_fluid_chain_link,
 )
 from planners.infrastructure import strip_local_power
 from planners.infrastructure_geometry import footprint_tile_indices
@@ -858,35 +858,31 @@ def _route_oil_fluid_link(
 ) -> tuple[dict, list[dict], bool]:
     """Prefer a land route; dive under blockers before crossing water.
 
-    Pass 2 bridges blocked hard tiles (poles, machines, planned footprints)
+    Underground attempts bridge blocked hard tiles (poles, machines, planned footprints)
     with landfill-free pipe-to-ground spans -- a single-tile blocker costs
     one pair instead of a detour or a dead run (2026-09-05: the crude
     pipeline ended two runs on a mid-pass power pole). Water crossings stay
     last: landfill is more expensive than a dive.
     """
-    last_error: ValueError | None = None
-    for allow_dives, allow_water_crossing in (
-        (False, False), (True, False), (True, True),
+    failures = []
+    # Expand the search only after the inexpensive land/dive attempts fail.
+    # Water remains last; no placement occurs until a complete route validates.
+    for margin, allow_dives, allow_water_crossing in (
+        (48, False, False), (48, True, False),
+        (96, True, False), (96, True, True),
     ):
         try:
-            link = generate_shortest_fluid_chain_link(
+            link, segments = plan_shortest_fluid_chain_link(
                 source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
+                tunnelable_tiles=terrain_water, clearance=0, search_margin=margin,
                 existing_tiles=existing_tiles, mixing_margin=True,
-                allow_terrain_tunnels=allow_water_crossing,
-                allow_dives=allow_dives,
-            )
-            segments = shortest_fluid_chain_segments(
-                source, targets, fluid, foreign=foreign, hard_tiles=hard,
-                tunnelable_tiles=terrain_water, clearance=0, search_margin=48,
-                mixing_margin=True,
                 allow_terrain_tunnels=allow_water_crossing,
                 allow_dives=allow_dives,
             )
             return link, segments, allow_water_crossing
         except ValueError as error:
-            last_error = error
-    raise last_error or ValueError("No bounded fluid route found")
+            failures.append(f"margin={margin} dives={allow_dives} water={allow_water_crossing}: {error}")
+    raise ValueError("No bounded fluid route found; " + "; ".join(failures))
 
 
 def _district_pumpjacks(

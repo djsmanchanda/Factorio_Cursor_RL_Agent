@@ -1,5 +1,5 @@
 # Path: orchestrator/bootstrap_profiles.py
-# Purpose: Version the deterministic bootstrap supply contracts and their finite seed stock.
+# Purpose: Retain deterministic bootstrap profile identities without item grants.
 
 from __future__ import annotations
 
@@ -18,9 +18,8 @@ BOOTSTRAP_PROFILE_SPECS = {
     "reduced-v1": BootstrapProfile(
         name="reduced-v1",
         version=1,
-        # The first compact cell cannot produce its own requester. Two cover
-        # the parent cell and the requester-chest producer reserved together.
-        seed_stock={"requester-chest": 2},
+        # Both profiles must obtain construction items from existing production.
+        seed_stock={},
     ),
     "supplied-v1": BootstrapProfile(
         name="supplied-v1", version=1, seed_stock={},

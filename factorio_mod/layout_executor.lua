@@ -701,6 +701,28 @@ local function execute_build_plan(authorization, build_plan)
     })
   end
 
+  -- Fail before any plan mutation: production construction must consume a
+  -- blueprint ghost through bots, even when legacy callers request direct placement.
+  if force.name == "player" then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_entity"
+          and not find_exact_entity(surface, force, action.entity, action.position) then
+          counts.attempted_entities = counts.attempted_entities + 1
+          record_failure(phase, action, "direct_construction_forbidden")
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_entities = #placement_failures
+      counts.failed_placements = #placement_failures
+      counts.attempted_placements = counts.attempted_entities
+      counts.placement_failures = placement_failures
+      counts.error = "direct_construction_forbidden"
+      return counts
+    end
+  end
+
   if build_plan.atomic == true then
     for _, phase in ipairs(build_plan.phases) do
       for _, action in ipairs(phase.actions or {}) do
@@ -895,6 +917,9 @@ local function execute_build_plan(authorization, build_plan)
           else
             counts.already_present_entities = counts.already_present_entities + 1
           end
+        elseif force.name == "player" then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "direct_construction_forbidden")
         elseif #exact_position_occupants(surface, force, position) > 0 then
           counts.failed_entities = counts.failed_entities + 1
           record_failure(phase, action, "exact_position_occupied_by_different_entity")
@@ -906,10 +931,8 @@ local function execute_build_plan(authorization, build_plan)
             type = action.underground_type,
             force = force
           }
-          -- Requester chests accept the blueprint trash payload at creation
-          -- time only (no runtime setter exists): merge it here so directly
-          -- placed cells self-clean stale WIP. Ghost-built cells get the same
-          -- treatment through the revive hook in control.lua.
+          -- Sandbox-only direct creation; production reaches this branch only
+          -- through ghosts and never replaces bot-built chests for settings.
           for key, value in pairs(trash_requesters.creation_params(action.entity)) do
             params[key] = value
           end
@@ -984,7 +1007,7 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
     end
     report.ok = result.failed_placements == 0
     if not report.ok then
-      report.error = tostring(result.failed_placements) .. " placement(s) failed"
+      report.error = result.error or (tostring(result.failed_placements) .. " placement(s) failed")
     end
   else
     report.error = tostring(result)

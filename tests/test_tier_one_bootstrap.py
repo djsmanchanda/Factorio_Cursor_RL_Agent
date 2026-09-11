@@ -59,7 +59,7 @@ def test_bootstrap_mall_orders_only_self_funded_upgrade_surplus(monkeypatch) -> 
             return Path("upgrade-report.json")
 
     monkeypatch.setattr(
-        builder.live_base, "available_items",
+        builder.live_base, "transferable_items",
         lambda *_a: {"assembling-machine-2": builder.UPGRADE_RESERVE + 1},
     )
     monkeypatch.setattr(
@@ -91,3 +91,34 @@ def test_bootstrap_mall_orders_only_self_funded_upgrade_surplus(monkeypatch) -> 
         "position": {"x": 36.5, "y": 32.5},
         "block": "bootstrap-mall-assembling-machine-1-to-assembling-machine-2",
     }]
+
+
+def test_iron_promotion_queues_am2_before_any_am2_producer_exists(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(builder, '_bootstrap_state', lambda _: SimpleNamespace(measured_output_count=1))
+    monkeypatch.setattr(builder, '_direct_plate_foundation_ready', lambda *_: True)
+    monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', None)
+    monkeypatch.setattr(builder.live_base, 'transferable_items', lambda *_: {})
+    monkeypatch.setattr(builder, '_production_started', lambda *_: False)
+    monkeypatch.setattr(builder, 'mall_entity_positions', lambda *_: ((1, 1), (2, 2)))
+    targets = {}
+    assert not builder._promote_mall_after_iron(object(), object(), 'nauvis', 'player', targets, (0, 0), lambda _: None)
+    assert targets == {'assembling-machine-2': 2 + builder.UPGRADE_RESERVE}
+
+
+def test_unproven_iron_foundation_cannot_trigger_promotion(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(builder, '_bootstrap_state', lambda _: SimpleNamespace(measured_output_count=0))
+    monkeypatch.setattr(builder, '_upgrade_bootstrap_mall', lambda *_a, **_k: (_ for _ in ()).throw(AssertionError('early upgrade')))
+    assert not builder._promote_mall_after_iron(object(), object(), 'nauvis', 'player', {}, (0, 0), lambda _: None)
+
+
+def test_upgrade_preserves_stock_reserved_by_construction(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(builder.live_base, 'transferable_items', lambda *_: {'assembling-machine-2': 20})
+    monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', SimpleNamespace(allocatable_stock=lambda _: {'assembling-machine-2': 0}))
+    monkeypatch.setattr(builder, '_production_started', lambda *_: True)
+    monkeypatch.setattr(builder, 'mall_entity_positions', lambda *_: ((1, 1),))
+    targets = {}
+    assert not builder._upgrade_bootstrap_mall(object(), object(), 'nauvis', 'player', targets, (0, 0), lambda _: None, assemblers_only=True)
+    assert targets['assembling-machine-2'] == 1 + builder.UPGRADE_RESERVE

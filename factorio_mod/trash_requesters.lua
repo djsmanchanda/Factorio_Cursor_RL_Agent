@@ -3,11 +3,9 @@
 
 local M = {}
 
--- Forces whose bot-built requesters are trash-enabled. Player-force builds
--- are the deterministic mission's own mall cells; planner-force is the
--- sandbox reference. Anything else (including training forces, which run
--- under a separate mod and contract) is left exactly as built.
-M.TRASH_MANAGED_FORCES = { player = true, planner = true }
+-- Only the isolated planner sandbox uses legacy requester replacement.
+-- Player construction must remain the actual entity built by its robots.
+M.TRASH_MANAGED_FORCES = { planner = true }
 
 -- The exact request_filters payload a hand-exported blueprint carries for a
 -- trash-enabled requester chest (verified live on 2.1.17: create_entity
@@ -42,6 +40,10 @@ end
 function M.revive_with_trash(surface, entity)
   if entity == nil or not entity.valid then
     return false, "invalid"
+  end
+  if not M.managed_force(entity.force and entity.force.name)
+    or surface.name ~= "planner-sandbox" then
+    return false, "replacement_forbidden"
   end
   local position = { entity.position.x, entity.position.y }
   local direction = entity.direction

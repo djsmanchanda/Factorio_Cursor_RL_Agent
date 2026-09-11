@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import re
 
+from tools.campaign_protocol import assistant_text as _assistant_text, session_id as _session_id
+
 ROLES = {
     "scheduling": "Decisions, prerequisites, mall loans, ownership/restoration, retries, progress credits and termination.",
     "supply": "Transferable supply versus allocated inventory, requester/machine contents, measured output rates and demand; net stock change is not throughput.",
@@ -36,21 +38,6 @@ def _ask(config, message, session_id, sequence):
     # Lazy import keeps the controller free to import this module at startup.
     from tools.opencode_campaign_orchestrator import _ask as campaign_ask
     return campaign_ask(config, message, session_id, sequence)
-
-
-def _assistant_text(output: str) -> str:
-    texts = []
-    for line in output.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "text":
-            part = event.get("part", {})
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                texts.append(part["text"])
-    # Never publish tool output or echoed instructions as an observer conclusion.
-    return "\n\n".join(texts)
 
 
 def _prompt(config, episode: str, role: str, checkpoint: int, terminal: bool, board: Path) -> str:
@@ -124,7 +111,6 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
             state.update(status="error", error=f"{type(exc).__name__}: {exc}")
             # A failed CLI call can still have allocated a session; recover it
             # from the saved transport so the next checkpoint resumes it.
-            from tools.opencode_campaign_orchestrator import _session_id
             transport = directory / f"opencode-{sequence:04d}.jsonl"
             if not state.get("session_id") and transport.exists():
                 state["session_id"] = _session_id(transport.read_text(encoding="utf-8"))

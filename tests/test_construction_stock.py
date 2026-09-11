@@ -3276,6 +3276,10 @@ def _post_core_world(monkeypatch):
         lambda *_a: {"assembling-machine-2": 10, "fast-inserter": 10},
     )
     monkeypatch.setattr(
+        builder.live_base, "transferable_items",
+        lambda *_a: {"assembling-machine-2": 10, "fast-inserter": 10},
+    )
+    monkeypatch.setattr(
         builder, "mall_entity_positions",
         lambda _c, _s, _f, _r, source: [(10.0, 10.0), (20.0, 20.0)],
     )

@@ -168,3 +168,113 @@ def test_finite_completed_loan_restores_circuit_producer(monkeypatch, blocking, 
         requester = next(a for a in actions if 'clear_logistic_groups' in a)
         assert requester['clear_logistic_groups'] == [loan.group]
         assert all(a['action_type'] == 'configure_entity' for a in actions)
+
+
+@pytest.mark.parametrize("pool_full", [False, True])
+def test_waiting_core_promotion_releases_completed_cable_loan(
+    monkeypatch, tmp_path, pool_full,
+):
+    """A core AM2 wait must let the queued circuit loan leave its capped cable step."""
+    from orchestrator.priority_list import PriorityList
+
+    loan = builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="electronic-circuit",
+        target_count=200, spare_target_count=200, side="left",
+        requester_position=(50.5, 32.5), current_recipe="copper-cable",
+        step_recipe="copper-cable", step_target_count=600,
+        step_baseline_finished=507, step_required_crafts=206,
+    )
+    stock = {"copper-cable": 2571, "copper-plate": 4800, "iron-plate": 3000}
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    monkeypatch.setattr(builder, "_core_mall_producer_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_prepare_core_mall_prerequisite", lambda *_a: None)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 12 if pool_full else 7)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 12)
+
+    def defer(*_a, **_kw):
+        raise builder.ProductionPrerequisiteDeferred(
+            "AM2 waits for its finite batch", code="temporary_mall_batch",
+            state="supply_wait",
+        )
+
+    monkeypatch.setattr(builder, "ensure_produced", defer)
+    monkeypatch.setattr(builder, "_rationed_mall_batch", defer)
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock))
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: 713)
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(builder, "_maybe_announce_post_starter", lambda *_a: None)
+    submitted = []
+    monkeypatch.setattr(builder, "_submit", lambda _c, _b, _s, plan, *_a: submitted.append(plan))
+    targets = {"electronic-circuit": 200}
+    priorities = PriorityList(tmp_path / "priorities.json", 0)
+    priorities.sync(targets, stock, 0)
+
+    def serve(*args, **_kw):
+        builder._submit_bootstrap_loan(
+            args[0], args[1], args[2], args[3], loan, lambda _m: None,
+        )
+        targets.clear()
+
+    monkeypatch.setattr(builder, "_serve_mall_task", serve)
+    spent = builder._prep_core_mall(
+        object(), object(), "nauvis", "player", set(), targets,
+        (0, 0), lambda _m: None,
+    )
+    # Same control flow as run(): True bypasses the ready-task scheduler.
+    if not spent:
+        builder._serve_ready_pass(
+            object(), object(), "nauvis", "player", priorities.next(targets, 0),
+            0, targets, {}, priorities, (0, 0), "automation-science-pack",
+            lambda _m: None,
+        )
+    assert len(submitted) == 1
+    configured = [
+        action for action in builder.plan_actions(submitted[0])
+        if action.get("recipe") == "electronic-circuit"
+    ]
+    assert len(configured) == 1
+
+
+@pytest.mark.parametrize("target", ["assembling-machine-2", "splitter"])
+def test_core_wait_after_real_loan_transition_requires_reobservation(monkeypatch, target):
+    """Promotion and restoration spend a pass without claiming new production."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-2", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item=target,
+        target_count=1, side="left", requester_position=(39.5, 32.5),
+        current_recipe=target,
+    )
+    stock = {target: 1}
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    monkeypatch.setattr(builder, "_core_mall_producer_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_prepare_core_mall_prerequisite", lambda *_a: None)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock))
+    monkeypatch.setattr(builder, "_BOOTSTRAP_LOAN_CONFIGURATION_REVISION", 0)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_LOAN_PROGRESS_REVISION", 0)
+    submitted = []
+    monkeypatch.setattr(builder, "_submit", lambda _c, _b, _s, _p, name, _e: submitted.append(name))
+
+    def transition(*args, **_kw):
+        builder._submit_bootstrap_loan(
+            args[0], args[1], args[2], args[3], loan, lambda _m: None,
+        )
+        raise builder.ProductionPrerequisiteDeferred(
+            "temporary batch changed configuration", code="temporary_mall_batch",
+        )
+
+    monkeypatch.setattr(builder, "ensure_produced", transition)
+    assert builder._prep_core_mall(
+        object(), object(), "nauvis", "player", set(), {},
+        (0, 0), lambda _m: None,
+    ) is True
+    assert submitted == [
+        "promote_bootstrap_loan_assembling-machine-2"
+        if target == "assembling-machine-2" else "restore_bootstrap_loan_splitter"
+    ]
+    assert builder._BOOTSTRAP_LOAN_CONFIGURATION_REVISION == 1
+    assert builder._BOOTSTRAP_LOAN_PROGRESS_REVISION == 0

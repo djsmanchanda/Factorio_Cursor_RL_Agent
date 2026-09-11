@@ -34,6 +34,9 @@ These names describe intended responsibilities, not permission to build speculat
   recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
+  Opening oil links use bounded land, underground-bypass, wider-land, then
+  water-crossing attempts. Reuse the validated route for both placements and
+  purity segments; never replan already submitted transaction geometry.
 - Generate fluid-machine layouts through rotation, reflection, and structural
   expansion operators. Reject collisions, unreachable attachments, and fluid
   mixing first; among legal candidates minimize the complete routed pipe bill,
@@ -210,8 +213,9 @@ These names describe intended responsibilities, not permission to build speculat
   the seed is measured. Configuration is existing-entity-only and fails closed
   if the planner-owned cell has disappeared; it never creates a replacement.
   This is recovery after the mall has duplicate cells, not the cold-start
-  source: `reduced-v1` supplies exactly two requester chests once per episode
-  before production prep, and the material ledger prevents replenishment.
+  source: no bootstrap profile supplies free requester chests. Existing stock
+  or production must fund every chest; an impossible cold-start dependency is
+  a real supply blocker, never permission to insert items.
   A permanent half-cell refresh also surveys its shared requester and clears
   obsolete `mall:*:<side>` sections for that half only. The opposite machine's
   side remains untouched, so one chest converges to at most its two live
@@ -224,10 +228,13 @@ These names describe intended responsibilities, not permission to build speculat
 - Reduced supply begins entirely on assembling-machine-1 and regular inserters;
   neither upgraded tier is part of the starter contract. Solid compact cells,
   including the permanent assembling-machine-2 and fast-inserter producers,
-  are assigned tier 1 from the live machine-category catalog. Once those two
-  producers have completed real crafts, the controller stocks exact replacement
-  counts plus a four-item construction reserve and orders native in-place bot
-  upgrades. Pending upgrades are excluded from later batches, and mixed AM1/AM2
+  are assigned tier 1 from the live machine-category catalog. Once the first
+  full iron foundation is built and its owned replacement has measured output,
+  the mall queues AM2 replacements immediately, without waiting for copper,
+  plastic, logistics-chest production, or the complete core mall. AM2 orders
+  require proven AM2 production and transferable stock remaining after material
+  reservations plus a four-item construction reserve. Fast-inserter upgrades
+  retain their later core-mall gate. Upgrades use native in-place bot orders. Pending upgrades are excluded from later batches, and mixed AM1/AM2
   recipe rows remain one observable line throughout the transition.
   Until plastic has produced output, low-demand construction items are finite
   batches made by a recoverable recipe loan in an existing mall assembler.
@@ -245,6 +252,14 @@ These names describe intended responsibilities, not permission to build speculat
   base; once the direct iron/copper replacements are healthy and released,
   pre-core items keep their grown standing reserve past the bill and build
   ahead instead of stopping at need-plus-margin.
+  Optional core-mall promotion must yield unchanged supply waits to the
+  queued-work scheduler in the same pass. A completed prerequisite may be
+  stopped at its stock cap until its loan receives the next scheduling turn;
+  that status alone is not a broken gate. Recipe configuration, restoration,
+  or promotion consumes the pass for re-observation; observed craft progress
+  alone must not let one optional batch monopolize scheduling. Coverage waits
+  retain bounded polling. The same decision applies to forced-pool admission
+  and chest-prerequisite admission.
   Concurrent recipe loans may run on different free cells: a batch for X and
   a batch for Y (or for X's precursors) each borrow their own cell and advance
   on their own passes, so the rotating pool makes several things at once. Each
@@ -559,3 +574,17 @@ After advanced circuits are live, power expansion uses the full 1:1
 panel/accumulator template. If a measured deficit selects a unit whose materials
 are short, the controller queues that unit's exact materials through the normal
 mall scheduler instead of merely rechecking the same unfunded atomic bill.
+
+## Blueprint-only deterministic construction
+
+Every new entity is a material-funded ghost constructed by bots. The submission
+boundary converts legacy `place_entity` plans for every prototype, not just
+power infrastructure. Observed matching entities use `configure_entity` and
+incur no new material bill. Settings requiring a real chest inventory are
+applied after bot construction. The Lua executor independently rejects missing
+player-force direct-placement targets before executing any actions.
+
+No bootstrap inventory grants and no destroy/recreate requester shortcut are
+allowed. Trash settings unsupported on a bot-built requester remain unsupported;
+removing a real building to force those settings is forbidden. Sandbox/training
+fixture creation remains isolated from the deterministic player-force runtime.

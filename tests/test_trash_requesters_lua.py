@@ -30,7 +30,7 @@ local function new_chest(name, x, y, stacks)
   local chest = {
     valid = true, name = name,
     position = { x = x, y = y }, direction = 4,
-    force = { name = "player" },
+    force = { name = "planner" },
     inserted = {},
   }
   function chest.get_inventory(_which)
@@ -50,7 +50,7 @@ local function new_chest(name, x, y, stacks)
 end
 
 local function new_surface(fail_create)
-  local surface = {}
+  local surface = { name = "planner-sandbox" }
   function surface.create_entity(params)
     created_params = params
     if fail_create then return nil end
@@ -134,7 +134,19 @@ def test_revive_falls_back_to_a_ghost_when_recreate_fails(lua) -> None:
 
 
 def test_only_managed_forces_opt_in(lua) -> None:
-    assert lua.eval("M.managed_force('player')") is True
+    assert lua.eval("M.managed_force('player')") is False
     assert lua.eval("M.managed_force('planner')") is True
     assert lua.eval("M.managed_force('training-01')") is False
     assert lua.eval("M.managed_force(nil)") is False
+
+
+def test_player_chest_is_never_destroyed_or_recreated(lua) -> None:
+    result = lua.eval("""(function()
+        stub.reset()
+        local chest = stub.new_chest("requester-chest", 1.5, 2.5, {})
+        chest.force.name = "player"
+        return M.revive_with_trash(stub.new_surface(false), chest)
+    end)()""")
+    assert result == (False, "replacement_forbidden")
+    assert lua.eval("stub.destroyed_total()") == 0
+    assert lua.eval("stub.created_params()") is None

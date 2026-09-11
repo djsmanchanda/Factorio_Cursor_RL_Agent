@@ -519,16 +519,9 @@ def test_oil_route_tries_land_before_requesting_landfill(monkeypatch) -> None:
 
     def link(*_args, **kwargs):
         tunnel_choices.append(kwargs["allow_terrain_tunnels"])
-        return {"phases": [{"name": "fluid", "actions": []}]}
+        return {"phases": [{"name": "fluid", "actions": []}]}, [{"used_tunnels": kwargs["allow_terrain_tunnels"]}]
 
-    monkeypatch.setattr(stage_chemical, "generate_shortest_fluid_chain_link", link)
-    monkeypatch.setattr(
-        stage_chemical, "shortest_fluid_chain_segments",
-        lambda *_args, **kwargs: [{
-            "fluid": "water", "tiles": [],
-            "used_tunnels": kwargs["allow_terrain_tunnels"],
-        }],
-    )
+    monkeypatch.setattr(stage_chemical, "plan_shortest_fluid_chain_link", link)
 
     _link, segments, crossed_water = stage_chemical._route_oil_fluid_link(
         (0.5, 0.5), [(5.5, 0.5)], "water", foreign=[], hard=set(),
@@ -552,20 +545,16 @@ def test_oil_route_uses_landfill_only_when_land_route_is_impossible(monkeypatch)
         )
         if not kwargs["allow_terrain_tunnels"]:
             raise ValueError("no land detour")
-        return {"phases": [{"name": "fluid", "actions": []}]}
+        return {"phases": [{"name": "fluid", "actions": []}]}, []
 
-    monkeypatch.setattr(stage_chemical, "generate_shortest_fluid_chain_link", link)
-    monkeypatch.setattr(
-        stage_chemical, "shortest_fluid_chain_segments",
-        lambda *_args, **_kwargs: [],
-    )
+    monkeypatch.setattr(stage_chemical, "plan_shortest_fluid_chain_link", link)
 
     _link, _segments, crossed_water = stage_chemical._route_oil_fluid_link(
         (0.5, 0.5), [(5.5, 0.5)], "water", foreign=[], hard=set(),
         terrain_water={(2, 0)}, existing_tiles=[],
     )
 
-    assert choices == [(False, False), (True, False), (True, True)]
+    assert choices == [(False, False), (True, False), (True, False), (True, True)]
     assert crossed_water
 
 
@@ -1574,3 +1563,26 @@ def test_extra_pumpjacks_preserve_unknown_existing_orientation():
     for site in sites:
         assert site["output"] not in existing_tiles
         assert stage_chemical.footprint_tile_indices(site["position"], 3).isdisjoint(existing_tiles)
+
+
+def test_oil_route_expands_land_search_before_water(monkeypatch):
+    attempts = []
+    def route(*args, **kw):
+        attempts.append((kw['search_margin'], kw['allow_dives'], kw['allow_terrain_tunnels']))
+        if kw['search_margin'] < 96:
+            raise ValueError('detour outside search bound')
+        return {'phases': []}, [{'fluid': 'water', 'tiles': []}]
+    monkeypatch.setattr(stage_chemical, 'plan_shortest_fluid_chain_link', route)
+    _, _, water = stage_chemical._route_oil_fluid_link(
+        (0, 0), [(5, 0)], 'water', foreign=[], hard=set(), terrain_water=set(), existing_tiles=[])
+    assert attempts == [(48, False, False), (48, True, False), (96, True, False)]
+    assert water is False
+
+
+def test_oil_route_exhaustion_reports_every_bounded_attempt(monkeypatch):
+    def reject(*args, **kw):
+        raise ValueError('blocked endpoints')
+    monkeypatch.setattr(stage_chemical, 'plan_shortest_fluid_chain_link', reject)
+    with pytest.raises(ValueError, match='No bounded fluid route') as failure:
+        stage_chemical._route_oil_fluid_link((0, 0), [(5, 0)], 'water', foreign=[], hard=set(), terrain_water=set(), existing_tiles=[])
+    assert str(failure.value).count('blocked endpoints') == 4

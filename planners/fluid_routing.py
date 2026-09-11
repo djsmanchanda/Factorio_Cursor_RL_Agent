@@ -595,30 +595,12 @@ def shortest_fluid_chain_segments(
     allow_dives: bool = False,
 ) -> List[dict]:
     """Return one purity segment, with narrow terrain tunnels represented."""
-    foreign = list(foreign)
-    endpoints = {_route_tile(from_point)} | {_route_tile(point) for point in to_points}
-    blocked = (
-        _mixing_keepout(foreign, fluid, endpoints) if mixing_margin
-        else _obstacles(foreign, fluid)
+    segment, _, _ = _route_segment_with_tunnels(
+        from_point, to_points, fluid, list(foreign), hard_tiles,
+        tunnelable_tiles, clearance, search_margin, mixing_margin,
+        allow_terrain_tunnels, allow_dives,
     )
-    hard = set(hard_tiles) | blocked | _foreign_tunnel_endpoints(foreign, fluid)
-    surface_reserved = {
-        tuple(tile) for segment in foreign
-        if segment.get("fluid") == fluid
-        for tile in segment.get("tiles", ())
-    }
-    network, tunnels, _ = _chain_network(
-        from_point, to_points, hard, tunnelable_tiles,
-        clearance, search_margin, allow_tunnels=allow_terrain_tunnels,
-        allow_dives=allow_dives, diveable_tiles=set(hard_tiles),
-        surface_reserved=surface_reserved,
-    )
-    return [{
-        "fluid": fluid,
-        "separated_by_pump": False,
-        "tiles": network,
-        "tunnel_endpoints": tunnels,
-    }]
+    return [segment]
 
 
 def _route_segment_with_tunnels(
@@ -633,7 +615,7 @@ def _route_segment_with_tunnels(
     mixing_margin: bool,
     allow_terrain_tunnels: bool,
     allow_dives: bool = False,
-) -> tuple[dict, list[tuple[tuple[int, int], tuple[int, int]]]]:
+) -> tuple[dict, list[tuple[tuple[int, int], tuple[int, int]]], list[tuple[int, int]]]:
     """Build the segment and retain the tunnel endpoint pairs for emission."""
     endpoints = {_route_tile(from_point)} | {_route_tile(point) for point in to_points}
     blocked = (
@@ -658,7 +640,7 @@ def _route_segment_with_tunnels(
     }, tunnels, landfill
 
 
-def generate_shortest_fluid_chain_link(
+def plan_shortest_fluid_chain_link(
     from_point: tuple,
     to_points: List[tuple],
     fluid: str,
@@ -671,7 +653,7 @@ def generate_shortest_fluid_chain_link(
     mixing_margin: bool = False,
     allow_terrain_tunnels: bool = False,
     allow_dives: bool = False,
-) -> dict:
+) -> tuple[dict, list[dict]]:
     """Return a schema-validated fluid link, tunnelling only narrow terrain.
 
     With `allow_dives`, blocked hard tiles are additionally bridged with
@@ -729,4 +711,29 @@ def generate_shortest_fluid_chain_link(
     plan = {"phases": [{"name": f"fluid_link_{fluid}", "actions": actions}]}
     _validate(plan)
     validate_network_purity([segment] + foreign)
+    return plan, [segment]
+
+
+def generate_shortest_fluid_chain_link(
+    from_point: tuple,
+    to_points: List[tuple],
+    fluid: str,
+    foreign: List[dict] = (),
+    hard_tiles=(),
+    tunnelable_tiles=(),
+    clearance: int = ROUTE_CLEARANCE,
+    search_margin: int = ROUTE_SEARCH_MARGIN,
+    existing_tiles=(),
+    mixing_margin: bool = False,
+    allow_terrain_tunnels: bool = False,
+    allow_dives: bool = False,
+) -> dict:
+    """Compatibility interface for callers that only need placement actions."""
+    plan, _ = plan_shortest_fluid_chain_link(
+        from_point, to_points, fluid, foreign=foreign, hard_tiles=hard_tiles,
+        tunnelable_tiles=tunnelable_tiles, clearance=clearance,
+        search_margin=search_margin, existing_tiles=existing_tiles,
+        mixing_margin=mixing_margin, allow_terrain_tunnels=allow_terrain_tunnels,
+        allow_dives=allow_dives,
+    )
     return plan

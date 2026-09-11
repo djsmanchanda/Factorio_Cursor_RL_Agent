@@ -20,7 +20,6 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -29,6 +28,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.campaign_protocol import (
+    assistant_text as _assistant_text, decision_fields as _decision_fields,
+    session_id as _session_id,
+)
 from tools.run_context import build_context
 from tools.run_history import index_log
 from tools import reliability_state
@@ -43,7 +46,6 @@ RUN_END = "RUN END"
 # agent's start prompt quotes "RUN END" mid-line, so a substring test would
 # declare every live run complete on its first checkpoint.
 _RUN_END_LINE = re.compile(r"(?m)^\+\d+s RUN END$")
-DECISION = re.compile(r"CAMPAIGN_DECISION:\s*(.*)", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -258,29 +260,6 @@ def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple
     )
 
 
-def _session_ids(value: Any) -> Iterable[str]:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if key in {"sessionID", "session_id"} and isinstance(child, str) and child:
-                yield child
-            yield from _session_ids(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _session_ids(child)
-
-
-def _session_id(output: str) -> str | None:
-    for line in output.splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        found = next(_session_ids(event), None)
-        if found:
-            return found
-    return None
-
-
 def _opencode_command(config: Config, message: str, session_id: str | None) -> list[str]:
     command = [
         config.opencode_bin, "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config.model,
@@ -449,29 +428,6 @@ def _tree_fingerprint(observations: Path) -> str:
             line for line in untracked.splitlines() if line != relative_notes.as_posix()
         )
     return hashlib.sha256((head_tree + tracked + "\n--untracked--\n" + untracked).encode("utf-8", errors="replace")).hexdigest()
-
-
-def _decision_fields(output: str, marker: str = "CAMPAIGN_DECISION") -> dict[str, str]:
-    # JSON transport escapes newlines; parse only assistant text events, not
-    # tool output or echoed prompts, before reading the final decision block.
-    texts = []
-    for line in output.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "text":
-            part = event.get("part", {})
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                texts.append(part["text"])
-    text = "\n".join(texts) if texts else output
-    result = {}
-    for chunk in text.split(marker + ":")[1:]:
-        fields = dict(line.split(":", 1) for line in chunk.splitlines() if ":" in line)
-        fields = {key.strip(): value.strip() for key, value in fields.items()}
-        if fields.get("status") in {"change", "no-change", "stop", "approved", "rejected"}:
-            result = fields
-    return result
 
 
 def _decision(output: str) -> str:
@@ -731,7 +687,6 @@ def _run_campaign(config: Config) -> int:
                 board = observe_team(config, state.active_episode_id, checkpoint)
                 _append(config.observations, f"Aspect evidence board: {board}\n")
             _, assessment = _ask(_readonly(config), _checkpoint_prompt(config, cycle, checkpoint) + "\nReturn findings only; do not edit the journal.", session_id, sequence)
-            from tools.campaign_observers import _assistant_text
             if _assistant_text(assessment):
                 _append(config.observations, _assistant_text(assessment))
             sequence += 1

@@ -203,3 +203,17 @@ def test_dive_keeps_foreign_fluids_impassable() -> None:
             (0, 0), [(8, 0)], "water", foreign,
             clearance=0, search_margin=2, allow_dives=True,
         )
+
+
+def test_combined_link_reuses_one_route_search(monkeypatch):
+    from planners import fluid_routing as routing
+    original = routing._chain_network
+    searches = []
+    def counted(*args, **kwargs):
+        searches.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(routing, '_chain_network', counted)
+    plan, segments = routing.plan_shortest_fluid_chain_link((0, 0), [(8, 0)], 'water')
+    assert len(searches) == 1
+    assert segments[0]['fluid'] == 'water'
+    assert plan == routing.generate_shortest_fluid_chain_link((0, 0), [(8, 0)], 'water')

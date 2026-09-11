@@ -17,6 +17,14 @@ These are boundaries, not layout recipes.
 - Design preferences such as short routes, direct belts, zoning, expansion room, and stability are rewards or priors unless explicitly promoted to a hard safety rule.
 - Real-base authority requires an explicitly promoted policy, bounded action scope, observable results, and rollback. Training success alone grants no production authority.
 
+## Deterministic construction
+
+All new player-force deterministic infrastructure must be blueprint ghosts,
+funded by real items and built by construction bots. No direct-placement or
+bootstrap item-grant exception exists. Existing-entity configuration may not
+create a missing target or replace a bot-built entity to apply settings.
+Disposable training/sandbox setup is a separate isolated lifecycle.
+
 ## 3. Evidence and lifecycle truth
 
 - A unit test proves only the tested behavior.

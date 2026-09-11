@@ -34,14 +34,11 @@ script.on_event(defines.events.on_robot_built_entity, function(event)
     end
   end
 
-  -- Bot-revived requester chests cannot carry the blueprint trash flag
-  -- (ghosts hold no settings and no setter exists), so swap each one for a
-  -- trash-enabled copy at revive time, before any configure flow or delivery
-  -- touches it. Scoped to bot builds: player hand placements keep whatever
-  -- the player set. Training forces run under their own mod and contract.
+  -- Preserve the legacy sandbox behavior only. Never replace a player chest
+  -- after construction to apply settings unavailable through the runtime API.
   if entity.valid and entity.name == "requester-chest" then
     local force_name = entity.force and entity.force.name
-    if trash_requesters.managed_force(force_name) then
+    if entity.surface.name == "planner-sandbox" and trash_requesters.managed_force(force_name) then
       trash_requesters.revive_with_trash(entity.surface, entity)
     end
   end

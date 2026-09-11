@@ -307,12 +307,10 @@ def test_core_mall_coverage_wait_paces_at_the_foundation_poll(monkeypatch) -> No
 
 
 def test_core_mall_non_coverage_wait_does_not_sleep(monkeypatch) -> None:
-    """Pacing applies only to bot-built infrastructure waits; other deferred
-    prerequisites keep fast passes so genuine mall spins still trip the
-    bound quickly."""
+    """Supply waits yield to ready tasks; only coverage owns a poll sleep."""
     result, slept, emitted = _core_mall_wait_case(
         monkeypatch, "production_prerequisite_deferred")
 
-    assert result is True
+    assert result is False
     assert slept == []
     assert any("CORE MALL WAIT" in line for line in emitted)

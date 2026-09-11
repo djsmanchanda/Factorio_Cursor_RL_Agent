@@ -163,8 +163,8 @@ def test_submit_ghosts_and_bills_every_power_and_coverage_entity(
     bridge = SimpleNamespace(build_layout=lambda _authorization, candidate: (
         submitted.append(candidate) or {
             "ok": True, "attempted_placements": 6,
-            "succeeded_placements": 6, "placed_ghosts": 5,
-            "placed_entities": 1,
+            "succeeded_placements": 6, "placed_ghosts": 6,
+            "placed_entities": 0,
         }
     ))
 
@@ -179,8 +179,8 @@ def test_submit_ghosts_and_bills_every_power_and_coverage_entity(
         action["action_type"] == "place_ghost"
         for action in actions if action["entity"] in infrastructure
     )
-    assert actions[-1]["action_type"] == "place_entity"
-    assert bills == [{entity: 1 for entity in sorted(infrastructure)}]
+    assert actions[-1]["action_type"] == "place_ghost"
+    assert bills == [{entity: 1 for entity in sorted(infrastructure | {"passive-provider-chest"})}]
 
 
 def test_infrastructure_ghostification_reports_only_former_direct_actions() -> None:
@@ -641,3 +641,53 @@ def test_unproductive_plan_spend_still_exhausts_the_budget() -> None:
             consume_plan_submission("third")
     finally:
         end_run_budget()
+
+
+@pytest.mark.parametrize("entity", ["requester-chest", "passive-provider-chest", "steel-chest", "inserter", "fast-inserter", "assembling-machine-1", "pipe", "transport-belt"])
+def test_all_legacy_construction_is_ghosted_and_billed(entity):
+    plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": entity, "position": {"x": 10, "y": 20}}]}]}
+    assert _ghostify_direct_infrastructure(plan) == ((entity, (10.0, 20.0)),)
+    assert _ghost_materials(plan) == {entity: 1}
+
+
+def test_sandbox_supply_cannot_enter_deterministic_submit():
+    plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": "infinity-chest", "position": {"x": 0, "y": 0}}]}]}
+    with pytest.raises(StuckError, match="sandbox supply"):
+        _submit(object(), object(), "nauvis", plan, "free-input", lambda _: None)
+
+
+
+def test_existing_direct_chest_is_configuration_without_new_material(monkeypatch):
+    from orchestrator import stage_services as services
+    plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": "requester-chest", "position": {"x": 1, "y": 2}}]}]}
+    monkeypatch.setattr(services.live_base, 'entity_names_at', lambda *_: {(1, 2): 'requester-chest'})
+    monkeypatch.setattr(services, 'clear_plan_clutter', lambda *_: None)
+    bills = []
+    monkeypatch.setattr(services, 'assert_affordable', lambda _c, _s, _f, p, *args: bills.append(_ghost_materials(p)))
+    monkeypatch.setattr(services, 'load_json', lambda p: p)
+    submitted = []
+    bridge = SimpleNamespace(build_layout=lambda _a, p: submitted.append(p) or {'ok': True})
+    _submit(SimpleNamespace(command=lambda _: ''), bridge, 'nauvis', plan, 'refresh', lambda _: None)
+    assert bills == [{}]
+    assert submitted[0]['phases'][0]['actions'][0]['action_type'] == 'configure_entity'
+    assert plan['phases'][0]['actions'][0]['action_type'] == 'place_entity'
+
+
+
+def test_new_chest_settings_wait_for_real_bot_construction(monkeypatch):
+    from orchestrator import stage_services as services
+    plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": "requester-chest", "position": {"x": 1, "y": 2}, "logistic_requests": [{"name": "iron-plate", "count": 5}]}]}]}
+    monkeypatch.setattr(services, 'clear_plan_clutter', lambda *_: None)
+    monkeypatch.setattr(services, 'assert_affordable', lambda *_a, **_k: None)
+    monkeypatch.setattr(services, 'load_json', lambda p: p)
+    sequence = []
+    monkeypatch.setattr(services, '_await_bot_built_infrastructure', lambda *a, **k: sequence.append('wait') if a[3] else None)
+    def build(_auth, p):
+        sequence.append(p['phases'][0]['actions'][0])
+        return {'ok': True, 'attempted_placements': 1, 'succeeded_placements': 1, 'placed_ghosts': 1, 'placed_entities': 0}
+    _submit(object(), SimpleNamespace(build_layout=build), 'nauvis', plan, 'new-chest', lambda _: None)
+    assert sequence[0]['action_type'] == 'place_ghost'
+    assert 'logistic_requests' not in sequence[0]
+    assert sequence[1] == 'wait'
+    assert sequence[2]['action_type'] == 'configure_entity'
+    assert sequence[2]['logistic_requests'] == [{'name': 'iron-plate', 'count': 5}]
