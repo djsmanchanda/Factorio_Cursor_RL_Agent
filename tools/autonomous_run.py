@@ -615,6 +615,8 @@ def main(argv: list[str] | None = None) -> int:
     subcommands = parser.add_subparsers(dest="command", required=True)
     produce = subcommands.add_parser("produce", help="Ensure one item has a working production line.")
     produce.add_argument("item")
+    produce.add_argument("--acceptance-seconds", type=int, default=0,
+                         help="Require sustained output for this many game seconds (multiple of 10).")
     _add_connection_arguments(produce)
     research = subcommands.add_parser("research", help="Produce a technology's science packs, then queue it.")
     research.add_argument("technology")
@@ -633,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             "production-increase goals are unsupported: declare a real-base rate measurement and capacity policy first"
         )
+    if args.command == "produce" and (args.acceptance_seconds < 0 or args.acceptance_seconds % 10 or args.acceptance_seconds > 600):
+        parser.error("--acceptance-seconds must be 0 or a multiple of 10 up to 600")
     if args.rcon_secret_file is not None:
         try:
             args.rcon_password = _load_rcon_secret(args.rcon_secret_file)
@@ -717,7 +721,34 @@ def main(argv: list[str] | None = None) -> int:
                 f"ledger={mission_state_path} blockers={blocker_events_path}"
             )
             if args.command == "produce":
-                _run_item(args, args.item, logger.emit)
+                result = _run_item(args, args.item, logger.emit)
+                if args.acceptance_seconds:
+                    from orchestrator.production_acceptance import monitor, read_sample
+                    from tools.rcon_client import RconClient
+                    client = RconClient(args.rcon_host, args.rcon_port, args.rcon_password)
+                    try:
+                        acceptance = monitor(
+                            read=lambda: read_sample(client, surface=args.surface, force=args.force,
+                                                     target=args.item, output_position=result["output_position"]),
+                            path=log_path.with_name("production-acceptance.json"),
+                            episode_id=args.episode_id, provenance=manifest,
+                            target=args.item, surface=args.surface, force=args.force,
+                            seconds=args.acceptance_seconds,
+                        )
+                    finally:
+                        client.close()
+                    logger.emit(
+                        f"PRODUCTION ACCEPTANCE: target={args.item} result={acceptance['result']} "
+                        f"samples={len(acceptance['samples'])} "
+                        f"ticks={acceptance['start_tick']}..{acceptance['end_tick']} "
+                        f"report={log_path.with_name('production-acceptance.json')}"
+                    )
+                    if not acceptance["ok"]:
+                        raise StuckError("sustained production acceptance failed",
+                                         code=acceptance["result"], details={
+                                             "target": args.item,
+                                             "report": str(log_path.with_name("production-acceptance.json")),
+                                         })
                 return 0
             if args.command == "research-queue":
                 return _research_queue(args, logger.emit)

@@ -14,6 +14,8 @@ Options:
   --runtime-root PATH  Private Factorio runtime root.
   --gui-mods PATH      Matching Linux GUI mods directory.
   --python PATH        Python interpreter for the runner (default: repository .venv).
+  --produce ITEM      Verify sustained production instead of research.
+  --acceptance-seconds N  Production window in game seconds (default: 120).
   --technology NAME    Research target (default: mining-productivity-4).
   --game-port PORT     Loopback game port (default: 34199).
   --rcon-port PORT     Loopback RCON port (default: 27017).
@@ -50,6 +52,8 @@ GUI_MODS_PATH="$HOME/.factorio/mods"
 PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 SOURCE_SAVE=""
 TECHNOLOGY="mining-productivity-4"
+PRODUCE=""
+ACCEPTANCE_SECONDS=120
 EPISODE_ID="episode-$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
 GAME_PORT=34199
 RCON_PORT=27017
@@ -62,6 +66,8 @@ while (($#)); do
     --runtime-root) RUNTIME_ROOT="${2:?missing --runtime-root value}"; shift 2 ;;
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --python) PYTHON_BIN="${2:?missing --python value}"; shift 2 ;;
+    --produce) PRODUCE="${2:?missing --produce value}"; shift 2 ;;
+    --acceptance-seconds) ACCEPTANCE_SECONDS="${2:?missing --acceptance-seconds value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
     --episode-id) EPISODE_ID="${2:?missing --episode-id value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
@@ -71,6 +77,8 @@ while (($#)); do
     *) die "unknown option: $1" ;;
   esac
 done
+
+[[ "$ACCEPTANCE_SECONDS" =~ ^[0-9]+$ ]] && (( 10#$ACCEPTANCE_SECONDS > 0 && 10#$ACCEPTANCE_SECONDS <= 600 && 10#$ACCEPTANCE_SECONDS % 10 == 0 )) || die "acceptance seconds must be a multiple of 10 between 10 and 600"
 
 case "$ACTION" in
   fresh|cycle|stop|status) ;;
@@ -92,6 +100,11 @@ RUNNER_OPTIONS=(
   --rcon-port "$RCON_PORT"
   --technology "$TECHNOLOGY"
 )
+
+if [[ -n "$PRODUCE" ]]; then
+  RUNNER_OPTIONS+=(--produce "$PRODUCE" --acceptance-seconds "$ACCEPTANCE_SECONDS")
+  TECHNOLOGY="produce:$PRODUCE"
+fi
 
 execute() {
   local command="$1"

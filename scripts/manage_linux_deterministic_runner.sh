@@ -12,6 +12,8 @@ Options:
   --root PATH         Isolated deterministic server state (default: ~/.local/share/factorio-rl/deterministic).
   --python PATH       Python interpreter for autonomous_run.py (default: python3).
   --rcon-port PORT    Loopback RCON port (default: 27017).
+  --produce ITEM      Verify sustained production instead of research.
+  --acceptance-seconds N  Production window in game seconds (default: 120).
   --technology NAME   Research target (default: mining-productivity-4).
   --queue-file PATH   Process this persisted research queue instead of one target.
   --episode-manifest PATH
@@ -46,6 +48,8 @@ STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
 PYTHON_BIN="python3"
 RCON_PORT=27017
 TECHNOLOGY="mining-productivity-4"
+PRODUCE=""
+ACCEPTANCE_SECONDS=120
 QUEUE_FILE=""
 EPISODE_MANIFEST=""
 
@@ -54,6 +58,8 @@ while (($#)); do
     --root) STATE_ROOT="${2:?missing --root value}"; shift 2 ;;
     --python) PYTHON_BIN="${2:?missing --python value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
+    --produce) PRODUCE="${2:?missing --produce value}"; shift 2 ;;
+    --acceptance-seconds) ACCEPTANCE_SECONDS="${2:?missing --acceptance-seconds value}"; shift 2 ;;
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
     --queue-file) QUEUE_FILE="${2:?missing --queue-file value}"; shift 2 ;;
     --episode-manifest) EPISODE_MANIFEST="${2:?missing --episode-manifest value}"; shift 2 ;;
@@ -62,11 +68,14 @@ while (($#)); do
   esac
 done
 
+[[ "$ACCEPTANCE_SECONDS" =~ ^[0-9]+$ ]] && (( 10#$ACCEPTANCE_SECONDS > 0 && 10#$ACCEPTANCE_SECONDS <= 600 && 10#$ACCEPTANCE_SECONDS % 10 == 0 )) || die "acceptance seconds must be a multiple of 10 between 10 and 600"
+
 case "$ACTION" in
   start|stop|restart|status) ;;
   *) usage >&2; exit 2 ;;
 esac
 require_port "$RCON_PORT"
+[[ -z "$PRODUCE" || -z "$QUEUE_FILE" ]] || die "--produce cannot be combined with --queue-file"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [[ "$PYTHON_BIN" == "python3" && -x "$REPO_ROOT/.venv/bin/python" ]] && PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
@@ -135,6 +144,8 @@ start_runner() {
   local runner_args=()
   if [[ -n "$QUEUE_FILE" ]]; then
     runner_args=(research-queue --queue-file "$QUEUE_FILE")
+  elif [[ -n "$PRODUCE" ]]; then
+    runner_args=(produce "$PRODUCE" --acceptance-seconds "$ACCEPTANCE_SECONDS")
   else
     runner_args=(research "$TECHNOLOGY")
   fi

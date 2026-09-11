@@ -7,6 +7,7 @@ import math
 from collections.abc import Callable
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
+from orchestrator.oil_transaction import OilTransactionStore
 from orchestrator.game_bridge import GameBridge
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.extraction_transport import (
@@ -1134,6 +1135,14 @@ def ensure_oil_cell(
 ) -> dict[str, Point] | None:
     if target_output not in {"plastic-bar", "sulfur"}:
         raise ValueError(f"unsupported oil-cell output {target_output!r}")
+    store = OilTransactionStore.for_bridge(bridge, surface, force)
+    transaction = store.load() if store is not None else None
+    # A producing chest does not prove remaining packets/services completed.
+    if transaction is not None and not transaction["complete"]:
+        return _resume_opening_oil_cell(
+            client, bridge, surface, force, service_stage, emit,
+            transaction, store, target_output,
+        )
     existing = _existing_outputs(client, surface, force) or {}
     if target_output in existing:
         # A built output chest outside every logistic network supplies
@@ -1157,6 +1166,29 @@ def ensure_oil_cell(
         return _extend_sulfur_stage(
             client, bridge, surface, force, service_stage, emit, existing,
         )
+    if transaction is None:
+        intent = _plan_opening_oil_cell(
+            client, bridge, surface, force, reference, service_stage, emit,
+            target_output=target_output,
+        )
+        if intent is None:
+            return None
+        transaction = {"intent": intent, "complete": False}
+        if store is not None:
+            store.save(intent, complete=False)
+            emit("  OIL TRANSACTION: persisted opening district before packet release")
+    return _resume_opening_oil_cell(
+        client, bridge, surface, force, service_stage, emit,
+        transaction, store, target_output,
+    )
+
+
+def _plan_opening_oil_cell(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference: Point, service_stage: ServiceStage,
+    emit: Callable[[str], None], *, target_output: str,
+) -> dict | None:
+    """Freeze all construction geometry before releasing any oil packet."""
     include_sulfur = target_output == "sulfur"
     oil = live_base.nearest_resource(client, surface, "crude-oil", reference)
     if oil is None:
@@ -1343,6 +1375,7 @@ def ensure_oil_cell(
         for plan in (crude_source, water_source, refinery, plastic, sulfur)
     ]
     crude_source, water_source, refinery, plastic, sulfur = plans
+    active_plans = plans if include_sulfur else plans[:-1]
     plastic_feed = _direct_single_belt_feed(
         plastic, "coal", plastic_flow_direction,
     )
@@ -1362,7 +1395,7 @@ def ensure_oil_cell(
         (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
         include_water=False,
     )
-    hard |= _planned_hard_tiles(*plans)
+    hard |= _planned_hard_tiles(*active_plans)
     terrain_water = live_base.water_tiles(
         client, surface,
         (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
@@ -1470,7 +1503,7 @@ def ensure_oil_cell(
         client, surface, force, "plastic-bar", "coal", coal, plastic_feed, 2,
         max_belt_route_tiles=_CHEMICAL_BELT_ROUTE_LIMIT,
         additional_blocked=planned_footprint_tiles(
-            _merge(*plans, *(link for _name, link in links))
+            _merge(*active_plans, *(link for _name, link in links))
         ),
         mode="belt", destination_is_belt=True,
         destination_belt_direction=plastic_flow_direction,
@@ -1482,7 +1515,10 @@ def ensure_oil_cell(
         "name": "bridge_coal_to_plastic-bar", "actions": coal_actions,
     }]}
     split_plans = [_split_plan_power(plan) for plan in plans]
-    power_plan = _merge(*(power for power, _construction in split_plans))
+    power_plan = _merge(*(
+        power for power, _construction in
+        (split_plans if include_sulfur else split_plans[:-1])
+    ))
     unpowered = [construction for _power, construction in split_plans]
     crude_source_stage, water_source_stage, refinery_stage, plastic_stage, sulfur_stage = (
         unpowered
@@ -1521,12 +1557,49 @@ def ensure_oil_cell(
             link_packets["chemical_sulfur_water_pipeline"],
             ),
         ))
+    return {
+        "target_output": target_output, "plans": plans, "links": links,
+        "packets": packets, "coal": coal, "coal_belt_type": coal_belt_type,
+        "coal_actions": coal_actions,
+    }
+
+
+def _resume_opening_oil_cell(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    service_stage: ServiceStage, emit: Callable[[str], None],
+    transaction: dict, store: OilTransactionStore | None, target_output: str,
+) -> dict[str, Point] | None:
+    intent = transaction["intent"]
+    emit("  OIL TRANSACTION: replaying reserved opening packets through live validation")
+    outputs = _execute_opening_oil_cell(
+        client, bridge, surface, force, service_stage, emit, intent,
+    )
+    if store is not None:
+        store.save(intent, complete=True)
+    if target_output == "sulfur" and "sulfur" not in outputs:
+        return _extend_sulfur_stage(
+            client, bridge, surface, force, service_stage, emit, outputs,
+        )
+    return outputs
+
+
+def _execute_opening_oil_cell(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    service_stage: ServiceStage, emit: Callable[[str], None], intent: dict,
+) -> dict[str, Point]:
+    """Retry exact plans; never skip legality, materials, coverage or health."""
+    plans, links, packets = intent["plans"], intent["links"], intent["packets"]
+    crude_source, water_source, refinery, plastic, sulfur = plans
+    coal, coal_actions = tuple(intent["coal"]), intent["coal_actions"]
+    coal_belt_type = intent["coal_belt_type"]
+    include_sulfur = intent["target_output"] == "sulfur"
+    active_plans = plans if include_sulfur else plans[:-1]
     _submit_oil_cell_packets(
         client, bridge, surface, force, packets, emit,
         after_packet=lambda name: (
             _connect_oil_cell_power(
-                client, bridge, surface, force, plans, emit,
-                reserved_tiles=_oil_cell_power_reserve_tiles(plans, links),
+                client, bridge, surface, force, active_plans, emit,
+                reserved_tiles=_oil_cell_power_reserve_tiles(active_plans, links),
             )
             if name == "chemical_power_backbone" else None
         ),

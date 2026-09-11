@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Path: schemas/production_acceptance.schema.json | Purpose: Sustained production evidence, distinct from net inventory changes.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ok",
+    "result",
+    "episode_id",
+    "target",
+    "surface",
+    "force",
+    "provenance",
+    "acceptance_seconds",
+    "sample_seconds",
+    "start_tick",
+    "end_tick",
+    "samples"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "result": {
+      "enum": [
+        "running",
+        "passed",
+        "production_acceptance_timeout",
+        "production_acceptance_invalid"
+      ]
+    },
+    "episode_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "type": "string"
+    },
+    "surface": {
+      "type": "string"
+    },
+    "force": {
+      "type": "string"
+    },
+    "provenance": {
+      "type": "object"
+    },
+    "acceptance_seconds": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 600,
+      "multipleOf": 10
+    },
+    "sample_seconds": {
+      "const": 10
+    },
+    "start_tick": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "end_tick": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "samples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "tick",
+          "surface",
+          "force",
+          "target",
+          "machines"
+        ],
+        "properties": {
+          "tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "surface": {
+            "type": "string"
+          },
+          "force": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "provider_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "machines": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

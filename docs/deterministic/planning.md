@@ -480,7 +480,10 @@ These names describe intended responsibilities, not permission to build speculat
   avoid both reservations; if a preferred outlet is blocked, try the other
   rotations before rejecting that well. The opening and expansion selectors
   share this pure geometry policy in `planners/pumpjack_siting.py`; full plan
-  collision validation remains mandatory.
+  collision validation remains mandatory. Opening oil packet geometry and service
+  plans persist in an episode-scoped immutable transaction before submission.
+  Retries and runner restarts reconcile that exact transaction rather than
+  selecting a new site; live validation still gates each submission.
 - The first refinery may use basic oil processing as bootstrap. Every later oil
   expansion uses advanced oil processing as one complete refinery-and-cracking
   block; heavy and light outputs may not be left without cracking consumers.
