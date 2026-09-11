@@ -13,11 +13,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 from orchestrator import autonomous_builder  # noqa: E402
 from orchestrator.autonomous_builder import (  # noqa: E402
     _MAX_UNCHANGED_PASSES,
+    _PENDING_FOUNDATION_POLL_SECONDS,
     _heaviest_source,
     _livelock_step,
     _outstanding_work_signature,
     _pass_signature,
+    _prepare_core_mall_prerequisite,
     _refuse_to_spin,
+    ProductionPrerequisiteDeferred,
 )
 from orchestrator.stage_services import StuckError  # noqa: E402
 
@@ -262,3 +265,54 @@ def test_priority_wait_sleeps_to_due_tick_without_busy_polling(
 
     assert result is autonomous_builder._SHORTAGE
     assert slept == [expected_seconds]
+
+
+def _core_mall_wait_case(monkeypatch, code: str):
+    """Run one core-mall prerequisite pass whose ladder defers with `code`."""
+    monkeypatch.setattr(
+        autonomous_builder, "_core_mall_prerequisites",
+        lambda *_args: ("advanced-circuit",),
+    )
+
+    def _defer(*_args, **_kwargs):
+        raise ProductionPrerequisiteDeferred(
+            "construction coverage waits for bot-built roboport wave",
+            code=code, state="constructing",
+        )
+
+    monkeypatch.setattr(autonomous_builder, "ensure_produced", _defer)
+    slept: list[float] = []
+    monkeypatch.setattr(autonomous_builder.time, "sleep", slept.append)
+    emitted: list[str] = []
+
+    result = _prepare_core_mall_prerequisite(
+        object(), object(), "nauvis", "player", "passive-provider-chest",
+        {}, (0.0, 0.0), emitted.append,
+    )
+    return result, slept, emitted
+
+
+def test_core_mall_coverage_wait_paces_at_the_foundation_poll(monkeypatch) -> None:
+    """Cycle 21 and the identical Sep-10 run died mid-wave: this wait spun
+    ~1s passes while the coal coverage wave advanced 338->128 tiles, so the
+    12-pass livelock bound fired ~12-30s into healthy wave-building instead
+    of after its ~120s horizon. The plate-starter coverage wait already
+    paces the identical wait code; the core-mall path must match it."""
+    result, slept, emitted = _core_mall_wait_case(
+        monkeypatch, "roboport_coverage_construction_wait")
+
+    assert result is True
+    assert slept == [_PENDING_FOUNDATION_POLL_SECONDS]
+    assert any("CORE MALL WAIT" in line for line in emitted)
+
+
+def test_core_mall_non_coverage_wait_does_not_sleep(monkeypatch) -> None:
+    """Pacing applies only to bot-built infrastructure waits; other deferred
+    prerequisites keep fast passes so genuine mall spins still trip the
+    bound quickly."""
+    result, slept, emitted = _core_mall_wait_case(
+        monkeypatch, "production_prerequisite_deferred")
+
+    assert result is True
+    assert slept == []
+    assert any("CORE MALL WAIT" in line for line in emitted)

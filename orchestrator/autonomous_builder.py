@@ -10202,6 +10202,15 @@ def _prepare_core_mall_prerequisite(
             f"  CORE MALL WAIT: {item} prerequisite {prerequisite} -- "
             f"{deferred}"
         )
+        if deferred.code == "roboport_coverage_construction_wait":
+            # Bot-built coverage waves advance one hop per build/charge cycle.
+            # Without a poll sleep this wait spins ~1s passes and the
+            # pass-counted livelock bound fires mid-wave (cycle 21 and the
+            # identical Sep-10 run died on the coal wave at 128/86 tiles).
+            # Pace like the plate-starter coverage wait so the bound keeps
+            # its ~120s horizon; hop builds still reset it via ghost falls.
+            consume_wait(f"coverage_{item}_prerequisite")
+            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
         return True
     return True
 
