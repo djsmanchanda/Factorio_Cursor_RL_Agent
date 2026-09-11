@@ -277,8 +277,9 @@ GET `{config.dashboard_url}`; do not change code or execute server lifecycle/fac
 
 At RUN END, compare all three references and own the investigation through implementation. Delegate bounded
 observation, reproduction or review to subagents; verify their decisive claims against raw evidence and code.
-When the cause and reusable fix are supported, implement, test and commit without asking the user to approve
-routine repository work. An analysis-only handoff is not completion when a justified fix is available.
+When the cause and reusable fix are supported, implement and test without asking the user to approve
+routine repository work, then return the diff for primary review. Do not commit: the primary orchestrator
+reviews, integrates and commits. An analysis-only handoff is not completion when a justified fix is available.
 The parent process controls lifecycle and the next run; it is not a human approval gate. Reply briefly after setup."""
 
 
@@ -307,8 +308,9 @@ only when the missing evidence requires execution, and you must specify what eac
 verifying the failure mechanism locally (a focused behavioral reproduction, then the predicted milestone under
 matching starting conditions) over another full episode. Do not start/reset/redeploy Factorio; the parent owns the
 next fresh run. Preserve unrelated dirty files. You own the code fix: verify subagent findings, implement the
-supported correction, run focused tests, address test failures, review the diff, and create one scoped commit.
-Do not end with "want me to implement?", "parent-owned fix", or an analysis-only handoff when you have a supported
+supported correction, run focused tests, address test failures, and review the diff — then stop and report files
+and results without committing. The primary orchestrator integrates and commits; your verdict stays `change` once
+the tested edit exists in the worktree. Do not end with "want me to implement?", "parent-owned fix", or an analysis-only handoff when you have a supported
 fix within repository scope. Report status: change only after implementation and verification. Stop or no-change
 is appropriate only for a concrete unresolved evidence gap, failed verification, exhausted budget, mission
 completion, or authority outside scope; explain the blocker and investigation already attempted. Never invent a
@@ -329,7 +331,7 @@ only to resolve one specifically named evidence gap from that comparison: implem
 telemetry that captures it, with a narrow regression test, and state what each possible reading would mean for the
 competing explanations. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files.
 Never manufacture telemetry just to unlock another run: if no evidence gap names telemetry as its resolution, make
-no change and say so. If implemented, verify and commit the telemetry patch yourself. Append the outcome to `{config.observations}`. End exactly with:
+no change and say so. If implemented, verify the telemetry patch and report it uncommitted for primary review. Append the outcome to `{config.observations}`. End exactly with:
 
 CAMPAIGN_DECISION:
 status: change|no-change|stop

@@ -56,7 +56,8 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
     assert "exactly one small reusable fix" in prompt
     assert "competing explanation" in prompt
     assert "obtain the missing read-only observation or local reproduction yourself" in prompt
-    assert "create one scoped commit" in prompt
+    assert "without committing" in prompt
+    assert "primary orchestrator integrates and commits" in prompt
     assert "verify subagent findings" in prompt
     assert "CAMPAIGN_DECISION:" in prompt
 
