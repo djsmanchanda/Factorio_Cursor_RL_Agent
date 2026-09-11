@@ -982,7 +982,12 @@ def bridge_belt_to_belt(
             initial_direction=exit_direction, final_direction=desired_direction,
         )
         if detour is None:
-            raise ValueError("no route satisfies the source and destination belt directions")
+            raise ValueError(
+                "no route satisfies the source and destination belt directions"
+                f"; bridge {source_belt} -> {route[-1]}"
+                f" entry={entry_direction} exit={exit_direction}"
+                f" destination={destination_direction}"
+            )
         route = detour
     inline_destination = (
         destination_direction is not None

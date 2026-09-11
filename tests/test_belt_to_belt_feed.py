@@ -313,3 +313,65 @@ def test_an_unroutable_bridge_is_still_a_hard_failure() -> None:
     """No route at all is a geometry problem; more belt cannot fix it."""
     assert "no belt route is available for this bridge" in _PLAN
     assert "raise StuckError(" in _PLAN
+
+
+def test_an_unroutable_bridge_files_a_typed_contract(monkeypatch, tmp_path) -> None:
+    """Cycle 19 (+3961s): the oil plastic-row bridge filed legacy
+    `untyped_stuck` with empty details, so the next identical verdict could
+    not name the failing bridge. The raise keeps its message but files code
+    `belt_bridge_unroutable` plus the bridge facts the blocker record needs."""
+    from orchestrator.stage_services import StuckError
+    monkeypatch.setattr(
+        stage_transport, "_survey_belt_route",
+        lambda *_a, **_k: ((10.5, 0.5), (0.5, 0.5), set(), "east", "east"),
+    )
+    monkeypatch.setattr(live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(
+        stage_transport, "_choose_route_belt_tier",
+        lambda *_a, **_k: "transport-belt",
+    )
+
+    def _no_route(*_a, **_k):
+        raise ValueError(
+            "no route satisfies the source and destination belt directions"
+        )
+
+    monkeypatch.setattr(stage_transport, "_route_belt_actions", _no_route)
+
+    with pytest.raises(StuckError, match="no belt route is available") as error:
+        stage_transport._plan_belt_transport(
+            object(), "nauvis", "player", "plastic-bar",
+            (0.5, 0.5), (40.5, 0.5),
+            reuse_existing=False, max_belt_route_tiles=None,
+        )
+
+    assert error.value.code == "belt_bridge_unroutable"
+    assert error.value.classification == "bug"
+    details = error.value.details
+    assert details["ingredient"] == "plastic-bar"
+    assert details["source_position"] == [0.5, 0.5]
+    assert details["feed_position"] == [40.5, 0.5]
+    assert details["route_source"] == [0.5, 0.5]
+    assert details["entry_direction"] == "east"
+    assert details["exit_direction"] == "east"
+    assert details["tiers_attempted"][0] == "transport-belt"
+
+    assert details["belt_source"] == [10.5, 0.5]
+    assert details["max_route_tiles"] is None
+    assert details["planner_error"] == "no route satisfies the source and destination belt directions"
+    assert isinstance(error.value.__cause__, ValueError)
+
+    # Verify the actual signal survives persistence, not just the exception.
+    import json
+    from orchestrator.mission_state import MissionStateLedger
+    ledger = MissionStateLedger(
+        tmp_path / "mission.json", tmp_path / "blockers.jsonl",
+        episode_id="episode-routing", bootstrap_profile="reduced-v1",
+        command="research", target="mining-productivity-4",
+        surface="nauvis", force="player", repository_revision="test",
+        save_provenance={},
+    )
+    ledger.record_blocker(error.value)
+    persisted = json.loads((tmp_path / "blockers.jsonl").read_text())
+    assert persisted["code"] == "belt_bridge_unroutable"
+    assert persisted["details"] == details

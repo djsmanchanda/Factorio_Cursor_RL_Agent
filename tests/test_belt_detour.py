@@ -107,3 +107,21 @@ def test_belt_detour_preserves_the_declared_source_exit_direction() -> None:
         if action["position"] == {"x": 0.5, "y": 0.5}
     )
     assert first["direction"] == "west"
+
+
+def test_an_unroutable_directional_bridge_names_its_endpoints() -> None:
+    """Cycle 19 (+3961s): the oil plastic-row bridge died as a bare
+    direction-mismatch with no endpoints, so the next identical verdict
+    could not name the failing site. The raise keeps its message but now
+    carries the bridge endpoints and directions."""
+    wall = {(x, y) for x in range(6, 31) for y in range(-60, 61)}
+    with pytest.raises(ValueError, match="no route satisfies") as error:
+        bridge_belt_to_belt(
+            (0.5, 0.5), (40.5, 0.5), entry_direction="east",
+            exit_direction="east", belt_type="transport-belt",
+            blocked_tiles=wall,
+        )
+    message = str(error.value)
+    assert "(0.5, 0.5)" in message
+    assert "entry=east" in message
+    assert "exit=east" in message

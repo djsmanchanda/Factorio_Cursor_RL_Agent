@@ -19,6 +19,10 @@ These names describe intended responsibilities, not permission to build speculat
   belt-to-chest conversion feeds. The first turn belongs on clear ground, not
   on the live source belt; detours retain the same source-direction constraint.
 - Route around established infrastructure. A blocked endpoint should trigger another candidate or a safe failure.
+  An exhausted belt-route search reports `belt_bridge_unroutable` with source/
+  destination and surveyed belt endpoints, direction constraints, attempted
+  tiers, route limit, and planner reason. These details survive mission-blocker
+  persistence; diagnostics do not relax route legality.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
 - Change the tier of an owned machine through Factorio's native upgrade order,

@@ -720,7 +720,24 @@ def _plan_belt_transport(
             )
         )
     if not shortfalls and route_error is not None:
-        raise StuckError(f"no belt route is available for this bridge: {route_error}")
+        raise StuckError(
+            f"no belt route is available for this bridge: {route_error}",
+            code="belt_bridge_unroutable",
+            details={
+                "ingredient": ingredient,
+                "source_position": [source_position[0], source_position[1]],
+                "feed_position": [feed_position[0], feed_position[1]],
+                "route_source": [route_source[0], route_source[1]],
+                "entry_direction": entry_direction,
+                "exit_direction": exit_direction,
+                "destination_is_belt": destination_is_belt,
+                "destination_belt_direction": destination_belt_direction,
+                "tiers_attempted": list(ordered),
+                "belt_source": list(belt_source) if belt_source is not None else None,
+                "max_route_tiles": max_belt_route_tiles,
+                "planner_error": str(route_error),
+            },
+        ) from route_error
     for tier in ordered:
         if tier in requirements:
             raise MaterialShortage(
