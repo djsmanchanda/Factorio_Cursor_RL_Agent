@@ -135,10 +135,12 @@ from orchestrator.stage_services import (
     _submit,
     _wait_for_ghosts,
     assert_affordable,
+    coverage_progress_revision,
     construction_supply_chain_is_scheduled,
     ensure_logistic_coverage,
     extend_power,
     extend_roboport_coverage,
+    reset_coverage_progress,
     service_distance,
     validate_builder_target,
 )
@@ -11402,6 +11404,20 @@ def _livelock_step(
     return 0 if signature_changed else unchanged_passes + 1
 
 
+def _controller_ground_progressed(
+    last_ghost_count: int | None, ghost_count: int,
+    stock_grew: bool, loan_progressed: bool,
+    last_coverage_revision: int, coverage_revision: int,
+) -> bool:
+    """Whether the observed world moved toward any declared controller work."""
+    return bool(
+        (last_ghost_count is not None and ghost_count < last_ghost_count)
+        or stock_grew
+        or loan_progressed
+        or coverage_revision > last_coverage_revision
+    )
+
+
 def _refuse_to_spin(
     unchanged_passes: int, signature: tuple, goal_item: str, *,
     deferred_reason: str | None = None,
@@ -11858,6 +11874,7 @@ def run(
         password=rcon_password, command_timeout=30.0, episode_id=episode_id,
     )
     budget = begin_run_budget(max_iterations)
+    reset_coverage_progress()
     _TRANSFERABLE_WAITS.clear()
     _STAGE_DELIVERY_ATTEMPTS.clear()
     try:
@@ -11874,6 +11891,7 @@ def run(
         last_ghost_count: int | None = None
         last_items_total: int | None = None
         last_loan_progress_revision = _BOOTSTRAP_LOAN_PROGRESS_REVISION
+        last_coverage_progress_revision = coverage_progress_revision()
         last_generation_check_tick = -_GENERATION_CHECK_INTERVAL_TICKS
         unchanged_passes = 0
         iteration = 0
@@ -11914,9 +11932,10 @@ def run(
                 or _outstanding_work_signature(signature)
                 != _outstanding_work_signature(last_signature)
             )
-            construction_progressed = (
-                (last_ghost_count is not None and ghosts_now < last_ghost_count)
-                or stock_grew or loan_progressed
+            coverage_revision = coverage_progress_revision()
+            construction_progressed = _controller_ground_progressed(
+                last_ghost_count, ghosts_now, stock_grew, loan_progressed,
+                last_coverage_progress_revision, coverage_revision,
             )
             # max_iterations bounds unproductive controller decisions. A
             # healthy one-second wait must not kill a run while its reserved
@@ -11935,6 +11954,7 @@ def run(
             last_ghost_count = ghosts_now
             last_items_total = items_now
             last_loan_progress_revision = _BOOTSTRAP_LOAN_PROGRESS_REVISION
+            last_coverage_progress_revision = coverage_revision
             deferred_reason = None
             if task is not None:
                 deferred_entry = getattr(priorities, "items", {}).get(task.item)

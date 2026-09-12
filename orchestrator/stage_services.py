@@ -8,7 +8,7 @@ import heapq
 import math
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
@@ -96,6 +96,24 @@ _ROBOPORT_SERVICE_AREAS = {
 }
 _POWER_BRIDGE_SETTLE_SECONDS = 3.0
 _PENDING_POWER_BRIDGES: dict[tuple[str, str], float] = {}
+# Run-scoped evidence that a bot-built coverage chain moved toward its target.
+# Counting only the total ghost count misses this: one completed roboport is
+# immediately replaced by the next hop's ghost, so the count can stay at one
+# while the live frontier advances hundreds of tiles. The controller reads the
+# monotonic revision; an unchanged or farther frontier earns no credit.
+
+
+@dataclass
+class _CoverageProgressState:
+    """Run-local observations used by the controller's livelock guard."""
+
+    revision: int = 0
+    frontiers: dict[tuple[str, str, str, Point], float] = field(
+        default_factory=dict,
+    )
+
+
+_COVERAGE_PROGRESS = _CoverageProgressState()
 # Slack subtracted from a chain's final hop so tile rounding can never land it
 # a fraction outside the service radius it was placed to satisfy.
 _COVERAGE_MARGIN = 2.0
@@ -117,6 +135,38 @@ _LOGISTIC_CHEST_ENTITIES = frozenset({
     "active-provider-chest", "buffer-chest", "passive-provider-chest",
     "requester-chest", "storage-chest",
 })
+
+
+def reset_coverage_progress() -> None:
+    """Start one controller call with no inherited coverage observations."""
+    _COVERAGE_PROGRESS.revision = 0
+    _COVERAGE_PROGRESS.frontiers.clear()
+
+
+def coverage_progress_revision() -> int:
+    """Monotonic count of observed closer live roboport frontiers this run."""
+    return _COVERAGE_PROGRESS.revision
+
+
+def _observe_coverage_frontier(
+    surface: str, force: str, purpose: str,
+    target_position: Point, nearest: Point,
+) -> bool:
+    """Record only measured movement of a built roboport toward one target."""
+    key = (surface, force, purpose, target_position)
+    gap = service_distance(
+        nearest, target_position,
+        square=_ROBOPORT_SERVICE_AREAS[purpose][1],
+    )
+    previous = _COVERAGE_PROGRESS.frontiers.get(key)
+    if previous is None:
+        _COVERAGE_PROGRESS.frontiers[key] = gap
+        return False
+    if gap >= previous - 1e-6:
+        return False
+    _COVERAGE_PROGRESS.frontiers[key] = gap
+    _COVERAGE_PROGRESS.revision += 1
+    return True
 # How far from a stage's machines its own collection chest can be. A stage's
 # chest sits at the end of its machine row; a container farther away than a
 # whole stage footprint belongs to something else and is not ours to cover.
@@ -1481,6 +1531,9 @@ def extend_roboport_coverage(
     nearest = live_base.nearest_roboport(client, surface, force, target_position)
     if nearest is None:
         return False
+    _observe_coverage_frontier(
+        surface, force, purpose, target_position, nearest,
+    )
     if client is not None and hasattr(client, "command"):
         # A ghost is not service yet, but it is already the active coverage
         # transaction. Credit a reachable in-flight hop and let the next pass

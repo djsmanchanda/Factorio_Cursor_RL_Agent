@@ -143,7 +143,9 @@ _ISOLATED_MUTABLE_STATE = {
     ),
     "orchestrator.resource_patches": ("_PATCH_CACHE",),
     "orchestrator.stage_extraction": ("_NEW_DIRECT_MINE_CACHE",),
-    "orchestrator.stage_services": ("_PENDING_POWER_BRIDGES",),
+    "orchestrator.stage_services": (
+        "_PENDING_POWER_BRIDGES", "_COVERAGE_PROGRESS",
+    ),
     "orchestrator.stage_chemical": ("_CRUDE_EXPANSION_FAILED_CELLS",),
     "orchestrator.live_base": ("_MALFORMED_STOCK_CHUNKS",),
 }

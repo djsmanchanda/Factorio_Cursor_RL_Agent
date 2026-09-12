@@ -19,11 +19,66 @@ from orchestrator.stage_services import (
     _ROBOPORT_LINK_DISTANCE,
     _ROBOPORT_LOGISTIC_RADIUS,
     _logistic_chest_positions,
+    _observe_coverage_frontier,
+    coverage_progress_revision,
     ensure_logistic_coverage,
     extend_roboport_coverage,
+    reset_coverage_progress,
     roboport_chain,
     service_distance,
 )
+
+
+def test_only_a_closer_live_roboport_advances_the_coverage_revision() -> None:
+    """Episode 32139 moved 42 tiles per hop while one next-hop ghost remained."""
+    target = (-334.5, 12.5)
+    reset_coverage_progress()
+
+    assert not _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-81.0, 3.0),
+    )
+    assert coverage_progress_revision() == 0
+    assert not _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-81.0, 3.0),
+    )
+    assert coverage_progress_revision() == 0
+    assert _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-123.0, 5.0),
+    )
+    assert _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-165.0, 6.0),
+    )
+    assert coverage_progress_revision() == 2
+
+
+def test_a_farther_roboport_does_not_claim_coverage_progress() -> None:
+    target = (-334.5, 12.5)
+    reset_coverage_progress()
+    _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-165.0, 6.0),
+    )
+
+    assert not _observe_coverage_frontier(
+        "nauvis", "player", "construction", target, (-123.0, 5.0),
+    )
+    assert coverage_progress_revision() == 0
+
+
+def test_coverage_extension_observes_a_moving_live_frontier(monkeypatch) -> None:
+    """The public coverage path records built-port movement between surveys."""
+    frontiers = iter(((50.0, 0.0), (40.0, 0.0)))
+    monkeypatch.setattr(
+        live_base, "nearest_roboport", lambda *_args: next(frontiers),
+    )
+    reset_coverage_progress()
+
+    for _ in range(2):
+        assert not extend_roboport_coverage(
+            None, object(), "nauvis", "player", (0.0, 0.0),
+            lambda _message: None,
+        )
+
+    assert coverage_progress_revision() == 1
 
 
 class _FakeRcon:

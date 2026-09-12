@@ -390,7 +390,11 @@ These names describe intended responsibilities, not permission to build speculat
   cell.
 - The controller's outer pass limit counts non-progress decisions. A pass is
   credited back when required stock grows, pending ghosts fall, a recipe loan
-  advances, or the outstanding-work state changes. A pass serves up to three
+  advances, an observed built-roboport frontier moves closer to its declared
+  coverage target, or the outstanding-work state changes. A replacement
+  next-hop ghost may keep the aggregate ghost count flat, so frontier credit is
+  keyed by surface, force, coverage purpose, and target and advances only on a
+  strictly closer real roboport. A pass serves up to three
   ready mall tasks: each item is attempted at most once, and a deferred task
   does not prevent another ready peer from using the remaining pass budget,
   so independent cells and loans build concurrently instead of one per pass. The consecutive unchanged

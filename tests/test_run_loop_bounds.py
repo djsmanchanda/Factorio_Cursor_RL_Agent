@@ -14,6 +14,7 @@ from orchestrator import autonomous_builder  # noqa: E402
 from orchestrator.autonomous_builder import (  # noqa: E402
     _MAX_UNCHANGED_PASSES,
     _PENDING_FOUNDATION_POLL_SECONDS,
+    _controller_ground_progressed,
     _heaviest_source,
     _livelock_step,
     _outstanding_work_signature,
@@ -192,6 +193,22 @@ def test_bots_building_resets_the_livelock_bound() -> None:
 def test_a_repeated_signature_with_no_ground_progress_accumulates() -> None:
     assert _livelock_step(False, False, 3) == 4
     assert _livelock_step(True, False, 3) == 0
+
+
+def test_a_closer_roboport_frontier_is_controller_progress() -> None:
+    """A built hop must reset the guard when its replacement keeps ghosts flat."""
+    progressed = _controller_ground_progressed(
+        1, 1, False, False, 3, 4,
+    )
+
+    assert progressed
+    assert _livelock_step(False, progressed, 11) == 0
+
+
+def test_an_unchanged_coverage_revision_does_not_mask_a_livelock() -> None:
+    assert not _controller_ground_progressed(
+        1, 1, False, False, 4, 4,
+    )
 
 
 def test_deferred_control_telemetry_summarizes_origins_and_reports_stock_deltas(
