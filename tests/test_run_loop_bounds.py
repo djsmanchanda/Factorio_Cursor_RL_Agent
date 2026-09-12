@@ -194,10 +194,10 @@ def test_a_repeated_signature_with_no_ground_progress_accumulates() -> None:
     assert _livelock_step(True, False, 3) == 0
 
 
-def test_deferred_control_telemetry_preserves_bill_fallback_and_credit_coverage(
+def test_deferred_control_telemetry_summarizes_origins_and_reports_stock_deltas(
     monkeypatch,
 ) -> None:
-    """The chemical fast-belt stall must identify its bill, not just its mall task."""
+    """Deferred logs point to full evidence without repeating every bill and item."""
     task = SimpleNamespace(item="fast-transport-belt", target=9)
     priorities = SimpleNamespace(items={
         "fast-transport-belt": SimpleNamespace(
@@ -209,18 +209,30 @@ def test_deferred_control_telemetry_preserves_bill_fallback_and_credit_coverage(
         sequence=1, project_id="expand_stone-brick_system", state="reserved",
         required={"fast-transport-belt": 9, "transport-belt": 4},
     )
-    monkeypatch.setattr(
-        autonomous_builder, "_MATERIAL_RESERVATION_LEDGER",
-        SimpleNamespace(projects={project.project_id: project}),
+    completed = SimpleNamespace(
+        sequence=2, project_id="old_fast_belt_request", state="completed",
+        required={"fast-transport-belt": 2, "inserter": 4},
+    )
+    ledger = SimpleNamespace(
+        projects={
+            project.project_id: project,
+            completed.project_id: completed,
+        },
+        revision=17,
     )
     monkeypatch.setattr(
+        autonomous_builder, "_MATERIAL_RESERVATION_LEDGER",
+        ledger,
+    )
+    stock = {
+        "fast-transport-belt": 0,
+        "transport-belt": 52,
+        "chemical-science-pack": 0,
+        "automation-science-pack": 190,
+    }
+    monkeypatch.setattr(
         autonomous_builder.live_base, "available_items",
-        lambda *_args: {
-            "fast-transport-belt": 0,
-            "transport-belt": 52,
-            "chemical-science-pack": 0,
-            "automation-science-pack": 190,
-        },
+        lambda *_args: dict(stock),
     )
     emitted: list[str] = []
 
@@ -229,17 +241,58 @@ def test_deferred_control_telemetry_preserves_bill_fallback_and_credit_coverage(
         {"fast-transport-belt": 9}, {}, priorities,
         "chemical-science-pack", ("automation-science-pack",), emitted.append,
     )
+    stock["transport-belt"] = 60
+    stock["automation-science-pack"] = 191
     autonomous_builder._emit_deferred_control_telemetry(
         object(), "nauvis", "player", task, 1_000,
         {"fast-transport-belt": 9}, {}, priorities,
         "chemical-science-pack", ("automation-science-pack",), emitted.append,
     )
 
-    assert "repeat=1; backoff=3600 ticks" in emitted[0]
-    assert "expand_stone-brick_system[state=reserved; bill=fast-transport-belt=9,transport-belt=4]" in emitted[0]
+    assert "repeat=1; retry=3600t/60s" in emitted[0]
+    assert "origins=2[completed=1,reserved=1; active=expand_stone-brick_system:reservedx9; ledger=r17]" in emitted[0]
     assert "belt-fallback=fast=0, regular=52, decision=not-applied" in emitted[0]
-    assert "chemical-credit(goal=chemical-science-pack)=[automation-science-pack=190,fast-transport-belt=0]" in emitted[0]
+    assert "stock=tracked=2,nonzero=1,task=0,goal=0" in emitted[0]
     assert "repeat=2" in emitted[1]
+    assert "stock-delta=automation-science-pack=+1" in emitted[1]
+    assert "transport-belt=+8" not in emitted[1]
+
+
+def test_deferred_control_telemetry_limits_active_origin_examples(monkeypatch) -> None:
+    task = SimpleNamespace(item="passive-provider-chest", target=4)
+    priorities = SimpleNamespace(items={
+        task.item: SimpleNamespace(
+            status="deferred", reason="chemical ladder is establishing plastic-bar",
+            retry_tick=4_600,
+        ),
+    })
+    projects = {
+        f"project-{index}": SimpleNamespace(
+            sequence=index, project_id=f"project-{index}",
+            state="constructing", required={task.item: 1, "inserter": 12},
+        )
+        for index in range(1, 8)
+    }
+    monkeypatch.setattr(
+        autonomous_builder, "_MATERIAL_RESERVATION_LEDGER",
+        SimpleNamespace(projects=projects, revision=23),
+    )
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "available_items", lambda *_args: {task.item: 1},
+    )
+    emitted: list[str] = []
+
+    autonomous_builder._emit_deferred_control_telemetry(
+        object(), "nauvis", "player", task, 1_000,
+        {task.item: 4}, {}, priorities,
+        "automation-science-pack", (), emitted.append,
+    )
+
+    assert "origins=7[constructing=7; active=" in emitted[0]
+    assert "project-1:constructingx1" in emitted[0]
+    assert "project-4:constructingx1,+3 more; ledger=r23]" in emitted[0]
+    assert "bill=" not in emitted[0]
+    assert "belt-fallback" not in emitted[0]
 
 
 @pytest.mark.parametrize(("wait_ticks", "expected_seconds"), [

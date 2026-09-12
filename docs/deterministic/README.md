@@ -137,6 +137,11 @@ and zero/nonzero outcomes remain distinct. Process liveness does not enter the
 append-only log: the runner overwrites one `autonomous-run.heartbeat.json`
 sidecar every ten seconds, while the PID record remains the dashboard's
 authoritative running-state probe.
+Deferred-control lines remain bounded as the factory grows: they report origin
+counts by lifecycle state, at most four active project IDs with the task-item
+quantity, the material-ledger revision, and only tracked-stock deltas after the
+first observation. Complete project bills stay in the episode material ledger;
+the human runner log does not copy every bill and inventory field on each retry.
 Unhandled tracebacks retain only their final 24 frames. Helper packets remove
 duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
 model calls above a 36,000-character prompt ceiling so a 16K local review

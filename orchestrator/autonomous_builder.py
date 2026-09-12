@@ -11649,19 +11649,35 @@ def _emit_deferred_control_telemetry(
     except Exception:
         stock = {}
     ledger = _MATERIAL_RESERVATION_LEDGER
-    origins: list[str] = []
+    origins: list[object] = []
     if ledger is not None:
         for project in sorted(ledger.projects.values(), key=lambda value: value.sequence):
             required = project.required
             if int(required.get(task.item, 0)) <= 0:
                 continue
-            bill = ",".join(
-                f"{item}={count}" for item, count in sorted(required.items())
-            )
-            origins.append(
-                f"{project.project_id}[state={project.state}; bill={bill}]"
-            )
-    origin_text = "; ".join(origins) or "none"
+            origins.append(project)
+    if origins:
+        states: dict[str, int] = {}
+        for project in origins:
+            states[project.state] = states.get(project.state, 0) + 1
+        state_text = ",".join(
+            f"{state}={count}" for state, count in sorted(states.items())
+        )
+        active = [project for project in origins if project.state != "completed"]
+        examples = active[:4]
+        example_text = ",".join(
+            f"{project.project_id}:{project.state}x"
+            f"{int(project.required.get(task.item, 0))}"
+            for project in examples
+        )
+        if len(active) > len(examples):
+            example_text += f",+{len(active) - len(examples)} more"
+        origin_text = (
+            f"{len(origins)}[{state_text}; active={example_text or 'none'}; "
+            f"ledger=r{ledger.revision}]"
+        )
+    else:
+        origin_text = "none"
     if task.item == "fast-transport-belt":
         fast = int(stock.get("fast-transport-belt", 0))
         regular = int(stock.get("transport-belt", 0))
@@ -11677,18 +11693,47 @@ def _emit_deferred_control_telemetry(
     relevant_items = set(mission_items or (goal_item,))
     relevant_items.update(mall_targets)
     relevant_items.update(background_targets)
-    coverage = ",".join(
-        f"{item}={int(stock.get(item, 0))}" for item in sorted(relevant_items)
-    ) or "none"
+    current_stock = {
+        item: int(stock.get(item, 0)) for item in sorted(relevant_items)
+    }
+    snapshots = getattr(priorities, "_deferred_control_stock_snapshots", {})
+    previous_stock = snapshots.get(repeat_key)
+    snapshots[repeat_key] = current_stock
+    setattr(priorities, "_deferred_control_stock_snapshots", snapshots)
+    if previous_stock is None:
+        nonzero = sum(count > 0 for count in current_stock.values())
+        stock_text = (
+            f"tracked={len(current_stock)},nonzero={nonzero},"
+            f"task={current_stock.get(task.item, 0)},"
+            f"goal={current_stock.get(goal_item, 0)}"
+        )
+    else:
+        changes = [
+            (item, current_stock[item] - int(previous_stock.get(item, 0)))
+            for item in current_stock
+            if current_stock[item] != int(previous_stock.get(item, 0))
+        ]
+        changes.sort(key=lambda change: (-abs(change[1]), change[0]))
+        shown = changes[:6]
+        stock_text = ",".join(
+            f"{item}={delta:+d}" for item, delta in shown
+        ) or "unchanged"
+        if len(changes) > len(shown):
+            stock_text += f",+{len(changes) - len(shown)} more"
     retry_ticks = max(0, int(getattr(entry, "retry_tick", tick)) - tick)
-    emit(
+    parts = [
         "  DEFERRED CONTROL: "
         f"task={task.item} target={getattr(task, 'target', mall_targets.get(task.item, 0))}; "
         f"reason={getattr(entry, 'reason', '')}; "
-        f"repeat={repeat}; backoff={retry_ticks} ticks; "
-        f"origin={origin_text}; belt-fallback={belt_text}; "
-        f"chemical-credit(goal={goal_item})=[{coverage}]"
+        f"repeat={repeat}; retry={retry_ticks}t/{math.ceil(retry_ticks / 60)}s; "
+        f"origins={origin_text}",
+    ]
+    if task.item == "fast-transport-belt":
+        parts.append(f"belt-fallback={belt_text}")
+    parts.append(
+        ("stock=" if previous_stock is None else "stock-delta=") + stock_text
     )
+    emit("; ".join(parts))
 
 
 def _serve_ready_pass(
