@@ -3977,6 +3977,61 @@ def _recover_partial_conversion_power(
         emit(f"  CONVERSION RECOVERY: power bridge unavailable: {error}")
 
 
+def _adopt_legacy_steel_seed_reservation(
+    ledger: MaterialReservationLedger,
+    stock: Mapping[str, int],
+    emit: Callable[[str], None],
+) -> None:
+    """Merge the pre-canonical steel seed reservation into its fence.
+
+    Older episodes used ``compact_steel_seed`` when the opening fence had
+    already declared ``conversion_steel-plate``.  Those names described one
+    physical transaction, but the ledger quite correctly treated them as two
+    projects. Adopt only that active alias, retaining the larger bill and
+    highest priority before releasing its duplicate claim. Other reservations
+    remain owned by their existing projects.
+    """
+    legacy_id = "compact_steel_seed"
+    canonical_id = "conversion_steel-plate"
+    legacy = ledger.projects.get(legacy_id)
+    if legacy is None:
+        return
+    if not ledger.project_is_active(legacy_id):
+        return
+    canonical = ledger.projects.get(canonical_id)
+    required = dict(legacy.required)
+    if canonical is not None:
+        required = {
+            item: max(canonical.required.get(item, 0), required.get(item, 0))
+            for item in set(canonical.required) | set(required)
+        }
+    # Declare through the ledger's normal rebalance/save path.  The canonical
+    # priority wins the pole allocation while the alias is still active; then
+    # completing the alias releases only its duplicate claim.
+    ledger.declare(
+        canonical_id, required, stock,
+        target_item="steel-plate",
+        priority=max(
+            _STEEL_STARTER_RESERVATION_PRIORITY,
+            legacy.priority,
+            canonical.priority if canonical is not None else 0,
+        ),
+        hold_until_producing=(
+            legacy.hold_until_producing
+            or (canonical.hold_until_producing if canonical is not None else False)
+        ),
+    )
+    if legacy.state == "constructing" or (
+        canonical is not None and canonical.state == "constructing"
+    ):
+        ledger.mark_constructing(canonical_id, stock)
+    ledger.complete(legacy_id)
+    emit(
+        "STEEL STARTER RESERVE: adopted legacy compact_steel_seed ownership "
+        "under conversion_steel-plate"
+    )
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -3989,6 +4044,16 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None:
         raise StuckError("compact steel requires an episode material ledger")
+    # The opening fence is created before the steel packet is selected.  Keep
+    # both operations under that same transaction identity: otherwise the
+    # packet sees the fence's poles as a foreign reservation and tries to
+    # manufacture poles from the steel it is meant to bootstrap.  The legacy
+    # alias is adopted below for episodes that were started before this
+    # identity was made canonical.
+    steel_project = "conversion_steel-plate"
+    _adopt_legacy_steel_seed_reservation(
+        ledger, _transferable_or_available_stock(client, surface, force), emit,
+    )
     path = ledger.path.with_suffix(".steel-seed.json")
     if path.exists():
         plan = json.loads(path.read_text())
@@ -4036,12 +4101,14 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
                 code="steel_seed_site_wait", state="planned",
             )
         plan.update(surface=surface, force=force)
-        assert_affordable(client, surface, force, plan, "compact_steel_seed", emit, reserve_project=True)
+        assert_affordable(client, surface, force, plan, steel_project, emit, reserve_project=True,
+                          reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY)
         path.write_text(json.dumps(plan, sort_keys=True))
-    _submit(client, bridge, surface, plan, "compact_steel_seed", emit,
+    _submit(client, bridge, surface, plan, steel_project, emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
-                reserved_tiles=planned_footprint_tiles(plan)))
+                reserved_tiles=planned_footprint_tiles(plan)),
+            reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY)
     actions = plan["phases"][0]["actions"]
     positions = lambda name: [(a["position"]["x"], a["position"]["y"]) for a in actions if a["entity"] == name]
     furnaces = positions("electric-furnace")
@@ -8402,9 +8469,23 @@ def _ensure_mall_item(
             return False, None
         except MaterialShortage as shortage:
             add_demands(mall_targets, shortage)
-            _start_unproduced_rationed_shortage(
-                client, bridge, surface, force, shortage, reference_point, emit,
-            )
+            try:
+                _start_unproduced_rationed_shortage(
+                    client, bridge, surface, force, shortage, reference_point, emit,
+                )
+            except MaterialShortage as nested:
+                # Recovery can discover another bill (including the parent's
+                # own prerequisite). Queue it once; never recurse from here.
+                add_demands(mall_targets, nested)
+                emit(
+                    f"  CONVERSION RECOVERY WAIT: {nested.stage} needs "
+                    + ", ".join(f"{name}={count}" for name, count in sorted(nested.required.items()))
+                    + " -- queued for the scheduler"
+                )
+            except ProductionPrerequisiteDeferred as deferred:
+                if deferred.code == "chemical_capability_handoff":
+                    raise
+                emit(f"  CONVERSION RECOVERY WAIT: {shortage.stage} -- {deferred}")
             emit(
                 f"  STEEL STARTER DEMAND: {shortage.stage} needs "
                 + ", ".join(
@@ -11384,14 +11465,28 @@ def _reserve_steel_starter_power_seed(
         return
     bill = _steel_starter_power_seed_bill()
     stock = _transferable_or_available_stock(client, surface, force)
-    sources, rates = _material_sources_and_rates(
-        client, surface, force, bill, stock,
+    project_id = "conversion_steel-plate"
+    existing = ledger.projects.get(project_id)
+    # Runner restarts call this startup fence again.  Once the compact packet
+    # has expanded the same project to its full persisted bill, never shrink
+    # it back to the two-pole opening estimate and accidentally expose its
+    # furnace/inserter/chest stock to another project.
+    preserves_expanded_bill = (
+        existing is not None
+        and (ledger.project_is_active(project_id) or existing.state == "constructing")
+        and all(existing.required.get(item, 0) >= count for item, count in bill.items())
     )
-    project = ledger.declare(
-        "conversion_steel-plate", bill, stock, target_item="steel-plate",
-        source_producers=sources, expected_rates=rates,
-        priority=_STEEL_STARTER_RESERVATION_PRIORITY,
-    )
+    if preserves_expanded_bill:
+        project = existing
+    else:
+        sources, rates = _material_sources_and_rates(
+            client, surface, force, bill, stock,
+        )
+        project = ledger.declare(
+            project_id, bill, stock, target_item="steel-plate",
+            source_producers=sources, expected_rates=rates,
+            priority=_STEEL_STARTER_RESERVATION_PRIORITY,
+        )
     emit(
         "STEEL STARTER RESERVE: held "
         f"{project.reserved.get('medium-electric-pole', 0)}/"

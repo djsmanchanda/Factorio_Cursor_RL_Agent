@@ -6,6 +6,7 @@ import pytest
 from planners.steel_bootstrap import steel_seed, VECTORS
 from planners.plan_validation import validate_no_collisions, validate_build_plan
 from orchestrator import autonomous_builder as builder
+from orchestrator.material_reservations import MaterialReservationLedger
 
 
 @pytest.mark.parametrize("direction", list(VECTORS))
@@ -25,6 +26,94 @@ def test_seed_cannot_precede_iron_retirement(monkeypatch):
     with pytest.raises(builder.ProductionPrerequisiteDeferred) as error:
         builder._build_compact_steel_seed(object(), object(), "nauvis", "player", (0,0), (0,0), print)
     assert error.value.code == "steel_iron_retirement_wait"
+
+
+def test_steel_seed_adopts_legacy_reservation_without_taking_power_bridge_stock(tmp_path):
+    """The old split identity must collapse to one pole-owning transaction."""
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-steel-legacy", surface="nauvis", force="player",
+    )
+    stock = {"medium-electric-pole": 4}
+    ledger.declare(
+        "conversion_steel-plate", {"medium-electric-pole": 2}, stock,
+        target_item="steel-plate", priority=100,
+    )
+    ledger.declare("power_bridge", {"medium-electric-pole": 2}, stock, priority=50)
+    ledger.declare(
+        "compact_steel_seed",
+        {"medium-electric-pole": 2, "electric-furnace": 1}, stock,
+        target_item="steel-plate", priority=50,
+    )
+
+    builder._adopt_legacy_steel_seed_reservation(ledger, stock, lambda _m: None)
+
+    assert ledger.projects["compact_steel_seed"].state == "completed"
+    assert ledger.projects["conversion_steel-plate"].required == {
+        "electric-furnace": 1, "medium-electric-pole": 2,
+    }
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    assert ledger.projects["power_bridge"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    assert ledger.required_stock("medium-electric-pole") == 4
+
+
+def test_steel_seed_adoption_renames_legacy_project_when_fence_is_absent(tmp_path):
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-steel-legacy-only", surface="nauvis", force="player",
+    )
+    stock = {"medium-electric-pole": 2}
+    ledger.declare(
+        "compact_steel_seed", {"medium-electric-pole": 2}, stock,
+        target_item="steel-plate", priority=50,
+    )
+
+    builder._adopt_legacy_steel_seed_reservation(ledger, stock, lambda _m: None)
+
+    assert set(ledger.projects) == {"conversion_steel-plate", "compact_steel_seed"}
+    assert ledger.projects["compact_steel_seed"].state == "completed"
+    project = ledger.projects["conversion_steel-plate"]
+    assert project.reserved == {"medium-electric-pole": 2}
+    assert project.priority == 100
+
+
+@pytest.mark.parametrize("constructing", [False, True])
+def test_steel_startup_fence_does_not_shrink_expanded_bill_on_restart(tmp_path, monkeypatch, constructing):
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output" / "factorio_cursor_rl",
+        episode_id="episode-steel-restart", surface="nauvis", force="player",
+    )
+    stock = {"medium-electric-pole": 4}
+    ledger.declare(
+        "conversion_steel-plate",
+        {"electric-furnace": 1, "medium-electric-pole": 2}, stock,
+        target_item="steel-plate", priority=100,
+    )
+    if constructing:
+        ledger.mark_constructing("conversion_steel-plate", stock)
+    state_before = ledger.projects["conversion_steel-plate"].state
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_steel_starter_power_seed_bill", lambda: {
+        "medium-electric-pole": 2,
+    })
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    monkeypatch.setattr(
+        builder, "_material_sources_and_rates", lambda *_a: ({}, {}),
+    )
+
+    builder._reserve_steel_starter_power_seed(
+        object(), "nauvis", "player", {"steel-plate": 1}, lambda _m: None,
+    )
+
+    assert ledger.projects["conversion_steel-plate"].required == {
+        "electric-furnace": 1, "medium-electric-pole": 2,
+    }
+    assert ledger.projects["conversion_steel-plate"].state == state_before
 
 
 def test_steel_promotion_is_gated_before_cached_source(monkeypatch):

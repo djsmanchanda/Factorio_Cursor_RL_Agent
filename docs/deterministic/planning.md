@@ -150,6 +150,14 @@ These names describe intended responsibilities, not permission to build speculat
   expansion reservations. If no belt-side site fits, a free ore patch may host
   a compact drill -> iron furnace -> inserter -> steel furnace seed instead.
   The funded seed and its exact identity persist per episode across retries.
+  Its startup pole reserve and full construction bill share the same material
+  project, `conversion_steel-plate`, at priority 100. A resumed active legacy
+  `compact_steel_seed` reservation is merged into that owner before its duplicate
+  claim is completed. Unrelated project reservations remain intact. Restarting
+  preserves the full bill, including a submitted constructing state, instead of
+  replacing it with the original two-pole estimate. A nested material shortage
+  during conversion recovery queues its bill once and yields to the scheduler;
+  it cannot recursively retry itself or swallow hard planner failures.
   Pipe production is not a prerequisite for this beltless steel seed.
   After advanced-circuit production is proven, a complete six-furnace steel
   refinery replaces it. A normal splitter is added beyond an unused iron-belt
