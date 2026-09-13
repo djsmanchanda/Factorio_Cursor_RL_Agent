@@ -3458,9 +3458,11 @@ def _upgrade_owned_plate_transport(
 
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
-# Before plastic, permanent and rotating work share one bounded pool. Plastic
-# releases permanent per-item cells into their own bank; twelve reserved halves
-# remain available for demand-driven duplicate capacity.
+# Before advanced circuits, permanent and rotating work share a deliberately
+# small pool. The mall expands to the normal twelve-slot demand bank only once
+# advanced-circuit production has actually started; this prevents bootstrap
+# capacity from consuming the assemblers needed to reach that transition.
+_PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 8
 _PRE_PLASTIC_MALL_SLOT_TARGET = DEMAND_MALL_SLOT_TARGET
 _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
     *BULK_CONSTRUCTION_ITEMS,
@@ -3471,9 +3473,17 @@ _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
 def _bootstrap_mall_slot_limit(
     client: RconClient, surface: str, force: str,
 ) -> int:
-    """Shared pre-plastic capacity or post-plastic demand-bank capacity."""
-    del client, surface, force
-    return _PRE_PLASTIC_MALL_SLOT_TARGET
+    """Return the shared mall cap for the current production transition."""
+    try:
+        advanced_started = _production_started(
+            client, surface, force, "advanced-circuit",
+        )
+    except Exception:
+        advanced_started = False
+    return (
+        _PRE_PLASTIC_MALL_SLOT_TARGET
+        if advanced_started else _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+    )
 
 
 def _top_up_solar_generation(

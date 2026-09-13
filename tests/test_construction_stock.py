@@ -726,17 +726,13 @@ def test_capped_intermediate_reclaims_completed_demand_cell(monkeypatch) -> None
     assert reclaimed == [{"minimum_machines": 1, "stock_target": 4}]
 
 
-def test_pre_plastic_and_demand_banks_each_have_twelve_slots(monkeypatch) -> None:
-    monkeypatch.setattr(
-        builder, "_metal_starter_transition_complete", lambda *_a: False,
-    )
+def test_mall_has_eight_slots_until_advanced_circuits_start(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
     assert builder._bootstrap_mall_slot_limit(
         object(), "nauvis", "player",
-    ) == 12
+    ) == 8
 
-    monkeypatch.setattr(
-        builder, "_metal_starter_transition_complete", lambda *_a: True,
-    )
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
     assert builder._bootstrap_mall_slot_limit(
         object(), "nauvis", "player",
     ) == 12
