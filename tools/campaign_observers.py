@@ -92,14 +92,28 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
         directory = root / role
         state_path = directory / "state.json"
         state = _read_state(state_path)
-        role_config = replace(config, opencode_log_dir=directory, read_only=True, model_timeout_seconds=240)
+        # The first two roles try the free Zen route. A weekly-limit/provider
+        # refusal falls back to the normal Go observer model without affecting
+        # the episode or the other observers.
+        preferred = getattr(config, "zen_observer_model", None) if role in ("scheduling", "supply") else None
+        role_config = replace(config, opencode_log_dir=directory, read_only=True,
+                             model_timeout_seconds=240,
+                             model=preferred or getattr(config, "observer_model", None) or config.model,
+                             variant=getattr(config, "observer_variant", None) or "high")
         sequence = int(state.get("sequence", 0)) + 1
         state.update(sequence=sequence, checkpoint=checkpoint, terminal=terminal,
                      updated_at=datetime.now(timezone.utc).isoformat(), status="running")
         _atomic(state_path, json.dumps(state, indent=2) + "\n")
         try:
-            session, output = _ask(role_config, _prompt(config, episode_id, role, checkpoint, terminal, board),
-                                   state.get("session_id"), sequence)
+            prompt = _prompt(config, episode_id, role, checkpoint, terminal, board)
+            try:
+                session, output = _ask(role_config, prompt, state.get("session_id"), sequence)
+            except Exception:
+                if not preferred:
+                    raise
+                fallback = replace(role_config, model=getattr(config, "observer_model", None) or config.model)
+                session, output = _ask(fallback, prompt, state.get("session_id"), sequence + 1)
+                state["fallback_model"] = fallback.model
             state["session_id"] = session
             findings = _assistant_text(output)
             if not findings.strip():

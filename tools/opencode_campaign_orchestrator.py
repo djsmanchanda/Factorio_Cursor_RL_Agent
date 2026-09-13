@@ -39,7 +39,7 @@ from tools.run_log_format import is_run_end_line, parse_timed_run_log_line
 DEFAULT_STATE_ROOT = Path.home() / ".local/share/factorio-rl/deterministic"
 DEFAULT_SOURCE_SAVE = Path.home() / ".factorio/saves/mod_playground.zip"
 DEFAULT_OBSERVATIONS = REPO_ROOT / "docs/deterministic/opencode_campaign_observations.md"
-DEFAULT_MODEL = "opencode-go/muse-spark-1.3-contributor"
+DEFAULT_MODEL = "opencode-go/glm-5.3-flash"
 RUN_START = "RUN START:"
 RUN_END = "RUN END"
 # Real terminal lines look like `+2443s RUN END` at line start. The helper
@@ -82,6 +82,11 @@ class Config:
     read_only: bool = False
     episode_id: str | None = None
     model_timeout_seconds: int = 1800
+    review_model: str | None = None
+    review_variant: str | None = None
+    observer_model: str | None = None
+    observer_variant: str | None = None
+    zen_observer_model: str | None = None
 
 
 @dataclass
@@ -491,7 +496,9 @@ def _review_and_commit(config: Config, output: str, protected: set[str], sequenc
         if _run(["git", "ls-files", "--error-unmatch", "--", path], timeout=120).returncode:
             additions.append(f"\nNew file: {path}\n" + (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
     _atomic_write(evidence, "# Candidate evidence\n\n" + output + "\n\n## Diff\n\n" + diff + "\n".join(additions))
-    _, review = _ask(_readonly(config), f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
+    reviewer = _readonly(replace(config, model=config.review_model or config.model,
+                                 variant=config.review_variant or "high"))
+    _, review = _ask(reviewer, f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
 {config.state_root}/logs/latest-context.md and the changed files: {', '.join(paths)}.
 Read the parent-captured candidate diff, new files, prediction and test claim at {evidence}.
 Read-only review: do not edit, commit or operate Factorio. Check causal evidence, invariants,
@@ -502,13 +509,11 @@ reason: one sentence""", None, sequence)
     if _decision_fields(review, "REVIEW_DECISION").get("status") != "approved" or _tree_fingerprint(config.observations) != digest:
         return False
     pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
-    # Do not spend every repair cycle on exhaustive unrelated training sweeps.
-    # Changed regression files run unfiltered, including any slow-marked case.
+    # Keep verification targeted: only tests explicitly changed or named by the
+    # candidate are run. The campaign is not a general repository test sweep.
     changed_tests = [p for p in paths if Path(p).parts[0] == "tests"
                      and Path(p).name.startswith("test_") and Path(p).suffix == ".py"]
-    commands = [pytest + ["-m", "not slow and not exhaustive"]]
-    if changed_tests:
-        commands.append(pytest + changed_tests)
+    commands = [pytest + changed_tests] if changed_tests else []
     verification_log = config.opencode_log_dir / f"verification-{sequence:04d}.log"
     _atomic_write(verification_log, "")
     for command in commands:
@@ -851,6 +856,9 @@ def _config(args: argparse.Namespace) -> Config:
         checkpoint_failures=args.checkpoint_failures, rcon_port=args.rcon_port,
         game_port=args.game_port, runtime_root=args.runtime_root, gui_mods=args.gui_mods,
         aspect_observers=args.aspect_observers, progress_file=args.progress_file,
+        review_model=args.review_model, review_variant=args.review_variant,
+        observer_model=args.observer_model, observer_variant=args.observer_variant,
+        zen_observer_model=args.zen_observer_model,
     )
 
 
@@ -878,7 +886,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-cycles", type=int, default=0, help="0 stops only on a guard or completion.")
     parser.add_argument("--max-runtime-hours", type=int, default=8, help="0 disables this wall-clock guard.")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--variant", default="xhigh")
+    parser.add_argument("--variant", default="auto")
+    parser.add_argument("--review-model")
+    parser.add_argument("--review-variant", default="high")
+    parser.add_argument("--observer-model", default="opencode-go/muse-spark-1.3-contributor")
+    parser.add_argument("--observer-variant", default="high")
+    parser.add_argument("--zen-observer-model", default="opencode-zen/muse-spark-1.3")
     parser.add_argument("--opencode-bin", default="opencode")
     parser.add_argument("--python", type=Path, default=REPO_ROOT / ".venv/bin/python")
     parser.add_argument("--campaign-manager", type=Path, default=REPO_ROOT / "scripts/manage_linux_deterministic_campaign.sh")

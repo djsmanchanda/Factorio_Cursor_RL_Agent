@@ -18,8 +18,16 @@ import time
 from tools.reliability_state import atomic_json
 from tools.runner_process import running_runner_pid
 
-MODEL = 'opencode-go/muse-spark-1.3-contributor'
-VARIANT = 'xhigh'
+# Compact loop roles: one fixer/controller, one conditional reviewer, four
+# read-only observers. Two observers opportunistically use the free Zen route;
+# their caller falls back to the Go route when the allowance is unavailable.
+MODEL = 'opencode-go/glm-5.3-flash'
+VARIANT = 'auto'
+REVIEW_MODEL = 'opencode-go/glm-5.3-flash'
+REVIEW_VARIANT = 'high'
+OBSERVER_MODEL = 'opencode-go/muse-spark-1.3-contributor'
+OBSERVER_VARIANT = 'high'
+ZEN_OBSERVER_MODEL = 'opencode-zen/muse-spark-1.3'
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -121,7 +129,10 @@ def _start(config) -> None:
                    python=python, opencode=opencode, technology=config.technology, rcon_port=config.rcon_port,
                    game_port=config.game_port, runtime_root=str(config.runtime_root) if config.runtime_root else None,
                    gui_mods=str(config.gui_mods) if config.gui_mods else None,
-                   deadline_epoch=time.time() + 12 * 3600, model=MODEL, variant=VARIANT)
+                   deadline_epoch=time.time() + 12 * 3600, model=MODEL, variant=VARIANT,
+                   review_model=REVIEW_MODEL, review_variant=REVIEW_VARIANT,
+                   observer_model=OBSERVER_MODEL, observer_variant=OBSERVER_VARIANT,
+                   zen_observer_model=ZEN_OBSERVER_MODEL)
     atomic_json(settings, payload)
     atomic_json(_root(config) / 'current.json', {'settings': str(settings)})
     _launch(config, settings)
@@ -162,7 +173,9 @@ def status(config) -> dict:
     running = _busy(config)
     current = _read(_root(config) / 'current.json')
     if not current:
-        return dict(running=running, phase='idle', reason='No supervised campaign started', model=MODEL, variant=VARIANT)
+        return dict(running=running, phase='idle', reason='No supervised campaign started',
+                    model=MODEL, variant=VARIANT, review_model=REVIEW_MODEL,
+                    observer_model=OBSERVER_MODEL, zen_observer_model=ZEN_OBSERVER_MODEL)
     directory = Path(current['settings']).parent
     settings = _read(directory / 'settings.json')
     data = _read(directory / 'status.json')
@@ -178,7 +191,7 @@ def status(config) -> dict:
     if boards:
         with boards[-1].open(errors='replace') as stream:
             notes = stream.read(4000)
-        for state_path in sorted(boards[-1].parent.glob('*/state.json'))[:4]:
+        for state_path in sorted(boards[-1].parent.glob('*/state.json')):
             agents[state_path.parent.name] = _read(state_path)
             findings = state_path.parent / 'findings.md'
             try:
@@ -187,7 +200,9 @@ def status(config) -> dict:
             except OSError:
                 pass
     return {**data, 'running': running, 'deadline': settings.get('deadline_epoch'),
-            'model': MODEL, 'variant': VARIANT, 'completed_runs': controller.get('completed_cycles', 0),
+            'model': MODEL, 'variant': VARIANT, 'review_model': REVIEW_MODEL,
+            'observer_model': OBSERVER_MODEL, 'zen_observer_model': ZEN_OBSERVER_MODEL,
+            'completed_runs': controller.get('completed_cycles', 0),
             'acceptance_streak': len(reliability.get('streak', [])), 'required_successes': 3,
             'milestones': reliability.get('runs', [])[-5:], 'notes': notes, 'agents': agents,
             'board_path': str(boards[-1]) if boards else None}
@@ -222,7 +237,10 @@ def supervise(settings_path: Path) -> int:
                '--aspect-observers', '--state-root', settings['state_root'], '--source-save', settings['source_save'],
                '--state-file', str(controller_path), '--opencode-log-dir', str(directory / 'agents'),
                '--observations', str(directory / 'journal.md'), '--progress-file', str(directory / 'progress.json'),
-               '--model', MODEL, '--variant', VARIANT, '--opencode-bin', settings['opencode'],
+               '--model', MODEL, '--variant', VARIANT, '--review-model', REVIEW_MODEL,
+               '--review-variant', REVIEW_VARIANT, '--observer-model', OBSERVER_MODEL,
+               '--observer-variant', OBSERVER_VARIANT, '--zen-observer-model', ZEN_OBSERVER_MODEL,
+               '--opencode-bin', settings['opencode'],
                '--python', settings['python'], '--rcon-port', str(settings['rcon_port']),
                '--game-port', str(settings.get('game_port', 34199)), '--technology', settings['technology'],
                '--max-runtime-hours', '12']
