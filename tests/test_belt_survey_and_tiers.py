@@ -471,7 +471,9 @@ def test_inline_approach_reuse_fails_closed_without_exact_ownership_and_flow(
         lambda *_a: live_direction,
     )
 
-    with pytest.raises(StuckError, match="inline direct-belt approach"):
+    from orchestrator import autonomous_builder
+
+    with pytest.raises(autonomous_builder.ProductionPrerequisiteDeferred) as failure:
         stage_transport._survey_belt_route(
             object(), "nauvis", "player", "copper-ore", source, feed,
             reuse_existing=True, additional_blocked=None, upstream_shift=1,
@@ -479,6 +481,48 @@ def test_inline_approach_reuse_fails_closed_without_exact_ownership_and_flow(
             planned_belt_source=None, through_flow_direction="east",
             owned_transport_tiles=owned,
         )
+    assert failure.value.code == "direct_belt_approach_wait"
+    assert failure.value.state == "constructing"
+    assert failure.value.details["blocked_approach_tiles"]
+
+
+def test_inline_approach_wait_reports_occupying_entities(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from orchestrator import autonomous_builder
+
+    source = (130.5, -76.5)
+    feed = (143.5, -76.5)
+    approach = {(141, -77), (142, -77)}
+    monkeypatch.setattr(
+        stage_transport, "_through_belt_source", lambda *_a, **_k: source,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tiles",
+        lambda *_a, **_k: set(approach),
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "entity_at", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "transport_belt_direction_at",
+        lambda *_a: "east",
+    )
+    monkeypatch.setattr(
+        stage_transport.live_base, "occupied_tile_owners",
+        lambda *_a, **_k: {(141, -77): ("transport-belt", 141.5, -76.5)},
+    )
+
+    with pytest.raises(autonomous_builder.ProductionPrerequisiteDeferred) as failure:
+        stage_transport._survey_belt_route(
+            SimpleNamespace(command=lambda _command: ""),
+            "nauvis", "player", "copper-ore", source, feed,
+            reuse_existing=True, additional_blocked=None, upstream_shift=1,
+            destination_is_belt=True, destination_belt_direction="east",
+            planned_belt_source=None, through_flow_direction="east",
+            owned_transport_tiles=set(),
+        )
+
+    assert failure.value.details["occupying_entities"][0]["entity"] == "transport-belt"
 
 
 def test_the_cheapest_tier_is_a_real_belt_the_agent_can_build() -> None:

@@ -53,17 +53,77 @@ def _direct_belt_entry(
         raise ValueError(f"Unknown direct-belt direction: {belt_direction!r}")
     entry_direction = opposite(belt_direction)
     vx, vy = DIRECTION_VECTORS[entry_direction]
-    approach = {
-        (math.floor(feed_position[0] + vx * step),
-         math.floor(feed_position[1] + vy * step))
-        for step in (1, 2)
-    }
+    approach = _direct_belt_approach_tiles(feed_position, belt_direction)
     if approach & blocked:
         raise StuckError(
             f"No inline direct-belt approach to {feed_position}; the upstream "
             f"end of its {belt_direction}bound bus is occupied"
         )
     return entry_direction
+
+
+def _direct_belt_approach_tiles(
+    feed_position: Point, belt_direction: str,
+) -> set[tuple[int, int]]:
+    """The two tiles that must remain clear before an inline belt tap."""
+    if belt_direction not in DIRECTION_VECTORS:
+        raise ValueError(f"Unknown direct-belt direction: {belt_direction!r}")
+    entry_direction = opposite(belt_direction)
+    vx, vy = DIRECTION_VECTORS[entry_direction]
+    return {
+        (math.floor(feed_position[0] + vx * step),
+         math.floor(feed_position[1] + vy * step))
+        for step in (1, 2)
+    }
+
+
+def _defer_direct_belt_approach(
+    client: RconClient, surface: str, feed_position: Point,
+    blocked: set[tuple[int, int]], belt_direction: str,
+) -> None:
+    """Yield a packed bus head for a later route/siting retry."""
+    # Import lazily: this module is imported by autonomous_builder, while the
+    # controller's typed lifecycle signal lives in that higher-level module.
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    approach_tiles = _direct_belt_approach_tiles(feed_position, belt_direction)
+    blocked_approach = sorted(approach_tiles & blocked)
+    owner_sample: list[dict[str, object]] = []
+    if hasattr(client, "command") and blocked_approach:
+        try:
+            owners = live_base.occupied_tile_owners(
+                client, surface,
+                (min(x for x, _ in approach_tiles), min(y for _, y in approach_tiles)),
+                (max(x for x, _ in approach_tiles) + 1, max(y for _, y in approach_tiles) + 1),
+            )
+            for tile, (name, x, y) in sorted(owners.items()):
+                if tile not in approach_tiles:
+                    continue
+                owner_sample.append({
+                    "tile": [tile[0], tile[1]],
+                    "entity": name,
+                    "position": [x, y],
+                })
+                if len(owner_sample) >= 16:
+                    break
+        except (RuntimeError, TypeError, ValueError):
+            # Diagnostics must never turn a retryable route wait into a
+            # telemetry failure.
+            owner_sample = []
+    details: dict[str, object] = {
+        "feed_position": [feed_position[0], feed_position[1]],
+        "belt_direction": belt_direction,
+        "approach_tiles": [[x, y] for x, y in sorted(approach_tiles)],
+        "blocked_approach_tiles": [[x, y] for x, y in blocked_approach],
+    }
+    if owner_sample:
+        details["occupying_entities"] = owner_sample
+    raise ProductionPrerequisiteDeferred(
+        f"direct belt approach to {feed_position} is occupied; waiting for "
+        "a retryable tap placement opportunity",
+        code="direct_belt_approach_wait", state="constructing",
+        details=details,
+    )
 
 
 def _release_owned_destination_approach(
@@ -605,9 +665,15 @@ def _survey_belt_route(
             client, surface, feed_position, blocked,
             destination_belt_direction, owned_transport_tiles,
         )
-        entry_direction = _direct_belt_entry(
-            feed_position, blocked, destination_belt_direction,
-        )
+        try:
+            entry_direction = _direct_belt_entry(
+                feed_position, blocked, destination_belt_direction,
+            )
+        except StuckError:
+            _defer_direct_belt_approach(
+                client, surface, feed_position, blocked,
+                destination_belt_direction,
+            )
     if entry_direction is None:
         raise StuckError(
             f"{ingredient} cannot reach its feed endpoint at {feed_position}: "
