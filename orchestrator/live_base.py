@@ -1652,7 +1652,8 @@ def belt_underground_reach(client: RconClient, belt_type: str) -> int:
     lua = (
         "local p=prototypes.entity['" + belt_type + "'];"
         "if not p then rcon.print('INVALID|missing-prototype') return end;"
-        "local ok,v=pcall(function() return p.max_underground_distance end);"
+        "local ok,v=pcall(function() return p.max_underground_distance or "
+        "(p.related_underground_belt and p.related_underground_belt.max_underground_distance) end);"
         "if not ok or type(v)~='number' then "
         "rcon.print('INVALID|max_underground_distance-unavailable') return end;"
         "if v~=v or v==math.huge or v==-math.huge or v<=0 then "

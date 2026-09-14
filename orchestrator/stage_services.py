@@ -1091,6 +1091,25 @@ def _hookup_pole_position(
     full spacing apart, so the last one can stop well outside that area -- which
     is how a bridged roboport ends up built, connected and still dead.
     """
+    candidates = _hookup_pole_candidates(
+        client, surface, consumer, blocked, toward, pole_name,
+    )
+    if not candidates:
+        return None
+    return min(candidates, key=lambda spot: distance(spot, toward))
+
+
+def _hookup_pole_candidates(
+    client: RconClient, surface: str, consumer: Point,
+    blocked: set[tuple[int, int]], toward: Point, pole_name: str,
+) -> list[Point]:
+    """Return legal terminal-pole positions covering ``consumer``.
+
+    Keep this separate from the chooser so a fully occupied supply area can
+    report how many geometric candidates existed versus how many survived the
+    live occupancy survey.  The distinction is useful when a stage's own
+    ghosts filled the area before its power anchor was reserved.
+    """
     entity = live_base.entity_at(client, surface, consumer)
     footprint = ENTITY_FOOTPRINTS.get(entity["name"], 1) if entity else 1
     reach = POLE_SPECS[pole_name]["supply"] + footprint / 2
@@ -1107,9 +1126,33 @@ def _hookup_pole_position(
         if max(abs(spot[0] - consumer[0]), abs(spot[1] - consumer[1])) < reach
         and footprint_tile_indices(spot, pole_size).isdisjoint(blocked)
     ]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda spot: distance(spot, toward))
+    return candidates
+
+
+def _defer_power_hookup(
+    near_position: Point, target_position: Point, pole_name: str,
+    *, geometric_candidates: int, blocked_candidates: int,
+    owners: Sequence[Mapping[str, object]] | None = None,
+) -> None:
+    """Yield a retryable power wait instead of aborting on a packed area."""
+    # Import lazily: autonomous_builder imports this module's services during
+    # startup, while the signal class lives in the higher-level controller.
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    details: dict[str, object] = {
+        "near_position": [near_position[0], near_position[1]],
+        "target_position": [target_position[0], target_position[1]],
+        "pole_name": pole_name,
+        "geometric_candidates": geometric_candidates,
+        "blocked_candidates": blocked_candidates,
+    }
+    if owners:
+        details["occupying_entities"] = list(owners)
+    raise ProductionPrerequisiteDeferred(
+        f"power hookup at {near_position} has no free {pole_name} anchor; "
+        "waiting for a retryable placement opportunity",
+        code="power_bridge_anchor_wait", state="power_wait", details=details,
+    )
 
 
 def extend_power(
@@ -1234,14 +1277,54 @@ def extend_power(
     if own_network is None:
         # The consumer's own body is an obstacle, not an endpoint: the chain has
         # to stop on a free tile whose supply area covers it.
+        geometric_candidates = _hookup_pole_candidates(
+            client, surface, near_position, set(), target_position, bridge_pole,
+        )
         endpoint = _hookup_pole_position(
             client, surface, near_position, hookup_blocked, target_position,
             bridge_pole,
         )
         if endpoint is None:
-            raise StuckError(
-                f"nothing at {near_position} can be powered: every tile within a medium "
-                "pole's supply area of it is occupied"
+            blocked_candidates = len(geometric_candidates)
+            owner_sample: list[dict[str, object]] = []
+            if hasattr(client, "command") and geometric_candidates:
+                try:
+                    candidate_tiles = set().union(*(
+                        footprint_tile_indices(
+                            point, int(POLE_SPECS[bridge_pole]["size"]),
+                        )
+                        for point in geometric_candidates
+                    ))
+                    owners = live_base.occupied_tile_owners(
+                        client, surface,
+                        (min(x for x, _ in candidate_tiles), min(y for _, y in candidate_tiles)),
+                        (max(x for x, _ in candidate_tiles) + 1, max(y for _, y in candidate_tiles) + 1),
+                        include_resources=avoid_resources,
+                    )
+                    seen_owners: set[tuple[str, float, float]] = set()
+                    for tile, (name, x, y) in sorted(owners.items()):
+                        if tile not in candidate_tiles:
+                            continue
+                        record = (name, x, y)
+                        if record in seen_owners:
+                            continue
+                        seen_owners.add(record)
+                        owner_sample.append({
+                            "tile": [tile[0], tile[1]],
+                            "entity": name,
+                            "position": [x, y],
+                        })
+                        if len(owner_sample) >= 32:
+                            break
+                except (RuntimeError, TypeError, ValueError):
+                    # Diagnostics must never turn a retryable placement wait
+                    # back into a terminal telemetry failure.
+                    owner_sample = []
+            _defer_power_hookup(
+                near_position, target_position, bridge_pole,
+                geometric_candidates=len(geometric_candidates),
+                blocked_candidates=blocked_candidates,
+                owners=owner_sample,
             )
     else:
         endpoint = near_position

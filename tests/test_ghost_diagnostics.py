@@ -929,10 +929,10 @@ def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
     assert submitted[0]["phases"][0]["actions"]
 
 
-def test_power_bridge_refuses_dense_stage_without_transmission_pole_terminal(
+def test_power_bridge_defers_dense_stage_without_transmission_pole_terminal(
     monkeypatch,
 ) -> None:
-    """A packed layout needs repair, not an implicit substation upgrade."""
+    """A packed layout yields for a later retry, not an implicit upgrade."""
     from orchestrator import autonomous_builder as builder_module
     from orchestrator import stage_services as ss
 
@@ -949,6 +949,10 @@ def test_power_bridge_refuses_dense_stage_without_transmission_pole_terminal(
     monkeypatch.setattr(
         ss.live_base, "occupied_tiles", lambda *_a, **_k: medium_terminal_tiles,
     )
+    monkeypatch.setattr(
+        ss.live_base, "occupied_tile_owners",
+        lambda *_a, **_k: {(0, 0): ("entity-ghost", 0.5, 0.5)},
+    )
     monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a: 100.0)
     monkeypatch.setattr(
         ss, "_submit",
@@ -958,11 +962,18 @@ def test_power_bridge_refuses_dense_stage_without_transmission_pole_terminal(
         builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
     )
 
-    with pytest.raises(ss.StuckError, match="every tile within a medium"):
+    with pytest.raises(builder_module.ProductionPrerequisiteDeferred) as failure:
         ss.extend_power(
-            object(), object(), "nauvis", "player", (0.0, 0.0),
+            _Client(""), object(), "nauvis", "player", (0.0, 0.0),
             lambda _message: None,
         )
+    assert failure.value.code == "power_bridge_anchor_wait"
+    assert failure.value.state == "power_wait"
+    assert failure.value.details["geometric_candidates"] > 0
+    assert failure.value.details["blocked_candidates"] == failure.value.details[
+        "geometric_candidates"
+    ]
+    assert failure.value.details["occupying_entities"][0]["entity"] == "entity-ghost"
     assert submitted == []
 
 
