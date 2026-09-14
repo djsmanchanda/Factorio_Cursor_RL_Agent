@@ -90,7 +90,7 @@ CORE_MALL_PRODUCERS = (
 # gear, one cable) plus up to ten rotational slots. A new construction need
 # below the cap adds a rotational cell for it; at the cap the rotational slots
 # borrow and restore instead, and the two anchors are never touched. Twelve
-# preserves useful pre-plastic parallelism while finite-stock
+# preserves useful pre-advanced-circuit parallelism while finite-stock
 # rationing, without making every demand an unconditional permanent mall
 # allocation.
 BOOTSTRAP_MALL_SLOT_TARGET = 12
@@ -104,6 +104,7 @@ RATIONED_MALL_BATCH_ITEMS = frozenset({
     # slot needed to make the core mall self-sufficient.
     "assembling-machine-1",
     "electronic-circuit",
+    "iron-stick",
     "transport-belt",
     "underground-belt",
     "inserter",

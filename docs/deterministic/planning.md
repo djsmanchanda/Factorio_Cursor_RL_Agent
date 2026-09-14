@@ -105,7 +105,7 @@ These names describe intended responsibilities, not permission to build speculat
   remains. Producing plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
-  After plastic output releases the independent mall, iron demand continues
+  After advanced-circuit output releases the independent mall, iron demand continues
   the same doubling policy beyond 96 and may advance into later validated
   refinery generations. New iron transport uses fast belts once their producer
   is proven; held fast belts, undergrounds, and splitters replace exact
@@ -244,12 +244,12 @@ These names describe intended responsibilities, not permission to build speculat
   reservations plus a four-item construction reserve. Fast-inserter upgrades
   retain their later core-mall gate. Upgrades use native in-place bot orders, limited to one machine per pass. Pending upgrades are excluded from later batches, and mixed AM1/AM2
   recipe rows remain one observable line throughout the transition.
-  Until plastic has produced output, low-demand construction items are finite
+  Until advanced circuits have produced output, low-demand construction items are finite
   batches made by a recoverable recipe loan in an existing mall assembler.
   The loan changes the existing requester group and output gate, may mix the
   temporary product with earlier contents in the same provider, and restores
   the original recipe and requests after the batch. Permanent one-recipe mall
-  slots become permanent only after plastic releases the independent mall.
+  slots become permanent only after advanced circuits release the independent mall.
   A finite cell's requester buffer is capped to the crafts in its current
   need-plus-margin batch plus 20% headroom (rounded up); it may not use the
   normal throughput window to warehouse construction components. Requester

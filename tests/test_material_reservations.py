@@ -894,7 +894,7 @@ def test_affordable_bootstrap_demand_claims_a_new_shared_output_slot(
     assert builder._BOOTSTRAP_SHARED_PROVIDER_ITEMS == {
         "electric-mining-drill",
     }
-    assert any("12-assembler pool" in message for message in messages)
+    assert any("8-assembler pool" in message for message in messages)
 
 
 def test_post_starter_demand_claims_free_slot_while_another_loan_runs(

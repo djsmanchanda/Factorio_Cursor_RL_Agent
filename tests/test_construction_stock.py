@@ -738,6 +738,22 @@ def test_mall_has_eight_slots_until_advanced_circuits_start(monkeypatch) -> None
     ) == 12
 
 
+def test_iron_stick_rotates_until_advanced_circuits_then_becomes_independent(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    assert builder._is_pre_core_temporary_mall_item(
+        object(), "nauvis", "player", "iron-stick",
+    )
+
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
+    assert not builder._is_pre_core_temporary_mall_item(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "player", "iron-stick",
+    )
+
+
 def test_post_metal_reserve_services_circuits_then_splitters(monkeypatch) -> None:
     """After starter retirement, background reserves fill whole stacks."""
     monkeypatch.setattr(

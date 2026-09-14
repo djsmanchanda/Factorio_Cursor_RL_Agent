@@ -243,6 +243,10 @@ def test_electric_furnace_chain_intermediates_are_persistent(monkeypatch) -> Non
     assert "steel-chest" not in builder.PERSISTENT_INTERMEDIATES
 
 
+def test_iron_stick_is_in_the_rotating_bootstrap_batch() -> None:
+    assert "iron-stick" in builder.RATIONED_MALL_BATCH_ITEMS
+
+
 def test_gate_task_itself_is_served_not_repromoted() -> None:
     """Live runs of 2026-08-24 07:25 and 07:47: a main-loop gate preemption
     first captured the electric-furnace task itself (promote-and-continue

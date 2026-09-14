@@ -3475,6 +3475,11 @@ def _bootstrap_mall_slot_limit(
 ) -> int:
     """Return the shared mall cap for the current production transition."""
     try:
+        if _independent_mall_ready(client, surface, force):
+            return _PRE_PLASTIC_MALL_SLOT_TARGET
+    except Exception:
+        pass
+    try:
         advanced_started = _production_started(
             client, surface, force, "advanced-circuit",
         )
@@ -5145,7 +5150,7 @@ def _mall_request_multiplier(
     """Keep startup requesters from claiming more inputs than their batch.
 
     Permanent cells keep a throughput-sized ten-second input window. Before
-    plastic releases the independent mall, every non-anchor output is finite; its requester may
+    advanced circuits release the independent mall, every non-anchor output is finite; its requester may
     therefore ask for at most the crafts needed by that bounded batch. This
     prevents a one-item fast-inserter construction need from warehousing ten
     or more regular inserters needed by an already planned refinery.
@@ -5360,14 +5365,14 @@ def _is_pre_core_temporary_mall_item(
 
     Gear and cable each keep one permanent anchor cell. Every other recipe in
     ``RATIONED_MALL_BATCH_ITEMS`` -- including the second gear/cable cells,
-    circuits, and belts -- is rotational until plastic output releases the
-    independent mall; persistent intermediates keep their
-    dedicated-source path instead of being turned into rotating loans.
+    circuits, belts, and iron-stick -- are rotational until advanced circuits
+    release the independent mall; steel and advanced circuits retain their
+    dedicated capability paths.
     """
     return bool(
         item in RATIONED_MALL_BATCH_ITEMS
         and item not in _MALL_RECIPE_ANCHORS
-        and item not in PERSISTENT_INTERMEDIATES
+        and (item not in PERSISTENT_INTERMEDIATES or item == "iron-stick")
         and not _independent_mall_ready(client, surface, force)
     )
 
@@ -5375,7 +5380,7 @@ def _is_pre_core_temporary_mall_item(
 def _pipe_is_temporary_batch(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Keep pipe rotating only until plastic releases independent cells."""
+    """Keep pipe rotating only until advanced circuits release independent cells."""
     return not _independent_mall_ready(client, surface, force)
 
 
@@ -7102,7 +7107,11 @@ def _ingredient_sources(
                 f"({stocked[ingredient]}/{required}) for {item}"
                 + ("" if backed else " -- NOTHING IS PRODUCING IT")
             )
-            if not backed and ingredient in PERSISTENT_INTERMEDIATES:
+            if (
+                not backed
+                and ingredient in PERSISTENT_INTERMEDIATES
+                and _power_generation_capability_started(client, surface, force)
+            ):
                 emit(
                     f"  MALL BOOTSTRAP: scheduling a persistent {ingredient} "
                     "producer before consuming the reserve"
@@ -7189,7 +7198,7 @@ def _build_assembled_stage(
     stock_gate_target: int | None = None,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
-    # The pre-plastic budget is global. Previously only optional demand cells
+    # The pre-advanced-circuit budget is global. Previously only optional demand cells
     # consulted it, while core-mall promotion kept allocating permanent cells
     # outside the budget; the latest run therefore reached thirteen mall
     # assemblers before the first logistic chest existed.  A running line is
@@ -8589,10 +8598,10 @@ def _ensure_mall_item(
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
         if temporary_precore and _scarce_metal_startup(client, surface, force):
-            # Scarce opening only: a pre-plastic construction item is a demand
+            # Scarce opening only: a pre-advanced-circuit construction item is a demand
             # batch, not a one-stack standing reserve. Keep the current bill
-            # plus at least a 20% spare margin (rounded up); plastic output
-            # releases permanent per-item slots.
+            # plus at least a 20% spare margin (rounded up); advanced circuits
+            # release permanent per-item slots.
             temporary_target = _rationed_mall_spare_target(
                 client, surface, force, item, target,
             )
@@ -8606,7 +8615,7 @@ def _ensure_mall_item(
             emit(
                 f"  MALL TEMPORARY RESERVE: {item} is limited to "
                 f"need {target} + margin {temporary_target - target} "
-                "until plastic releases the independent mall"
+                "until advanced circuits release the independent mall"
             )
         elif temporary_precore:
             emit(
@@ -10273,11 +10282,11 @@ def _power_generation_capability_started(
 def _independent_mall_ready(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Whether plastic output has released permanent per-item mall cells."""
+    """Whether advanced circuits have released permanent per-item mall cells."""
     if not hasattr(client, "command"):
         return False
-    return "plastic-bar" in LINE_RECIPES and _production_started(
-        client, surface, force, "plastic-bar",
+    return "advanced-circuit" in LINE_RECIPES and _production_started(
+        client, surface, force, "advanced-circuit",
     )
 
 
