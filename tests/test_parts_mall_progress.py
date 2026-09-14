@@ -66,6 +66,18 @@ def test_wait_for_stock_expands_after_a_full_window_without_progress(monkeypatch
     assert expansions == [60.0]
 
 
+def test_wait_for_stock_can_require_transferable_stock(monkeypatch) -> None:
+    reads = iter(({"iron-stick": 12}, {"iron-stick": 0}, {"iron-stick": 4}))
+    monkeypatch.setattr(parts_mall.time, "sleep", lambda _seconds: None)
+
+    ready = parts_mall.wait_for_stock(
+        object(), "nauvis", "player", "iron-stick", 4,
+        lambda _message: None, stock_reader=lambda: next(reads),
+    )
+
+    assert ready is True
+
+
 def test_mall_expansion_shortage_is_reported_before_the_pass_yields() -> None:
     source = inspect.getsource(builder._serve_mall_task)
     wait_clause = source[source.index("ready = wait_for_stock"):]

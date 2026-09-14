@@ -5200,7 +5200,14 @@ def _effective_mall_stock_gate(
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,
 ) -> bool:
-    """Whether anything on the base is actually making `ingredient`."""
+    """Whether a non-ghost line is live enough to replenish `ingredient`.
+
+    A configured but stopped assembler may be the cell currently borrowed for
+    another recipe. Counting its machine footprint as a producer lets a
+    persistent intermediate consume its only reserve and then wait forever.
+    Dry test doubles without live status fields retain the legacy machine-count
+    interpretation.
+    """
     if ingredient in MANAGED_INTERMEDIATE_SOURCES:
         return True
     if ingredient not in LINE_RECIPES:
@@ -5208,7 +5215,14 @@ def _has_producer(
     line = live_base.find_line(
         client, surface, force, ingredient, LINE_RECIPES[ingredient]["machine"],
     )
-    return line is not None and line.machine_count > 0
+    if line is None or line.machine_count <= 0:
+        return False
+    if not hasattr(line, "working_count") and not hasattr(line, "produced_count"):
+        return True
+    return bool(
+        getattr(line, "working_count", 0) > 0
+        or getattr(line, "produced_count", 0) > 0
+    )
 
 
 def _material_project_id(item: str) -> str:
@@ -5710,6 +5724,12 @@ def _submit_bootstrap_loan(
     preempt_for: str | None = None, reference_point: Point | None = None,
 ) -> str:
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    # A managed persistent source points at a provider chest, not at an
+    # immutable machine. Once that cell is borrowed for another recipe the
+    # pointer is stale; leaving it cached makes later pole/assembler loans
+    # believe iron-stick (or inserter) production still exists.
+    if loan.original_recipe != loan.target_item:
+        MANAGED_INTERMEDIATE_SOURCES.pop(loan.original_recipe, None)
     live_loan_group = loan.group
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
@@ -7687,6 +7707,7 @@ def ensure_produced(
         # plastic is live it may allocate a normal permanent cell.
         upgrade_bootstrap = False
         temporary_mall = True
+    temporary_precore = False
     if not upgrade_bootstrap:
         temporary_precore = _is_pre_core_temporary_mall_item(
             client, surface, force, item,
@@ -9582,9 +9603,16 @@ def _serve_mall_task(
             return True
 
         try:
+            ready_reader = None
+            if item in PERSISTENT_INTERMEDIATES:
+                ready_reader = lambda: live_base.transferable_items(
+                    client, surface, force,
+                )
+            wait_kwargs = {"on_stalled": expand_upstream}
+            if ready_reader is not None:
+                wait_kwargs["stock_reader"] = ready_reader
             ready = wait_for_stock(
-                client, surface, force, item, target, emit,
-                on_stalled=expand_upstream,
+                client, surface, force, item, target, emit, **wait_kwargs,
             )
         except MaterialShortage as shortage:
             add_demands(mall_targets, shortage)

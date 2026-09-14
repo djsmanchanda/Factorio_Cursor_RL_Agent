@@ -2509,7 +2509,7 @@ def _reclaim_world(monkeypatch, *, pool_full=True, donor_stock=6,
     })
     monkeypatch.setattr(
         builder, "mall_slot_count",
-        lambda *_a: 12 if pool_full else 11,
+        lambda *_a: 8 if pool_full else 7,
     )
     monkeypatch.setattr(
         builder, "_transferable_or_available_stock", lambda *_a: {

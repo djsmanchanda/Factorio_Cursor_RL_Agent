@@ -21,8 +21,13 @@ from orchestrator.stage_services import StuckError  # noqa: E402
 
 
 class _Line:
-    def __init__(self, machine_count: int) -> None:
+    def __init__(self, machine_count: int, *, working_count: int | None = None,
+                 produced_count: int | None = None) -> None:
         self.machine_count = machine_count
+        if working_count is not None:
+            self.working_count = working_count
+        if produced_count is not None:
+            self.produced_count = produced_count
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +67,24 @@ def test_an_empty_line_counts_as_no_producer(lines) -> None:
     lines({"copper-cable": 0})
 
     assert not _has_producer(None, "nauvis", "player", "copper-cable")
+
+
+def test_a_stopped_live_line_does_not_count_as_a_replenishing_producer(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: _Line(1, working_count=0, produced_count=0),
+    )
+
+    assert not _has_producer(None, "nauvis", "player", "copper-cable")
+
+
+def test_a_previously_producing_idle_line_remains_a_valid_source(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda *_a: _Line(1, working_count=0, produced_count=3),
+    )
+
+    assert _has_producer(None, "nauvis", "player", "copper-cable")
 
 
 def test_a_mined_input_is_not_ours_to_produce(lines) -> None:

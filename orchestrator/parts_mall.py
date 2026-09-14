@@ -121,13 +121,17 @@ def wait_for_stock(
     emit: Callable[[str], None], *, poll_seconds: float = 5.0,
     report_seconds: float = 30.0, expansion_seconds: float = 60.0,
     on_stalled: Callable[[], bool] | None = None,
+    stock_reader: Callable[[], Mapping[str, int]] | None = None,
 ) -> bool:
     """Wait for stock; expand only after a full window with no progress."""
+    read_stock = stock_reader or (
+        lambda: live_base.available_items(client, surface, force)
+    )
     last_report = 0.0
     next_expansion = time.monotonic() + expansion_seconds
     best_have = -1
     while True:
-        have = live_base.available_items(client, surface, force).get(item, 0)
+        have = read_stock().get(item, 0)
         if have >= target:
             emit(f"  MALL READY: {item} stock reached {have}/{target}")
             return True
