@@ -6371,10 +6371,20 @@ def _release_completed_construction_loans(
             and int(stock.get(loan.target_item, 0)) < loan.target_count
         ):
             continue
-        _submit_bootstrap_loan(
-            client, bridge, surface, force, loan, emit,
-            reference_point=reference_point,
-        )
+        try:
+            _submit_bootstrap_loan(
+                client, bridge, surface, force, loan, emit,
+                reference_point=reference_point,
+            )
+        except ProductionPrerequisiteDeferred as deferred:
+            # A chemical-ladder handoff may restore the borrowed cell before
+            # its predecessor can be admitted.  That is a normal cross-loan
+            # observation boundary, not a controller failure: the next pass
+            # must re-survey the restored cell and resume the predecessor.
+            emit(
+                f"  MALL BOOTSTRAP LOAN WAIT: {loan.target_item} -- "
+                f"{deferred}; retrying after re-observation"
+            )
 
 
 def _service_bootstrap_loan(

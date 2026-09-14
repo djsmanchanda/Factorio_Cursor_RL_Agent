@@ -118,6 +118,40 @@ def test_completed_loan_hands_off_without_explicit_competitor(
     assert bool(restored) is release
 
 
+def test_completed_loan_release_parks_typed_chemical_handoff(monkeypatch) -> None:
+    """Periodic loan release must not let a chemical handoff escape the loop."""
+    loan = SimpleNamespace(
+        target_item="chemical-plant", target_count=1, production_target=1,
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock",
+        lambda *_a: {"chemical-plant": 1},
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 1,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_minimum_fulfilled", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            builder.ProductionPrerequisiteDeferred(
+                "chemical ladder handoff", code="chemical_capability_handoff",
+                state="supply_wait",
+            )
+        ),
+    )
+    messages: list[str] = []
+
+    builder._release_completed_construction_loans(
+        object(), object(), "nauvis", "player", (0, 0), messages.append,
+    )
+
+    assert any("retrying after re-observation" in message for message in messages)
+
+
 @pytest.mark.parametrize("earmark", [True, False])
 def test_existing_direct_mine_earmark_does_not_wait_before_refinery(monkeypatch, earmark):
     extraction = SimpleNamespace(
