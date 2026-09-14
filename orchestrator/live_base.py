@@ -1313,6 +1313,9 @@ _TRANSPORT_LIVE_CATEGORIES = frozenset({
     "live_entity", "entity_ghost", "tile_ghost", "terrain",
     "deconstruction_order",
 })
+_TRANSIENT_TRANSPORT_ENTITY_TYPES = frozenset({
+    "logistic-robot", "construction-robot", "combat-robot",
+})
 _CARDINAL_DIRECTIONS = frozenset({"north", "east", "south", "west"})
 _UNDERGROUND_TYPES = frozenset({"input", "output"})
 
@@ -1356,7 +1359,9 @@ def transport_occupancy_snapshot(
         "underground,string.format('%.3f',e.position.x),"
         "string.format('%.3f',e.position.y),table.concat(tiles,':')},'|') end;"
         "for _,e in pairs(s.find_entities_filtered{area=area}) do "
-        "if e.type~='character' and e.type~='resource' then "
+        "if e.type~='character' and e.type~='resource' and "
+        "e.type~='logistic-robot' and e.type~='construction-robot' and "
+        "e.type~='combat-robot' then "
         "local category='live_entity';local name=e.name;"
         "if e.type=='entity-ghost' then category='entity_ghost';name=e.ghost_name "
         "elseif e.type=='tile-ghost' then category='tile_ghost';name=e.ghost_name end;"
@@ -1378,6 +1383,11 @@ def transport_occupancy_snapshot(
                 f"malformed transport occupancy record {index}: {raw_record!r}",
             )
         category, name, direction, underground, raw_x, raw_y, raw_tiles = fields
+        # Flying robots have no stable collision footprint and can cross an
+        # arbitrary route between the survey and the next tick. The Lua query
+        # excludes them; keep this parser guard for an older/stale mod reply.
+        if name in _TRANSIENT_TRANSPORT_ENTITY_TYPES:
+            continue
         if category not in _TRANSPORT_LIVE_CATEGORIES:
             raise TelemetryError(
                 f"unknown transport occupancy category in record {index}: {category!r}",
