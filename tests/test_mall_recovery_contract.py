@@ -403,7 +403,7 @@ def test_post_plastic_per_item_cell_bypasses_demand_bank_cap(monkeypatch) -> Non
     )
 
 
-def test_post_plastic_demand_cell_stops_at_twelve(monkeypatch) -> None:
+def test_post_advanced_demand_cell_has_no_slot_cap(monkeypatch) -> None:
     plan = builder._LinePlan(
         existing=SimpleNamespace(machine_count=1),
         spec=builder.LINE_RECIPES["transport-belt"],
@@ -419,17 +419,17 @@ def test_post_plastic_demand_cell_stops_at_twelve(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         builder, "_ingredient_sources",
-        lambda *_a, **_k: pytest.fail("capped demand must not spend inputs"),
+        lambda *_a, **_k: {},
+    )
+    monkeypatch.setattr(
+        builder, "build_compact_mall_stage", lambda *_a, **_k: (1.0, 1.0),
     )
 
-    with pytest.raises(builder.ProductionPrerequisiteDeferred) as raised:
-        builder._build_assembled_stage(
-            object(), object(), "nauvis", "player", "transport-belt",
-            (3.0, -1.0), lambda _message: None, plan, None,
-            upgrade_bootstrap=False,
-        )
-
-    assert raised.value.details["slot_cap"] == 12
+    builder._build_assembled_stage(
+        object(), object(), "nauvis", "player", "transport-belt",
+        (3.0, -1.0), lambda _message: None, plan, None,
+        upgrade_bootstrap=False,
+    )
 
 
 def test_under_sized_existing_line_cannot_escape_the_global_slot_cap(monkeypatch) -> None:

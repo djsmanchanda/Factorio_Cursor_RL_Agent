@@ -3472,11 +3472,11 @@ _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
 
 def _bootstrap_mall_slot_limit(
     client: RconClient, surface: str, force: str,
-) -> int:
-    """Return the shared mall cap for the current production transition."""
+) -> int | None:
+    """Return the pre-advanced-circuit cap; post-transition is unlimited."""
     try:
         if _independent_mall_ready(client, surface, force):
-            return _PRE_PLASTIC_MALL_SLOT_TARGET
+            return None
     except Exception:
         pass
     try:
@@ -3486,9 +3486,20 @@ def _bootstrap_mall_slot_limit(
     except Exception:
         advanced_started = False
     return (
-        _PRE_PLASTIC_MALL_SLOT_TARGET
-        if advanced_started else _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+        None if advanced_started else _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
     )
+
+
+def _mall_slot_cap_reached(committed: int, limit: int | None) -> bool:
+    return limit is not None and committed >= limit
+
+
+def _mall_pool_text(committed: int | None, limit: int | None) -> str:
+    if committed is None:
+        return "?"
+    if limit is None:
+        return "unlimited"
+    return f"{max(0, limit - int(committed))}/{limit}"
 
 
 def _top_up_solar_generation(
@@ -5706,10 +5717,7 @@ def _emit_loan_cell_telemetry(
             f"{item}={int(actual.get(item, 0))}" for item, _ in ingredients
         ) or "-"
         slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
-        pool = (
-            f"{max(0, slot_limit - int(committed))}/{slot_limit}"
-            if committed is not None else "?"
-        )
+        pool = _mall_pool_text(committed, slot_limit)
         table = ",".join(
             f"{holder.target_item}:{holder.step_recipe or holder.current_recipe}"
             f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
@@ -7218,7 +7226,7 @@ def _build_assembled_stage(
             mall_slot_count(client, surface, reference_point)
         )
         slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
-        if committed >= slot_limit:
+        if _mall_slot_cap_reached(committed, slot_limit):
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
                 f"{slot_limit} assemblers are committed; "
@@ -8106,7 +8114,9 @@ def _bootstrap_demand_cell_affordable(
         if independent_mall else
         mall_slot_count(client, surface, reference_point)
     )
-    if committed >= _bootstrap_mall_slot_limit(client, surface, force):
+    if _mall_slot_cap_reached(
+        committed, _bootstrap_mall_slot_limit(client, surface, force),
+    ):
         return False, {}
     allocation = preview_mall_allocation(
         client, surface, item, reference_point,
@@ -8219,7 +8229,7 @@ def _bootstrap_reserve_machine_target(
         emit(
             f"  DYNAMIC ANCHOR CAPACITY: {item} has {backlog:.0f}s of "
             f"blocking backlog; funding {wanted} temporary producers "
-            f"within the {slot_limit}-assembler pool"
+            f"within the {'unlimited' if slot_limit is None else f'{slot_limit}-assembler'} pool"
         )
         return wanted
     if item not in _PARALLEL_BOOTSTRAP_RESERVE_ITEMS:
@@ -8255,7 +8265,7 @@ def _bootstrap_reserve_machine_target(
     emit(
         f"  DYNAMIC MALL CAPACITY: {item} has {backlog:.0f}s of blocking "
         f"backlog; funding 2 producers within the "
-        f"{slot_limit}-assembler pool"
+        f"{'unlimited' if slot_limit is None else f'{slot_limit}-assembler'} pool"
     )
     return 2
 
@@ -8391,7 +8401,7 @@ def _rationed_mall_batch(
             slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
             emit(
                 f"  BOOTSTRAP MALL CAPACITY: assigning a demand-owned {item} "
-                f"slot within the {slot_limit}-assembler pool; "
+                f"slot within the {'unlimited' if slot_limit is None else f'{slot_limit}-assembler'} pool; "
                 "paired halves share one passive provider"
             )
             return False
@@ -8950,7 +8960,7 @@ def _emit_rotating_switch_stock(
             f"{external_count} usable={int(usable.get(external_item, 0))} "
             f"available={int(actual.get(external_item, 0))} | prereq "
             f"requester={prereq_requester} | pool "
-            f"{f'{max(0, slot_limit - int(committed))}/{slot_limit}' if committed is not None and slot_limit is not None else '?'}"
+            f"{_mall_pool_text(committed, slot_limit)}"
             f" free | loans {table}"
         )
     except Exception as error:
@@ -9078,11 +9088,7 @@ def _emit_no_progress_verdict_stock(
                 f"asm={asm}"
             )
         try:
-            pool_free: str = (
-                f"{max(0, slot_limit - int(committed))}/{slot_limit}"
-                if committed is not None and slot_limit is not None
-                else "?"
-            )
+            pool_free: str = _mall_pool_text(committed, slot_limit)
         except Exception:
             pool_free = "?"
         emit(
@@ -10445,7 +10451,9 @@ def _reclaim_spent_demand_slot_for_prep(
         if independent_mall else
         mall_slot_count(client, surface, reference_point)
     )
-    if committed < _bootstrap_mall_slot_limit(client, surface, force):
+    if not _mall_slot_cap_reached(
+        committed, _bootstrap_mall_slot_limit(client, surface, force),
+    ):
         return False
     try:
         stock = _transferable_or_available_stock(client, surface, force)
@@ -10768,9 +10776,10 @@ def _prep_core_mall(
         # completion promotes that same cell in _submit_bootstrap_loan.
         if (
             not _independent_mall_ready(client, surface, force)
-            and mall_slot_count(
-                client, surface, reference_point,
-            ) >= _bootstrap_mall_slot_limit(client, surface, force)
+            and _mall_slot_cap_reached(
+                mall_slot_count(client, surface, reference_point),
+                _bootstrap_mall_slot_limit(client, surface, force),
+            )
         ):
             try:
                 if _rationed_mall_batch(

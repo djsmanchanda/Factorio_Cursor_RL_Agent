@@ -735,7 +735,7 @@ def test_mall_has_eight_slots_until_advanced_circuits_start(monkeypatch) -> None
     monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
     assert builder._bootstrap_mall_slot_limit(
         object(), "nauvis", "player",
-    ) == 12
+    ) is None
 
 
 def test_iron_stick_rotates_until_advanced_circuits_then_becomes_independent(
