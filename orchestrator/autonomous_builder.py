@@ -5099,6 +5099,11 @@ _CORE_MALL_RECIPE_ITEMS = frozenset({
     "passive-provider-chest", "requester-chest",
 })
 _CORE_MALL_TEMPORARY_PREREQUISITES = frozenset({"steel-chest"})
+# A goal conversion that has already requested a logistic chest owns the next
+# mall pass. Optional core promotion (especially fast-inserter) must not consume
+# the final pre-advanced-circuit slot while the chest's chemical ladder is
+# waiting to start.
+_GOAL_CRITICAL_MALL_ITEMS = frozenset(_CORE_MALL_RECIPE_ITEMS)
 
 # The direct iron/copper stacks are deliberately temporary. Their tiny mall
 # ceilings protect the first plates from being converted into construction
@@ -10721,9 +10726,14 @@ def _prep_core_mall(
     emit: Callable[[str], None],
 ) -> bool:
     """Promote the rationed mall into five self-sustaining core cells."""
-    if _BLOCKING_MALL_ITEMS:
+    if _BLOCKING_MALL_ITEMS or any(
+        item in _GOAL_CRITICAL_MALL_ITEMS and int(target) > 0
+        for item, target in mall_targets.items()
+    ):
         # Required feeders still run through the selected batch's dependency
-        # path; optional permanent-cell promotion cannot outrank construction.
+        # path; optional permanent-cell promotion cannot outrank construction
+        # or a goal-critical logistic-chest demand. This keeps all eight
+        # pre-advanced-circuit slots available to the actual goal closure.
         return False
     for item in CORE_MALL_PRODUCERS:
         key = f"_core_mall:{item}"

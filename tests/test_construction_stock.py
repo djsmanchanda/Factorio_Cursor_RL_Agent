@@ -3324,6 +3324,21 @@ def test_post_core_smoke_upgrades_retrofit_and_core_prep(
     ) is False
 
 
+def test_core_promotion_yields_to_goal_logistic_chest_demand(monkeypatch) -> None:
+    """A requester/passive chest demand must open its chemical ladder first."""
+    from orchestrator import autonomous_builder as builder_module
+
+    monkeypatch.setattr(builder_module, "_BLOCKING_MALL_ITEMS", set())
+    prepped: set[str] = set()
+    targets = {"requester-chest": 3}
+
+    assert builder_module._prep_core_mall(
+        object(), object(), "nauvis", "player", prepped, targets,
+        (0.0, 0.0), lambda _message: None,
+    ) is False
+    assert prepped == set()
+
+
 def test_post_starter_announces_once_when_earned(monkeypatch) -> None:
     """Program gate: advanced circuits producing flips the phase once."""
     from orchestrator import autonomous_builder as builder_module
