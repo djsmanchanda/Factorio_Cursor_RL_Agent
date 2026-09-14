@@ -15,6 +15,8 @@ from orchestrator.extraction_state import (
     _classify_direct_mine,
 )
 from orchestrator.stage_extraction import (
+    LocalExtractionRouteAssessment,
+    LocalExtractionRouteBudget,
     LOCAL_MODE_MAX_LINK_TILES,
     LocalExtractionPlan,
     _align_area_anchor,
@@ -918,12 +920,88 @@ def test_planner_fails_closed_beyond_local_mode_link_limit(monkeypatch) -> None:
         live_base, "find_clear_areas", _clear_areas_at((1000.0, 1000.0)),
     )
 
-    with pytest.raises(ValueError, match="CityPlanner rail handoff"):
+    def blocked_route(_source, _destination, _budget):
+        return LocalExtractionRouteAssessment(
+            legal=False, reason="no legal route around the occupied district",
+        )
+
+    with pytest.raises(ValueError, match="occupied district"):
         plan_local_extraction(
             object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
             belt_type="fast-transport-belt", inserter_type="fast-inserter",
+            route_preflight=blocked_route,
         )
-    assert LOCAL_MODE_MAX_LINK_TILES == 300.0
+    assert LOCAL_MODE_MAX_LINK_TILES > 300
+
+
+def test_a_legal_route_over_300_tiles_is_accepted_within_budget(monkeypatch) -> None:
+    _patch_and_rates(monkeypatch, existing=ResourceMine((18.5, 20.5), 2))
+    monkeypatch.setattr(
+        live_base, "find_clear_areas", _clear_areas_at((1000.0, 1000.0)),
+    )
+    budget = LocalExtractionRouteBudget(
+        max_route_tiles=640, max_actions=2_048, max_material_items=4_096,
+    )
+
+    def legal_long_route(_source, _destination, _budget):
+        return LocalExtractionRouteAssessment(
+            legal=True, route_tiles=401, action_count=450,
+            material_bill={"transport-belt": 401, "inserter": 2},
+        )
+
+    planned = plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
+        belt_type="fast-transport-belt", inserter_type="fast-inserter",
+        route_budget=budget, route_preflight=legal_long_route,
+    )
+
+    assert planned.smelter_origin == (1001.0, 1000.0)
+
+
+@pytest.mark.parametrize(
+    ("assessment", "message"),
+    [
+        (
+            LocalExtractionRouteAssessment(
+                legal=True, route_tiles=641, action_count=10,
+            ),
+            "route needs 641 tiles",
+        ),
+        (
+            LocalExtractionRouteAssessment(
+                legal=True, route_tiles=20, action_count=2_049,
+            ),
+            "route needs 2049 actions",
+        ),
+        (
+            LocalExtractionRouteAssessment(
+                legal=True, route_tiles=20, action_count=10,
+                material_bill={"transport-belt": 4_097},
+            ),
+            "route needs 4097 material items",
+        ),
+    ],
+)
+def test_exhausted_route_budget_rejects_before_site_selection(
+    monkeypatch, assessment, message,
+) -> None:
+    _patch_and_rates(monkeypatch)
+    monkeypatch.setattr(
+        live_base, "find_clear_area", lambda *_a, **_k: (0.0, 0.0),
+    )
+    monkeypatch.setattr(
+        live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)),
+    )
+
+    def exhausted_route(_source, _destination, _budget):
+        return assessment
+
+    with pytest.raises(ValueError, match=message):
+        plan_local_extraction(
+            object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 2,
+            belt_type="fast-transport-belt", inserter_type="fast-inserter",
+            route_preflight=exhausted_route,
+        )
 
 
 def test_real_builder_submits_ore_then_calls_modular_refinery(

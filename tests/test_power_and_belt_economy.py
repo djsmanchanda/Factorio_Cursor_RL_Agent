@@ -280,6 +280,7 @@ def test_visibly_filling_blueprints_extend_remediation(monkeypatch) -> None:
 
 def test_healthy_network_skips_the_top_up(monkeypatch, tmp_path) -> None:
     """A converged usable-capacity calculation is the gate."""
+    monkeypatch.setattr(builder, "maybe_ensure_bootstrap_steam_power", lambda *_a, **_k: False)
     monkeypatch.setattr(
         builder.live_base, "network_firm_generation_kw", lambda *_a: 5000.0,
     )
@@ -423,6 +424,7 @@ def test_power_sizing_does_not_treat_existing_coverage_as_a_grid_join(
     monkeypatch, tmp_path,
 ) -> None:
     """Coverage by a pole is not proof that the remote grid was bridged."""
+    monkeypatch.setattr(builder, "maybe_ensure_bootstrap_steam_power", lambda *_a, **_k: False)
     from orchestrator.stage_services import PowerExtensionResult
 
     monkeypatch.setattr(

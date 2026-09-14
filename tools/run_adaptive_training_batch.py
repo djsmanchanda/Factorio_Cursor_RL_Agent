@@ -26,6 +26,7 @@ from tools.run_training_batch import (
     _learn_policy,
     _load_policy,
     _policy_learning_count,
+    _policy_success_count,
     _rcon_password,
     _run_worker,
     EpisodeQueue,
@@ -407,6 +408,10 @@ def _parse(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--database", type=Path, default=Path("data/training/experience.db"))
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
+    parser.add_argument(
+        "--reinitialize-mining-features", action="store_true",
+        help="Explicitly start a V3 mining policy from a legacy checkpoint's hyperparameters.",
+    )
     parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
     parser.add_argument("--password-env", default="FACTORIO_TRAINING_RCON_PASSWORD")
     parser.add_argument("--rcon-secret-file", type=Path)
@@ -546,7 +551,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     holdout_hash = canonical_sha256([scenario["scenario_hash"] for scenario in holdout_scenarios])
     password = _rcon_password(args)
-    generation, policy = _load_policy(args.checkpoint)
+    generation, policy = _load_policy(
+        args.checkpoint, reinitialize_mining_features=args.reinitialize_mining_features,
+    )
     policy.exploration_rate = args.exploration_rate
     total_completed = total_failed = 0
     stage = cohort = 0
@@ -689,8 +696,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not cohort_results:
                     raise RuntimeError("policy cohort ended without terminal training evidence")
                 learning_count = _policy_learning_count(cohort_results)
+                success_count = _policy_success_count(cohort_results)
                 policy_advanced = False
-                promotion_reason = "cohort has no successful training evidence"
+                promotion_reason = "cohort has no safe policy-learning evidence"
                 candidate_evaluation = incumbent_evaluation = None
                 if learning_count:
                     candidate = _learn_policy(policy, cohort_results)
@@ -761,6 +769,8 @@ def main(argv: list[str] | None = None) -> int:
                     "policy_episode_target": args.episodes_per_policy,
                     "policy_terminal_episodes": len(cohort_results),
                     "policy_learning_episodes": learning_count,
+                    "policy_success_episodes": success_count,
+                    "policy_partial_learning_episodes": learning_count - success_count,
                     "policy_rejected_episodes": len(cohort_results) - learning_count,
                     "policy_advanced": policy_advanced,
                     "promotion_reason": promotion_reason,

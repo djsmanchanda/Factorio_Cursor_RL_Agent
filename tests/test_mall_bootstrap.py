@@ -508,7 +508,7 @@ def test_loan_cell_telemetry_names_missing_ingredient_pool_and_loans(
     assert "bill 2/184+221" in line
     assert "crafts 4/52" in line
     assert "missing iron-plate" in line
-    assert "pool 6/12 free" in line
+    assert "pool 2/8 free" in line
     assert "transport-belt:iron-gear-wheel@(42.5,38.5)" in line
     assert "splitter:transport-belt@(47.5,32.5)" in line
 

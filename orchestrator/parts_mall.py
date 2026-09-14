@@ -122,14 +122,22 @@ def wait_for_stock(
     report_seconds: float = 30.0, expansion_seconds: float = 60.0,
     on_stalled: Callable[[], bool] | None = None,
     stock_reader: Callable[[], Mapping[str, int]] | None = None,
+    max_stalled_attempts: int | None = 1,
 ) -> bool:
-    """Wait for stock; expand only after a full window with no progress."""
+    """Wait for stock; yield after bounded evidence-backed remediation.
+
+    A successful upstream action is work, not proof that this target should
+    keep the controller.  Returning after a bounded attempt lets another
+    independent material bill run while production catches up; the next survey
+    resumes this demand from its existing reservation.
+    """
     read_stock = stock_reader or (
         lambda: live_base.available_items(client, surface, force)
     )
     last_report = 0.0
     next_expansion = time.monotonic() + expansion_seconds
     best_have = -1
+    stalled_attempts = 0
     while True:
         have = read_stock().get(item, 0)
         if have >= target:
@@ -146,6 +154,16 @@ def wait_for_stock(
                 "requesting the next upstream expansion phase"
             )
             if not on_stalled():
+                return False
+            stalled_attempts += 1
+            if (
+                max_stalled_attempts is not None
+                and stalled_attempts >= max_stalled_attempts
+            ):
+                emit(
+                    f"  MALL YIELD: {item} remediation was submitted; "
+                    "re-surveying before another stock wait"
+                )
                 return False
             next_expansion = time.monotonic() + expansion_seconds
         if now - last_report >= report_seconds:

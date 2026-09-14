@@ -18,8 +18,11 @@ from training.alternating import AlternatingFamily, AlternatingPolicyScheduler
 from training.candidates import furnace_refining_candidates, mining_delivery_candidates
 from training.episode import run_episode
 from training.factorio_bridge import FactorioTrainingBridge
-from training.features import FURNACE_REFINING_FEATURES_V1, MINING_DELIVERY_FEATURES_V2
-from training.policies import DiagonalLinUCB, policy_snapshot, transition_can_train_policy
+from training.features import FURNACE_REFINING_FEATURES_V1, MINING_DELIVERY_FEATURES_V3
+from training.policies import (
+    DiagonalLinUCB, policy_snapshot,
+    transition_can_train_policy, transition_can_update_policy,
+)
 from training.scenarios.furnace_refining import generate_furnace_refining_curriculum
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import load_worker_specs
@@ -35,7 +38,7 @@ def _policy(path: Path, family: str):
     if path.is_file():
         payload = json.loads(path.read_text(encoding="utf-8"))
         return int(payload.get("generation", 0)), DiagonalLinUCB.from_dict(payload["policy"])
-    features = FURNACE_REFINING_FEATURES_V1 if family == "furnace_refining" else MINING_DELIVERY_FEATURES_V2
+    features = FURNACE_REFINING_FEATURES_V1 if family == "furnace_refining" else MINING_DELIVERY_FEATURES_V3
     return 0, DiagonalLinUCB(f"policy-{family}-g0000-initial", features)
 
 
@@ -149,7 +152,7 @@ def main(argv=None):
             if transition is not None:
                 store.save_transition(transition)
                 store.finish_episode(job.episode_id, transition["result"]["status"], transition["started_tick"], transition["ended_tick"], {"reward": transition["reward"]["total"], "family": job.family})
-                if transition_can_train_policy(transition):
+                if transition_can_update_policy(transition):
                     policies[job.family].update(transition["observation"], next(c for c in transition["candidates"] if c["action_id"] == transition["chosen_action_id"]), transition["reward"]["total"])
                     learning_counts[job.family] += 1
             else:

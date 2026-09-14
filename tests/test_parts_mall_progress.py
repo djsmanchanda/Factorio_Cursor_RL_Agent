@@ -66,6 +66,23 @@ def test_wait_for_stock_expands_after_a_full_window_without_progress(monkeypatch
     assert expansions == [60.0]
 
 
+def test_wait_for_stock_yields_after_one_successful_remediation(monkeypatch) -> None:
+    clock = _Clock()
+    expansions: list[float] = []
+    monkeypatch.setattr(parts_mall.time, "monotonic", clock.monotonic)
+    monkeypatch.setattr(parts_mall.time, "sleep", clock.sleep)
+    monkeypatch.setattr(parts_mall.live_base, "available_items", lambda *_a: {"inserter": 0})
+
+    ready = parts_mall.wait_for_stock(
+        object(), "nauvis", "player", "inserter", 1, lambda _message: None,
+        poll_seconds=30.0, report_seconds=999.0, expansion_seconds=60.0,
+        on_stalled=lambda: expansions.append(clock.now) is None or True,
+    )
+
+    assert ready is False
+    assert expansions == [60.0]
+
+
 def test_wait_for_stock_can_require_transferable_stock(monkeypatch) -> None:
     reads = iter(({"iron-stick": 12}, {"iron-stick": 0}, {"iron-stick": 4}))
     monkeypatch.setattr(parts_mall.time, "sleep", lambda _seconds: None)

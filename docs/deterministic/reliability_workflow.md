@@ -83,8 +83,12 @@ The console reads bounded excerpts; agents can inspect full local files.
 5. On failure, archives the manifest/report/log/packet, optionally captures the
    failed world, then asks the fixer for one evidence-backed correction.
 6. A separate read-only reviewer assesses the change. The primary controller
-   runs the non-slow/non-exhaustive suite, reruns changed regression files without
-   a cost filter, and checks the diff before committing only declared files.
+   always runs the mandatory cross-component gate declared in
+   `MANDATORY_CAMPAIGN_TESTS`, then reruns changed regression files without a
+   cost filter and checks the diff before committing only declared files.
+   Production-only changes still run the mandatory gate. Verification records
+   exact commands and return codes; an empty changed-test list cannot count as
+   pytest success.
    Full slow/exhaustive sweeps remain milestone/manual verification.
    Pre-existing dirty files or staged work require review; they are not swept
    into an automatic commit. Failed verification or review parks the campaign
@@ -141,6 +145,22 @@ sidecars and matching episode/mod provenance; do not feed the saved world alone
 through ordinary fresh acceptance. Such replay is diagnostic, never one of the
 three clean-start acceptance runs. Live capture/replay is not yet validated by
 this implementation's offline tests.
+
+Extraction also writes `REPLAY.json`, a diagnostic fixture contract containing
+the world hash, episode/profile/source identity, deployed mod hashes and all
+captured durable sidecars. Nested material, district and bootstrap-work stores
+are included; top-level inventory snapshots are not substitutes for them.
+Use `python -m tools.episode_checkpoint --replay <fixture>` to verify it.
+Use `--baseline <fixture> --candidate <fixture> --destination <new-directory>`
+to prepare paired inputs. Both sides must have identical world, provenance and
+durable starting state; the episode sidecar may differ only in code/mod identity. Pair preparation does not launch Factorio or certify
+an outcome; distinct candidate code must be selected by the diagnostic runner.
+Fixtures and pairs explicitly set `acceptance_eligible: false`.
+
+Keep fresh-start acceptance for every release candidate. A checkpoint test is
+an earlier diagnostic gate, never proof that preceding bootstrap stages still
+work. Develop later stages from separately preserved milestone worlds, then
+exercise the same candidate from the pinned original source before promotion.
 
 ## Resume, budget and outputs
 

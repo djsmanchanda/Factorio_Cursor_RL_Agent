@@ -4,7 +4,7 @@
 import pytest
 
 from training.candidates import mining_delivery_candidates
-from training.episode import EpisodeCapacityInterrupted, _stage_candidates, run_episode
+from training.episode import EpisodeCapacityInterrupted, _observation, _stage_candidates, run_episode
 from training.policies import DeterministicBaseline
 from training.scenarios.mining_delivery import (
     generate_mining_delivery_scenario,
@@ -31,6 +31,17 @@ def test_staged_catalog_expands_to_thirty_then_two_thirty_per_second_lines():
     assert all(candidate["features"]["sink_count"] == 1 for candidate in stage_two)
     assert all(candidate["features"]["drill_count"] == 120 for candidate in stage_three)
     assert all(candidate["features"]["sink_count"] == 2 for candidate in stage_three)
+
+
+def test_missing_capacity_metrics_remain_unknown_in_the_observation() -> None:
+    observation = _observation({
+        "metrics": {"rate_per_tick": 0.0, "sustained_ticks": 0, "resource_remaining": 10},
+        "objective": {"target_rate_per_tick": 1 / 60},
+    })
+
+    assert "placed_mining_drills" not in observation
+    assert "mining_drill_blocked_ticks" not in observation
+    assert observation["capacity_audit_available"] == 0.0
 
 class FakeBridge:
     def __init__(self, fail_execution: bool = False, failed_placements: int = 0):

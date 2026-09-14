@@ -964,10 +964,10 @@ def nearest_powered_pole(
         "if ok and id then local kw=0;"
         "if e.type=='electric-energy-interface' then "
         "local okw,w=pcall(function() return e.power_production end);"
-        "if okw and type(w)=='number' and w==w and w~=math.huge and w~=-math.huge then kw=w/1000 end "
+        "if okw and type(w)=='number' and w==w and w~=math.huge and w~=-math.huge then kw=w*60/1000 end "
         "end;"
         "if kw==0 then local okp,p=pcall(function() return e.prototype.get_max_energy_production() end);"
-        "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge then kw=p end end;"
+        "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge then kw=p*60/1000 end end;"
         "generation[id]=(generation[id] or 0)+kw end end;"
         "local selected,best_kw=nil,-1;"
         "for id,kw in pairs(generation) do "
@@ -1601,11 +1601,6 @@ def roboport_ghost_positions(
     return [tuple(float(v) for v in record.split()) for record in raw.split(";")]
 
 
-_GENERATOR_TYPES = (
-    "'generator','electric-energy-interface','fusion-generator','burner-generator'"
-)
-
-
 class TelemetryError(RuntimeError):
     """A live survey returned an unusable numeric value."""
 
@@ -1675,17 +1670,12 @@ def _network_generation_kw_impl(
     """Combined generation capacity (kW) of the electric network nearest
     `near`, or None when no electric pole defines that network.
 
-    Generators only: accumulators store rather than generate, so they are
-    excluded -- a charged battery bank must not license a placement burst the
-    grid cannot sustain. Prototype maxima are the nameplate quantity a charging
-    burst competes against (verified live on 2.1.14:
-    LuaEntityPrototype.get_max_energy_production() returns kilowatts), EXCEPT
-    for script-configured sources: an electric-energy-interface's real output
-    lives on the entity (power_production, watts). Live evidence 2026-08-22:
-    one EEI reported prototype 8_333_333_333 kW vs entity 166.7 kW, which
-    silently gated off every solar top-up and browned out the whole base.
+    Factorio 2.1 energy rates are joules per tick for both entity EEI
+    power_production and prototype get_max_energy_production(). Multiply by
+    60/1000 for kW. A 10 MW EEI reports 166666.67 J/tick, a standard solar panel
+    1000 J/tick, and an engine 15000 J/tick. Accumulators are storage only.
     """
-    types = _GENERATOR_TYPES + (",'solar-panel'" if include_solar else "")
+    types = _GENERATOR_TYPES if include_solar else _GENERATOR_TYPES.replace(",'solar-panel'", "")
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
@@ -1703,13 +1693,13 @@ def _network_generation_kw_impl(
         "if g.type=='electric-energy-interface' then "
         "local okw,w=pcall(function() return g.power_production end);"
         "if okw and type(w)=='number' and w==w and w~=math.huge and w~=-math.huge "
-        "then kw=w/1000 elseif okw and type(w)=='number' then "
+        "then kw=w*60/1000 elseif okw and type(w)=='number' then "
         "rcon.print('INVALID|'..g.type..'|'..g.name..'|'..g.position.x..','"
         "..g.position.y..'|power_production|'..tostring(w)) return end end;"
         "if kw==nil then "
         "local okp,p=pcall(function() return g.prototype.get_max_energy_production() end);"
         "if okp and type(p)=='number' and p==p and p~=math.huge and p~=-math.huge "
-        "then kw=p elseif okp and type(p)=='number' then "
+        "then kw=p*60/1000 elseif okp and type(p)=='number' then "
         "rcon.print('INVALID|'..g.type..'|'..g.name..'|'..g.position.x..','"
         "..g.position.y..'|get_max_energy_production|'..tostring(p)) return end end;"
         "if kw==nil then rcon.print('INVALID|'..g.type..'|'..g.name..'|'"
@@ -1746,9 +1736,9 @@ def network_firm_generation_kw(
 ) -> float | None:
     """Generation capacity (kW) EXCLUDING solar panels on the nearest network.
 
-    Live evidence 2026-08-23: one modded solar panel reports a 1000 kW
+    Live evidence 2026-08-23: a standard solar panel reports 1000 J/tick (60 kW)
     nameplate while producing nothing after dusk -- with zero accumulators
-    the whole base still collapsed to its 166.7 kW interface every night.
+    the whole base still depends on its firm interface every night.
     Night-survivable capacity is FIRM capacity; licensing placement bursts
     against daylight nameplate browns out after sundown."""
     return _network_generation_kw_impl(

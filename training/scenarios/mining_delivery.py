@@ -40,10 +40,20 @@ def _opposed_sites(rng: random.Random) -> tuple[tuple[int, int], tuple[float, fl
     return (lateral, along), (-lateral + 0.5, -along + 0.5)
 
 
-def _patch_bounds(center: tuple[int, int], rng: random.Random) -> dict[str, int]:
-    width = rng.choice(_PATCH_SIZES)
+def _patch_bounds(
+    center: tuple[int, int], rng: random.Random, *, required_drills: int,
+) -> dict[str, int]:
+    """Size a patch for both its sampled geometry and advertised drill demand."""
+    # Each collection column holds a north/south pair of 3x3 drills. Reserve
+    # one additional drill so the two policy alternatives are both feasible.
+    columns = math.ceil((required_drills + 1) / 2)
+    max_width = _WORLD_BOUNDS["x_max_exclusive"] - _WORLD_BOUNDS["x_min"] - 2
+    width = min(max_width, max(rng.choice(_PATCH_SIZES), columns * 3))
     height = rng.choice(_PATCH_SIZES)
-    x1 = center[0] - width // 2
+    x1 = min(
+        _WORLD_BOUNDS["x_max_exclusive"] - width - 1,
+        max(_WORLD_BOUNDS["x_min"] + 1, center[0] - width // 2),
+    )
     y1 = center[1] - height // 2
     return {"x1": x1, "y1": y1, "x2": x1 + width - 1, "y2": y1 + height - 1}
 
@@ -93,15 +103,34 @@ def _construction_budget(
     patch_center = ((patch["x1"] + patch["x2"]) / 2, (patch["y1"] + patch["y2"]) / 2)
     source_span = math.dist(source, patch_center)
     # The source and remote delivery inserter both need continuous pole coverage.
-    poles = math.ceil((source_span + route_span) / _POLE_WIRE_STEP) + 10
-    return {
+    patch_width = patch["x2"] - patch["x1"] + 1
+    # The compiled network branches along the full collection row as well as
+    # crossing the source-to-sink span. Reserve that branch explicitly rather
+    # than advertising a scenario whose legal candidate cannot be funded.
+    poles = (
+        math.ceil((source_span + route_span + patch_width) / _POLE_WIRE_STEP)
+        + math.ceil(patch_width / 6.0) + 15
+    )
+    budget = {
         "electric-mining-drill": drills,
         "fast-inserter": 4,
         "medium-electric-pole": poles,
         "splitter": 2,
-        "transport-belt": route_span + 32,
+        # Reserve a bounded detour allowance in addition to the collection row
+        # and centre-to-sink span; protected fixtures can displace the bridge.
+        "transport-belt": route_span + patch_width + 64,
         "underground-belt": max(4, route_span // 16 * 2),
     }
+    # One yellow belt cannot honestly predict a 30/s target. These items are
+    # provided only in the explicitly high-throughput profile; 60/s remains a
+    # two-sink staged objective because a single express delivery lane is 45/s.
+    if target_rate_per_tick > 15.0 / 60.0:
+        budget.update({
+            "express-transport-belt": route_span + patch_width + 64,
+            "express-underground-belt": max(4, route_span // 10 * 2),
+            "express-loader": 1,
+        })
+    return budget
 
 
 def generate_mining_delivery_scenario(
@@ -119,7 +148,8 @@ def generate_mining_delivery_scenario(
         raise ValueError(f"target rate must be one of {_MAX_TARGET_RATES_PER_SECOND}")
     target_rate_per_tick = target_rate_per_second / 60.0
     patch_center, destination = _opposed_sites(rng)
-    patch = _patch_bounds(patch_center, rng)
+    required_drills = math.ceil(target_rate_per_tick / _DRILL_RATE_PER_TICK)
+    patch = _patch_bounds(patch_center, rng, required_drills=required_drills)
     power_source = _power_source_position(rng, patch, destination)
     route_span = _route_span(patch, destination)
     budget = _construction_budget(target_rate_per_tick, route_span, power_source, patch)

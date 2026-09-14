@@ -68,9 +68,7 @@ def _drill_positions(
             raise ValueError("resource patch is too short for independent mining corridors")
         stride = patch_height / corridor_count
         belt_y = math.floor(patch["y1"] + stride * (corridor_index + 0.5)) + 0.5
-    staged = "staged-demand" in scenario.get("curriculum", {}).get("tags", [])
-    max_positions = (max(1, math.floor((patch["x2"] - patch["x1"] + 1) / 3))
-                     if staged else 4)
+    max_positions = max(1, math.floor((patch["x2"] - patch["x1"] + 1) / 3))
     xs = [patch["x1"] + 1.5 + 3 * index for index in range(max_positions)]
     xs = [x for x in xs if x + 1.5 <= patch["x2"] + 1]
     # Grow each collection line as opposing drill pairs.  Keeping the two rows
@@ -81,7 +79,10 @@ def _drill_positions(
         for x in xs
         for site in ((x, belt_y - 2, "south"), (x, belt_y + 2, "north"))
     ]
-    count = min(count, len(sites))
+    if count > len(sites):
+        raise ValueError(
+            f"unsupported mining demand: patch provides {len(sites)} drill sites, requested {count}",
+        )
     return [_placement("electric-mining-drill", site[:2], site[2]) for site in sites[:count]], belt_y, xs
 
 def _sink_entry(source: tuple[float, float], sink: tuple[float, float]) -> str:
@@ -163,9 +164,9 @@ def _belt_actions(
         and (sink_fixture_id is None or fixture["id"] == sink_fixture_id)
     )
     sink = tuple(float(value) for value in sink_fixture["position"])
-    staged = "staged-demand" in scenario.get("curriculum", {}).get("tags", [])
-    belt_type = "express-transport-belt" if staged else "transport-belt"
-    transfer_type = "express-loader" if staged else "fast-inserter"
+    express = "express-transport-belt" in scenario["construction_budget"]
+    belt_type = "express-transport-belt" if express else "transport-belt"
+    transfer_type = "express-loader" if express else "fast-inserter"
     # Keep the first delivery turn outside the final drill's 3x3 footprint.
     source_x = max(xs) + 2 if sink[0] >= sum(xs) / len(xs) else min(xs) - 2
     source = (source_x, belt_y)
@@ -383,8 +384,11 @@ def _candidate(
         "action_id": f"mining-direct-v{variant}-{digest[7:19]}",
         "plan_hash": digest,
         "features": {
-            "predicted_completion": 1.0,
+            "predicted_completion": float(
+                drill_count * _DRILL_RATE_PER_TICK >= target_rate_per_tick - 1e-12,
+            ),
             "predicted_rate_per_tick": drill_count * _DRILL_RATE_PER_TICK,
+            "capacity_margin_per_tick": drill_count * _DRILL_RATE_PER_TICK - target_rate_per_tick,
             "drill_count": drill_count,
             "sink_count": len(sink_fixture_ids),
             "route_tiles": route_tiles,
@@ -435,26 +439,37 @@ def mining_delivery_candidates(
 
     budget = int(scenario["construction_budget"]["electric-mining-drill"])
     patch = scenario["resource_patch"]["bounds"]
-    staged = "staged-demand" in scenario.get("curriculum", {}).get("tags", [])
     patch_positions = max(1, math.floor((patch["x2"] - patch["x1"] + 1) / 3))
-    available_per_corridor = patch_positions * 2 if staged else 8
+    available_per_corridor = patch_positions * 2
     per_sink_target = target / len(resolved_sink_ids)
+    if per_sink_target > 45.0 / 60.0:
+        raise ValueError(
+            "unsupported mining demand: one delivery sink exceeds the 45/s express-belt capacity; "
+            "use a multi-sink staged scenario",
+        )
+    if per_sink_target > 15.0 / 60.0 and "express-transport-belt" not in scenario["construction_budget"]:
+        raise ValueError(
+            "unsupported mining demand: target requires the express-belt construction profile",
+        )
     minimum_per_sink = max(1, math.ceil(per_sink_target / _DRILL_RATE_PER_TICK))
     if minimum_per_sink * len(resolved_sink_ids) > budget:
-        raise ValueError("staged sink demand exceeds the mining drill budget")
+        raise ValueError("unsupported mining demand: sink demand exceeds the mining drill budget")
     if len(resolved_sink_ids) > 1:
         if minimum_per_sink > available_per_corridor:
-            raise ValueError("staged sink demand exceeds one mining corridor")
+            raise ValueError("unsupported mining demand: sink demand exceeds one mining corridor")
         catalogs = (
             tuple(minimum_per_sink for _ in resolved_sink_ids),
             tuple(minimum_per_sink for _ in resolved_sink_ids),
         )
     else:
         available = min(budget, available_per_corridor)
-        lower = min(minimum_per_sink, available)
+        if minimum_per_sink > available:
+            raise ValueError(
+                "unsupported mining demand: target needs "
+                f"{minimum_per_sink} drills but only {available} are feasible from patch and budget",
+            )
+        lower = minimum_per_sink
         upper = min(available, lower + 1)
-        if upper == lower:
-            lower = max(1, upper - 1)
         catalogs = ((lower,), (upper,))
     candidates = [
         _candidate(scenario, variant, counts, target, resolved_sink_ids)

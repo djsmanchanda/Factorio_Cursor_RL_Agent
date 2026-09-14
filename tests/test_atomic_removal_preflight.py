@@ -1,5 +1,5 @@
 # Path: tests/test_atomic_removal_preflight.py
-# Purpose: Exercise atomic remove-then-place preflight against a stub Factorio surface.
+# Purpose: Exercise sandbox atomic remove-then-place behavior; player construction is tested separately as ghosts only.
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ prototypes.entity["rectangular-machine"].collision_box = {
   right_bottom = { x = 1.4, y = 0.4 },
 }
 
-local force = { name = "player" }
+local force = { name = "planner" }
 local entities = {}
 
 local function in_area(entity, area)
@@ -199,7 +199,7 @@ def _run(
         {f'add_entity("stone-furnace", 0.25, 0)' if foreign else ''}
         payload = {{
           authorization = {{ approved_actions = {{ "remove_entities", "place_core_infrastructure" }} }},
-          build_plan = {{ surface = "nauvis", force = "player", atomic = true, phases = {{
+          build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
             {{ name = "replace", actions = {{
               {{ action_type = "remove_entity", entity = "{remove_name}", position = {{ x = {remove_x}, y = 0 }} }},
               {{ action_type = "place_entity", entity = "fast-transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
@@ -240,7 +240,7 @@ def test_atomic_replacement_keeps_unrelated_overlap_blocking(tmp_path: Path) -> 
         foreign=True,
         assertions="""
           assert(captured_report.ok == false)
-          assert(captured_report.error == "1 placement(s) failed")
+          assert(captured_report.error == "atomic_footprint_blocked")
           assert(#mutation_log == 1)
           assert(mutation_log[1] == "preflight:fast-transport-belt")
         """,
@@ -259,7 +259,7 @@ def test_execution_removes_only_the_exact_matched_entity(tmp_path: Path) -> None
       add_entity("transport-belt", 0.55, 0)
       payload = {{
         authorization = {{ approved_actions = {{ "remove_entities", "place_core_infrastructure" }} }},
-        build_plan = {{ surface = "nauvis", force = "player", atomic = true, phases = {{
+        build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
           {{ name = "replace", actions = {{
             {{ action_type = "remove_entity", entity = "transport-belt", position = {{ x = 0, y = 0 }} }},
             {{ action_type = "place_entity", entity = "fast-transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
@@ -281,7 +281,7 @@ def test_malformed_atomic_removal_fails_before_any_mutation(tmp_path: Path) -> N
       add_entity("transport-belt", 0, 0)
       payload = {{
         authorization = {{ approved_actions = {{ "remove_entities", "place_core_infrastructure" }} }},
-        build_plan = {{ surface = "nauvis", force = "player", atomic = true, phases = {{
+        build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
           {{ name = "replace", actions = {{
             {{ action_type = "remove_entity", entity = "transport-belt", position = {{ y = 0 }} }},
             {{ action_type = "place_entity", entity = "fast-transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
@@ -304,7 +304,7 @@ def test_overlapping_atomic_placements_fail_before_partial_execution(tmp_path: P
       dofile("{EXECUTOR.as_posix()}")
       payload = {{
         authorization = {{ approved_actions = {{ "place_core_infrastructure" }} }},
-        build_plan = {{ surface = "nauvis", force = "player", atomic = true, phases = {{
+        build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
           {{ name = "overlap", actions = {{
             {{ action_type = "place_entity", entity = "transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
             {{ action_type = "place_entity", entity = "fast-transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
@@ -331,7 +331,7 @@ def test_factorio_2_east_rotates_rectangular_atomic_footprints(tmp_path: Path) -
       dofile("{EXECUTOR.as_posix()}")
       payload = {{
         authorization = {{ approved_actions = {{ "place_core_infrastructure" }} }},
-        build_plan = {{ surface = "nauvis", force = "player", atomic = true, phases = {{
+        build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
           {{ name = "overlap", actions = {{
             {{ action_type = "place_entity", entity = "rectangular-machine", position = {{ x = 0, y = 0 }}, direction = "east" }},
             {{ action_type = "place_entity", entity = "rectangular-machine", position = {{ x = 0, y = 2 }}, direction = "east" }},
@@ -386,7 +386,7 @@ def test_flying_robot_does_not_block_ghost_placement(tmp_path: Path) -> None:
         entities[#entities + 1] = robot
         payload = {{
           authorization = {{ approved_actions = {{ "place_core_infrastructure" }} }},
-          build_plan = {{ surface = "nauvis", force = "player", phases = {{
+          build_plan = {{ surface = "planner-sandbox", force = "planner", phases = {{
             {{ name = "p", actions = {{
               {{ action_type = "place_entity", entity = "transport-belt",
                  position = {{ x = 8, y = 0 }}, direction = "north" }},

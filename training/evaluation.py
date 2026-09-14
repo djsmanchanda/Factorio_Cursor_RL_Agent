@@ -104,6 +104,8 @@ def promotion_decision(
         return False, "candidate has insufficient holdout episodes"
     if candidate.fitness.safety_violations:
         return False, "candidate has safety violations"
+    if candidate.fitness.completion_rate <= 0:
+        return False, "candidate has no completed held-out objective"
     if prior_family_regressions:
         return False, "candidate regresses an earlier curriculum family"
     if incumbent is not None and not behaviorally_distinct:

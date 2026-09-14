@@ -110,6 +110,47 @@ MINING_DELIVERY_FEATURES_V2 = FeatureRegistry(
     ),
 )
 
+# Fresh checkpoints use measured capacity and bottleneck facts available at
+# every decision boundary. V1/V2 remain immutable replay contracts;
+# DiagonalLinUCB filters these fields for an older registry.
+MINING_DELIVERY_FEATURES_V3 = FeatureRegistry(
+    version="mining-efficiency-v2",
+    names=(
+        "bias",
+        "observation.delivered_rate_per_tick",
+        "observation.target_rate_per_tick",
+        "observation.sustained_ticks",
+        "observation.resource_remaining",
+        "observation.capacity_audit_available",
+        "observation.placed_mining_drills",
+        "observation.productive_mining_drills",
+        "observation.productive_mining_drill_ratio",
+        "observation.mining_drill_capacity_ticks",
+        "observation.mining_drill_working_ticks",
+        "observation.mining_drill_blocked_ticks",
+        "observation.mining_drill_idle_ticks",
+        "candidate.predicted_completion",
+        "candidate.predicted_rate_per_tick",
+        "candidate.capacity_margin_per_tick",
+        "candidate.drill_count",
+        "candidate.collection_belt_tiles",
+        "candidate.actual_delivery_route_tiles",
+        "candidate.shortest_delivery_route_tiles",
+        "candidate.route_excess_tiles",
+        "candidate.route_efficiency",
+        "candidate.occupied_land_tiles",
+        "candidate.turn_count",
+        "candidate.pole_count",
+        "candidate.material_cost",
+    ),
+    scales=(
+        1.0, 0.05, 0.05, 1_800.0, 100_000_000.0, 1.0,
+        120.0, 120.0, 1.0, 21_600.0, 21_600.0, 21_600.0, 21_600.0,
+        1.0, 1.0, 1.0, 120.0,
+        256.0, 512.0, 512.0, 256.0, 1.0, 2_048.0, 16.0, 128.0, 8_192.0,
+    ),
+)
+
 FURNACE_REFINING_FEATURES_V1 = FeatureRegistry(
     version="furnace-efficiency-v1",
     names=(

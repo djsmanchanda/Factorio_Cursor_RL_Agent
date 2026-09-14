@@ -11,10 +11,13 @@ from tools.run_training_batch import (
     _load_policy,
     _parse,
     _policy_learning_count,
+    _policy_success_count,
     _rcon_password,
     main,
 )
-from training.features import MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2
+from training.features import (
+    MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2, MINING_DELIVERY_FEATURES_V3,
+)
 from training.policies import DiagonalLinUCB
 
 
@@ -64,7 +67,7 @@ def test_completed_transitions_train_a_new_generation(tmp_path):
     assert restored.a_diag == learned.a_diag
 
 
-def test_attempts_below_target_are_evidence_but_do_not_train_the_next_policy():
+def test_safe_attempts_below_target_train_a_candidate_without_counting_as_success():
     base = DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V1)
     candidate = {
         "action_id": "a", "plan_hash": "sha256:" + "a" * 64,
@@ -89,9 +92,10 @@ def test_attempts_below_target_are_evidence_but_do_not_train_the_next_policy():
 
     learned = _learn_policy(base, results)
 
-    assert _policy_learning_count(results) == 0
-    assert learned.a_diag == base.a_diag
-    assert learned.b == base.b
+    assert _policy_learning_count(results) == 1
+    assert _policy_success_count(results) == 0
+    assert learned.a_diag != base.a_diag
+    assert learned.b != base.b
 
 
 def test_completed_staged_trajectory_credits_each_action_without_overweighting_episode():
@@ -142,4 +146,24 @@ def test_fresh_checkpoint_uses_mining_efficiency_features(tmp_path) -> None:
     generation, policy = _load_policy(tmp_path / "missing-policy.json")
 
     assert generation == 0
-    assert policy.registry == MINING_DELIVERY_FEATURES_V2
+    assert policy.registry == MINING_DELIVERY_FEATURES_V3
+
+
+def test_legacy_checkpoint_requires_an_explicit_v3_feature_reinitialization(tmp_path) -> None:
+    legacy = DiagonalLinUCB("policy-g0002-legacy", MINING_DELIVERY_FEATURES_V2, alpha=0.7)
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps({"generation": 2, "policy": legacy.to_dict()}), encoding="utf-8")
+
+    generation, preserved = _load_policy(path)
+    assert generation == 2
+    assert preserved.registry == MINING_DELIVERY_FEATURES_V2
+
+    generation, refreshed = _load_policy(path, reinitialize_mining_features=True)
+    assert generation == 2
+    assert refreshed.registry == MINING_DELIVERY_FEATURES_V3
+    assert refreshed.alpha == legacy.alpha
+    _checkpoint(path, 3, refreshed)
+    checkpoint = json.loads(path.read_text(encoding="utf-8"))
+    assert checkpoint["feature_registry_migration"] == {
+        "from": "mining-efficiency-v1", "to": "mining-efficiency-v2",
+    }

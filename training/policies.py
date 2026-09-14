@@ -19,9 +19,32 @@ def policy_snapshot(policy) -> dict:
 
 
 def transition_can_train_policy(transition: Mapping) -> bool:
-    """Return whether an attempt sustained its objective and may shape a successor."""
+    """Return whether an attempt is complete enough for promotion evidence.
+
+    This deliberately remains stricter than ``transition_can_update_policy``:
+    a policy may learn that a safe layout made partial progress, but only a
+    sustained objective can support a promoted checkpoint.
+    """
     result = transition.get("result") or {}
     return result.get("status") == "completed" and result.get("failure_kind") == "none"
+
+
+def transition_can_update_policy(transition: Mapping) -> bool:
+    """Return whether a measured outcome is safe policy-learning evidence.
+
+    Strategy failures and objective timeouts have executed a validated plan in
+    an isolated episode and retain useful reward credit. Contract, fixture,
+    capability, execution, identity, budget, power, and safety failures do
+    not describe a policy choice reliably, so they must never train a policy.
+    """
+    result = transition.get("result") or {}
+    status = result.get("status")
+    failure_kind = result.get("failure_kind")
+    return (
+        (status == "completed" and failure_kind == "none")
+        or (status == "failed" and failure_kind == "strategy")
+        or (status == "timed_out" and failure_kind == "timeout")
+    )
 
 
 def _candidate_id(candidate: Mapping) -> str:

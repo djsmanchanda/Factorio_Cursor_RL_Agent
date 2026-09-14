@@ -7,6 +7,17 @@ from pathlib import Path
 from tools import opencode_campaign_orchestrator as campaign
 
 
+def review_config(root):
+    return campaign.Config(
+        state_root=root, source_save=root / 'source.zip', observations=root / 'notes.md',
+        state_file=root / 'state.json', opencode_log_dir=root, technology='mining-productivity-4',
+        interval_seconds=120, post_run_wait_seconds=0, max_cycles=1, max_runtime_seconds=60,
+        model='test', variant='high', opencode_bin='opencode', python=Path('python'),
+        campaign_manager=root / 'manager', dashboard_url='http://127.0.0.1',
+        dry_run=False, resume_active_run=False,
+    )
+
+
 def test_three_fresh_successes_skip_fixer_and_certify(tmp_path, monkeypatch):
     root = tmp_path / 'runtime'
     source = tmp_path / 'source.zip'
@@ -55,7 +66,6 @@ def test_json_assistant_decision_ignores_tool_template():
 
 
 def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
-    from types import SimpleNamespace
     monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
     (tmp_path / 'fix.py').write_text('value=1')
     commands = []
@@ -66,7 +76,7 @@ def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
     monkeypatch.setattr(campaign, '_readonly', lambda config: config)
     monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
-    cfg = SimpleNamespace(observations=tmp_path / 'notes.md', state_root=tmp_path, python=Path('python'), opencode_log_dir=tmp_path)
+    cfg = review_config(tmp_path)
     assert not campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: fix.py', set(), 1)
     assert not any(command[:2] == ['git','add'] for command in commands)
 
@@ -83,7 +93,6 @@ def test_expired_persisted_deadline_cannot_start_fresh(tmp_path, monkeypatch):
 
 
 def test_declared_regression_files_run_without_cost_marker_filter(tmp_path, monkeypatch):
-    from types import SimpleNamespace
     commands = []
     monkeypatch.setattr(campaign, '_readonly', lambda config: config)
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
@@ -92,8 +101,34 @@ def test_declared_regression_files_run_without_cost_marker_filter(tmp_path, monk
         commands.append(command)
         return subprocess.CompletedProcess(command, 0, '', '')
     monkeypatch.setattr(campaign, '_run', run)
-    cfg = SimpleNamespace(observations=tmp_path / 'notes.md', state_root=tmp_path, python=Path('python'), opencode_log_dir=tmp_path)
+    cfg = review_config(tmp_path)
     assert campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: tests/test_reliability_campaign.py', set(), 1)
     gates = [command for command in commands if 'pytest' in command]
     assert gates[0][-2:] == ['-m', 'not slow and not exhaustive']
     assert gates[1] == ['python', '-m', 'pytest', '-q', '--tb=short', 'tests/test_reliability_campaign.py']
+
+
+def test_undocumented_test_change_still_runs_mandatory_gate(tmp_path, monkeypatch):
+    import json
+
+    commands = []
+    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
+    monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
+
+    def run(command, **_):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, '', '')
+
+    monkeypatch.setattr(campaign, '_run', run)
+    cfg = review_config(tmp_path)
+    assert campaign._review_and_commit(
+        cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: fix.py', set(), 1,
+    )
+    gates = [command for command in commands if 'pytest' in command]
+    assert len(gates) == 1
+    assert all(str(campaign.REPO_ROOT / path) in gates[0]
+               for path in campaign.MANDATORY_CAMPAIGN_TESTS)
+    evidence = json.loads((tmp_path / 'verification-0001.log').read_text().splitlines()[0])
+    assert evidence['status'] == 'passed'
+    assert '0 supplemental test command(s) passed' in (tmp_path / 'notes.md').read_text()

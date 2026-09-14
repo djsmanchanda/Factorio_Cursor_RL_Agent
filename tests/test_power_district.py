@@ -243,9 +243,9 @@ def test_finite_interface_consumes_entity_value_not_prototype_maximum() -> None:
         client, "nauvis", "player", (3, -1),
     ) == pytest.approx(250)
     lua = client.commands[0]
-    assert "total=total+i/1000" in lua
-    assert "kw=u/1000" in lua
-    assert "kw=p/1000" in lua
+    assert "total=total+i*60/1000" in lua
+    assert "kw=u*60/1000" in lua
+    assert "kw=p*60/1000" in lua
     assert "get_max_energy_usage" in lua
 
 

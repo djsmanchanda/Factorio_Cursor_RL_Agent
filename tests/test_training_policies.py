@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 from training.features import (
-    MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2,
+    MINING_DELIVERY_FEATURES_V1, MINING_DELIVERY_FEATURES_V2, MINING_DELIVERY_FEATURES_V3,
     FeatureRegistry, policy_features,
 )
-from training.policies import DeterministicBaseline, DiagonalLinUCB
+from training.policies import (
+    DeterministicBaseline, DiagonalLinUCB,
+    transition_can_train_policy, transition_can_update_policy,
+)
 
 
 REGISTRY = FeatureRegistry(
@@ -79,6 +82,32 @@ def test_mining_efficiency_registry_exposes_route_quality() -> None:
         "candidate.shortest_delivery_route_tiles", "candidate.route_excess_tiles",
         "candidate.route_efficiency",
     } <= names
+
+
+def test_fresh_registry_exposes_measured_capacity_and_bottleneck_evidence() -> None:
+    names = set(MINING_DELIVERY_FEATURES_V3.names)
+    assert {
+        "observation.placed_mining_drills",
+        "observation.capacity_audit_available",
+        "observation.productive_mining_drill_ratio",
+        "observation.mining_drill_blocked_ticks",
+        "candidate.capacity_margin_per_tick",
+    } <= names
+
+
+def test_safe_partial_outcome_can_learn_but_cannot_support_promotion() -> None:
+    transition = {"result": {"status": "timed_out", "failure_kind": "timeout"}}
+    assert transition_can_update_policy(transition)
+    assert not transition_can_train_policy(transition)
+
+
+def test_infrastructure_and_hard_failures_never_become_policy_evidence() -> None:
+    for status, kind in (
+        ("failed", "safety"), ("failed", "identity"), ("failed", "budget"),
+        ("failed", "fixture"), ("failed", "capability"), ("failed", "execution"),
+        ("failed", "power_unconnected"),
+    ):
+        assert not transition_can_update_policy({"result": {"status": status, "failure_kind": kind}})
 
 
 def test_older_checkpoint_ignores_new_candidate_evidence() -> None:

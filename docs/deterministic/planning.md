@@ -351,17 +351,30 @@ These names describe intended responsibilities, not permission to build speculat
   mine/refinery packets share one reservation transaction even when their
   persisted project names differ; a retry may not count its child packet
   reservations as foreign stock and demand a duplicate bill.
-  Before plastic, the compact mall has a hard global ceiling of twelve
-  assemblers shared by anchors, permanent prerequisites, and rotating demand.
-  After plastic, the layout separates forty-eight permanent per-item halves
+  Before advanced-circuit production, the compact mall retains an eight-assembler
+  ceiling shared by anchors and rotating demand. This protects finite seed
+  logistics items while the complete future chemical/coverage bill is unknown.
+  Plastic alone cannot release the ceiling: chests, electric furnaces,
+  substations and roboports still require downstream production capabilities.
+  Each concrete construction project reserves its exact generated bill under
+  its own beneficiary identity; no speculative spare-cell reservation may hold
+  the last items needed to build that beneficiary. Existing named reservations
+  remain in force when advanced circuits release the slot ceiling.
+  After advanced circuits, there is no additional global slot ceiling; the
+  layout separates forty-eight permanent per-item halves
   from twelve demand-driven halves. A recipe's first cell is allocated from
   the permanent bank; temporary duplicate capacity may use only the demand
-  bank, and reclaims never take a permanent cell. Before plastic, core-mall
+  bank, and reclaims never take a permanent cell. Before advanced circuits, core-mall
   requests may not bypass the shared ceiling; when it is full, core promotion
   or a blocked ordinary demand reclaims an idle completed non-anchor temporary
-  slot and converts it in place. After plastic, any promotable solid item with
-  measured demand above 5/s leaves the mall for a complete six-assembler direct
-  line. This commonly applies to gears, copper cable, circuits, and belts. Its
+  slot and converts it in place. After advanced circuits, measured demand above
+  5/s can propose a complete six-assembler direct line. Optional promotion
+  compares a conservative electricity estimate from observed accessible supply
+  distances and live robot speed/payload/energy costs with added machine/inserter
+  demand. Cheap low-demand requester transport remains valid. Unknown energy
+  facts retain the existing capacity/backlog policy, and an observed capacity
+  shortfall cannot be vetoed by cheap transport. These are planning estimates,
+  not measured network savings. This applies to gears, cable, circuits and belts. Its
   inputs use line-to-line belt delivery with logistic requesters disabled. Once
   a circuit request exceeds the
   capacity of two circuit cells (by live rate or queued work beyond their
@@ -578,10 +591,17 @@ generation and measured connected accumulator storage with bounded peak demand,
 including night energy and recharge surplus; it stops when that metric converges.
 Every Nauvis template contains one accumulator per solar panel; the power bill
 and the placed geometry use the same 1:1 ratio.
-Until advanced-circuit production is proven, the controller performs required
-grid-connection repairs but postpones all generation construction. It does not
-size a solar district or queue solar panels or accumulators, preventing a small
-early power deficit from outranking the iron foundation and chemical ladder.
+Until advanced-circuit production is proven, solar/accumulator construction stays
+gated. The seed interface is retained. A bounded temporary steam unit may bridge
+a measured one-minute consumption deficit: one boiler, two engines, direct coal
+belt, water attachment and funded bot-built poles. Missing construction items
+return to mall scheduling. Its exact plan and episode identity persist before
+submission and reconcile after restart. It retires through bots only after
+solar/storage independently satisfy the night target. This new steam workflow
+has offline geometry/restart tests, not live construction acceptance.
+Factorio 2.1.17 energy rate values are J/tick: both prototype and interface rates
+convert to kW with `value * 60 / 1000`. The 10 MW seed reports 166666.67 J/tick.
+Steam uses measured consumption rather than all roboports' maximum charging draw.
 After advanced circuits are live, power expansion uses the full 1:1
 panel/accumulator template. If a measured deficit selects a unit whose materials
 are short, the controller queues that unit's exact materials through the normal

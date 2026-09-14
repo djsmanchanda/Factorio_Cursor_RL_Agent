@@ -35,6 +35,8 @@ ENTITY_FOOTPRINTS = {
 # Splitters are the only rectangular placement used by the deterministic
 # planners. Their long axis is perpendicular to belt flow.
 ENTITY_RECTANGULAR_FOOTPRINTS = {
+    "boiler": (3, 2),
+    "steam-engine": (3, 5),
     "splitter": (2, 1),
     "fast-splitter": (2, 1),
     "express-splitter": (2, 1),

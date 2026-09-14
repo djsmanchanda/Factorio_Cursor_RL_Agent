@@ -134,7 +134,7 @@ def test_expansion_gate_defers_and_queues_the_unlock_work(monkeypatch) -> None:
         lambda *_a, **_k: (True, (1.0, 1.0)),
     )
 
-    def fake_wait(_c, _s, _f, item, target, emit, *, on_stalled=None):
+    def fake_wait(_c, _s, _f, item, target, emit, *, on_stalled=None, stock_reader=None):
         assert on_stalled is not None
         on_stalled()
         return False
@@ -154,6 +154,10 @@ def test_expansion_gate_defers_and_queues_the_unlock_work(monkeypatch) -> None:
     monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 100)
     monkeypatch.setattr(
         builder, "expansion_target", lambda *_a: "iron-plate",
+    )
+    monkeypatch.setattr(
+        builder, "diagnose_replenishment", lambda *_a, **_k:
+        SimpleNamespace(target="iron-plate", kind="extraction", path=("electric-mining-drill", "iron-plate")),
     )
 
     mall_targets: dict[str, int] = {}

@@ -17,9 +17,11 @@ from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
     _stage_inserter_type,
+    diagnose_replenishment,
     expansion_target,
     may_consume_stocked_inputs,
 )
+from orchestrator.bootstrap_work import BootstrapWorkLedger
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
 from orchestrator.bootstrap_district import (
     BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
@@ -29,6 +31,7 @@ from orchestrator.bootstrap_profiles import bootstrap_profile
 from orchestrator.bootstrap_supply import (
     BootstrapSupplyError, ensure_bootstrap_supply,
 )
+from orchestrator.bootstrap_steam_power import maybe_ensure_bootstrap_steam_power
 from orchestrator.construction_stock import (
     BULK_CONSTRUCTION_ITEMS, FALLBACK_STACK_SIZE, MallReserve, mall_reserve,
 )
@@ -86,8 +89,13 @@ from orchestrator.intermediate_scaling import (
     is_promotable,
     live_intermediate_demand, promoted_companion_machine_count,
     PROMOTED_LINE_MIN_MACHINES,
+    output_per_machine,
     promoted_line_belt_type, promoted_line_machine_count,
 )
+from orchestrator.transport_energy import (
+    TransportEnergy, observe_transport_energy, prefer_direct_transport,
+)
+from orchestrator.extraction_route import live_route_preflight
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity
 from orchestrator.recoverable_retirement import (
@@ -243,10 +251,32 @@ _REFINERY_SITE_RESERVATIONS: dict[
 ] = {}
 _BOOTSTRAP_DISTRICT_LEDGER: BootstrapDistrictLedger | None = None
 _MATERIAL_RESERVATION_LEDGER: MaterialReservationLedger | None = None
+_BOOTSTRAP_WORK_LEDGER: BootstrapWorkLedger | None = None
 # The first steel furnace is an upstream construction capability: once its
 # finite, steel-cyclic pole stock is selected, other projects must carry any
 # shared-stock shortfall instead of taking those anchors back.
 _STEEL_STARTER_RESERVATION_PRIORITY = 100
+
+
+def _reconcile_bootstrap_work(
+    client: RconClient, surface: str, force: str,
+) -> None:
+    """Drop only dependencies whose child now has measured production."""
+    ledger = _BOOTSTRAP_WORK_LEDGER
+    if ledger is None:
+        return
+    candidates = {
+        child for children in ledger.edges.values() for child in children
+    }
+    completed = []
+    for item in candidates:
+        try:
+            if _has_producer(client, surface, force, item):
+                completed.append(item)
+        except Exception:
+            # Observation loss never releases restart-persistent work.
+            continue
+    ledger.reconcile(completed)
 
 
 def _bootstrap_lifecycle_stuck(
@@ -2896,6 +2926,11 @@ def build_mining_stage(
             defer_pending_owned_refinery=expand,
             unbounded_growth=post_plastic_iron,
             refinery_reserve_furnaces=refinery_reserve_furnaces,
+            route_preflight=(
+                live_route_preflight(client, surface, force, belt_type=belt_type)
+                if hasattr(client, "command") and owned_smelter_origin is None
+                else None
+            ),
             observe=emit,
             reserved_refinery_areas=tuple(
                 area for (reserved_surface, reserved_force, reserved_recipe), area
@@ -3525,6 +3560,23 @@ def _top_up_solar_generation(
             )
             if primary is not None:
                 capacity_near = primary[0]
+    # The seed grid can carry the opening load.  Steam is only a measured
+    # bridge when that ceases to be true, and this same call retires an owned
+    # bridge once solar plus storage has independently proved adequate.
+    try:
+        if maybe_ensure_bootstrap_steam_power(
+            client, bridge, surface, force, capacity_near, emit,
+        ):
+            return True
+    except MaterialShortage as shortage:
+        if mall_targets is None:
+            raise
+        add_demands(mall_targets, shortage)
+        emit(f"BOOTSTRAP STEAM SUPPLY WAIT: {shortage}; queued for normal mall production")
+        return False
+    except ProductionPrerequisiteDeferred as deferred:
+        emit(f"BOOTSTRAP STEAM CONSTRUCTION WAIT: {deferred}; yielding to production")
+        return False
     if not _power_generation_capability_started(client, surface, force):
         emit(
             "POWER DISTRICT DEFERRED: generation construction waits until "
@@ -4681,6 +4733,51 @@ def _plan_line(
         and (existing.machine_count if existing else 0) < PROMOTED_LINE_MIN_MACHINES
     ):
         promoted_count = PROMOTED_LINE_MIN_MACHINES
+    # Above the bootstrap threshold a requester-fed mall is a legitimate
+    # low-volume transport choice.  For an optional rate-triggered promotion,
+    # compare its observed robot route with the conservative added-line draw.
+    # Capacity shortfall remains mandatory and unknown telemetry preserves the
+    # established backlog/rate decision.
+    if (
+        allow_promotion
+        and _independent_mall_ready(client, surface, force)
+        and existing is not None
+        and getattr(existing, "output_position", None) is not None
+        and promoted_count is not None
+        and promoted_count >= existing.machine_count
+        and is_promotable(item)
+    ):
+        existing_capacity = output_per_machine(item, spec["machine"]) * existing.machine_count
+        ingredient_rates = {
+            ingredient: demand * amount / max(1, spec.get("product_amount", 1))
+            for ingredient, amount in zip(
+                spec["ingredients"], spec["amounts"], strict=True,
+            )
+        }
+        evidence = observe_transport_energy(
+            client, surface, force, machine=spec["machine"],
+            destination=existing.output_position, ingredient_rates=ingredient_rates,
+            added_machines=max(0, promoted_count - existing.machine_count),
+            proposed_machines=promoted_count,
+        )
+        direct = prefer_direct_transport(
+            evidence, demand=demand, existing_capacity=existing_capacity,
+        )
+        if direct is False and demand <= existing_capacity:
+            emit(
+                f"  TRANSPORT ENERGY: retaining {item} requester flow; estimated "
+                f"robots={evidence.robot_watts:.0f}W <= added line={evidence.added_line_watts:.0f}W"
+            )
+            promoted_count = None
+        elif direct is True and evidence is not None:
+            rationale = (
+                "demand exceeds existing capacity"
+                if demand > existing_capacity else "estimated robot electricity exceeds added line draw"
+            )
+            emit(
+                f"  TRANSPORT ENERGY: {item} direct line is justified ({rationale}); estimated "
+                f"robots={evidence.robot_watts:.0f}W, added line={evidence.added_line_watts:.0f}W"
+            )
     # Production prep asks for a standing number of MALL cells and must be
     # allowed to finish. Promotion outranking it turned "copper-cable to 2
     # machines" into a 6-machine dedicated line on the second pass, which then
@@ -7025,6 +7122,15 @@ def _reserve_compact_mall_project(
         f"  MATERIAL PROJECT: {project_id} state={project.state} "
         f"bill=" + ",".join(f"{name}:{count}" for name, count in bill.items())
     )
+    emit(
+        "  MATERIAL RESERVATION: owner=" + project_id + "; "
+        + ", ".join(
+            f"{name} available={stock.get(name, 0)} "
+            f"reserved={getattr(project, 'reserved', {}).get(name, 0)} "
+            f"remaining={max(0, count - getattr(project, 'reserved', {}).get(name, 0))}"
+            for name, count in sorted(bill.items())
+        )
+    )
     if not shortage:
         emit(f"  MATERIAL PROJECT READY: {project_id} has its complete startup bill")
         return
@@ -8772,7 +8878,7 @@ _CAPPED_ASSEMBLER_WIP_CRAFTS = 2
 
 def _queued_downstream_input_commitment(
     client: RconClient, surface: str, force: str, ingredient: str,
-    mall_targets: dict[str, int],
+    mall_targets: dict[str, int], *, exclude_consumers: frozenset[str] = frozenset(),
 ) -> tuple[int, tuple[tuple[str, int], ...]]:
     """Recipe-derived ingredient draw from queued capped mall batches."""
     try:
@@ -8781,7 +8887,7 @@ def _queued_downstream_input_commitment(
         stock = {}
     commitments: list[tuple[str, int]] = []
     for consumer, target in mall_targets.items():
-        if consumer == ingredient or target < 1:
+        if consumer == ingredient or consumer in exclude_consumers or target < 1:
             continue
         spec = LINE_RECIPES.get(consumer)
         if spec is None or not spec.get("set_recipe", True):
@@ -8803,11 +8909,37 @@ def _queued_downstream_input_commitment(
     return sum(count for _consumer, count in commitments), tuple(commitments)
 
 
+def _ledger_belt_commitment(
+    ingredient: str, *, excluding_consumer: str,
+) -> tuple[int, frozenset[str]] | None:
+    """Return exact active belt bills, excluding the consumer being admitted."""
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return None
+    total = 0
+    submitted_targets: set[str] = set()
+    found = False
+    for project in ledger.projects.values():
+        if not ledger.project_is_active(project.project_id):
+            continue
+        required = int(project.required.get(ingredient, 0))
+        if required <= 0:
+            continue
+        found = True
+        if project.target_item == excluding_consumer:
+            continue
+        total += required
+        if project.target_item:
+            submitted_targets.add(project.target_item)
+    return (total, frozenset(submitted_targets)) if found else None
+
+
 def _belt_starved_consumer(
     client: RconClient, surface: str, force: str, item: str,
+    mall_targets: dict[str, int] | None = None,
 ) -> str | None:
     """Why this mall item must wait for the blueprint belt reserve, or None."""
-    shortfall = _belt_reserve_shortfall(client, surface, force, item)
+    shortfall = _belt_reserve_shortfall(client, surface, force, item, mall_targets)
     if shortfall is None:
         return None
     ingredient, floor, held = shortfall
@@ -8820,8 +8952,9 @@ def _belt_starved_consumer(
 
 def _belt_reserve_shortfall(
     client: RconClient, surface: str, force: str, item: str,
+    mall_targets: dict[str, int] | None = None,
 ) -> tuple[str, int, int] | None:
-    """The (ingredient, floor, held) triple a belt reserve wait rests on."""
+    """The (ingredient, required bill, held) triple a belt wait rests on."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
@@ -8829,9 +8962,23 @@ def _belt_reserve_shortfall(
     for ingredient, amount in zip(
         spec["ingredients"], spec["amounts"], strict=True,
     ):
-        floor = _BELT_RESERVE_FLOORS.get(ingredient)
-        if floor is None:
+        fallback = _BELT_RESERVE_FLOORS.get(ingredient)
+        if fallback is None:
             continue
+        exact = _ledger_belt_commitment(
+            str(ingredient), excluding_consumer=item,
+        )
+        if exact is None:
+            floor = fallback
+        else:
+            submitted, submitted_targets = exact
+            unsubmitted, _consumers = _queued_downstream_input_commitment(
+                client, surface, force, str(ingredient), mall_targets or {},
+                exclude_consumers=submitted_targets | frozenset({item}),
+            )
+            floor = submitted + unsubmitted
+            if floor <= 0:
+                continue
         held = stock.get(ingredient, 0)
         ingredient_recipe = LINE_RECIPES.get(ingredient)
         belt_line = None
@@ -9359,11 +9506,25 @@ def _serve_mall_task(
     bottleneck is pushed back a step onto the thing that actually limits it.
     """
     item, target = task.item, task.target
+    ledger_target = (
+        _MATERIAL_RESERVATION_LEDGER.required_stock(item)
+        if _MATERIAL_RESERVATION_LEDGER is not None
+        and hasattr(_MATERIAL_RESERVATION_LEDGER, "required_stock") else 0
+    )
+    if ledger_target > target:
+        emit(
+            f"  BINDING MATERIAL BILL: {item} target {target} -> "
+            f"{ledger_target} from active ghost/project reservations"
+        )
+        target = ledger_target
     if item in _BELT_RESERVE_FLOORS:
         downstream, consumers = _queued_downstream_input_commitment(
             client, surface, force, item, mall_targets,
         )
-        if downstream > 0:
+        # A complete, active project bill has precedence over optional batch
+        # spares.  Only use queued batch WIP to size a belt reserve when no
+        # binding ghost bill already names the belt demand.
+        if downstream > 0 and ledger_target <= 0:
             base_target = target
             target += downstream
             emit(
@@ -9373,7 +9534,9 @@ def _serve_mall_task(
                 )
                 + f" capped-consumer draw => {target} before spare/WIP margin"
             )
-    starved_on = _belt_starved_consumer(client, surface, force, item)
+    starved_on = _belt_starved_consumer(
+        client, surface, force, item, mall_targets,
+    )
     if starved_on is not None:
         tick_now = live_base.game_tick(client)
         priorities.defer(item, tick_now, starved_on)
@@ -9382,7 +9545,9 @@ def _serve_mall_task(
         # rebuilds instead of stalling the run (2026-09-04: splitter waited
         # 243s on belts at 26 while nothing was tasked with making belts).
         try:
-            shortfall = _belt_reserve_shortfall(client, surface, force, item)
+            shortfall = _belt_reserve_shortfall(
+                client, surface, force, item, mall_targets,
+            )
         except Exception:
             shortfall = None
         if shortfall is not None:
@@ -9572,11 +9737,60 @@ def _serve_mall_task(
             return
 
         def expand_upstream() -> bool:
-            upstream = expansion_target(
-                item, live_base.available_items(client, surface, force),
+            stock = live_base.available_items(client, surface, force)
+            diagnosis = diagnose_replenishment(
+                item, stock,
+                producer_is_live=lambda candidate: _has_producer(
+                    client, surface, force, candidate,
+                ),
             )
+            if diagnosis.kind == "missing_producer" and diagnosis.target is not None:
+                upstream = diagnosis.target
+                cycle = (
+                    _BOOTSTRAP_WORK_LEDGER.depend(
+                        item, upstream, reason="stock_wait_missing_producer",
+                    )
+                    if _BOOTSTRAP_WORK_LEDGER is not None else None
+                )
+                if cycle is not None:
+                    reason = (
+                        "bootstrap recovery dependency graph reached its "
+                        "bounded evidence limit"
+                        if cycle.reason == "dependency_graph_limit" else
+                        "bootstrap recovery dependency cycle: "
+                        + " -> ".join(cycle.members)
+                    )
+                    priorities.defer(item, live_base.game_tick(client), reason)
+                    emit(f"  PRIORITY DEFERRED: {item}; {reason}")
+                    return False
+                emit(
+                    f"  MALL DIAGNOSIS: {item} is short because {upstream} "
+                    "has no measured live producer; restoring that capability "
+                    "before expanding extraction"
+                )
+                try:
+                    ensure_produced(
+                        client, bridge, surface, force, upstream,
+                        reference_point, emit, upgrade_bootstrap=False,
+                        stock_target=1, allow_promotion=False,
+                    )
+                except MaterialShortage as shortage:
+                    add_demands(mall_targets, shortage)
+                    emit(
+                        f"  MALL REPLENISHMENT DEMAND: {upstream} needs "
+                        + ", ".join(
+                            f"{name}={count}"
+                            for name, count in sorted(shortage.required.items())
+                        )
+                    )
+                except ProductionPrerequisiteDeferred as deferred:
+                    priorities.defer(item, live_base.game_tick(client), str(deferred))
+                    emit(f"  MALL REPLENISHMENT WAIT: {upstream}; {deferred}")
+                return True
+            upstream = diagnosis.target
             if upstream is None:
-                reason = f"{item} has no supported extraction input to expand"
+                path = " -> ".join(diagnosis.path) or item
+                reason = f"{item} has no supported replenishment route ({path})"
                 priorities.defer(item, live_base.game_tick(client), reason)
                 emit(f"  PRIORITY DEFERRED: {reason}")
                 return False
@@ -9622,19 +9836,8 @@ def _serve_mall_task(
                 return False
             return True
 
-        try:
-            ready_reader = None
-            if item in PERSISTENT_INTERMEDIATES:
-                ready_reader = lambda: live_base.transferable_items(
-                    client, surface, force,
-                )
-            wait_kwargs = {"on_stalled": expand_upstream}
-            if ready_reader is not None:
-                wait_kwargs["stock_reader"] = ready_reader
-            ready = wait_for_stock(
-                client, surface, force, item, target, emit, **wait_kwargs,
-            )
-        except MaterialShortage as shortage:
+        def queue_expansion_shortage(shortage: MaterialShortage) -> None:
+            """Return a remediation bill to normal reserved mall scheduling."""
             add_demands(mall_targets, shortage)
             emit(
                 f"  MALL EXPANSION DEMAND: {shortage.stage} needs "
@@ -9644,7 +9847,56 @@ def _serve_mall_task(
                 )
                 + " -- queued; expansion resumes once the mall has them"
             )
-            return
+
+        ready_reader = (
+            (lambda: live_base.transferable_items(client, surface, force))
+            if item in PERSISTENT_INTERMEDIATES else
+            (lambda: live_base.available_items(client, surface, force))
+        )
+        if _BOOTSTRAP_WORK_LEDGER is not None:
+            have = int(ready_reader().get(item, 0))
+            observation = _BOOTSTRAP_WORK_LEDGER.observe_stock(item, target, have)
+            if observation == "ready":
+                ready = True
+            elif observation == "stalled":
+                emit(
+                    f"  MALL STOCK STALLED: {item} remains {have}/{target}; "
+                    "one replenishment action is eligible"
+                )
+                try:
+                    expand_upstream()
+                except MaterialShortage as shortage:
+                    queue_expansion_shortage(shortage)
+                return
+            else:
+                try:
+                    current_tick = live_base.game_tick(client)
+                except Exception:
+                    current_tick = tick
+                try:
+                    priorities.defer(
+                        item, current_tick,
+                        f"stock {observation}: {have}/{target}", retry_ticks=600,
+                    )
+                except (AttributeError, KeyError, TypeError):
+                    pass
+                emit(
+                    f"  MALL YIELD: {item} stock is {have}/{target} "
+                    f"({observation}); preserving its work for the next survey"
+                )
+                return
+        else:
+            # Direct/unit callers without an episode ledger retain the legacy
+            # blocking helper.  Managed runs always use the durable poll above.
+            try:
+                ready = wait_for_stock(
+                    client, surface, force, item, target, emit,
+                    on_stalled=expand_upstream, stock_reader=ready_reader,
+                )
+                # MALL EXPANSION DEMAND is queued if the callback discovers a bill.
+            except MaterialShortage as shortage:
+                queue_expansion_shortage(shortage)
+                return
         if not ready:
             return
         priorities.complete(item, live_base.game_tick(client))
@@ -11918,7 +12170,7 @@ def run(
     genuinely stuck (raises StuckError rather than guessing). A ready pass
     serves up to `_MAX_MALL_TASKS_PER_PASS` mall tasks while they keep
     completing, so independent work advances in parallel."""
-    global _BOOTSTRAP_DISTRICT_LEDGER, _MATERIAL_RESERVATION_LEDGER
+    global _BOOTSTRAP_DISTRICT_LEDGER, _MATERIAL_RESERVATION_LEDGER, _BOOTSTRAP_WORK_LEDGER
     validate_builder_target(goal_item, surface, LINE_RECIPES)
     _BOOTSTRAP_DISTRICT_LEDGER = (
         BootstrapDistrictLedger(
@@ -11931,6 +12183,10 @@ def run(
         MaterialReservationLedger(
             script_output, episode_id=episode_id, surface=surface, force=force,
         )
+        if episode_id else None
+    )
+    _BOOTSTRAP_WORK_LEDGER = (
+        BootstrapWorkLedger(script_output, episode_id=episode_id)
         if episode_id else None
     )
     set_active_material_ledger(_MATERIAL_RESERVATION_LEDGER)
@@ -11950,6 +12206,7 @@ def run(
             reference_point=reference_point,
         )
         _restore_bootstrap_reservations()
+        _reconcile_bootstrap_work(client, surface, force)
         prepped: set[str] = set()
         deferred_plate_targets: dict[str, int] = {}
         pending_plate_materials: dict[str, dict[str, int]] = {}
@@ -11963,6 +12220,7 @@ def run(
         iteration = 0
         while budget.passes < max_iterations:
             budget.begin_pass()
+            _reconcile_bootstrap_work(client, surface, force)
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities, prepped,
             )
@@ -12197,6 +12455,7 @@ def run(
     finally:
         _BOOTSTRAP_DISTRICT_LEDGER = None
         _MATERIAL_RESERVATION_LEDGER = None
+        _BOOTSTRAP_WORK_LEDGER = None
         set_active_material_ledger(None)
         end_run_budget()
         client.close()

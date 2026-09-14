@@ -68,3 +68,13 @@ def test_promotion_prefers_productive_compact_routes_after_output() -> None:
     )
 
     assert promotion_decision(candidate, incumbent)[0] is True
+
+
+def test_promotion_cannot_trade_partial_holdout_throughput_for_completion() -> None:
+    incumbent = EvaluationResult("old", "holdout", "same", fitness(0.0, 1_000))
+    candidate = EvaluationResult("new", "holdout", "same", fitness(0.0, 900))
+
+    promoted, reason = promotion_decision(candidate, incumbent)
+
+    assert not promoted
+    assert "no completed held-out objective" in reason

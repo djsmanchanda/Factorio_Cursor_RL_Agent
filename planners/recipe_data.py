@@ -360,8 +360,11 @@ CHAIN_SOUTH_APPROACH_COL = -4
 MEDIUM_POLE_WIRE_REACH = 9.0
 CHAINED_SUBSTATION_X = -7.0
 
-# Invariant (docs/20 §12): all equipment is electric. Plans containing any of
-# these fuel-burning entities are rejected at validation time.
+# Ordinary production equipment remains electric.  The one deliberately
+# bounded exception is the temporary, bot-built bootstrap steam contract in
+# ``orchestrator.bootstrap_steam_power``.  It exists only to bridge a measured
+# grid deficit before the battery/plastic ladder is available; it cannot admit
+# burner inserters, furnaces, or an unlabelled fuel build.
 FORBIDDEN_FUEL_ENTITIES = {
     "burner-mining-drill",
     "stone-furnace",
@@ -379,7 +382,23 @@ def _reject_fuel_entities(plan: dict) -> None:
         for action in phase.get("actions", [])
         if action.get("entity") in FORBIDDEN_FUEL_ENTITIES
     })
-    if offenders:
+    contract = plan.get("power_contract")
+    approved_bootstrap_steam = (
+        isinstance(contract, dict)
+        and contract.get("kind") == "bootstrap-steam-v1"
+        and set(offenders) <= {"boiler", "steam-engine"}
+        and type(contract.get("boilers")) is int and contract["boilers"] == 1
+        and type(contract.get("steam_engines")) is int and contract["steam_engines"] == 2
+        and all(
+            sum(action.get("entity") == name and action.get("action_type") == "place_ghost"
+                for phase in plan.get("phases", []) for action in phase.get("actions", [])) == count
+            for name, count in (("boiler", 1), ("steam-engine", 2))
+        )
+        and all(action.get("action_type") == "place_ghost"
+                for phase in plan.get("phases", []) for action in phase.get("actions", [])
+                if action.get("entity") in {"boiler", "steam-engine"})
+    )
+    if offenders and not approved_bootstrap_steam:
         raise ValueError(f"Electric-only invariant violated by: {', '.join(offenders)}")
 
 MACHINE_WIDTH = 3  # tiles; assembling machines are 3x3

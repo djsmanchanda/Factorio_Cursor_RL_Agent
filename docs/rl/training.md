@@ -60,7 +60,18 @@ geometry evidence, allowing training to discover compact shared-header refinery
 and chemical-plant structures without selecting from a catalog of complete user
 blueprints.
 
-Policy promotion remains lexicographic. Safety, completion, and sustained output come first; productive capacity, route efficiency, time, materials, footprint, and poles distinguish otherwise successful policies. An attempt that does not sustain its complete production objective remains stored as structured failure evidence, but it cannot update or parent the next policy checkpoint. A cohort with no successful attempts retains its parent generation. Existing immutable `mining-delivery-v1` checkpoints ignore newly added audit fields, while fresh checkpoints use the richer `mining-efficiency-v1` feature registry.
+Policy promotion remains lexicographic. Safety, completion and sustained output
+come first. Candidate learning now includes safe strategy failures and objective
+timeouts with measured rewards; safety, execution, fixture, power and contract
+failures remain excluded. Learning counts and successful-episode counts are
+reported separately. Frozen held-out promotion still requires completed objectives
+and cannot trade partial throughput for a completion regression. Fresh mining
+checkpoints use `mining-efficiency-v2` (V3); immutable V1/V2 checkpoints retain
+their feature contracts. `--reinitialize-mining-features` explicitly starts new V3
+weights from the old hyperparameters and records the migration. Available drill
+capacity/working/blocked/idle measurements enter observations; absent data remains
+unknown. Non-staged mining scales patch and candidates with demand rather than
+capping at eight drills, and rejects infeasible single-sink demands before an episode.
 
 The next production curriculum should compare **upgrade versus expand**, not only repair versus duplicate. It should randomize assembler tier and quality, speed/productivity/efficiency modules, beacon support, inserter and belt tier, available footprint, capital budget, energy price, recipe demand, and research state. Rewards should use measured output and total lifecycle cost so an assembler-3, quality upgrade, module change, or added parallel machine wins only when its throughput, resource efficiency, energy, and land tradeoff is better on held-out scenarios. Repeatable productivity and mining research must enter observations as live modifiers; research cost and the downstream savings it creates are separate actions and reward evidence rather than hard-coded upgrade rules.
 

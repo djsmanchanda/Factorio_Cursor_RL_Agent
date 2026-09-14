@@ -3,14 +3,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from orchestrator.live_base import Point, _sc
 from tools.rcon_client import RconClient
 
 
 def nearest_offshore_pump_site(
     client: RconClient, surface: str, near: Point, *, search_radius: float = 400.0,
+    allowed_directions: Sequence[str] | None = None,
 ) -> dict | None:
     """Nearest shoreline where an offshore pump and land pipe can exist."""
+    allowed = tuple(allowed_directions or ("north", "east", "south", "west"))
+    if not allowed or set(allowed) - {"north", "east", "south", "west"}:
+        raise ValueError("allowed offshore-pump directions must be cardinal")
     min_x, min_y = near[0] - search_radius, near[1] - search_radius
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
     lua = (
@@ -19,6 +25,7 @@ def nearest_offshore_pump_site(
         # by the opposite landward vector and adjacent pipe coordinate.
         "local specs={{'south',0,-1,0.5,-0.5,0,-2},{'west',1,0,1.5,0.5,2,0},"
         "{'north',0,1,0.5,1.5,0,2},{'east',-1,0,-0.5,0.5,-2,0}};"
+        "local allowed={" + ",".join("['" + direction + "']=true" for direction in allowed) + "};"
         "local best=nil;local bd=1e18;"
         "for _,t in pairs(s.find_tiles_filtered{name={'water','deepwater'},area={{" +
         str(min_x) + "," + str(min_y) + "},{" + str(max_x) + "," + str(max_y) + "}}}) do "
@@ -32,7 +39,7 @@ def nearest_offshore_pump_site(
         "if (wn~='water' and wn~='deepwater') or ln=='water' or ln=='deepwater' then clear=false end end;"
         "for step=1,4 do local tx=x+p[2]*step;local ty=y+p[3]*step;"
         "local tn=s.get_tile(tx,ty).name;if tn=='water' or tn=='deepwater' then clear=false end end;"
-        "local dir=defines.direction[p[1]];if clear and s.can_place_entity{name='offshore-pump',"
+        "local dir=defines.direction[p[1]];if allowed[p[1]] and clear and s.can_place_entity{name='offshore-pump',"
         "position={px,py},direction=dir,force='neutral'} then local d=(px-nx)^2+(py-ny)^2;"
         "if d<bd then bd=d;best={px,py,ox,oy,p[1]} end end end end end;"
         "if not best then rcon.print('NONE') else rcon.print(table.concat(best,' ')) end"

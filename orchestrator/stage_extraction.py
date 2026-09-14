@@ -7,7 +7,8 @@ import math
 import time
 from copy import deepcopy
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Mapping
 
 from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
 from orchestrator.work_state import WorkStateSignal
@@ -31,7 +32,124 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 ELECTRIC_DRILL_ITEMS_PER_SECOND = 0.5
-LOCAL_MODE_MAX_LINK_TILES = 300.0
+
+
+@dataclass(frozen=True)
+class LocalExtractionRouteBudget:
+    """Finite budget for a mine-to-refinery route preflight.
+
+    Distance is only a pruning budget.  A route is accepted only after the
+    caller's live route planner reports that it is legal for the surveyed
+    occupancy and interfaces.  Keeping action and material limits here stops a
+    long but technically legal route from consuming an unbounded construction
+    transaction.
+    """
+
+    max_route_tiles: int = 640
+    max_actions: int = 2_048
+    max_material_items: int = 4_096
+    max_search_nodes: int = 250_000
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_route_tiles", "max_actions", "max_material_items",
+            "max_search_nodes",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+
+
+DEFAULT_LOCAL_EXTRACTION_ROUTE_BUDGET = LocalExtractionRouteBudget()
+# Compatibility export for callers that still use the old name.  New callers
+# should pass a LocalExtractionRouteBudget so route/action/material limits are
+# kept together.  The old 300-tile policy is deliberately gone.
+LOCAL_MODE_MAX_LINK_TILES = DEFAULT_LOCAL_EXTRACTION_ROUTE_BUDGET.max_route_tiles
+
+
+@dataclass(frozen=True)
+class LocalExtractionRouteAssessment:
+    """Result returned by the actual route planner for one candidate site."""
+
+    legal: bool
+    route_tiles: int = 0
+    action_count: int = 0
+    search_nodes: int = 0
+    material_bill: Mapping[str, int] = field(default_factory=dict)
+    reason: str = ""
+
+    @property
+    def material_items(self) -> int:
+        return sum(max(0, int(count)) for count in self.material_bill.values())
+
+
+RoutePreflight = Callable[
+    [Point, Point, LocalExtractionRouteBudget], LocalExtractionRouteAssessment
+]
+
+
+def route_assessment_from_actions(
+    actions: list[dict] | tuple[dict, ...],
+    *,
+    route_tiles: int,
+    search_nodes: int = 0,
+    legal: bool = True,
+    reason: str = "",
+) -> LocalExtractionRouteAssessment:
+    """Build a route assessment from executable actions.
+
+    This helper is intentionally small so the belt preflight can report the
+    material cost of its exact route without duplicating bill logic in the
+    extraction planner.
+    """
+    bill: dict[str, int] = {}
+    for action in actions:
+        action_type = action.get("action_type")
+        if action_type in {"place_entity", "place_ghost"}:
+            item = str(action["entity"])
+        elif action_type == "place_tile_ghost":
+            item = str(action["tile"])
+        else:
+            continue
+        bill[item] = bill.get(item, 0) + 1
+    return LocalExtractionRouteAssessment(
+        legal=legal,
+        route_tiles=int(route_tiles),
+        action_count=len(actions),
+        search_nodes=int(search_nodes),
+        material_bill=bill,
+        reason=reason,
+    )
+
+
+def route_budget_failure(
+    assessment: LocalExtractionRouteAssessment,
+    budget: LocalExtractionRouteBudget,
+) -> str | None:
+    """Return a stable rejection reason, or ``None`` when a route is usable."""
+    if not assessment.legal:
+        return assessment.reason or "route planner rejected the candidate"
+    if assessment.route_tiles > budget.max_route_tiles:
+        return (
+            f"route needs {assessment.route_tiles} tiles, beyond the "
+            f"{budget.max_route_tiles}-tile route budget"
+        )
+    if assessment.action_count > budget.max_actions:
+        return (
+            f"route needs {assessment.action_count} actions, beyond the "
+            f"{budget.max_actions}-action route budget"
+        )
+    if assessment.search_nodes > budget.max_search_nodes:
+        return (
+            f"route search used {assessment.search_nodes} nodes, beyond the "
+            f"{budget.max_search_nodes}-node search budget"
+        )
+    if assessment.material_items > budget.max_material_items:
+        return (
+            f"route needs {assessment.material_items} material items, beyond "
+            f"the {budget.max_material_items}-item route budget"
+        )
+    return None
 RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 REFINERY_SITE_CLEARANCE_TILES = 10.0
@@ -768,9 +886,35 @@ def plan_local_extraction(
     defer_pending_owned_refinery: bool = False,
     unbounded_growth: bool = False,
     refinery_reserve_furnaces: int = REFINERY_GENERATION_1_CAPACITIES[-1],
+    route_budget: LocalExtractionRouteBudget = DEFAULT_LOCAL_EXTRACTION_ROUTE_BUDGET,
+    route_preflight: RoutePreflight | None = None,
     observe: Callable[[str], None] | None = None,
 ) -> LocalExtractionPlan:
-    """Reconcile mining, then reserve an exact, bounded, off-ore smelter."""
+    """Reconcile mining, then reserve an exact, bounded, off-ore smelter.
+
+    ``route_preflight`` is the live occupancy-aware route planner owned by the
+    caller.  When present, every candidate is checked with that planner before
+    it can win siting.  Without it, siting deliberately does not pretend that a
+    Manhattan distance is a legal belt route; the build-stage preflight remains
+    responsible for rejecting the plan before submission.
+    """
+    if not isinstance(route_budget, LocalExtractionRouteBudget):
+        raise TypeError("route_budget must be a LocalExtractionRouteBudget")
+
+    last_route_failure: str | None = None
+
+    def route_failure(source: Point, destination: Point) -> str | None:
+        nonlocal last_route_failure
+        if route_preflight is None:
+            return None
+        assessment = route_preflight(source, destination, route_budget)
+        if not isinstance(assessment, LocalExtractionRouteAssessment):
+            raise TypeError(
+                "route_preflight must return a LocalExtractionRouteAssessment"
+            )
+        last_route_failure = route_budget_failure(assessment, route_budget)
+        return last_route_failure
+
     def surveyed(label: str, operation):
         started = time.monotonic()
         if observe is not None:
@@ -1007,14 +1151,11 @@ def plan_local_extraction(
             smelter_origin[0] + owned_feed_offset[0],
             smelter_origin[1] + owned_feed_offset[1],
         )
-        if (
-            abs(owned_feed[0] - ore_output[0])
-            + abs(owned_feed[1] - ore_output[1])
-            > LOCAL_MODE_MAX_LINK_TILES
-        ):
+        owned_route_failure = route_failure(ore_output, owned_feed)
+        if owned_route_failure is not None:
             raise ValueError(
-                f"Owned {recipe} refinery at {smelter_origin} exceeds the "
-                f"{LOCAL_MODE_MAX_LINK_TILES:.0f}-tile local-mode link limit"
+                f"Owned {recipe} refinery at {smelter_origin} has no usable "
+                f"mine link: {owned_route_failure}"
             )
     anchors = (
         [] if smelter_origin is not None else smelter_search_anchors(
@@ -1066,24 +1207,35 @@ def plan_local_extraction(
             site_score = _refinery_site_score(
                 ore_output, reference_point, feed, output,
             )
-            input_tiles = site_score[-1]
-            if input_tiles <= LOCAL_MODE_MAX_LINK_TILES:
-                candidates.append((
-                    *site_score,
-                    "east",
-                    vertical_mirror,
-                    candidate,
-                ))
+            candidate_route_failure = route_failure(ore_output, feed)
+            if candidate_route_failure is not None:
+                if observe is not None:
+                    observe(
+                        f"ROUTE REJECT: {recipe} refinery at {candidate} "
+                        f"{candidate_route_failure}"
+                    )
+                continue
+            candidates.append((
+                *site_score,
+                "east",
+                vertical_mirror,
+                candidate,
+            ))
     if candidates:
         (
             _input_wrong_way, _output_wrong_way, _total, _output, _input,
             smelter_flow_direction, smelter_vertical_mirror, smelter_origin,
         ) = min(candidates)
     if smelter_origin is None:
+        route_description = (
+            "within the supplied route/action/material budget and legal "
+            "occupancy survey"
+            if route_preflight is not None else
+            "with the later live route preflight"
+        )
         raise ValueError(
-            f"No off-ore {recipe} site is available within the "
-            f"{LOCAL_MODE_MAX_LINK_TILES:.0f}-tile local-mode link limit; "
-            "CityPlanner rail handoff is required"
+            f"No off-ore {recipe} site is available {route_description}; "
+            f"last route rejection: {last_route_failure or 'no candidate was surveyed'}"
         )
     return LocalExtractionPlan(
         ore=ore,

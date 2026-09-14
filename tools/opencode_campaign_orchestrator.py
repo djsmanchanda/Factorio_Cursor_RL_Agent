@@ -47,6 +47,18 @@ RUN_END = "RUN END"
 # declare every live run complete on its first checkpoint.
 _RUN_END_LINE = re.compile(r"(?m)^\+\d+s RUN END$")
 
+# This is intentionally small and cross-component.  It protects the durable
+# contracts most likely to regress together during a campaign fix; a changed
+# test file is run separately below.  Keep fresh-start/live acceptance outside
+# this offline gate.
+MANDATORY_CAMPAIGN_TESTS = (
+    "tests/test_episode_checkpoint.py",
+    "tests/test_campaign_protocol.py",
+    "tests/test_persistent_intermediates.py",
+    "tests/test_construction_handoffs.py",
+    "tests/test_mission_state.py",
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -509,17 +521,26 @@ reason: one sentence""", None, sequence)
     if _decision_fields(review, "REVIEW_DECISION").get("status") != "approved" or _tree_fingerprint(config.observations) != digest:
         return False
     pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
-    # Keep verification targeted: only tests explicitly changed or named by the
-    # candidate are run. The campaign is not a general repository test sweep.
+    # Always exercise a small cross-component contract gate.  Candidate tests
+    # supplement it; an empty candidate-test list is never treated as success.
     changed_tests = [p for p in paths if Path(p).parts[0] == "tests"
                      and Path(p).name.startswith("test_") and Path(p).suffix == ".py"]
-    commands = [pytest + changed_tests] if changed_tests else []
+    mandatory = [REPO_ROOT / path for path in MANDATORY_CAMPAIGN_TESTS]
+    commands = [pytest + [str(path) for path in mandatory] + ["-m", "not slow and not exhaustive"]]
+    supplemental = changed_tests
+    if supplemental:
+        commands.append(pytest + supplemental)
     verification_log = config.opencode_log_dir / f"verification-{sequence:04d}.log"
     _atomic_write(verification_log, "")
     for command in commands:
         validation = _run(command, timeout=900)
         with verification_log.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(command) + "\n" + validation.stdout + validation.stderr)
+            handle.write(json.dumps({
+                "command": command,
+                "returncode": validation.returncode,
+                "status": "passed" if validation.returncode == 0 else "failed",
+            }, sort_keys=True) + "\n")
+            handle.write(validation.stdout + validation.stderr)
         if validation.returncode:
             return False
     if _run(["git", "diff", "--check"], timeout=120).returncode:
@@ -532,7 +553,8 @@ reason: one sentence""", None, sequence)
         return False
     revision = _run(["git", "rev-parse", "HEAD"], timeout=120).stdout.strip()
     _append(config.observations, f"Verified commit: {revision or 'inspect git log'}; files: {', '.join(paths)}. "
-            f"Prediction: {fields.get('prediction', 'not provided')}. Independent review and pytest passed.\n")
+            f"Prediction: {fields.get('prediction', 'not provided')}. Mandatory campaign gate and "
+            f"{int(bool(supplemental))} supplemental test command(s) passed; see {verification_log}.\n")
     return True
 
 

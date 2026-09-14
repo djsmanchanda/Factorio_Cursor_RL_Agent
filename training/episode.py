@@ -12,7 +12,7 @@ from planners.sandbox_infrastructure import build_layout_authorization
 from training.canonical import policy_hash
 from training.candidates import furnace_refining_candidates, mining_delivery_candidates
 from training.contracts import validate_transition
-from training.policies import policy_snapshot, transition_can_train_policy
+from training.policies import policy_snapshot, transition_can_update_policy
 from training.rewards import reward_components
 
 
@@ -28,7 +28,7 @@ def _progress(callback, phase: str, identifier: str, payload: Mapping) -> None:
 def _observation(report: Mapping) -> dict[str, float]:
     metrics = report.get("metrics") or {}
     objective = report.get("objective") or {}
-    return {
+    result = {
         "delivered_rate_per_tick": float(metrics.get("rate_per_tick", 0.0)),
         "target_rate_per_tick": float(objective.get("target_rate_per_tick", 0.0)),
         "sustained_ticks": float(metrics.get("sustained_ticks", 0)),
@@ -36,6 +36,24 @@ def _observation(report: Mapping) -> dict[str, float]:
         "stage_index": float(metrics.get("stage_index", objective.get("stage_index", 1))),
         "stage_count": float(objective.get("stage_count", 1)),
     }
+    # These fields are audit measurements, not inferred zeros. Older training
+    # mod reports omit them; preserve that absence as unknown so an episode is
+    # neither rejected nor credited with invented capacity evidence.
+    for name in (
+        "placed_mining_drills", "productive_mining_drills",
+        "productive_mining_drill_ratio", "mining_drill_capacity_ticks",
+        "mining_drill_working_ticks", "mining_drill_blocked_ticks",
+        "mining_drill_idle_ticks",
+    ):
+        if name in metrics:
+            result[name] = float(metrics[name])
+    result["capacity_audit_available"] = float(all(name in metrics for name in (
+        "placed_mining_drills", "productive_mining_drills",
+        "productive_mining_drill_ratio", "mining_drill_capacity_ticks",
+        "mining_drill_working_ticks", "mining_drill_blocked_ticks",
+        "mining_drill_idle_ticks",
+    )))
+    return result
 
 
 def _result(report: Mapping) -> dict:
@@ -234,7 +252,7 @@ def run_episode(
         if (
             update_policy
             and hasattr(policy, "update")
-            and transition_can_train_policy(transition)
+            and transition_can_update_policy(transition)
         ):
             policy.update(initial, chosen, transition["reward"]["total"])
         _progress(on_progress, "finished", identifier, {

@@ -21,11 +21,12 @@ from training.candidates import mining_delivery_candidates
 from training.canonical import canonical_sha256
 from training.episode import EpisodeCapacityInterrupted, run_episode
 from training.factorio_bridge import FactorioTrainingBridge
-from training.features import MINING_DELIVERY_FEATURES_V2
+from training.features import MINING_DELIVERY_FEATURES_V3
 from training.policies import (
     DiagonalLinUCB,
     policy_snapshot,
     transition_can_train_policy,
+    transition_can_update_policy,
 )
 from training.scenarios.mining_delivery import generate_mining_delivery_curriculum
 from training.scheduler import WorkerSpec, load_worker_specs
@@ -225,22 +226,40 @@ def _offline(scenarios: list[dict], attempts: int) -> dict:
     }
 
 
-def _load_policy(path: Path) -> tuple[int, DiagonalLinUCB]:
+def _load_policy(
+    path: Path, *, reinitialize_mining_features: bool = False,
+) -> tuple[int, DiagonalLinUCB]:
     if path.is_file():
         checkpoint = json.loads(path.read_text(encoding="utf-8"))
-        return int(checkpoint["generation"]), DiagonalLinUCB.from_dict(checkpoint["policy"])
-    return 0, DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V2)
+        generation = int(checkpoint["generation"])
+        policy = DiagonalLinUCB.from_dict(checkpoint["policy"])
+        if reinitialize_mining_features and policy.registry != MINING_DELIVERY_FEATURES_V3:
+            # Never mutate a historical feature contract in place. An explicit
+            # fresh policy keeps its selection hyperparameters while discarding
+            # incompatible learned coefficients, and records its lineage when
+            # it is checkpointed after collecting new evidence.
+            policy = DiagonalLinUCB(
+                f"policy-g{generation:04d}-mining-features-v3",
+                MINING_DELIVERY_FEATURES_V3,
+                alpha=policy.alpha,
+                regularization=policy.regularization,
+                exploration_rate=policy.exploration_rate,
+            )
+            policy.feature_registry_migrated_from = checkpoint["policy"].get("registry", {}).get("version")
+        return generation, policy
+    return 0, DiagonalLinUCB("policy-g0000-initial", MINING_DELIVERY_FEATURES_V3)
 
 
 def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
-    """Learn only from complete trajectories, crediting every staged decision.
+    """Learn from safe measured trajectories, crediting every staged decision.
 
-    A terminal success is evidence for the sequence that built it, not only its
-    final expansion action. Failures remain excluded by ``transition_can_train_policy``.
+    A terminal success and a safe partial outcome both describe the sequence
+    that built it. Infrastructure and hard-contract failures remain excluded
+    by ``transition_can_update_policy``.
     """
     learned = DiagonalLinUCB.from_dict(base.to_dict())
     for _episode_id, transition, _error in sorted(results, key=lambda item: item[0]):
-        if transition is None or not transition_can_train_policy(transition):
+        if transition is None or not transition_can_update_policy(transition):
             continue
         trail = transition.get("stage_action_trail") or ()
         if trail:
@@ -261,7 +280,15 @@ def _learn_policy(base: DiagonalLinUCB, results: list[tuple]) -> DiagonalLinUCB:
 
 
 def _policy_learning_count(results: list[tuple]) -> int:
-    """Count successful attempts eligible to shape the next checkpoint."""
+    """Count safe measured attempts eligible to shape a candidate checkpoint."""
+    return sum(
+        transition is not None and transition_can_update_policy(transition)
+        for _episode_id, transition, _error in results
+    )
+
+
+def _policy_success_count(results: list[tuple]) -> int:
+    """Count sustained objectives separately from safe partial learning credit."""
     return sum(
         transition is not None and transition_can_train_policy(transition)
         for _episode_id, transition, _error in results
@@ -272,8 +299,14 @@ def _checkpoint(path: Path, generation: int, policy: DiagonalLinUCB) -> None:
     identity = {key: value for key, value in policy.to_dict().items() if key != "policy_id"}
     policy.policy_id = f"policy-g{generation:04d}-{canonical_sha256(identity)[7:19]}"
     path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = {"generation": generation, "policy": policy.to_dict()}
+    migrated_from = getattr(policy, "feature_registry_migrated_from", None)
+    if migrated_from:
+        checkpoint["feature_registry_migration"] = {
+            "from": str(migrated_from), "to": policy.registry.version,
+        }
     path.write_text(
-        json.dumps({"generation": generation, "policy": policy.to_dict()}, indent=2) + "\n",
+        json.dumps(checkpoint, indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -288,6 +321,10 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=Path("data/training/policy.json"))
     parser.add_argument("--live-directory", type=Path, default=Path("data/training/live"))
     parser.add_argument("--password-env", default="FACTORIO_TRAINING_RCON_PASSWORD")
+    parser.add_argument(
+        "--reinitialize-mining-features", action="store_true",
+        help="Explicitly start a V3 mining policy from a legacy checkpoint's hyperparameters.",
+    )
     parser.add_argument(
         "--rcon-secret-file", type=Path,
         help="Local training-worker RCON secret file; takes precedence over --password-env.",
@@ -318,7 +355,9 @@ def _execute_live(args, scenarios: list[dict], password: str) -> dict:
     static_assignments = _jobs(scenarios, args.attempts_per_scenario, workers)
     jobs = [job for assigned in static_assignments.values() for job in assigned]
     shared_jobs = EpisodeQueue(jobs)
-    generation, policy = _load_policy(args.checkpoint)
+    generation, policy = _load_policy(
+        args.checkpoint, reinitialize_mining_features=args.reinitialize_mining_features,
+    )
     with TrainingStore(args.database) as store:
         _prepare_store(store, scenarios, jobs, policy, generation)
         events = Queue()
@@ -335,6 +374,7 @@ def _execute_live(args, scenarios: list[dict], password: str) -> dict:
                 expected_episode_ids=[job[0] for job in jobs],
             )
         learning_count = _policy_learning_count(results)
+        success_count = _policy_success_count(results)
         if learning_count:
             learned = _learn_policy(policy, results)
             generation += 1
@@ -348,6 +388,8 @@ def _execute_live(args, scenarios: list[dict], password: str) -> dict:
     return {
         "attempts": len(results), "completed": completed, "failed": failed,
         "policy_learning_episodes": learning_count,
+        "policy_success_episodes": success_count,
+        "policy_partial_learning_episodes": learning_count - success_count,
         "policy_rejected_episodes": len(results) - learning_count,
         "policy_advanced": bool(learning_count),
         "generation": generation, "policy_id": learned.policy_id,

@@ -169,6 +169,90 @@ def test_post_plastic_demand_above_five_forces_first_six_machine_line(
     assert plan.promoted_count == 6
 
 
+def test_cheaper_observed_bots_veto_an_optional_rate_promotion(monkeypatch) -> None:
+    existing = SimpleNamespace(
+        machine_count=6, working_count=0, produced_count=10,
+        output_position=(4.5, 4.5),
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "logistic_request_total", lambda *_a: 0)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: existing)
+    monkeypatch.setattr(builder, "_mall_request_multiplier", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "live_intermediate_demand", lambda *_a: 1.0)
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(builder, "promoted_line_machine_count", lambda *_a, **_k: 12)
+    monkeypatch.setattr(
+        builder, "observe_transport_energy", lambda *_a, **_k:
+        builder.TransportEnergy(robot_watts=10, added_line_watts=100),
+    )
+
+    plan = builder._plan_line(
+        object(), "nauvis", "player", GEARS, lambda _message: None,
+        upgrade_bootstrap=False, stock_target=100, minimum_machines=1,
+        allow_promotion=True,
+    )
+
+    assert plan.promote_to_line is False
+    assert plan.promoted_count is None
+
+
+def test_transport_energy_cannot_veto_a_real_capacity_shortfall(monkeypatch) -> None:
+    existing = SimpleNamespace(
+        machine_count=1, working_count=0, produced_count=10,
+        output_position=(4.5, 4.5),
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "logistic_request_total", lambda *_a: 0)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: existing)
+    monkeypatch.setattr(builder, "_mall_request_multiplier", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "live_intermediate_demand", lambda *_a: 100.0)
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(builder, "promoted_line_machine_count", lambda *_a, **_k: 6)
+    monkeypatch.setattr(
+        builder, "observe_transport_energy", lambda *_a, **_k:
+        builder.TransportEnergy(robot_watts=1, added_line_watts=1000),
+    )
+
+    plan = builder._plan_line(
+        object(), "nauvis", "player", GEARS, lambda _message: None,
+        upgrade_bootstrap=False, stock_target=100, minimum_machines=1,
+        allow_promotion=True,
+    )
+
+    assert plan.promote_to_line is True
+    assert plan.promoted_count == 6
+
+
+def test_unknown_transport_energy_keeps_existing_promotion_decision(monkeypatch) -> None:
+    existing = SimpleNamespace(
+        machine_count=6, working_count=0, produced_count=10,
+        output_position=(4.5, 4.5),
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: True)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "logistic_request_total", lambda *_a: 0)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: existing)
+    monkeypatch.setattr(builder, "_mall_request_multiplier", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "live_intermediate_demand", lambda *_a: 1.0)
+    monkeypatch.setattr(builder, "backlog_seconds", lambda *_a, **_k: 0.0)
+    monkeypatch.setattr(builder, "promoted_line_machine_count", lambda *_a, **_k: 12)
+    monkeypatch.setattr(builder, "observe_transport_energy", lambda *_a, **_k: None)
+
+    plan = builder._plan_line(
+        object(), "nauvis", "player", GEARS, lambda _message: None,
+        upgrade_bootstrap=False, stock_target=100, minimum_machines=1,
+        allow_promotion=True,
+    )
+
+    assert plan.promote_to_line is True
+    assert plan.promoted_count == 12
+
+
 def test_post_plastic_six_machine_promotion_has_no_logistic_inputs(
     monkeypatch,
 ) -> None:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Callable
 
 from core.science_recipe_graph import NAUVIS_DIRECT_RESOURCE_INPUTS
@@ -19,6 +20,22 @@ from planners.recipe_data import (
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class ReplenishmentDiagnosis:
+    """The next capability to restore before asking raw extraction to grow.
+
+    ``expansion_target`` deliberately ignores whether an intermediate has a
+    producer.  That is useful for sizing an already-running chain, but it is
+    unsafe for recovery: a missing stick assembler makes more iron irrelevant.
+    Keep the two decisions separate so callers can first establish the missing
+    capability, then use the existing extraction walk for real throughput.
+    """
+
+    target: str | None
+    kind: str  # ``missing_producer``, ``extraction``, or ``unsupported``
+    path: tuple[str, ...]
 
 def _mineable(recipe: str) -> bool:
     """Whether this recipe is a supported direct resource-extraction stage."""
@@ -85,6 +102,50 @@ def expansion_target(item: str, stock: Mapping[str, int]) -> str | None:
             ),
         )
     return None
+
+
+def diagnose_replenishment(
+    item: str,
+    stock: Mapping[str, int],
+    *,
+    producer_is_live: Callable[[str], bool],
+) -> ReplenishmentDiagnosis:
+    """Find a missing intermediate producer before expanding extraction.
+
+    The walk follows the same scarce-input rule as :func:`expansion_target`,
+    but checks each non-extraction stage against measured producer evidence.
+    It never guesses that a chest holding one item proves a future producer.
+    A cycle stays an explicit unsupported diagnosis rather than becoming an
+    unbounded recursive recovery request.
+    """
+    seen: set[str] = set()
+    path: list[str] = []
+    current = item
+    while current in LINE_RECIPES:
+        if current in seen:
+            return ReplenishmentDiagnosis(None, "unsupported", tuple(path + [current]))
+        seen.add(current)
+        path.append(current)
+        if _mineable(current):
+            return ReplenishmentDiagnosis(current, "extraction", tuple(path))
+        # The root is normally the stalled mall producer itself.  Do not ask
+        # callers to rebuild it; inspect the first missing dependency below it.
+        if current != item and not producer_is_live(current):
+            return ReplenishmentDiagnosis(current, "missing_producer", tuple(path))
+        spec = LINE_RECIPES[current]
+        candidates = [
+            ingredient for ingredient in spec["ingredients"]
+            if ingredient in LINE_RECIPES and ingredient not in seen
+        ]
+        if not candidates:
+            return ReplenishmentDiagnosis(None, "unsupported", tuple(path))
+        current = min(
+            candidates,
+            key=lambda ingredient: stock.get(ingredient, 0) / max(
+                1, spec["amounts"][spec["ingredients"].index(ingredient)],
+            ),
+        )
+    return ReplenishmentDiagnosis(None, "unsupported", tuple(path))
 
 
 def _heaviest_source(
