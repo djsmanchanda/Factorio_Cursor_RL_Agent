@@ -30,7 +30,13 @@ _CELL_COLUMNS = 3
 _CELL_ROWS = 10
 DEMAND_MALL_SLOT_TARGET = 12
 _DEMAND_CELL_COUNT = DEMAND_MALL_SLOT_TARGET // 2
-_QUAD_MALL_CENTER_OFFSET = (4.0, 24.0)
+# The paired bank occupies three columns from ``start`` through ``start+34``
+# and reserves a 12-tile service footprint beyond each origin.  The previous
+# offset landed on row four of that bank, so the quad ghosts collided with a
+# legacy requester/machine cell and expansion silently fell back to pairs.
+# Keep one dense expansion bay to the right of the bank; its four machines and
+# two providers remain within the same mall power/logistic district.
+_QUAD_MALL_CENTER_OFFSET = (43.5, 6.5)
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
@@ -125,7 +131,7 @@ def mall_slot_count(
 
 
 def quad_mall_center(reference_point: Point) -> Point:
-    """Stable cross-module center reserved after the opening paired bank."""
+    """Stable cross-module center in the reserved expansion bay."""
     start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
     return (start[0] + _QUAD_MALL_CENTER_OFFSET[0], start[1] + _QUAD_MALL_CENTER_OFFSET[1])
 

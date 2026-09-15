@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 from orchestrator import autonomous_builder as builder
-from orchestrator.mall_builder import quad_mall_project_bill
+from orchestrator.mall_builder import (
+    _cell_origins, quad_mall_center, quad_mall_project_bill,
+)
 from planners.plan_validation import validate_no_collisions
 from planners.quad_mall_layout import generate_quad_mall_layout
 from planners.recipe_data import LINE_RECIPES
@@ -54,3 +56,13 @@ def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     assert top["substation"] == 1
     assert bottom.get("requester-chest", 0) == 0
     assert bottom.get("substation", 0) == 0
+
+
+def test_quad_expansion_bay_does_not_overlap_legacy_paired_bank() -> None:
+    """The expansion module must have a real empty bay after the old bank."""
+    reference = (3.0, -1.0)
+    center = quad_mall_center(reference)
+    origins = _cell_origins(reference)
+    bank_right = max(origin[0] + 12 for origin in origins)
+
+    assert center[0] - 7 > bank_right
