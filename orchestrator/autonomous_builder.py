@@ -64,6 +64,8 @@ from orchestrator.mall_builder import (
     mall_slot_count,
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
+    preview_quad_mall_allocation,
+    quad_mall_project_bill,
     preview_mall_allocation,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
@@ -3494,9 +3496,9 @@ def _upgrade_owned_plate_transport(
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
 # Before advanced circuits, permanent and rotating work share a deliberately
-# small pool. The mall expands to the normal twelve-slot demand bank only once
-# advanced-circuit production has actually started; this prevents bootstrap
-# capacity from consuming the assemblers needed to reach that transition.
+# small paired pool. Once the iron pioneer is released, one four-machine quad
+# module expands that pool to twelve without consuming four extra requesters;
+# advanced-circuit production still releases the independent mall completely.
 _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 8
 _PRE_PLASTIC_MALL_SLOT_TARGET = DEMAND_MALL_SLOT_TARGET
 _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
@@ -3520,9 +3522,23 @@ def _bootstrap_mall_slot_limit(
         )
     except Exception:
         advanced_started = False
-    return (
-        None if advanced_started else _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
-    )
+    if advanced_started:
+        return None
+    # Once the iron pioneer is gone, the quad module can add four slots while
+    # using one requester and two providers. This is the reduced-seed path:
+    # it reaches twelve slots without demanding the six requesters required by
+    # six ordinary paired cells.
+    if _iron_starter_released(client, surface, force):
+        return DEMAND_MALL_SLOT_TARGET
+    return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+
+
+def _iron_starter_released(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether the exact iron pioneer lifecycle has reached released."""
+    state = _bootstrap_state("iron-plate")
+    return bool(state is not None and state.lifecycle_state == "released")
 
 
 def _mall_slot_cap_reached(committed: int, limit: int | None) -> bool:
@@ -7539,6 +7555,10 @@ def _build_assembled_stage(
                     "compact mall slot(s) and cleared their request groups"
                 )
     elif not upgrade_bootstrap:
+        quad_mall = (
+            not independent_mall
+            and _iron_starter_released(client, surface, force)
+        )
         output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,
             bring_stage_up, emit, stock_target=mall_storage_limit,
@@ -7548,6 +7568,7 @@ def _build_assembled_stage(
             shared_provider=getattr(plan, "shared_provider", False),
             machine_name=spec["machine"],
             demand_slot=getattr(plan, "demand_slot", False),
+            quad_mall=quad_mall,
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -8245,16 +8266,30 @@ def _bootstrap_demand_cell_affordable(
         committed, _bootstrap_mall_slot_limit(client, surface, force),
     ):
         return False, {}
-    allocation = preview_mall_allocation(
-        client, surface, item, reference_point,
-        demand_slot=independent_mall,
+    quad_mall = not independent_mall and _iron_starter_released(
+        client, surface, force,
+    )
+    allocation = (
+        preview_quad_mall_allocation(client, surface, item, reference_point)
+        if quad_mall else
+        preview_mall_allocation(
+            client, surface, item, reference_point,
+            demand_slot=independent_mall,
+        )
     )
     if allocation is None:
         return False, {}
     _origin, side = allocation
-    bill = compact_mall_project_bill(
-        item, stock_target=max(1, target), side=side, shared_provider=True,
-        machine_name="assembling-machine-1",
+    bill = (
+        quad_mall_project_bill(
+            item, side, stock_target=max(1, target),
+            machine_name="assembling-machine-1",
+        )
+        if quad_mall else
+        compact_mall_project_bill(
+            item, stock_target=max(1, target), side=side, shared_provider=True,
+            machine_name="assembling-machine-1",
+        )
     )
     stock = _transferable_or_available_stock(client, surface, force)
     available = (

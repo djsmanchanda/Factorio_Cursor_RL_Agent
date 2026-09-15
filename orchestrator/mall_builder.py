@@ -13,6 +13,10 @@ from orchestrator.game_bridge import GameBridge
 from orchestrator.material_reservations import plan_material_bill
 from orchestrator.stage_services import StuckError, _submit, extend_power
 from planners.mall_layout import generate_paired_mall_layout, recipe_group_name
+from planners.quad_mall_layout import (
+    QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
+    generate_quad_mall_layout,
+)
 from planners.recipe_data import LINE_RECIPES
 from tools.rcon_client import RconClient
 
@@ -26,6 +30,7 @@ _CELL_COLUMNS = 3
 _CELL_ROWS = 10
 DEMAND_MALL_SLOT_TARGET = 12
 _DEMAND_CELL_COUNT = DEMAND_MALL_SLOT_TARGET // 2
+_QUAD_MALL_CENTER_OFFSET = (4.0, 24.0)
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
@@ -111,11 +116,89 @@ def mall_slot_count(
 ) -> int:
     """Live or ghosted paired-mall assembler slots already committed."""
     states = _district_state(client, surface, _cell_origins(reference_point))
-    return sum(
+    paired = sum(
         recipe != "-"
         for left, right, _requester in states.values()
         for recipe in (left, right)
     )
+    return paired + quad_mall_slot_count(client, surface, reference_point)
+
+
+def quad_mall_center(reference_point: Point) -> Point:
+    """Stable cross-module center reserved after the opening paired bank."""
+    start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
+    return (start[0] + _QUAD_MALL_CENTER_OFFSET[0], start[1] + _QUAD_MALL_CENTER_OFFSET[1])
+
+
+def _quad_mall_state(client: RconClient, surface: str, center: Point) -> tuple[str, str, str]:
+    """Read the two recipe groups and central requester for the quad module."""
+    positions = {
+        group: [
+            (center[0] + QUAD_MALL_MACHINE_OFFSETS[side][0],
+             center[1] + QUAD_MALL_MACHINE_OFFSETS[side][1])
+            for side in sides
+        ]
+        for group, sides in QUAD_MALL_GROUP_MACHINES.items()
+    }
+    if not hasattr(client, "command"):
+        return "-", "-", "-"
+    literal = ",".join(
+        "{" + str(x) + "," + str(y) + "}" for group in ("top", "bottom")
+        for x, y in positions[group]
+    )
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for _,p in ipairs({" + literal + "}) do local e=s.find_entities_filtered{position=p,radius=0.4,limit=1}[1];"
+        "local ok,r=pcall(function() return e and e.get_recipe() end);out[#out+1]=(ok and r and r.name or '-') end;"
+        "local c=s.find_entities_filtered{position={" + str(center[0]) + "," + str(center[1]) + "},radius=0.4,limit=1}[1];"
+        "out[#out+1]=(c and c.name or '-');rcon.print(table.concat(out,','))"
+    )
+    raw = client.command("/sc " + lua).strip().split(",")
+    values = (raw + ["-", "-", "-", "-", "-"])[:5]
+    top = values[0] if values[0] != "-" else values[1]
+    bottom = values[2] if values[2] != "-" else values[3]
+    return top, bottom, values[4]
+
+
+def quad_mall_slot_count(
+    client: RconClient, surface: str, reference_point: Point,
+) -> int:
+    """Committed assembler count in the four-machine bootstrap module."""
+    top, bottom, requester = _quad_mall_state(client, surface, quad_mall_center(reference_point))
+    if requester not in {"requester-chest", "entity-ghost"}:
+        return 0
+    return (2 if top != "-" else 0) + (2 if bottom != "-" else 0)
+
+
+def preview_quad_mall_allocation(
+    client: RconClient, surface: str, recipe: str, reference_point: Point,
+) -> tuple[Point, str] | None:
+    """Return an open top/bottom half in the quad module."""
+    top, bottom, requester = _quad_mall_state(client, surface, quad_mall_center(reference_point))
+    if requester not in {"requester-chest", "entity-ghost", "-"}:
+        return None
+    if top == "-":
+        return quad_mall_center(reference_point), "top"
+    if bottom == "-":
+        return quad_mall_center(reference_point), "bottom"
+    return None
+
+
+def quad_mall_project_bill(
+    recipe: str, group: str, *, stock_target: int = 1,
+    machine_name: str | None = None,
+) -> dict[str, int]:
+    """Construction bill for one quad half, including only new shared parts."""
+    spec = LINE_RECIPES[recipe]
+    plan = generate_quad_mall_layout(
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
+        (0.0, 0.0), group, stock_target=stock_target,
+        product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
+    )
+    return dict(sorted(
+        (item, count) for item, count in Counter(plan_material_bill(plan)).items()
+        if count > 0
+    ))
 
 
 def mall_demand_slot_count(
@@ -534,8 +617,16 @@ def build_compact_mall_stage(
     shared_provider: bool = False,
     machine_name: str | None = None,
     demand_slot: bool = False,
+    quad_mall: bool = False,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
+    if quad_mall:
+        return build_quad_mall_stage(
+            client, bridge, surface, force, recipe, ingredient_sources,
+            reference_point, bring_stage_up, emit, stock_target=stock_target,
+            stock_gate_target=stock_gate_target, fill_chest=fill_chest,
+            request_multiplier_override=request_multiplier_override,
+        )
     spec = LINE_RECIPES[recipe]
     if not spec.get("set_recipe", True):
         # find_line counts machines by the recipe they have SET. A furnace takes
@@ -612,3 +703,58 @@ def build_compact_mall_stage(
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
     )
     return provider
+
+
+def build_quad_mall_stage(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,
+    bring_stage_up: Callable, emit: Callable[[str], None], *, stock_target: int = 1,
+    stock_gate_target: int | None = None, fill_chest: bool = False,
+    request_multiplier_override: int | None = None,
+) -> Point:
+    """Fill one half of the four-machine bootstrap module."""
+    spec = LINE_RECIPES[recipe]
+    allocation = preview_quad_mall_allocation(
+        client, surface, recipe, reference_point,
+    )
+    if allocation is None:
+        raise StuckError("No assignable half remains in the quad bootstrap mall")
+    center, group = allocation
+    plan = generate_quad_mall_layout(
+        recipe, spec["machine"], spec["ingredients"], spec["amounts"], center,
+        group, stock_target=stock_target,
+        product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
+        stock_gate_target=stock_gate_target, fill_chest=fill_chest,
+        set_recipe=spec.get("set_recipe", True),
+        request_multiplier_override=request_multiplier_override,
+    )
+    plan["surface"], plan["force"] = surface, force
+    emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
+    substation = (center[0] + 5.0, center[1] + 5.0)
+    if group == "top" and hasattr(client, "command"):
+        if not extend_power(
+            client, bridge, surface, force, substation, emit,
+            reserved_tiles=planned_footprint_tiles(plan),
+        ):
+            raise StuckError(
+                f"quad mall for {recipe} cannot stage generated power at {substation}"
+            )
+    _submit(client, bridge, surface, plan, f"quad_mall_{recipe}_{group}", emit)
+    machines = [
+        (center[0] + QUAD_MALL_MACHINE_OFFSETS[side][0],
+         center[1] + QUAD_MALL_MACHINE_OFFSETS[side][1])
+        for side in QUAD_MALL_GROUP_MACHINES[group]
+    ]
+    chests = [
+        (action["position"]["x"], action["position"]["y"])
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity") in {"requester-chest", "passive-provider-chest"}
+    ]
+    stage_area = ((center[0] - 7, center[1] - 7), (center[0] + 7, center[1] + 7))
+    bring_stage_up(
+        client, bridge, surface, force, f"quad bootstrap mall for {recipe}",
+        center, stage_area, substation, machines, emit,
+        logistic_chest_positions=[*ingredient_sources.values(), *chests],
+    )
+    provider_offset = (0.0, -1.0) if group == "top" else (0.0, 1.0)
+    return (center[0] + provider_offset[0], center[1] + provider_offset[1])
