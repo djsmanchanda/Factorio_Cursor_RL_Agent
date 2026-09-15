@@ -43,6 +43,7 @@ def generate_quad_mall_layout(
     fill_chest: bool = False, set_recipe: bool = True,
     request_multiplier_override: int | None = None,
     inserter_type: str | None = None,
+    support_inserter_type: str | None = None,
 ) -> dict:
     """Build one two-machine half of the four-machine cross module.
 
@@ -98,9 +99,9 @@ def generate_quad_mall_layout(
             output_position = _position(center, (0.0, -2.0 if side == "north" else 2.0))
             direction = "south" if side == "north" else "north"
             actions.extend([
-                {"action_type": "place_entity", "entity": "long-handed-inserter",
+                {"action_type": "place_entity", "entity": support_inserter_type or "long-handed-inserter",
                  "position": input_position, "direction": direction},
-                {"action_type": "place_entity", "entity": "long-handed-inserter",
+                {"action_type": "place_entity", "entity": support_inserter_type or "long-handed-inserter",
                  "position": output_position, "direction": direction},
             ])
         else:

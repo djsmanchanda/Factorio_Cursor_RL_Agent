@@ -208,7 +208,8 @@ def preview_quad_mall_allocation(
 
 def quad_mall_project_bill(
     recipe: str, group: str, *, stock_target: int = 1,
-    machine_name: str | None = None,
+    machine_name: str | None = None, inserter_type: str | None = None,
+    support_inserter_type: str | None = None,
 ) -> dict[str, int]:
     """Construction bill for one quad half, including only new shared parts."""
     spec = LINE_RECIPES[recipe]
@@ -216,6 +217,8 @@ def quad_mall_project_bill(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
         (0.0, 0.0), group, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
+        inserter_type=inserter_type,
+        support_inserter_type=support_inserter_type,
     )
     return dict(sorted(
         (item, count) for item, count in Counter(plan_material_bill(plan)).items()
@@ -749,6 +752,8 @@ def build_quad_mall_stage(
     if allocation is None:
         raise StuckError("No assignable half remains in the quad bootstrap mall")
     center, group = allocation
+    seed_module = center == quad_mall_center(reference_point)
+    seed_inserter = "inserter" if seed_module else None
     plan = generate_quad_mall_layout(
         recipe, spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,
@@ -756,6 +761,8 @@ def build_quad_mall_stage(
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
         set_recipe=spec.get("set_recipe", True),
         request_multiplier_override=request_multiplier_override,
+        inserter_type=seed_inserter,
+        support_inserter_type=seed_inserter,
     )
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
