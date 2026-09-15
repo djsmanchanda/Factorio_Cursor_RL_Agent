@@ -7289,7 +7289,13 @@ def _ingredient_sources(
                 sources[ingredient] = source
                 continue
             if not backed:
-                UNBACKED_DRAWS.add(ingredient)
+                # Standing reserves have their own re-queue policy in
+                # ``_survey_pass``.  A just-in-time AM1 draw is therefore
+                # recoverable even while its rotating loan is between batches;
+                # do not turn that expected gap into a terminal unbacked-draw
+                # verdict before the reserve floor is crossed.
+                if ingredient not in _EVERGREEN_STOCK:
+                    UNBACKED_DRAWS.add(ingredient)
             elif ingredient in UNBACKED_DRAWS:
                 UNBACKED_DRAWS.discard(ingredient)
             continue
@@ -11529,7 +11535,15 @@ def mall_reserve_for(
 _EVERGREEN_STOCK = {
     # item: (standing target, restock floor)
     "transport-belt": (200, 25),
+    # AM1 is the seed for every pre-advanced-circuit mall upgrade.  Its
+    # rotating loan can make it, but the demand used to retire as soon as the
+    # core cell bill reached three.  Native AM1 -> AM2 upgrades then consumed
+    # that stock without creating a new target, leaving the mall with no
+    # producer and no eligible free slot.  Keep a small just-in-time buffer;
+    # the item remains a rotating batch and does not reserve another cell.
+    "assembling-machine-1": (6, 3),
 }
+_AM1_RESERVE_SEEN_KEY = "_am1_reserve_seen"
 
 
 def _evergreen_producer_live(
@@ -11646,6 +11660,19 @@ def _survey_pass(
     running.
     """
     stock = _transferable_or_available_stock(client, surface, force)
+    # Remember that this run actually received an AM1 starter reserve.  A
+    # missing/zero key in a dry harness means “no AM1 capability supplied”,
+    # while a live run may legitimately omit zero-count items after upgrades
+    # drain the reserve; the marker lets that later stockout re-queue safely.
+    if int(stock.get("assembling-machine-1", 0)) > 0:
+        try:
+            prepped.add(_AM1_RESERVE_SEEN_KEY)
+        except AttributeError:
+            pass
+    am1_reserve_seen = (
+        int(stock.get("assembling-machine-1", 0)) > 0
+        or _AM1_RESERVE_SEEN_KEY in prepped
+    )
     tick = live_base.game_tick(client)
     ghost_bill = (
         live_base.pending_construction_items(client, surface, force)
@@ -11713,7 +11740,13 @@ def _survey_pass(
         # first 128-belt foundation bill to the 200-belt standing reserve and
         # delayed every downstream stage.  Once prep has established the
         # recipe, the original stockout recovery behavior resumes.
-        if evergreen not in prepped:
+        # The belt watchdog waits until its cell is prepared so the opening
+        # foundation bill does not inflate to the full reserve. AM1 becomes
+        # eligible after its starter reserve has actually been observed; its
+        # rotating batch is then the capability that creates more mall cells.
+        if evergreen not in prepped and not (
+            evergreen == "assembling-machine-1" and am1_reserve_seen
+        ):
             continue
         if evergreen in mall_targets:
             continue

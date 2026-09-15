@@ -107,6 +107,30 @@ def test_stocked_inserter_schedules_a_real_producer(monkeypatch):
     assert calls[0][1]["upgrade_bootstrap"] is False
 
 
+def test_stocked_am1_draw_is_backed_by_the_reserve_watchdog(monkeypatch):
+    """AM1 stock may cover one cell while the survey owns replenishment."""
+    monkeypatch.setitem(builder.LINE_RECIPES, "assembling-machine-1", {
+        "machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+        "amounts": [9], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_args: {"assembling-machine-1": 3},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+    builder.UNBACKED_DRAWS.clear()
+
+    result = builder._ingredient_sources(
+        object(), object(), "nauvis", "player", "assembling-machine-2",
+        (0.0, 0.0), lambda _message: None,
+        _plan("assembling-machine-2", "assembling-machine-1"),
+        upgrade_bootstrap=False,
+    )
+
+    assert result == {}
+    assert "assembling-machine-1" not in builder.UNBACKED_DRAWS
+
+
 def test_steel_line_reuses_the_real_iron_provider_not_starter_storage(monkeypatch):
     monkeypatch.setattr(
         builder.live_base, "available_items",

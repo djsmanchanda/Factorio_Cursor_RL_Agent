@@ -1363,6 +1363,31 @@ def test_survey_snapshots_transferable_history(monkeypatch) -> None:
     assert builder._DRAIN_WATCH_LAST_TRANSFERABLE == {_DRAIN_KEY: 130}
 
 
+def test_am1_reserve_requeues_after_native_upgrades_drain_it(monkeypatch) -> None:
+    """AM1 is a rotating seed batch, so later upgrades must reopen it."""
+    mall_targets: dict[str, int] = {}
+    synced: list[dict[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock",
+        lambda *_a: {"assembling-machine-1": 3},
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 100)
+    monkeypatch.setattr(builder, "_evergreen_producer_live", lambda *_a: False)
+    priorities = SimpleNamespace(
+        sync=lambda targets, *_a: synced.append(dict(targets)),
+        next=lambda targets, *_a: SimpleNamespace(item="assembling-machine-1")
+        if "assembling-machine-1" in targets else None,
+    )
+
+    _tick, task = builder._survey_pass(
+        object(), "nauvis", "player", mall_targets, priorities,
+    )
+
+    assert mall_targets == {"assembling-machine-1": 6}
+    assert task is not None and task.item == "assembling-machine-1"
+    assert synced[-1]["assembling-machine-1"] == 6
+
+
 # --- standing reserves grow once metal flows ---------------------------------
 
 def test_scarce_startup_keeps_tight_batch() -> None:
