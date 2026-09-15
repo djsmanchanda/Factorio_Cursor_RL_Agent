@@ -11589,6 +11589,12 @@ _EVERGREEN_STOCK = {
     # producer and no eligible free slot.  Keep a small just-in-time buffer;
     # the item remains a rotating batch and does not reserve another cell.
     "assembling-machine-1": (6, 3),
+    # The two-pair seed consumes both of these while fast-inserter, drill, and
+    # AM1 batches bootstrap.  Their cells may be correctly gate-disabled once
+    # the opening reserve is full, but a later construction draw must reopen
+    # the demand before the prerequisites reach zero.
+    "electronic-circuit": (18, 6),
+    "inserter": (20, 5),
 }
 _AM1_RESERVE_SEEN_KEY = "_am1_reserve_seen"
 
@@ -12310,6 +12316,7 @@ def run(
     mission_items: tuple[str, ...] = (),
     episode_id: str | None = None,
     bootstrap_profile: str = "reduced-v1",
+    checkpoint_boundary: Callable[[], None] | None = None,
 ) -> dict:
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
@@ -12365,6 +12372,12 @@ def run(
         unchanged_passes = 0
         iteration = 0
         while budget.passes < max_iterations:
+            # Checkpoint observation is invoked only at this controller pass
+            # boundary, after the previous pass has returned control to the
+            # orchestrator.  The callback is injectable and owns no live
+            # process lifecycle; fleet runners use it for structured evidence.
+            if checkpoint_boundary is not None:
+                checkpoint_boundary()
             budget.begin_pass()
             _reconcile_bootstrap_work(client, surface, force)
             tick, task = _survey_pass(
