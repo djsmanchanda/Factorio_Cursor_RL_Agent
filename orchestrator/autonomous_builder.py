@@ -6385,6 +6385,17 @@ def _release_completed_construction_loans(
                 f"  MALL BOOTSTRAP LOAN WAIT: {loan.target_item} -- "
                 f"{deferred}; retrying after re-observation"
             )
+        except StuckError as error:
+            if "configure_target_missing" not in str(error):
+                raise
+            # A native upgrade or bot replacement can change the exact entity
+            # identity between the loan survey and its configuration plan.
+            # Re-read the active loan before treating the cell as lost; the
+            # periodic release pass is allowed to yield this race safely.
+            emit(
+                f"  MALL BOOTSTRAP LOAN WAIT: {loan.target_item} -- "
+                f"{error}; retrying after cell re-observation"
+            )
 
 
 def _service_bootstrap_loan(
@@ -11126,12 +11137,22 @@ def _upgrade_bootstrap_mall(
         ("assembling-machine-1", "assembling-machine-2"),
         ("inserter", "fast-inserter"),
     )
+    try:
+        busy_upgrade_positions = {
+            tuple(loan.machine_position)
+            for loan in active_bootstrap_loans(client, surface, force)
+        }
+    except Exception:
+        busy_upgrade_positions = set()
     for source, target in upgrades:
         if assemblers_only and source != "assembling-machine-1":
             continue
-        positions = mall_entity_positions(
-            client, surface, force, reference_point, source,
-        )
+        positions = [
+            position for position in mall_entity_positions(
+                client, surface, force, reference_point, source,
+            )
+            if tuple(position) not in busy_upgrade_positions
+        ]
         if not positions:
             continue
         wanted = len(positions) + UPGRADE_RESERVE

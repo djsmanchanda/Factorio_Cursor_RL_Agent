@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from orchestrator import autonomous_builder as builder
 from orchestrator import live_base
@@ -91,6 +92,42 @@ def test_bootstrap_mall_orders_only_self_funded_upgrade_surplus(monkeypatch) -> 
         "position": {"x": 36.5, "y": 32.5},
         "block": "bootstrap-mall-assembling-machine-1-to-assembling-machine-2",
     }]
+
+
+def test_bootstrap_mall_never_upgrades_an_active_loan_cell(monkeypatch) -> None:
+    submitted: list[dict] = []
+
+    class Bridge:
+        def execute_upgrade_plan(self, _authorization, plan, **_scope) -> Path:
+            submitted.append(plan)
+            return Path("upgrade-report.json")
+
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items",
+        lambda *_a: {"assembling-machine-2": builder.UPGRADE_RESERVE + 20},
+    )
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda *_a: _a[-1] == "assembling-machine-2",
+    )
+    monkeypatch.setattr(
+        builder, "mall_entity_positions",
+        lambda *_a: ((36.5, 32.5), (47.5, 32.5))
+        if _a[-1] == "assembling-machine-1" else (),
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: (SimpleNamespace(machine_position=(36.5, 32.5)),),
+    )
+    monkeypatch.setattr(
+        builder, "load_json", lambda _path: {"actions": [{"status": "success"}]},
+    )
+
+    assert builder._upgrade_bootstrap_mall(
+        object(), Bridge(), "nauvis", "player", {}, (3.0, -1.0),
+        lambda _message: None,
+    ) is True
+    assert submitted[0]["actions"][0]["position"] == {"x": 47.5, "y": 32.5}
 
 
 def test_iron_promotion_queues_am2_before_any_am2_producer_exists(monkeypatch):

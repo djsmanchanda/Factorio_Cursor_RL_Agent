@@ -152,6 +152,38 @@ def test_completed_loan_release_parks_typed_chemical_handoff(monkeypatch) -> Non
     assert any("retrying after re-observation" in message for message in messages)
 
 
+def test_completed_loan_release_parks_missing_cell_identity(monkeypatch) -> None:
+    loan = SimpleNamespace(
+        target_item="pipe", target_count=100, production_target=100,
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock",
+        lambda *_a: {"pipe": 100},
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_products_finished", lambda *_a: 100,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_minimum_fulfilled", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_submit_bootstrap_loan",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            builder.StuckError(
+                "bootstrap_loan_pipe: configure_target_missing",
+            )
+        ),
+    )
+    messages: list[str] = []
+
+    builder._release_completed_construction_loans(
+        object(), object(), "nauvis", "player", (0, 0), messages.append,
+    )
+
+    assert any("cell re-observation" in message for message in messages)
+
+
 @pytest.mark.parametrize("earmark", [True, False])
 def test_existing_direct_mine_earmark_does_not_wait_before_refinery(monkeypatch, earmark):
     extraction = SimpleNamespace(
