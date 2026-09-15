@@ -14,6 +14,7 @@ from orchestrator.material_reservations import plan_material_bill
 from orchestrator.stage_services import StuckError, _submit, extend_power
 from planners.mall_layout import generate_paired_mall_layout, recipe_group_name
 from planners.quad_mall_layout import (
+    DENSE_MALL_MODULE_OFFSETS,
     QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
     generate_quad_mall_layout,
 )
@@ -131,9 +132,21 @@ def mall_slot_count(
 
 
 def quad_mall_center(reference_point: Point) -> Point:
-    """Stable cross-module center in the reserved expansion bay."""
+    """Stable center of the opening four-machine expansion bay."""
     start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
-    return (start[0] + _QUAD_MALL_CENTER_OFFSET[0], start[1] + _QUAD_MALL_CENTER_OFFSET[1])
+    return (
+        start[0] + _QUAD_MALL_CENTER_OFFSET[0] + DENSE_MALL_MODULE_OFFSETS[0][0],
+        start[1] + _QUAD_MALL_CENTER_OFFSET[1] + DENSE_MALL_MODULE_OFFSETS[0][1],
+    )
+
+
+def dense_mall_module_centers(reference_point: Point) -> tuple[Point, ...]:
+    """Return the fixed 4, 8, and 12-slot module centres."""
+    first = quad_mall_center(reference_point)
+    return tuple(
+        (first[0] + dx, first[1] + dy)
+        for dx, dy in DENSE_MALL_MODULE_OFFSETS
+    )
 
 
 def _quad_mall_state(client: RconClient, surface: str, center: Point) -> tuple[str, str, str]:
@@ -169,24 +182,27 @@ def _quad_mall_state(client: RconClient, surface: str, center: Point) -> tuple[s
 def quad_mall_slot_count(
     client: RconClient, surface: str, reference_point: Point,
 ) -> int:
-    """Committed assembler count in the four-machine bootstrap module."""
-    top, bottom, requester = _quad_mall_state(client, surface, quad_mall_center(reference_point))
-    if requester not in {"requester-chest", "entity-ghost"}:
-        return 0
-    return (2 if top != "-" else 0) + (2 if bottom != "-" else 0)
+    """Committed assembler count across the reserved 4 -> 12-slot bank."""
+    total = 0
+    for center in dense_mall_module_centers(reference_point):
+        top, bottom, requester = _quad_mall_state(client, surface, center)
+        if requester in {"requester-chest", "entity-ghost"}:
+            total += (2 if top != "-" else 0) + (2 if bottom != "-" else 0)
+    return total
 
 
 def preview_quad_mall_allocation(
     client: RconClient, surface: str, recipe: str, reference_point: Point,
 ) -> tuple[Point, str] | None:
-    """Return an open top/bottom half in the quad module."""
-    top, bottom, requester = _quad_mall_state(client, surface, quad_mall_center(reference_point))
-    if requester not in {"requester-chest", "entity-ghost", "-"}:
-        return None
-    if top == "-":
-        return quad_mall_center(reference_point), "top"
-    if bottom == "-":
-        return quad_mall_center(reference_point), "bottom"
+    """Return the next open half, filling the three dense modules in order."""
+    for center in dense_mall_module_centers(reference_point):
+        top, bottom, requester = _quad_mall_state(client, surface, center)
+        if requester not in {"requester-chest", "entity-ghost", "-"}:
+            continue
+        if top == "-":
+            return center, "top"
+        if bottom == "-":
+            return center, "bottom"
     return None
 
 
@@ -226,10 +242,17 @@ def mall_entity_positions(
 ) -> tuple[Point, ...]:
     """Exact, not-already-upgrading entities inside the compact mall district."""
     origins = _cell_origins(reference_point)
+    dense_centers = dense_mall_module_centers(reference_point)
     min_x = min(origin[0] for origin in origins) - 2
     min_y = min(origin[1] for origin in origins)
-    max_x = max(origin[0] for origin in origins) + 12
-    max_y = max(origin[1] for origin in origins) + 7
+    max_x = max(
+        max(origin[0] for origin in origins) + 12,
+        max(center[0] for center in dense_centers) + 8,
+    )
+    max_y = max(
+        max(origin[1] for origin in origins) + 7,
+        max(center[1] for center in dense_centers) + 8,
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local out={};for _,e in pairs(s.find_entities_filtered{name='" + entity_name

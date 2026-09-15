@@ -25,6 +25,12 @@ QUAD_MALL_GROUP_MACHINES = {
     "bottom": ("east", "south"),
 }
 
+# Three reserved module centres form the 4 -> 12 expansion bank.  The offsets
+# follow the supplied dense blueprint's staggered arrangement: the first
+# module is the opening four-machine bank, and the two later modules sit above
+# and to the right without moving the machines already built.
+DENSE_MALL_MODULE_OFFSETS = ((0.0, 0.0), (3.0, -10.0), (9.0, -5.0))
+
 
 def _position(center: tuple[float, float], offset: tuple[float, float]) -> dict:
     return {"x": center[0] + offset[0], "y": center[1] + offset[1]}

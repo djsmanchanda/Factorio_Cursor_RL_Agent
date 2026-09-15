@@ -3495,11 +3495,13 @@ def _upgrade_owned_plate_transport(
 
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
-# Before advanced circuits, permanent and rotating work share a deliberately
-# small paired pool. Once the iron pioneer is released, one four-machine quad
-# module expands that pool to twelve without consuming four extra requesters;
-# advanced-circuit production still releases the independent mall completely.
-_PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 8
+# Before advanced circuits, permanent and rotating work starts in one dense
+# four-machine module. Once the iron pioneer is released, two more reserved
+# modules expand that same bank to twelve without moving the first mine's mall
+# or consuming six new requesters. Advanced-circuit production still releases
+# the independent mall completely.
+_PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 4
+_LEGACY_DRY_MALL_SLOT_TARGET = 8
 _PRE_PLASTIC_MALL_SLOT_TARGET = DEMAND_MALL_SLOT_TARGET
 _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
     *BULK_CONSTRUCTION_ITEMS,
@@ -3524,13 +3526,32 @@ def _bootstrap_mall_slot_limit(
         advanced_started = False
     if advanced_started:
         return None
-    # Once the iron pioneer is gone, the quad module can add four slots while
-    # using one requester and two providers. This is the reduced-seed path:
-    # it reaches twelve slots without demanding the six requesters required by
-    # six ordinary paired cells.
+    # Once the iron pioneer is gone, the two reserved modules can join the
+    # opening module. This is the reduced-seed path: it reaches twelve slots
+    # without demanding the six requesters required by six ordinary pairs.
     if _iron_starter_released(client, surface, force):
         return DEMAND_MALL_SLOT_TARGET
-    return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+    # Real runs observe the direct metal starters before mall construction;
+    # use the dense four-slot seed immediately.  Dry harnesses that have no
+    # starter observation retain the legacy eight-slot contract so planner
+    # unit tests and catalog-only callers do not invent live geometry.
+    if _STARTUP_METAL_STARTERS_OBSERVED:
+        return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+    return (
+        _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+        if _STARTUP_METAL_STARTERS_OBSERVED
+        else _LEGACY_DRY_MALL_SLOT_TARGET
+    )
+
+
+def _dense_bootstrap_mall_enabled(
+    client: RconClient, surface: str, force: str,
+) -> bool:
+    """Whether this caller represents a real starter-backed mall run."""
+    return bool(
+        _STARTUP_METAL_STARTERS_OBSERVED
+        and not _independent_mall_ready(client, surface, force)
+    )
 
 
 def _iron_starter_released(
@@ -7133,8 +7154,7 @@ def _reserve_compact_mall_project(
     independent_mall = _independent_mall_ready(client, surface, force)
     quad_mall = bool(
         reference_point is not None
-        and not independent_mall
-        and _iron_starter_released(client, surface, force)
+        and _dense_bootstrap_mall_enabled(client, surface, force)
     )
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
@@ -7576,10 +7596,7 @@ def _build_assembled_stage(
                     "compact mall slot(s) and cleared their request groups"
                 )
     elif not upgrade_bootstrap:
-        quad_mall = (
-            not independent_mall
-            and _iron_starter_released(client, surface, force)
-        )
+        quad_mall = _dense_bootstrap_mall_enabled(client, surface, force)
         output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,
             bring_stage_up, emit, stock_target=mall_storage_limit,
@@ -8287,9 +8304,7 @@ def _bootstrap_demand_cell_affordable(
         committed, _bootstrap_mall_slot_limit(client, surface, force),
     ):
         return False, {}
-    quad_mall = not independent_mall and _iron_starter_released(
-        client, surface, force,
-    )
+    quad_mall = _dense_bootstrap_mall_enabled(client, surface, force)
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
         if quad_mall else
