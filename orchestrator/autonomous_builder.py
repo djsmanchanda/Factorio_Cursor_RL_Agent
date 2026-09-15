@@ -7130,21 +7130,36 @@ def _reserve_compact_mall_project(
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None:
         return
-    project_id = _material_project_id(item)
+    independent_mall = _independent_mall_ready(client, surface, force)
+    quad_mall = bool(
+        reference_point is not None
+        and not independent_mall
+        and _iron_starter_released(client, surface, force)
+    )
     allocation = (
+        preview_quad_mall_allocation(client, surface, item, reference_point)
+        if quad_mall else
         preview_mall_allocation(client, surface, item, reference_point)
         if reference_point is not None else None
     )
     project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
-    bill = compact_mall_project_bill(
-        item, stock_target=plan.mall_storage_limit,
-        stock_gate_target=stock_gate_target,
-        fill_chest=plan.fill_provider,
-        request_multiplier_override=plan.mall_request_multiplier,
-        side=allocation[1] if allocation is not None else "left",
-        shared_provider=getattr(plan, "shared_provider", False),
-        machine_name=project_spec.get("machine"),
-    )
+    if quad_mall and allocation is not None:
+        project_id = f"quad_mall_{item}_{allocation[1]}"
+        bill = quad_mall_project_bill(
+            item, allocation[1], stock_target=plan.mall_storage_limit,
+            machine_name=project_spec.get("machine"),
+        )
+    else:
+        project_id = _material_project_id(item)
+        bill = compact_mall_project_bill(
+            item, stock_target=plan.mall_storage_limit,
+            stock_gate_target=stock_gate_target,
+            fill_chest=plan.fill_provider,
+            request_multiplier_override=plan.mall_request_multiplier,
+            side=allocation[1] if allocation is not None else "left",
+            shared_provider=getattr(plan, "shared_provider", False),
+            machine_name=project_spec.get("machine"),
+        )
     stock = live_base.transferable_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
         client, surface, force, bill, stock,

@@ -58,6 +58,14 @@ def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     assert bottom.get("substation", 0) == 0
 
 
+def test_quad_bill_includes_support_inserters_before_submission() -> None:
+    bill = quad_mall_project_bill(
+        "transport-belt", "top", machine_name="assembling-machine-1",
+    )
+
+    assert bill["long-handed-inserter"] == 2
+
+
 def test_quad_expansion_bay_does_not_overlap_legacy_paired_bank() -> None:
     """The expansion module must have a real empty bay after the old bank."""
     reference = (3.0, -1.0)
