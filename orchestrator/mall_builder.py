@@ -752,8 +752,12 @@ def build_quad_mall_stage(
     if allocation is None:
         raise StuckError("No assignable half remains in the quad bootstrap mall")
     center, group = allocation
-    seed_module = center == quad_mall_center(reference_point)
-    seed_inserter = "inserter" if seed_module else None
+    # The opening four slots are the regular-inserter seed bank.  By the time
+    # this quad path is admitted, long-handed support has been observed, but
+    # ordinary inserters remain the cheap input/output choice until native
+    # upgrades promote the cells.
+    seed_module = False
+    seed_inserter = "inserter"
     plan = generate_quad_mall_layout(
         recipe, spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,

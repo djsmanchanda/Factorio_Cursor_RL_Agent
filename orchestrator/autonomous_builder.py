@@ -64,7 +64,6 @@ from orchestrator.mall_builder import (
     mall_slot_count,
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
-    quad_mall_center,
     preview_quad_mall_allocation,
     quad_mall_project_bill,
     preview_mall_allocation,
@@ -3530,12 +3529,12 @@ def _bootstrap_mall_slot_limit(
     # Once the iron pioneer is gone, the two reserved modules can join the
     # opening module. This is the reduced-seed path: it reaches twelve slots
     # without demanding the six requesters required by six ordinary pairs.
-    if _iron_starter_released(client, surface, force):
+    if _dense_bootstrap_mall_enabled(client, surface, force):
         return DEMAND_MALL_SLOT_TARGET
     # Real runs observe the direct metal starters before mall construction;
-    # use the dense four-slot seed immediately.  Dry harnesses that have no
-    # starter observation retain the legacy eight-slot contract so planner
-    # unit tests and catalog-only callers do not invent live geometry.
+    # keep the opening pair bank at four until long-handed support exists.
+    # Dry harnesses that have no starter observation retain the legacy
+    # eight-slot contract so catalog-only callers do not invent live geometry.
     if _STARTUP_METAL_STARTERS_OBSERVED:
         return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
     return (
@@ -3548,9 +3547,24 @@ def _bootstrap_mall_slot_limit(
 def _dense_bootstrap_mall_enabled(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Whether this caller represents a real starter-backed mall run."""
+    """Whether top/bottom expansion support is actually available."""
+    long_handed_ready = False
+    if hasattr(client, "command") and "long-handed-inserter" in LINE_RECIPES:
+        long_handed_ready = _production_started(
+            client, surface, force, "long-handed-inserter",
+        )
+        if not long_handed_ready:
+            try:
+                long_handed_ready = (
+                    live_base.available_items(
+                        client, surface, force,
+                    ).get("long-handed-inserter", 0) >= 2
+                )
+            except Exception:
+                long_handed_ready = False
     return bool(
         _STARTUP_METAL_STARTERS_OBSERVED
+        and long_handed_ready
         and not _independent_mall_ready(client, surface, force)
     )
 
@@ -7166,12 +7180,10 @@ def _reserve_compact_mall_project(
     project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
     if quad_mall and allocation is not None:
         project_id = f"quad_mall_{item}_{allocation[1]}"
-        seed_module = allocation[0] == quad_mall_center(reference_point)
         bill = quad_mall_project_bill(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
-            inserter_type="inserter" if seed_module else None,
-            support_inserter_type="inserter" if seed_module else None,
+            inserter_type="inserter",
         )
     else:
         project_id = _material_project_id(item)
@@ -8320,16 +8332,11 @@ def _bootstrap_demand_cell_affordable(
     if allocation is None:
         return False, {}
     _origin, side = allocation
-    seed_module = (
-        quad_mall
-        and allocation[0] == quad_mall_center(reference_point)
-    )
     bill = (
         quad_mall_project_bill(
             item, side, stock_target=max(1, target),
             machine_name="assembling-machine-1",
-            inserter_type="inserter" if seed_module else None,
-            support_inserter_type="inserter" if seed_module else None,
+            inserter_type="inserter",
         )
         if quad_mall else
         compact_mall_project_bill(

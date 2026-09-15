@@ -41,6 +41,7 @@ def test_pre_advanced_mall_releases_quad_capacity_after_iron_pioneer(
 ) -> None:
     monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
     monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_dense_bootstrap_mall_enabled", lambda *_a: True)
     monkeypatch.setattr(
         builder, "_bootstrap_state",
         lambda recipe: type("State", (), {"lifecycle_state": "released"})()
