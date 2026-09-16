@@ -426,6 +426,22 @@ def seed_cell_includes_substation(
     return origin == (start[0], start[1]) and side == "left"
 
 
+def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]]:
+    """Reserve dense-module footprints before routing seed power bridges."""
+    spec = LINE_RECIPES["iron-gear-wheel"]
+    reserved: set[tuple[int, int]] = set()
+    for center in dense_mall_module_centers(reference_point):
+        for group in ("top", "bottom"):
+            plan = generate_quad_mall_layout(
+                "iron-gear-wheel", "assembling-machine-1",
+                spec["ingredients"], spec["amounts"], center, group,
+                inserter_type="inserter", support_inserter_type="inserter",
+                include_substation=False, craft_time=spec["craft_time"],
+            )
+            reserved.update(planned_footprint_tiles(plan))
+    return reserved
+
+
 def _slot_position(origin: tuple[int, int], side: str) -> Point:
     return (origin[0] + (1.5 if side == "left" else 7.5), origin[1] + 1.5)
 
@@ -760,11 +776,14 @@ def build_compact_mall_stage(
             )
             if existing_network is not None else None
         )
+        reserved_tiles = planned_footprint_tiles(plan)
+        if seed_cell_uses_shared_substation(reference_point, origin):
+            reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
         if (
             (existing_generation is None or existing_generation <= 0)
             and not extend_power(
                 client, bridge, surface, force, substation, emit,
-                reserved_tiles=planned_footprint_tiles(plan),
+                reserved_tiles=reserved_tiles,
             )
         ):
             raise StuckError(

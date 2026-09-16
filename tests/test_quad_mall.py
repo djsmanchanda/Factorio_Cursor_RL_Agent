@@ -7,7 +7,7 @@ from orchestrator import autonomous_builder as builder
 from orchestrator.mall_builder import (
     _cell_origins, dense_mall_module_centers, quad_mall_center,
     quad_mall_project_bill, seed_cell_includes_substation,
-    seed_shared_substation,
+    seed_expansion_reserved_tiles, seed_shared_substation,
 )
 from planners.plan_validation import validate_no_collisions
 from planners.quad_mall_layout import generate_quad_mall_layout
@@ -141,6 +141,12 @@ def test_seed_power_is_shared_and_keeps_the_bottom_bay_clear() -> None:
         for action in phase["actions"] if action.get("entity") == "substation"
     ]
     assert substations == [{"x": 43.0, "y": 35.0}]
+
+
+def test_seed_power_bridge_reserves_all_dense_module_tiles() -> None:
+    reserved = seed_expansion_reserved_tiles((3.0, -1.0))
+    assert (39, 27) in reserved
+    assert (36, 47) in reserved
 
 
 def test_dense_bank_has_three_reserved_module_centres() -> None:
