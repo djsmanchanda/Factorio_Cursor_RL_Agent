@@ -3547,26 +3547,42 @@ def _bootstrap_mall_slot_limit(
 def _dense_bootstrap_mall_enabled(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Whether top/bottom expansion support is actually available."""
-    long_handed_ready = False
-    if hasattr(client, "command") and "long-handed-inserter" in LINE_RECIPES:
-        long_handed_ready = _production_started(
-            client, surface, force, "long-handed-inserter",
-        )
-        if not long_handed_ready:
-            try:
-                long_handed_ready = (
-                    live_base.available_items(
-                        client, surface, force,
-                    ).get("long-handed-inserter", 0) >= 2
-                )
-            except Exception:
-                long_handed_ready = False
+    """Whether the top/bottom expansion bay may be admitted.
+
+    The expansion uses the regular-inserter seed geometry and upgrades it
+    later.  Requiring a long-handed line to have already produced an item made
+    this gate circular: nothing else requested long-handed inserters, so the
+    quad bay could never be reached.  A recipe present in the live catalog is
+    the capability signal; the iron pioneer must still be released first so
+    the opening pair bank remains the four-slot bootstrap.
+    """
+    long_handed_ready = "long-handed-inserter" in LINE_RECIPES
+    if not long_handed_ready:
+        return False
+    if not _iron_starter_released(client, surface, force):
+        return False
     return bool(
         _STARTUP_METAL_STARTERS_OBSERVED
         and long_handed_ready
         and not _independent_mall_ready(client, surface, force)
     )
+
+
+def _quad_bootstrap_mall_enabled(
+    client: RconClient, surface: str, force: str,
+    reference_point: Point | None = None,
+) -> bool:
+    """Use the dense bay only after the opening paired bank is full."""
+    if not _dense_bootstrap_mall_enabled(client, surface, force):
+        return False
+    if not hasattr(client, "command"):
+        return True
+    try:
+        return mall_slot_count(client, surface, reference_point or (3.0, -1.0)) >= (
+            _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+        )
+    except Exception:
+        return False
 
 
 def _iron_starter_released(
@@ -7169,7 +7185,9 @@ def _reserve_compact_mall_project(
     independent_mall = _independent_mall_ready(client, surface, force)
     quad_mall = bool(
         reference_point is not None
-        and _dense_bootstrap_mall_enabled(client, surface, force)
+        and _quad_bootstrap_mall_enabled(
+            client, surface, force, reference_point,
+        )
     )
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
@@ -7612,7 +7630,9 @@ def _build_assembled_stage(
                     "compact mall slot(s) and cleared their request groups"
                 )
     elif not upgrade_bootstrap:
-        quad_mall = _dense_bootstrap_mall_enabled(client, surface, force)
+        quad_mall = _quad_bootstrap_mall_enabled(
+            client, surface, force, reference_point,
+        )
         output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,
             bring_stage_up, emit, stock_target=mall_storage_limit,
@@ -8320,7 +8340,9 @@ def _bootstrap_demand_cell_affordable(
         committed, _bootstrap_mall_slot_limit(client, surface, force),
     ):
         return False, {}
-    quad_mall = _dense_bootstrap_mall_enabled(client, surface, force)
+    quad_mall = _quad_bootstrap_mall_enabled(
+        client, surface, force, reference_point,
+    )
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
         if quad_mall else

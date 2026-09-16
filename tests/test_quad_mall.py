@@ -60,6 +60,27 @@ def test_pre_advanced_mall_starts_with_one_dense_four_slot_module(monkeypatch) -
     assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 4
 
 
+def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) -> None:
+    """Catalog availability must unlock expansion; waiting for output is circular."""
+    monkeypatch.setitem(
+        LINE_RECIPES, "long-handed-inserter",
+        {"machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+         "amounts": [1], "product_amount": 1, "craft_time": 0.5},
+    )
+    monkeypatch.setattr(builder, "_STARTUP_METAL_STARTERS_OBSERVED", True)
+    monkeypatch.setattr(
+        builder, "_bootstrap_state",
+        lambda recipe: type("State", (), {"lifecycle_state": "released"})()
+        if recipe == "iron-plate" else None,
+    )
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+
+    assert builder._dense_bootstrap_mall_enabled(
+        object(), "nauvis", "player",
+    )
+
+
 def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     top = quad_mall_project_bill("copper-cable", "top", machine_name="assembling-machine-1")
     bottom = quad_mall_project_bill("electronic-circuit", "bottom", machine_name="assembling-machine-1")
