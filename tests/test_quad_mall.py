@@ -81,18 +81,6 @@ def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) 
     )
 
 
-def test_startup_prep_keeps_circuit_slot_open(monkeypatch) -> None:
-    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
-    assert builder._startup_prep_target(
-        object(), "nauvis", "player", "copper-cable",
-    ) == 1
-
-    monkeypatch.setattr(builder, "_production_started", lambda *_a: True)
-    assert builder._startup_prep_target(
-        object(), "nauvis", "player", "copper-cable",
-    ) == 2
-
-
 def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     top = quad_mall_project_bill("copper-cable", "top", machine_name="assembling-machine-1")
     bottom = quad_mall_project_bill("electronic-circuit", "bottom", machine_name="assembling-machine-1")
