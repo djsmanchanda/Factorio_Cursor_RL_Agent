@@ -11016,6 +11016,26 @@ def _prep_reclaims_capped_slot(
     return False
 
 
+def _startup_prep_target(
+    client: RconClient, surface: str, force: str, recipe: str,
+) -> int:
+    """Keep one opening slot for circuits until their producer exists.
+
+    The reduced four-slot seed cannot fit two gear machines, two cable
+    machines, and a circuit machine.  A single cable assembler is enough to
+    establish the circuit producer; later demand can expand cable after the
+    iron starter and dense bay are available.
+    """
+    target = BASELINE_MACHINES[recipe]
+    if (
+        recipe == "copper-cable"
+        and target > 1
+        and not _production_started(client, surface, force, "electronic-circuit")
+    ):
+        return 1
+    return target
+
+
 def _prep_intermediate(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     prepped: set[str], mall_targets: dict[str, int], reference_point: Point,
@@ -11040,7 +11060,7 @@ def _prep_intermediate(
     pending = [r for r in baseline_build_order() if r not in prepped]
     if pending:
         recipe = pending[0]
-        wanted = BASELINE_MACHINES[recipe]
+        wanted = _startup_prep_target(client, surface, force, recipe)
         line = live_base.find_line(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
