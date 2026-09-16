@@ -147,8 +147,9 @@ def resource_tiles(
 
 def box_has_reserved_patch(
     client: RconClient, surface: str, minimum: Point, maximum: Point,
+    *, minimum_amount: int = MINIMUM_NEW_PATCH_RESOURCE,
 ) -> bool:
-    """Whether a box touches a patch still worth reserving for extraction."""
+    """Whether a box touches a patch at or above ``minimum_amount``."""
     lua = (
         "local s=game.surfaces['" + surface + "'];local out={};local seen={};"
         "for _,e in pairs(s.find_entities_filtered{type='resource',area={{"
@@ -165,6 +166,6 @@ def box_has_reserved_patch(
         patch = nearest_patch(client, surface, name, (float(x), float(y)))
         if patch is None:
             continue
-        if patch.amount >= MINIMUM_NEW_PATCH_RESOURCE:
+        if patch.amount >= minimum_amount:
             return True
     return False

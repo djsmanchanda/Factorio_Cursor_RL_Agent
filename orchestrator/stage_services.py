@@ -13,7 +13,7 @@ from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
 from orchestrator.controller_budget import consume_plan_submission, consume_wait
-from orchestrator import extraction_state, live_base
+from orchestrator import extraction_state, live_base, resource_patches
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.material_reservations import active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
@@ -30,6 +30,7 @@ from planners.sandbox_infrastructure import build_layout_authorization
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+POWER_LOW_REMAINING_ORE_THRESHOLD = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -1271,6 +1272,25 @@ def extend_power(
          max(target_position[1], near_position[1]) + margin),
         include_resources=avoid_resources,
     )
+    if avoid_resources and hasattr(client, "command"):
+        corridor_min = (
+            min(target_position[0], near_position[0]) - margin,
+            min(target_position[1], near_position[1]) - margin,
+        )
+        corridor_max = (
+            max(target_position[0], near_position[0]) + margin,
+            max(target_position[1], near_position[1]) + margin,
+        )
+        # Preserve mineable deposits, but let emergency power bridges cross
+        # depleted patches. A route containing any healthy >=1M patch remains
+        # protected and follows the old strict behavior.
+        if not resource_patches.box_has_reserved_patch(
+            client, surface, corridor_min, corridor_max,
+            minimum_amount=POWER_LOW_REMAINING_ORE_THRESHOLD,
+        ):
+            blocked -= resource_patches.resource_tiles(
+                client, surface, corridor_min, corridor_max,
+            )
     blocked |= reserved_tiles or set()
     hookup_blocked = set(blocked)
     blocked -= {(math.floor(target_position[0]), math.floor(target_position[1]))}
