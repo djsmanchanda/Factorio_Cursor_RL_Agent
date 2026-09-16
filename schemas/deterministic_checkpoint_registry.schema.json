@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "deterministic_checkpoint_registry.schema.json",
+  "title": "Deterministic checkpoint registry",
+  "description": "Explicitly ordered checkpoint definitions and immutable generation pointers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "registry_id", "registry_revision", "checkpoints", "retention"],
+  "properties": {
+    "version": { "const": 1 },
+    "registry_id": { "$ref": "#/definitions/id" },
+    "registry_revision": { "type": "integer", "minimum": 1 },
+    "updated_at": { "type": "string", "minLength": 1 },
+    "checkpoints": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/checkpoint" }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["per_origin", "protected_outside_limit"],
+      "properties": {
+        "per_origin": { "const": 20 },
+        "protected_outside_limit": { "type": "boolean" }
+      }
+    }
+  },
+  "definitions": {
+    "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "order", "predicate_version", "generations", "default_generation_id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer", "minimum": 0 },
+        "predicate_version": { "$ref": "#/definitions/id" },
+        "predicate": { "type": "object" },
+        "generations": { "type": "array", "items": { "$ref": "#/definitions/generation" } },
+        "default_generation_id": { "type": ["string", "null"] }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_id", "origin_checkpoint_id", "path", "creator_commit", "created_at", "provisional", "pinned", "active_input"],
+      "properties": {
+        "generation_id": { "$ref": "#/definitions/id" },
+        "origin_checkpoint_id": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" },
+        "path": { "type": "string", "minLength": 1 },
+        "creator_commit": { "$ref": "#/definitions/id" },
+        "created_at": { "type": "string", "minLength": 1 },
+        "provisional": { "type": "boolean" },
+        "pinned": { "type": "boolean" },
+        "active_input": { "type": "boolean" },
+        "coordinator_pinned": { "type": "boolean" },
+        "source_run_id": { "type": "string", "minLength": 1 },
+        "save_name": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

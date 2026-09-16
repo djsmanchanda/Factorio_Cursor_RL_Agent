@@ -131,7 +131,8 @@ def _manifest(path: Path | None) -> str:
     if not isinstance(payload, dict):
         return "Episode manifest unavailable: invalid object."
     selected = {key: payload.get(key) for key in (
-        "episode_id", "repository_revision", "target_technology", "surface", "force", "started_at",
+        "episode_id", "run_id", "lineage_id", "suite_id", "attempt_id",
+        "repository_revision", "target_technology", "surface", "force", "started_at",
     )}
     return json.dumps(selected, sort_keys=True)
 
@@ -281,6 +282,7 @@ def run_helper(config: Config) -> int:
 def launch_helper(
     *, run_id: str, log_path: Path, manifest_path: Path | None,
     data_root: Path | None = None, report_root: Path | None = None,
+    dashboard_url: str | None = None,
 ) -> str:
     """Launch the read-only OpenCode observer independently of the runner."""
     root = (data_root or DEFAULT_DATA_ROOT).expanduser()
@@ -291,6 +293,8 @@ def launch_helper(
         "--log-path", str(log_path), "--data-root", str(root),
         "--report-root", str((report_root or DEFAULT_REPORT_ROOT).resolve()),
     ]
+    if dashboard_url:
+        command += ["--dashboard-url", dashboard_url]
     if manifest_path is not None:
         command += ["--episode-manifest", str(manifest_path)]
     if os.environ.get("INVOCATION_ID"):

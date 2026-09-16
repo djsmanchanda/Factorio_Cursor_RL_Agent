@@ -18,6 +18,18 @@ Options:
   --queue-file PATH   Process this persisted research queue instead of one target.
   --episode-manifest PATH
                       Fail closed unless the runner matches this fresh episode.
+  --candidate-checkout PATH
+                      Detached clean candidate source used by the runner.
+  --run-id ID         Optional lane run identity; must match the manifest.
+  --opencode-helper-data-root PATH
+                      Lane-specific read-only helper state directory.
+  --opencode-helper-report-root PATH
+                      Lane-specific helper findings directory.
+  --opencode-helper-api-url URL
+                      Lane-specific read-only helper dashboard endpoint.
+  --no-opencode-helper
+                      Do not start the helper for this lane.
+  --fleet-mode        Headless lane marker; does not change runner behavior.
 
 The runner reads the RCON secret from the isolated server root. It does not
 write to the normal Factorio profile or expose the secret in its command line.
@@ -52,6 +64,13 @@ PRODUCE=""
 ACCEPTANCE_SECONDS=120
 QUEUE_FILE=""
 EPISODE_MANIFEST=""
+CANDIDATE_CHECKOUT=""
+RUN_ID=""
+HELPER_DATA_ROOT=""
+HELPER_REPORT_ROOT=""
+HELPER_API_URL=""
+NO_OPENCODE_HELPER=0
+FLEET_MODE=0
 
 while (($#)); do
   case "$1" in
@@ -63,6 +82,13 @@ while (($#)); do
     --technology) TECHNOLOGY="${2:?missing --technology value}"; shift 2 ;;
     --queue-file) QUEUE_FILE="${2:?missing --queue-file value}"; shift 2 ;;
     --episode-manifest) EPISODE_MANIFEST="${2:?missing --episode-manifest value}"; shift 2 ;;
+    --candidate-checkout) CANDIDATE_CHECKOUT="${2:?missing --candidate-checkout value}"; shift 2 ;;
+    --run-id) RUN_ID="${2:?missing --run-id value}"; shift 2 ;;
+    --opencode-helper-data-root) HELPER_DATA_ROOT="${2:?missing --opencode-helper-data-root value}"; shift 2 ;;
+    --opencode-helper-report-root) HELPER_REPORT_ROOT="${2:?missing --opencode-helper-report-root value}"; shift 2 ;;
+    --opencode-helper-api-url) HELPER_API_URL="${2:?missing --opencode-helper-api-url value}"; shift 2 ;;
+    --no-opencode-helper) NO_OPENCODE_HELPER=1; shift ;;
+    --fleet-mode) FLEET_MODE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -78,6 +104,12 @@ require_port "$RCON_PORT"
 [[ -z "$PRODUCE" || -z "$QUEUE_FILE" ]] || die "--produce cannot be combined with --queue-file"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CODE_ROOT="$REPO_ROOT"
+if [[ -n "$CANDIDATE_CHECKOUT" ]]; then
+  CODE_ROOT="$(realpath -m "$CANDIDATE_CHECKOUT")"
+  [[ -d "$CODE_ROOT/.git" || -f "$CODE_ROOT/.git" ]] || die "candidate checkout is not a Git worktree: $CODE_ROOT"
+  [[ -z "$(git -C "$CODE_ROOT" status --porcelain --untracked-files=normal)" ]] || die "candidate checkout is dirty"
+fi
 [[ "$PYTHON_BIN" == "python3" && -x "$REPO_ROOT/.venv/bin/python" ]] && PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 SECRET_PATH="$STATE_ROOT/rcon-password"
 SCRIPT_OUTPUT="$STATE_ROOT/script-output"
@@ -86,7 +118,7 @@ PID_PATH="$STATE_ROOT/logs/autonomous-run.pid"
 CONSOLE_LOG="$STATE_ROOT/logs/autonomous-run-console.log"
 RUNNER_UNIT="factorio-rl-deterministic-runner-${RCON_PORT}.service"
 
-cd "$REPO_ROOT"
+cd "$CODE_ROOT"
 
 # User services do not inherit an activated shell virtualenv. Preserve an
 # explicit selected venv so managed imports match direct runner imports.
@@ -153,6 +185,21 @@ start_runner() {
   if [[ -n "$EPISODE_MANIFEST" ]]; then
     manifest_args=(--episode-manifest "$EPISODE_MANIFEST")
   fi
+  if [[ -n "$RUN_ID" ]]; then
+    manifest_args+=(--run-id "$RUN_ID")
+  fi
+  if [[ -n "$HELPER_DATA_ROOT" ]]; then
+    manifest_args+=(--opencode-helper-data-root "$HELPER_DATA_ROOT")
+  fi
+  if [[ -n "$HELPER_REPORT_ROOT" ]]; then
+    manifest_args+=(--opencode-helper-report-root "$HELPER_REPORT_ROOT")
+  fi
+  if [[ -n "$HELPER_API_URL" ]]; then
+    manifest_args+=(--opencode-helper-dashboard-url "$HELPER_API_URL")
+  fi
+  if (( NO_OPENCODE_HELPER )); then
+    manifest_args+=(--no-opencode-helper)
+  fi
   local environment_args=()
   if [[ -n "$VENV_ROOT" ]]; then
     environment_args=(
@@ -164,12 +211,12 @@ start_runner() {
   systemd-run --user --quiet \
     --unit="$RUNNER_UNIT" --collect \
     --description="Factorio RL deterministic runner on RCON port $RCON_PORT" \
-    --working-directory="$REPO_ROOT" \
+    --working-directory="$CODE_ROOT" \
     --setenv=PYTHONUNBUFFERED=1 \
     "${environment_args[@]}" \
     --property="StandardOutput=append:$CONSOLE_LOG" \
     --property="StandardError=append:$CONSOLE_LOG" \
-    "$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py" \
+    "$PYTHON_BIN" -u "$CODE_ROOT/tools/autonomous_run.py" \
     "${runner_args[@]}" --surface nauvis --force player \
       --rcon-host 127.0.0.1 --rcon-port "$RCON_PORT" \
       --rcon-secret-file "$SECRET_PATH" --script-output "$SCRIPT_OUTPUT" \

@@ -44,6 +44,56 @@
       <pre id="loop-milestones" class="evidence-text">No acceptance evidence loaded.</pre>
       <details><summary>Agent status &amp; shared notes</summary><pre id="loop-board" class="evidence-text">No notes loaded.</pre></details>
     </section>
+    <section id="fleet-panel" class="panel fleet-panel" aria-labelledby="fleet-heading">
+      <div class="panel-heading fleet-heading">
+        <div><p class="eyebrow">CHECKPOINT FLEET · 8 NAUVIS SERVERS</p><h2 id="fleet-heading">Commit-by-checkpoint regression</h2></div>
+        <span id="fleet-state" class="operation-state" role="status">Loading fleet…</span>
+      </div>
+      <div class="fleet-toolbar">
+        <button id="fleet-run-default" class="fleet-primary" type="button">Run default</button>
+        <button id="fleet-restart-latest" type="button">Restart all · latest commit</button>
+        <button id="fleet-custom-toggle" type="button">Custom run</button>
+        <button id="fleet-verify-toggle" type="button">Verify checkpoint</button>
+        <button id="fleet-pause" type="button">Pause scheduling</button>
+        <label class="fleet-toggle"><input id="fleet-auto-run" type="checkbox" checked> Auto-run commits</label>
+        <span id="fleet-message" class="action-message" role="status"></span>
+        <span id="fleet-api-status" class="fleet-api-status" role="status">Fleet API: loading</span>
+      </div>
+      <form id="fleet-custom-form" class="fleet-form" hidden>
+        <label>Commits <input id="fleet-commits" maxlength="80" placeholder="HEAD, abc1234"></label>
+        <fieldset><legend>Checkpoints</legend><div id="fleet-checkpoints"></div></fieldset>
+        <label>Helper checkpoints <select id="fleet-helper-checkpoint" multiple size="4"></select></label>
+        <label>One-off source checkpoint <select id="fleet-source-checkpoint"><option value="">Use checkpoint defaults</option></select></label>
+        <label>Checkpoint generation <input id="fleet-generation" maxlength="200" placeholder="generation ID (optional)"></label>
+        <label>One-off save <input id="fleet-save" maxlength="200" placeholder="save ID or path (optional)"></label>
+        <label>Mission override <input id="fleet-mission" maxlength="160" placeholder="produce:item or research:technology"></label>
+        <p class="fleet-form-note">A generation or one-off save is an ad-hoc input only; it never changes the canonical checkpoint. Pair it with a source checkpoint.</p>
+        <button type="submit" class="fleet-primary">Queue custom suite</button>
+      </form>
+      <form id="fleet-verify-form" class="fleet-form" hidden>
+        <label>Commit <input id="fleet-verify-commit" maxlength="80" placeholder="HEAD"></label>
+        <label>Checkpoint <select id="fleet-verify-checkpoint"></select></label>
+        <label>Candidate ID <input id="fleet-verify-candidate" maxlength="200" required placeholder="captured checkpoint candidate"></label>
+        <button type="submit" class="fleet-primary">Queue verification pair</button>
+      </form>
+      <div id="fleet-matrix-wrap" class="fleet-matrix-wrap" aria-live="polite">
+        <table class="fleet-matrix"><thead id="fleet-matrix-head"></thead><tbody id="fleet-matrix-body"><tr><td>Loading checkpoint fleet…</td></tr></tbody></table>
+      </div>
+      <div class="fleet-lower-grid">
+        <section class="fleet-subpanel"><h3>Queued lanes</h3><div id="fleet-queue" class="fleet-queue">No queued lanes.</div></section>
+        <section class="fleet-subpanel"><h3>Checkpoint promotion</h3>
+          <form id="fleet-promote-form" class="fleet-promote-form">
+            <label>Checkpoint <select id="fleet-promote-checkpoint"></select></label>
+            <label>Verified candidate ID <input id="fleet-promote-save" maxlength="200" required placeholder="coordinator candidate ID"></label>
+            <label>Creator commit <input id="fleet-promote-commit" maxlength="80" placeholder="commit SHA"></label>
+            <button type="submit">Set as default</button>
+          </form>
+          <p class="fleet-note">Promotion is manual. Verification and C0 provenance stay visible in the matrix.</p>
+        </section>
+      </div>
+      <section class="fleet-subpanel fleet-frontier"><h3>Last 10 frontier runs</h3><div id="fleet-frontier-runs">No frontier runs recorded.</div></section>
+      <section class="fleet-subpanel fleet-ranking" id="fleet-ranking-panel" hidden><h3>Commit ranking · stability first</h3><div id="fleet-ranking">No ranked commits recorded.</div></section>
+    </section>
     <section id="run-evidence" class="panel evidence-panel" aria-labelledby="evidence-heading">
       <div class="panel-heading">
         <div><p class="eyebrow">RUN OBSERVABILITY</p><h2 id="evidence-heading">Evidence &amp; recurring failures</h2></div>

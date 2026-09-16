@@ -20,6 +20,11 @@ Thumbs.db
 .DS_Store
 runs/
 
+# Local deterministic checkpoint fleet artifacts (the canonical base stays tracked)
+saves/checkpoint*.zip
+saves/checkpoints/
+checkpoint-fleet/
+
 # Local RL training evidence and checkpoints
 data/
 data/training/*.db*

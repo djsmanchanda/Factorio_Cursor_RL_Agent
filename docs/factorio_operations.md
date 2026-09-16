@@ -163,6 +163,41 @@ lifecycle in one bounded command. `cycle` is a compatibility alias. Use
 `--dry-run` to inspect the exact resolved sequence. Never use a controller
 restart as a substitute for a fresh episode.
 
+### Native deterministic checkpoint fleet
+
+The checkpoint fleet is owned by one persistent user-systemd coordinator. Its
+state and generated bundles live below
+`~/.local/share/factorio-rl/deterministic/checkpoint-fleet`; it never writes a
+lane into the repository save or GUI profile. Initialize the local catalog
+from the tracked C0 input once:
+
+```bash
+scripts/manage_linux_deterministic_fleet.sh init \\
+  --source-save "$PWD/saves/mod_playground.zip"
+```
+
+This copies the source into an immutable local C0 bundle and registers later
+milestone definitions without claiming that they are runnable. The source
+save is read-only. Install and start the persistent watcher with:
+
+```bash
+scripts/manage_linux_deterministic_fleet.sh install
+scripts/manage_linux_deterministic_fleet.sh start
+scripts/manage_linux_deterministic_fleet.sh status
+```
+
+The service runs `tools/deterministic_fleet_coordinator.py watch --execute`.
+By default it gives frontier helpers the loopback Operations Console endpoint
+`http://127.0.0.1:9137`; override that with `--helper-api-url` when the console
+uses another local port.
+Direct `status` and `run-once` calls are read-only by default; only the
+service unit supplies `--execute`. The coordinator watches immutable `HEAD`
+objects even when the operator checkout contains unrelated dirty work. Only
+descendant commits enqueue an automatic default suite; rewinds and divergent
+histories do not. The dashboard and coordinator share
+`checkpoint-fleet.json`, its lock, and `coordinator-heartbeat.json`, so queue
+mutations cannot be lost to a second facade schema.
+
 ### Mod-copy synchronization and GUI restart
 
 Factorio does not hot-reload Lua scripts. Any changed mod script must be

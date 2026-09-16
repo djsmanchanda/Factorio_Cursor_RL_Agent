@@ -10,6 +10,7 @@ Read only the route relevant to the current task.
 | RL policy, structural planning, rewards | [RL system](rl/README.md) |
 | Episodes, workers, evolution, autoresearch | [Training](rl/training.md) |
 | Existing deterministic runtime | [Deterministic runtime](deterministic/README.md), [Planning](deterministic/planning.md) |
+| Concurrent deterministic checkpoint runs | [Checkpoint fleet](deterministic/checkpoint_fleet.md) |
 | RCON, deployment, restarts, live failures | [Factorio operations](factorio_operations.md) |
 | Current priorities | [Roadmap](roadmap.md) |
 | Game mechanics used by validators/rewards | [Factorio mechanics](reference/factorio_mechanics.md) |

@@ -26,6 +26,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator.autonomous_builder import StuckError, run
+from orchestrator.checkpoint_observer import (
+    LiveCheckpointObservationAdapter,
+    UnsupportedObservationAdapter,
+)
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.mission_state import BOOTSTRAP_PROFILES, MissionStateLedger
 from orchestrator.research_queue import ResearchQueueError, load_queue, update_item
@@ -34,6 +38,12 @@ from helper_agent.packet_builder import build_case_packet, write_packet
 from tools.opencode_helper_agent import launch_helper as launch_opencode_helper
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
+from tools.rcon_client import RconClient
+from tools.checkpoint_run_monitor import (
+    CheckpointMonitorError,
+    lane_milestone_capture,
+    monitor_from_manifest,
+)
 
 
 _TRACEBACK_FRAME_LIMIT = 24
@@ -262,7 +272,7 @@ def _start_opencode_helper(
     """Start the permanent read-only observer for this runner invocation."""
     if getattr(args, "no_opencode_helper", False):
         return None
-    run_id = getattr(args, "episode_id", None) or (
+    run_id = getattr(args, "run_id", None) or getattr(args, "episode_id", None) or (
         "direct-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     )
     try:
@@ -272,6 +282,9 @@ def _start_opencode_helper(
             manifest_path=getattr(args, "episode_manifest", None),
             data_root=getattr(args, "opencode_helper_data_root", None),
             report_root=getattr(args, "opencode_helper_report_root", None),
+            dashboard_url=getattr(
+                args, "opencode_helper_dashboard_url", None,
+            ),
         )
     except (OSError, subprocess.SubprocessError) as error:
         emit(
@@ -411,6 +424,10 @@ def _save_provenance(path: Path | None) -> dict[str, object]:
 
 
 def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--run-id", dest="requested_run_id",
+        help="Optional lane run identity; must match the episode manifest.",
+    )
     parser.add_argument("--surface", default="nauvis")
     parser.add_argument("--force", default="player")
     parser.add_argument("--rcon-host", default="127.0.0.1")
@@ -462,6 +479,10 @@ def _add_connection_arguments(parser: argparse.ArgumentParser) -> None:
         help="Write one OpenCode Helper findings directory per deterministic run.",
     )
     parser.add_argument(
+        "--opencode-helper-dashboard-url",
+        help="Lane-specific read-only dashboard URL for the OpenCode Helper.",
+    )
+    parser.add_argument(
         "--no-opencode-helper", action="store_true",
         help="Do not start the read-only OpenCode Helper observer (intended for tests).",
     )
@@ -474,8 +495,7 @@ def _run_item(
     if ledger is not None:
         ledger.controller_started(item)
     try:
-        result = run(
-            item,
+        run_options = dict(
             surface=args.surface,
             force=args.force,
             rcon_host=args.rcon_host,
@@ -489,6 +509,29 @@ def _run_item(
             episode_id=getattr(args, "episode_id", None),
             bootstrap_profile=getattr(args, "bootstrap_profile", "reduced-v1"),
         )
+        checkpoint_monitor = getattr(args, "checkpoint_monitor", None)
+        if checkpoint_monitor is not None:
+            def checkpoint_boundary(client, bridge) -> None:
+                # The monitor is constructed from the manifest before the
+                # builder opens its RCON connections.  Bind the real,
+                # read-only adapter at the first safe boundary when the
+                # manifest did not provide a replay observation file.
+                if isinstance(checkpoint_monitor.adapter, UnsupportedObservationAdapter):
+                    checkpoint_monitor.adapter = LiveCheckpointObservationAdapter(
+                        client, bridge, surface=args.surface, force=args.force,
+                        reference_point=tuple(args.reference_point),
+                        bootstrap_profile=args.bootstrap_profile,
+                    )
+                evidence = checkpoint_monitor.observe_boundary(client, bridge)
+                if evidence.get("status") == "incompatible":
+                    raise StuckError(
+                        str(evidence.get("failure_reason") or "structured checkpoint observation unsupported"),
+                        code="checkpoint_observation_unsupported",
+                        classification="infrastructure",
+                        state="failed",
+                    )
+            run_options["checkpoint_boundary"] = checkpoint_boundary
+        result = run(item, **run_options)
     except Exception:
         if ledger is not None:
             ledger.controller_finished(item, "failed")
@@ -642,9 +685,20 @@ def main(argv: list[str] | None = None) -> int:
             args.rcon_password = _load_rcon_secret(args.rcon_secret_file)
         except ValueError as error:
             parser.error(str(error))
-    args.episode_id = _validate_episode_manifest(
+    manifest_episode_id = _validate_episode_manifest(
         getattr(args, "episode_manifest", None)
     )
+    manifest_metadata = _episode_metadata(getattr(args, "episode_manifest", None))
+    manifest_run_id = manifest_metadata.get("run_id")
+    requested_run_id = getattr(args, "requested_run_id", None)
+    expected_run_id = manifest_run_id or manifest_episode_id
+    if requested_run_id and expected_run_id and requested_run_id != expected_run_id:
+        parser.error("--run-id does not match the episode manifest")
+    args.episode_id = manifest_episode_id or requested_run_id
+    # Controller ledgers and durable sidecars use the creator episode.  The
+    # helper/report identity follows the replay attempt when a fleet manifest
+    # provides one, while legacy manifests continue to use episode_id.
+    args.run_id = str(manifest_run_id or requested_run_id or args.episode_id or "")
     args.bootstrap_profile = _bootstrap_profile(args)
     log_path = args.log_file or args.script_output.parent / "logs" / "autonomous-run.log"
     archived = archive_runner_sessions(log_path, keep=2)
@@ -657,6 +711,7 @@ def main(argv: list[str] | None = None) -> int:
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
         mission_ledger: MissionStateLedger | None = None
+        checkpoint_monitor = None
         heartbeat_stop = threading.Event()
 
         def _emit_heartbeat() -> None:
@@ -690,6 +745,24 @@ def main(argv: list[str] | None = None) -> int:
                 args, "item", getattr(args, "technology", "research-queue"),
             )
             manifest = _episode_metadata(getattr(args, "episode_manifest", None))
+            if getattr(args, "episode_manifest", None) is not None:
+                try:
+                    checkpoint_monitor = monitor_from_manifest(
+                        args.episode_manifest,
+                        root=args.script_output.parent,
+                        log_path=log_path,
+                        capture=lane_milestone_capture(
+                            args.script_output.parent, manifest,
+                        ),
+                    )
+                except CheckpointMonitorError as error:
+                    raise StuckError(
+                        f"checkpoint fleet manifest is invalid: {error}",
+                        code="checkpoint_manifest_invalid",
+                        classification="infrastructure",
+                        state="failed",
+                    ) from error
+                args.checkpoint_monitor = checkpoint_monitor
             mission_state_path = (
                 args.mission_state_file
                 or log_path.with_name("deterministic-mission-state.json")
@@ -811,6 +884,28 @@ def main(argv: list[str] | None = None) -> int:
             logger.emit("RUN END")
             logger.close()
             heartbeat_path.unlink(missing_ok=True)
+            # Finalize after RUN END so the persisted tail contains the full
+            # terminal runner evidence, while still delegating result writes to
+            # the monitor's atomic result path.
+            if checkpoint_monitor is not None:
+                terminal_client = RconClient(
+                    args.rcon_host, args.rcon_port, args.rcon_password,
+                )
+                try:
+                    if mission_status == "completed":
+                        checkpoint_monitor.finish("passed", client=terminal_client)
+                    elif mission_status == "stuck":
+                        checkpoint_monitor.finish(
+                            "functional_failed", termination_reason,
+                            client=terminal_client,
+                        )
+                    else:
+                        checkpoint_monitor.finish(
+                            "infrastructure_error", termination_reason,
+                            client=terminal_client,
+                        )
+                finally:
+                    terminal_client.close()
 
 
 if __name__ == "__main__":

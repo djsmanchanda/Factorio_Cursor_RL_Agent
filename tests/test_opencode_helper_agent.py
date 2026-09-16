@@ -73,6 +73,7 @@ def test_runner_starts_the_permanent_helper_at_run_start(monkeypatch, tmp_path: 
     launched: dict[str, object] = {}
     args = SimpleNamespace(
         episode_id="episode-test", episode_manifest=tmp_path / "manifest.json",
+        run_id="replay-suite-attempt",
         opencode_helper_data_root=tmp_path / "state",
         opencode_helper_report_root=tmp_path / "reports", no_opencode_helper=False,
     )
@@ -86,9 +87,9 @@ def test_runner_starts_the_permanent_helper_at_run_start(monkeypatch, tmp_path: 
     assert autonomous_run._start_opencode_helper(
         args, log_path=tmp_path / "autonomous-run.log", emit=messages.append,
     ) == "pid=123"
-    assert launched["run_id"] == "episode-test"
+    assert launched["run_id"] == "replay-suite-attempt"
     assert messages == [
-        "OPENCODE HELPER: started read-only observer pid=123 run=episode-test",
+        "OPENCODE HELPER: started read-only observer pid=123 run=replay-suite-attempt",
     ]
 
 

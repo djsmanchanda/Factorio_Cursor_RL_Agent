@@ -21,6 +21,8 @@ Options:
   --gui-mods PATH       Linux GUI Factorio mods directory (default: ~/.factorio/mods).
   --game-port PORT      Game port (default: 34199).
   --rcon-port PORT      Loopback RCON port (default: 27017).
+  --fleet-mode          Headless lane mode; never sync GUI mods or snapshot
+                        a lane save into the repository saves directory.
 
 bootstrap copies --source-save only when the dedicated save does not already
 exist. It never modifies the source save or the normal ~/.factorio profile.
@@ -61,6 +63,7 @@ BOOTSTRAP_PROFILE="reduced-v1"
 GUI_MODS_PATH="$HOME/.factorio/mods"
 GAME_PORT=34199
 RCON_PORT=27017
+FLEET_MODE=0
 
 while (($#)); do
   case "$1" in
@@ -75,6 +78,7 @@ while (($#)); do
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
+    --fleet-mode) FLEET_MODE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -188,7 +192,9 @@ sync_mod() {
     || die "GUI mods directory must not be the isolated server mods directory"
   sync_mod_copy "$MODS_PATH" factorio_cursor_rl_agent factorio_mod
   sync_mod_copy "$MODS_PATH" factorio_training_lab factorio_training_lab
-  "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"
+  if (( ! FLEET_MODE )); then
+    "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"
+  fi
   write_server_files
 }
 
@@ -345,10 +351,18 @@ start_server() {
   [[ -x "$FACTORIO_BIN" ]] || die "Factorio executable is missing: $FACTORIO_BIN"
   [[ -f "$SAVE_PATH" ]] || die "server is not bootstrapped; run bootstrap first"
   [[ -f "$SECRET_PATH" ]] || die "server RCON secret is missing; run bootstrap first"
+  # Fleet lanes are materialized without the normal bootstrap path.  Refresh
+  # only lane-local config; write_server_files never touches GUI or repository
+  # state, and FLEET_MODE keeps mod synchronization local.
+  if (( FLEET_MODE )); then
+    write_server_files
+  fi
   [[ -f "$CONFIG_PATH" && -f "$SERVER_SETTINGS" ]] || die "server configuration is missing; run bootstrap first"
   port_available "$GAME_PORT" || die "game port $GAME_PORT is already in use"
   port_available "$RCON_PORT" || die "RCON port $RCON_PORT is already in use"
-  snapshot_save_to_repository
+  if (( ! FLEET_MODE )); then
+    snapshot_save_to_repository
+  fi
   mkdir -p "$DATA_ROOT/logs"
   : > "$DATA_ROOT/factorio-current.log"
   : > "$DATA_ROOT/logs/factorio-console.log"

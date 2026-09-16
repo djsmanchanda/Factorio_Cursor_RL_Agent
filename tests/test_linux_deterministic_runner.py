@@ -26,7 +26,7 @@ def test_linux_deterministic_runner_exposes_only_bounded_actions() -> None:
     assert 'usage: manage_linux_deterministic_runner.sh {start|stop|restart|status}' in source
     assert 'start|stop|restart|status) ;;' in source
     assert 'kill -TERM "$current"' in source
-    assert '"$PYTHON_BIN" -u "$REPO_ROOT/tools/autonomous_run.py"' in source
+    assert '"$PYTHON_BIN" -u "$CODE_ROOT/tools/autonomous_run.py"' in source
 
 
 def test_linux_deterministic_runner_survives_manager_exit() -> None:

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "deterministic_checkpoint_result.schema.json",
+  "title": "Deterministic checkpoint run result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "run_id", "commit", "start_checkpoint_id", "status", "passed_checkpoints", "contiguous_reached_checkpoints", "started_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "run_id": { "$ref": "#/definitions/id" },
+    "suite_id": { "$ref": "#/definitions/id" },
+    "commit": { "$ref": "#/definitions/id" },
+    "start_checkpoint_id": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" },
+    "start_generation_id": { "$ref": "#/definitions/id" },
+    "status": { "enum": ["queued", "running", "passed", "functional_failed", "timed_out", "incompatible", "infrastructure_error", "cancelled"] },
+    "passed_checkpoints": { "type": "array", "items": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" } },
+    "contiguous_reached_checkpoints": { "type": "array", "items": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" } },
+    "transition_ticks": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "transition_durations_seconds": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0 } },
+    "checkpoint_results": { "type": "object", "additionalProperties": { "type": "object" } },
+    "captures": { "type": "object" },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "unsupported_evidence": { "type": "array", "items": { "type": "object" } },
+    "failure_reason": { "type": "string" },
+    "warning": { "type": "string" },
+    "log_tail": { "type": "array", "maxItems": 100, "items": { "type": "string" } },
+    "started_at": { "type": "string", "minLength": 1 },
+    "ended_at": { "type": "string", "minLength": 1 }
+  },
+  "definitions": {
+    "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+  }
+}

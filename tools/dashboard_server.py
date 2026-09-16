@@ -115,6 +115,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if request.path == "/api/status":
             self._json(200, self.manager.status())
             return
+        if request.path in {"/api/checkpoint-fleet", "/api/fleet"}:
+            try:
+                self._json(200, self.manager.checkpoint_fleet())
+            except OperationError as exc:
+                self._json(503, {"error": str(exc)})
+            return
         if request.path == "/api/observation-loop":
             try:
                 self._json(200, self.manager.observation_loop())
@@ -229,6 +235,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             if action == "helper_feedback":
                 self._json(202, self.manager.submit_helper_feedback(payload))
+                return
+            fleet_actions = {
+                "fleet_run_default": "run_default",
+                "fleet_restart_latest": "restart_latest",
+                "fleet_run_custom": "run_custom",
+                "fleet_verify_checkpoint": "verify_checkpoint",
+                "fleet_pause": "pause",
+                "fleet_auto_run": "auto_run",
+                "fleet_remove_queue": "remove_queue",
+                "fleet_stop_run": "stop_run",
+                "fleet_restart_helper": "restart_helper",
+                "fleet_promote_checkpoint": "promote_checkpoint",
+            }
+            if action in fleet_actions:
+                result = self.manager.fleet_action(fleet_actions[action], payload)
+                self._json(202, {"accepted": True, "action": action, "fleet": result})
                 return
             self.manager.start(action, str(payload.get("confirmation", "")))
             self._json(202, {"accepted": True, "action": action})

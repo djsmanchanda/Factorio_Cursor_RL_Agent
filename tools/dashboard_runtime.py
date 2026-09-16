@@ -34,6 +34,8 @@ from tools.run_log_format import (
 from helper_agent import dashboard as helper_dashboard
 from tools.inventory_history import InventoryHistory
 from tools.runner_process import clear_runner_pid, running_runner_pid
+from tools.deterministic_fleet_coordinator import CheckpointFleetCoordinator, FleetCoordinatorError
+from tools.checkpoint_catalog import initialize_catalog
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,157 @@ class OperationError(RuntimeError):
     pass
 
 
+class CheckpointFleetStore:
+    """Bounded file-backed facade for the checkpoint fleet console.
+
+    The fleet coordinator can adopt this schema later.  Until then the
+    dashboard records intent and operator decisions only; it never launches a
+    Factorio process from this facade.
+    """
+
+    MAX_COMMITS = 256
+    MAX_QUEUE = 4096
+    MAX_RUNS = 4096
+    MAX_PAYLOAD_BYTES = 16_384
+    DEFAULT_CHECKPOINTS = (
+        ("C0", "Base"),
+        ("C1", "Starter mall"),
+        ("C2", "Iron + copper rollout"),
+        ("C3", "Stone rollout"),
+        ("C4", "First plastic"),
+        ("C5", "Stable plastic"),
+        ("C6", "Advanced circuit consumer"),
+    )
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.path = root / "checkpoint-fleet.json"
+        self._lock = threading.Lock()
+        # The web process and the persistent fleet service intentionally share
+        # this coordinator-owned state file and lock.  The store name is kept
+        # for API compatibility with dashboard callers.
+        coordinator_data = root.parent if root.name == "checkpoint-fleet" else root
+        self._coordinator = CheckpointFleetCoordinator(coordinator_data)
+        if root.name != "checkpoint-fleet":
+            # Direct store users (including offline tests) historically passed
+            # the fleet directory itself rather than its server-data parent.
+            # Keep that API while retaining one coordinator state schema.
+            self._coordinator.root = root.resolve()
+            self._coordinator.state_path = self._coordinator.root / "checkpoint-fleet.json"
+            self._coordinator.lock_path = self._coordinator.root / ".coordinator.lock"
+            self._coordinator.heartbeat_path = self._coordinator.root / "coordinator-heartbeat.json"
+            self._coordinator.catalog_path = self._coordinator.root / "registry.json"
+
+    @classmethod
+    def empty(cls) -> dict:
+        return {
+            "schema_version": "1.0.0",
+            "registry_version": "1",
+            "settings": {
+                "paused": False,
+                "auto_run_commits": True,
+                "active_cap": 8,
+                "active_servers": 0,
+            },
+            "api": {
+                "version": "1.0",
+                "facade": True,
+                "coordinator_connected": False,
+                "mutations": "intent-only",
+            },
+            "helper": {
+                "available": False,
+                "default_checkpoint": "Cn",
+                "selected_runs": 0,
+            },
+            "checkpoints": [
+                {"id": ident, "name": name, "generation": None,
+                 "starred": ident == "C6", "creator_commit": None,
+                 "stale": False}
+                for ident, name in cls.DEFAULT_CHECKPOINTS
+            ],
+            "commits": [],
+            "promotion_candidates": [],
+            "promotion_intents": [],
+            "queue": [],
+            "runs": [],
+            "frontier_runs": [],
+            "updated_at": None,
+        }
+
+    @staticmethod
+    def _string(value: object, field: str, *, max_length: int = 160) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > max_length:
+            raise OperationError(f"{field} must be a non-empty string of at most {max_length} characters")
+        return value.strip()
+
+    def _load(self) -> dict:
+        if not self.path.exists():
+            return self.empty()
+        try:
+            raw = self.path.read_bytes()
+            if len(raw) > self.MAX_PAYLOAD_BYTES * 64:
+                raise OperationError("Checkpoint fleet state is too large")
+            state = json.loads(raw.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise OperationError(f"Checkpoint fleet state is unavailable: {exc}") from exc
+        if not isinstance(state, dict) or state.get("schema_version") != "1.0.0":
+            raise OperationError("Checkpoint fleet state has an unsupported schema")
+        for key in ("settings", "checkpoints", "commits", "queue", "runs", "frontier_runs"):
+            if key not in state or not isinstance(state[key], (dict if key == "settings" else list)):
+                raise OperationError(f"Checkpoint fleet state has invalid {key}")
+        # These keys were introduced after the initial facade schema.  Treat
+        # an older empty state as an explicit no-candidate/no-coordinator
+        # state; never infer promotion eligibility from a typed save path.
+        if "promotion_candidates" not in state:
+            state["promotion_candidates"] = []
+        if "promotion_intents" not in state:
+            state["promotion_intents"] = []
+        state.setdefault("api", {
+            "version": "1.0", "facade": True,
+            "coordinator_connected": False, "mutations": "intent-only",
+        })
+        state.setdefault("helper", {
+            "available": False, "default_checkpoint": "Cn", "selected_runs": 0,
+        })
+        if not isinstance(state["api"], dict) or not isinstance(state["helper"], dict):
+            raise OperationError("Checkpoint fleet API/helper status is invalid")
+        if not isinstance(state["promotion_candidates"], list) or not isinstance(state["promotion_intents"], list):
+            raise OperationError("Checkpoint fleet promotion records are invalid")
+        if len(state["queue"]) > self.MAX_QUEUE or len(state["runs"]) > self.MAX_RUNS:
+            raise OperationError("Checkpoint fleet state exceeds its bounded history")
+        return state
+
+    def view(self) -> dict:
+        with self._lock:
+            return self._coordinator.status()
+
+    def _save(self, state: dict) -> dict:
+        state["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+        self.root.mkdir(parents=True, exist_ok=True)
+        temp = self.path.with_suffix(".json.tmp")
+        encoded = json.dumps(state, indent=2, sort_keys=True).encode("utf-8")
+        if len(encoded) > self.MAX_PAYLOAD_BYTES * 64:
+            raise OperationError("Checkpoint fleet state exceeds its size limit")
+        try:
+            temp.write_bytes(encoded)
+            os.replace(temp, self.path)
+        except OSError as exc:
+            raise OperationError(f"Cannot persist checkpoint fleet state: {exc}") from exc
+        return state
+
+    def mutate(self, action: str, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise OperationError("Fleet action payload must be an object")
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > self.MAX_PAYLOAD_BYTES:
+            raise OperationError("Fleet action payload is too large")
+        try:
+            return self._coordinator.apply_dashboard_action(action, payload)
+        except FleetCoordinatorError as error:
+            raise OperationError(str(error)) from error
+
+
 class OperationManager:
     ACTIONS = {
         "deploy_mod", "restart_server", "stop_runner",
@@ -108,6 +261,18 @@ class OperationManager:
             config.inventory_history_file, config.runner_log,
         )
         self.control_log = config.server_data / "logs" / "dashboard-control.log"
+        # runtime_root is the shared Factorio installation; fleet state is
+        # server-owned and must never be written into that installation.
+        fleet_root = config.server_data / "checkpoint-fleet"
+        self._fleet = CheckpointFleetStore(fleet_root)
+        # Initialization is local and read-only with respect to the configured
+        # source save.  A missing source is allowed so offline dashboard tests
+        # and status views remain side-effect free.
+        if config.source_save.is_file() and not (fleet_root / "registry.json").exists():
+            try:
+                initialize_catalog(server_data=config.server_data, source_save=config.source_save, repo_root=REPO_ROOT)
+            except (OSError, ValueError):
+                self._last_result = "Checkpoint catalog initialization is pending."
         if not self._runner_pids():
             try:
                 self._archive_runner_logs()
@@ -141,7 +306,18 @@ class OperationManager:
                 "started_at": self._started_at,
             },
             "technology": self.config.technology,
+            "fleet": self._fleet.view()["settings"] if hasattr(self, "_fleet") else {
+                "paused": False, "auto_run_commits": True, "active_cap": 8, "active_servers": 0,
+            },
         }
+
+    def checkpoint_fleet(self) -> dict:
+        """Return the bounded checkpoint fleet UI state."""
+        return self._fleet.view()
+
+    def fleet_action(self, action: str, payload: dict) -> dict:
+        """Record an allowlisted fleet intent for a future coordinator."""
+        return self._fleet.mutate(action, payload)
 
     def start(self, action: str, confirmation: str = "") -> None:
         if action not in self.ACTIONS:

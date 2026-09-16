@@ -150,3 +150,7 @@ context retains room for the system rubric and structured answer.
 For compact handoffs and cross-run lookup, use the [run context workflow](run_context.md).
 
 For repeated plastic acceptance and reviewed automatic fixes, use the [reliability workflow](reliability_workflow.md).
+
+For concurrent commit-by-checkpoint deterministic regression runs, immutable
+checkpoint promotion, retention, and Operations Console fleet controls, use the
+[checkpoint fleet contract](checkpoint_fleet.md).

@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "deterministic_checkpoint_bundle.schema.json",
+  "title": "Deterministic checkpoint bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "acceptance_eligible", "segment_regression_eligible", "bundle_id", "checkpoint_id", "generation_id", "run_id", "lineage_id", "capture_tick", "capture_reason", "save_name", "world", "sidecars", "files", "file_manifest", "predicate", "provenance", "created_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": { "const": "milestone-regression" },
+    "acceptance_eligible": { "const": false },
+    "segment_regression_eligible": { "const": true },
+    "bundle_id": { "$ref": "#/definitions/id" },
+    "checkpoint_id": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" },
+    "generation_id": { "$ref": "#/definitions/id" },
+    "run_id": { "$ref": "#/definitions/id" },
+    "lineage_id": { "$ref": "#/definitions/id" },
+    "capture_tick": { "type": "integer", "minimum": 0 },
+    "capture_reason": { "type": "string", "enum": ["5-minute", "five-minute", "periodic", "milestone", "terminal", "manual"] },
+    "save_name": { "$ref": "#/definitions/id" },
+    "created_at": { "type": "string", "minLength": 1 },
+    "world": { "$ref": "#/definitions/file" },
+    "sidecars": { "type": "array", "items": { "$ref": "#/definitions/file" } },
+    "files": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+    "file_manifest": { "type": "object", "additionalProperties": { "$ref": "#/definitions/hash_size" } },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "evidence"],
+      "properties": {
+        "version": { "$ref": "#/definitions/id" },
+        "evidence": { "type": "object" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["creator_commit", "mod_hashes", "surface", "force", "predicate_version"],
+      "properties": {
+        "creator_commit": { "$ref": "#/definitions/id" },
+        "mod_hashes": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } },
+        "surface": { "const": "nauvis" },
+        "force": { "const": "player" },
+        "predicate_version": { "$ref": "#/definitions/id" },
+        "source_checkpoint_id": { "type": "string", "pattern": "^C[0-9]+[A-Za-z0-9]*$" },
+        "source_run_id": { "type": "string", "minLength": 1 },
+        "source_lineage_id": { "type": "string", "minLength": 1 },
+        "creator_manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "const": "state/episode/current.json" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
+    "manifest_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  },
+  "definitions": {
+    "id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "hash_size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "size"],
+      "properties": {
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
