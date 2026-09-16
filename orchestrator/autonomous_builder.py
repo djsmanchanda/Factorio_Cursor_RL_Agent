@@ -7204,6 +7204,7 @@ def _reserve_compact_mall_project(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
             inserter_type="inserter",
+            support_inserter_type="inserter",
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and allocation[1] == "top"
@@ -8372,6 +8373,7 @@ def _bootstrap_demand_cell_affordable(
             item, side, stock_target=max(1, target),
             machine_name="assembling-machine-1",
             inserter_type="inserter",
+            support_inserter_type="inserter",
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and side == "top"

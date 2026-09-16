@@ -108,6 +108,35 @@ def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     assert bottom.get("substation", 0) == 0
 
 
+def test_runtime_quad_reservation_uses_regular_support_inserters(monkeypatch) -> None:
+    captured = {}
+
+    def fake_bill(*args, **kwargs):
+        captured.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 0)
+    monkeypatch.setattr(builder, "_bootstrap_mall_slot_limit", lambda *_a: 4)
+    monkeypatch.setattr(builder, "_quad_bootstrap_mall_enabled", lambda *_a: True)
+    monkeypatch.setattr(
+        builder, "preview_quad_mall_allocation",
+        lambda *_a: (quad_mall_center((3.0, -1.0)), "top"),
+    )
+    monkeypatch.setattr(builder, "quad_mall_project_bill", fake_bill)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+
+    affordable, shortage = builder._bootstrap_demand_cell_affordable(
+        object(), "nauvis", "player", "electric-mining-drill", 1,
+        (3.0, -1.0),
+    )
+
+    assert affordable is True
+    assert shortage == {}
+    assert captured["inserter_type"] == "inserter"
+    assert captured["support_inserter_type"] == "inserter"
+
+
 def test_quad_bill_includes_support_inserters_before_submission() -> None:
     bill = quad_mall_project_bill(
         "transport-belt", "top", machine_name="assembling-machine-1",
