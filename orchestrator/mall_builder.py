@@ -31,13 +31,10 @@ _CELL_COLUMNS = 3
 _CELL_ROWS = 10
 DEMAND_MALL_SLOT_TARGET = 12
 _DEMAND_CELL_COUNT = DEMAND_MALL_SLOT_TARGET // 2
-# The paired bank occupies three columns from ``start`` through ``start+34``
-# and reserves a 12-tile service footprint beyond each origin.  The previous
-# offset landed on row four of that bank, so the quad ghosts collided with a
-# legacy requester/machine cell and expansion silently fell back to pairs.
-# Keep one dense expansion bay to the right of the bank; its four machines and
-# two providers remain within the same mall power/logistic district.
-_QUAD_MALL_CENTER_OFFSET = (43.5, 6.5)
+# The first dense requester is the centre of the opening staggered pair bank.
+# Its shared substation sits between the two seed cells and remains clear of
+# the upper/lower expansion modules.
+_QUAD_MALL_CENTER_OFFSET = (4.5, 1.5)
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
@@ -88,6 +85,7 @@ def compact_mall_project_bill(
     side: str = "left",
     shared_provider: bool = False,
     machine_name: str | None = None,
+    include_substation: bool = True,
 ) -> dict[str, int]:
     """Incremental cell-half bill plus one craft of bootstrap ingredients."""
     spec = LINE_RECIPES[recipe]
@@ -99,6 +97,7 @@ def compact_mall_project_bill(
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
         request_multiplier_override=request_multiplier_override,
         shared_provider=shared_provider,
+        include_substation=include_substation,
     )
     bill: Counter[str] = Counter(plan_material_bill(preview))
     if side == "right":
@@ -210,6 +209,7 @@ def quad_mall_project_bill(
     recipe: str, group: str, *, stock_target: int = 1,
     machine_name: str | None = None, inserter_type: str | None = None,
     support_inserter_type: str | None = None,
+    include_substation: bool = True,
 ) -> dict[str, int]:
     """Construction bill for one quad half, including only new shared parts."""
     spec = LINE_RECIPES[recipe]
@@ -219,6 +219,7 @@ def quad_mall_project_bill(
         product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
         inserter_type=inserter_type,
         support_inserter_type=support_inserter_type,
+        include_substation=include_substation,
     )
     return dict(sorted(
         (item, count) for item, count in Counter(plan_material_bill(plan)).items()
@@ -381,12 +382,45 @@ def next_shared_provider_retrofit_plan(
 
 
 def _cell_origins(reference_point: Point) -> list[tuple[int, int]]:
-    """Stable row-major district: cells touch their exact working footprint."""
+    """Stable district with the two staggered seed cells first."""
     start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
-    return [
+    seed = [(start[0], start[1]), (start[0] + 6, start[1] + 5)]
+    candidates = [
         (start[0] + column * _CELL_PITCH[0], start[1] + row * _CELL_PITCH[1])
-        for row in range(_CELL_ROWS) for column in range(_CELL_COLUMNS)
+        for row in range(_CELL_ROWS + 4) for column in range(_CELL_COLUMNS)
     ]
+    def overlaps_seed(origin: tuple[int, int]) -> bool:
+        left, top = origin
+        right, bottom = left + 12, top + 7
+        return any(
+            left < sx + 12 and right > sx and top < sy + 7 and bottom > sy
+            for sx, sy in seed
+        )
+    rest = [origin for origin in candidates if origin not in seed and not overlaps_seed(origin)]
+    return seed + rest[: 30 - len(seed)]
+
+
+def seed_shared_substation(reference_point: Point) -> Point:
+    """Power anchor shared by the two opening paired cells."""
+    start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
+    return (start[0] + 8.0, start[1] + 4.0)
+
+
+def seed_cell_uses_shared_substation(
+    reference_point: Point, origin: tuple[int, int],
+) -> bool:
+    start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
+    return origin in {
+        (start[0], start[1]), (start[0] + 6, start[1] + 5),
+    }
+
+
+def seed_cell_includes_substation(
+    reference_point: Point, origin: tuple[int, int], side: str,
+) -> bool:
+    """Only the first half funds the shared seed substation."""
+    start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
+    return origin == (start[0], start[1]) and side == "left"
 
 
 def _slot_position(origin: tuple[int, int], side: str) -> Point:
@@ -583,6 +617,10 @@ def rebuild_incomplete_mall_cell(
         side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        include_substation=seed_cell_includes_substation(
+            reference_point, origin, side,
+        ),
+        substation_position=seed_shared_substation(reference_point),
     )
     plan["surface"], plan["force"] = surface, force
     emit(
@@ -681,6 +719,10 @@ def build_compact_mall_stage(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        include_substation=seed_cell_includes_substation(
+            reference_point, origin, side,
+        ),
+        substation_position=seed_shared_substation(reference_point),
         stock_gate_target=stock_gate_target,
         fill_chest=fill_chest,
         request_multiplier_override=request_multiplier_override,
@@ -692,7 +734,11 @@ def build_compact_mall_stage(
         origin[0] + 4.5,
         origin[1] + (0.5 if side == "left" or shared_provider else 2.5),
     )
-    substation = (origin[0] + 4.0, origin[1] + 5.0)
+    substation = (
+        seed_shared_substation(reference_point)
+        if seed_cell_uses_shared_substation(reference_point, origin)
+        else (origin[0] + 4.0, origin[1] + 5.0)
+    )
     requester_action = next(
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "requester-chest"
@@ -767,10 +813,17 @@ def build_quad_mall_stage(
         request_multiplier_override=request_multiplier_override,
         inserter_type=seed_inserter,
         support_inserter_type=seed_inserter,
+        include_substation=not (
+            center == quad_mall_center(reference_point) and group == "top"
+        ),
     )
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
-    substation = (center[0] + 5.0, center[1] + 5.0)
+    seed_module = center == quad_mall_center(reference_point) and group == "top"
+    substation = (
+        seed_shared_substation(reference_point)
+        if seed_module else (center[0] + 3.5, center[1] + 2.5)
+    )
     if group == "top" and hasattr(client, "command"):
         if not extend_power(
             client, bridge, surface, force, substation, emit,

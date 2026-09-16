@@ -29,7 +29,10 @@ QUAD_MALL_GROUP_MACHINES = {
 # follow the supplied dense blueprint's staggered arrangement: the first
 # module is the opening four-machine bank, and the two later modules sit above
 # and to the right without moving the machines already built.
-DENSE_MALL_MODULE_OFFSETS = ((0.0, 0.0), (3.0, -10.0), (9.0, -5.0))
+# The three requester centres follow the supplied expandable blueprint.  The
+# first centre reuses the opening paired cell; the other two add the upper and
+# lower expansion modules without moving the seed machines.
+DENSE_MALL_MODULE_OFFSETS = ((0.0, 0.0), (6.0, 5.0), (-3.0, 10.0))
 
 
 def _position(center: tuple[float, float], offset: tuple[float, float]) -> dict:
@@ -44,6 +47,7 @@ def generate_quad_mall_layout(
     request_multiplier_override: int | None = None,
     inserter_type: str | None = None,
     support_inserter_type: str | None = None,
+    include_substation: bool = True,
 ) -> dict:
     """Build one two-machine half of the four-machine cross module.
 
@@ -61,10 +65,10 @@ def generate_quad_mall_layout(
         ),
     }
     actions: list[dict] = []
-    if group == "top":
+    if group == "top" and include_substation:
         actions.append({
             "action_type": "place_entity", "entity": "substation",
-            "position": _position(center, (5.0, 5.0)),
+            "position": _position(center, (3.5, 2.5)),
         })
         actions.append({
             "action_type": "place_entity", "entity": "requester-chest",

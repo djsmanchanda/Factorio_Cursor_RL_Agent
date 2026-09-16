@@ -6,10 +6,12 @@ from __future__ import annotations
 from orchestrator import autonomous_builder as builder
 from orchestrator.mall_builder import (
     _cell_origins, dense_mall_module_centers, quad_mall_center,
-    quad_mall_project_bill,
+    quad_mall_project_bill, seed_cell_includes_substation,
+    seed_shared_substation,
 )
 from planners.plan_validation import validate_no_collisions
 from planners.quad_mall_layout import generate_quad_mall_layout
+from planners.mall_layout import generate_paired_mall_layout
 from planners.recipe_data import LINE_RECIPES
 
 
@@ -114,14 +116,31 @@ def test_quad_bill_includes_support_inserters_before_submission() -> None:
     assert bill["long-handed-inserter"] == 2
 
 
-def test_quad_expansion_bay_does_not_overlap_legacy_paired_bank() -> None:
-    """The expansion module must have a real empty bay after the old bank."""
+def test_quad_expansion_reuses_the_staggered_seed_geometry() -> None:
+    """The first dense requester aligns with the two expandable seed cells."""
     reference = (3.0, -1.0)
     center = quad_mall_center(reference)
-    origins = _cell_origins(reference)
-    bank_right = max(origin[0] + 12 for origin in origins)
+    assert center == (39.5, 32.5)
+    assert _cell_origins(reference)[:2] == [(35, 31), (41, 36)]
 
-    assert center[0] - 7 > bank_right
+
+def test_seed_power_is_shared_and_keeps_the_bottom_bay_clear() -> None:
+    spec = LINE_RECIPES["iron-gear-wheel"]
+    reference = (3.0, -1.0)
+    plans = [
+        generate_paired_mall_layout(
+            "iron-gear-wheel", spec["machine"], spec["ingredients"],
+            spec["amounts"], origin, "left", craft_time=spec["craft_time"],
+            include_substation=seed_cell_includes_substation(reference, origin, "left"),
+            substation_position=seed_shared_substation(reference),
+        )
+        for origin in _cell_origins(reference)[:2]
+    ]
+    substations = [
+        action["position"] for plan in plans for phase in plan["phases"]
+        for action in phase["actions"] if action.get("entity") == "substation"
+    ]
+    assert substations == [{"x": 43.0, "y": 35.0}]
 
 
 def test_dense_bank_has_three_reserved_module_centres() -> None:

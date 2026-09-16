@@ -263,6 +263,8 @@ def generate_paired_mall_layout(
     request_multiplier_override: int | None = None,
     shared_provider: bool = False,
     inserter_type: str | None = "inserter",
+    include_substation: bool = True,
+    substation_position: tuple[float, float] | None = None,
 ) -> dict:
     """Fill one half of a dense two-machine cell sharing one requester.
 
@@ -305,9 +307,14 @@ def generate_paired_mall_layout(
         machine_action["logistic_condition"] = stock_gate(recipe, stock_gate_target)
     if set_recipe:
         machine_action["recipe"] = recipe
-    actions = [
-        {"action_type": "place_entity", "entity": "substation",
-         "position": {"x": ox + 4.0, "y": oy + 5.0}},
+    actions = []
+    if include_substation:
+        sx, sy = substation_position or (ox + 4.0, oy + 5.0)
+        actions.append({
+            "action_type": "place_entity", "entity": "substation",
+            "position": {"x": sx, "y": sy},
+        })
+    actions.extend([
         machine_action,
         {"action_type": "place_entity", "entity": "requester-chest",
          "position": {"x": ox + 4.5, "y": oy + 1.5},
@@ -332,5 +339,5 @@ def generate_paired_mall_layout(
          "inventory_limit": _inventory_limit(
              recipe, stock_target,
              fill_chest=fill_chest or shared_provider)},
-    ]
+    ])
     return {"phases": [{"name": f"paired_mall_{recipe}", "actions": actions}]}

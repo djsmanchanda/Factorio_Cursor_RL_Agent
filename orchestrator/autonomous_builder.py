@@ -64,11 +64,13 @@ from orchestrator.mall_builder import (
     mall_slot_count,
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
+    quad_mall_center,
     preview_quad_mall_allocation,
     quad_mall_project_bill,
     preview_mall_allocation,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
+    seed_cell_includes_substation,
 )
 from orchestrator.mall_bootstrap import (
     MallBootstrapLoan, MallBootstrapStep,
@@ -7202,6 +7204,10 @@ def _reserve_compact_mall_project(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
             inserter_type="inserter",
+            include_substation=not (
+                allocation[0] == quad_mall_center(reference_point)
+                and allocation[1] == "top"
+            ),
         )
     else:
         project_id = _material_project_id(item)
@@ -7213,6 +7219,13 @@ def _reserve_compact_mall_project(
             side=allocation[1] if allocation is not None else "left",
             shared_provider=getattr(plan, "shared_provider", False),
             machine_name=project_spec.get("machine"),
+            include_substation=(
+                seed_cell_includes_substation(
+                    reference_point, allocation[0], allocation[1],
+                )
+                if allocation is not None and reference_point is not None
+                else True
+            ),
         )
     stock = live_base.transferable_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
@@ -8359,11 +8372,16 @@ def _bootstrap_demand_cell_affordable(
             item, side, stock_target=max(1, target),
             machine_name="assembling-machine-1",
             inserter_type="inserter",
+            include_substation=not (
+                allocation[0] == quad_mall_center(reference_point)
+                and side == "top"
+            ),
         )
         if quad_mall else
         compact_mall_project_bill(
             item, stock_target=max(1, target), side=side, shared_provider=True,
             machine_name="assembling-machine-1",
+            include_substation=True,
         )
     )
     stock = _transferable_or_available_stock(client, surface, force)
