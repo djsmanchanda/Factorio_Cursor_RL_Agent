@@ -11596,7 +11596,10 @@ _EVERGREEN_STOCK = {
     "electronic-circuit": (18, 6),
     "inserter": (20, 5),
 }
-_AM1_RESERVE_SEEN_KEY = "_am1_reserve_seen"
+_SEED_RESERVE_SEEN_KEYS = {
+    item: f"_seed_reserve_seen:{item}"
+    for item in ("assembling-machine-1", "electronic-circuit", "inserter")
+}
 
 
 def _evergreen_producer_live(
@@ -11717,15 +11720,16 @@ def _survey_pass(
     # missing/zero key in a dry harness means “no AM1 capability supplied”,
     # while a live run may legitimately omit zero-count items after upgrades
     # drain the reserve; the marker lets that later stockout re-queue safely.
-    if int(stock.get("assembling-machine-1", 0)) > 0:
-        try:
-            prepped.add(_AM1_RESERVE_SEEN_KEY)
-        except AttributeError:
-            pass
-    am1_reserve_seen = (
-        int(stock.get("assembling-machine-1", 0)) > 0
-        or _AM1_RESERVE_SEEN_KEY in prepped
-    )
+    observed_seed_reserves = {
+        item for item in _SEED_RESERVE_SEEN_KEYS
+        if int(stock.get(item, 0)) > 0
+    }
+    try:
+        for item, marker in _SEED_RESERVE_SEEN_KEYS.items():
+            if int(stock.get(item, 0)) > 0:
+                prepped.add(marker)
+    except AttributeError:
+        pass
     tick = live_base.game_tick(client)
     ghost_bill = (
         live_base.pending_construction_items(client, surface, force)
@@ -11798,7 +11802,11 @@ def _survey_pass(
         # eligible after its starter reserve has actually been observed; its
         # rotating batch is then the capability that creates more mall cells.
         if evergreen not in prepped and not (
-            evergreen == "assembling-machine-1" and am1_reserve_seen
+            evergreen in _SEED_RESERVE_SEEN_KEYS
+            and (
+                evergreen in observed_seed_reserves
+                or _SEED_RESERVE_SEEN_KEYS[evergreen] in prepped
+            )
         ):
             continue
         if evergreen in mall_targets:
@@ -12316,7 +12324,7 @@ def run(
     mission_items: tuple[str, ...] = (),
     episode_id: str | None = None,
     bootstrap_profile: str = "reduced-v1",
-    checkpoint_boundary: Callable[[], None] | None = None,
+    checkpoint_boundary: Callable[[RconClient, GameBridge], None] | None = None,
 ) -> dict:
     """Loop: survey -> decide the single deepest missing stage -> build it ->
     repeat, until `goal_item` has a real, working line or the builder is
@@ -12377,7 +12385,7 @@ def run(
             # orchestrator.  The callback is injectable and owns no live
             # process lifecycle; fleet runners use it for structured evidence.
             if checkpoint_boundary is not None:
-                checkpoint_boundary()
+                checkpoint_boundary(client, bridge)
             budget.begin_pass()
             _reconcile_bootstrap_work(client, surface, force)
             tick, task = _survey_pass(
