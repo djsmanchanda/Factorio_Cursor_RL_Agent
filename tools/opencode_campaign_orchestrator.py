@@ -98,6 +98,8 @@ class Config:
     review_variant: str | None = None
     observer_model: str | None = None
     observer_variant: str | None = None
+    fixer_model: str | None = None
+    fixer_variant: str | None = None
     zen_observer_model: str | None = None
 
 
@@ -289,7 +291,8 @@ def _opencode_command(config: Config, message: str, session_id: str | None) -> l
     return command + [message]
 
 
-def _ask(config: Config, message: str, session_id: str | None, sequence: int) -> tuple[str | None, str]:
+def _ask(config: Config, message: str, session_id: str | None, sequence: int,
+         retry: int = 0) -> tuple[str | None, str]:
     if config.dry_run:
         return session_id or "dry-run-session", "CAMPAIGN_DECISION:\nstatus: dry-run\n"
     command = _opencode_command(config, message, session_id)
@@ -302,7 +305,8 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int) ->
         command[2:2] = ["--agent", "build"]
         command = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(policy), *command]
     config.opencode_log_dir.mkdir(parents=True, exist_ok=True)
-    transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
+    suffix = "" if retry == 0 else f"-continue-{retry}"
+    transport = config.opencode_log_dir / f"opencode-{sequence:04d}{suffix}.jsonl"
     try:
         result = _run(command, timeout=config.model_timeout_seconds)
         output = result.stdout + result.stderr
@@ -315,6 +319,33 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int) ->
     if result.returncode:
         raise RuntimeError(f"OpenCode exited {result.returncode}; inspect {transport}")
     return session_id or _session_id(output), output
+
+
+def _ask_with_continue(config: Config, message: str, session_id: str | None,
+                       sequence: int, *, require_response: bool = True,
+                       retries: int = 3) -> tuple[str | None, str]:
+    """Recover a congested model call by resuming its allocated session."""
+    active_session = session_id
+    prompt = message
+    for attempt in range(retries + 1):
+        try:
+            if attempt:
+                returned_session, output = _ask(config, prompt, active_session, sequence, retry=attempt)
+            else:
+                returned_session, output = _ask(config, prompt, active_session, sequence)
+            active_session = returned_session or active_session
+            if require_response and not output.strip():
+                raise ValueError("model returned no usable assistant response")
+            return active_session, output
+        except Exception as error:
+            transport = config.opencode_log_dir / f"opencode-{sequence:04d}{'' if attempt == 0 else f'-continue-{attempt}'}.jsonl"
+            if active_session is None and transport.exists():
+                active_session = _session_id(transport.read_text(encoding="utf-8", errors="replace"))
+            if attempt >= retries:
+                raise RuntimeError(f"model did not recover after {retries} continue attempts") from error
+            prompt = ("Continue the same isolated campaign investigation after an interrupted model call. "
+                      "Re-read the saved session context and current raw evidence; do not duplicate lifecycle "
+                      "actions or discard any partial candidate. Complete the requested response now.\n\n" + message)
 
 
 def _progress(config: Config, phase: str, state: State, **details) -> None:
@@ -369,7 +400,8 @@ The parent process controls lifecycle and the next run; it is not a human approv
 
 
 def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
-    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and return its assessment for the controller (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. Keep the whole blocked
+    board = config.opencode_log_dir / "observers" / "latest-board.md"
+    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and return its assessment for the controller (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. When aspect observers are enabled, inspect `{board}`: identify any role with an error or stale checkpoint and explicitly request its continued evidence collection; the controller will resume that saved session with a bounded continue prompt. Keep the whole blocked
 dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
 reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
 count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
@@ -482,6 +514,21 @@ def _dirty_paths() -> set[str]:
     return {name for name in (tracked + untracked).split("\0") if name}
 
 
+def _record_campaign_milestone(output: str) -> str | None:
+    """Append the controller's accepted-fix handoff before its scoped commit."""
+    path = REPO_ROOT / "CURRENT_STATUS.md"
+    if not path.is_file():
+        return None
+    fields = _decision_fields(output)
+    summary = fields.get("reason", "verified campaign repair")
+    prediction = fields.get("prediction", "not provided")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"\n- {_now()[:10]}: GLM-controlled campaign accepted Union Alpha repair. "
+                     f"Files: {fields.get('files', 'not declared')}. Prediction: {prediction}. "
+                     f"Reason: {summary}.\n")
+    return "CURRENT_STATUS.md"
+
+
 def _review_and_commit(config: Config, output: str, protected: set[str], sequence: int) -> bool:
     fields = _decision_fields(output)
     paths = [p.strip() for p in fields.get("files", "").split(",") if p.strip()]
@@ -490,6 +537,13 @@ def _review_and_commit(config: Config, output: str, protected: set[str], sequenc
                         not (REPO_ROOT / p).resolve().is_relative_to(REPO_ROOT.resolve()) for p in paths):
         _append(config.observations, "Fix requires review: missing/unsafe file list or pre-existing dirty file was touched.\n")
         return False
+    status_path = "CURRENT_STATUS.md"
+    if status_path in protected:
+        _append(config.observations, "Fix requires review: CURRENT_STATUS.md contains pre-existing work and cannot be auto-updated.\n")
+        return False
+    record_status = (REPO_ROOT / status_path).is_file()
+    if record_status and status_path not in paths:
+        paths.append(status_path)
     permitted = set(paths) | protected
     if config.observations.resolve().is_relative_to(REPO_ROOT.resolve()):
         permitted.add(config.observations.resolve().relative_to(REPO_ROOT.resolve()).as_posix())
@@ -510,14 +564,14 @@ def _review_and_commit(config: Config, output: str, protected: set[str], sequenc
     _atomic_write(evidence, "# Candidate evidence\n\n" + output + "\n\n## Diff\n\n" + diff + "\n".join(additions))
     reviewer = _readonly(replace(config, model=config.review_model or config.model,
                                  variant=config.review_variant or "high"))
-    _, review = _ask(reviewer, f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
+    _, review = _ask_with_continue(reviewer, f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
 {config.state_root}/logs/latest-context.md and the changed files: {', '.join(paths)}.
 Read the parent-captured candidate diff, new files, prediction and test claim at {evidence}.
 Read-only review: do not edit, commit or operate Factorio. Check causal evidence, invariants,
 regression coverage and the predicted plastic milestone. Verify the prediction is cause-specific and backed by the regression; a repeated terminal permits another episode only with this evidence. Do not approve merely because tests pass.
 Finish exactly with REVIEW_DECISION:
 status: approved|rejected
-reason: one sentence""", None, sequence)
+reason: one sentence""", None, sequence, require_response=False)
     if _decision_fields(review, "REVIEW_DECISION").get("status") != "approved" or _tree_fingerprint(config.observations) != digest:
         return False
     pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
@@ -543,6 +597,8 @@ reason: one sentence""", None, sequence)
             handle.write(validation.stdout + validation.stderr)
         if validation.returncode:
             return False
+    if record_status:
+        _record_campaign_milestone(output)
     if _run(["git", "diff", "--check"], timeout=120).returncode:
         return False
     # Primary controller owns the scoped commit; fixer and reviewer remain separate.
@@ -692,7 +748,7 @@ def _run_campaign(config: Config) -> int:
         _progress(config, "observing", state)
         if session_id is None:
             try:
-                session_id, _ = _ask(_readonly(config), _initial_prompt(config, cycle) + "\nRead-only: return findings; do not edit files. The controller owns journal writes.", None, sequence)
+                session_id, _ = _ask_with_continue(_readonly(config), _initial_prompt(config, cycle) + "\nRead-only: return findings; do not edit files. The controller owns journal writes.", None, sequence, require_response=False)
             except Exception:
                 transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
                 if transport.exists():
@@ -713,7 +769,7 @@ def _run_campaign(config: Config) -> int:
                 from tools.campaign_observers import observe_team
                 board = observe_team(config, state.active_episode_id, checkpoint)
                 _append(config.observations, f"Aspect evidence board: {board}\n")
-            _, assessment = _ask(_readonly(config), _checkpoint_prompt(config, cycle, checkpoint) + "\nReturn findings only; do not edit the journal.", session_id, sequence)
+            _, assessment = _ask_with_continue(_readonly(config), _checkpoint_prompt(config, cycle, checkpoint) + "\nReturn findings only; do not edit the journal.", session_id, sequence, require_response=False)
             if _assistant_text(assessment):
                 _append(config.observations, _assistant_text(assessment))
             sequence += 1
@@ -798,7 +854,9 @@ def _run_campaign(config: Config) -> int:
         protected = set(state.pending_fix["protected"])
         before = state.pending_fix["before"]
         try:
-            fixer_session, output = _ask(config, _completion_prompt(config, cycle) + board_context +
+            fixer_config = replace(config, model=config.fixer_model or config.model,
+                                   variant=config.fixer_variant or config.variant)
+            fixer_session, output = _ask_with_continue(fixer_config, _completion_prompt(config, cycle) + board_context +
                          "\nContinue any partial candidate from the previous interrupted attempt; preserve pre-existing dirty files: " + ", ".join(sorted(protected)), state.pending_fix.get("session_id"), sequence)
             state.pending_fix["session_id"] = fixer_session
             _save_state(config.state_file, state)
@@ -812,12 +870,12 @@ def _run_campaign(config: Config) -> int:
         after = _tree_fingerprint(config.observations)
         decision = _decision(output)
         if not _decision_fields(output).get("status") and not config.dry_run:
-            _, output = _ask(config, "Your response omitted CAMPAIGN_DECISION. Continue this same investigation and any partial edit; do not operate lifecycle. Return the required status/files/test/prediction/reason fields after verifying the candidate, or identify a concrete blocker.", state.pending_fix.get("session_id"), sequence)
+            _, output = _ask_with_continue(config, "Your response omitted CAMPAIGN_DECISION. Continue this same investigation and any partial edit; do not operate lifecycle. Return the required status/files/test/prediction/reason fields after verifying the candidate, or identify a concrete blocker.", state.pending_fix.get("session_id"), sequence)
             sequence += 1
             after = _tree_fingerprint(config.observations)
             decision = _decision(output)
         if decision == "no-change" and before == after:
-            _, output = _ask(config, _telemetry_prompt(config, cycle), state.pending_fix.get("session_id"), sequence)
+            _, output = _ask_with_continue(config, _telemetry_prompt(config, cycle), state.pending_fix.get("session_id"), sequence)
             sequence += 1
             after = _tree_fingerprint(config.observations)
             decision = _decision(output)
@@ -880,6 +938,7 @@ def _config(args: argparse.Namespace) -> Config:
         aspect_observers=args.aspect_observers, progress_file=args.progress_file,
         review_model=args.review_model, review_variant=args.review_variant,
         observer_model=args.observer_model, observer_variant=args.observer_variant,
+        fixer_model=args.fixer_model, fixer_variant=args.fixer_variant,
         zen_observer_model=args.zen_observer_model,
     )
 
@@ -913,6 +972,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--review-variant", default="high")
     parser.add_argument("--observer-model", default="opencode-go/muse-spark-1.3-contributor")
     parser.add_argument("--observer-variant", default="high")
+    parser.add_argument("--fixer-model")
+    parser.add_argument("--fixer-variant", default="high")
     parser.add_argument("--zen-observer-model", default="opencode-zen/muse-spark-1.3")
     parser.add_argument("--opencode-bin", default="opencode")
     parser.add_argument("--python", type=Path, default=REPO_ROOT / ".venv/bin/python")

@@ -18,16 +18,17 @@ import time
 from tools.reliability_state import atomic_json
 from tools.runner_process import running_runner_pid
 
-# Compact loop roles: one fixer/controller, one conditional reviewer, four
-# read-only observers. Two observers opportunistically use the free Zen route;
-# their caller falls back to the Go route when the allowance is unavailable.
+# GLM owns campaign control/review. Union Alpha supplies shared evidence and
+# implements the focused repair that GLM then verifies and commits.
+UNION_ALPHA_MODEL = 'opencode-go/union-alpha'
 MODEL = 'opencode-go/glm-5.3-flash'
 VARIANT = 'auto'
 REVIEW_MODEL = 'opencode-go/glm-5.3-flash'
 REVIEW_VARIANT = 'high'
-OBSERVER_MODEL = 'opencode-go/muse-spark-1.3-contributor'
+OBSERVER_MODEL = UNION_ALPHA_MODEL
 OBSERVER_VARIANT = 'high'
-ZEN_OBSERVER_MODEL = 'opencode-zen/muse-spark-1.3'
+FIXER_MODEL = UNION_ALPHA_MODEL
+FIXER_VARIANT = 'high'
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -132,7 +133,7 @@ def _start(config) -> None:
                    deadline_epoch=time.time() + 12 * 3600, model=MODEL, variant=VARIANT,
                    review_model=REVIEW_MODEL, review_variant=REVIEW_VARIANT,
                    observer_model=OBSERVER_MODEL, observer_variant=OBSERVER_VARIANT,
-                   zen_observer_model=ZEN_OBSERVER_MODEL)
+                   fixer_model=FIXER_MODEL, fixer_variant=FIXER_VARIANT)
     atomic_json(settings, payload)
     atomic_json(_root(config) / 'current.json', {'settings': str(settings)})
     _launch(config, settings)
@@ -175,7 +176,7 @@ def status(config) -> dict:
     if not current:
         return dict(running=running, phase='idle', reason='No supervised campaign started',
                     model=MODEL, variant=VARIANT, review_model=REVIEW_MODEL,
-                    observer_model=OBSERVER_MODEL, zen_observer_model=ZEN_OBSERVER_MODEL)
+                    observer_model=OBSERVER_MODEL)
     directory = Path(current['settings']).parent
     settings = _read(directory / 'settings.json')
     data = _read(directory / 'status.json')
@@ -201,7 +202,7 @@ def status(config) -> dict:
                 pass
     return {**data, 'running': running, 'deadline': settings.get('deadline_epoch'),
             'model': MODEL, 'variant': VARIANT, 'review_model': REVIEW_MODEL,
-            'observer_model': OBSERVER_MODEL, 'zen_observer_model': ZEN_OBSERVER_MODEL,
+            'observer_model': OBSERVER_MODEL, 'fixer_model': FIXER_MODEL,
             'completed_runs': controller.get('completed_cycles', 0),
             'acceptance_streak': len(reliability.get('streak', [])), 'required_successes': 3,
             'milestones': reliability.get('runs', [])[-5:], 'notes': notes, 'agents': agents,
@@ -239,7 +240,8 @@ def supervise(settings_path: Path) -> int:
                '--observations', str(directory / 'journal.md'), '--progress-file', str(directory / 'progress.json'),
                '--model', MODEL, '--variant', VARIANT, '--review-model', REVIEW_MODEL,
                '--review-variant', REVIEW_VARIANT, '--observer-model', OBSERVER_MODEL,
-               '--observer-variant', OBSERVER_VARIANT, '--zen-observer-model', ZEN_OBSERVER_MODEL,
+               '--observer-variant', OBSERVER_VARIANT,
+               '--fixer-model', FIXER_MODEL, '--fixer-variant', FIXER_VARIANT,
                '--opencode-bin', settings['opencode'],
                '--python', settings['python'], '--rcon-port', str(settings['rcon_port']),
                '--game-port', str(settings.get('game_port', 34199)), '--technology', settings['technology'],

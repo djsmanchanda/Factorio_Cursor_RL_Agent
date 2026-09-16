@@ -36,7 +36,7 @@ def _read_state(path: Path) -> dict:
 
 def _ask(config, message, session_id, sequence):
     # Lazy import keeps the controller free to import this module at startup.
-    from tools.opencode_campaign_orchestrator import _ask as campaign_ask
+    from tools.opencode_campaign_orchestrator import _ask_with_continue as campaign_ask
     return campaign_ask(config, message, session_id, sequence)
 
 
@@ -92,13 +92,9 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
         directory = root / role
         state_path = directory / "state.json"
         state = _read_state(state_path)
-        # The first two roles try the free Zen route. A weekly-limit/provider
-        # refusal falls back to the normal Go observer model without affecting
-        # the episode or the other observers.
-        preferred = getattr(config, "zen_observer_model", None) if role in ("scheduling", "supply") else None
         role_config = replace(config, opencode_log_dir=directory, read_only=True,
                              model_timeout_seconds=240,
-                             model=preferred or getattr(config, "observer_model", None) or config.model,
+                             model=getattr(config, "observer_model", None) or config.model,
                              variant=getattr(config, "observer_variant", None) or "high")
         sequence = int(state.get("sequence", 0)) + 1
         state.update(sequence=sequence, checkpoint=checkpoint, terminal=terminal,
@@ -106,14 +102,7 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
         _atomic(state_path, json.dumps(state, indent=2) + "\n")
         try:
             prompt = _prompt(config, episode_id, role, checkpoint, terminal, board)
-            try:
-                session, output = _ask(role_config, prompt, state.get("session_id"), sequence)
-            except Exception:
-                if not preferred:
-                    raise
-                fallback = replace(role_config, model=getattr(config, "observer_model", None) or config.model)
-                session, output = _ask(fallback, prompt, state.get("session_id"), sequence + 1)
-                state["fallback_model"] = fallback.model
+            session, output = _ask(role_config, prompt, state.get("session_id"), sequence)
             state["session_id"] = session
             findings = _assistant_text(output)
             if not findings.strip():

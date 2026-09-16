@@ -65,6 +65,23 @@ def test_json_assistant_decision_ignores_tool_template():
     assert campaign._decision(raw) == 'stop'
 
 
+def test_model_call_resumes_saved_session_after_interruption(tmp_path, monkeypatch):
+    cfg = review_config(tmp_path)
+    calls = []
+
+    def ask(config, prompt, session, sequence, retry=0):
+        calls.append((prompt, session, sequence, retry))
+        if retry == 0:
+            raise TimeoutError('provider busy')
+        return 'saved-session', 'completed response'
+
+    monkeypatch.setattr(campaign, '_ask', ask)
+    session, output = campaign._ask_with_continue(cfg, 'inspect evidence', 'saved-session', 7)
+    assert (session, output) == ('saved-session', 'completed response')
+    assert calls[1][1] == 'saved-session' and calls[1][3] == 1
+    assert calls[1][0].startswith('Continue the same isolated campaign investigation')
+
+
 def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
     (tmp_path / 'fix.py').write_text('value=1')

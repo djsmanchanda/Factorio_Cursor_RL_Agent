@@ -23,24 +23,32 @@ An exclusive file lock rejects concurrent instances on the same state root.
 ## Operations Console: supervised 12-hour loop
 
 The **Autonomous observation & fixes** panel provides Start, Resume and Stop.
-Start creates a fixed 12-hour window using
-`opencode-go/muse-spark-1.3-contributor`, variant `xhigh`, and the console's
-configured isolated runtime, save, ports and Python interpreter. It requires
+Start creates a fixed 12-hour window with GLM-5.3 as the primary controller:
+it observes the campaign, checks the shared evidence board, directs recovery,
+reviews candidates, verifies tests, commits accepted fixes, records the
+milestone, and starts the next fresh episode. Union Alpha performs all
+read-only observations and the final focused repair. The window uses the
+console's configured isolated runtime, save, ports and Python interpreter. It requires
 Linux user systemd and OpenCode on the console's PATH with working model access.
 The existing runner must be stopped before starting a new window.
 
-Four concurrent observers cover scheduling, supply, construction and code
-correlation. Each keeps its own episode-scoped session and findings. The shared
-board carries current status, bounded excerpts and links to full reports.
+Four concurrent Union Alpha observers cover scheduling, supply, construction
+and code correlation. Each keeps its own episode-scoped session and findings.
+The shared board carries current status, bounded excerpts and links to full reports.
+The final Union Alpha fixer receives the board, re-verifies the cited raw
+evidence, identifies the root cause, and makes one focused repair.
 Observers can follow as many useful evidence references as needed within their
 bounded call window; the controller retains raw transport and prior findings
 when one fails. They have no edit, shell, task-delegation or live-mutation tools.
 The permanent secondary helper remains separate and its instructions are unchanged.
 
-At run end the team cross-checks its findings. The primary fixer reconciles
-claims against raw evidence, implements a focused correction and returns its
-diff. An independent read-only reviewer and controller-run tests precede a
-scoped commit. Successful plastic acceptance runs repeat the same candidate;
+At run end the team cross-checks its findings. GLM reviews the Union Alpha
+candidate against raw evidence, runs the required verification, commits only
+the declared files, and records the verified milestone in `CURRENT_STATUS.md`
+before starting the next fresh run and observation team. A failed, timed-out,
+or empty Union Alpha call is resumed through its saved session with an explicit
+continue prompt, up to three times; exhausted recovery parks the episode and
+preserves its evidence. Successful plastic acceptance runs repeat the same candidate;
 they do not require an invented code change. The console displays acceptance
 streaks and achieved milestone times; longer survival never counts as success.
 
