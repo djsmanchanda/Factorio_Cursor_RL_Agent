@@ -173,8 +173,11 @@ def _quad_mall_state(client: RconClient, surface: str, center: Point) -> tuple[s
     )
     raw = client.command("/sc " + lua).strip().split(",")
     values = (raw + ["-", "-", "-", "-", "-"])[:5]
-    top = values[0] if values[0] != "-" else values[1]
-    bottom = values[2] if values[2] != "-" else values[3]
+    # The opening paired seed reuses the quad module's west/east positions.
+    # Do not mistake those horizontal machines for a committed top/bottom
+    # dense half; only the north/south positions prove quad expansion.
+    top = values[0]
+    bottom = values[3]
     return top, bottom, values[4]
 
 
