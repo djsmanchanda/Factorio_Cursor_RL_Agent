@@ -8507,6 +8507,35 @@ def _bootstrap_reserve_machine_target(
     return 2
 
 
+def _missing_rotating_input(
+    client: RconClient, surface: str, force: str, item: str,
+    target: int,
+) -> tuple[str, int] | None:
+    """Find a missing direct ingredient that another rotating batch can make."""
+    spec = LINE_RECIPES.get(item)
+    if spec is None:
+        return None
+    actual, usable = _bootstrap_loan_stock(client, surface, force, item)
+    missing = max(0, target - int(actual.get(item, 0)))
+    if missing <= 0:
+        return None
+    crafts = math.ceil(
+        missing / max(1, math.floor(float(spec.get("product_amount", 1))))
+    )
+    for ingredient, amount in zip(
+        spec.get("ingredients", ()), spec.get("amounts", ()), strict=True,
+    ):
+        required = math.ceil(float(amount) * crafts)
+        if int(usable.get(ingredient, 0)) >= required:
+            continue
+        if ingredient not in RATIONED_MALL_BATCH_ITEMS:
+            continue
+        if _production_started(client, surface, force, ingredient):
+            continue
+        return str(ingredient), required
+    return None
+
+
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
@@ -8553,6 +8582,36 @@ def _rationed_mall_batch(
             details={"target": item, "rung": ladder_block},
         )
     active = active_bootstrap_loans(client, surface, force)
+    own_loan = next((loan for loan in active if loan.target_item == item), None)
+    if own_loan is not None:
+        missing_input = _missing_rotating_input(
+            client, surface, force, item, target,
+        )
+        if missing_input is not None:
+            prerequisite, required = missing_input
+            _restore_bootstrap_loan(
+                client, bridge, surface, force, own_loan, emit,
+                reference_point=reference_point,
+                reason=(
+                    f"{item} is missing rotating prerequisite "
+                    f"{prerequisite}={required}"
+                ),
+            )
+            _rationed_mall_batch(
+                client, bridge, surface, force, prerequisite, required,
+                reference_point, emit,
+            )
+            raise ProductionPrerequisiteDeferred(
+                f"rotating mall restored {item} before producing "
+                f"{prerequisite}; retrying after re-observation",
+                code="rotating_mall_prerequisite_handoff",
+                state="supply_wait",
+                details={
+                    "target": item,
+                    "prerequisite": prerequisite,
+                    "required": required,
+                },
+            )
     if not active or any(loan.target_item == item for loan in active):
         actual, usable = _bootstrap_loan_stock(
             client, surface, force, item,

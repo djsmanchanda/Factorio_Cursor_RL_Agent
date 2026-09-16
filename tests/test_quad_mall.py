@@ -81,6 +81,22 @@ def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) 
     )
 
 
+def test_rotating_loan_finds_missing_circuit_prerequisite(monkeypatch) -> None:
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock",
+        lambda *_a: ({"fast-inserter": 0}, {"electronic-circuit": 0}),
+    )
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setitem(
+        LINE_RECIPES, "fast-inserter",
+        {"ingredients": ["electronic-circuit"], "amounts": [1],
+         "product_amount": 1},
+    )
+    assert builder._missing_rotating_input(
+        object(), "nauvis", "player", "fast-inserter", 1,
+    ) == ("electronic-circuit", 1)
+
+
 def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     top = quad_mall_project_bill("copper-cable", "top", machine_name="assembling-machine-1")
     bottom = quad_mall_project_bill("electronic-circuit", "bottom", machine_name="assembling-machine-1")
