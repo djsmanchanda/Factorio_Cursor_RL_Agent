@@ -889,6 +889,7 @@ def _await_built_status(
 
 def _power_bridge_hops(
     start: Point, end: Point, spacing: float, blocked: set[tuple[int, int]],
+    *, orthogonal: bool = False,
 ) -> list[Point]:
     """Shortest deterministic pole chain whose real centres avoid blockers.
 
@@ -917,6 +918,8 @@ def _power_bridge_hops(
         if span == 0:
             return []
         minimum_segments = max(1, math.ceil(span / spacing))
+        if orthogonal and leg_start[0] != actual_end[0] and leg_start[1] != actual_end[1]:
+            return None
         for segments in range(minimum_segments, minimum_segments + 9):
             points = [
                 pole_centre((
@@ -938,9 +941,9 @@ def _power_bridge_hops(
 
     horizontal = l_route(start, end)
     vertical = [start, (start[0], end[1]), end]
-    # A pole may connect at every angle; a direct diagonal is both the shortest
-    # route and generally uses fewer poles than the old orthogonal L route.
-    routes = [[start, end], horizontal, vertical]
+    # Resource-protected corridors stay orthogonal so a mine edge is treated as
+    # a real boundary rather than something a diagonal can cut through.
+    routes = [horizontal, vertical] if orthogonal else [[start, end], horizontal, vertical]
     for offset in (-128, -64, -32, -16, 16, 32, 64, 128):
         routes.extend((
             [start, (start[0], start[1] + offset),
@@ -974,7 +977,9 @@ def _power_bridge_hops(
         length = sum(distance(a, b) for a, b in zip(route, route[1:]))
         candidates.append((collisions, length, tuple(route), hops))
     if not candidates:
-        return _searched_bridge_hops(start, end, spacing, blocked)
+        return _searched_bridge_hops(
+            start, end, spacing, blocked, orthogonal=orthogonal,
+        )
     collisions, _length, _route, hops = min(
         candidates,
         key=lambda item: (item[0], len(item[3]), item[1], item[2]),
@@ -985,12 +990,15 @@ def _power_bridge_hops(
         # TERRAIN: a coastline is not a rectangle, so every candidate can clip
         # water while a perfectly good winding route exists. Fall back to a real
         # search rather than declaring the gap unroutable.
-        return _searched_bridge_hops(start, end, spacing, blocked)
+        return _searched_bridge_hops(
+            start, end, spacing, blocked, orthogonal=orthogonal,
+        )
     return hops
 
 
 def _searched_bridge_hops(
     start: Point, end: Point, spacing: float, blocked: set[tuple[int, int]],
+    *, orthogonal: bool = False,
 ) -> list[Point]:
     """A* over free tiles for a pole chain from `start` to within reach of `end`.
 
@@ -1001,11 +1009,12 @@ def _searched_bridge_hops(
     """
     cardinal = max(2, int(spacing) - 1)
     diagonal = max(1, int((spacing - 1) / 1.415))
-    steps = [
-        (cardinal, 0), (-cardinal, 0), (0, cardinal), (0, -cardinal),
-        (diagonal, diagonal), (diagonal, -diagonal),
-        (-diagonal, diagonal), (-diagonal, -diagonal),
-    ]
+    steps = [(cardinal, 0), (-cardinal, 0), (0, cardinal), (0, -cardinal)]
+    if not orthogonal:
+        steps.extend([
+            (diagonal, diagonal), (diagonal, -diagonal),
+            (-diagonal, diagonal), (-diagonal, -diagonal),
+        ])
     margin = 96
     min_x, max_x = min(start[0], end[0]) - margin, max(start[0], end[0]) + margin
     min_y, max_y = min(start[1], end[1]) - margin, max(start[1], end[1]) + margin
@@ -1045,11 +1054,13 @@ def _searched_bridge_hops(
 
 def _long_reach_bridge_hops(
     start: Point, end: Point, start_name: str, end_name: str,
-    pole_name: str, blocked: set[tuple[int, int]],
+    pole_name: str, blocked: set[tuple[int, int]], *, orthogonal: bool = False,
 ) -> list[Point] | None:
     """Fewest stocked 2x2 poles along a legal corridor, with honest end reach."""
     try:
-        corridor = _power_bridge_hops(start, end, 4.0, blocked)
+        corridor = _power_bridge_hops(
+            start, end, 4.0, blocked, orthogonal=orthogonal,
+        )
     except ValueError:
         return None
     candidates = list(dict.fromkeys(
@@ -1350,7 +1361,10 @@ def extend_power(
         endpoint = near_position
         blocked -= {(math.floor(near_position[0]), math.floor(near_position[1]))}
     try:
-        hops = _power_bridge_hops(target_position, endpoint, spacing, blocked)
+        hops = _power_bridge_hops(
+            target_position, endpoint, spacing, blocked,
+            orthogonal=avoid_resources,
+        )
     except ValueError as error:
         raise StuckError(f"power gap cannot be routed safely: {error}") from error
     action_names = [bridge_pole] * len(hops)
@@ -1384,6 +1398,7 @@ def extend_power(
             route = _long_reach_bridge_hops(
                 target_position, terminal, target_name, terminal_name, trunk,
                 blocked | footprint_tile_indices(terminal, int(POLE_SPECS[terminal_name]["size"])),
+                orthogonal=avoid_resources,
             )
             if route is None:
                 continue
