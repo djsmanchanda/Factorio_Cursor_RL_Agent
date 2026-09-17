@@ -8736,11 +8736,20 @@ def _rationed_mall_batch(
     )
     if remedy is None:
         active = active_bootstrap_loans(client, surface, force)
-        raise StuckError(
-            f"rationed mall needs a borrowable assembler to batch {item} "
-            f"through stock {target}",
-            code="rationed_mall_no_borrower",
-            classification="bug",
+        # Borrower availability across the restore->borrow seam is state/
+        # timing-dependent (2026-09-17 belt-128: loans emptied at +404s and
+        # the +407s pass killed the run; the prior run survived the same
+        # seam). Park and retry through the queued-demand paths instead of
+        # classifying an unrecoverable bug onto empty-pool timing.
+        emit(
+            f"  RATIONED MALL BORROW RETRY: no borrowable assembler is free "
+            f"for {item} through stock {target} ({len(active)} active "
+            "loan(s)); parking the batch and retrying after re-observation"
+        )
+        raise ProductionPrerequisiteDeferred(
+            f"rationed mall has no borrowable assembler to batch {item} "
+            f"through stock {target}; retrying after re-observation",
+            code="rationed_mall_borrow_deferred",
             state="supply_wait",
             details={
                 "item": item,

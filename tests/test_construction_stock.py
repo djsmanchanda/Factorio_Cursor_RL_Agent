@@ -3099,6 +3099,67 @@ def test_restore_also_establishes_the_prerequisite(monkeypatch) -> None:
     assert deferred.value.code == "rotating_mall_prerequisite_handoff"
 
 
+def test_empty_pool_after_restore_parks_the_batch_instead_of_dying(
+    monkeypatch,
+) -> None:
+    """2026-09-17 episode-20260917T132636Z: a yield-restore emptied the loan
+    set at +404s and the +407s belt-128 batch killed the run with
+    `rationed_mall_no_borrower` while the prior run survived the same seam.
+    With zero loans and no borrowable cell, the batch must park and retry --
+    never raise a terminal bug-class PATCH of empty-pool timing."""
+    emitted: list[str] = []
+    monkeypatch.setattr(
+        builder, "_transferable_or_available_stock", lambda *_a: {},
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_loan_stock", lambda *_a: ({}, {}),
+    )
+    monkeypatch.setattr(
+        builder, "bootstrap_external_shortages", lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(
+        builder, "_independent_mall_ready", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_recipe_depends_on_fast_transport_belt", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_unfunded_ladder_ingredient", lambda *_a: None,
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_completion_target", lambda *_a: 128,
+    )
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "live_base",
+        SimpleNamespace(find_line=lambda *_a, **_k: None),
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable",
+        lambda *_a, **_k: (False, {}),
+    )
+    monkeypatch.setattr(
+        builder, "_rationed_mall_spare_target", lambda *_a, **_k: 128,
+    )
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *_a, **_k: None)
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        builder._rationed_mall_batch(
+            object(), object(), "nauvis", "player", "transport-belt", 128,
+            (0.0, 0.0), emitted.append,
+        )
+
+    assert deferred.value.code == "rationed_mall_borrow_deferred"
+    assert deferred.value.details["active_loans"] == []
+    assert deferred.value.details["target"] == 128
+    assert any(
+        "RATIONED MALL BORROW RETRY" in line for line in emitted
+    )
+
+
 def test_prerequisite_shortage_still_propagates(monkeypatch) -> None:
     """If establishing fails on materials, the shortage (not a silent pass)
     reaches the caller that queues it."""
