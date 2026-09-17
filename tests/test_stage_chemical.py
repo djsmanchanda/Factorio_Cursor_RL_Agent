@@ -144,6 +144,49 @@ def test_rung_defferal_codes_park_set_is_bounded() -> None:
     })
 
 
+def test_goal_path_parks_rung_waits_like_the_mall_path(monkeypatch) -> None:
+    """Run 7 (2026-09-17): plastic-bar reached the goal path
+    (`_advance_the_goal`), whose catch emitted `MALL DEFERRED` without
+    parking, so 12 identical passes killed the run despite FIX-0006's
+    mall-task park. Rung-establishment deferrals must park the goal on the
+    same 60s retry horizon from the goal path too."""
+    from types import SimpleNamespace
+
+    deferred = autonomous_builder.ProductionPrerequisiteDeferred(
+        "compact steel waits for verified iron production and starter "
+        "retirement",
+        code="steel_iron_retirement_wait", state="retiring",
+    )
+
+    def _goal_ready(*_a, **_k):
+        raise deferred
+
+    monkeypatch.setattr(
+        autonomous_builder, "ensure_produced", _goal_ready,
+    )
+    deferred_object: list[str] = []
+    priorities = SimpleNamespace(
+        defer=lambda item, tick, reason, *, retry_ticks=None:
+            deferred_object.append(
+                (item, reason, retry_ticks or 0),
+            ),
+    )
+    messages: list[str] = []
+
+    assert autonomous_builder._advance_the_goal(
+        object(), object(), "nauvis", "player", "plastic-bar", {},
+        (0.0, 0.0), messages.append,
+        priorities=priorities, tick=1000,
+    ) is autonomous_builder._SHORTAGE
+
+    assert deferred_object == [
+        ("plastic-bar", str(deferred), 3600),
+    ]
+    assert any(
+        "parked until iron-plate" in message for message in messages
+    )
+
+
 def test_existing_battery_cell_is_serviced_before_reuse(monkeypatch) -> None:
     surveys = iter([
         SimpleNamespace(machine_positions=((10.5, 20.5),), working_count=0),

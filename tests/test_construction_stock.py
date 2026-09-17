@@ -874,7 +874,7 @@ def test_goal_shortage_preempts_background_reserve(monkeypatch) -> None:
     calls: list[str] = []
     monkeypatch.setattr(
         builder, "_advance_the_goal",
-        lambda *_args: calls.append("goal") or builder._SHORTAGE,
+        lambda *_args, **_kwargs: calls.append("goal") or builder._SHORTAGE,
     )
     monkeypatch.setattr(
         builder, "_serve_background_mall_task",

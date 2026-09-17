@@ -11559,7 +11559,8 @@ _SHORTAGE = object()
 def _advance_the_goal(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     goal_item: str, mall_targets: dict[str, int], reference_point: Point,
-    emit: Callable[[str], None],
+    emit: Callable[[str], None], priorities: PriorityList | None = None,
+    tick: int | None = None,
 ) -> Point | None | object:
     """One attempt at the goal item; a shortage becomes mall demand instead."""
     try:
@@ -11567,6 +11568,28 @@ def _advance_the_goal(
             client, bridge, surface, force, goal_item, reference_point, emit,
         )
     except ProductionPrerequisiteDeferred as deferred:
+        deferred_code = getattr(deferred, "code", "")
+        if deferred_code in _CHEMICAL_RUNG_PARK_CODES and priorities is not None:
+            # A rung-establishment wait (iron starter retirement, chemical
+            # predecessor) takes minutes: park the goal on a real retry
+            # horizon instead of reselecting it every pass (runs 6-7,
+            # 2026-09-17: 12 identical passes killed the run while iron's
+            # swap was still in flight). Background work keeps running and
+            # its ground progress resets the livelock counter.
+            deferred_details = getattr(deferred, "details", {}) or {}
+            rung = deferred_details.get("rung") or (
+                "iron-plate"
+                if deferred_code == "steel_iron_retirement_wait" else None
+            )
+            priorities.defer(
+                goal_item, tick or live_base.game_tick(client),
+                str(deferred), retry_ticks=3600,
+            )
+            emit(
+                f"  CHEMICAL WAIT: {goal_item} parked until {rung} "
+                "establishes (retry in 60s)"
+            )
+            return _SHORTAGE
         emit(f"  MALL DEFERRED: {deferred}")
         return _SHORTAGE
     except MaterialShortage as shortage:
@@ -12520,6 +12543,7 @@ def _serve_ready_pass(
     goal_result = _advance_the_goal(
         client, bridge, surface, force, goal_item, mall_targets,
         reference_point, emit,
+        priorities=priorities, tick=tick,
     )
     if goal_result is not None:
         return goal_result
