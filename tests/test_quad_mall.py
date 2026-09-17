@@ -1,11 +1,14 @@
 # Path: tests/test_quad_mall.py
 # Purpose: Protect the reduced-seed four-slot mall module and its iron-release gate.
 
-from __future__ import annotations
+from types import SimpleNamespace
+
+import pytest
 
 from orchestrator import autonomous_builder as builder
 from orchestrator.mall_builder import (
-    _cell_origins, dense_mall_module_centers, quad_mall_center,
+    _cell_origins, build_quad_mall_stage, dense_mall_module_centers,
+    preview_quad_mall_allocation, quad_mall_center,
     quad_mall_project_bill, seed_cell_includes_substation,
     seed_expansion_reserved_tiles, seed_shared_substation,
 )
@@ -184,3 +187,46 @@ def test_dense_bank_has_three_reserved_module_centres() -> None:
     assert len(centers) == 3
     assert centers[0] == quad_mall_center((3.0, -1.0))
     assert len(set(centers)) == 3
+
+
+def test_quad_top_admission_parks_when_power_cannot_stage(monkeypatch) -> None:
+    """Run 5 (2026-09-17): the first quad-top admission killed the run with
+    an untyped `cannot stage generated power` StuckError at the shared seed
+    substation. A staging wait on real infrastructure is a supply_wait:
+    the admission must park with a named substation and retry while power
+    lands."""
+    import orchestrator.mall_builder as mall_builder
+
+    center = quad_mall_center((3.0, -1.0))
+    monkeypatch.setattr(
+        mall_builder, "preview_quad_mall_allocation",
+        lambda *_a, **_k: (center, "top"),
+    )
+    monkeypatch.setattr(
+        mall_builder, "extend_power",
+        lambda *_a, **_k: False,
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda *_a: pytest.fail("admission must park before submitting"),
+    )
+    messages: list[str] = []
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        build_quad_mall_stage(
+            SimpleNamespace(command="/sc noop"), SimpleNamespace(), "nauvis",
+            "player", "electronic-circuit", {}, (3.0, -1.0),
+            lambda *_a: pytest.fail("stage-up must not run"),
+            messages.append,
+        )
+
+    assert deferred.value.code == "quad_power_staging_deferred"
+    assert deferred.value.state == "power_wait"
+    assert deferred.value.details["substation"] == [
+        seed_shared_substation((3.0, -1.0))[0],
+        seed_shared_substation((3.0, -1.0))[1],
+    ]
+    assert any(
+        "QUAD MALL POWER STAGING RETRY" in message for message in messages
+    )

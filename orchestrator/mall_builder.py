@@ -851,8 +851,28 @@ def build_quad_mall_stage(
             client, bridge, surface, force, substation, emit,
             reserved_tiles=planned_footprint_tiles(plan),
         ):
-            raise StuckError(
-                f"quad mall for {recipe} cannot stage generated power at {substation}"
+            # Staging wait on real infrastructure is a supply_wait, not a
+            # terminal bug (run 5, 2026-09-17: the first quad-top admission
+            # killed the run at the shared seed gap). Park the admission;
+            # the queued-demand paths retry while power lands. The lazy
+            # import keeps autonomous_builder -> mall_builder one-way.
+            from orchestrator.autonomous_builder import (
+                ProductionPrerequisiteDeferred,
+            )
+            emit(
+                f"  QUAD MALL POWER STAGING RETRY: {recipe} top half waits "
+                f"for generated power at {substation}; parking the "
+                "admission and retrying after re-observation"
+            )
+            raise ProductionPrerequisiteDeferred(
+                f"quad mall for {recipe} cannot stage generated power at "
+                f"{substation}; retrying after re-observation",
+                code="quad_power_staging_deferred",
+                state="power_wait",
+                details={
+                    "recipe": recipe,
+                    "substation": [substation[0], substation[1]],
+                },
             )
     _submit(client, bridge, surface, plan, f"quad_mall_{recipe}_{group}", emit)
     machines = [
