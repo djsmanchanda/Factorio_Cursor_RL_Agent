@@ -230,3 +230,46 @@ def test_quad_top_admission_parks_when_power_cannot_stage(monkeypatch) -> None:
     assert any(
         "QUAD MALL POWER STAGING RETRY" in message for message in messages
     )
+
+
+def test_quad_top_admission_accepts_an_already_powered_shared_seed_anchor(monkeypatch) -> None:
+    """The quad seed-top admission stages power at the shared seed substation,
+    which the seed bank already placed and powered. extend_power must not be
+    surveyed into a false failure there: the only generating network is the
+    position's own network, so the first attempt deferred forever and the mall
+    stayed at its seed slots (live 2026-09-17)."""
+    import orchestrator.mall_builder as mall_builder
+    from orchestrator import live_base
+
+    center = quad_mall_center((3.0, -1.0))
+    monkeypatch.setattr(
+        mall_builder, "preview_quad_mall_allocation",
+        lambda *_a, **_k: (center, "top"),
+    )
+    monkeypatch.setattr(
+        live_base, "pole_network_id", lambda *_a, **_k: 5,
+    )
+    monkeypatch.setattr(
+        live_base, "network_generation_kw", lambda *_a, **_k: 5000.0,
+    )
+    monkeypatch.setattr(
+        mall_builder, "extend_power",
+        lambda *_a, **_k: pytest.fail("already-powered anchor must skip the bridge survey"),
+    )
+    submitted: list[str] = []
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda _client, _bridge, _surface, plan, label, _emit: submitted.append(label),
+    )
+    staged: list[tuple] = []
+    messages: list[str] = []
+
+    provider = build_quad_mall_stage(
+        SimpleNamespace(command="/sc noop"), SimpleNamespace(), "nauvis",
+        "player", "electronic-circuit", {}, (3.0, -1.0),
+        lambda *args, **kwargs: staged.append(args), messages.append,
+    )
+
+    assert submitted == ["quad_mall_electronic-circuit_top"]
+    assert staged and staged[0][4] == "quad bootstrap mall for electronic-circuit"
+    assert provider[0] == center[0]

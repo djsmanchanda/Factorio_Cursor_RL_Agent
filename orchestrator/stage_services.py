@@ -1019,36 +1019,35 @@ def _searched_bridge_hops(
     min_x, max_x = min(start[0], end[0]) - margin, max(start[0], end[0]) + margin
     min_y, max_y = min(start[1], end[1]) - margin, max(start[1], end[1]) + margin
 
-    origin = (round(start[0]), round(start[1]))
-    goal = (round(end[0]), round(end[1]))
+    origin = (math.floor(start[0]), math.floor(start[1]))
+
+    def position(tile: tuple[int, int]) -> Point:
+        return start if tile == origin else (tile[0] + 0.5, tile[1] + 0.5)
+
     frontier: list[tuple[float, tuple[int, int]]] = [(0.0, origin)]
     came: dict[tuple[int, int], tuple[int, int] | None] = {origin: None}
     spent: dict[tuple[int, int], float] = {origin: 0.0}
     while frontier:
         _, node = heapq.heappop(frontier)
-        if distance(node, end) <= spacing:
+        if distance(position(node), end) <= spacing:
             chain: list[Point] = []
             cursor: tuple[int, int] | None = node
             while cursor is not None:
-                chain.append((float(cursor[0]), float(cursor[1])))
+                chain.append(position(cursor))
                 cursor = came[cursor]
             chain.reverse()
-            return [
-                (math.floor(hop[0]) + 0.5, math.floor(hop[1]) + 0.5)
-                for hop in chain[1:]
-                if hop != goal
-            ]
+            return [hop for hop in chain[1:] if hop != end]
         for dx, dy in steps:
             nxt = (node[0] + dx, node[1] + dy)
             if not (min_x <= nxt[0] <= max_x and min_y <= nxt[1] <= max_y):
                 continue
             if nxt in blocked:
                 continue
-            moved = spent[node] + distance(node, nxt)
+            moved = spent[node] + distance(position(node), position(nxt))
             if nxt not in spent or moved < spent[nxt]:
                 spent[nxt] = moved
                 came[nxt] = node
-                heapq.heappush(frontier, (moved + distance(nxt, end), nxt))
+                heapq.heappush(frontier, (moved + distance(position(nxt), end), nxt))
     raise ValueError("no unobstructed power route is available")
 
 
@@ -1213,18 +1212,22 @@ def extend_power(
         avoid_resources=avoid_resources,
     )
     if target is None:
-        # A bridge submission can race another stage: enough of the first
-        # attempt may land to merge the networks before the retry surveys.
-        # That is success, not a reason to tell the caller no repair occurred.
-        if (
-            (_retried or waited_for_pending)
-            and own_network is not None
-            and live_base.network_generation_kw(
+        # No other powered network exists to bridge to. If the position's own
+        # network already carries generation it is powered: that is success on
+        # any attempt, first one included. A submitted bridge that merged here
+        # before the retry surveys reaches the same semantic outcome.
+        generation = (
+            live_base.network_generation_kw(
                 client, surface, force, near_position,
-            ) > 0
-        ):
-            emit(f"  power bridge already joined network {own_network} while retrying")
-            return _power_extension_result(True, True, detailed=detailed)
+            )
+            if own_network is not None else None
+        )
+        if generation is not None and generation > 0:
+            emit(f"  {near_position} already sits on generating network {own_network}; "
+                 "nothing to bridge")
+            return _power_extension_result(
+                True, waited_for_pending or _retried, detailed=detailed,
+            )
         return _power_extension_result(False, False, detailed=detailed)
     target_position, target_name = target
     target_supply = POLE_SPECS.get(

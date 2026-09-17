@@ -825,3 +825,45 @@ def test_belt_recovery_queues_past_the_release_condition(monkeypatch) -> None:
         for message in messages
     )
     assert any("BELT RECOVERY" in message for message in messages)
+
+
+# --- extend_power own-network semantics --------------------------------------
+
+def test_extend_power_accepts_a_generating_own_network_on_the_first_attempt(monkeypatch):
+    """The quad seed bay staged power at the shared seed substation, which
+    already belongs to the only generating network. extend_power used to
+    require a retry before accepting that, so the admission deferred forever
+    and the mall could not grow past its seed slots (live 2026-09-17)."""
+    from orchestrator import live_base
+    import orchestrator.stage_services as services
+
+    monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_a, **_k: 5)
+    monkeypatch.setattr(services.live_base, "nearest_powered_pole",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr(services.live_base, "network_generation_kw",
+                        lambda *_a, **_k: 5000.0)
+    messages: list[str] = []
+
+    result = services.extend_power(
+        SimpleNamespace(), SimpleNamespace(), "nauvis", "player",
+        (43.0, 35.0), messages.append,
+    )
+
+    assert result is True
+    assert any("already sits on generating network" in message for message in messages)
+
+
+def test_extend_power_still_fails_a_dead_own_network_without_other_supply(monkeypatch):
+    from orchestrator import live_base
+    import orchestrator.stage_services as services
+
+    monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_a, **_k: 5)
+    monkeypatch.setattr(services.live_base, "nearest_powered_pole",
+                        lambda *_a, **_k: None)
+    monkeypatch.setattr(services.live_base, "network_generation_kw",
+                        lambda *_a, **_k: 0.0)
+
+    assert services.extend_power(
+        SimpleNamespace(), SimpleNamespace(), "nauvis", "player",
+        (43.0, 35.0), lambda *_: None,
+    ) is False

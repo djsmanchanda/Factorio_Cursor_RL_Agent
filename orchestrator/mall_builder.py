@@ -409,6 +409,26 @@ def seed_shared_substation(reference_point: Point) -> Point:
     return (start[0] + 8.0, start[1] + 4.0)
 
 
+def _existing_network_generation(
+    client, surface: str, force: str, position: Point,
+) -> float | None:
+    """Generation on the network at `position`; None when unwired or unquerable.
+
+    An unqueryable client (offline harness) degrades to None so the caller
+    falls through to the normal `extend_power` survey instead of assuming
+    either powered or unpowered.
+    """
+    try:
+        if live_base.pole_network_id(client, surface, position) is None:
+            return None
+    except Exception:  # noqa: BLE001 -- offline client fakes cannot answer RCON
+        return None
+    try:
+        return live_base.network_generation_kw(client, surface, force, position)
+    except Exception:  # noqa: BLE001 -- same harness fallback
+        return None
+
+
 def seed_cell_uses_shared_substation(
     reference_point: Point, origin: tuple[int, int],
 ) -> bool:
@@ -847,9 +867,20 @@ def build_quad_mall_stage(
         if seed_module else (center[0] + 3.5, center[1] + 2.5)
     )
     if group == "top" and hasattr(client, "command"):
-        if not extend_power(
-            client, bridge, surface, force, substation, emit,
-            reserved_tiles=planned_footprint_tiles(plan),
+        # Mirror the compact-mall staging pre-check: a substation whose network
+        # already generates (notably the shared seed anchor beside the quad
+        # seed bay) must be accepted without a bridge survey, otherwise the
+        # first admission defers forever and the mall can never grow past its
+        # seed slots (live 2026-09-17: stuck at 3 of 8 slots).
+        existing_generation = _existing_network_generation(
+            client, surface, force, substation,
+        )
+        if (
+            (existing_generation is None or existing_generation <= 0)
+            and not extend_power(
+                client, bridge, surface, force, substation, emit,
+                reserved_tiles=planned_footprint_tiles(plan),
+            )
         ):
             # Staging wait on real infrastructure is a supply_wait, not a
             # terminal bug (run 5, 2026-09-17: the first quad-top admission
