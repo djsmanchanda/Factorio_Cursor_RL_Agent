@@ -17,6 +17,7 @@ class ControlBudget:
     max_remediations: int
     max_waits: int
     max_diagnoses: int
+    plans_per_pass: int = 8
     passes: int = 0
     plans: int = 0
     remediations: int = 0
@@ -43,10 +44,22 @@ class ControlBudget:
         fault). The refund only returns to the pass-start mark, so spend
         banked by earlier unproductive passes is kept and pure spinning
         still trips the bound.
+
+        Run 9 (2026-09-17) exposed the next bound: a run with ten absorbed
+        parks and three verified mines exhausted 800/800 plans across a
+        healthy 3252s rotation while 158 progress credits sat unconsumed.
+        Every credit is observed production growth, so each one renews one
+        pass-worth of plan allowance into the cap; the unproductive-pass
+        refund below still cannot breach the running ceiling, and the
+        12-pass livelock guard remains the pure-spin bound.
         """
         if self.passes > 0:
             self.passes -= 1
             self.progress_credits += 1
+            self.max_plans += self.plans_per_pass
+            self.max_remediations += 8
+            self.max_waits += 4
+            self.max_diagnoses += 8
         self.plans = max(0, self._plans_at_pass_start)
         self.remediations = max(0, self.remediations - 1)
         self.diagnoses = max(0, self.diagnoses - 1)
@@ -83,6 +96,7 @@ def begin_run_budget(max_passes: int, *, plans_per_pass: int = 8) -> ControlBudg
     _ACTIVE = ControlBudget(
         max_passes=max_passes,
         max_plans=max_passes * plans_per_pass,
+        plans_per_pass=plans_per_pass,
         max_remediations=max_passes * 8,
         max_waits=max_passes * 4,
         max_diagnoses=max_passes * 8,

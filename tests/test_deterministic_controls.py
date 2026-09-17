@@ -643,6 +643,32 @@ def test_unproductive_plan_spend_still_exhausts_the_budget() -> None:
         end_run_budget()
 
 
+def test_progress_credits_renew_the_plan_budget() -> None:
+    """Run 9 (2026-09-17): ten absorbed parks and three verified mines
+    exhausted 800/800 plans across a healthy rotation while 158 progress
+    credits sat unconsumed. Each credit renews one pass-worth of allowance;
+    unproductive passes still burn their spend without renewal."""
+    budget = begin_run_budget(1, plans_per_pass=2)
+    try:
+        budget.begin_pass()
+        for index in range(2):
+            consume_plan_submission(f"start{index}")
+        with pytest.raises(BudgetExhausted):
+            consume_plan_submission("over-cap")
+        # An observably productive pass renews the allowance.
+        budget.credit_progress_pass()
+        assert budget.max_plans == 2 + 2
+        assert budget.plans == 0
+        for index in range(4):
+            consume_plan_submission(f"renewed{index}")
+        with pytest.raises(BudgetExhausted):
+            consume_plan_submission("without_credit")
+        budget.credit_progress_pass()
+        consume_plan_submission("after_second_credit")
+    finally:
+        end_run_budget()
+
+
 @pytest.mark.parametrize("entity", ["requester-chest", "passive-provider-chest", "steel-chest", "inserter", "fast-inserter", "assembling-machine-1", "pipe", "transport-belt"])
 def test_all_legacy_construction_is_ghosted_and_billed(entity):
     plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": entity, "position": {"x": 10, "y": 20}}]}]}
