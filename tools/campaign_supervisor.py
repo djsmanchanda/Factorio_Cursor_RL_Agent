@@ -18,12 +18,12 @@ import time
 from tools.reliability_state import atomic_json
 from tools.runner_process import running_runner_pid
 
-# GLM owns campaign control/review. Union Alpha supplies shared evidence and
-# implements the focused repair that GLM then verifies and commits.
+# Union Alpha owns campaign control/review and supplies shared evidence plus
+# the focused repair that it then verifies and commits.
 UNION_ALPHA_MODEL = 'opencode-go/union-alpha'
-MODEL = 'opencode-go/glm-5.3-flash'
+MODEL = UNION_ALPHA_MODEL
 VARIANT = 'auto'
-REVIEW_MODEL = 'opencode-go/glm-5.3-flash'
+REVIEW_MODEL = UNION_ALPHA_MODEL
 REVIEW_VARIANT = 'high'
 OBSERVER_MODEL = UNION_ALPHA_MODEL
 OBSERVER_VARIANT = 'high'
