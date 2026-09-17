@@ -1,9 +1,19 @@
-"""Automate isolated deterministic Factorio runs with a per-run OpenCode observer.
+# Path: tools/opencode_campaign_orchestrator.py
+# Purpose: Durable autonomous campaign supervisor for isolated deterministic runs.
+"""Persistent-session campaign supervisor.
 
-The controller starts fresh episodes, records read-only two-minute evidence,
-then asks that run's OpenCode session for one code-correlated focused change.
+Architecture:
+- one persistent PRIMARY session controls the entire campaign (all checkpoints,
+  run ends, syntheses, reviews and commits; it survives controller restarts);
+- one persistent FIXER session implements one focused correction per episode;
+- every fresh Factorio episode gets a NEW four-observer team;
+- at RUN END, observer finalization starts immediately while the independent
+  OpenCode helper receives at most `helper_wait_seconds` (default 120s) to
+  finish; both run concurrently;
+- durable state, the loop log, the fix/hypothesis ledgers and git are the
+  campaign truth; conversations provide reasoning continuity only;
+- recoverable worker/helper/git-state conditions never park the campaign.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -11,31 +21,37 @@ import hashlib
 import fcntl
 import json
 import re
+import shutil
 import subprocess
 import sqlite3
 import sys
 import time
-import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if __package__ in {None, ""}:
+    import sys
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.campaign_protocol import (
     assistant_text as _assistant_text, decision_fields as _decision_fields,
-    session_id as _session_id,
+    marker_fields as _marker_fields, session_id as _session_id,
 )
+from tools.campaign_prompts import (
+    fixer_bootstrap, primary_bootstrap, primary_checkpoint, primary_run_end, primary_run_transition,
+)
+from tools.campaign_loop_log import cycle_record
 from tools.run_context import build_context
 from tools.run_history import index_log
 from tools import reliability_state
 from tools.run_log_format import is_run_end_line, parse_timed_run_log_line
+
 DEFAULT_STATE_ROOT = Path.home() / ".local/share/factorio-rl/deterministic"
 DEFAULT_SOURCE_SAVE = Path.home() / ".factorio/saves/mod_playground.zip"
 DEFAULT_OBSERVATIONS = REPO_ROOT / "docs/deterministic/opencode_campaign_observations.md"
@@ -45,18 +61,29 @@ RUN_END = "RUN END"
 # Real terminal lines look like `+2443s RUN END` at line start. The helper
 # agent's start prompt quotes "RUN END" mid-line, so a substring test would
 # declare every live run complete on its first checkpoint.
-_RUN_END_LINE = re.compile(r"(?m)^\+\d+s RUN END$")
+_RUN_END_SECONDS = re.compile(r"(?m)^\+(?P<seconds>\d+)s RUN END$")
+_HELPER_COMPLETE = re.compile(r"OPENCODE HELPER: findings complete (?P<path>\S+)")
 
 # This is intentionally small and cross-component.  It protects the durable
 # contracts most likely to regress together during a campaign fix; a changed
-# test file is run separately below.  Keep fresh-start/live acceptance outside
-# this offline gate.
+# test file is run separately during verification.  Keep fresh-start/live
+# acceptance outside this offline gate.
 MANDATORY_CAMPAIGN_TESTS = (
     "tests/test_episode_checkpoint.py",
     "tests/test_campaign_protocol.py",
     "tests/test_persistent_intermediates.py",
     "tests/test_construction_handoffs.py",
     "tests/test_mission_state.py",
+)
+
+# Fingerprint noise: campaign-owned/generated artifacts the controller itself
+# edits during a cycle. They are never fixer evidence of a code change.
+_FINGERPRINT_EXCLUDES = (
+    "CURRENT_STATUS.md",
+    "saves/",
+    "runs/",
+    "logs/",
+    "docs/deterministic/opencode_helper_runs/",
 )
 
 
@@ -101,18 +128,30 @@ class Config:
     fixer_model: str | None = None
     fixer_variant: str | None = None
     zen_observer_model: str | None = None
+    helper_wait_seconds: int = 120
+    max_fix_revisions: int = 2
 
 
 @dataclass
 class State:
+    campaign_id: str | None = None
     completed_cycles: int = 0
-    terminal_keys: list[str] = field(default_factory=list)
     active_cycle: int | None = None
-    active_session_id: str | None = None
+    active_episode_id: str | None = None
     deadline_utc: str | None = None
+    phase: str | None = None
+    primary_session_id: str | None = None
+    fixer_session_id: str | None = None
+    observer_episode: str | None = None
+    last_checkpoint: int = 0
+    last_checkpoint_episode: str | None = None
+    last_seen_tick: int | None = None
+    run_end: dict | None = None
+    helper: dict | None = None
+    synthesis: dict | None = None
+    pre_cycle_dirty: list[str] = field(default_factory=list)
     pending_fix: dict | None = None
     active_code_hash: str | None = None
-    active_episode_id: str | None = None
     lifecycle_intent: dict | None = None
 
 
@@ -135,18 +174,25 @@ def _load_state(path: Path) -> State:
     if not isinstance(payload, dict):
         raise ValueError(f"campaign state must be an object: {path}")
     return State(
+        campaign_id=payload.get("campaign_id"),
         active_episode_id=payload.get("active_episode_id"),
         lifecycle_intent=payload.get("lifecycle_intent"),
         deadline_utc=payload.get("deadline_utc"),
+        phase=payload.get("phase"),
+        primary_session_id=payload.get("primary_session_id"),
+        fixer_session_id=payload.get("fixer_session_id"),
+        observer_episode=payload.get("observer_episode"),
+        run_end=payload.get("run_end"),
+        helper=payload.get("helper"),
+        synthesis=payload.get("synthesis"),
+        pre_cycle_dirty=[str(p) for p in payload.get("pre_cycle_dirty", []) if isinstance(p, str)],
         pending_fix=payload.get("pending_fix"),
         active_code_hash=payload.get("active_code_hash"),
         completed_cycles=int(payload.get("completed_cycles", 0)),
-        terminal_keys=[str(item) for item in payload.get("terminal_keys", []) if isinstance(item, str)],
         active_cycle=int(payload["active_cycle"]) if isinstance(payload.get("active_cycle"), int) else None,
-        active_session_id=(
-            str(payload["active_session_id"]) if isinstance(payload.get("active_session_id"), str)
-            and payload["active_session_id"] else None
-        ),
+        last_checkpoint=int(payload.get("last_checkpoint", 0)),
+        last_checkpoint_episode=payload.get("last_checkpoint_episode"),
+        last_seen_tick=int(payload["last_seen_tick"]) if isinstance(payload.get("last_seen_tick"), int) else None,
     )
 
 
@@ -172,7 +218,7 @@ def _append(path: Path, text: str) -> None:
         path.write_text(
             "<!-- Path: docs/deterministic/opencode_campaign_observations.md | Purpose: Durable automated campaign evidence. -->\n\n"
             "# Automated deterministic campaign observations\n\n"
-            "The controller appends raw evidence; each run's OpenCode session appends the code-correlated interpretation.\n",
+            "The controller appends raw evidence; each run's persistent primary session appends the code-correlated interpretation.\n",
             encoding="utf-8",
         )
     with path.open("a", encoding="utf-8") as handle:
@@ -223,10 +269,9 @@ def _current_run_text(contents: str) -> str:
     return "".join(lines[starts[-1]:]) if starts else ""
 
 
-def _terminal_key(run_text: str) -> str:
-    lines = [line for line in run_text.splitlines() if "STUCK:" in line or "ERROR:" in line]
-    value = lines[-1] if lines else "run-ended-without-terminal-detail"
-    return re.sub(r"[-+]?\d+(?:\.\d+)?", "#", value.lower())[:180]
+def _run_end_seconds(run_text: str) -> int | None:
+    matches = _RUN_END_SECONDS.findall(run_text)
+    return int(matches[-1]) if matches else None
 
 
 def _inventory(url: str) -> str:
@@ -245,20 +290,24 @@ def _inventory(url: str) -> str:
     )[:30]
     counts = ", ".join(f"{name}={count:g}" for name, count in top) or "no available logistic items"
     networks = report.get("networks", [])
+    tick = report.get("tick")
+    summary = f"tick={tick if tick is not None else 'unknown'}; networks={len(networks) if isinstance(networks, list) else 0}; "
     return (
-        f"tick={report.get('tick', 'unknown')}; networks={len(networks) if isinstance(networks, list) else 0}; "
-        f"disconnected_roboports={report.get('disconnected_roboports', 'unknown')}\n\nTop logistic items: {counts}"
+        summary + f"disconnected_roboports={report.get('disconnected_roboports', 'unknown')}\n\nTop logistic items: {counts}"
     )
 
 
-def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple[str, int]:
+def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple[str, int, int | None]:
     if config.dry_run:
         status_text = "Dry run: status probe skipped."
         log, next_offset = "Dry run: runner-log probe skipped.", offset
-        inventory = "Dry run: Operations Console probe skipped."
+        inventory, tick = "Dry run: Operations Console probe skipped.", None
     else:
         status = _run(_status_command(config), timeout=60)
-        inventory = _inventory(config.dashboard_url)
+        inventory_text = _inventory(config.dashboard_url)
+        tick_match = re.search(r"tick=(\d+)", inventory_text)
+        tick = int(tick_match.group(1)) if tick_match else None
+        inventory = inventory_text
         log_path = config.state_root / "logs/autonomous-run.log"
         packet_path = config.state_root / "logs/latest-context.md"
         packet = build_context(log_path, config.state_root / "logs/inventory-history.json")
@@ -275,7 +324,7 @@ def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple
         f"### Run context\n\n```text\n{log}\n```\n\n"
         f"### Logistic inventory (`nauvis` / `player`)\n\n{inventory}\n\n"
         "### OpenCode assessment\n\nPending this session's review.\n",
-        next_offset,
+        next_offset, tick,
     )
 
 
@@ -349,12 +398,13 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
             attempt += 1
             # A recovered OpenCode session already contains the role brief and
             # all prior evidence. Repeating it wastes context and can restart
-            # the observer's reasoning; its next turn must be only a continue.
+            # the session's reasoning; its next turn must be only a continue.
             prompt = "continue" if active_session else message
             time.sleep(min(5 * attempt, 60))
 
 
 def _progress(config: Config, phase: str, state: State, **details) -> None:
+    state.phase = phase
     if config.progress_file is not None:
         _atomic_write(config.progress_file, json.dumps({"phase": phase, "updated_at": _now(),
             "episode_id": state.active_episode_id, "cycle": state.active_cycle,
@@ -372,116 +422,26 @@ def _readonly(config: Config) -> Config:
     return replace(config, read_only=True, model_timeout_seconds=min(config.model_timeout_seconds, 240))
 
 
-def _initial_prompt(config: Config, cycle: int) -> str:
-    return f"""You are the accountable investigator and implementer for fresh deterministic Factorio cycle {cycle}, using one session for this run only.
-The parent controller already started the isolated run for `{config.technology}` and will send this same session a
-durable checkpoint every {config.interval_seconds} seconds. Work in `{REPO_ROOT}`; preserve unrelated dirty files.
-The sole live scope is `{config.state_root}` on `nauvis` / `player`.
-
-Read AGENTS.md, docs/system_invariants.md, docs/factorio_operations.md, docs/deterministic/README.md,
-docs/deterministic/planning.md, docs/deterministic/opencode_campaign_prompt.md, git status, and the prior run summaries in
-`{config.observations}`. Read `docs/deterministic/run_context.md` for evidence scope. For every checkpoint, read its new section and return a compact assessment for the controller to append.
-
-Separate observation from interpretation. Record timestamped facts, deltas, and evidence references (log offsets,
-report ticks, inventory snapshots). Label every hypothesis as one; retain raw observations in source artifacts, not copied into the transcript;
-summaries report only milestone transitions, newly blocked dependencies, production/delivery-rate changes, and
-contradictions. Collapse repeated unchanged observations into one interval with a repetition count. Never convert
-"unknown" into zero, and never infer adequate supply from aggregate stock: total, accessible, and already-allocated
-stock are different claims. A blocked dependency is captured whole: recipe and required quantities, requester
-contents, machine input/output inventories, assembler/inserter status, power, transferable stock, reservations,
-ghost backlog, and craft/delivery deltas.
-
-Compare against three references, not one: the preceding run, the best verified milestone run, and previous runs
-with the same failure mechanism. A changed terminal item alone does not establish a different cause. Classify each
-outcome separately: factory improvement, useful diagnostic evidence, regression, or inconclusive. Longer survival
-and larger inventories do not establish factory improvement. Use read-only live observation and
-GET `{config.dashboard_url}`; do not change code or execute server lifecycle/factory actions while the run is active.
-
-At RUN END, compare all three references and own the investigation through implementation. Delegate bounded
-observation, reproduction or review to subagents; verify their decisive claims against raw evidence and code.
-When the cause and reusable fix are supported, implement and test without asking the user to approve
-routine repository work, then return the diff for primary review. Do not commit: the primary orchestrator
-reviews, integrates and commits. An analysis-only handoff is not completion when a justified fix is available.
-The parent process controls lifecycle and the next run; it is not a human approval gate. Reply briefly after setup."""
-
-
-def _checkpoint_prompt(config: Config, cycle: int, checkpoint: int) -> str:
-    board = config.opencode_log_dir / "observers" / "latest-board.md"
-    return f"""Cycle {cycle}, checkpoint {checkpoint} is appended to `{config.observations}`. Read the new section and the referenced rolling context packet and return its assessment for the controller (at most 1200 characters): timestamped facts and deltas first, then explicitly labeled hypotheses. When aspect observers are enabled, inspect `{board}`: identify any role with an error or stale checkpoint and explicitly request its continued evidence collection; the controller will resume that saved session with a bounded continue prompt. Keep the whole blocked
-dependency (recipe/quantities, requester and machine inventories, statuses, power, transferable vs allocated stock,
-reservations, ghosts, craft/delivery deltas). If nothing changed, extend the unchanged interval with its repetition
-count and name the next measurable signal rather than repeating old logs. The runner remains active: make no code,
-lifecycle, deployment, reset, or factory changes."""
-
-
-def _completion_prompt(config: Config, cycle: int) -> str:
-    return f"""Cycle {cycle} has RUN END. Before anything else, inspect the preserved failed episode with read-only probes
-where possible: the isolated save is still in place until the parent starts the next fresh run. Read its final run
-block in `{config.state_root}/logs/latest-context.md`, follow decisive raw line references, wait up to {config.post_run_wait_seconds} seconds for helper output if it is still arriving, and compare this
-completed run against three references in `{config.observations}`: the preceding run, the best verified milestone run,
-and previous runs with the same failure mechanism. Use `python -m tools.run_history search --db {config.state_root}/logs/run-history.sqlite --query "<blocker or dependency>"` for matching historical evidence. Then classify the outcome: factory improvement, useful diagnostic
-evidence, regression, or inconclusive. Survival time and inventory size alone decide nothing.
-
-Only when the evidence supports a fix, implement exactly one small reusable fix, add/update its narrow regression
-test, and run the focused test. Before editing, state: observed failure -> causal hypothesis -> supporting evidence
--> competing explanation -> smallest reusable fix -> predicted measurable result. If the evidence cannot distinguish
-the explanations, obtain the missing read-only observation or local reproduction yourself, using subagents when
-useful. Ask the user only for genuinely unavailable input or authority outside the campaign scope. A telemetry-only rerun is allowed
-only when the missing evidence requires execution, and you must specify what each possible result would mean. Prefer
-verifying the failure mechanism locally (a focused behavioral reproduction, then the predicted milestone under
-matching starting conditions) over another full episode. Do not start/reset/redeploy Factorio; the parent owns the
-next fresh run. Preserve unrelated dirty files. You own the code fix: verify subagent findings, implement the
-supported correction, run focused tests, address test failures, and review the diff — then stop and report files
-and results without committing. The primary orchestrator integrates and commits; your verdict stays `change` once
-the tested edit exists in the worktree. Do not end with "want me to implement?", "parent-owned fix", or an analysis-only handoff when you have a supported
-fix within repository scope. Report status: change only after implementation and verification. Stop or no-change
-is appropriate only for a concrete unresolved evidence gap, failed verification, exhausted budget, mission
-completion, or authority outside scope; explain the blocker and investigation already attempted. Never invent a
-fix merely to continue. Respect the controller's existing repeated-failure and runtime guards. Record exact provenance in the journal entry (one entry
-per episode): episode ID, commit, dirty-patch hash, save/configuration/profile, tests, and activated code. End exactly with:
-
-CAMPAIGN_DECISION:
-status: change|no-change|stop
-files: comma-separated paths or none
-test: command/result or not-run
-prediction: falsifiable next production milestone and supporting local regression evidence
-reason: one sentence
-"""
-
-
-def _telemetry_prompt(config: Config, cycle: int) -> str:
-    return f"""Cycle {cycle}'s final comparison declined a behavior change. A follow-up observability patch is allowed
-only to resolve one specifically named evidence gap from that comparison: implement the minimal zero-behavior
-telemetry that captures it, with a narrow regression test, and state what each possible reading would mean for the
-competing explanations. Do not alter planning behavior, start/reset/redeploy Factorio, or touch unrelated files.
-Never manufacture telemetry just to unlock another run: if no evidence gap names telemetry as its resolution, make
-no change and say so. If implemented, verify the telemetry patch and report it uncommitted for primary review. Append the outcome to `{config.observations}`. End exactly with:
-
-CAMPAIGN_DECISION:
-status: change|no-change|stop
-files: comma-separated paths or none
-test: command/result or not-run
-prediction: falsifiable next production milestone and supporting local regression evidence
-reason: one sentence
-"""
-
-
 def _tree_fingerprint(observations: Path) -> str:
-    """Fingerprint code/test changes while excluding the mandatory campaign journal."""
+    """Fingerprint code/test changes while excluding campaign-owned artifacts."""
     command = ["git", "diff", "HEAD", "--binary", "--no-ext-diff", "--", "."]
     head_tree = _run(["git", "rev-parse", "HEAD^{tree}"], timeout=120).stdout
     try:
         relative_notes = observations.resolve().relative_to(REPO_ROOT)
     except ValueError:
         relative_notes = None
+    excludes = [f":(exclude){item}" for item in _FINGERPRINT_EXCLUDES]
     if relative_notes is not None:
-        command.append(f":(exclude){relative_notes.as_posix()}")
+        excludes.append(f":(exclude){relative_notes.as_posix()}")
+    command += excludes
     tracked = _run(command, timeout=120).stdout
-    untracked = _run(["git", "ls-files", "--others", "--exclude-standard"], timeout=120).stdout
+    untracked = _run(["git", "ls-files", "--others", "--exclude-standard", "-z"], timeout=120).stdout
     if relative_notes is not None:
         untracked = "\n".join(
-            line for line in untracked.splitlines() if line != relative_notes.as_posix()
+            line for line in untracked.split("\0") if line and line != relative_notes.as_posix()
         )
+    else:
+        untracked = "\n".join(line for line in untracked.split("\0") if line)
     return hashlib.sha256((head_tree + tracked + "\n--untracked--\n" + untracked).encode("utf-8", errors="replace")).hexdigest()
 
 
@@ -520,104 +480,66 @@ def _dirty_paths() -> set[str]:
     return {name for name in (tracked + untracked).split("\0") if name}
 
 
-def _record_campaign_milestone(output: str) -> str | None:
-    """Append the controller's accepted-fix handoff before its scoped commit."""
+def _record_milestone(fields: dict, fix_id: str) -> str | None:
+    """Append the accepted-fix milestone to CURRENT_STATUS.md (campaign-owned)."""
     path = REPO_ROOT / "CURRENT_STATUS.md"
     if not path.is_file():
         return None
-    fields = _decision_fields(output)
-    summary = fields.get("reason", "verified campaign repair")
-    prediction = fields.get("prediction", "not provided")
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"\n- {_now()[:10]}: GLM-controlled campaign accepted Union Alpha repair. "
-                     f"Files: {fields.get('files', 'not declared')}. Prediction: {prediction}. "
-                     f"Reason: {summary}.\n")
+        handle.write(
+            f"\n- {_now()[:10]}: Campaign fix {fix_id} passed persistent-primary review and verification. "
+            f"Kind: {fields.get('kind', 'behavior')}. Files: {fields.get('files', 'not declared')}. "
+            f"Prediction: {fields.get('prediction', 'not provided')}. Reason: {fields.get('reason', 'verified campaign repair')}.\n")
     return "CURRENT_STATUS.md"
 
 
-def _review_and_commit(config: Config, output: str, protected: set[str], sequence: int) -> bool:
-    fields = _decision_fields(output)
-    paths = [p.strip() for p in fields.get("files", "").split(",") if p.strip()]
-    if not paths or any(p == "none" or p in protected or p.startswith("-") or
-                        Path(p).is_absolute() or ".." in Path(p).parts or
-                        not (REPO_ROOT / p).resolve().is_relative_to(REPO_ROOT.resolve()) for p in paths):
-        _append(config.observations, "Fix requires review: missing/unsafe file list or pre-existing dirty file was touched.\n")
-        return False
-    status_path = "CURRENT_STATUS.md"
-    if status_path in protected:
-        _append(config.observations, "Fix requires review: CURRENT_STATUS.md contains pre-existing work and cannot be auto-updated.\n")
-        return False
-    record_status = (REPO_ROOT / status_path).is_file()
-    if record_status and status_path not in paths:
-        paths.append(status_path)
-    permitted = set(paths) | protected
-    if config.observations.resolve().is_relative_to(REPO_ROOT.resolve()):
-        permitted.add(config.observations.resolve().relative_to(REPO_ROOT.resolve()).as_posix())
-    undeclared = _dirty_paths() - permitted
-    if undeclared:
-        _append(config.observations, "Fix requires review: undeclared new changes: " + ", ".join(sorted(undeclared)) + "\n")
-        return False
-    if _run(["git", "diff", "--cached", "--name-only"], timeout=120).stdout.strip():
-        _append(config.observations, "Fix requires review: index already contains staged work.\n")
-        return False
-    digest = _tree_fingerprint(config.observations)
-    evidence = config.opencode_log_dir / f"review-{sequence:04d}.md"
-    diff = _run(["git", "diff", "HEAD", "--", *paths], timeout=120).stdout
-    additions = []
-    for path in paths:
-        if _run(["git", "ls-files", "--error-unmatch", "--", path], timeout=120).returncode:
-            additions.append(f"\nNew file: {path}\n" + (REPO_ROOT / path).read_text(encoding="utf-8", errors="replace"))
-    _atomic_write(evidence, "# Candidate evidence\n\n" + output + "\n\n## Diff\n\n" + diff + "\n".join(additions))
-    reviewer = _readonly(replace(config, model=config.review_model or config.model,
-                                 variant=config.review_variant or "high"))
-    _, review = _ask_with_continue(reviewer, f"""Independently review this candidate fix. Read AGENTS.md, the current run packet at
-{config.state_root}/logs/latest-context.md and the changed files: {', '.join(paths)}.
-Read the parent-captured candidate diff, new files, prediction and test claim at {evidence}.
-Read-only review: do not edit, commit or operate Factorio. Check causal evidence, invariants,
-regression coverage and the predicted plastic milestone. Verify the prediction is cause-specific and backed by the regression; a repeated terminal permits another episode only with this evidence. Do not approve merely because tests pass.
-Finish exactly with REVIEW_DECISION:
-status: approved|rejected
-reason: one sentence""", None, sequence, require_response=False)
-    if _decision_fields(review, "REVIEW_DECISION").get("status") != "approved" or _tree_fingerprint(config.observations) != digest:
-        return False
-    pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
-    # Always exercise a small cross-component contract gate.  Candidate tests
-    # supplement it; an empty candidate-test list is never treated as success.
-    changed_tests = [p for p in paths if Path(p).parts[0] == "tests"
-                     and Path(p).name.startswith("test_") and Path(p).suffix == ".py"]
-    mandatory = [REPO_ROOT / path for path in MANDATORY_CAMPAIGN_TESTS]
-    commands = [pytest + [str(path) for path in mandatory] + ["-m", "not slow and not exhaustive"]]
-    supplemental = changed_tests
-    if supplemental:
-        commands.append(pytest + supplemental)
-    verification_log = config.opencode_log_dir / f"verification-{sequence:04d}.log"
-    _atomic_write(verification_log, "")
-    for command in commands:
-        validation = _run(command, timeout=900)
-        with verification_log.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({
-                "command": command,
-                "returncode": validation.returncode,
-                "status": "passed" if validation.returncode == 0 else "failed",
-            }, sort_keys=True) + "\n")
-            handle.write(validation.stdout + validation.stderr)
-        if validation.returncode:
-            return False
-    if record_status:
-        _record_campaign_milestone(output)
-    if _run(["git", "diff", "--check"], timeout=120).returncode:
-        return False
-    # Primary controller owns the scoped commit; fixer and reviewer remain separate.
-    if _run(["git", "add", "--", *paths], timeout=120).returncode:
-        return False
-    committed = _run(["git", "commit", "-m", "fix(deterministic): verified campaign repair"], timeout=120)
-    if committed.returncode:
-        return False
-    revision = _run(["git", "rev-parse", "HEAD"], timeout=120).stdout.strip()
-    _append(config.observations, f"Verified commit: {revision or 'inspect git log'}; files: {', '.join(paths)}. "
-            f"Prediction: {fields.get('prediction', 'not provided')}. Mandatory campaign gate and "
-            f"{int(bool(supplemental))} supplemental test command(s) passed; see {verification_log}.\n")
-    return True
+def _helper_finding(config: Config, episode: str) -> tuple[str | None, bool]:
+    """Locate the OpenCode helper findings for one episode: (path, announced complete)."""
+    from tools.opencode_helper_agent import DEFAULT_REPORT_ROOT
+    try:
+        run_log = (config.state_root / "logs/autonomous-run.log").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        run_log = ""
+    for match in _HELPER_COMPLETE.finditer(_current_run_text(run_log)):
+        path = Path(match.group("path"))
+        if path.is_file():
+            return str(path), True
+    candidate = DEFAULT_REPORT_ROOT / episode / "findings.md"
+    if candidate.is_file():
+        return str(candidate), False
+    return None, False
+
+
+def _collect_helper(config: Config, episode: str, wait_seconds: int) -> dict:
+    """Wait at most `wait_seconds` after RUN END for helper findings; never block."""
+    if config.dry_run:
+        return {"episode": episode, "status": "unavailable", "path": None, "reason": "dry run"}
+    started = time.time()
+    announced = False
+    while True:
+        path, announced = _helper_finding(config, episode)
+        if announced and path:
+            return {"episode": episode, "status": "complete", "path": path,
+                    "reason": "findings announced complete"}
+        remaining = wait_seconds - (time.time() - started)
+        if remaining <= 0:
+            if path:
+                return {"episode": episode, "status": "late", "path": path,
+                        "reason": "findings not announced complete within the wait window"}
+            return {"episode": episode, "status": "unavailable", "path": None,
+                    "reason": f"no helper findings within {wait_seconds}s after RUN END"}
+        time.sleep(min(5, max(1, remaining)))
+
+
+def _late_helper(config: Config, state: State, episode: str) -> dict:
+    """After the flow moved on, preserve helper findings as late evidence."""
+    helper = state.helper or {}
+    if helper.get("episode") != episode or helper.get("status") != "unavailable":
+        return helper
+    path, announced = _helper_finding(config, episode)
+    if path and announced:
+        helper.update(status="late", path=path, reason="findings completed after the wait window")
+    return helper
 
 
 def _milestones(run_text: str) -> dict:
@@ -649,6 +571,111 @@ def run_campaign(config: Config) -> int:
         _COMMAND_DEADLINE = None
 
 
+def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> tuple[str | None, bool]:
+    """Bootstrap the persistent primary only when no usable session exists."""
+    if state.primary_session_id:
+        return state.primary_session_id, False
+    session, _ = _ask_with_continue(_readonly(config), primary_bootstrap(config, cycle), None, sequence, require_response=False)
+    if session is None:
+        raise RuntimeError("OpenCode did not return a persistent primary session ID")
+    state.primary_session_id = session
+    _save_state(config.state_file, state)
+    return session, True
+
+
+def _ensure_fixer(config: Config, state: State, sequence: int = 0) -> str | None:
+    if state.fixer_session_id:
+        return state.fixer_session_id
+    fixer_config = replace(config, model=config.fixer_model or config.model,
+                           variant=config.fixer_variant or config.variant)
+    session, _ = _ask_with_continue(fixer_config, fixer_bootstrap(config), None, sequence, require_response=False)
+    if session is None:
+        raise RuntimeError("OpenCode did not return a persistent fixer session ID")
+    state.fixer_session_id = session
+    _save_state(config.state_file, state)
+    return session
+
+
+def _primary_turn(config: Config, state: State, message: str, sequence: int) -> str:
+    """Send one concise event message to the same persistent primary session."""
+    session, output = _ask_with_continue(_readonly(config), message, state.primary_session_id, sequence, require_response=False)
+    if session:
+        state.primary_session_id = session
+        _save_state(config.state_file, state)
+    return output
+
+
+def _terminal_evidence(config: Config, state: State, episode: str) -> tuple[dict, Path]:
+    """Finalize observers concurrently with the bounded helper wait."""
+    board = config.opencode_log_dir / "observers" / episode / "board.md"
+    if state.helper and state.helper.get("episode") == episode:
+        # RUN END evidence collection already ran once (controller restart or
+        # repeated detection); do not duplicate the wait or finalization.
+        return state.helper, board
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="campaign-terminal") as pool:
+        future = None
+        if config.aspect_observers and not config.dry_run:
+            from tools.campaign_observers import observe_team
+            future = pool.submit(observe_team, config, episode, state.last_checkpoint + 1, True)
+        helper = _collect_helper(config, episode, config.helper_wait_seconds)
+        state.helper = helper
+        _save_state(config.state_file, state)
+        if future is None:
+            return helper, board
+        try:
+            # observe_team only returns the board path; the helper result above
+            # was collected while the observers finalized concurrently.
+            future.result(timeout=config.helper_wait_seconds + 180)
+        except Exception as error:  # observer finalization must never block synthesis
+            _append(config.observations, f"Observer terminal finalization incomplete: {error}\n")
+    return helper, board
+
+
+def _record_hypothesis(config: Config, state: State, cycle: int, synthesis_text: str) -> str | None:
+    fields = _marker_fields(synthesis_text, "SYNTHESIS")
+    if not fields.get("hypothesis"):
+        return None
+    from tools import campaign_loop_log
+    existing = {
+        entry["hypothesis_id"]: entry
+        for entry in campaign_loop_log.hypotheses(config.state_root).values()
+        if entry.get("description") == fields["hypothesis"]
+    }
+    if existing:
+        hypothesis_id, entry = next(iter(existing.items()))
+        entry.setdefault("supporting_runs", [])
+        if episode_key(state) not in entry["supporting_runs"]:
+            campaign_loop_log.record_hypothesis(config.state_root, {
+                "hypothesis_id": hypothesis_id, "supporting_runs": episode_key(state)})
+    else:
+        hypothesis_id = campaign_loop_log.next_hypothesis_id(config.state_root)
+        campaign_loop_log.record_hypothesis(config.state_root, {
+            "hypothesis_id": hypothesis_id,
+            "description": fields["hypothesis"],
+            "first_cycle": cycle,
+            "confidence": fields.get("confidence", "unknown"),
+            "supporting_evidence": fields.get("supporting", ""),
+            "contradicting_evidence": fields.get("contradicting", ""),
+            "competing": fields.get("competing", ""),
+            "discriminating": fields.get("discriminating", ""),
+            "status": "OPEN",
+            "supporting_runs": episode_key(state),
+            "contradicting_runs": [],
+            "related_fixes": [],
+        })
+    return hypothesis_id
+
+
+def episode_key(state: State) -> str:
+    return f"{state.active_cycle or state.completed_cycles + 1}/{state.active_episode_id or 'unknown'}"
+
+
+def _terminal_key(run_text: str) -> str:
+    lines = [line for line in run_text.splitlines() if "STUCK:" in line or "ERROR:" in line]
+    value = lines[-1] if lines else "run-ended-without-terminal-detail"
+    return re.sub(r"[-+]?\d+(?:\.\d+)?", "#", value.lower())[:180]
+
+
 def _run_campaign(config: Config) -> int:
     global _COMMAND_DEADLINE
     if config.checkpoint_failures and not config.plastic_reliability:
@@ -665,23 +692,43 @@ def _run_campaign(config: Config) -> int:
         _save_state(config.state_file, state)
     deadline = datetime.fromisoformat(state.deadline_utc).timestamp() if state.deadline_utc else float("inf")
     _COMMAND_DEADLINE = deadline
+    if not state.campaign_id:
+        state.campaign_id = "campaign-" + (state.deadline_utc or _now()).replace(":", "").replace("+", "Z")
+        _save_state(config.state_file, state)
     reliability_path = config.state_root / "logs/reliability-state.json"
     base_config = config
     existing_sequences = [int(p.stem.split("-")[-1]) for p in config.opencode_log_dir.glob("opencode-*.jsonl") if p.stem.split("-")[-1].isdigit()]
     sequence = max(existing_sequences, default=0) + 1
-    if state.pending_fix and state.pending_fix.get("phase", "review") == "review" and config.plastic_reliability:
+
+    # Resume an interrupted fix cycle before anything touches a new episode.
+    if state.pending_fix and not config.dry_run:
         pending = state.pending_fix
-        if time.time() >= deadline or not _review_and_commit(config, pending["output"], set(pending["protected"]), sequence):
-            _progress(config, "parked", state, reason="pending review could not complete")
-            return 0
-        state.pending_fix = None
-        _save_state(config.state_file, state)
+        if pending.get("episode") and state.active_episode_id \
+                and pending["episode"] != state.active_episode_id:
+            # The pending fix belongs to an episode that no longer exists.
+            _append(config.observations,
+                    f"Dropped stale pending fix {pending.get('fix_id')} for episode "
+                    f"{pending.get('episode')}; active episode is {state.active_episode_id}.\n")
+            state.pending_fix = None
+            _save_state(config.state_file, state)
+    if state.pending_fix and not config.dry_run:
+        from tools.campaign_fix_flow import run_fix_cycle
+        outcome = run_fix_cycle(config, state, state.active_cycle or state.completed_cycles + 1,
+                                state.active_episode_id or "unknown",
+                                Path(state.pending_fix.get("synthesis") or config.observations),
+                                Path(state.pending_fix.get("board") or config.observations),
+                                state.helper or dict(state.pending_fix.get("helper")
+                                                     or {"status": "unavailable", "path": None,
+                                                         "reason": "resumed"}),
+                                sequence)
+        _finish_cycle(config, state, outcome, {}, run_text="")
         sequence += 1
+
     while config.max_cycles == 0 or state.completed_cycles < config.max_cycles:
         if time.time() >= deadline:
-            _progress(config, "deadline", state, reason="campaign deadline reached")
-            _append(config.observations, "## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
-            return 0
+            return _stop_campaign(config, state, "DEADLINE_REACHED",
+                                  reason="campaign deadline reached",
+                                  journal="## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
         if base_config.plastic_reliability:
             reliability = reliability_state.load(reliability_path)
             baseline = reliability.get("baseline")
@@ -694,8 +741,7 @@ def _run_campaign(config: Config) -> int:
                     reliability.update(phase="plastic", streak=[])
                     reliability_state.atomic_json(reliability_path, reliability)
             if reliability["phase"] == "research" and base_config.stop_after_acceptance:
-                _progress(config, "complete", state, reason="plastic acceptance certified")
-                return 0
+                return _stop_campaign(config, state, "SUCCESS", reason="plastic acceptance certified")
             config = replace(base_config, technology="plastic-bar" if reliability["phase"] == "plastic" else base_config.technology)
         if config.plastic_reliability and not config.dry_run:
             config = replace(config, source_save=_pin_source(config))
@@ -717,7 +763,8 @@ def _run_campaign(config: Config) -> int:
                 _save_state(config.state_file, state)
                 resuming = True
             else:
-                _progress(config, "blocked", state, reason="fresh lifecycle interrupted; inspect before retrying")
+                _progress(config, "UNRECOVERABLE_FAILURE", state,
+                          reason="fresh lifecycle interrupted; inspect before retrying")
                 raise RuntimeError("fresh lifecycle intent is unresolved; refusing an automatic second reset")
         if resuming and config.plastic_reliability:
             attempt_hash = state.active_code_hash or "unknown-start-code"
@@ -725,9 +772,7 @@ def _run_campaign(config: Config) -> int:
         if resuming:
             if state.active_episode_id and _episode_id(config) != state.active_episode_id and not config.dry_run:
                 raise RuntimeError("active episode provenance changed; refuse to adopt another world")
-            session_id = state.active_session_id
             _append(config.observations, f"## Cycle {cycle} — resumed ({_now()}); no fresh lifecycle issued.\n")
-            offset = 0
         else:
             if adopt_active_run:
                 complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
@@ -738,7 +783,7 @@ def _run_campaign(config: Config) -> int:
                 state.lifecycle_intent = {"previous_episode": _episode_id(config), "expected_episode": config.episode_id, "cycle": cycle}
                 state.active_code_hash = attempt_hash
                 _save_state(config.state_file, state)
-                _progress(config, "starting", state)
+                _progress(config, "STARTING_EPISODE", state)
                 fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
                 if fresh.returncode:
                     raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
@@ -747,46 +792,63 @@ def _run_campaign(config: Config) -> int:
             state.active_episode_id = _episode_id(config) or (f"dry-run-{cycle}" if config.dry_run else None)
             state.active_code_hash = attempt_hash
             state.lifecycle_intent = None
-            state.active_session_id = None
+            # A new episode always gets a new observer team and a clean checkpoint.
+            state.observer_episode = state.active_episode_id
+            state.last_checkpoint = 0
+            state.last_checkpoint_episode = state.active_episode_id
+            state.run_end = None
+            state.helper = None
+            state.synthesis = None
+            state.pending_fix = None
+            state.pre_cycle_dirty = sorted(_dirty_paths())
             _save_state(config.state_file, state)
-            session_id = None
-            offset = 0
-        _progress(config, "observing", state)
-        if session_id is None:
-            try:
-                session_id, _ = _ask_with_continue(_readonly(config), _initial_prompt(config, cycle) + "\nRead-only: return findings; do not edit files. The controller owns journal writes.", None, sequence, require_response=False)
-            except Exception:
-                transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
-                if transport.exists():
-                    state.active_session_id = _session_id(transport.read_text())
-                    _save_state(config.state_file, state)
-                raise
+        # The persistent primary is bootstrapped only once per campaign; a
+        # fresh episode or a controller restart reuses the same session.
+        _, bootstrapped = _ensure_primary(config, state, cycle, sequence)
+        sequence += 1
+        if not bootstrapped:
+            previous = cycle_record(config.state_root, state.campaign_id, cycle - 1)
+            _primary_turn(config, state, primary_run_transition(
+                config, cycle, state.active_episode_id, state.fixer_session_id,
+                config.state_root / "logs/latest-context.md", config.state_root,
+                Path(previous["synthesis_path"]) if previous and previous.get("synthesis_path") else None), sequence)
             sequence += 1
-            if session_id is None:
-                raise RuntimeError("OpenCode did not return a session ID; active episode retained")
-            state.active_session_id = session_id
-            _save_state(config.state_file, state)
-        checkpoint = 0
+        _progress(config, "OBSERVING", state)
+        checkpoint = max(state.last_checkpoint, 0)
+        # A resumed episode may already have ended while the controller was
+        # down; a freshly started episode must get one checkpoint turn before
+        # its first end check so the new RUN START cannot race the old block.
+        first_turn_done = resuming
         while True:
+            complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
+            if (complete or config.dry_run) and first_turn_done:
+                break
+            if time.time() >= deadline:
+                return _stop_campaign(config, state, "DEADLINE_REACHED",
+                                      reason="deadline reached during active episode",
+                                      journal="## Campaign stop\n\nWall-clock limit reached during an active run.\n")
             checkpoint += 1
-            snapshot, offset = _snapshot(config, cycle, checkpoint, offset)
+            snapshot, offset, tick = _snapshot(config, cycle, checkpoint, 0)
             _append(config.observations, snapshot)
+            if tick is not None:
+                state.last_seen_tick = max(state.last_seen_tick or 0, tick)
             if config.aspect_observers and state.active_episode_id and not config.dry_run:
                 from tools.campaign_observers import observe_team
                 board = observe_team(config, state.active_episode_id, checkpoint)
                 _append(config.observations, f"Aspect evidence board: {board}\n")
-            _, assessment = _ask_with_continue(_readonly(config), _checkpoint_prompt(config, cycle, checkpoint) + "\nReturn findings only; do not edit the journal.", session_id, sequence, require_response=False)
+            _, assessment = _ask_with_continue(_readonly(config), primary_checkpoint(cycle, state.active_episode_id, checkpoint), state.primary_session_id, sequence, require_response=False)
             if _assistant_text(assessment):
                 _append(config.observations, _assistant_text(assessment))
             sequence += 1
+            first_turn_done = True
+            state.last_checkpoint = checkpoint
+            state.last_checkpoint_episode = state.active_episode_id
+            _save_state(config.state_file, state)
             complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
             if complete or config.dry_run:
                 break
-            if time.time() >= deadline:
-                _progress(config, "deadline", state, reason="deadline reached during active episode")
-                _append(config.observations, "## Campaign stop\n\nWall-clock limit reached during an active run.\n")
-                return 0
             time.sleep(min(config.interval_seconds, max(0, deadline - time.time())))
+
         if not config.dry_run:
             history_db = config.state_root / "logs/run-history.sqlite"
             history_sources = sorted((config.state_root / "logs/archive").glob("autonomous-run-*.log"))
@@ -818,25 +880,21 @@ def _run_campaign(config: Config) -> int:
                 seconds=config.acceptance_seconds, required=config.required_successes, code_hash=attempt_hash,
                 milestones=_milestones(full_log))
             if reliability["runs"][-1]["passed"]:
-                state.completed_cycles += 1
-                state.active_cycle = state.active_session_id = state.active_episode_id = None
-                state.terminal_keys = []
-                _save_state(config.state_file, state)
                 _append(config.observations, f"Plastic acceptance: {len(reliability['streak'])}/{config.required_successes} same-candidate fresh runs passed.\n")
                 if reliability["phase"] == "research" and config.stop_after_acceptance:
-                    _progress(config, "complete", state, reason="plastic acceptance certified")
-                    return 0
+                    return _finish_cycle(config, state, "acceptance", {}, run_text=full_log,
+                                         terminal_phase="SUCCESS",
+                                         reason="plastic acceptance certified")
+                _finish_cycle(config, state, "acceptance", {}, run_text=full_log)
                 continue
         if config.plastic_reliability and config.technology != "plastic-bar" and not config.dry_run:
             mission = json.loads((config.state_root / "logs/deterministic-mission-state.json").read_text())
             manifest = json.loads((config.state_root / "episode/current.json").read_text())
             if mission.get("episode_id", mission.get("mission_id")) == manifest.get("episode_id") and mission.get("status") == "completed":
-                state.completed_cycles += 1
-                state.active_cycle = state.active_session_id = state.active_episode_id = None
-                _save_state(config.state_file, state)
-                _progress(config, "complete", state, reason="research runner contract completed; research completion needs live proof")
                 _append(config.observations, "Research runner completed its contract; research queued is not proof of research completion.\n")
-                return 0
+                return _finish_cycle(config, state, "acceptance", {}, run_text="",
+                                     terminal_phase="SUCCESS",
+                                     reason="research runner contract completed; research completion needs live proof")
         if config.plastic_reliability and config.checkpoint_failures and not config.dry_run:
             from tools.episode_checkpoint import capture
             from tools.rcon_client import RconClient
@@ -846,79 +904,110 @@ def _run_campaign(config: Config) -> int:
                 _append(config.observations, f"Failed-world checkpoint: {bundle}\n")
             finally:
                 client.close()
-        _progress(config, "fixing", state)
-        board_context = ""
-        if config.aspect_observers and state.active_episode_id and not config.dry_run:
-            from tools.campaign_observers import observe_team
-            board = observe_team(config, state.active_episode_id, checkpoint + 1, terminal=True)
-            board = observe_team(config, state.active_episode_id, checkpoint + 2, terminal=True)
-            board_context = f"\nConvene over all four role findings in {board}; verify their raw evidence and resolve disagreements before fixing."
-        if not state.pending_fix:
-            state.pending_fix = {"phase": "fixing", "protected": sorted(_dirty_paths()) if config.plastic_reliability else [],
-                                 "before": _tree_fingerprint(config.observations)}
-            _save_state(config.state_file, state)
-        protected = set(state.pending_fix["protected"])
-        before = state.pending_fix["before"]
-        try:
-            fixer_config = replace(config, model=config.fixer_model or config.model,
-                                   variant=config.fixer_variant or config.variant)
-            fixer_session, output = _ask_with_continue(fixer_config, _completion_prompt(config, cycle) + board_context +
-                         "\nContinue any partial candidate from the previous interrupted attempt; preserve pre-existing dirty files: " + ", ".join(sorted(protected)), state.pending_fix.get("session_id"), sequence)
-            state.pending_fix["session_id"] = fixer_session
-            _save_state(config.state_file, state)
-        except Exception:
-            transport = config.opencode_log_dir / f"opencode-{sequence:04d}.jsonl"
-            if transport.exists() and not state.pending_fix.get("session_id"):
-                state.pending_fix["session_id"] = _session_id(transport.read_text())
-                _save_state(config.state_file, state)
-            raise
-        sequence += 1
-        after = _tree_fingerprint(config.observations)
-        decision = _decision(output)
-        if not _decision_fields(output).get("status") and not config.dry_run:
-            _, output = _ask_with_continue(config, "Your response omitted CAMPAIGN_DECISION. Continue this same investigation and any partial edit; do not operate lifecycle. Return the required status/files/test/prediction/reason fields after verifying the candidate, or identify a concrete blocker.", state.pending_fix.get("session_id"), sequence)
-            sequence += 1
-            after = _tree_fingerprint(config.observations)
-            decision = _decision(output)
-        if decision == "no-change" and before == after:
-            _, output = _ask_with_continue(config, _telemetry_prompt(config, cycle), state.pending_fix.get("session_id"), sequence)
-            sequence += 1
-            after = _tree_fingerprint(config.observations)
-            decision = _decision(output)
-        if decision != "change" or before == after:
-            # Resume must return to this investigation, especially when a model
-            # leaves a partial diff without a valid verdict. It cannot authorize
-            # running that unverified candidate or resetting its failed world.
-            _save_state(config.state_file, state)
-            _progress(config, "parked", state, reason="no verified change verdict; resume continues this investigation")
-            _append(config.observations, "## Campaign parked\n\nNo verified change verdict. Episode and pending investigation retained; no next reset authorized.\n")
-            return 0
-        state.completed_cycles += 1
-        state.terminal_keys = (state.terminal_keys + [_terminal_key(run_text)])[-2:]
-        state.active_cycle = state.active_session_id = state.active_episode_id = None
-        state.pending_fix = ({"phase": "review", "output": output, "protected": sorted(protected)}
-                             if decision == "change" and before != after and config.plastic_reliability else None)
+
+        # ---- RUN END: explicit state transition -----------------------------
+        state.run_end = state.run_end or {"episode": state.active_episode_id,
+                                          "run_seconds": _run_end_seconds(run_text),
+                                          "wall_time": _now()}
         _save_state(config.state_file, state)
-        if config.plastic_reliability and not config.dry_run:
-            _progress(config, "reviewing", state)
-            state.pending_fix = {"phase": "review", "output": output, "protected": sorted(protected)}
-            _save_state(config.state_file, state)
-            if not _review_and_commit(config, output, protected, sequence):
-                _progress(config, "parked", state, reason="review, verification or commit failed")
-                _append(config.observations, "Campaign parked: independent review, verification or scoped commit did not pass.\n")
-                return 0
+        _progress(config, "WAITING_FOR_HELPER_AND_OBSERVERS", state)
+        helper, board = _terminal_evidence(config, state, state.active_episode_id)
+        sequence += 1
+        _append(config.observations,
+                f"RUN END recorded for episode {state.active_episode_id} at +{state.run_end.get('run_seconds')}s; "
+                f"helper status: {helper.get('status')} ({helper.get('reason')}). Observer board: {board}\n")
+
+        # ---- terminal synthesis by the persistent primary -------------------
+        if state.synthesis and state.synthesis.get("episode") == state.active_episode_id \
+                and Path(state.synthesis.get("path")).is_file():
+            synthesis_path = Path(state.synthesis["path"])
+        else:
+            _progress(config, "SYNTHESIZING", state)
+            synthesis_output = _primary_turn(config, state, primary_run_end(
+                state.active_episode_id, board, helper.get("status"), helper.get("path"),
+                config.state_root / "logs/latest-context.md", config.observations), sequence)
             sequence += 1
-            state.pending_fix = None
+            synthesis_path = config.state_root / "logs/campaign-loop" / f"synthesis-{cycle:04d}.md"
+            _atomic_write(synthesis_path, _assistant_text(synthesis_output) or synthesis_output)
+            hypothesis_id = _record_hypothesis(config, state, cycle, _assistant_text(synthesis_output))
+            state.synthesis = {"episode": state.active_episode_id, "path": str(synthesis_path),
+                               "hypothesis_id": hypothesis_id}
             _save_state(config.state_file, state)
-        repeated = len(state.terminal_keys) == 2 and state.terminal_keys[0] == state.terminal_keys[1]
-        fields = _decision_fields(output)
-        justified_retry = (config.plastic_reliability and not config.dry_run and
-                           bool(fields.get("prediction", "").strip()) and fields.get("test", "not-run") != "not-run")
-        if repeated and not justified_retry:
-            _progress(config, "blocked", state, reason="repeated terminal without reviewed distinguishing prediction")
-            _append(config.observations, "## Campaign stop\n\nThe same terminal failure occurred twice; a third retry is blocked.\n")
-            return 0
-    _progress(config, "complete", state, reason="configured cycle limit reached")
+
+        # ---- fixing through commit, all revisions in the same sessions ------
+        from tools.campaign_fix_flow import run_fix_cycle
+        outcome = run_fix_cycle(config, state, cycle, state.active_episode_id, synthesis_path,
+                                board, helper, sequence)
+        state.helper = _late_helper(config, state, state.active_episode_id)
+        _finish_cycle(config, state, outcome, {}, run_text=run_text)
+    return _stop_campaign(config, state, "SUCCESS",
+                          reason="configured cycle limit reached")
+
+
+def _stop_campaign(config: Config, state: State, phase: str, *, reason: str,
+                   journal: str | None = None) -> int:
+    """Persist a terminal condition; only genuinely unrecoverable ends land here."""
+    _progress(config, phase, state, reason=reason)
+    if journal:
+        _append(config.observations, journal)
+    return 0
+
+
+def _finish_cycle(config: Config, state: State, outcome: str, fields: dict, *,
+                  run_text: str = "", reason: str | None = None,
+                  terminal_phase: str | None = None) -> int:
+    """Append the durable loop record, reset per-episode workflow state, advance."""
+    from tools import campaign_loop_log
+    from tools.campaign_observers import observer_sessions
+    cycle = state.active_cycle or state.completed_cycles + 1
+    episode = state.active_episode_id or "unknown"
+    observers = {}
+    if state.observer_episode:
+        observers = {role: session for role, session in observer_sessions(
+            state.observer_episode, config.opencode_log_dir).items() if session}
+    fix_record = {}
+    for fix in campaign_loop_log.fixes(config.state_root).values():
+        if fix.get("introduced_cycle") == cycle:
+            fix_record = fix
+    start_line = next((line for line in run_text.splitlines() if line.startswith("RUN START:")), "")
+    record = {
+        "campaign_id": state.campaign_id,
+        "cycle_id": cycle,
+        "episode_id": episode,
+        "primary_session_id": state.primary_session_id,
+        "fixer_session_id": state.fixer_session_id,
+        "run_start": start_line.replace("RUN START: ts=", "").strip() or None,
+        "run_end_seconds": (state.run_end or {}).get("run_seconds"),
+        "observer_sessions": observers,
+        "helper_status": (state.helper or {}).get("status"),
+        "helper_path": (state.helper or {}).get("path"),
+        "helper_reason": (state.helper or {}).get("reason"),
+        "terminal_hypothesis": (state.synthesis or {}).get("hypothesis_id"),
+        "synthesis_path": (state.synthesis or {}).get("path"),
+        "fix_id": fix_record.get("fix_id"),
+        "fix_status": fix_record.get("status", outcome),
+        "files_changed": fix_record.get("files"),
+        "tests": fix_record.get("verification"),
+        "review_result": fix_record.get("review"),
+        "commit": fix_record.get("commit"),
+        "verification_result": fix_record.get("verification"),
+        "outcome": outcome,
+        "reason": reason,
+        "completed_at": _now(),
+    }
+    campaign_loop_log.append_cycle(config.state_root, record)
+    if terminal_phase is not None:
+        return _stop_campaign(config, state, terminal_phase, reason=reason or outcome)
+    state.completed_cycles += 1
+    state.active_cycle = None
+    state.active_episode_id = None
+    state.observer_episode = None
+    state.run_end = None
+    state.helper = None
+    state.synthesis = None
+    state.pending_fix = None
+    state.pre_cycle_dirty = []
+    _save_state(config.state_file, state)
     return 0
 
 
@@ -946,6 +1035,8 @@ def _config(args: argparse.Namespace) -> Config:
         observer_model=args.observer_model, observer_variant=args.observer_variant,
         fixer_model=args.fixer_model, fixer_variant=args.fixer_variant,
         zen_observer_model=args.zen_observer_model,
+        helper_wait_seconds=args.helper_wait_seconds,
+        max_fix_revisions=args.max_fix_revisions,
     )
 
 
@@ -987,6 +1078,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dashboard-url", default="http://127.0.0.1:9137/api/logistic-inventory")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--resume-active-run", action="store_true", help="Attach an observer to an already-running isolated episode without resetting it.")
+    parser.add_argument("--helper-wait-seconds", type=int, default=120, help="Maximum seconds after RUN END to wait for OpenCode helper findings.")
+    parser.add_argument("--max-fix-revisions", type=int, default=2, help="Bounded fixer revisions per episode before a candidate is abandoned.")
     args = parser.parse_args(argv)
     try:
         return run_campaign(_config(args))
@@ -997,3 +1090,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

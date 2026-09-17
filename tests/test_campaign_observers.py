@@ -77,7 +77,7 @@ def test_observer_does_not_publish_tool_output_as_findings(tmp_path, monkeypatch
     config = Config(tmp_path, tmp_path, tmp_path / "notes")
     monkeypatch.setattr(observers, "_ask", lambda *args, **kwargs: ("session", '{"type":"tool","text":"success"}'))
     board = observers.observe_team(config, "episode-2", 1)
-    assert board.read_text().count(": recovering;") == 4
+    assert board.read_text().count("status=recovering") == 4
     assert not (board.parent / "supply/findings.md").exists()
 
 
@@ -85,3 +85,62 @@ def test_episode_id_cannot_escape_board_root(tmp_path):
     config = Config(tmp_path, tmp_path, tmp_path / "notes")
     with pytest.raises(ValueError, match="episode"):
         observers.observe_team(config, "../other", 1)
+
+
+def test_repeated_failures_replace_the_observer_session_with_handover(tmp_path, monkeypatch):
+    config = Config(tmp_path / "sessions", tmp_path, tmp_path / "notes")
+    prompts = []
+    turns = {"supply": 0}
+
+    def ask(cfg, prompt, session, sequence, **_):
+        role = cfg.opencode_log_dir.name
+        prompts.append((role, prompt, session))
+        if role != "supply":
+            return f"session-{role}", json.dumps({"type": "text", "part": {"text": f"evidence {sequence}"}} )
+        turns["supply"] += 1
+        if turns["supply"] <= observers.OBSERVER_FAILURE_LIMIT:
+            raise TimeoutError("provider exhausted")
+        return f"replacement-supply-{sequence}", json.dumps(
+            {"type": "text", "part": {"text": "replacement evidence"}})
+
+    monkeypatch.setattr(observers, "_ask", ask)
+    for checkpoint in range(1, observers.OBSERVER_FAILURE_LIMIT + 1):
+        observers.observe_team(config, "episode-1", checkpoint)
+    state = json.loads((config.opencode_log_dir / "observers/episode-1/supply/state.json").read_text())
+    assert state["status"] == "failed"
+    # Durable prior findings survive the failures and are handed over.
+    findings_path = config.opencode_log_dir / "observers/episode-1/supply/findings.md"
+    findings_path.parent.mkdir(parents=True, exist_ok=True)
+    findings_path.write_text("# supply — episode-1\n\nevergreen circuit starvation evidence\n")
+    # The next checkpoint replaces the session for the same run and role.
+    board = observers.observe_team(config, "episode-1", observers.OBSERVER_FAILURE_LIMIT + 1)
+    state = json.loads((config.opencode_log_dir / "observers/episode-1/supply/state.json").read_text())
+    assert state["session_id"] == "replacement-supply-4"
+    handover_prompts = [prompt for role, prompt, _ in prompts
+                        if role == "supply" and "replaced observer session" in prompt]
+    assert handover_prompts, "the replacement prompt must hand over prior findings"
+    assert "evergreen circuit starvation evidence" in handover_prompts[0]
+    assert "supply" in board.read_text()
+
+
+def test_replaced_observer_recovers_and_reports(tmp_path, monkeypatch):
+    config = Config(tmp_path / "sessions", tmp_path, tmp_path / "notes")
+    turns = {"supply": 0}
+
+    def ask(cfg, prompt, session, sequence, **_):
+        role = cfg.opencode_log_dir.name
+        if role == "supply":
+            turns["supply"] += 1
+            if turns["supply"] <= observers.OBSERVER_FAILURE_LIMIT:
+                raise TimeoutError("down")
+        return f"session-{role}-{sequence}", json.dumps(
+            {"type": "text", "part": {"text": f"evidence {sequence}"}})
+
+    monkeypatch.setattr(observers, "_ask", ask)
+    for checkpoint in range(1, observers.OBSERVER_FAILURE_LIMIT + 1):
+        observers.observe_team(config, "episode-1", checkpoint)
+    observers.observe_team(config, "episode-1", observers.OBSERVER_FAILURE_LIMIT + 1)
+    state = json.loads((config.opencode_log_dir / "observers/episode-1/supply/state.json").read_text())
+    assert state["status"] == "complete"
+    findings = (config.opencode_log_dir / "observers/episode-1/supply/findings.md").read_text()
+    assert f"Checkpoint {observers.OBSERVER_FAILURE_LIMIT + 1}" in findings

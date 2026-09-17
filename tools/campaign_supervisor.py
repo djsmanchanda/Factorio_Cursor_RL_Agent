@@ -185,7 +185,9 @@ def status(config) -> dict:
     progress = _read(directory / 'progress.json')
     if running and progress:
         data.update(phase=progress.get('phase', data.get('phase')), reason=progress.get('reason', ''))
-    if not running and data.get('phase') not in ('stopped', 'deadline', 'parked', 'complete', 'blocked'):
+    terminal = ('stopped', 'deadline', 'parked', 'complete', 'blocked',
+                'success', 'manual_stop', 'unrecoverable')
+    if not running and data.get('phase') not in terminal:
         data.update(phase='interrupted', reason='Supervisor exited; Resume retains the original deadline and controller state')
     notes, agents = '', {}
     boards = sorted((directory / 'agents/observers').glob('*/board.md'), key=lambda p: p.stat().st_mtime)
@@ -271,7 +273,9 @@ def supervise(settings_path: Path) -> int:
         state = _read(controller_path)
         # Recover only a recorded episode/session/review. Never blindly repeat
         # a fresh lifecycle if the controller died before persisting ownership.
-        recoverable = bool(state.get('active_session_id') or state.get('pending_fix') or state.get('active_episode_id') or state.get('lifecycle_intent'))
+        recoverable = bool(state.get('primary_session_id') or state.get('fixer_session_id')
+                           or state.get('pending_fix') or state.get('active_episode_id')
+                           or state.get('lifecycle_intent'))
         failures += 1
         if not recoverable or failures > 3:
             atomic_json(directory / 'status.json', dict(phase='parked', reason='Controller failed; safe automatic recovery unavailable or exhausted. Inspect controller.log.', recovery_attempts=failures))

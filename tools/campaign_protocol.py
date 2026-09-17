@@ -50,16 +50,22 @@ def session_id(output: str) -> str | None:
     return None
 
 
-def decision_fields(output: str, marker: str = 'CAMPAIGN_DECISION') -> dict[str, str]:
+def marker_fields(output: str, marker: str) -> dict[str, str]:
+    """Parse a trailing structured `MARKER:` block from assistant output."""
     events = _events(output)
     # Plain verdicts support offline callers. Once transport events exist,
     # stderr/tool text cannot stand in for a missing assistant response.
     text = _texts(events) if events else output
-    statuses = {'change', 'no-change', 'stop'} if marker == 'CAMPAIGN_DECISION' else {'approved', 'rejected'}
     result = {}
     for chunk in re.split(r'(?m)^' + re.escape(marker) + r':\s*$', text)[1:]:
         fields = dict(line.split(':', 1) for line in chunk.splitlines() if ':' in line)
         fields = {key.strip(): value.strip() for key, value in fields.items()}
-        if fields.get('status') in statuses:
+        if any(value for value in fields.values()):
             result = fields
     return result
+
+
+def decision_fields(output: str, marker: str = 'CAMPAIGN_DECISION') -> dict[str, str]:
+    fields = marker_fields(output, marker)
+    statuses = {'change', 'no-change', 'stop'} if marker == 'CAMPAIGN_DECISION' else {'approved', 'rejected'}
+    return fields if fields.get('status') in statuses else {}

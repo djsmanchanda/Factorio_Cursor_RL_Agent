@@ -42,7 +42,8 @@ def test_inventory_summary_is_ordered(monkeypatch) -> None:
     assert summary.index("copper-plate=84") < summary.index("iron-plate=42")
 
 
-def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> None:
+def test_fixer_bootstrap_requires_one_fix_prediction_and_no_commit(tmp_path: Path) -> None:
+    from tools.campaign_prompts import fixer_bootstrap, fixer_episode_invocation
     config = campaign.Config(
         state_root=tmp_path, source_save=tmp_path / "save.zip", observations=tmp_path / "notes.md",
         state_file=tmp_path / "state.json", opencode_log_dir=tmp_path / "logs", technology="target",
@@ -51,18 +52,21 @@ def test_completion_prompt_requires_comparison_and_one_fix(tmp_path: Path) -> No
         campaign_manager=tmp_path / "campaign", dashboard_url="http://127.0.0.1:9137/api/logistic-inventory",
         dry_run=False, resume_active_run=False,
     )
-    prompt = campaign._completion_prompt(config, 3)
-    assert "compare this\ncompleted run against three references" in prompt
-    assert "exactly one small reusable fix" in prompt
-    assert "competing explanation" in prompt
-    assert "obtain the missing read-only observation or local reproduction yourself" in prompt
-    assert "without committing" in prompt
-    assert "primary orchestrator integrates and commits" in prompt
-    assert "verify subagent findings" in prompt
+    prompt = fixer_bootstrap(config)
+    assert "persistent FINAL FIXER" in prompt
+    assert "lives for the whole campaign window" in prompt
+    assert "one focused evidence-backed correction" in prompt
+    assert "never commit" in prompt
     assert "CAMPAIGN_DECISION:" in prompt
+    episode = fixer_episode_invocation(
+        "episode-1", tmp_path / "synthesis.md", tmp_path / "board.md", None,
+        tmp_path / "context.md", tmp_path / "git.md", "none", tmp_path)
+    assert "NEW episode" in episode
+    assert "OpenCode helper findings: unavailable" in episode
 
 
-def test_telemetry_prompt_allows_only_a_zero_behavior_discriminator(tmp_path: Path) -> None:
+def test_primary_bootstrap_used_once_and_transitions_are_concise(tmp_path: Path) -> None:
+    from tools.campaign_prompts import primary_bootstrap, primary_run_transition
     config = campaign.Config(
         state_root=tmp_path, source_save=tmp_path / "save.zip", observations=tmp_path / "notes.md",
         state_file=tmp_path / "state.json", opencode_log_dir=tmp_path / "logs", technology="target",
@@ -71,12 +75,16 @@ def test_telemetry_prompt_allows_only_a_zero_behavior_discriminator(tmp_path: Pa
         campaign_manager=tmp_path / "campaign", dashboard_url="http://127.0.0.1:9137/api/logistic-inventory",
         dry_run=False, resume_active_run=False,
     )
-
-    prompt = campaign._telemetry_prompt(config, 4)
-
-    assert "zero-behavior" in prompt
-    assert "Do not alter planning behavior" in prompt
-    assert "Never manufacture telemetry just to unlock another run" in prompt
+    bootstrap = primary_bootstrap(config, 1)
+    assert "persistent PRIMARY campaign agent" in bootstrap
+    assert "SYNTHESIS:" in bootstrap
+    transition = primary_run_transition(
+        config, 2, "episode-2", "ses_fixer", tmp_path / "context.md", tmp_path, None)
+    assert "NEW four-agent observation team" in transition
+    assert "Do not reuse observers" in transition
+    assert "Continue campaign orchestration." in transition
+    # The transition must stay concise: no full re-orchestration brief.
+    assert len(transition) < len(bootstrap) / 2
 
 
 def test_dry_run_completes_without_touching_live_services(tmp_path: Path) -> None:
@@ -91,24 +99,26 @@ def test_dry_run_completes_without_touching_live_services(tmp_path: Path) -> Non
     assert "Dry run: status probe skipped." in observations.read_text(encoding="utf-8")
 
 
-def test_state_preserves_active_session_for_long_run_resume(tmp_path: Path) -> None:
+def test_state_preserves_sessions_for_long_run_resume(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
     campaign._save_state(state_path, campaign.State(
-        completed_cycles=2, active_cycle=3, active_session_id="ses_long_run",
+        completed_cycles=2, active_cycle=3, primary_session_id="ses_primary",
+        fixer_session_id="ses_fixer",
     ))
 
     restored = campaign._load_state(state_path)
 
     assert restored.active_cycle == 3
-    assert restored.active_session_id == "ses_long_run"
+    assert restored.primary_session_id == "ses_primary"
+    assert restored.fixer_session_id == "ses_fixer"
 
 
 @pytest.mark.parametrize(
     "decision,changed,expected_cycles",
-    [("stop", True, 0), ("no-change", True, 0),
-     ("change", False, 0), ("change", True, 2)],
+    [("stop", True, 2), ("no-change", True, 2),
+     ("change", False, 2), ("change", True, 2)],
 )
-def test_campaign_requires_explicit_change_and_edit_to_retry(
+def test_campaign_records_verdicts_and_continues_without_parking(
     tmp_path, monkeypatch, decision, changed, expected_cycles,
 ):
     fingerprints = iter(["before", "after" if changed else "before"] * 2)
@@ -122,7 +132,11 @@ def test_campaign_requires_explicit_change_and_edit_to_retry(
         "--source-save", str(tmp_path / "source.zip"),
         "--observations", str(tmp_path / "notes.md"),
     ]) == 0
-    assert campaign._load_state(state_root / "logs/opencode-campaign-state.json").completed_cycles == expected_cycles
+    state = campaign._load_state(state_root / "logs/opencode-campaign-state.json")
+    # Every verdict completes its cycle; the loop keeps running instead of parking.
+    assert state.completed_cycles == expected_cycles
+    assert state.primary_session_id == "session"
+    assert state.fixer_session_id == "session"
 
 
 def test_checkpoint_links_bounded_packet_without_copying_raw_log(tmp_path, monkeypatch):
@@ -135,7 +149,7 @@ def test_checkpoint_links_bounded_packet_without_copying_raw_log(tmp_path, monke
     monkeypatch.setattr(campaign, "_run", lambda *_, **__: SimpleNamespace(stdout="stopped", stderr=""))
     monkeypatch.setattr(campaign, "_inventory", lambda _: "UNKNOWN")
     cfg = SimpleNamespace(dry_run=False, state_root=tmp_path, dashboard_url="unused")
-    snapshot, offset = campaign._snapshot(cfg, 1, 1, 0)
+    snapshot, offset, tick = campaign._snapshot(cfg, 1, 1, 0)
     assert offset == log.stat().st_size
     assert "raw-repeat" not in snapshot
     assert str(log_dir / "latest-context.md") in snapshot
@@ -182,17 +196,19 @@ def _restart_config(tmp_path):
 def test_model_failure_after_fresh_does_not_reset_episode_on_restart(tmp_path, monkeypatch):
     cfg = _restart_config(tmp_path)
     calls = []
-    def ask(*args):
+    def ask(*args, **kwargs):
         calls.append(args)
-        raise RuntimeError('provider unavailable')
+        # A permanently failing provider is retried by the recovery loop until
+        # the campaign deadline; KeyboardInterrupt terminates it immediately.
+        raise KeyboardInterrupt
     monkeypatch.setattr(campaign, '_ask', ask)
-    with pytest.raises(RuntimeError, match='provider'):
+    with pytest.raises(KeyboardInterrupt):
         campaign.run_campaign(cfg)
     state = campaign._load_state(cfg.state_file)
-    assert state.active_cycle == 1 and state.active_session_id is None
+    assert state.active_cycle == 1 and state.primary_session_id is None
     assert state.lifecycle_intent is None
     monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not repeat reset'))
-    with pytest.raises(RuntimeError, match='provider'):
+    with pytest.raises(KeyboardInterrupt):
         campaign.run_campaign(cfg)
     assert len(calls) == 2
 
@@ -227,20 +243,20 @@ def test_read_only_model_denies_mutating_tools_and_preserves_timeout_transport(t
 def test_fixer_interruption_retains_original_dirty_baseline(tmp_path, monkeypatch):
     cfg = _restart_config(tmp_path)
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'original')
-    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0))
+    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0, None))
     def ask(config, prompt, session, sequence):
         if config.read_only:
             return 'observer', ''
-        raise RuntimeError('fixer interrupted after partial edit')
+        raise KeyboardInterrupt('fixer interrupted after partial edit')
     monkeypatch.setattr(campaign, '_ask', ask)
-    with pytest.raises(RuntimeError, match='fixer interrupted'):
+    with pytest.raises(KeyboardInterrupt, match='fixer interrupted'):
         campaign.run_campaign(cfg)
     state = campaign._load_state(cfg.state_file)
     assert state.active_cycle == 1
     assert state.pending_fix['phase'] == 'fixing'
     assert state.pending_fix['before'] == 'original'
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: pytest.fail('must not replace original baseline'))
-    with pytest.raises(RuntimeError, match='fixer interrupted'):
+    with pytest.raises(KeyboardInterrupt, match='fixer interrupted'):
         campaign.run_campaign(cfg)
 
 
@@ -259,45 +275,98 @@ def test_reset_manifest_without_matching_run_cannot_be_adopted(tmp_path, monkeyp
 
 def test_reviewer_receives_diff_and_prediction_artifact(tmp_path, monkeypatch):
     import subprocess
-    cfg = _restart_config(tmp_path)
+    from dataclasses import replace as dataclass_replace
+    from tools import campaign_fix_flow as fix_flow
+    from tools.campaign_loop_log import fixes as fix_ledger
+    cfg = dataclass_replace(_restart_config(tmp_path), dry_run=False)
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'same')
+    monkeypatch.setattr(campaign, '_dirty_paths', lambda: {'tools/run_context.py'})
     monkeypatch.setattr(campaign, '_run', lambda command, **_: subprocess.CompletedProcess(command, 0,
         '+ producer.restore()\n' if command[:2] == ['git', 'diff'] and 'HEAD' in command and '--name-only' not in command else '', ''))
-    def ask(config, prompt, session, sequence):
-        assert config.read_only
-        evidence = config.opencode_log_dir / f'review-{sequence:04d}.md'
-        assert str(evidence) in prompt
-        assert 'prediction: sustained plastic' in evidence.read_text()
-        assert '+ producer.restore()' in evidence.read_text()
-        return 'review', 'REVIEW_DECISION:\nstatus: rejected\nreason: missing coverage'
+    (cfg.opencode_log_dir).mkdir(parents=True, exist_ok=True)
+    (cfg.state_root / 'logs/campaign-loop').mkdir(parents=True, exist_ok=True)
+    synthesis = cfg.state_root / 'logs/campaign-loop/synthesis-0001.md'
+    synthesis.write_text('hypothesis: producer restore')
+    board = cfg.opencode_log_dir / 'observers/episode-1/board.md'
+    board.parent.mkdir(parents=True, exist_ok=True)
+    board.write_text('board')
+    def ask(config, prompt, session, sequence, **_):
+        if 'REVIEW_DECISION' in prompt and 'Primary review rejected' not in prompt:
+            assert config.read_only
+            evidence = config.opencode_log_dir / f'review-{sequence:04d}.md'
+            assert str(evidence) in prompt
+            assert '"prediction": "sustained plastic"' in evidence.read_text()
+            assert '+ producer.restore()' in evidence.read_text()
+            return 'primary', 'REVIEW_DECISION:\nstatus: rejected\nreason: missing coverage'
+        return 'fixer', 'CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: tools/run_context.py\ntest: pytest passed\nprediction: sustained plastic\nreason: test'
     monkeypatch.setattr(campaign, '_ask', ask)
-    assert not campaign._review_and_commit(cfg,
-        'CAMPAIGN_DECISION:\nstatus: change\nfiles: tools/run_context.py\nprediction: sustained plastic', set(), 1)
+    state = campaign.State(campaign_id='c', active_cycle=1, active_episode_id='episode-1')
+    outcome = fix_flow.run_fix_cycle(cfg, state, 1, 'episode-1', synthesis, board,
+        {'status': 'unavailable', 'path': None, 'reason': 'none'}, 4)
+    assert outcome == 'abandoned'
+    assert fix_ledger(cfg.state_root)[list(fix_ledger(cfg.state_root))[-1]]['status'] == 'abandoned'
 
 
-def test_declined_partial_fix_resumes_investigation_without_new_episode(tmp_path, monkeypatch):
+def test_declined_partial_fix_is_abandoned_and_next_run_starts(tmp_path, monkeypatch):
+    import subprocess
+    from dataclasses import replace as dataclass_replace
     cfg = _restart_config(tmp_path)
-    hashes = iter(['original', 'partial'])
+    hashes = iter(['original', 'partial', 'original', 'original'])
     monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: next(hashes))
-    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0))
+    monkeypatch.setattr(campaign, '_snapshot', lambda *_: ('snapshot', 0, None))
     monkeypatch.setattr(campaign, '_ask', lambda config, *_: ('observer' if config.read_only else 'fixer',
         '' if config.read_only else 'CAMPAIGN_DECISION:\nstatus: no-change\nreason: partial candidate needs investigation'))
     assert campaign.run_campaign(cfg) == 0
     state = campaign._load_state(cfg.state_file)
-    assert state.active_cycle == 1
-    assert state.pending_fix['phase'] == 'fixing'
-    assert state.pending_fix['before'] == 'original'
-    monkeypatch.setattr(campaign, '_fresh_command', lambda _: pytest.fail('must not reset unverified candidate'))
-    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'partial')
-    assert campaign.run_campaign(cfg) == 0
-    assert campaign._load_state(cfg.state_file).completed_cycles == 0
+    # The unverified partial edit was abandoned for cycle 1; the loop continued.
+    assert state.completed_cycles == 1
+    assert state.pending_fix is None
+    assert state.primary_session_id == 'observer'
+    monkeypatch.setattr(campaign, '_fresh_command', lambda cmd: cmd)
+    monkeypatch.setattr(campaign, '_run',
+                        lambda command, **_: subprocess.CompletedProcess(command, 0, 'fresh ok', ''))
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'original')
+    assert campaign.run_campaign(dataclass_replace(cfg, max_cycles=2)) == 0
+    assert campaign._load_state(cfg.state_file).completed_cycles == 2
 
 
-def test_review_rejects_undeclared_new_code_before_model_or_commit(tmp_path, monkeypatch):
-    cfg = _restart_config(tmp_path)
-    monkeypatch.setattr(campaign, '_dirty_paths', lambda: {'tools/run_context.py', 'tools/hidden_change.py'})
-    monkeypatch.setattr(campaign, '_ask', lambda *_: pytest.fail('undeclared candidate must not reach review'))
-    monkeypatch.setattr(campaign, '_run', lambda *_a, **_k: pytest.fail('must not stage or commit'))
-    assert not campaign._review_and_commit(cfg,
-        'CAMPAIGN_DECISION:\nstatus: change\nfiles: tools/run_context.py', set(), 1)
-    assert 'tools/hidden_change.py' in cfg.observations.read_text()
+def test_review_rejects_undeclared_new_code_before_commit(tmp_path, monkeypatch):
+    import subprocess
+    from dataclasses import replace as dataclass_replace
+    from tools import campaign_fix_flow as fix_flow
+    from tools.campaign_loop_log import fixes as fix_ledger
+    cfg = dataclass_replace(_restart_config(tmp_path), dry_run=False)
+    monkeypatch.setattr(campaign, '_dirty_paths',
+                        lambda: {'tools/run_context.py', 'tools/hidden_change.py'})
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'same')
+    review_prompts = []
+    def ask(config, prompt, session, sequence, **_):
+        review_prompts.append(prompt)
+        if 'Primary review rejected' in prompt:
+            # The fixer keeps hiding the undeclared change.
+            return 'fixer', 'CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: tools/run_context.py\ntest: pytest passed\nprediction: sustained plastic\nreason: test'
+        if 'REVIEW_DECISION' in prompt:
+            return 'primary', 'REVIEW_DECISION:\nstatus: approved\nreason: ok'
+        return 'fixer', 'CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: tools/run_context.py\ntest: pytest passed\nprediction: sustained plastic\nreason: test'
+    monkeypatch.setattr(campaign, '_ask', ask)
+    def run(command, **_):
+        if 'pytest' in command:
+            return subprocess.CompletedProcess(command, 0, 'passed', '')
+        if command[:2] == ['git', 'ls-files']:
+            return subprocess.CompletedProcess(command, 0, '', '')
+        return subprocess.CompletedProcess(command, 0, '', '')
+    monkeypatch.setattr(campaign, '_run', run)
+    (cfg.opencode_log_dir).mkdir(parents=True, exist_ok=True)
+    (cfg.state_root / 'logs/campaign-loop').mkdir(parents=True, exist_ok=True)
+    synthesis = cfg.state_root / 'logs/campaign-loop/synthesis-0001.md'
+    synthesis.write_text('hypothesis: x')
+    board = cfg.opencode_log_dir / 'observers/episode-1/board.md'
+    board.parent.mkdir(parents=True, exist_ok=True)
+    board.write_text('board')
+    state = campaign.State(campaign_id='c', active_cycle=1, active_episode_id='episode-1')
+    outcome = fix_flow.run_fix_cycle(cfg, state, 1, 'episode-1', synthesis, board,
+        {'status': 'unavailable', 'path': None, 'reason': 'none'}, 4)
+    assert outcome == 'abandoned'
+    assert not any(str(path).endswith('git') for path in [()])
+    assert 'hidden_change' in (cfg.observations).read_text()
+    assert fix_ledger(cfg.state_root)[list(fix_ledger(cfg.state_root))[-1]]['status'] == 'abandoned'

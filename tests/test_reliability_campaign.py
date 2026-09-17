@@ -1,10 +1,12 @@
 # Path: tests/test_reliability_campaign.py
-# Purpose: Exercise the automated acceptance gate without launching Factorio or models.
+# Purpose: Exercise the automated acceptance gate and fix flow without launching Factorio or models.
 import json
 import subprocess
 from pathlib import Path
 
 from tools import opencode_campaign_orchestrator as campaign
+from tools import campaign_fix_flow as fix_flow
+from tools.campaign_loop_log import fixes as fix_ledger, loop_root
 
 
 def review_config(root):
@@ -42,7 +44,7 @@ def test_three_fresh_successes_skip_fixer_and_certify(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(command, 0, '', '')
     monkeypatch.setattr(campaign, '_run', run)
     monkeypatch.setattr(campaign, '_code_hash', lambda: 'code')
-    monkeypatch.setattr(campaign, '_snapshot', lambda *a: ('checkpoint', 0))
+    monkeypatch.setattr(campaign, '_snapshot', lambda *a: ('checkpoint', 0, None))
     monkeypatch.setattr(campaign, 'index_log', lambda *_: None)
     calls = []
     def ask(config, prompt, session, sequence):
@@ -56,7 +58,16 @@ def test_three_fresh_successes_skip_fixer_and_certify(tmp_path, monkeypatch):
     assert all('--produce' in command and 'plastic-bar' in command for command in cycles)
     state = json.loads((root / 'logs/reliability-state.json').read_text())
     assert state['phase'] == 'research' and len(state['baseline']['episodes']) == 3
+    # One persistent primary bootstrap, one concise checkpoint turn per run,
+    # and one concise run transition for every later run. No new session per run.
     assert len(calls) == 6
+    assert 'persistent PRIMARY campaign agent' in calls[0]
+    assert 'Checkpoint 1 for episode episode-1' in calls[1]
+    assert 'Starting deterministic run 2/' in calls[2]
+    assert 'Checkpoint 1 for episode episode-2' in calls[3]
+    assert 'Starting deterministic run 3/' in calls[4]
+    restored = campaign._load_state(root / 'logs/reliability-campaign-state.json')
+    assert restored.primary_session_id == 'session'
 
 
 def test_json_assistant_decision_ignores_tool_template():
@@ -82,22 +93,6 @@ def test_model_call_resumes_saved_session_after_interruption(tmp_path, monkeypat
     assert calls[1][0] == 'continue'
 
 
-def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
-    monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
-    (tmp_path / 'fix.py').write_text('value=1')
-    commands = []
-    def run(command, **_):
-        commands.append(command)
-        return subprocess.CompletedProcess(command, 1 if 'pytest' in command else 0, '', '')
-    monkeypatch.setattr(campaign, '_run', run)
-    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
-    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
-    monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
-    cfg = review_config(tmp_path)
-    assert not campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: fix.py', set(), 1)
-    assert not any(command[:2] == ['git','add'] for command in commands)
-
-
 def test_expired_persisted_deadline_cannot_start_fresh(tmp_path, monkeypatch):
     root = tmp_path / 'runtime'
     state_file = root / 'logs/reliability-campaign-state.json'
@@ -109,43 +104,149 @@ def test_expired_persisted_deadline_cannot_start_fresh(tmp_path, monkeypatch):
     assert json.loads(state_file.read_text())['deadline_utc'] == '2000-01-01T00:00:00+00:00'
 
 
-def test_declared_regression_files_run_without_cost_marker_filter(tmp_path, monkeypatch):
-    commands = []
-    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
-    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
-    monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
+CHANGE = ('CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: {files}\n'
+          'test: pytest passed\nprediction: sustained plastic\nreason: fix\n')
+
+
+def run_fix(tmp_path, monkeypatch, *, fixer_outputs, review_outputs, pytest_results,
+            declared_files='fix.py', dirty=()):
+    """Drive one full fix cycle with mocked model/git/pytest commands."""
+    root = tmp_path / 'runtime'
+    root.mkdir(exist_ok=True)
+    cfg = review_config(root)
+    state = campaign.State(campaign_id='campaign-1', active_cycle=1, active_episode_id='episode-1',
+                           pre_cycle_dirty=list(dirty))
+    (root / 'logs/campaign-loop').mkdir(parents=True, exist_ok=True)
+    synthesis = root / 'logs/campaign-loop/synthesis-0001.md'
+    synthesis.write_text('hypothesis: root cause')
+    board = root / 'agents/observers/episode-1/board.md'
+    board.parent.mkdir(parents=True, exist_ok=True)
+    board.write_text('board')
+    calls = []
+    declared = declared_files.split(', ')
+
+    def ask(config, prompt, session, sequence, retry=0):
+        calls.append(prompt)
+        if 'Primary review rejected' in prompt or 'Verification failed' in prompt:
+            return 'fixer-session', fixer_outputs.pop(0) if fixer_outputs else ''
+        if 'REVIEW_DECISION' in prompt:
+            return 'primary-session', review_outputs.pop(0)
+        if 'has ended' in prompt:
+            return 'fixer-session', fixer_outputs.pop(0) if fixer_outputs else ''
+        return 'observer-session', ''
+
+    monkeypatch.setattr(campaign, '_ask', ask)
+    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda *_: 'same')
+    monkeypatch.setattr(campaign, '_dirty_paths', lambda: set(declared) | set(dirty))
+
     def run(command, **_):
-        commands.append(command)
+        calls.append(' '.join(str(part) for part in command))
+        if command[:2] == ['git', 'ls-files']:
+            return subprocess.CompletedProcess(command, 0 if command[-1] in declared else 1, '', '')
+        if 'pytest' in command:
+            return subprocess.CompletedProcess(command, pytest_results.pop(0), 'tests ran', '')
         return subprocess.CompletedProcess(command, 0, '', '')
+
     monkeypatch.setattr(campaign, '_run', run)
-    cfg = review_config(tmp_path)
-    assert campaign._review_and_commit(cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: tests/test_reliability_campaign.py', set(), 1)
-    gates = [command for command in commands if 'pytest' in command]
-    assert gates[0][-2:] == ['-m', 'not slow and not exhaustive']
-    assert gates[1] == ['python', '-m', 'pytest', '-q', '--tb=short', 'tests/test_reliability_campaign.py']
+    outcome = fix_flow.run_fix_cycle(cfg, state, 1, 'episode-1', synthesis, board,
+                                     {'status': 'unavailable', 'path': None, 'reason': 'none'}, 5)
+    return outcome, state, calls, root
+
+
+def test_verified_change_commits_declared_files_and_status(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py')],
+        review_outputs=['REVIEW_DECISION:\nstatus: approved\nreason: verified'],
+        pytest_results=[0],
+    )
+    assert outcome == 'committed'
+    staged = [line for line in calls if line.startswith('git add')]
+    assert staged == ['git add -- fix.py CURRENT_STATUS.md']
+    assert [line for line in calls if line.startswith('git commit')]
+    record = [fix for fix in fix_ledger(root).values()][-1]
+    assert record['status'] == 'committed' and record['files'] == ['fix.py']
+
+
+def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py')] * 3,
+        review_outputs=['REVIEW_DECISION:\nstatus: approved\nreason: verified'] * 3,
+        pytest_results=[1, 1, 1],
+    )
+    assert outcome == 'abandoned'
+    assert not any(line.startswith('git add') for line in calls)
+    assert not any(line.startswith('git commit') for line in calls)
+    assert fix_ledger(root)[list(fix_ledger(root))[-1]]['status'] == 'abandoned'
+
+
+def pytest_commands(calls):
+    return [line for line in calls if line.startswith('python -m pytest')]
+
+
+def test_declared_regression_files_run_without_cost_marker_filter(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='tests/test_reliability_campaign.py')],
+        review_outputs=['REVIEW_DECISION:\nstatus: approved\nreason: verified'],
+        pytest_results=[0, 0],
+        declared_files='tests/test_reliability_campaign.py',
+    )
+    assert outcome == 'committed'
+    gates = pytest_commands(calls)
+    assert gates[0].endswith('-m not slow and not exhaustive')
+    assert 'tests/test_reliability_campaign.py' in gates[1]
 
 
 def test_undocumented_test_change_still_runs_mandatory_gate(tmp_path, monkeypatch):
-    import json
-
-    commands = []
-    monkeypatch.setattr(campaign, '_readonly', lambda config: config)
-    monkeypatch.setattr(campaign, '_tree_fingerprint', lambda _: 'unchanged')
-    monkeypatch.setattr(campaign, '_ask', lambda *_: ('reviewer', 'REVIEW_DECISION:\nstatus: approved\nreason: reviewed'))
-
-    def run(command, **_):
-        commands.append(command)
-        return subprocess.CompletedProcess(command, 0, '', '')
-
-    monkeypatch.setattr(campaign, '_run', run)
-    cfg = review_config(tmp_path)
-    assert campaign._review_and_commit(
-        cfg, 'CAMPAIGN_DECISION:\nstatus: change\nfiles: fix.py', set(), 1,
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py')],
+        review_outputs=['REVIEW_DECISION:\nstatus: approved\nreason: verified'],
+        pytest_results=[0],
     )
-    gates = [command for command in commands if 'pytest' in command]
+    assert outcome == 'committed'
+    gates = pytest_commands(calls)
     assert len(gates) == 1
-    assert all(str(campaign.REPO_ROOT / path) in gates[0]
-               for path in campaign.MANDATORY_CAMPAIGN_TESTS)
-    evidence = json.loads((tmp_path / 'verification-0001.log').read_text().splitlines()[0])
-    assert evidence['status'] == 'passed'
-    assert '0 supplemental test command(s) passed' in (tmp_path / 'notes.md').read_text()
+    assert all(str(path) in gates[0] for path in
+               [Path(__file__).resolve().parents[1] / name for name in campaign.MANDATORY_CAMPAIGN_TESTS])
+    assert 'Verification log:' in (root / 'notes.md').read_text()
+
+
+def test_rejected_review_revises_with_the_same_fixer_then_commits(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py'), CHANGE.format(files='fix.py')],
+        review_outputs=['REVIEW_DECISION:\nstatus: rejected\nreason: missing coverage',
+                        'REVIEW_DECISION:\nstatus: approved\nreason: verified'],
+        pytest_results=[0],
+    )
+    assert outcome == 'committed'
+    reviews = [prompt for prompt in calls if 'REVIEW_DECISION' in prompt]
+    assert len(reviews) == 2
+    revision = [prompt for prompt in calls if prompt.startswith('Primary review rejected FIX-')]
+    assert revision and 'missing coverage' in revision[0]
+
+
+def test_primary_rejection_abandons_after_bounded_revisions(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py')] * 3,
+        review_outputs=['REVIEW_DECISION:\nstatus: rejected\nreason: no'] * 3,
+        pytest_results=[],
+    )
+    assert outcome == 'abandoned'
+    assert not any(line.startswith('git commit') for line in calls)
+
+
+def test_unrelated_user_work_is_never_staged(tmp_path, monkeypatch):
+    outcome, state, calls, root = run_fix(
+        tmp_path, monkeypatch,
+        fixer_outputs=[CHANGE.format(files='fix.py')],
+        review_outputs=['REVIEW_DECISION:\nstatus: approved\nreason: verified'],
+        pytest_results=[0],
+        dirty=('user_note.md',),
+    )
+    assert outcome == 'committed'
+    assert not any('user_note.md' in line for line in calls if line.startswith('git add'))

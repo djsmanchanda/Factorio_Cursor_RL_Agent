@@ -32,38 +32,84 @@ console's configured isolated runtime, save, ports and Python interpreter. It re
 Linux user systemd and OpenCode on the console's PATH with working model access.
 The existing runner must be stopped before starting a new window.
 
-Four concurrent Union Alpha observers cover scheduling, supply, construction
-and code correlation. Each keeps its own episode-scoped session and findings.
-The shared board carries current status, bounded excerpts and links to full reports.
-The final Union Alpha fixer receives the board, re-verifies the cited raw
-evidence, identifies the root cause, and makes one focused repair.
-Observers can follow as many useful evidence references as needed within their
-bounded call window; the controller retains raw transport and prior findings
-when one fails. They have no edit, shell, task-delegation or live-mutation tools.
-The permanent secondary helper remains separate and its instructions are unchanged.
+The controller runs two campaign-persistent agent sessions and four per-run
+observer sessions. `PRIMARY` (GLM) is bootstrapped once per campaign and the
+same OpenCode session controls every checkpoint, run end, synthesis, review and
+commit; controller restarts, run ends, worker failures and helper failures all
+reuse it, and only a positively unrecoverable session is ever replaced.
+`FINAL_FIXER` is likewise created once per campaign and receives each NEW
+episode's evidence through the same session, so it retains prior fixes,
+rejected hypotheses and review feedback (conversation context, never
+authoritative evidence). Fresh episodes always receive a NEW four-observer
+team (timeline, supply, comparison, falsifier) scoped to that episode's
+directory; observers are read-only and never reset Factorio, start runs,
+authorize fixes or decide campaign completion. The controller sends the
+persistent sessions only concise event messages after bootstrap; ordinary
+recovery resumes the same saved session with a minimal `continue`.
 
-At run end the team cross-checks its findings. GLM reviews the Union Alpha
-candidate against raw evidence, runs the required verification, commits only
-the declared files, and records the verified milestone in `CURRENT_STATUS.md`
-before starting the next fresh run and observation team. A failed, timed-out,
-or empty Union Alpha call is resumed through its saved session with an explicit
-continue prompt until it responds or the fixed campaign deadline expires. Each
-observer turn is bounded so a congested observer cannot delay GLM's terminal
-handling; the next checkpoint resumes its same session. A campaign-deadline
-exit preserves its episode and evidence. Successful plastic acceptance runs repeat the same candidate;
-they do not require an invented code change. The console displays acceptance
-streaks and achieved milestone times; longer survival never counts as success.
+Four concurrent observers cover those roles with per-episode sessions and
+findings. The shared board carries health, checkpoints, bounded excerpts and
+links to full reports. Observer retry exhaustion is recoverable: after bounded
+consecutive failures the same role/run gets a replacement session with a
+handover of its durable findings instead of being disabled; a failed turn
+never stops the run or parks the campaign. The permanent secondary helper
+remains separate and its instructions are unchanged.
+
+At run end the controller records the terminal tick and wall time, starts
+observer finalization immediately, and concurrently gives the independent
+OpenCode helper at most 120 seconds (`--helper-wait-seconds`) to finish. When
+the helper window expires the controller records `helper_status` with a reason
+and proceeds: missing helper findings never park the campaign, restart a run,
+or block synthesis, fixing or the next episode. Findings that arrive after the
+window are preserved as late evidence without rewinding the flow. The primary
+then synthesizes terminal evidence (earliest divergence, first violated
+invariant, first downstream consequence, terminal failure, and a structured
+hypothesis block persisted to the hypothesis ledger), and the SAME persistent
+fixer receives the synthesis, observer board, helper findings when present,
+git evidence and the previous accepted fix, and implements ONE focused
+evidence-backed correction (behavior fix, instrumentation-only change, or an
+explicit no-change). The primary reviews the candidate in its own persistent
+session and may reject with specific feedback; revisions return to the SAME
+fixer session. The controller runs the mandatory cross-component gate declared
+in `MANDATORY_CAMPAIGN_TESTS` plus changed regression files, and commits only
+the fixer's declared files plus campaign-owned records.
+
+Worktree ownership is explicit: runtime/generated artifacts (save zips,
+helper findings, run logs, scratch), campaign-owned records (CURRENT_STATUS.md,
+the observations journal) and the fixer's declared files are each staged
+selectively; unrelated pre-existing user changes are preserved unstaged and
+never swept into a campaign commit, and their existence never blocks a
+targeted commit. A candidate that cannot be verified or reviewed within a
+bounded revision budget (`--max-fix-revisions`) is abandoned with its clean
+paths reverted and unknown paths quarantined, the failure is recorded in the
+fix ledger, and the loop continues with the next fresh episode. A candidate is
+never committed unverified, and an unverified partial edit never blocks the
+next fresh lifecycle. The controller keeps an explicit state machine
+(`STARTING_EPISODE`, `OBSERVING`, `RUN_ENDED`,
+`WAITING_FOR_HELPER_AND_OBSERVERS`, `SYNTHESIZING`, `FIXING`, `PRIMARY_REVIEW`,
+`VERIFYING`, `COMMITTING`) and records every completed cycle in a durable loop
+log plus fix/hypothesis ledgers under `<state-root>/logs/campaign-loop/`;
+terminal phases are `SUCCESS`, `DEADLINE_REACHED`, `MANUAL_STOP` and
+`UNRECOVERABLE_FAILURE` only. Controller restarts resume from persisted state
+without duplicating sessions, fixes, commits, resets or episodes.
+
+A failed, timed-out, or empty model call is resumed through its saved session
+with an explicit continue prompt until it responds or the fixed campaign
+deadline expires. Each observer turn is bounded so a congested observer cannot
+delay the primary's terminal handling; the next checkpoint resumes its same
+session. A campaign-deadline exit preserves its episode and evidence.
+Successful plastic acceptance runs repeat the same candidate; they do not
+require an invented code change. The console displays acceptance streaks and
+achieved milestone times; longer survival never counts as success.
 
 The loop runs in a user systemd service independently of the browser and console
 process. Process failures receive up to three bounded recovery attempts against
 recorded controller ownership. Resume retains the original deadline and pending
 work. Uncertain lifecycle state must be inspected; recovery never blindly repeats
-a reset. An unresolved evidence gap or failed verification remains a visible
-parked state, not permission for endless reruns. A declined or incomplete fix
-retains the episode and original dirty-file boundary; Resume returns to that
-investigation instead of running an unverified partial edit. The displayed
-resolved-cycle count advances only after the cycle reaches a verified change
-verdict or production acceptance.
+a reset. A declined or incomplete fix retains the episode and original dirty-file
+boundary; Resume returns to that pending record instead of running an unverified
+partial edit. The displayed resolved-cycle count advances only after the cycle
+reaches a verified change verdict or production acceptance.
 
 Stop terminates the supervisor's controller and model processes. **The separately
 managed Factorio runner and server remain running.** Their controls become
@@ -174,10 +220,13 @@ exercise the same candidate from the pinned original source before promotion.
 
 ## Resume, budget and outputs
 
-- `logs/reliability-campaign-state.json`: active fixer session, pending review,
-  completed cycles and persisted deadline. Restarting resumes the remaining
-  window; it does not grant another 12 hours. Use a new `--state-file` explicitly
-  for a new campaign window.
+- `logs/reliability-campaign-state.json`: persistent primary/fixer session ids,
+  observer episode, pending review, checkpoint monotonicity, helper status and
+  the persisted deadline. Restarting resumes the remaining window; it does not
+  grant another 12 hours. Use a new `--state-file` explicitly for a new
+  campaign window.
+- `logs/campaign-loop/`: durable per-cycle loop records, fix ledger,
+  hypothesis ledger, per-cycle synthesis and git-evidence snapshots.
 - `logs/reliability-state.json`: results, streak and certified baseline.
 - `logs/reliability-runs/`: immutable per-episode evidence copies.
 - `logs/production-acceptance.json`: current sampled evidence.
