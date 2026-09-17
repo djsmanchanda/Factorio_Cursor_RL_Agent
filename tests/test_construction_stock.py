@@ -4246,7 +4246,7 @@ def test_no_progress_verdict_names_belt_gate_floor_and_ledger(
     )
     monkeypatch.setattr(
         builder, "_belt_reserve_shortfall",
-        lambda *_a, **_k: ("transport-belt", 115, 117),
+        lambda *_a, **_k: ("transport-belt", 115, 117, 4.0),
     )
     monkeypatch.setattr(
         builder.live_base, "available_items", lambda *_a: {"splitter": 0},
@@ -4273,7 +4273,7 @@ def test_no_progress_verdict_names_belt_gate_floor_and_ledger(
     reserve = messages[1]
     assert "NO PROGRESS VERDICT RESERVE" in reserve
     assert "task=splitter" in reserve
-    assert "reserve transport-belt held=117 floor=115" in reserve
+    assert "reserve transport-belt held=117 floor=115 bill=4" in reserve
     assert (
         "ledger modular_iron-plate_refinery:"
         "modular_iron-plate_refinery@supply_wait"

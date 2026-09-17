@@ -772,4 +772,56 @@ def test_belt_recovery_is_queued_with_the_deferral(monkeypatch) -> None:
 
     assert mall_targets.get("transport-belt", 0) >= 50
     assert promoted == ["transport-belt"]
+
+
+def test_belt_recovery_queues_past_the_release_condition(monkeypatch) -> None:
+    """Run 3 (2026-09-17): the recovery queued belts to the floor alone, so
+    held landed exactly at floor (115=115) while the release condition needs
+    held >= floor + the consumer's craft bill -- a fixed point where the
+    ledger's own splitter sub-bill starves behind the reserve it holds.
+    Recovery must queue past the gate, not to the floor."""
+    import inspect
+
+    from orchestrator import priority_list
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "splitter",
+        {"ingredients": ["iron-plate", "transport-belt"],
+         "amounts": [1, 4], "product_amount": 1,
+         "machine": "assembling-machine-1"},
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"transport-belt": 115},
+    )
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 1000)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_ledger_belt_commitment",
+        lambda *_a, **_k: (115, frozenset()),
+    )
+    priorities = priority_list.PriorityList.__new__(priority_list.PriorityList)
+    priorities.items = {}
+    promoted: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        priorities, "promote",
+        lambda item, target, tick: promoted.append((item, target)),
+    )
+    monkeypatch.setattr(
+        priorities, "defer", lambda *args, **kwargs: None,
+    )
+    mall_targets: dict[str, int] = {"splitter": 3, "transport-belt": 115}
+    messages: list[str] = []
+    task = type("Task", (), {"item": "splitter", "target": 3})()
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 1000, mall_targets,
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert mall_targets.get("transport-belt", 0) == 115 + 4
+    assert ("transport-belt", 119) in promoted
+    assert any(
+        "rebuilds past the splitter craft" in message
+        for message in messages
+    )
     assert any("BELT RECOVERY" in message for message in messages)

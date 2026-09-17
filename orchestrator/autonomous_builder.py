@@ -9161,7 +9161,7 @@ def _belt_starved_consumer(
     shortfall = _belt_reserve_shortfall(client, surface, force, item, mall_targets)
     if shortfall is None:
         return None
-    ingredient, floor, held = shortfall
+    ingredient, floor, held, _amount = shortfall
     return (
         f"its recipe consumes {ingredient} and only {held} remain -- "
         f"active blueprints hold the reserve until stock recovers "
@@ -9172,8 +9172,8 @@ def _belt_starved_consumer(
 def _belt_reserve_shortfall(
     client: RconClient, surface: str, force: str, item: str,
     mall_targets: dict[str, int] | None = None,
-) -> tuple[str, int, int] | None:
-    """The (ingredient, required bill, held) triple a belt wait rests on."""
+) -> tuple[str, int, int, float] | None:
+    """The (ingredient, required bill, held, per-craft amount) belt-wait quad."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
@@ -9216,7 +9216,7 @@ def _belt_reserve_shortfall(
         ):
             continue
         if held < floor + amount:
-            return (str(ingredient), floor, int(held))
+            return (str(ingredient), floor, int(held), float(amount))
     return None
 
 
@@ -9497,9 +9497,10 @@ def _emit_no_progress_verdict_reserve(
             except Exception:
                 shortfall = None
             if shortfall is not None:
-                ingredient, floor, held = shortfall
+                ingredient, floor, held, amount = shortfall
                 sections.append(
-                    f"reserve {ingredient} held={held} floor={floor}"
+                    f"reserve {ingredient} held={held} floor={floor} "
+                    f"bill={math.ceil(float(amount))}"
                 )
         ledger = _MATERIAL_RESERVATION_LEDGER
         if ledger is not None:
@@ -9836,16 +9837,24 @@ def _serve_mall_task(
         except Exception:
             shortfall = None
         if shortfall is not None:
-            ingredient, floor, _held = shortfall
-            if mall_targets.get(ingredient, 0) < floor:
-                mall_targets[ingredient] = floor
+            ingredient, floor, _held, amount = shortfall
+            # The release condition is held >= floor + the consumer's own
+            # bill. Recovery must queue past that condition, not the floor
+            # alone: held landing exactly at floor starves the very sub-bill
+            # the ledger holds the reserve for and held can never legally
+            # exceed floor (run 3, 2026-09-17: held=115 floor=115 with the
+            # refinery's own splitter=3 queued behind the same gate).
+            release = floor + math.ceil(float(amount))
+            if mall_targets.get(ingredient, 0) < release:
+                mall_targets[ingredient] = release
                 try:
-                    priorities.promote(ingredient, floor, tick_now)
+                    priorities.promote(ingredient, release, tick_now)
                 except Exception:
                     pass
                 emit(
                     f"  BELT RECOVERY: {item} waits on {ingredient}; queued "
-                    f"{ingredient}={floor} so the reserve rebuilds"
+                    f"{ingredient}={release} so the reserve rebuilds past "
+                    f"the {item} craft"
                 )
         return
     emit(priorities.describe(task, tick))
