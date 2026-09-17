@@ -79,7 +79,7 @@ def test_model_call_resumes_saved_session_after_interruption(tmp_path, monkeypat
     session, output = campaign._ask_with_continue(cfg, 'inspect evidence', 'saved-session', 7)
     assert (session, output) == ('saved-session', 'completed response')
     assert calls[1][1] == 'saved-session' and calls[1][3] == 1
-    assert calls[1][0].startswith('Continue the same isolated campaign investigation')
+    assert calls[1][0] == 'continue'
 
 
 def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):

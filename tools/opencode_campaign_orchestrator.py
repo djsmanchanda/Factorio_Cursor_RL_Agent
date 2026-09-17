@@ -347,9 +347,10 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
             if _COMMAND_DEADLINE is not None and time.time() >= _COMMAND_DEADLINE:
                 raise RuntimeError("model recovery stopped at the campaign deadline") from error
             attempt += 1
-            prompt = ("Continue the same isolated campaign investigation after an interrupted model call. "
-                      "Re-read the saved session context and current raw evidence; do not duplicate lifecycle "
-                      "actions or discard any partial candidate. Complete the requested response now.\n\n" + message)
+            # A recovered OpenCode session already contains the role brief and
+            # all prior evidence. Repeating it wastes context and can restart
+            # the observer's reasoning; its next turn must be only a continue.
+            prompt = "continue" if active_session else message
             time.sleep(min(5 * attempt, 60))
 
 
