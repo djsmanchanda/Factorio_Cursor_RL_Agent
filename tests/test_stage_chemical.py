@@ -68,6 +68,82 @@ def test_real_builder_delegates_battery_to_the_chemical_stage(monkeypatch) -> No
     assert calls == [(1.0, 2.0)]
 
 
+def test_steel_rung_wait_parks_the_goal_on_a_retry_horizon(monkeypatch) -> None:
+    """Run 6 (2026-09-17): every pass reselected plastic-bar, its ladder wait
+    consumed the pass unproductively (`MALL DEFERRED: compact steel waits for
+    verified iron production and starter retirement` x12) and the 12-pass
+    livelock guard killed the run while iron's swap was still in flight. A
+    minutes-long rung wait must park the target (retry in 60s) so background
+    work keeps counting ground progress."""
+    import inspect
+
+    from types import SimpleNamespace
+
+    from orchestrator.priority_list import PriorityList
+
+    monkeypatch.setattr(
+        autonomous_builder.live_base, "game_tick", lambda *_a: 1000,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_production_started",
+        lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_belt_starved_consumer",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_MATERIAL_RESERVATION_LEDGER", None,
+    )
+    deferred = autonomous_builder.ProductionPrerequisiteDeferred(
+        "compact steel waits for verified iron production and starter "
+        "retirement",
+        code="steel_iron_retirement_wait", state="retiring",
+    )
+
+    def _ensure_mall_item(*_a, **_k):
+        raise deferred
+
+    monkeypatch.setattr(
+        autonomous_builder, "_ensure_mall_item", _ensure_mall_item,
+    )
+    monkeypatch.setattr(
+        autonomous_builder, "_advance_parked_chemical_rung",
+        lambda *_a, **_k: False,
+    )
+    priorities = PriorityList.__new__(PriorityList)
+    priorities.items = {}
+    parked: list[tuple[str, int, str, int]] = []
+    monkeypatch.setattr(
+        priorities, "defer",
+        lambda item, tick, reason, *, retry_ticks=None: parked.append(
+            (item, tick, reason, retry_ticks or 0),
+        ),
+    )
+    monkeypatch.setattr(
+        priorities, "describe", lambda task, tick: "PRIORITY: plastic-bar",
+    )
+    messages: list[str] = []
+    task = type("Task", (), {"item": "plastic-bar", "target": 1})()
+
+    autonomous_builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 1000, {},
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert parked == [("plastic-bar", 1000, str(deferred), 3600)]
+    assert any("parked until iron-plate" in message for message in messages)
+
+
+def test_rung_defferal_codes_park_set_is_bounded() -> None:
+    """Only minutes-long rung establishment codes reach the parking branch;
+    the ensure path must still swallow ordinary batch deferrals."""
+    assert autonomous_builder._CHEMICAL_RUNG_PARK_CODES == frozenset({
+        "chemical_capability_handoff", "chemical_capability_wait",
+        "steel_iron_retirement_wait",
+    })
+
+
 def test_existing_battery_cell_is_serviced_before_reuse(monkeypatch) -> None:
     surveys = iter([
         SimpleNamespace(machine_positions=((10.5, 20.5),), working_count=0),

@@ -7682,6 +7682,14 @@ def _iron_capacity_for_fast_belts(
     return furnaces, drills
 
 
+#: Rung-establishment waits minutes upstream: defer/park them through the
+#: chemical-wait retry horizon instead of per-pass reselection.
+_CHEMICAL_RUNG_PARK_CODES = frozenset({
+    "chemical_capability_handoff",
+    "chemical_capability_wait",
+    "steel_iron_retirement_wait",
+})
+
 _CHEMICAL_BATCH_TARGETS = {
     "pipe": ITEM_STACK_SIZES.get("pipe", 100),
     "chemical-plant": 2,
@@ -9046,6 +9054,14 @@ def _ensure_mall_item(
                 "cell instead of waiting on the compact-mall cap"
             )
             return False, None
+        # A rung-establishment wait (iron starter retirement, chemical
+        # predecessor) takes minutes: the caller that owns the priorities
+        # must park it on a real retry horizon instead of reselecting the
+        # target every pass (run 6, 2026-09-17: plastic-bar re-waited at
+        # steel-plate 12 times and the livelock guard killed the run while
+        # iron's swap was still in flight).
+        if getattr(deferred, "code", "") in _CHEMICAL_RUNG_PARK_CODES:
+            raise
         emit(f"  MALL DEFERRED: {deferred}")
         return False, None
     except MaterialShortage as shortage:
@@ -9876,7 +9892,8 @@ def _serve_mall_task(
             reference_point, emit, background=False,
         )
     except ProductionPrerequisiteDeferred as deferred:
-        if getattr(deferred, "code", "") != "chemical_capability_handoff":
+        code = getattr(deferred, "code", "")
+        if code not in _CHEMICAL_RUNG_PARK_CODES:
             raise
         # A chemical rung takes minutes to establish: park the target on a
         # real retry horizon instead of re-borrowing every pass (2026-09-04:
@@ -9884,6 +9901,9 @@ def _serve_mall_task(
         # a livelock trip). A rung that already produces means stale news --
         # fall through and serve normally.
         rung = (getattr(deferred, "details", {}) or {}).get("rung")
+        if code == "steel_iron_retirement_wait" and not rung:
+            # The iron starter's retirement is steel's upstream capability.
+            rung = "iron-plate"
         try:
             rung_flowing = bool(
                 rung and _production_started(client, surface, force, rung)
