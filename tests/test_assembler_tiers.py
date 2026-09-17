@@ -187,3 +187,114 @@ def test_the_upgrade_plan_orders_native_replacement_with_a_recipe_guard() -> Non
 def test_an_empty_upgrade_is_refused_rather_than_submitted() -> None:
     with pytest.raises(ValueError, match="at least one machine"):
         upgrade_plan({})
+
+
+# --- Live tier-capability proof ---------------------------------------------
+#
+# The rotating loan machinery re-purposes recipe assemblers on the tier items
+# themselves. `products_finished` is a lifetime counter (Factorio API: products
+# "finished crafting in its lifetime"), so a well-used borrowed cell carrying
+# recipe assembling-machine-2 with zero AM2 output still reads produced. Live
+# 2026-09-18: that lie flipped tier capability on BEFORE any real AM2 existed,
+# so every fresh quad top cell ordered two tier-2 machines the base could never
+# make and the run died at the AM2 bootstrap seam (NO PROGRESS VERDICT,
+# quad_mall_*_top=@supply_wait[assembling-machine-2=2]).
+
+def test_a_recipe_swapped_borrower_proves_nothing_about_tier_items(monkeypatch) -> None:
+    """A loaned gear cell with recipe AM2 and lifetime gear output denies tier 2."""
+    from types import SimpleNamespace
+
+    from orchestrator import autonomous_builder as builder
+    from orchestrator import live_base
+
+    line = live_base.LineState(
+        recipe=_AM2, machine_count=1, working_count=0,
+        output_position=(36.5, 32.5), machine_positions=((36.5, 32.5),),
+        produced_count=944,
+    )
+    monkeypatch.setitem(
+        LINE_RECIPES, _AM2,
+        {"machine": _AM2, "ingredients": ["iron-plate", "electronic-circuit"], "craft_time": 0.5},
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: (SimpleNamespace(machine_position=(36.5, 32.5)),),
+    )
+
+    class _FakeClient:
+        command = lambda self, *a, **k: ""  # noqa: E731
+
+    assert not builder._production_started(
+        _FakeClient(), "nauvis", "player", _AM2,
+    )
+
+
+def test_a_real_running_tier_line_proves_capability(monkeypatch) -> None:
+    from orchestrator import autonomous_builder as builder
+    from orchestrator import live_base
+
+    working = live_base.LineState(
+        recipe=_AM2, machine_count=1, working_count=1,
+        output_position=(36.5, 32.5), machine_positions=((36.5, 32.5),),
+        produced_count=0,
+    )
+    monkeypatch.setitem(
+        LINE_RECIPES, _AM2,
+        {"machine": _AM2, "ingredients": ["iron-plate", "electronic-circuit"], "craft_time": 0.5},
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: working)
+
+    assert builder._production_started(object(), "nauvis", "player", _AM2)
+
+
+def test_a_permitted_am2_producer_cell_proves_capability_when_idled(monkeypatch) -> None:
+    """A real (non-loan) tier producer keeps its lifetime budget as proof even
+    once it idles against its stock gate, so capability does not flap off."""
+    from types import SimpleNamespace
+
+    from orchestrator import autonomous_builder as builder
+    from orchestrator import live_base
+
+    idled = live_base.LineState(
+        recipe=_AM2, machine_count=2, working_count=0,
+        output_position=(43.5, 30.5), machine_positions=((36.5, 32.5), (43.5, 30.5)),
+        produced_count=950,
+    )
+    monkeypatch.setitem(
+        LINE_RECIPES, _AM2,
+        {"machine": _AM2, "ingredients": ["iron-plate", "electronic-circuit"], "craft_time": 0.5},
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: idled)
+    # Only the borrowed half is ruled out; the real producer half stands.
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: (SimpleNamespace(machine_position=(36.5, 32.5)),),
+    )
+
+    class _FakeClient:
+        command = lambda self, *a, **k: ""  # noqa: E731
+
+    assert builder._production_started(
+        _FakeClient(), "nauvis", "player", _AM2,
+    )
+
+
+def test_non_machine_items_kept_the_monotonic_produced_proof(monkeypatch) -> None:
+    """Furnace-type recipes keep produced-before: their lines are never loan
+    borrowers, and a line that has produced and idles at its cap is real."""
+    from orchestrator import autonomous_builder as builder
+    from orchestrator import live_base
+
+    idled = live_base.LineState(
+        recipe="electric-furnace", machine_count=1, working_count=0,
+        output_position=(10.5, 4.5), machine_positions=((10.5, 4.5),),
+        produced_count=200,
+    )
+    monkeypatch.setitem(
+        LINE_RECIPES, "electric-furnace",
+        {"machine": "electric-furnace", "ingredients": ["steel-plate"], "craft_time": 0.5},
+    )
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: idled)
+
+    assert builder._production_started(object(), "nauvis", "player", "electric-furnace")

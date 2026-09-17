@@ -10826,20 +10826,60 @@ def _prep_the_belt_cell(
 _BELT_CELL_PREP_KEY = "_belt_cell"
 
 
+def _unborrowed_recipe_positions(
+    client: RconClient, surface: str, force: str, line,
+) -> tuple[Point, ...]:
+    """Recipe-line machines that are NOT active loan borrowers.
+
+    Offline harness clients (no RCON) read no loans, so every machine counts
+    as an ordinary line and the caller keeps the old produced-before proof.
+    """
+    if not hasattr(client, "command"):
+        return tuple(line.machine_positions)
+    try:
+        loaned = {
+            tuple(map(float, loan.machine_position))
+            for loan in active_bootstrap_loans(client, surface, force)
+        }
+    except Exception:  # noqa: BLE001 -- offline client fakes cannot answer RCON
+        return tuple(line.machine_positions)
+    return tuple(
+        position for position in line.machine_positions
+        if tuple(map(float, position)) not in loaned
+    )
+
+
 def _production_started(
     client: RconClient, surface: str, force: str, item: str,
 ) -> bool:
-    """Whether an upstream line is working now or has produced before."""
+    """Whether an upstream line is working now or has produced before.
+
+    For assembler-tier items the lifetime counter cannot prove *this* recipe
+    produced anything: `products_finished` survives a recipe swap, and the
+    rotating loan machinery re-purposes recipe assemblers on exactly those
+    recipes (live 2026-09-18: a loaned gear cell carrying recipe
+    assembling-machine-2 with zero AM2 output read produced, so tier
+    capability claimed the base makes tier 2; every fresh quad top cell then
+    ordered two tier-2 machines the base could never make and the run died at
+    the AM2 bootstrap seam). A tier item whose recipe machines are all active
+    loan borrowers proves nothing; a real line does, even years idled.
+    """
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return True
     line = live_base.find_line(
         client, surface, force, item, spec["machine"],
     )
-    return line is not None and (
-        getattr(line, "working_count", 0) > 0
-        or getattr(line, "produced_count", 0) > 0
-    )
+    if line is None:
+        return False
+    if getattr(line, "working_count", 0) > 0:
+        return True
+    produced = getattr(line, "produced_count", 0) > 0
+    if not produced:
+        return False
+    if item not in live_base.ASSEMBLER_TIERS:
+        return True
+    return bool(_unborrowed_recipe_positions(client, surface, force, line))
 
 
 def _core_mall_producer_ready(client, surface, force, item):
