@@ -8386,10 +8386,30 @@ def _bootstrap_demand_cell_affordable(
     if allocation is None:
         return False, {}
     _origin, side = allocation
+    # The reserved machine must match the machine the plan will place: the
+    # capability-aware mall tier, not a hardcoded tier-1 name (a quad cell
+    # places tier-2 machines once the base can make them). Items without a
+    # recipe spec and clients that cannot answer a survey keep the historical
+    # tier-1 default.
+    try:
+        capability = BaseCapability(
+            produces_tier2=_production_started(
+                client, surface, force, "assembling-machine-2",
+            ),
+            produces_tier3=_production_started(
+                client, surface, force, "assembling-machine-3",
+            ),
+            stock=live_base.available_items(client, surface, force),
+        )
+        cell_machine = mall_machine(item, capability)
+    except (KeyError, AttributeError):
+        cell_machine = "assembling-machine-1"
+    except KeyError:
+        cell_machine = "assembling-machine-1"
     bill = (
         quad_mall_project_bill(
             item, side, stock_target=max(1, target),
-            machine_name="assembling-machine-1",
+            machine_name=cell_machine,
             inserter_type="inserter",
             support_inserter_type="inserter",
             include_substation=not (
@@ -8400,7 +8420,7 @@ def _bootstrap_demand_cell_affordable(
         if quad_mall else
         compact_mall_project_bill(
             item, stock_target=max(1, target), side=side, shared_provider=True,
-            machine_name="assembling-machine-1",
+            machine_name=cell_machine,
             include_substation=True,
         )
     )

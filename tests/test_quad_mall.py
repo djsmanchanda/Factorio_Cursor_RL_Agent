@@ -273,3 +273,54 @@ def test_quad_top_admission_accepts_an_already_powered_shared_seed_anchor(monkey
     assert submitted == ["quad_mall_electronic-circuit_top"]
     assert staged and staged[0][4] == "quad bootstrap mall for electronic-circuit"
     assert provider[0] == center[0]
+
+
+def test_quad_module_places_the_capability_aware_machine(monkeypatch) -> None:
+    """The quad path forwarded the recipe's native tier (assembling-machine-2)
+    even before the base could make one, so every expansion module queued an
+    unfillable AM2 demand while tier-1 assemblers sat in stock and the mall
+    stayed at its seed slots (live 2026-09-17). The admission must place the
+    same capability-aware machine the compact path and its material
+    reservation use."""
+    from orchestrator import live_base
+    import orchestrator.mall_builder as mall_builder
+    from planners.quad_mall_layout import QUAD_MALL_MACHINE_OFFSETS
+
+    placed = {}
+
+    def fake_layout(recipe, machine, *_a, **_k):
+        placed["machine"] = machine
+        return generate_quad_mall_layout(
+            recipe, machine, ["copper-plate"], [1.0],
+            quad_mall_center((3.0, -1.0)), "top", craft_time=0.5,
+            include_substation=False,
+        )
+
+    monkeypatch.setattr(mall_builder, "generate_quad_mall_layout", fake_layout)
+    monkeypatch.setattr(
+        mall_builder, "preview_quad_mall_allocation",
+        lambda *_a, **_k: (quad_mall_center((3.0, -1.0)), "top"),
+    )
+    monkeypatch.setattr(
+        mall_builder, "_existing_network_generation",
+        lambda *_a, **_k: 5000.0,
+    )
+    submitted = []
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda _c, _b, _s, plan, label, _e: submitted.append(plan),
+    )
+
+    mall_builder.build_quad_mall_stage(
+        SimpleNamespace(command="/sc noop"), SimpleNamespace(), "nauvis",
+        "player", "copper-cable", {}, (3.0, -1.0),
+        lambda *_a, **_k: None, (lambda *_a: None),
+        machine_name="assembling-machine-1",
+    )
+
+    assert placed["machine"] == "assembling-machine-1"
+    machine_actions = [
+        action for phase in submitted[0]["phases"] for action in phase["actions"]
+        if action.get("entity", "").startswith("assembling-machine")
+    ]
+    assert {action["entity"] for action in machine_actions} == {"assembling-machine-1"}

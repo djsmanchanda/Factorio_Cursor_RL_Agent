@@ -735,6 +735,7 @@ def build_compact_mall_stage(
             reference_point, bring_stage_up, emit, stock_target=stock_target,
             stock_gate_target=stock_gate_target, fill_chest=fill_chest,
             request_multiplier_override=request_multiplier_override,
+            machine_name=machine_name,
         )
     spec = LINE_RECIPES[recipe]
     if not spec.get("set_recipe", True):
@@ -831,6 +832,7 @@ def build_quad_mall_stage(
     bring_stage_up: Callable, emit: Callable[[str], None], *, stock_target: int = 1,
     stock_gate_target: int | None = None, fill_chest: bool = False,
     request_multiplier_override: int | None = None,
+    machine_name: str | None = None,
 ) -> Point:
     """Fill one half of the four-machine bootstrap module."""
     spec = LINE_RECIPES[recipe]
@@ -847,7 +849,7 @@ def build_quad_mall_stage(
     seed_module = False
     seed_inserter = "inserter"
     plan = generate_quad_mall_layout(
-        recipe, spec["machine"], spec["ingredients"], spec["amounts"], center,
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
