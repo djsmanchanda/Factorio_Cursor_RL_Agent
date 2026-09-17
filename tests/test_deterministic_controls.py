@@ -691,3 +691,50 @@ def test_new_chest_settings_wait_for_real_bot_construction(monkeypatch):
     assert sequence[1] == 'wait'
     assert sequence[2]['action_type'] == 'configure_entity'
     assert sequence[2]['logistic_requests'] == [{'name': 'iron-plate', 'count': 5}]
+
+
+def test_budget_exhaustion_is_typed_intended_difficulty(monkeypatch) -> None:
+    """Run 8 (2026-09-17): a 4393s productive run ended as
+    `unhandled_exception (BudgetExhausted)` when its plan budget capped
+    during a mall-provider refresh retry. Resource accounting is a typed
+    lifecycle stop (intended difficulty), never an unclassified bug."""
+    from orchestrator import autonomous_builder as builder
+
+    budget = SimpleNamespace(
+        progress_credits=7, passes=1, plans=8, max_plans=8,
+    )
+    exhausted = BudgetExhausted("plan submission budget exhausted before x")
+    emitted: list[str] = []
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._raise_typed_budget_stop(
+            "plastic-bar", budget, exhausted, emitted.append,
+        )
+
+    stop = raised.value
+    assert stop.code == "budget_exhausted"
+    assert stop.classification == "intended_difficulty"
+    assert stop.state == "constructing"
+    assert stop.details == {
+        "goal_item": "plastic-bar",
+        "progress_credits": 7,
+        "passes": 1,
+        "plans": 8,
+        "max_plans": 8,
+    }
+    assert any("BUDGET EXHAUSTED" in message for message in emitted)
+
+    begin_run_budget(1, plans_per_pass=1)
+    try:
+        consume_plan_submission("first")
+        with pytest.raises(BudgetExhausted):
+            consume_plan_submission("second")
+    finally:
+        end_run_budget()
+
+
+def test_run_converts_budget_exhaustion_to_typed_stop() -> None:
+    """The mission body wraps BudgetExhausted through the typed converter."""
+    source = inspect.getsource(builder.run)
+    assert "_raise_typed_budget_stop" in source
+    assert "except BudgetExhausted" in source

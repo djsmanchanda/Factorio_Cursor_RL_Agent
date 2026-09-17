@@ -48,8 +48,8 @@ from orchestrator.baseline_production import (
 )
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.controller_budget import (
-    begin_run_budget, consume_diagnosis, consume_remediation, consume_wait,
-    end_run_budget,
+    BudgetExhausted, begin_run_budget, consume_diagnosis,
+    consume_remediation, consume_wait, end_run_budget,
 )
 from orchestrator.mine_retirement import retire_depleted_mines
 from orchestrator.mine_output_tap import legacy_output_tap_plan
@@ -12555,6 +12555,34 @@ def _serve_ready_pass(
     return None
 
 
+def _raise_typed_budget_stop(
+    goal_item: str, budget, exhausted: BudgetExhausted,
+    emit: Callable[[str], None],
+) -> None:
+    """Convert a budget exhaustion into a typed intended-difficulty stop.
+
+    The plan/pass/diagnosis budget is resource accounting, not a
+    construction fault: a productive run may exhaust its bound while every
+    loan and cell advances (run 8, 2026-09-17: 4393s of productive
+    rotation ended as `unhandled_exception` because the exhaustion raised
+    straight out of the retry submit). Name the resource truthfully.
+    """
+    emit(f"BUDGET EXHAUSTED: {exhausted}")
+    raise StuckError(
+        str(exhausted),
+        code="budget_exhausted",
+        classification="intended_difficulty",
+        state="constructing",
+        details={
+            "goal_item": goal_item,
+            "progress_credits": getattr(budget, "progress_credits", 0),
+            "passes": getattr(budget, "passes", 0),
+            "plans": getattr(budget, "plans", 0),
+            "max_plans": getattr(budget, "max_plans", 0),
+        },
+    ) from exhausted
+
+
 def run(
     goal_item: str, *, surface: str = "nauvis", force: str = "player",
     rcon_host: str = "127.0.0.1", rcon_port: int = 27017, rcon_password: str = "",
@@ -12858,6 +12886,14 @@ def run(
                 "progress_credits": budget.progress_credits,
             },
         )
+    except BudgetExhausted as exhausted:
+        # The plan/pass/diagnosis budget is resource accounting, not a
+        # construction fault: a productive run may exhaust its bound while
+        # every loan and cell advances (run 8, 2026-09-17: 4393s of
+        # productive rotation ended as `unhandled_exception` because the
+        # exhaustion raised straight out of the retry submit). Name the
+        # resource truthfully as intended difficulty.
+        _raise_typed_budget_stop(goal_item, budget, exhausted, emit)
     finally:
         _BOOTSTRAP_DISTRICT_LEDGER = None
         _MATERIAL_RESERVATION_LEDGER = None
