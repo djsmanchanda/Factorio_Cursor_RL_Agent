@@ -25,8 +25,8 @@ def test_roles_run_concurrently_and_resume_independent_sessions(tmp_path, monkey
     barrier = Barrier(4, timeout=5)
     calls = []
 
-    def ask(cfg, prompt, session, sequence):
-        assert cfg.read_only and cfg.model_timeout_seconds == 240
+    def ask(cfg, prompt, session, sequence, **_):
+        assert cfg.read_only and cfg.model_timeout_seconds == 120
         role = cfg.opencode_log_dir.name
         calls.append((role, session, sequence, cfg.model, prompt))
         barrier.wait()
@@ -41,6 +41,8 @@ def test_roles_run_concurrently_and_resume_independent_sessions(tmp_path, monkey
         assert [call[2] for call in role_calls] == [1, 2]
         assert all(call[3] == config.model for call in role_calls)
         assert "Do not edit any file" in role_calls[0][4]
+        assert "Never sleep or wait longer than 120 seconds" in role_calls[0][4]
+        assert role_calls[1][4] == "continue"
         assert str(board) in role_calls[0][4]
     assert board.read_text().count("last successful checkpoint=2") == 4
 
@@ -48,8 +50,8 @@ def test_roles_run_concurrently_and_resume_independent_sessions(tmp_path, monkey
 def test_failed_observer_preserves_findings_and_other_roles_finish(tmp_path, monkeypatch):
     config = Config(tmp_path / "sessions", tmp_path, tmp_path / "notes")
 
-    def ask(cfg, prompt, session, sequence):
-        assert cfg.read_only and cfg.model_timeout_seconds == 240
+    def ask(cfg, prompt, session, sequence, **_):
+        assert cfg.read_only and cfg.model_timeout_seconds == 120
         role = cfg.opencode_log_dir.name
         if sequence == 2 and role == "supply":
             raise TimeoutError("bounded observer timeout")
@@ -61,7 +63,7 @@ def test_failed_observer_preserves_findings_and_other_roles_finish(tmp_path, mon
     observers.observe_team(config, "episode-1", 2)
     assert (board.parent / "supply/findings.md").read_text() == prior
     state = json.loads((board.parent / "supply/state.json").read_text())
-    assert state["status"] == "error"
+    assert state["status"] == "recovering"
     assert state["session_id"] == "session-supply"
     assert "last successful checkpoint=1" in board.read_text()
     assert board.read_text().count("last successful checkpoint=2") == 3
@@ -73,9 +75,9 @@ def test_failed_observer_preserves_findings_and_other_roles_finish(tmp_path, mon
 
 def test_observer_does_not_publish_tool_output_as_findings(tmp_path, monkeypatch):
     config = Config(tmp_path, tmp_path, tmp_path / "notes")
-    monkeypatch.setattr(observers, "_ask", lambda *args: ("session", '{"type":"tool","text":"success"}'))
+    monkeypatch.setattr(observers, "_ask", lambda *args, **kwargs: ("session", '{"type":"tool","text":"success"}'))
     board = observers.observe_team(config, "episode-2", 1)
-    assert board.read_text().count(": error;") == 4
+    assert board.read_text().count(": recovering;") == 4
     assert not (board.parent / "supply/findings.md").exists()
 
 

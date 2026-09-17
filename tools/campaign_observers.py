@@ -34,10 +34,10 @@ def _read_state(path: Path) -> dict:
         return {}
 
 
-def _ask(config, message, session_id, sequence):
+def _ask(config, message, session_id, sequence, *, retries=None):
     # Lazy import keeps the controller free to import this module at startup.
     from tools.opencode_campaign_orchestrator import _ask_with_continue as campaign_ask
-    return campaign_ask(config, message, session_id, sequence)
+    return campaign_ask(config, message, session_id, sequence, retries=retries)
 
 
 def _prompt(config, episode: str, role: str, checkpoint: int, terminal: bool, board: Path) -> str:
@@ -56,6 +56,8 @@ competing explanation, raw path/line/tick references, questions for other roles 
 Distinguish total/transferable/allocated stock and production counters. Judge progress by achieved
 production/research objectives, not elapsed survival. On terminal review identify the earliest causal
 failure and a focused testable fix recommendation, but leave implementation to the primary fixer.
+Observe continuously for this episode: after each evidence check, continue investigating the next
+useful signal rather than idling. Never sleep or wait longer than 120 seconds between observations.
 """
 
 
@@ -93,7 +95,9 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
         state_path = directory / "state.json"
         state = _read_state(state_path)
         role_config = replace(config, opencode_log_dir=directory, read_only=True,
-                             model_timeout_seconds=240,
+                             # An observer must never block GLM from seeing RUN
+                             # END. Its same saved session resumes next turn.
+                             model_timeout_seconds=120,
                              model=getattr(config, "observer_model", None) or config.model,
                              variant=getattr(config, "observer_variant", None) or "high")
         sequence = int(state.get("sequence", 0)) + 1
@@ -101,8 +105,10 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
                      updated_at=datetime.now(timezone.utc).isoformat(), status="running")
         _atomic(state_path, json.dumps(state, indent=2) + "\n")
         try:
-            prompt = _prompt(config, episode_id, role, checkpoint, terminal, board)
-            session, output = _ask(role_config, prompt, state.get("session_id"), sequence)
+            prompt = "continue" if state.get("session_id") else _prompt(config, episode_id, role, checkpoint, terminal, board)
+            # One bounded turn leaves the observer in recovering state; later
+            # checkpoints continue indefinitely without repeating its brief.
+            session, output = _ask(role_config, prompt, state.get("session_id"), sequence, retries=0)
             state["session_id"] = session
             findings = _assistant_text(output)
             if not findings.strip():
@@ -111,7 +117,7 @@ def observe_team(config, episode_id: str, checkpoint: int, terminal: bool = Fals
             state.update(status="complete", last_successful_checkpoint=checkpoint)
             state.pop("error", None)
         except Exception as exc:
-            state.update(status="error", error=f"{type(exc).__name__}: {exc}")
+            state.update(status="recovering", error=f"{type(exc).__name__}: {exc}")
             # A failed CLI call can still have allocated a session; recover it
             # from the saved transport so the next checkpoint resumes it.
             transport = directory / f"opencode-{sequence:04d}.jsonl"
