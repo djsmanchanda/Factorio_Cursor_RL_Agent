@@ -7852,10 +7852,20 @@ def _ensure_chemical_ladder_predecessor(
                 reference_point, emit,
             )
             if remedy is None:
-                raise StuckError(
-                    f"chemical ladder cannot borrow a mall cell for {predecessor}",
-                    code="chemical_ladder_no_borrower",
-                    classification="bug",
+                # An empty borrower pool is a supply_wait, not a terminal bug:
+                # the same contract FIX-0001 established for the rationed mall
+                # (run 4, 2026-09-17: 4/4 cap committed and the pipe rung killed
+                # the run instead of parking). Park and retry through the
+                # queued-demand paths while the mall reclaims a cell.
+                emit(
+                    f"  CHEMICAL LADDER BORROW RETRY: no borrowable "
+                    f"assembler is free for {predecessor}; parking the rung "
+                    "and retrying after re-observation"
+                )
+                raise ProductionPrerequisiteDeferred(
+                    f"chemical ladder cannot borrow a mall cell for "
+                    f"{predecessor}; retrying after re-observation",
+                    code="chemical_ladder_borrow_deferred",
                     state="supply_wait",
                     details={"item": item, "predecessor": predecessor},
                 )

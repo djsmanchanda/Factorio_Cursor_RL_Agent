@@ -460,6 +460,45 @@ def test_steel_starter_defers_a_loan_blocked_on_steel(monkeypatch) -> None:
     assert any(message.startswith("  STEEL STARTER PRIORITY:") for message in messages)
 
 
+def test_chemical_ladder_parks_when_no_mall_cell_is_borrowable(
+    monkeypatch,
+) -> None:
+    """Run 4 (2026-09-17): the pipe rung killed the run with
+    `chemical_ladder_no_borrower` while the 4/4 mall cap was fully
+    committed. Empty borrower capacity is a supply_wait: the rung must
+    park and retry through the queued-demand paths like FIX-0001's
+    rationed-mall parks."""
+    messages: list[str] = []
+    monkeypatch.setattr(
+        builder, "_chemical_ladder_predecessors",
+        lambda _item: ("pipe", "steel-plate"),
+    )
+    monkeypatch.setattr(
+        builder, "_missing_chemical_ladder_predecessor",
+        lambda *_a: "pipe",
+    )
+    monkeypatch.setattr(
+        builder, "_chemical_uses_rotating_batch", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan", lambda *_a, **_k: None,
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as deferred:
+        builder._ensure_chemical_ladder_predecessor(
+            object(), object(), "nauvis", "player", "chemical-plant",
+            (3.0, -1.0), messages.append,
+        )
+
+    assert deferred.value.code == "chemical_ladder_borrow_deferred"
+    assert deferred.value.details == {
+        "item": "chemical-plant", "predecessor": "pipe",
+    }
+    assert any(
+        "CHEMICAL LADDER BORROW RETRY" in message for message in messages
+    )
+
+
 def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):
     monkeypatch.setattr(
         builder, "_transport_mode", lambda *_args: "logistic",
