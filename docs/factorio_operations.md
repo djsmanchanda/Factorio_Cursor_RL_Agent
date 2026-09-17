@@ -62,7 +62,7 @@ Its default ports are game
 
 `scripts/manage_linux_deterministic_server.sh` owns the isolated deterministic
 root at `~/.local/share/factorio-rl/deterministic`, using the private
-`factorio-2.1.17` runtime.  Its `bootstrap` action requires an explicit source
+`factorio-2.1.19` runtime.  Its `bootstrap` action requires an explicit source
 save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
@@ -97,7 +97,7 @@ uv run --with-requirements requirements.txt python tools/dashboard_server.py \
   --server-manager scripts/manage_linux_deterministic_server.sh \
   --runner-manager scripts/manage_linux_deterministic_runner.sh \
   --campaign-manager scripts/manage_linux_deterministic_campaign.sh \
-  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.17 \
+  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.19 \
   --gui-mods ~/.factorio/mods
 ```
 
