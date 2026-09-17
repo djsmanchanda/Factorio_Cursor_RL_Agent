@@ -4210,6 +4210,78 @@ def test_no_progress_verdict_names_borrowed_assembler_status(monkeypatch) -> Non
     assert "asm=?" in unreadable[0]
 
 
+def test_no_progress_verdict_names_belt_gate_floor_and_ledger(
+    monkeypatch,
+) -> None:
+    """Cycle 19 (episode-20260917T134109Z) died on `splitter 0%` with the
+    belt reserve and the material ledger both showing their decomposition:
+    the verdict must name the gate triple (held vs floor) and every active
+    ledger reservation so a circular reserve (blueprint holds belts while
+    its own sub-bill queues the gated consumer) is separable from a short
+    economy without cross-pass pairing."""
+    import dataclasses
+
+    from orchestrator.material_reservations import MaterialProject
+
+    project = MaterialProject(
+        project_id="modular_iron-plate_refinery",
+        target_item="modular_iron-plate_refinery",
+        state="supply_wait",
+        required={
+            "transport-belt": 115, "splitter": 3, "inserter": 4,
+            "fast-inserter": 1,
+        },
+        reserved={},
+        source_producers={},
+        expected_rates={},
+        eta_seconds={},
+        priority=5, sequence=3,
+    )
+    ledger = SimpleNamespace(
+        projects={"modular_iron-plate_refinery": project},
+        project_is_active=lambda _pid: True,
+    )
+    monkeypatch.setattr(
+        builder, "_MATERIAL_RESERVATION_LEDGER", ledger,
+    )
+    monkeypatch.setattr(
+        builder, "_belt_reserve_shortfall",
+        lambda *_a, **_k: ("transport-belt", 115, 117),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {"splitter": 0},
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 7)
+    monkeypatch.setattr(
+        builder, "_independent_mall_ready", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_bootstrap_mall_slot_limit", lambda *_a: 12,
+    )
+    messages: list[str] = []
+    signature = ("splitter", 0, ("splitter", "pipe"), (), (), (), ())
+
+    assert builder._emit_no_progress_verdict_stock(
+        object(), "nauvis", "player", signature, "automation-science-pack",
+        100, 0, 162, (3.0, -1.0), messages.append,
+    ) is None
+
+    assert len(messages) == 2
+    reserve = messages[1]
+    assert "NO PROGRESS VERDICT RESERVE" in reserve
+    assert "task=splitter" in reserve
+    assert "reserve transport-belt held=117 floor=115" in reserve
+    assert (
+        "ledger modular_iron-plate_refinery:"
+        "modular_iron-plate_refinery@supply_wait"
+    ) in reserve
+    assert "transport-belt=115" in reserve
+    assert "splitter=3" in reserve
+
+
 @pytest.mark.parametrize(
     "contents,stock,free,expected",
     [

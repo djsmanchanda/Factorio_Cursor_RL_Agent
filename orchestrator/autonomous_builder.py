@@ -9468,6 +9468,72 @@ def _emit_no_progress_verdict_stock(
         )
     except Exception as error:
         emit(f"  NO PROGRESS VERDICT skipped: {error}")
+    _emit_no_progress_verdict_reserve(
+        client, surface, force, item, emit,
+    )
+
+
+def _emit_no_progress_verdict_reserve(
+    client: RconClient, surface: str, force: str, item: str | None,
+    emit: Callable[[str], None],
+) -> None:
+    """One read-only diagnostic beside the non-progress verdict.
+
+    Cycle 19 died on `splitter 0%` with the belt gate and the ledger both
+    silent at the verdict: the gate held belts against a blueprint bill
+    (floor 115+) while the blueprint's own sub-bill (splitter=3) was this
+    very queue entry, and only 117 belts sat behind it. Name the gate's
+    decomposition (held vs floor) and every active ledger reservation so
+    the next identical verdict separates a legitimately short economy from
+    a circular reserve the queue itself feeds.
+    """
+    try:
+        sections: list[str] = []
+        if item is not None:
+            try:
+                shortfall = _belt_reserve_shortfall(
+                    client, surface, force, item,
+                )
+            except Exception:
+                shortfall = None
+            if shortfall is not None:
+                ingredient, floor, held = shortfall
+                sections.append(
+                    f"reserve {ingredient} held={held} floor={floor}"
+                )
+        ledger = _MATERIAL_RESERVATION_LEDGER
+        if ledger is not None:
+            entries: list[str] = []
+            for project_id, project in sorted(
+                ledger.projects.items(),
+                key=lambda pair: pair[1].sequence,
+            ):
+                try:
+                    if not ledger.project_is_active(project_id):
+                        continue
+                    required = ",".join(
+                        f"{name}={count}"
+                        for name, count in sorted(
+                            project.required.items()
+                        )
+                    ) or "-"
+                    entries.append(
+                        f"{project_id}:{project.target_item}@{project.state}"
+                        f"[{required}]"
+                    )
+                except Exception:
+                    continue
+            if entries:
+                sections.append(
+                    "ledger " + " ".join(entries[:8])
+                )
+        if sections:
+            emit(
+                "  NO PROGRESS VERDICT RESERVE: task=" + str(item)
+                + " | " + " | ".join(sections)
+            )
+    except Exception as error:
+        emit(f"  NO PROGRESS VERDICT RESERVE skipped: {error}")
 
 
 def _emit_iteration_limit_verdict(
