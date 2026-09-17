@@ -323,11 +323,12 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int,
 
 def _ask_with_continue(config: Config, message: str, session_id: str | None,
                        sequence: int, *, require_response: bool = True,
-                       retries: int = 3) -> tuple[str | None, str]:
-    """Recover a congested model call by resuming its allocated session."""
+                       retries: int | None = None) -> tuple[str | None, str]:
+    """Recover a congested model call until it responds or the campaign ends."""
     active_session = session_id
     prompt = message
-    for attempt in range(retries + 1):
+    attempt = 0
+    while True:
         try:
             if attempt:
                 returned_session, output = _ask(config, prompt, active_session, sequence, retry=attempt)
@@ -341,11 +342,15 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
             transport = config.opencode_log_dir / f"opencode-{sequence:04d}{'' if attempt == 0 else f'-continue-{attempt}'}.jsonl"
             if active_session is None and transport.exists():
                 active_session = _session_id(transport.read_text(encoding="utf-8", errors="replace"))
-            if attempt >= retries:
+            if retries is not None and attempt >= retries:
                 raise RuntimeError(f"model did not recover after {retries} continue attempts") from error
+            if _COMMAND_DEADLINE is not None and time.time() >= _COMMAND_DEADLINE:
+                raise RuntimeError("model recovery stopped at the campaign deadline") from error
+            attempt += 1
             prompt = ("Continue the same isolated campaign investigation after an interrupted model call. "
                       "Re-read the saved session context and current raw evidence; do not duplicate lifecycle "
                       "actions or discard any partial candidate. Complete the requested response now.\n\n" + message)
+            time.sleep(min(5 * attempt, 60))
 
 
 def _progress(config: Config, phase: str, state: State, **details) -> None:

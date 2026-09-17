@@ -47,8 +47,8 @@ candidate against raw evidence, runs the required verification, commits only
 the declared files, and records the verified milestone in `CURRENT_STATUS.md`
 before starting the next fresh run and observation team. A failed, timed-out,
 or empty Union Alpha call is resumed through its saved session with an explicit
-continue prompt, up to three times; exhausted recovery parks the episode and
-preserves its evidence. Successful plastic acceptance runs repeat the same candidate;
+continue prompt until it responds or the fixed campaign deadline expires. A
+campaign-deadline exit preserves its episode and evidence. Successful plastic acceptance runs repeat the same candidate;
 they do not require an invented code change. The console displays acceptance
 streaks and achieved milestone times; longer survival never counts as success.
 
