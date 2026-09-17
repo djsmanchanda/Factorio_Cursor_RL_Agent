@@ -43,12 +43,8 @@ def test_player_direct_placement_rejected_before_other_actions(atomic, entity):
         assert(result.failed_entities == 1)
         assert(created == 0)
         local trash = require('trash_requesters')
-        local destroyed = false
-        local chest = {valid = true, force = {name = 'player'},
-            destroy = function() destroyed = true end}
-        local ok, reason = trash.revive_with_trash(surface, chest)
-        assert(ok == false and reason == 'replacement_forbidden')
-        assert(not destroyed and created == 0)
+        assert(trash.managed_force('player'))
+        assert(not trash.managed_force('training-01'))
     """)
     result = subprocess.run([LUA, '-'], input='\n'.join(scripts), text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

@@ -34,11 +34,12 @@ script.on_event(defines.events.on_robot_built_entity, function(event)
     end
   end
 
-  -- Preserve the legacy sandbox behavior only. Never replace a player chest
-  -- after construction to apply settings unavailable through the runtime API.
+  -- Bot-built requester ghosts cannot carry the blueprint trash flag. Apply
+  -- the same setting to deterministic player/planner chests immediately after
+  -- construction; training forces are excluded by trash_requesters.
   if entity.valid and entity.name == "requester-chest" then
     local force_name = entity.force and entity.force.name
-    if entity.surface.name == "planner-sandbox" and trash_requesters.managed_force(force_name) then
+    if trash_requesters.managed_force(force_name) then
       trash_requesters.revive_with_trash(entity.surface, entity)
     end
   end
