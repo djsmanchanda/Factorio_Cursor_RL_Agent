@@ -86,6 +86,34 @@ def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) 
     )
 
 
+def test_mall_expansion_precedes_native_am2_upgrades(monkeypatch) -> None:
+    """AM1 replacement stock stays available until the dense bank is full."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        builder, "_bootstrap_state",
+        lambda _recipe: SimpleNamespace(
+            measured_output_count=1, lifecycle_state="released",
+        ),
+    )
+    monkeypatch.setattr(
+        builder, "_direct_plate_foundation_ready", lambda *_a: True,
+    )
+    monkeypatch.setattr(
+        builder, "_dense_bootstrap_mall_enabled", lambda *_a: True,
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(
+        builder, "_upgrade_bootstrap_mall",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("upgrade ran early")),
+    )
+
+    assert builder._promote_mall_after_iron(
+        object(), object(), "nauvis", "player", {}, (3.0, -1.0),
+        lambda _message: None,
+    ) is False
+
+
 def test_rotating_loan_finds_missing_circuit_prerequisite(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock",

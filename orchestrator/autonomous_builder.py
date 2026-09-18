@@ -11511,6 +11511,22 @@ def _promote_mall_after_iron(
         return False
     if not _direct_plate_foundation_ready(client, surface, force, "iron-plate"):
         return False
+    # Keep AM1 replacement stock available for the reserved dense bank first.
+    # Upgrading the opening cells before the top/bottom expansion can reserve
+    # the exact AM1s needed to move from the three visible cells to twelve
+    # slots, leaving the mall stuck behind its own upgrade demand.
+    if _dense_bootstrap_mall_enabled(client, surface, force):
+        try:
+            committed = mall_slot_count(client, surface, reference_point)
+        except Exception:
+            committed = 0
+        if committed < DEMAND_MALL_SLOT_TARGET:
+            emit(
+                f"  MALL UPGRADE DEFERRED: dense expansion is at "
+                f"{committed}/{DEMAND_MALL_SLOT_TARGET} slots; reserving "
+                "AM1 stock for the top/bottom mall bank first"
+            )
+            return False
     return _upgrade_bootstrap_mall(
         client, bridge, surface, force, mall_targets, reference_point, emit,
         assemblers_only=True,
