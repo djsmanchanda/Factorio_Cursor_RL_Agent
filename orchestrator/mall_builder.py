@@ -145,23 +145,14 @@ def quad_mall_center(reference_point: Point) -> Point:
     )
 
 
-def quad_support_inserter_type(
-    recipe: str, available_stock: Mapping[str, int] | None = None,
-) -> str:
-    """Return the vertical support tier without creating a self-seed cycle.
+def quad_support_inserter_type(recipe: str) -> str:
+    """Return the required dense vertical transfer tier.
 
-    A long-handed-inserter cell cannot use its own output to place its first
-    two vertical transfers.  It therefore starts with regular inserters, but
-    that fallback must be temporary: once long-handed stock exists, retries
-    should replace the regular supports so the cell matches the dense layout.
+    Every dense vertical transfer is long-handed.  The long-handed recipe is
+    seeded through the ordinary paired horizontal cell until one is in stock;
+    it is never admitted to the dense bay with a regular-inserter fallback.
     """
-    if recipe != "long-handed-inserter":
-        return "long-handed-inserter"
-    if available_stock is not None and available_stock.get(
-        "long-handed-inserter", 0,
-    ) > 0:
-        return "long-handed-inserter"
-    return "inserter"
+    return "long-handed-inserter"
 
 
 def dense_mall_module_centers(reference_point: Point) -> tuple[Point, ...]:
@@ -892,6 +883,21 @@ def build_quad_mall_stage(
 ) -> Point:
     """Fill one half of the four-machine bootstrap module."""
     spec = LINE_RECIPES[recipe]
+    if recipe == "long-handed-inserter" and callable(
+        getattr(client, "command", None),
+    ):
+        stock = live_base.transferable_items(client, surface, force)
+        if stock.get("long-handed-inserter", 0) <= 0:
+            from orchestrator.autonomous_builder import (
+                ProductionPrerequisiteDeferred,
+            )
+            raise ProductionPrerequisiteDeferred(
+                "dense long-handed-inserter mall waits for existing "
+                "long-handed support stock; seed it in a paired cell first",
+                code="dense_long_handed_support_wait",
+                state="supply_wait",
+                details={"item": recipe},
+            )
     allocation = preview_quad_mall_allocation(
         client, surface, recipe, reference_point,
     )
@@ -903,11 +909,7 @@ def build_quad_mall_stage(
     # requester and provider transfers use long-handed inserters in the
     # declared order. Horizontal west/east positions keep regular inserters.
     seed_inserter = "inserter"
-    available_stock = (
-        live_base.transferable_items(client, surface, force)
-        if callable(getattr(client, "command", None)) else {}
-    )
-    support_inserter = quad_support_inserter_type(recipe, available_stock)
+    support_inserter = quad_support_inserter_type(recipe)
     plan = generate_quad_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,

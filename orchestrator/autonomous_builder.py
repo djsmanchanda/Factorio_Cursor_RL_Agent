@@ -3588,13 +3588,22 @@ def _dense_bootstrap_mall_enabled(
 
 def _quad_bootstrap_mall_enabled(
     client: RconClient, surface: str, force: str,
-    reference_point: Point | None = None,
+    reference_point: Point | None = None, recipe: str | None = None,
 ) -> bool:
     """Use the dense bay only after the opening paired bank is full."""
     if not _dense_bootstrap_mall_enabled(client, surface, force):
         return False
     if not hasattr(client, "command"):
         return True
+    # The long-handed line must be seeded in a horizontal paired cell.  A
+    # vertical dense cell needs long-handed supports before it can be built;
+    # admitting it with regular supports only creates a producer that cannot
+    # satisfy its own geometry and eventually stalls the run.  Once one real
+    # long-handed item is transferable, the dense path is safe again.
+    if recipe == "long-handed-inserter":
+        stock = _transferable_or_available_stock(client, surface, force)
+        if stock.get("long-handed-inserter", 0) <= 0:
+            return False
     try:
         return mall_slot_count(client, surface, reference_point or (3.0, -1.0)) >= (
             _DENSE_MALL_EXPANSION_TRIGGER_SLOTS
@@ -7255,7 +7264,7 @@ def _reserve_compact_mall_project(
     quad_mall = bool(
         reference_point is not None
         and _quad_bootstrap_mall_enabled(
-            client, surface, force, reference_point,
+            client, surface, force, reference_point, item,
         )
     )
     allocation = (
@@ -7267,17 +7276,11 @@ def _reserve_compact_mall_project(
     project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
     if quad_mall and allocation is not None:
         project_id = f"quad_mall_{item}_{allocation[1]}"
-        support_stock = (
-            live_base.transferable_items(client, surface, force)
-            if callable(getattr(client, "command", None)) else {}
-        )
         bill = quad_mall_project_bill(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
             inserter_type="inserter",
-            support_inserter_type=quad_support_inserter_type(
-                item, support_stock,
-            ),
+            support_inserter_type=quad_support_inserter_type(item),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and allocation[1] == "top"
@@ -7747,7 +7750,7 @@ def _build_assembled_stage(
                 )
     elif not upgrade_bootstrap:
         quad_mall = _quad_bootstrap_mall_enabled(
-            client, surface, force, reference_point,
+            client, surface, force, reference_point, item,
         )
         output = build_compact_mall_stage(
             client, bridge, surface, force, item, sources, reference_point,
@@ -8475,7 +8478,7 @@ def _bootstrap_demand_cell_affordable(
     ):
         return False, {}
     quad_mall = _quad_bootstrap_mall_enabled(
-        client, surface, force, reference_point,
+        client, surface, force, reference_point, item,
     )
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
@@ -8508,18 +8511,12 @@ def _bootstrap_demand_cell_affordable(
         cell_machine = "assembling-machine-1"
     except KeyError:
         cell_machine = "assembling-machine-1"
-    support_stock = (
-        live_base.transferable_items(client, surface, force)
-        if callable(getattr(client, "command", None)) else {}
-    )
     bill = (
         quad_mall_project_bill(
             item, side, stock_target=max(1, target),
             machine_name=cell_machine,
             inserter_type="inserter",
-            support_inserter_type=quad_support_inserter_type(
-                item, support_stock,
-            ),
+            support_inserter_type=quad_support_inserter_type(item),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and side == "top"

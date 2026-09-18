@@ -191,17 +191,13 @@ def test_quad_vertical_transfers_use_long_handed_inserters_in_order() -> None:
     )
 
 
-def test_long_handed_inserter_bootstrap_uses_regular_supports() -> None:
+def test_dense_vertical_supports_are_always_long_handed() -> None:
     assert quad_support_inserter_type("electronic-circuit") == (
         "long-handed-inserter"
     )
-    assert quad_support_inserter_type("long-handed-inserter") == "inserter"
-
-
-def test_long_handed_inserter_supports_upgrade_after_stock_exists() -> None:
-    assert quad_support_inserter_type(
-        "long-handed-inserter", {"long-handed-inserter": 1},
-    ) == "long-handed-inserter"
+    assert quad_support_inserter_type("long-handed-inserter") == (
+        "long-handed-inserter"
+    )
 
 
 def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
