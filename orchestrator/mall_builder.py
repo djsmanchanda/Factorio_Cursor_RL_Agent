@@ -19,6 +19,7 @@ from planners.quad_mall_layout import (
     generate_quad_mall_layout,
 )
 from planners.recipe_data import LINE_RECIPES
+from planners.stock_gating import stock_gate
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
