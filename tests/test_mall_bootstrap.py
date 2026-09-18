@@ -513,6 +513,86 @@ def test_loan_cell_telemetry_names_missing_ingredient_pool_and_loans(
     assert "splitter:transport-belt@(47.5,32.5)" in line
 
 
+def test_loan_cell_telemetry_counts_the_missing_item_network_wide(
+    monkeypatch,
+) -> None:
+    """Run 3 (2026-09-18): transferable=18 in each verdict line beside a
+    loan requester holding 0 could mean a bot-delivery fault or a logistic
+    coverage/segmentation fault, and the line could not tell them apart.
+    The counts-AT-the-requester probe answers it with one number."""
+    from orchestrator import autonomous_builder as builder
+
+    loan = _telemetry_loan()
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents", lambda *_a: {},
+    )
+    counts: dict[str, int] = {"iron-plate": 18}
+    monkeypatch.setattr(
+        builder.live_base, "network_item_count",
+        lambda _cl, _surface, _force, _position, item: counts.get(item),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans", lambda *_a: (loan,),
+    )
+    got: dict[str, object] = {}
+
+    def _record(line: str) -> None:
+        got["line"] = line
+
+    # No reference point: the caller passes none on loan waits.
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", loan,
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        {"iron-gear-wheel": 0}, 40, _record,
+    )
+    assert "missing iron-plate" in got["line"]
+    assert "reachable iron-plate=18" in got["line"]
+
+    counts["iron-plate"] = 0
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", loan,
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        {"iron-gear-wheel": 0}, 40, _record,
+    )
+    assert "reachable iron-plate=0" in got["line"]
+
+
+def test_loan_cell_telemetry_hides_the_reachability_probe_when_not_missing(
+    monkeypatch,
+) -> None:
+    from orchestrator import autonomous_builder as builder
+
+    loan = _telemetry_loan()
+    called: list[object] = []
+
+    def _never(*_a, **_k) -> dict[str, int]:
+        called.append("probe")
+        raise AssertionError("must not probe a satisfied line")
+
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents", lambda *_a: {},
+    )
+    monkeypatch.setattr(builder.live_base, "network_item_count", _never)
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(
+        builder,
+        "active_bootstrap_loans",
+        lambda *_a: (loan,),
+    )
+    money_items = {"iron-plate": 50, "iron-gear-wheel": 50}
+    emitted: list[str] = []
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", loan,
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        money_items, 44, emitted.append,
+    )
+
+    assert len(emitted) == 1
+    assert "reachable" not in emitted[0]
+    assert called == []
+
+
 def test_loan_cell_telemetry_never_raises(monkeypatch) -> None:
     """Telemetry is zero-behavior: total probe failure still emits one
     skip marker instead of breaking the pass."""

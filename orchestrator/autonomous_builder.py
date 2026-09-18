@@ -5890,6 +5890,24 @@ def _emit_loan_cell_telemetry(
             f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
             for holder in loans
         ) or "-"
+        # Run 3 (2026-09-18) froze 100 passes with transferable=18 circuits
+        # beside a loan whose requester held 0: the verdict telemetry named
+        # the item but could not say whether the units were reachable in the
+        # requester's own logistic network or live beyond a coverage gap --
+        # the two live mechanisms that both end in bots never delivering.
+        # Counting the same ingredient network-wide AT the requester turns
+        # that ambiguity into one number: network>0 means a bot-delivery
+        # fault, network==0 means a coverage/segmentation fault.
+        far = "?"
+        if missing != "-":
+            try:
+                network_count = live_base.network_item_count(
+                    client, surface, force, loan.requester_position, missing,
+                )
+            except Exception:  # noqa: BLE001 -- diagnostic only
+                network_count = None
+            if network_count is not None:
+                far = f"{missing}={network_count}"
         emit(
             f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
             f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
@@ -5898,6 +5916,7 @@ def _emit_loan_cell_telemetry(
             f"/{need if need is not None else '?'} "
             f"| requester {requester} net {net} missing {missing} "
             f"| pool {pool} free | loans {table}"
+            + (f" | reachable {far}" if missing != "-" and far != "?" else "")
         )
     except Exception as error:
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
