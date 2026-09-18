@@ -675,3 +675,25 @@ def test_stage_delivery_telemetry_never_raises(monkeypatch) -> None:
 
     assert len(emitted) == 1
     assert "STAGE DELIVERY TELEMETRY" in emitted[0]
+
+
+def test_network_item_count_fails_closed_on_negative_readings(monkeypatch):
+    """Run 4 (2026-09-18): the FIX-0012 reachability probe read -2..-5 more
+    often than >=0, so the suffix was uninterpretable (unknown-not-zero) and
+    the delivery skip predicate could skip on bogus authority. A logistic
+    network inventory count cannot be negative: the probe must fail closed --
+    known non-negative stays authoritative, anything else reads unknown."""
+    from orchestrator import live_base
+
+    readings = iter(["18", "0", "-3", "NONE", "garbage"])
+    monkeypatch.setattr(
+        live_base, "_sc", lambda _client, _lua: next(readings),
+    )
+    class _FakeClient:  # probe shaped like the real RCON client
+        pass
+
+    assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") == 18
+    assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") == 0
+    assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
+    assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
+    assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None

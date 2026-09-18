@@ -2565,7 +2565,15 @@ def chest_has_items(
 def network_item_count(
     client: RconClient, surface: str, force: str, near: Point, item: str,
 ) -> int | None:
-    """Units of `item` inside the logistic network covering `near` (None: none)."""
+    """Units of `item` inside the logistic network covering `near` (None: none).
+
+    Live 2026-09-18: the same probe family read iron-plate at -2..-5 through
+    24 of 38 calls beside a loan cell with force-wide stock -- a network
+    inventory count cannot be negative, so those readings are a lookup or
+    sentinel fault, unknown-not-zero. Fail closed: report None, which callers
+    treat as "unknown" (the telemetry hides the probe; the delivery predicate
+    treats unknown as never skip) instead of an authoritative number.
+    """
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=s.find_logistic_network_by_position({"
@@ -2577,9 +2585,12 @@ def network_item_count(
     if raw == "NONE":
         return None
     try:
-        return int(float(raw))
+        count = int(float(raw))
     except ValueError:
         return None
+    if count < 0:
+        return None
+    return count
 
 
 def transfer_stock(
