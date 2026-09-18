@@ -139,7 +139,7 @@ def test_quad_bottom_half_reuses_requester_and_substation() -> None:
     assert bottom.get("substation", 0) == 0
 
 
-def test_runtime_quad_reservation_uses_regular_support_inserters(monkeypatch) -> None:
+def test_runtime_quad_reservation_uses_long_handed_support_inserters(monkeypatch) -> None:
     captured = {}
 
     def fake_bill(*args, **kwargs):
@@ -165,7 +165,72 @@ def test_runtime_quad_reservation_uses_regular_support_inserters(monkeypatch) ->
     assert affordable is True
     assert shortage == {}
     assert captured["inserter_type"] == "inserter"
-    assert captured["support_inserter_type"] == "inserter"
+    assert captured["support_inserter_type"] == "long-handed-inserter"
+
+
+def test_quad_vertical_transfers_use_long_handed_inserters_in_order() -> None:
+    spec = LINE_RECIPES["electronic-circuit"]
+    center = (39.5, 32.5)
+    plan = generate_quad_mall_layout(
+        "electronic-circuit", spec["machine"], spec["ingredients"],
+        spec["amounts"], center, "bottom", craft_time=spec["craft_time"],
+        inserter_type="inserter", support_inserter_type="long-handed-inserter",
+    )
+    by_position = {
+        (action["position"]["x"], action["position"]["y"]): action
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("entity", "").endswith("inserter")
+    }
+
+    assert by_position[(center[0], center[1] + 3.0)]["entity"] == (
+        "long-handed-inserter"
+    )
+    assert by_position[(center[0], center[1] + 2.0)]["entity"] == (
+        "long-handed-inserter"
+    )
+
+
+def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
+    import orchestrator.mall_builder as mall_builder
+
+    center = quad_mall_center((3.0, -1.0))
+    positions = {
+        (center[0], center[1] + 3.0): {"name": "inserter", "type": "inserter"},
+        (center[0], center[1] + 2.0): {
+            "name": "inserter", "type": "inserter",
+        },
+    }
+    monkeypatch.setattr(
+        mall_builder, "preview_quad_mall_allocation",
+        lambda *_a, **_k: (center, "bottom"),
+    )
+    monkeypatch.setattr(
+        mall_builder.live_base, "entity_at",
+        lambda _c, _s, position: positions.get(position),
+    )
+    monkeypatch.setattr(
+        mall_builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit: setattr(
+            mall_builder, "_test_plan", plan,
+        ),
+    )
+    monkeypatch.setattr(mall_builder, "_test_plan", None, raising=False)
+    monkeypatch.setattr(
+        mall_builder, "_existing_network_generation", lambda *_a: 5000.0,
+    )
+
+    build_quad_mall_stage(
+        SimpleNamespace(command=lambda *_a: ""), SimpleNamespace(), "nauvis",
+        "player", "electronic-circuit", {}, (3.0, -1.0),
+        lambda *_a, **_k: None, lambda *_a: None,
+    )
+
+    removals = [
+        action for action in mall_builder._test_plan["phases"][0]["actions"]
+        if action["action_type"] == "remove_entity"
+    ]
+    assert len(removals) == 2
+    assert all(action["entity"] == "inserter" for action in removals)
 
 
 def test_quad_bill_includes_support_inserters_before_submission() -> None:

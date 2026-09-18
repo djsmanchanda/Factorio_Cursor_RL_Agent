@@ -787,7 +787,7 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
-    if hasattr(client, "command"):
+    if callable(getattr(client, "command", None)):
         existing_network = live_base.pole_network_id(
             client, surface, substation,
         )
@@ -842,12 +842,12 @@ def build_quad_mall_stage(
     if allocation is None:
         raise StuckError("No assignable half remains in the quad bootstrap mall")
     center, group = allocation
-    # The opening four slots are the regular-inserter seed bank.  By the time
-    # this quad path is admitted, long-handed support has been observed, but
-    # ordinary inserters remain the cheap input/output choice until native
-    # upgrades promote the cells.
-    seed_module = False
+    # The opening four slots are the regular-inserter seed bank.  The dense
+    # expansion adds vertical north/south machines around that bank; their
+    # requester and provider transfers use long-handed inserters in the
+    # declared order. Horizontal west/east positions keep regular inserters.
     seed_inserter = "inserter"
+    support_inserter = "long-handed-inserter"
     plan = generate_quad_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,
@@ -856,11 +856,46 @@ def build_quad_mall_stage(
         set_recipe=spec.get("set_recipe", True),
         request_multiplier_override=request_multiplier_override,
         inserter_type=seed_inserter,
-        support_inserter_type=seed_inserter,
+        support_inserter_type=support_inserter,
         include_substation=not (
             center == quad_mall_center(reference_point) and group == "top"
         ),
     )
+    # Older runs admitted this expansion with regular vertical inserters.
+    # Remove those exact wrong-tier entities/ghosts before resubmitting the
+    # corrected long-handed pair; otherwise idempotent placement sees an
+    # occupied tile and leaves the fourth machine half permanently missing.
+    if callable(getattr(client, "command", None)):
+        wrong_supports = []
+        for side in QUAD_MALL_GROUP_MACHINES[group]:
+            if side not in {"north", "south"}:
+                continue
+            y = -3.0 if side == "north" else 3.0
+            output_y = -2.0 if side == "north" else 2.0
+            for y_offset in (y, output_y):
+                position = (center[0], center[1] + y_offset)
+                existing = live_base.entity_at(client, surface, position)
+                if not existing:
+                    continue
+                actual = (
+                    existing.get("ghost_name")
+                    if existing.get("type") == "entity-ghost"
+                    else existing.get("name")
+                )
+                if actual in {"inserter", "fast-inserter", "bulk-inserter"}:
+                    wrong_supports.append({
+                        "action_type": "remove_entity",
+                        "entity": actual,
+                        "position": {"x": position[0], "y": position[1]},
+                    })
+        if wrong_supports:
+            plan["phases"][0]["actions"] = (
+                wrong_supports + plan["phases"][0]["actions"]
+            )
+            emit(
+                f"  QUAD MALL REPAIR: replacing {len(wrong_supports)} "
+                "vertical inserter(s) with long-handed transfers"
+            )
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
     seed_module = center == quad_mall_center(reference_point) and group == "top"
