@@ -47,15 +47,15 @@ def test_dense_mall_pitch_keeps_adjacent_cells_clear() -> None:
     validate_no_collisions(plans)
 
 
-def test_cables_pair_before_opening_another_cell(monkeypatch) -> None:
+def test_permanent_anchors_use_separate_seed_cells(monkeypatch) -> None:
     reference = (3.0, -1.0)
     circuit_cell, belt_cell, *_rest = mall_builder._cell_origins(reference)
     states = {
         origin: ("-", "-", "-")
         for origin in mall_builder._cell_origins(reference)
     }
-    states[circuit_cell] = ("copper-cable", "-", "requester-chest")
-    states[belt_cell] = ("copper-cable", "-", "requester-chest")
+    states[circuit_cell] = ("iron-gear-wheel", "-", "requester-chest")
+    states[belt_cell] = ("-", "-", "-")
     monkeypatch.setattr(mall_builder, "_district_state", lambda *_args: states)
     monkeypatch.setattr(mall_builder, "_side_clear", lambda *_args: True)
     monkeypatch.setattr(
@@ -68,25 +68,8 @@ def test_cables_pair_before_opening_another_cell(monkeypatch) -> None:
     )
 
     assert mall_builder._choose_slot(
-        object(), "nauvis", "electronic-circuit", reference,
-    ) == (circuit_cell, "right")
-    states[circuit_cell] = (
-        "copper-cable", "electronic-circuit", "requester-chest",
-    )
-    assert mall_builder._choose_slot(
-        object(), "nauvis", "transport-belt", reference,
-    ) == (belt_cell, "right")
-    states = {
-        origin: ("-", "-", "-")
-        for origin in mall_builder._cell_origins(reference)
-    }
-    states[circuit_cell] = ("copper-cable", "-", "requester-chest")
-    states[belt_cell] = ("-", "-", "-")
-    monkeypatch.setattr(mall_builder, "_district_state", lambda *_args: states)
-
-    assert mall_builder._choose_slot(
         object(), "nauvis", "copper-cable", reference,
-    ) == (circuit_cell, "right")
+    ) == (belt_cell, "left")
 
 
 def test_post_plastic_demand_bank_reserves_twelve_separate_slots(

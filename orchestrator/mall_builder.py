@@ -38,12 +38,13 @@ _QUAD_MALL_CENTER_OFFSET = (4.5, 1.5)
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
-    # The reduced startup baseline deliberately contains two cable machines;
-    # keep them in the same lower paired cell before opening another origin.
-    frozenset({"copper-cable"}),
 })
 _INCOMPATIBLE_PAIRS = frozenset({
     frozenset({"electronic-circuit", "transport-belt"}),
+    # Permanent gear and cable anchors occupy separate seed cells. Their
+    # companion halves remain available for the two rotating startup slots.
+    frozenset({"iron-gear-wheel", "copper-cable"}),
+    frozenset({"copper-cable"}),
 })
 
 
