@@ -6615,12 +6615,21 @@ def _borrow_free_mall_cell(
         spec = LINE_RECIPES.get(original_recipe)
         if spec is None:
             continue
-        line = live_base.find_line(
-            client, surface, force, original_recipe, str(spec["machine"]),
-            # Anchor protection counts real producers only: an unbuilt ghost
-            # is not capacity that remains after borrowing the working cell.
-            include_ghosts=False,
-        )
+        # A mall cell may be placed on a capability-aware tier that differs
+        # from the catalog's preferred tier (for example electronic-circuit
+        # can be built on AM1 before AM2 production exists).  Borrowing must
+        # discover the real line across every live assembler tier or it will
+        # report an empty pool even though a complete cell is available.
+        line = None
+        for machine_tier in live_base.ASSEMBLER_TIERS:
+            line = live_base.find_line(
+                client, surface, force, original_recipe, str(machine_tier),
+                # Anchor protection counts real producers only: an unbuilt
+                # ghost is not capacity that remains after borrowing the cell.
+                include_ghosts=False,
+            )
+            if line is not None:
+                break
         if line is None:
             continue
         if require_stocked_original and stock.get(original_recipe, 0) < 1:
