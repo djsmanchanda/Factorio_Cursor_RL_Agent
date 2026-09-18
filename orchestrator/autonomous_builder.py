@@ -4177,14 +4177,46 @@ def _adopt_legacy_steel_seed_reservation(
     )
 
 
+def _verified_iron_pioneer_output(
+    client, surface: str, provider: Point | None,
+) -> bool:
+    """Whether a submitted iron replacement still has a usable pioneer feed."""
+    if provider is None or not callable(getattr(client, "command", None)):
+        return False
+    try:
+        contents = live_base.chest_contents(client, surface, provider)
+    except Exception:
+        return False
+    return int(contents.get("iron-plate", 0)) > 0
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
     state = _bootstrap_state("iron-plate")
-    if state is None or state.lifecycle_state != "released":
+    if state is None:
         raise ProductionPrerequisiteDeferred(
             "compact steel waits for verified iron production and starter retirement",
             code="steel_iron_retirement_wait", state="retiring",
+        )
+    if state.lifecycle_state != "released":
+        # The iron replacement needs medium poles, while the steel seed makes
+        # the steel that replenishes those poles. Once the exact replacement
+        # has been submitted and its temporary pioneer provider has delivered
+        # iron, let the fenced two-pole steel seed break that cycle. Retirement
+        # still waits for the replacement's own first-output lifecycle proof.
+        if (
+            state.lifecycle_state == "pioneer"
+            or not getattr(state, "replacement_submitted", False)
+            or not _verified_iron_pioneer_output(client, surface, provider)
+        ):
+            raise ProductionPrerequisiteDeferred(
+                "compact steel waits for verified iron production and starter retirement",
+                code="steel_iron_retirement_wait", state="retiring",
+            )
+        emit(
+            "  STEEL STARTER CYCLE BREAK: using verified iron pioneer output "
+            "before full starter retirement; the fenced pole reserve funds it"
         )
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None:

@@ -22,10 +22,28 @@ def test_seed_has_no_feed_belt_and_fits(direction, mined):
 
 
 def test_seed_cannot_precede_iron_retirement(monkeypatch):
-    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: SimpleNamespace(lifecycle_state="validating"))
+    monkeypatch.setattr(
+        builder, "_bootstrap_state",
+        lambda *_a: SimpleNamespace(
+            lifecycle_state="validating", replacement_submitted=True,
+        ),
+    )
+    monkeypatch.setattr(builder, "_verified_iron_pioneer_output", lambda *_a: False)
     with pytest.raises(builder.ProductionPrerequisiteDeferred) as error:
         builder._build_compact_steel_seed(object(), object(), "nauvis", "player", (0,0), (0,0), print)
     assert error.value.code == "steel_iron_retirement_wait"
+
+
+def test_verified_iron_pioneer_output_breaks_steel_cycle(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(
+        builder.live_base, "chest_contents",
+        lambda *_a: {"iron-plate": 3},
+    )
+
+    assert builder._verified_iron_pioneer_output(
+        client, "nauvis", (10.5, 10.5),
+    ) is True
 
 
 def test_steel_seed_adopts_legacy_reservation_without_taking_power_bridge_stock(tmp_path):
