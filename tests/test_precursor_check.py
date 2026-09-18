@@ -138,4 +138,4 @@ def test_the_record_does_not_leak_between_runs() -> None:
 def test_the_essentials_the_player_named_are_in_the_prep_set() -> None:
     """'copper cable and gear assembly machines are absolutely necessary'."""
     assert BASELINE_MACHINES["copper-cable"] >= 1
-    assert BASELINE_MACHINES["iron-gear-wheel"] >= 2
+    assert BASELINE_MACHINES["iron-gear-wheel"] >= 1

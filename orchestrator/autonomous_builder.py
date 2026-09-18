@@ -3498,12 +3498,14 @@ def _upgrade_owned_plate_transport(
 
 _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
-# Before advanced circuits, permanent and rotating work starts in one dense
-# four-machine module. Once the iron pioneer is released, two more reserved
-# modules expand that same bank to twelve without moving the first mine's mall
-# or consuming six new requesters. Advanced-circuit production still releases
+# Before advanced circuits, one gear anchor, one cable anchor, and two
+# demand-driven rotating slots form the opening bank. The pool grows to eight
+# slots as demand rises. Once the iron pioneer is released, reserved dense
+# modules expand that bank to twelve without moving the first mine's mall or
+# consuming six new requesters. Advanced-circuit production still releases
 # the independent mall completely.
-_PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 4
+_PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 8
+_DENSE_MALL_EXPANSION_TRIGGER_SLOTS = 4
 _LEGACY_DRY_MALL_SLOT_TARGET = 8
 _PRE_PLASTIC_MALL_SLOT_TARGET = DEMAND_MALL_SLOT_TARGET
 _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
@@ -3534,17 +3536,9 @@ def _bootstrap_mall_slot_limit(
     # without demanding the six requesters required by six ordinary pairs.
     if _dense_bootstrap_mall_enabled(client, surface, force):
         return DEMAND_MALL_SLOT_TARGET
-    # Real runs observe the direct metal starters before mall construction;
-    # keep the opening pair bank at four until long-handed support exists.
-    # Dry harnesses that have no starter observation retain the legacy
-    # eight-slot contract so catalog-only callers do not invent live geometry.
-    if _STARTUP_METAL_STARTERS_OBSERVED:
-        return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
-    return (
-        _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
-        if _STARTUP_METAL_STARTERS_OBSERVED
-        else _LEGACY_DRY_MALL_SLOT_TARGET
-    )
+    # Both live and dry callers may grow the rotating pool to eight slots;
+    # demand, rather than baseline prep, decides when those extra slots exist.
+    return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
 
 
 def _dense_bootstrap_mall_enabled(
@@ -3582,7 +3576,7 @@ def _quad_bootstrap_mall_enabled(
         return True
     try:
         return mall_slot_count(client, surface, reference_point or (3.0, -1.0)) >= (
-            _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
+            _DENSE_MALL_EXPANSION_TRIGGER_SLOTS
         )
     except Exception:
         return False

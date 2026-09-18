@@ -39,10 +39,10 @@ def _output_rate(recipe: str, machines: int) -> float:
 
 def test_the_prep_set_is_the_agreed_one() -> None:
     assert BASELINE_MACHINES == {
-        "iron-gear-wheel": 2,
-        "copper-cable": 2,
+        "iron-gear-wheel": 1,
+        "copper-cable": 1,
     }
-    assert sum(BASELINE_MACHINES.values()) == 4
+    assert sum(BASELINE_MACHINES.values()) == 2
 
 
 def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
@@ -66,9 +66,9 @@ def test_nothing_smelted_is_prepped_as_a_mall_cell() -> None:
 
 
 def test_cable_capacity_covers_the_circuit_machine_it_feeds() -> None:
-    """The two cable anchors cover one early circuit consumer."""
+    """A second rotating cable slot covers one early circuit consumer."""
     active_machines = 1
-    made = _output_rate("copper-cable", BASELINE_MACHINES["copper-cable"])
+    made = _output_rate("copper-cable", 2)
     needed = (
         active_machines
         * MACHINE_SPEEDS[LINE_RECIPES["electronic-circuit"]["machine"]]
@@ -84,8 +84,8 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
     draw = baseline_plate_draw()
 
     assert set(draw) == set(BASELINE_PLATES)
-    assert draw["iron-plate"] == pytest.approx(6.0)
-    assert draw["copper-plate"] == pytest.approx(3.0)
+    assert draw["iron-plate"] == pytest.approx(3.0)
+    assert draw["copper-plate"] == pytest.approx(1.5)
 
 
 def test_mall_burst_draw_expands_nested_plate_requirements() -> None:
@@ -111,9 +111,9 @@ def test_mall_burst_has_a_bounded_influence_on_standing_draw() -> None:
     assert adjusted["copper-plate"] == baseline["copper-plate"]
 
 def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
-    """The two gear anchors draw 6.0 plate/s, so prep raises extraction beyond
-    the opening six-drill row without reserving a circuit cell."""
-    assert baseline_drill_phase("iron-plate") == 12
+    """The single gear anchor draws 3.0 plate/s, so prep stays on the opening
+    six-drill row without reserving a circuit cell."""
+    assert baseline_drill_phase("iron-plate") == 6
     assert EXTRACTION_DRILL_PHASES[0] == 6
 
 

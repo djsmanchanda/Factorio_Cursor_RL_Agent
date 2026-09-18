@@ -62,7 +62,7 @@ def test_pre_advanced_mall_starts_with_one_dense_four_slot_module(monkeypatch) -
     monkeypatch.setattr(builder, "_bootstrap_state", lambda _recipe: None)
     monkeypatch.setattr(builder, "_STARTUP_METAL_STARTERS_OBSERVED", True)
 
-    assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 4
+    assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 8
 
 
 def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) -> None:
