@@ -38,10 +38,12 @@ _QUAD_MALL_CENTER_OFFSET = (4.5, 1.5)
 _PREFERRED_PAIRS = frozenset({
     frozenset({"electronic-circuit", "copper-cable"}),
     frozenset({"transport-belt", "copper-cable"}),
+    # The reduced startup baseline deliberately contains two cable machines;
+    # keep them in the same lower paired cell before opening another origin.
+    frozenset({"copper-cable"}),
 })
 _INCOMPATIBLE_PAIRS = frozenset({
     frozenset({"electronic-circuit", "transport-belt"}),
-    frozenset({"copper-cable"}),
 })
 
 
@@ -283,6 +285,21 @@ def preview_mall_allocation(
     return _choose_slot(
         client, surface, recipe, reference_point, demand_slot=demand_slot,
     )
+
+
+def mall_allocation_completes_pair(
+    client: RconClient, surface: str,
+    allocation: tuple[tuple[int, int], str] | None,
+) -> bool:
+    """Whether an allocation fills the open half of an existing cell."""
+    if allocation is None:
+        return False
+    origin, _side = allocation
+    state = _district_state(client, surface, [origin]).get(origin)
+    if state is None:
+        return False
+    left, right, requester = state
+    return requester == "requester-chest" and (left == "-") != (right == "-")
 
 
 def mall_slot_is_demand(

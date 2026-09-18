@@ -47,7 +47,7 @@ def test_dense_mall_pitch_keeps_adjacent_cells_clear() -> None:
     validate_no_collisions(plans)
 
 
-def test_cables_split_between_circuits_and_transport_belts(monkeypatch) -> None:
+def test_cables_pair_before_opening_another_cell(monkeypatch) -> None:
     reference = (3.0, -1.0)
     circuit_cell, belt_cell, *_rest = mall_builder._cell_origins(reference)
     states = {
@@ -81,11 +81,12 @@ def test_cables_split_between_circuits_and_transport_belts(monkeypatch) -> None:
         for origin in mall_builder._cell_origins(reference)
     }
     states[circuit_cell] = ("copper-cable", "-", "requester-chest")
+    states[belt_cell] = ("-", "-", "-")
     monkeypatch.setattr(mall_builder, "_district_state", lambda *_args: states)
 
     assert mall_builder._choose_slot(
         object(), "nauvis", "copper-cable", reference,
-    ) == (belt_cell, "left")
+    ) == (circuit_cell, "right")
 
 
 def test_post_plastic_demand_bank_reserves_twelve_separate_slots(

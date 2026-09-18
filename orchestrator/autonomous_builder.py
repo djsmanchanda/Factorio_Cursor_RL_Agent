@@ -57,6 +57,7 @@ from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
     DEMAND_MALL_SLOT_TARGET,
     locate_mall_cell,
+    mall_allocation_completes_pair,
     mall_cell_needs_rebuild,
     mall_demand_slot_count,
     mall_entity_positions,
@@ -7494,7 +7495,19 @@ def _build_assembled_stage(
             mall_slot_count(client, surface, reference_point)
         )
         slot_limit = _bootstrap_mall_slot_limit(client, surface, force)
-        if _mall_slot_cap_reached(committed, slot_limit):
+        pair_completion = False
+        if plan.existing is not None and not plan.at_size:
+            try:
+                allocation = preview_mall_allocation(
+                    client, surface, item, reference_point,
+                    demand_slot=getattr(plan, "demand_slot", False),
+                )
+                pair_completion = mall_allocation_completes_pair(
+                    client, surface, allocation,
+                )
+            except Exception:
+                pair_completion = False
+        if _mall_slot_cap_reached(committed, slot_limit) and not pair_completion:
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
                 f"{slot_limit} assemblers are committed; "
