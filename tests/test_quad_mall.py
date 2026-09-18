@@ -9,7 +9,8 @@ from orchestrator import autonomous_builder as builder
 from orchestrator.mall_builder import (
     _cell_origins, build_quad_mall_stage, dense_mall_module_centers,
     preview_quad_mall_allocation, quad_mall_center,
-    quad_mall_project_bill, seed_cell_includes_substation,
+    quad_mall_project_bill, quad_support_inserter_type,
+    seed_cell_includes_substation,
     seed_expansion_reserved_tiles, seed_shared_substation,
 )
 from planners.plan_validation import validate_no_collisions
@@ -188,6 +189,13 @@ def test_quad_vertical_transfers_use_long_handed_inserters_in_order() -> None:
     assert by_position[(center[0], center[1] + 2.0)]["entity"] == (
         "long-handed-inserter"
     )
+
+
+def test_long_handed_inserter_bootstrap_uses_regular_supports() -> None:
+    assert quad_support_inserter_type("electronic-circuit") == (
+        "long-handed-inserter"
+    )
+    assert quad_support_inserter_type("long-handed-inserter") == "inserter"
 
 
 def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:

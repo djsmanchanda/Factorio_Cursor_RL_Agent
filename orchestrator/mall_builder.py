@@ -145,6 +145,11 @@ def quad_mall_center(reference_point: Point) -> Point:
     )
 
 
+def quad_support_inserter_type(recipe: str) -> str:
+    """Return the vertical support tier without creating a self-seed cycle."""
+    return "inserter" if recipe == "long-handed-inserter" else "long-handed-inserter"
+
+
 def dense_mall_module_centers(reference_point: Point) -> tuple[Point, ...]:
     """Return the fixed 4, 8, and 12-slot module centres."""
     first = quad_mall_center(reference_point)
@@ -868,7 +873,7 @@ def build_quad_mall_stage(
     # requester and provider transfers use long-handed inserters in the
     # declared order. Horizontal west/east positions keep regular inserters.
     seed_inserter = "inserter"
-    support_inserter = "long-handed-inserter"
+    support_inserter = quad_support_inserter_type(recipe)
     plan = generate_quad_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,

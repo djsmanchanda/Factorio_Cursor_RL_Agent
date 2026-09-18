@@ -66,6 +66,7 @@ from orchestrator.mall_builder import (
     mall_slot_uses_shared_provider,
     next_shared_provider_retrofit_plan,
     quad_mall_center,
+    quad_support_inserter_type,
     preview_quad_mall_allocation,
     quad_mall_project_bill,
     preview_mall_allocation,
@@ -7250,7 +7251,7 @@ def _reserve_compact_mall_project(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
             inserter_type="inserter",
-            support_inserter_type="long-handed-inserter",
+            support_inserter_type=quad_support_inserter_type(item),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and allocation[1] == "top"
@@ -8486,7 +8487,7 @@ def _bootstrap_demand_cell_affordable(
             item, side, stock_target=max(1, target),
             machine_name=cell_machine,
             inserter_type="inserter",
-            support_inserter_type="long-handed-inserter",
+            support_inserter_type=quad_support_inserter_type(item),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and side == "top"
