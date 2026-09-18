@@ -1363,6 +1363,44 @@ def test_survey_snapshots_transferable_history(monkeypatch) -> None:
     assert builder._DRAIN_WATCH_LAST_TRANSFERABLE == {_DRAIN_KEY: 130}
 
 
+def test_active_mall_bill_prerequisites_are_promoted(monkeypatch, tmp_path) -> None:
+    """A pending mall cell owns priority over ordinary standing reserves."""
+    from orchestrator.material_reservations import MaterialReservationLedger
+
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output", episode_id="ep", surface="nauvis", force="player",
+    )
+    ledger.declare(
+        "quad_mall_fast-inserter_top",
+        {"assembling-machine-2": 2, "long-handed-inserter": 2, "requester-chest": 1},
+        {}, target_item="fast-inserter", priority=100,
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 0)
+    promoted: list[tuple[str, int]] = []
+    priorities = SimpleNamespace(
+        sync=lambda *_a: None,
+        promote=lambda item, target, _tick: promoted.append((item, target)),
+        next=lambda targets, *_a: SimpleNamespace(item=next(iter(targets)))
+        if targets else None,
+    )
+    targets: dict[str, int] = {}
+
+    builder._survey_pass(object(), "nauvis", "player", targets, priorities)
+
+    assert targets == {
+        "assembling-machine-2": 2,
+        "long-handed-inserter": 2,
+        "requester-chest": 1,
+    }
+    assert set(promoted) == {
+        ("assembling-machine-2", 2),
+        ("long-handed-inserter", 2),
+        ("requester-chest", 1),
+    }
+
+
 def test_am1_reserve_requeues_after_native_upgrades_drain_it(monkeypatch) -> None:
     """AM1 is a rotating seed batch, so later upgrades must reopen it."""
     mall_targets: dict[str, int] = {}

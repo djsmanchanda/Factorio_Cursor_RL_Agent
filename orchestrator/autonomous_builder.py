@@ -12162,6 +12162,9 @@ def _survey_pass(
         if count > stock.get(item, 0):
             mall_targets[item] = max(mall_targets.get(item, 0), count)
             _BLOCKING_MALL_ITEMS.add(item)
+    _promote_material_bill_prerequisites(
+        stock, mall_targets, priorities, tick,
+    )
     priorities.sync(mall_targets, stock, tick)
     # Binding demands outrank standing reserves while they block placed
     # ghosts; entries retire with their demand so a past bottleneck cannot
@@ -12276,6 +12279,48 @@ def _pass_signature(
         )),
         tuple(sorted(prepped)),
     )
+
+
+def _promote_material_bill_prerequisites(
+    stock: Mapping[str, int], mall_targets: dict[str, int],
+    priorities: PriorityList, tick: int,
+) -> None:
+    """Promote every missing item owned by an active mall build bill.
+
+    The visible ghost bill is only the last step.  A mall expansion can still
+    be waiting on an assembler tier, inserters, chests, poles, or an input
+    ingredient that has not become a visible ghost yet.  Those items must win
+    over standing reserves and unrelated mission work or the mall starves
+    while the controller keeps restocking background producers.
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return
+    missing: dict[str, int] = {}
+    for project_id, project in ledger.projects.items():
+        if not ledger.project_is_active(project_id):
+            continue
+        try:
+            ledger.shortage_targets(project_id, stock)
+        except Exception:
+            continue
+        current = ledger.projects.get(project_id)
+        if current is None:
+            continue
+        for item, required in current.required.items():
+            outstanding = max(
+                0, int(required) - int(current.reserved.get(item, 0)),
+            )
+            if outstanding:
+                missing[item] = missing.get(item, 0) + outstanding
+    if not missing:
+        return
+    promote = getattr(priorities, "promote", None)
+    for item, target in sorted(missing.items()):
+        mall_targets[item] = max(int(mall_targets.get(item, 0)), target)
+        _BLOCKING_MALL_ITEMS.add(item)
+        if promote is not None:
+            promote(item, mall_targets[item], tick)
 
 
 def _outstanding_work_signature(signature: tuple) -> tuple:
