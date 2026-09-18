@@ -81,7 +81,73 @@ def test_stocked_iron_stick_schedules_a_real_producer(monkeypatch):
     assert calls[0][1]["upgrade_bootstrap"] is False
 
 
-def test_stocked_inserter_schedules_a_real_producer(monkeypatch):
+def test_post_starter_swap_unbacked_gear_draw_schedules_a_producer(monkeypatch):
+    """After the metal starter swaps retire, an unbacked stocked draw of a rail
+    item outside PERSISTENT_INTERMEDIATES arms the same permanent-cell
+    admission the demand-cell machinery uses. Live 2026-09-18: the
+    plastic-bar run had no producing gear line anywhere from ~+1878s onward
+    yet consumed the gear buffer for 2100s while the advanced-circuit gate
+    stayed false forever -- the 12-pass verdict then named
+    unbacked_draws=[iron-gear-wheel, iron-stick] at +5726s."""
+    calls = []
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_args: {"iron-gear-wheel": 1080},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete",
+        lambda *_args: True,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or None,
+    )
+
+    result = builder._ingredient_sources(
+        object(), object(), "nauvis", "player", "assembling-machine-2",
+        (0.0, 0.0), lambda _message: None,
+        _plan("assembling-machine-2", "iron-gear-wheel"),
+        upgrade_bootstrap=False,
+    )
+
+    assert result is None
+    assert len(calls) == 1
+    assert calls[0][0][4] == "iron-gear-wheel"
+    assert calls[0][1]["upgrade_bootstrap"] is False
+
+
+def test_before_starter_swap_the_gear_draw_stays_a_waiting_draw(monkeypatch):
+    """The post-swap arm must not fire cold start: rails with no producer and
+    no retired starters stay stock draws (the survey owns replenishment)."""
+    calls = []
+    builder.UNBACKED_DRAWS.clear()
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_args: {"iron-gear-wheel": 1080},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or None,
+    )
+
+    try:
+        result = builder._ingredient_sources(
+            object(), object(), "nauvis", "player", "assembling-machine-2",
+            (0.0, 0.0), lambda _message: None,
+            _plan("assembling-machine-2", "iron-gear-wheel"),
+            upgrade_bootstrap=False,
+        )
+    finally:
+        builder.UNBACKED_DRAWS.clear()
+
+    assert result == {}
+    assert calls == []
     """When mall cells draw regular inserters from stock without a live producer,
     schedule a real producer before the initial inventory runs out."""
     calls = []

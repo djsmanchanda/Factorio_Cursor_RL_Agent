@@ -7343,8 +7343,25 @@ def _ingredient_sources(
             )
             if (
                 not backed
-                and ingredient in PERSISTENT_INTERMEDIATES
-                and _power_generation_capability_started(client, surface, force)
+                and (
+                    (
+                        ingredient in PERSISTENT_INTERMEDIATES
+                        and _power_generation_capability_started(
+                            client, surface, force,
+                        )
+                    )
+                    # After the metal starter swaps retire, permanent-cell
+                    # admission is already allowed everywhere else; an
+                    # unbacked stocked draw may then arm it too. The
+                    # advanced-circuit gate alone never armed during the
+                    # plastic-bar contract: live 2026-09-18 the base drew
+                    # iron-gear-wheel and iron-stick from stock with no
+                    # producing line anywhere for 2100s and the 12-pass
+                    # verdict named exactly those unbacked draws at +5726s.
+                    or _metal_starter_transition_complete(
+                        client, surface, force,
+                    )
+                )
             ):
                 emit(
                     f"  MALL BOOTSTRAP: scheduling a persistent {ingredient} "
