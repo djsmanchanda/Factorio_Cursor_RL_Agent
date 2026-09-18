@@ -51,6 +51,36 @@ _INCOMPATIBLE_PAIRS = frozenset({
 })
 
 
+def _configure_built_mall_recipes(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, machine_name: str, machine_positions: list[Point],
+    stock_gate_target: int | None, emit: Callable[[str], None],
+) -> None:
+    """Assign recipes after bots have turned mall ghosts into machines."""
+    actions = []
+    for x, y in machine_positions:
+        action = {
+            "action_type": "configure_entity",
+            "entity": machine_name,
+            "position": {"x": x, "y": y},
+            "recipe": recipe,
+        }
+        if stock_gate_target is not None:
+            action["logistic_condition"] = stock_gate(recipe, stock_gate_target)
+        actions.append(action)
+    if not actions:
+        return
+    plan = {
+        "surface": surface,
+        "force": force,
+        "phases": [{
+            "name": f"mall_recipe_{recipe}",
+            "actions": actions,
+        }],
+    }
+    _submit(client, bridge, surface, plan, f"mall_recipe_{recipe}", emit)
+
+
 def _clear_stale_side_requests(
     client: RconClient, surface: str, requester_action: dict,
     recipe: str, side: str,
@@ -867,6 +897,10 @@ def build_compact_mall_stage(
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
         reserved_tiles=reserved_tiles,
     )
+    _configure_built_mall_recipes(
+        client, bridge, surface, force, recipe,
+        machine_name or spec["machine"], [machine], stock_gate_target, emit,
+    )
     return provider
 
 
@@ -1026,6 +1060,10 @@ def build_quad_mall_stage(
         center, stage_area, substation, machines, emit,
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
         reserved_tiles=reserved_tiles,
+    )
+    _configure_built_mall_recipes(
+        client, bridge, surface, force, recipe,
+        machine_name or spec["machine"], machines, stock_gate_target, emit,
     )
     provider_offset = (0.0, -1.0) if group == "top" else (0.0, 1.0)
     return (center[0] + provider_offset[0], center[1] + provider_offset[1])

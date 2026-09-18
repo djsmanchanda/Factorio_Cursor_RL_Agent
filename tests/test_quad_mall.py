@@ -218,13 +218,11 @@ def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
         mall_builder.live_base, "entity_at",
         lambda _c, _s, position: positions.get(position),
     )
+    submitted: list[dict] = []
     monkeypatch.setattr(
         mall_builder, "_submit",
-        lambda _c, _b, _s, plan, _name, _emit: setattr(
-            mall_builder, "_test_plan", plan,
-        ),
+        lambda _c, _b, _s, plan, _name, _emit: submitted.append(plan),
     )
-    monkeypatch.setattr(mall_builder, "_test_plan", None, raising=False)
     monkeypatch.setattr(
         mall_builder, "_existing_network_generation", lambda *_a: 5000.0,
     )
@@ -236,13 +234,13 @@ def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
     )
 
     removals = [
-        action for action in mall_builder._test_plan["phases"][0]["actions"]
+        action for action in submitted[0]["phases"][0]["actions"]
         if action["action_type"] == "remove_entity"
     ]
     assert len(removals) == 2
     assert all(action["entity"] == "inserter" for action in removals)
     machine = next(
-        action for action in mall_builder._test_plan["phases"][0]["actions"]
+        action for action in submitted[0]["phases"][0]["actions"]
         if action.get("entity", "").startswith("assembling-machine-")
     )
     assert "recipe" not in machine
@@ -382,7 +380,10 @@ def test_quad_top_admission_accepts_an_already_powered_shared_seed_anchor(monkey
         lambda *args, **kwargs: staged.append(args), messages.append,
     )
 
-    assert submitted == ["quad_mall_electronic-circuit_top"]
+    assert submitted == [
+        "quad_mall_electronic-circuit_top",
+        "mall_recipe_electronic-circuit",
+    ]
     assert staged and staged[0][4] == "quad bootstrap mall for electronic-circuit"
     assert provider[0] == center[0]
 
