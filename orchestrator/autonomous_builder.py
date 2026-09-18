@@ -6637,11 +6637,18 @@ def _borrow_free_mall_cell(
         anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
         if line.machine_count <= anchor_minimum:
             # Gear and cable are the bootstrap mall's feedstock anchors. A
-            # recipe loan may use a duplicate, never the last producer.
+            # recipe loan may use a duplicate, never the last producer.  Once
+            # transferable anchor stock is already above the protected floor,
+            # temporarily lending that sole cell is safe and breaks the
+            # pre-advanced capacity cycle (especially the shared cable half).
             # Counts are real machines only: borrowing the sole working cell
             # while an unbuilt ghost poses as its duplicate strands the
             # recipe (2026-09-04 cable collapse).
-            continue
+            if (
+                original_recipe not in _MALL_RECIPE_ANCHORS
+                or int(stock.get(original_recipe, 0)) <= anchor_minimum
+            ):
+                continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
             if located is None:
