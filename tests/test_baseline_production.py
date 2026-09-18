@@ -41,10 +41,8 @@ def test_the_prep_set_is_the_agreed_one() -> None:
     assert BASELINE_MACHINES == {
         "iron-gear-wheel": 2,
         "copper-cable": 2,
-        "electronic-circuit": 1,
-        "transport-belt": 1,
     }
-    assert sum(BASELINE_MACHINES.values()) == 6
+    assert sum(BASELINE_MACHINES.values()) == 4
 
 
 def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
@@ -61,19 +59,19 @@ def test_direct_plate_foundation_precedes_capacity_expansion() -> None:
 def test_nothing_smelted_is_prepped_as_a_mall_cell() -> None:
     """A furnace takes its recipe from what is inserted, so an idle one reports
     none and find_line can never count it. Prep saw zero however many it had
-    built and placed another cell every pass -- twelve steel-plate furnaces
-    across six mall cells in one run."""
+    built and placed another cell every pass -- keep smelting out of the mall
+    baseline entirely."""
     for recipe in BASELINE_MACHINES:
         assert LINE_RECIPES[recipe].get("set_recipe", True), recipe
 
 
 def test_cable_capacity_covers_the_circuit_machine_it_feeds() -> None:
-    """When a circuit consumer is active, copper cable maintains at least 2 machines."""
-    active_machines = 2
-    made = _output_rate("copper-cable", active_machines)
+    """The two cable anchors cover one early circuit consumer."""
+    active_machines = 1
+    made = _output_rate("copper-cable", BASELINE_MACHINES["copper-cable"])
     needed = (
-        BASELINE_MACHINES["electronic-circuit"]
-        * MACHINE_SPEEDS["assembling-machine-2"]
+        active_machines
+        * MACHINE_SPEEDS[LINE_RECIPES["electronic-circuit"]["machine"]]
         / LINE_RECIPES["electronic-circuit"]["craft_time"]
         * 3
     )
@@ -86,7 +84,7 @@ def test_plate_draw_counts_every_direct_consumer() -> None:
     draw = baseline_plate_draw()
 
     assert set(draw) == set(BASELINE_PLATES)
-    assert draw["iron-plate"] == pytest.approx(9.0)
+    assert draw["iron-plate"] == pytest.approx(6.0)
     assert draw["copper-plate"] == pytest.approx(3.0)
 
 
@@ -113,9 +111,9 @@ def test_mall_burst_has_a_bounded_influence_on_standing_draw() -> None:
     assert adjusted["copper-plate"] == baseline["copper-plate"]
 
 def test_iron_needs_the_next_phase_up_from_a_starting_row() -> None:
-    """9.0 plate/s is well past what six drills carry -- the reason prep has
-    to raise extraction rather than inherit the opening row."""
-    assert baseline_drill_phase("iron-plate") == 24
+    """The two gear anchors draw 6.0 plate/s, so prep raises extraction beyond
+    the opening six-drill row without reserving a circuit cell."""
+    assert baseline_drill_phase("iron-plate") == 12
     assert EXTRACTION_DRILL_PHASES[0] == 6
 
 
@@ -158,8 +156,7 @@ def test_build_order_puts_a_feeder_before_what_it_feeds() -> None:
     order = baseline_build_order()
 
     assert order == (
-        "iron-gear-wheel", "copper-cable", "electronic-circuit",
-        "transport-belt",
+        "iron-gear-wheel", "copper-cable",
     )
 
 

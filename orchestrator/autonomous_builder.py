@@ -11329,7 +11329,11 @@ def _prep_intermediate(
     pending = [r for r in baseline_build_order() if r not in prepped]
     if pending:
         recipe = pending[0]
-        wanted = BASELINE_MACHINES[recipe]
+        # Keep custom/test prep orders and demand-driven feeder admission
+        # compatible with the reduced four-slot baseline: recipes removed
+        # from the standing set (circuits/belts) default to one requested
+        # machine when explicitly queued.
+        wanted = BASELINE_MACHINES.get(recipe, 1)
         line = live_base.find_line(
             client, surface, force, recipe, LINE_RECIPES[recipe]["machine"],
         )
