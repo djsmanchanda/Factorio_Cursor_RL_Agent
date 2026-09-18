@@ -496,15 +496,6 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
                 include_substation=True, craft_time=spec["craft_time"],
             )
             reserved.update(planned_footprint_tiles(plan))
-        # Keep the open service lanes inside the module envelope clear too.
-        # They are where a power bridge most often otherwise drops a pole.
-        left = int(center[0] - 7)
-        top = int(center[1] - 7)
-        reserved.update(
-            (x, y)
-            for x in range(left, left + 15)
-            for y in range(top, top + 15)
-        )
     return reserved
 
 
