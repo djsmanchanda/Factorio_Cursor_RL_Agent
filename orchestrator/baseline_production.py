@@ -16,11 +16,11 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 #
 # Counts are machines, and deliberately small -- this is a standing baseline,
 # not a target. The opening mall keeps one permanent anchor each for
-# iron-gear-wheel and copper-cable. Two additional slots are demand-driven
-# rotating work; the pool grows to eight slots before advanced circuits. A new
-# need below that cap adds capacity as required; at the cap the shared slots
-# rotate instead. Steel-plate is deliberately NOT here. It is smelted, not
-# assembled:
+# iron-gear-wheel and copper-cable, plus two seeded rotating slots for
+# electronic-circuit and transport-belt. The pool grows to eight slots before
+# advanced circuits; a new need below that cap adds capacity as required, and
+# at the cap the shared slots rotate instead. Steel-plate is deliberately NOT
+# here. It is smelted, not assembled:
 # a furnace takes its recipe from what is inserted, so an idle one reports no
 # recipe and find_line can never count it. Prep saw zero however many it had
 # built and placed another cell every pass -- twelve furnaces across six mall
@@ -29,6 +29,8 @@ from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 BASELINE_MACHINES = {
     "iron-gear-wheel": 1,
     "copper-cable": 1,
+    "electronic-circuit": 1,
+    "transport-belt": 1,
 }
 
 # A plate the prep set consumes has to be mined and smelted; anything else in

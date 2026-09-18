@@ -944,9 +944,9 @@ def test_furnace_cap_lifts_only_after_a_working_furnace_producer(monkeypatch) ->
 
 
 def test_iron_prep_asks_for_more_than_a_starting_row() -> None:
-    """The single gear anchor keeps iron on the opening six-drill row."""
-    assert baseline_smelter_count("iron-plate") == 5
-    assert baseline_drill_phase("iron-plate") == 6
+    """The reduced one-anchor baseline stays on the smaller iron phase."""
+    assert baseline_smelter_count("iron-plate") == 10
+    assert baseline_drill_phase("iron-plate") == 12
 
 
 def test_copper_prep_is_satisfied_by_a_smaller_row() -> None:
