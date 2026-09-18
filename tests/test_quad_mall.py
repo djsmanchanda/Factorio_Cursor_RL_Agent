@@ -198,6 +198,12 @@ def test_long_handed_inserter_bootstrap_uses_regular_supports() -> None:
     assert quad_support_inserter_type("long-handed-inserter") == "inserter"
 
 
+def test_long_handed_inserter_supports_upgrade_after_stock_exists() -> None:
+    assert quad_support_inserter_type(
+        "long-handed-inserter", {"long-handed-inserter": 1},
+    ) == "long-handed-inserter"
+
+
 def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
     import orchestrator.mall_builder as mall_builder
 
@@ -280,6 +286,10 @@ def test_seed_power_bridge_reserves_all_dense_module_tiles() -> None:
     reserved = seed_expansion_reserved_tiles((3.0, -1.0))
     assert (39, 27) in reserved
     assert (36, 47) in reserved
+    # The power route must preserve the interior service lanes of every
+    # relative module, not just the half currently being submitted.
+    assert (45, 37) in reserved
+    assert (36, 42) in reserved
 
 
 def test_dense_bank_has_three_reserved_module_centres() -> None:

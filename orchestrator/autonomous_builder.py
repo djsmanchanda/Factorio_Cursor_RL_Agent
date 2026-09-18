@@ -844,6 +844,7 @@ def _apply_remedy(
     remedy: str, description: str, origin: Point, substation_position: Point,
     machine_positions: list[Point], logistic_chest_positions: Sequence[Point],
     area: tuple[Point, Point] | None, emit: Callable[[str], None],
+    *, reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> bool:
     """Apply the one remedy a diagnosis asked for; report whether it acted.
 
@@ -851,6 +852,16 @@ def _apply_remedy(
     has to charge before it serves a logistic area, so the honest answer is
     'nothing to do yet' -- the caller waits it out rather than giving up.
     """
+    def extend_power_for_stage(position: Point) -> bool:
+        if reserved_tiles is None:
+            return bool(extend_power(
+                client, bridge, surface, force, position, emit,
+            ))
+        return bool(extend_power(
+            client, bridge, surface, force, position, emit,
+            reserved_tiles=reserved_tiles,
+        ))
+
     if remedy == "coverage":
         # The stage origin is only an anchor. A long output belt can extend
         # beyond it while the anchor itself remains covered, which used to
@@ -864,6 +875,7 @@ def _apply_remedy(
                     break
         acted = extend_roboport_coverage(
             client, bridge, surface, force, coverage_target, emit,
+            reserved_tiles=reserved_tiles,
         )
     elif remedy == "coverage_charge_wait":
         emit(
@@ -881,8 +893,13 @@ def _apply_remedy(
         # no-op here is reported and waited out rather than treated as
         # fatal -- but it is no longer silent, and a run where every single
         # round was a no-op now says so instead of timing out anonymously.
+        coverage_kwargs = (
+            {"reserved_tiles": reserved_tiles}
+            if reserved_tiles is not None else {}
+        )
         acted = ensure_logistic_coverage(
             client, bridge, surface, force, logistic_chest_positions, emit,
+            **coverage_kwargs,
         )
         if not acted:
             emit(
@@ -901,9 +918,7 @@ def _apply_remedy(
             nearest = (float(x), float(y))
         else:
             nearest = live_base.nearest_roboport(client, surface, force, origin)
-        if nearest is not None and not extend_power(
-            client, bridge, surface, force, nearest, emit,
-        ):
+        if nearest is not None and not extend_power_for_stage(nearest):
             raise StuckError(
                 f"{name}: {description}, but no power bridge can be built from the "
                 f"roboport at {nearest} -- either no pole stands there or the whole "
@@ -916,9 +931,7 @@ def _apply_remedy(
         # recorded position or no second network to bridge to; the previous
         # code discarded that, so the loop re-ran an identical no-op for
         # every remaining round and reported only a bare timeout.
-        acted = extend_power(
-            client, bridge, surface, force, substation_position, emit,
-        )
+        acted = extend_power_for_stage(substation_position)
         if not acted:
             # A scaffold can already be on the source network while one or
             # more machines sit outside its supply area (for example, the
@@ -933,9 +946,7 @@ def _apply_remedy(
                 if statuses.get(tuple(position)) == "no_power"
             ]
             for position in stranded:
-                acted |= extend_power(
-                    client, bridge, surface, force, position, emit,
-                )
+                acted |= extend_power_for_stage(position)
         if not acted:
             raise StuckError(
                 f"{name}: {description}, but no power bridge can be built from "
@@ -952,9 +963,7 @@ def _apply_remedy(
             # precisely because no single pole position covers them all.
             acted = False
             for position in stranded:
-                acted |= extend_power(
-                    client, bridge, surface, force, position, emit,
-                )
+                acted |= extend_power_for_stage(position)
             if not acted:
                 raise StuckError(
                     f"{name}: {description}, but none of {stranded} can be reached "
@@ -1168,6 +1177,7 @@ def bring_stage_up(
     *, rounds: int = _BLOCKAGE_ROUNDS, interval: float = _BLOCKAGE_INTERVAL,
     logistic_chest_positions: Sequence[Point] = (),
     on_observation: Callable[[], None] | None = None,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> None:
     """Work a stage until it is physically alive, like an open ticket.
 
@@ -1181,9 +1191,13 @@ def bring_stage_up(
     # waiting on bots -- and logistic coverage BEFORE the chests are even built,
     # so they join a network the moment they exist rather than after a stage has
     # visibly starved.
-    extend_roboport_coverage(client, bridge, surface, force, origin, emit)
+    extend_roboport_coverage(
+        client, bridge, surface, force, origin, emit,
+        reserved_tiles=reserved_tiles,
+    )
     ensure_logistic_coverage(
         client, bridge, surface, force, logistic_chest_positions, emit,
+        reserved_tiles=reserved_tiles,
     )
     description, remedy, acted_ever = "no blockage recorded", "none", False
     extensions = 0
@@ -1256,11 +1270,17 @@ def bring_stage_up(
             continue
         description, remedy = issue
         emit(f"  [{name} #{attempt}/{total_rounds}] OPEN: {description} -> remedy: {remedy}")
-        acted = _apply_remedy(
+        remedy_args = (
             client, bridge, surface, force, name, remedy, description, origin,
             substation_position, machine_positions, logistic_chest_positions,
             area, emit,
         )
+        if reserved_tiles is None:
+            acted = _apply_remedy(*remedy_args)
+        else:
+            acted = _apply_remedy(
+                *remedy_args, reserved_tiles=reserved_tiles,
+            )
         acted_ever |= bool(acted)
     if rebuilt_stale and remaining:
         pending = live_base.ghost_blockages(client, surface, force, area)
@@ -7247,11 +7267,17 @@ def _reserve_compact_mall_project(
     project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
     if quad_mall and allocation is not None:
         project_id = f"quad_mall_{item}_{allocation[1]}"
+        support_stock = (
+            live_base.transferable_items(client, surface, force)
+            if callable(getattr(client, "command", None)) else {}
+        )
         bill = quad_mall_project_bill(
             item, allocation[1], stock_target=plan.mall_storage_limit,
             machine_name=project_spec.get("machine"),
             inserter_type="inserter",
-            support_inserter_type=quad_support_inserter_type(item),
+            support_inserter_type=quad_support_inserter_type(
+                item, support_stock,
+            ),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and allocation[1] == "top"
@@ -8482,12 +8508,18 @@ def _bootstrap_demand_cell_affordable(
         cell_machine = "assembling-machine-1"
     except KeyError:
         cell_machine = "assembling-machine-1"
+    support_stock = (
+        live_base.transferable_items(client, surface, force)
+        if callable(getattr(client, "command", None)) else {}
+    )
     bill = (
         quad_mall_project_bill(
             item, side, stock_target=max(1, target),
             machine_name=cell_machine,
             inserter_type="inserter",
-            support_inserter_type=quad_support_inserter_type(item),
+            support_inserter_type=quad_support_inserter_type(
+                item, support_stock,
+            ),
             include_substation=not (
                 allocation[0] == quad_mall_center(reference_point)
                 and side == "top"

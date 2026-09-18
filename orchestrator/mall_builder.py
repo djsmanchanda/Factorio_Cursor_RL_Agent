@@ -145,9 +145,23 @@ def quad_mall_center(reference_point: Point) -> Point:
     )
 
 
-def quad_support_inserter_type(recipe: str) -> str:
-    """Return the vertical support tier without creating a self-seed cycle."""
-    return "inserter" if recipe == "long-handed-inserter" else "long-handed-inserter"
+def quad_support_inserter_type(
+    recipe: str, available_stock: Mapping[str, int] | None = None,
+) -> str:
+    """Return the vertical support tier without creating a self-seed cycle.
+
+    A long-handed-inserter cell cannot use its own output to place its first
+    two vertical transfers.  It therefore starts with regular inserters, but
+    that fallback must be temporary: once long-handed stock exists, retries
+    should replace the regular supports so the cell matches the dense layout.
+    """
+    if recipe != "long-handed-inserter":
+        return "long-handed-inserter"
+    if available_stock is not None and available_stock.get(
+        "long-handed-inserter", 0,
+    ) > 0:
+        return "long-handed-inserter"
+    return "inserter"
 
 
 def dense_mall_module_centers(reference_point: Point) -> tuple[Point, ...]:
@@ -473,7 +487,13 @@ def seed_cell_includes_substation(
 
 
 def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]]:
-    """Reserve dense-module footprints before routing seed power bridges."""
+    """Reserve the whole dense bank before routing power or coverage.
+
+    Reserving only the submitted half let a bridge pole or roboport land in a
+    future top/bottom half.  Every module is cheap to describe from the same
+    relative geometry, so reserve all three modules up front; this remains
+    relative to the mall reference and works on other map seeds.
+    """
     spec = LINE_RECIPES["iron-gear-wheel"]
     reserved: set[tuple[int, int]] = set()
     for center in dense_mall_module_centers(reference_point):
@@ -482,9 +502,18 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
                 "iron-gear-wheel", "assembling-machine-1",
                 spec["ingredients"], spec["amounts"], center, group,
                 inserter_type="inserter", support_inserter_type="inserter",
-                include_substation=False, craft_time=spec["craft_time"],
+                include_substation=True, craft_time=spec["craft_time"],
             )
             reserved.update(planned_footprint_tiles(plan))
+        # Keep the open service lanes inside the module envelope clear too.
+        # They are where a power bridge most often otherwise drops a pole.
+        left = int(center[0] - 7)
+        top = int(center[1] - 7)
+        reserved.update(
+            (x, y)
+            for x in range(left, left + 15)
+            for y in range(top, top + 15)
+        )
     return reserved
 
 
@@ -813,6 +842,9 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
+    reserved_tiles = planned_footprint_tiles(plan)
+    if seed_cell_uses_shared_substation(reference_point, origin):
+        reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
     if callable(getattr(client, "command", None)):
         existing_network = live_base.pole_network_id(
             client, surface, substation,
@@ -823,9 +855,6 @@ def build_compact_mall_stage(
             )
             if existing_network is not None else None
         )
-        reserved_tiles = planned_footprint_tiles(plan)
-        if seed_cell_uses_shared_substation(reference_point, origin):
-            reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
         if (
             (existing_generation is None or existing_generation <= 0)
             and not extend_power(
@@ -848,6 +877,7 @@ def build_compact_mall_stage(
         client, bridge, surface, force, f"compact mall for {recipe}",
         origin, stage_area, substation, [machine], emit,
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
+        reserved_tiles=reserved_tiles,
     )
     return provider
 
@@ -873,7 +903,11 @@ def build_quad_mall_stage(
     # requester and provider transfers use long-handed inserters in the
     # declared order. Horizontal west/east positions keep regular inserters.
     seed_inserter = "inserter"
-    support_inserter = quad_support_inserter_type(recipe)
+    available_stock = (
+        live_base.transferable_items(client, surface, force)
+        if callable(getattr(client, "command", None)) else {}
+    )
+    support_inserter = quad_support_inserter_type(recipe, available_stock)
     plan = generate_quad_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], center,
         group, stock_target=stock_target,
@@ -925,6 +959,10 @@ def build_quad_mall_stage(
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
     seed_module = center == quad_mall_center(reference_point) and group == "top"
+    reserved_tiles = (
+        planned_footprint_tiles(plan)
+        | seed_expansion_reserved_tiles(reference_point)
+    )
     substation = (
         seed_shared_substation(reference_point)
         if seed_module else (center[0] + 3.5, center[1] + 2.5)
@@ -942,7 +980,9 @@ def build_quad_mall_stage(
             (existing_generation is None or existing_generation <= 0)
             and not extend_power(
                 client, bridge, surface, force, substation, emit,
-                reserved_tiles=planned_footprint_tiles(plan),
+                reserved_tiles=(
+                    reserved_tiles
+                ),
             )
         ):
             # Staging wait on real infrastructure is a supply_wait, not a
@@ -984,6 +1024,7 @@ def build_quad_mall_stage(
         client, bridge, surface, force, f"quad bootstrap mall for {recipe}",
         center, stage_area, substation, machines, emit,
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
+        reserved_tiles=reserved_tiles,
     )
     provider_offset = (0.0, -1.0) if group == "top" else (0.0, 1.0)
     return (center[0] + provider_offset[0], center[1] + provider_offset[1])

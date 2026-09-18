@@ -11,8 +11,12 @@ from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
 
-_ALTERNATE_SEARCH_RADII = (20, 32, 48)
-_ALTERNATE_BEAM = 256
+# A factory corridor can be wider than one local 10-tile detour, especially
+# after mine transport and power routes have been built.  Keep the cheap local
+# search first, then widen the connected fallback far enough to route around a
+# complete district without baking in map coordinates.
+_ALTERNATE_SEARCH_RADII = (20, 32, 48, 64, 80)
+_ALTERNATE_BEAM = 512
 
 
 def _service_distance(source: Point, target: Point, square: bool) -> float:

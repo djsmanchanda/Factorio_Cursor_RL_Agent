@@ -1851,7 +1851,8 @@ def _logistic_chest_positions(plan: dict) -> list[Point]:
 
 def ensure_logistic_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    chest_positions: Sequence[Point], emit: Callable[[str], None],
+    chest_positions: Sequence[Point], emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
 ) -> bool:
     """Put every one of `chest_positions` inside a roboport's LOGISTIC supply
     area, chaining roboports out where it isn't. Returns True if anything was
@@ -1867,5 +1868,6 @@ def ensure_logistic_coverage(
     for position in sorted({tuple(p) for p in chest_positions}):
         added |= extend_roboport_coverage(
             client, bridge, surface, force, position, emit, purpose="logistic",
+            reserved_tiles=reserved_tiles,
         )
     return added
