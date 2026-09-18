@@ -653,7 +653,9 @@ def mall_cell_needs_rebuild(
     plan = generate_paired_mall_layout(
         recipe, spec["machine"], spec["ingredients"], spec["amounts"], origin,
         side, product_amount=spec.get("product_amount", 1),
-        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        # Blueprints carry the machine footprint only.  The recipe is applied
+        # by the post-construction stock-gate configuration pass.
+        craft_time=spec["craft_time"], set_recipe=False,
     )
     for phase in plan["phases"]:
         for action in phase["actions"]:
@@ -692,7 +694,9 @@ def rebuild_incomplete_mall_cell(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin,
         side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
-        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        # Blueprints carry the machine footprint only.  The recipe is applied
+        # by the post-construction stock-gate configuration pass.
+        craft_time=spec["craft_time"], set_recipe=False,
         include_substation=seed_cell_includes_substation(
             reference_point, origin, side,
         ),
@@ -795,7 +799,9 @@ def build_compact_mall_stage(
     plan = generate_paired_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
-        craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
+        # Blueprints carry the machine footprint only.  The recipe is applied
+        # by the post-construction stock-gate configuration pass.
+        craft_time=spec["craft_time"], set_recipe=False,
         include_substation=seed_cell_includes_substation(
             reference_point, origin, side,
         ),
@@ -906,7 +912,9 @@ def build_quad_mall_stage(
         group, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1), craft_time=spec["craft_time"],
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
-        set_recipe=spec.get("set_recipe", True),
+        # Assemblers are blueprinted first; configure the recipe only after
+        # construction has produced a real machine.
+        set_recipe=False,
         request_multiplier_override=request_multiplier_override,
         inserter_type=seed_inserter,
         support_inserter_type=support_inserter,

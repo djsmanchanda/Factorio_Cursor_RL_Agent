@@ -241,6 +241,11 @@ def test_quad_replaces_old_regular_vertical_supports(monkeypatch) -> None:
     ]
     assert len(removals) == 2
     assert all(action["entity"] == "inserter" for action in removals)
+    machine = next(
+        action for action in mall_builder._test_plan["phases"][0]["actions"]
+        if action.get("entity", "").startswith("assembling-machine-")
+    )
+    assert "recipe" not in machine
 
 
 def test_quad_bill_includes_support_inserters_before_submission() -> None:
