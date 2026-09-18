@@ -44,6 +44,9 @@ _INCOMPATIBLE_PAIRS = frozenset({
     # Permanent gear and cable anchors occupy separate seed cells. Their
     # companion halves remain available for the two rotating startup slots.
     frozenset({"iron-gear-wheel", "copper-cable"}),
+    # The gear seed's shared substation occupies the right-half service tile;
+    # keep transport-belt out of that half and choose the next clear cell.
+    frozenset({"iron-gear-wheel", "transport-belt"}),
     frozenset({"copper-cable"}),
 })
 

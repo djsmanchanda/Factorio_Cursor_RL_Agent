@@ -71,6 +71,11 @@ def test_permanent_anchors_use_separate_seed_cells(monkeypatch) -> None:
         object(), "nauvis", "copper-cable", reference,
     ) == (belt_cell, "left")
 
+    states[circuit_cell] = ("iron-gear-wheel", "-", "requester-chest")
+    assert mall_builder._choose_slot(
+        object(), "nauvis", "transport-belt", reference,
+    ) != (circuit_cell, "right")
+
 
 def test_post_plastic_demand_bank_reserves_twelve_separate_slots(
     monkeypatch,
