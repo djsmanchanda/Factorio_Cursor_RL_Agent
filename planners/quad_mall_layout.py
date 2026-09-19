@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from planners.mall_layout import (
-    _inventory_limit,
     compact_input_inserter,
     compact_output_inserter,
     recipe_group_name,
@@ -79,7 +78,7 @@ def generate_quad_mall_layout(
     actions.append({
         "action_type": "place_entity", "entity": "passive-provider-chest",
         "position": provider,
-        "inventory_limit": _inventory_limit(recipe, stock_target, fill_chest=fill_chest),
+        "clear_inventory_limit": True,
     })
     input_inserter = inserter_type or compact_input_inserter(
         machine, ingredients, amounts, craft_time,

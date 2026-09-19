@@ -369,6 +369,14 @@ local function configuration_error(entity, action, direction)
       return "inventory_limit_mismatch:expected=" .. expected .. ",actual=" .. tostring(actual)
     end
   end
+  if action.clear_inventory_limit then
+    local inventory = entity.get_inventory(defines.inventory.chest)
+    if not inventory then return "inventory_limit_missing_inventory" end
+    local ok = pcall(function()
+      if inventory.supports_bar() then inventory.set_bar() end
+    end)
+    if not ok then return "inventory_limit_read_failed" end
+  end
   if action.clear_logistic_condition then
     local behavior = entity.get_or_create_control_behavior()
     if not behavior then return "logistic_condition_unsupported" end
@@ -517,6 +525,14 @@ local function configure_created_entity(entity, action)
     local ok = pcall(function()
       if not inventory.supports_bar() then return end
       if bar <= #inventory then inventory.set_bar(bar) else inventory.set_bar() end
+    end)
+    if not ok then return "inventory_limit_set_failed" end
+  end
+  if action.clear_inventory_limit then
+    local inventory = entity.get_inventory(defines.inventory.chest)
+    if not inventory then return "inventory_limit_missing_inventory" end
+    local ok = pcall(function()
+      if inventory.supports_bar() then inventory.set_bar() end
     end)
     if not ok then return "inventory_limit_set_failed" end
   end

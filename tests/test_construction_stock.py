@@ -2101,18 +2101,8 @@ def test_startup_request_clamp_keeps_its_deliberate_policy(monkeypatch) -> None:
     assert overrides == [2]
 
 
-def test_canonical_provider_limit_is_monotonic_per_item(monkeypatch) -> None:
-    monkeypatch.setattr(builder, "_MALL_ITEM_PROVIDER_LIMITS", {})
-
-    assert builder._canonical_mall_provider_limit("n", "p", "gear", 5) == 5
-    assert builder._canonical_mall_provider_limit("n", "p", "gear", 3) == 5
-    assert builder._canonical_mall_provider_limit("n", "p", "gear", 240) == 240
-    assert builder._canonical_mall_provider_limit("n", "p", "belt", 3) == 3
-
-
-def test_twin_cells_converge_on_one_provider_limit(monkeypatch) -> None:
-    """Same item, two providers, different transient demands: both bars land
-    on the max (user standard 2026-09-04)."""
+def test_twin_cells_clear_provider_bars(monkeypatch) -> None:
+    """Same-item cells remain unbounded; assembler gates own production."""
     machines = ((50.5, 32.5), (56.5, 32.5))
     providers = iter([(10.0, 10.0), (20.0, 20.0)])
     submitted: list[dict] = []
@@ -2149,20 +2139,12 @@ def test_twin_cells_converge_on_one_provider_limit(monkeypatch) -> None:
             stock_gate_target=target,
         )
 
-    counts = [
-        count for plan in submitted for count in _provider_counts(plan)
-    ]
-    assert counts == [400, 400]
-
-
-def _provider_counts(plan: dict) -> list[int]:
-    return [
-        action["inventory_limit"]["count"]
-        for phase in plan["phases"]
-        for action in phase["actions"]
+    providers = [
+        action for plan in submitted
+        for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "passive-provider-chest"
-        and isinstance(action.get("inventory_limit"), dict)
     ]
+    assert providers and all(action["clear_inventory_limit"] for action in providers)
 
 
 def test_stock_parser_survives_a_glued_loan_record() -> None:
@@ -3246,8 +3228,7 @@ def _restore_harness(monkeypatch, *, shared: bool):
     return loan, submitted
 
 
-def test_restore_keeps_shared_provider_open(monkeypatch) -> None:
-    """Shared chests must not be re-barred behind another recipe's stacks."""
+def test_restore_clears_provider_bar(monkeypatch) -> None:
     loan, submitted = _restore_harness(monkeypatch, shared=True)
 
     builder._restore_bootstrap_loan(
@@ -3261,13 +3242,10 @@ def test_restore_keeps_shared_provider_open(monkeypatch) -> None:
         for action in phase["actions"]
         if action.get("entity") == "passive-provider-chest"
     ]
-    assert providers and all(
-        action["inventory_limit"].get("fill_chest") for action in providers
-    )
+    assert providers and all(action["clear_inventory_limit"] for action in providers)
 
 
-def test_restore_applies_canonical_to_dedicated(monkeypatch) -> None:
-    """Dedicated twins converge on the canonical count at restore."""
+def test_restore_clears_dedicated_provider_bar(monkeypatch) -> None:
     loan, submitted = _restore_harness(monkeypatch, shared=False)
 
     builder._restore_bootstrap_loan(
@@ -3276,8 +3254,12 @@ def test_restore_applies_canonical_to_dedicated(monkeypatch) -> None:
         reference_point=(3.0, -1.0),
     )
 
-    counts = _provider_counts(submitted[0])
-    assert counts and all(count == 240 for count in counts)
+    providers = [
+        action for phase in submitted[0]["phases"]
+        for action in phase["actions"]
+        if action.get("entity") == "passive-provider-chest"
+    ]
+    assert providers and all(action["clear_inventory_limit"] for action in providers)
 
 
 def test_chemical_handoff_parks_on_a_retry_horizon(monkeypatch) -> None:

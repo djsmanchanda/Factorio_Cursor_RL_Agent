@@ -593,7 +593,8 @@ def _submit(
     pending_configuration = []
     setting_fields = {
         "logistic_request", "logistic_requests", "logistic_sections",
-        "clear_logistic_groups", "inventory_limit", "logistic_condition",
+        "clear_logistic_groups", "inventory_limit", "clear_inventory_limit",
+        "logistic_condition",
         "clear_logistic_condition", "input_priority", "output_priority", "recipe",
     }
     for action in direct_actions:

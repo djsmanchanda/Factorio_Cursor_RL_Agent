@@ -237,7 +237,10 @@
             }
            }
           }
-         }
+          }
+        },
+        "clear_inventory_limit": {
+          "type": "boolean"
         },
         "infinity_filter": {
          "type": "string"

@@ -275,7 +275,7 @@ def test_compact_bill_includes_cell_entities_and_first_recipe_craft(
     )
     assert shared_right["assembling-machine-2"] == 1
     assert "requester-chest" not in shared_right
-    assert "passive-provider-chest" not in shared_right
+    assert shared_right["passive-provider-chest"] == 1
     assert "substation" not in shared_right
 
 

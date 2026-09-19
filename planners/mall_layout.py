@@ -8,32 +8,11 @@ import math
 from planners.recipe_data import FEED_HEADROOM, MACHINE_SPEEDS, inserter_for_demand
 from planners.stock_gating import stock_gate
 
-MALL_MINIMUM_STACKS = {
-    "production": 1,
-    "logistics": 4,
-    "intermediate-products": 10,
-}
-
 # A requester holds this many seconds of the machine's own consumption. Sizing
 # the buffer in TIME rather than in finished goods keeps it correct as machines
 # get faster: the same fifteen-second window resolves to a proportionally bigger
 # number and absorbs worker bot flight latency across the factory.
 MALL_SUPPLY_SECONDS = 15.0
-
-
-_UNLIMITED_CHEST_ITEMS = frozenset({"iron-gear-wheel", "copper-cable"})
-
-
-def _inventory_limit(recipe: str, stock_target: int, *, fill_chest: bool = False) -> dict:
-    limit = {
-        "name": recipe,
-        "count": stock_target,
-        "minimum_stacks_by_group": dict(MALL_MINIMUM_STACKS),
-    }
-    if fill_chest or recipe in _UNLIMITED_CHEST_ITEMS:
-        limit["fill_chest"] = True
-    return limit
-
 
 
 def compact_requests(
@@ -167,12 +146,17 @@ def generate_mall_provider_limit_update(
     recipe: str, provider_position: tuple[float, float], stock_target: int,
     *, fill_chest: bool = False,
 ) -> dict:
-    """Resize an existing mall provider to its storage ceiling."""
+    """Remove the physical inventory bar from an existing mall provider.
+
+    Mall production is bounded by the assembler's logistic stock gate.  A
+    provider chest bar is a second, independent cap that can strand mixed
+    output during loans and paired-cell expansion, so every mall provider is
+    kept unbounded.  The legacy arguments remain for callers and plan IDs.
+    """
     action = {
         "action_type": "place_entity", "entity": "passive-provider-chest",
         "position": {"x": provider_position[0], "y": provider_position[1]},
-        "inventory_limit": _inventory_limit(
-            recipe, stock_target, fill_chest=fill_chest),
+        "clear_inventory_limit": True,
     }
     return {"phases": [{"name": f"mall_provider_limit_{recipe}", "actions": [action]}]}
 
@@ -286,10 +270,10 @@ def generate_paired_mall_layout(
     left = side == "left"
     machine_x = ox + (1.5 if left else 7.5)
     input_x = ox + (3.5 if left else 5.5)
-    # During reduced-supply bootstrap the second half may share the upper
-    # provider. Both output inserters then flank that chest, saving the passive
-    # chest that would otherwise prevent useful temporary capacity.
-    provider_y = oy + (0.5 if left or shared_provider else 2.5)
+    # Every half owns its own provider.  Sharing the upper chest was a
+    # temporary bootstrap optimization; it mixes products and breaks the
+    # expandable quad-cell topology.
+    provider_y = oy + (0.5 if left else 2.5)
     output_x = ox + (3.5 if left else 5.5)
     # Inserters face the tile they pick up from. The requester is between the
     # two machines: the left machine picks up east and the right picks up west.
@@ -340,8 +324,6 @@ def generate_paired_mall_layout(
          "direction": output_direction},
         {"action_type": "place_entity", "entity": "passive-provider-chest",
          "position": {"x": ox + 4.5, "y": provider_y},
-         "inventory_limit": _inventory_limit(
-             recipe, stock_target,
-             fill_chest=fill_chest or shared_provider)},
+         "clear_inventory_limit": True},
     ])
     return {"phases": [{"name": f"paired_mall_{recipe}", "actions": actions}]}

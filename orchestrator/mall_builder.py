@@ -139,12 +139,10 @@ def compact_mall_project_bill(
     bill: Counter[str] = Counter(plan_material_bill(preview))
     if side == "right":
         # The cell's centre requester and substation already belong to its
-        # first half. A bootstrap-shared right half also reuses that half's
-        # provider, so none of those entities belongs in its incremental bill.
+        # first half. Each half owns a provider, so the right half only reuses
+        # the requester and substation.
         bill["requester-chest"] -= 1
         bill["substation"] -= 1
-        if shared_provider:
-            bill["passive-provider-chest"] -= 1
     for ingredient, amount in zip(
         spec["ingredients"], spec["amounts"], strict=True,
     ):

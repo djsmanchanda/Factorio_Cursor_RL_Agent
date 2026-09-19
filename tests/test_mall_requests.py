@@ -61,7 +61,7 @@ def test_both_halves_label_the_same_chest_differently() -> None:
     assert left["logistic_sections"][0]["group"] != right["logistic_sections"][0]["group"]
 
 
-def test_bootstrap_right_half_can_share_the_left_provider() -> None:
+def test_bootstrap_right_half_always_gets_its_own_provider() -> None:
     spec = LINE_RECIPES["advanced-circuit"]
     plan = generate_paired_mall_layout(
         "advanced-circuit", spec["machine"], spec["ingredients"],
@@ -76,11 +76,11 @@ def test_bootstrap_right_half_can_share_the_left_provider() -> None:
     output = next(
         action for action in actions
         if action.get("entity", "").endswith("inserter")
-        and action["position"] == {"x": 105.5, "y": 100.5}
+        and action["position"] == {"x": 105.5, "y": 102.5}
     )
 
-    assert provider["position"] == {"x": 104.5, "y": 100.5}
-    assert provider["inventory_limit"]["fill_chest"] is True
+    assert provider["position"] == {"x": 104.5, "y": 102.5}
+    assert provider["clear_inventory_limit"] is True
     assert output["direction"] == "east"
     assert not list(_SCHEMA.iter_errors(plan))
 

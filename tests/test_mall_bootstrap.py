@@ -159,7 +159,7 @@ def test_loan_configures_only_existing_entities_and_requests_step_inputs(
         action for action in actions
         if action["entity"] == "passive-provider-chest"
     )
-    assert provider["inventory_limit"]["fill_chest"] is True
+    assert provider["clear_inventory_limit"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 
@@ -179,7 +179,7 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
         action for action in actions
         if action["entity"] == "passive-provider-chest"
     )
-    assert provider["inventory_limit"]["fill_chest"] is True
+    assert provider["clear_inventory_limit"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 
@@ -210,7 +210,7 @@ def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
     ]
     assert machine["recipe"] == "pipe"
     assert machine["logistic_condition"]["constant"] == 100
-    assert provider["inventory_limit"]["fill_chest"] is True
+    assert provider["clear_inventory_limit"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 
@@ -320,31 +320,16 @@ def test_hovering_robot_is_not_parsed_as_the_borrowed_machine() -> None:
     assert loan.current_recipe == "transport-belt"
 
 
-def _provider_counts(plan: dict) -> list[int]:
-    return [
-        action["inventory_limit"]["count"]
-        for phase in plan["phases"]
-        for action in phase["actions"]
-        if action.get("entity") == "passive-provider-chest"
-        and isinstance(action.get("inventory_limit"), dict)
-    ]
-
-
-def test_restore_defaults_to_the_legacy_provider_count() -> None:
-    plan = restore_bootstrap_loan_plan(_loan("copper-cable"))
-
-    assert _provider_counts(plan) == [1]
-
-
-def test_restore_applies_the_canonical_twin_limit() -> None:
-    """Every live cell making the same item carries the same provider limit
-    (user standard 2026-09-04): a restored twin must not reset to 1 while its
-    sibling holds hundreds."""
-    plan = restore_bootstrap_loan_plan(
-        _loan("copper-cable"), provider_stock_target=240,
-    )
-
-    assert _provider_counts(plan) == [240]
+def test_restore_always_clears_the_provider_bar() -> None:
+    for target in (None, 240):
+        plan = restore_bootstrap_loan_plan(
+            _loan("copper-cable"), provider_stock_target=target,
+        )
+        provider = next(
+            action for phase in plan["phases"] for action in phase["actions"]
+            if action.get("entity") == "passive-provider-chest"
+        )
+        assert provider["clear_inventory_limit"] is True
 
 
 def _install_self_supply_recipes(monkeypatch) -> None:
@@ -443,21 +428,22 @@ def _restore_plan(provider_fill_chest: bool) -> dict:
     )
 
 
-def test_restore_opens_shared_providers() -> None:
-    """2026-09-04: resetting a count bar behind another recipe's stacks
-    stranded every future output on a shared chest."""
+def test_restore_clears_provider_bar() -> None:
     actions = [
         action for phase in _restore_plan(True)["phases"]
         for action in phase["actions"]
         if action.get("entity") == "passive-provider-chest"
     ]
-    assert actions and all(
-        action["inventory_limit"].get("fill_chest") for action in actions
-    )
+    assert actions and all(action["clear_inventory_limit"] for action in actions)
 
 
-def test_restore_applies_canonical_count_to_dedicated() -> None:
-    assert _provider_counts(_restore_plan(False)) == [240]
+def test_restore_clears_canonical_count_to_dedicated() -> None:
+    actions = [
+        action for phase in _restore_plan(False)["phases"]
+        for action in phase["actions"]
+        if action.get("entity") == "passive-provider-chest"
+    ]
+    assert actions and all(action["clear_inventory_limit"] for action in actions)
 
 
 def _telemetry_loan(**overrides) -> MallBootstrapLoan:

@@ -231,7 +231,7 @@ def test_ensure_produced_preserves_requirement_and_capacity_to_the_build(
     }
 
 
-def test_existing_mall_cell_gets_the_reserve_gate_and_storage_limit(
+def test_existing_mall_cell_gets_the_reserve_gate_and_clears_provider_bar(
     monkeypatch,
 ) -> None:
     machines = ((10.5, 10.5), (16.5, 10.5))
@@ -261,12 +261,12 @@ def test_existing_mall_cell_gets_the_reserve_gate_and_storage_limit(
         lambda _message: None, upgrade_bootstrap=False, stock_gate_target=1000,
     )
 
-    limit = next(actions(submitted[0]))["inventory_limit"]
+    provider = next(actions(submitted[0]))
     gates = [
         action["logistic_condition"]
         for action in actions(submitted[1])
     ]
-    assert limit["count"] == 1000
+    assert provider["clear_inventory_limit"] is True
     assert gates == [stock_gate("transport-belt", 1000)] * 2
 
 
@@ -319,12 +319,12 @@ def test_the_bar_is_only_touched_on_inventories_that_support_one() -> None:
     assert "supports_bar()" in _EXECUTOR
 
 
-def test_bootstrap_inventory_limits_are_exact_stack_counts() -> None:
-    assert "local usable_slots = math.max(minimum_stacks, target_stacks)" in _EXECUTOR
-    assert "growth_stacks" not in _EXECUTOR
+def test_mall_provider_bars_are_cleared_instead_of_reapplied() -> None:
+    assert "action.clear_inventory_limit" in _EXECUTOR
+    assert "inventory.set_bar()" in _EXECUTOR
 
 
-def test_a_mature_cell_explicitly_fills_the_provider_chest() -> None:
+def test_a_mature_cell_leaves_the_provider_chest_unbounded() -> None:
     plan = generate_paired_mall_layout(
         "transport-belt", "assembling-machine-2",
         ["iron-gear-wheel", "iron-plate"], [1, 1], (0, 0), "left",
@@ -336,7 +336,7 @@ def test_a_mature_cell_explicitly_fills_the_provider_chest() -> None:
         if action["entity"] == "passive-provider-chest"
     )
 
-    assert provider["inventory_limit"]["fill_chest"] is True
+    assert provider["clear_inventory_limit"] is True
 
 
 def test_a_mature_cell_clears_its_old_bootstrap_gate() -> None:
@@ -355,11 +355,11 @@ def test_the_executor_clears_and_verifies_an_old_gate() -> None:
     assert "logistic_condition_clear_failed" in _EXECUTOR
 
 
-def test_the_schema_distinguishes_exact_reserve_from_full_chest() -> None:
+def test_the_schema_exposes_mall_bar_clearance() -> None:
     fields = (
         _SCHEMA["properties"]["phases"]["items"]["properties"]["actions"]
         ["items"]["properties"]
     )
 
-    assert fields["inventory_limit"]["properties"]["fill_chest"]["type"] == "boolean"
+    assert fields["clear_inventory_limit"]["type"] == "boolean"
     assert fields["clear_logistic_condition"]["type"] == "boolean"
