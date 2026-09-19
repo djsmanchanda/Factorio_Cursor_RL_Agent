@@ -5060,11 +5060,10 @@ def _refresh_mall_cell(
                     _MALL_STOCK_GATE_FLOORS.get(gate_key, 0),
                 )
                 _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
-            capacity = (
-                "the full chest"
-                if shared_or_fill
-                else str(mall_storage_limit)
-            )
+            # The provider chest has no physical bar. Production is bounded
+            # by the assembler's logistic stock gate below, so mixed output
+            # and temporary loans cannot strand the chest behind a stale cap.
+            capacity = "unbounded"
             limit_plan = generate_mall_provider_limit_update(
                 item, mall_provider, mall_storage_limit,
                 fill_chest=shared_or_fill,
@@ -5074,7 +5073,7 @@ def _refresh_mall_cell(
             def refresh_provider_limit() -> None:
                 emit(
                     f"  MALL RESERVE: {item} provider at {mall_provider} "
-                    f"holds {capacity}"
+                    f"remains {capacity}; assembler stock gate owns the cap"
                 )
                 _submit(
                     client, bridge, surface, limit_plan,
