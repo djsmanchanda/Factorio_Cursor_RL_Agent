@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_case.schema.json",
+  "title": "LayaTrainingCase",
+  "description": "One versioned, provenance-carrying Laya typed-decision case.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "case_id",
+    "source",
+    "state",
+    "questions",
+    "gold",
+    "weights",
+    "created_at",
+    "dataset_version",
+    "split",
+    "label_provenance"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "case_id": { "$ref": "#/definitions/id" },
+    "source": { "$ref": "#/definitions/source" },
+    "state": { "$ref": "laya_state.schema.json" },
+    "questions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/definitions/questionId" },
+      "additionalProperties": { "$ref": "#/definitions/question" }
+    },
+    "gold": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/definitions/questionId" },
+      "additionalProperties": { "$ref": "#/definitions/goldAnswer" }
+    },
+    "weights": { "$ref": "#/definitions/weights" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "dataset_version": { "$ref": "#/definitions/version" },
+    "split": { "enum": ["train", "calibration", "held_out", "test"] },
+    "label_provenance": { "$ref": "#/definitions/labelProvenance" }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "questionId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "run_id", "provenance_hash"],
+      "properties": {
+        "kind": { "enum": ["rl_transition", "deterministic_run", "campaign_decision"] },
+        "run_id": { "$ref": "#/definitions/id" },
+        "episode_id": { "$ref": "#/definitions/id" },
+        "trajectory_id": { "$ref": "#/definitions/id" },
+        "scenario_id": { "$ref": "#/definitions/id" },
+        "scenario_seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "scenario_hash": { "$ref": "#/definitions/hash" },
+        "repository_revision": { "$ref": "#/definitions/nonEmptyString" },
+        "provenance_hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "instructions", "criteria"],
+      "properties": {
+        "type": { "enum": ["choice", "noul", "score"] },
+        "instructions": { "$ref": "#/definitions/nonEmptyString" },
+        "criteria": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "uniqueItems": true,
+              "items": { "$ref": "#/definitions/nonEmptyString" }
+            },
+            {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 20,
+              "propertyNames": { "$ref": "#/definitions/optionId" },
+              "additionalProperties": { "$ref": "#/definitions/nonEmptyString" }
+            }
+          ]
+        },
+        "option_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/optionId" }
+        },
+        "option_count": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "temperature_bucket": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "optionId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "goldAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": {
+          "anyOf": [{ "$ref": "#/definitions/optionId" }, { "type": "null" }]
+        },
+        "probabilities": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/definitions/optionId" },
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "noul": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score": {
+          "oneOf": [
+            { "type": "number" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["value", "distribution"],
+              "properties": {
+                "value": { "type": "number" },
+                "distribution": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "propertyNames": { "$ref": "#/definitions/optionId" },
+                  "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          ]
+        },
+        "label_source": { "enum": ["expert", "deterministic", "counterfactual", "outcome", "reviewer"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "anyOf": [
+        { "required": ["probabilities"] },
+        { "required": ["noul"] },
+        { "required": ["score"] }
+      ]
+    },
+    "weights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_weight", "question_weights", "source_quality"],
+      "properties": {
+        "case_weight": { "type": "number", "minimum": 0 },
+        "question_weights": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/definitions/questionId" },
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "source_quality": { "type": "number", "minimum": 0, "maximum": 1 },
+        "temporal_decay": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "labelProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "evidence_hash"],
+      "properties": {
+        "method": { "enum": ["direct_outcome", "expert_distillation", "counterfactual", "hindsight", "reviewer"] },
+        "evidence_hash": { "$ref": "#/definitions/hash" },
+        "reviewer_id": { "$ref": "#/definitions/id" },
+        "notes": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    }
+  }
+}

@@ -1,0 +1,455 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_state.schema.json",
+  "title": "LayaDirectorState",
+  "description": "Bounded, normalized state presented to the Laya director at one decision boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "run",
+    "objective",
+    "goal_stack",
+    "acceptance_gap",
+    "current_transaction",
+    "state_digest",
+    "recent_history",
+    "active_failures",
+    "guidelines",
+    "options",
+    "provenance",
+    "budget"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "run": { "$ref": "#/definitions/run" },
+    "objective": { "$ref": "#/definitions/objective" },
+    "goal_stack": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/definitions/goal" }
+    },
+    "acceptance_gap": { "$ref": "#/definitions/acceptanceGap" },
+    "current_transaction": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/definitions/transaction" }
+      ]
+    },
+    "state_digest": { "$ref": "#/definitions/stateDigest" },
+    "recent_history": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/definitions/historyEntry" }
+    },
+    "active_failures": {
+      "type": "array",
+      "maxItems": 16,
+      "items": { "$ref": "#/definitions/failure" }
+    },
+    "guidelines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/definitions/guideline" }
+    },
+    "options": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/definitions/option" }
+    },
+    "provenance": { "$ref": "#/definitions/provenance" },
+    "budget": { "$ref": "#/definitions/budget" }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nullableNumber": {
+      "type": ["number", "null"],
+      "not": { "type": "number", "enum": ["NaN", "Infinity", "-Infinity"] }
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "nullableNonNegativeNumber": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "nullableNonNegativeInteger": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "episode_id",
+        "tick",
+        "elapsed_ticks",
+        "bootstrap_profile",
+        "surface",
+        "force",
+        "runtime"
+      ],
+      "properties": {
+        "run_id": { "$ref": "#/definitions/id" },
+        "episode_id": { "$ref": "#/definitions/id" },
+        "tick": { "type": "integer", "minimum": 0 },
+        "elapsed_ticks": { "type": "integer", "minimum": 0 },
+        "bootstrap_profile": { "$ref": "#/definitions/nonEmptyString" },
+        "surface": { "$ref": "#/definitions/nonEmptyString" },
+        "force": { "$ref": "#/definitions/nonEmptyString" },
+        "runtime": {
+          "enum": ["disposable_training", "real_nauvis", "legacy_retired"]
+        }
+      }
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "description", "target", "unit"],
+      "properties": {
+        "family": { "$ref": "#/definitions/id" },
+        "description": { "$ref": "#/definitions/nonEmptyString" },
+        "target": { "$ref": "#/definitions/nullableNumber" },
+        "unit": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal_id",
+        "kind",
+        "objective",
+        "status",
+        "gap",
+        "age_ticks",
+        "retry_count"
+      ],
+      "properties": {
+        "goal_id": { "$ref": "#/definitions/id" },
+        "kind": { "$ref": "#/definitions/id" },
+        "objective": { "$ref": "#/definitions/nonEmptyString" },
+        "status": { "enum": ["pending", "active", "blocked", "satisfied", "retired"] },
+        "gap": { "$ref": "#/definitions/nullableNumber" },
+        "age_ticks": { "type": "integer", "minimum": 0 },
+        "retry_count": { "type": "integer", "minimum": 0 },
+        "last_failure_kind": { "$ref": "#/definitions/failureKind" }
+      }
+    },
+    "acceptanceGap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "current",
+        "target",
+        "remaining",
+        "unit",
+        "sustained_ticks",
+        "required_sustained_ticks"
+      ],
+      "properties": {
+        "metric": { "$ref": "#/definitions/nonEmptyString" },
+        "current": { "$ref": "#/definitions/nullableNumber" },
+        "target": { "$ref": "#/definitions/nullableNumber" },
+        "remaining": { "$ref": "#/definitions/nullableNumber" },
+        "unit": { "$ref": "#/definitions/nonEmptyString" },
+        "sustained_ticks": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "required_sustained_ticks": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transaction_id",
+        "operation_id",
+        "status",
+        "scope",
+        "started_tick",
+        "expected_effects"
+      ],
+      "properties": {
+        "transaction_id": { "$ref": "#/definitions/id" },
+        "operation_id": { "$ref": "#/definitions/id" },
+        "status": { "enum": ["selected", "validating", "executing", "measuring", "completed", "failed", "escalated"] },
+        "scope": { "$ref": "#/definitions/scope" },
+        "started_tick": { "type": "integer", "minimum": 0 },
+        "expected_effects": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/effect" }
+        }
+      }
+    },
+    "stateDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["power", "logistics", "stock", "production", "resource", "space"],
+      "properties": {
+        "power": { "$ref": "#/definitions/power" },
+        "logistics": { "$ref": "#/definitions/logistics" },
+        "stock": { "$ref": "#/definitions/stock" },
+        "production": { "$ref": "#/definitions/production" },
+        "resource": { "$ref": "#/definitions/resource" },
+        "space": { "$ref": "#/definitions/space" }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generation_kw", "firm_generation_kw", "accumulator_mj", "unpowered_consumers", "poles"],
+      "properties": {
+        "generation_kw": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "firm_generation_kw": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "accumulator_mj": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "unpowered_consumers": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "poles": { "$ref": "#/definitions/nullableNonNegativeInteger" }
+      }
+    },
+    "logistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["robots", "providers_available", "pending_ghosts", "ghost_blockages_top3"],
+      "properties": {
+        "robots": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "providers_available": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "pending_ghosts": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "ghost_blockages_top3": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "$ref": "#/definitions/blockage" }
+        }
+      }
+    },
+    "stock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "accessible", "allocated", "top_shortages"],
+      "properties": {
+        "total": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "accessible": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "allocated": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "top_shortages": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/definitions/shortage" }
+        }
+      }
+    },
+    "production": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rate_now", "rate_target", "sustained_ticks", "bottleneck_hint"],
+      "properties": {
+        "rate_now": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "rate_target": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "sustained_ticks": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "bottleneck_hint": {
+          "anyOf": [{ "$ref": "#/definitions/nonEmptyString" }, { "type": "null" }]
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remaining", "patch_bounds_hint"],
+      "properties": {
+        "remaining": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "patch_bounds_hint": {
+          "anyOf": [{ "$ref": "#/definitions/bounds" }, { "type": "null" }]
+        }
+      }
+    },
+    "space": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["free_area_tiles", "reserved_area_tiles", "occupied_footprint_tiles", "candidate_site_count"],
+      "properties": {
+        "free_area_tiles": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "reserved_area_tiles": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "occupied_footprint_tiles": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "candidate_site_count": { "$ref": "#/definitions/nullableNonNegativeInteger" }
+      }
+    },
+    "historyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_id", "tick", "summary", "outcome"],
+      "properties": {
+        "decision_id": { "$ref": "#/definitions/id" },
+        "tick": { "type": "integer", "minimum": 0 },
+        "summary": { "$ref": "#/definitions/nonEmptyString" },
+        "outcome": { "enum": ["completed", "failed", "timed_out", "blocked", "escalated", "pending"] }
+      }
+    },
+    "failureKind": {
+      "enum": [
+        "none", "safety", "identity", "budget", "fixture", "capability", "execution",
+        "strategy", "power_unconnected", "timeout", "collision", "fluid_purity",
+        "authorization", "scope", "contract", "unknown"
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_id", "kind", "state", "message", "first_seen_tick", "active"],
+      "properties": {
+        "failure_id": { "$ref": "#/definitions/id" },
+        "kind": { "$ref": "#/definitions/failureKind" },
+        "state": { "$ref": "#/definitions/id" },
+        "message": { "$ref": "#/definitions/nonEmptyString" },
+        "first_seen_tick": { "type": "integer", "minimum": 0 },
+        "active": { "const": true }
+      }
+    },
+    "guideline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "kind", "statement"],
+      "properties": {
+        "rule_id": { "$ref": "#/definitions/id" },
+        "kind": { "enum": ["hard", "soft"] },
+        "statement": { "$ref": "#/definitions/nonEmptyString" },
+        "rationale": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "operation_family", "tool_id", "signature", "summary", "features", "scope", "risk_tier"],
+      "properties": {
+        "option_id": { "$ref": "#/definitions/id" },
+        "operation_family": { "$ref": "#/definitions/id" },
+        "tool_id": { "$ref": "#/definitions/id" },
+        "signature": { "$ref": "#/definitions/hash" },
+        "plan_hash": {
+          "anyOf": [{ "$ref": "#/definitions/hash" }, { "type": "null" }]
+        },
+        "summary": { "$ref": "#/definitions/nonEmptyString" },
+        "features": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+          "additionalProperties": { "$ref": "#/definitions/nullableNumber" }
+        },
+        "scope": { "$ref": "#/definitions/scope" },
+        "risk_tier": { "$ref": "#/definitions/riskTier" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surface", "force", "bounds"],
+      "properties": {
+        "surface": { "$ref": "#/definitions/nonEmptyString" },
+        "force": { "$ref": "#/definitions/nonEmptyString" },
+        "bounds": {
+          "anyOf": [{ "$ref": "#/definitions/bounds" }, { "type": "null" }]
+        }
+      }
+    },
+    "riskTier": {
+      "enum": ["read_only", "ghost_submit", "reversible_mutation", "destructive_mutation", "human_authorized"]
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x_min", "y_min", "x_max_exclusive", "y_max_exclusive"],
+      "properties": {
+        "x_min": { "type": "integer" },
+        "y_min": { "type": "integer" },
+        "x_max_exclusive": { "type": "integer" },
+        "y_max_exclusive": { "type": "integer" }
+      }
+    },
+    "blockage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "count"],
+      "properties": {
+        "kind": { "$ref": "#/definitions/nonEmptyString" },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "shortage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item", "amount"],
+      "properties": {
+        "item": { "$ref": "#/definitions/nonEmptyString" },
+        "amount": { "$ref": "#/definitions/nullableNonNegativeNumber" }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "direction"],
+      "properties": {
+        "metric": { "$ref": "#/definitions/nonEmptyString" },
+        "direction": { "enum": ["increase", "decrease", "preserve", "establish", "remove"] },
+        "target": { "$ref": "#/definitions/nullableNumber" },
+        "unit": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["materials_remaining", "construction_budget_remaining", "action_count_remaining", "elapsed_ticks_remaining"],
+      "properties": {
+        "materials_remaining": { "$ref": "#/definitions/nullableNonNegativeNumber" },
+        "construction_budget_remaining": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "action_count_remaining": { "$ref": "#/definitions/nullableNonNegativeInteger" },
+        "elapsed_ticks_remaining": { "$ref": "#/definitions/nullableNonNegativeInteger" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["renderer_version", "state_snapshot_hash", "guideline_pack", "tool_registry", "model"],
+      "properties": {
+        "renderer_version": { "$ref": "#/definitions/nonEmptyString" },
+        "state_snapshot_hash": { "$ref": "#/definitions/hash" },
+        "guideline_pack": { "$ref": "#/definitions/versionedRef" },
+        "tool_registry": { "$ref": "#/definitions/versionedRef" },
+        "model": { "$ref": "#/definitions/modelRef" }
+      }
+    },
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "hash"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/nonEmptyString" },
+        "hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "modelRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "model_hash"],
+      "properties": {
+        "model_id": { "$ref": "#/definitions/id" },
+        "model_hash": { "$ref": "#/definitions/hash" }
+      }
+    }
+  }
+}

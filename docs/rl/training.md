@@ -2,6 +2,20 @@
 
 # Training and autoresearch
 
+## Adopted director migration
+
+The target policy is the Laya autonomous director in
+`docs/rl/Laya_director_final_plan.md`.  The current `DiagonalLinUCB` candidate
+selector and hand-written production cascade are baselines to beat and retire,
+not policy architectures to extend.  Training continues to own disposable
+worlds, measured outcomes, lineage, held-out evaluation, and promotion.
+
+During M1, while the runtime operation compiler and telemetry are not yet
+integrated, the current loop remains active for evidence collection.  New
+deterministic work is limited to observations, operation compilation, hard
+validation, execution, measurement, or a blocker in those mechanics; new
+strategic behavior belongs in the learned director and its curriculum.
+
 ## Current system
 
 - `factorio_training_lab/` owns isolated `training/*` surfaces and `training-*` forces.

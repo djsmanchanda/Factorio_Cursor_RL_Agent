@@ -1,10 +1,20 @@
 <!-- Path: docs/rl/README.md | Purpose: Define the RL system, including learned structural planning. -->
 
-# RL system
+# Laya learning and decision system
 
 ## Goal
 
-Build an agent that tries, measures, learns from failure, and retries without needing a human to encode each mistake as a new recipe. It should eventually plan and operate a self-expanding factory, not merely rank deterministic blueprints.
+Build a fast local Laya director that tries, measures, learns from failure, and
+retries without needing a human to encode each mistake as a new controller
+branch. It must operate a self-expanding factory across unseen seeds and base
+states, not merely rank deterministic blueprints or imitate the existing
+cascade.
+
+The canonical implementation direction is
+`docs/rl/Laya_director_final_plan.md`.  The existing contextual-bandit policy
+and deterministic controller are migration baselines.  The training runtime,
+reward/evidence store, held-out evaluation, and promotion gates remain the
+learning system around Laya.
 
 ## What RL may learn
 
@@ -53,7 +63,16 @@ Failures must remain structured evidence. A timeout, no delivery, blocked route,
 
 ## Relationship to deterministic code
 
-Reuse live game facts, schemas, validators, execution, and measurements where they are genuinely generic. Use the deterministic planner as a baseline and occasional bootstrap, not as the hidden source of every candidate. A policy has learned little if all structural choices were already made for it.
+Reuse live game facts, schemas, validators, geometry realization, execution,
+and measurements where they are genuinely generic.  Retire the deterministic
+decision cascade from policy authority.  Its remaining migration role is a
+frozen comparison baseline; it must not be the hidden source of goal ordering,
+strategy, site, scale, wait, or recovery choices.
+
+Seed-specific tooling may compile legal alternatives.  Laya chooses among
+those alternatives using the live state, goal stack, failure memory, and
+versioned guideline pack.  Validators may reject an illegal choice, but they
+may not replace it with their own preferred strategy.
 
 The retired `experimental/legacy_autonomy/` implementation may supply ideas or small compatible utilities after review. It is never imported wholesale into the active training runtime.
 

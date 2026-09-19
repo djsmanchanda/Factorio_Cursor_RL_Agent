@@ -30,3 +30,8 @@ Documentation for each schema is maintained in this README.
 - `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract
 - `training_transition.schema.json` - observation, candidate choice, measured outcome, failure class, and decomposed reward contract
 - `training_episode_report.schema.json` - training-mod provision, observation, and asynchronous recycle reports; all rates are per tick
+- `laya_state.schema.json` - bounded director input containing goals, normalized facts, guidelines, options, budgets, and complete provenance
+- `laya_case.schema.json` - typed fine-tuning case with source evidence, train/calibration/held-out split, gold distributions, and label provenance
+- `laya_decision.schema.json` - append-only model decision, validation, authorization, execution, outcome, reward, and attribution evidence
+- `laya_tool_registry.schema.json` - declarative operation inventory; it names required authorization actions but never grants them
+- `laya_guideline_pack.schema.json` - versioned hard/soft task guidance with source provenance and evidence-gated promotion

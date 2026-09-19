@@ -1,0 +1,307 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_tool_registry.schema.json",
+  "title": "LayaToolRegistry",
+  "description": "Declarative inventory of compiled Laya operations and their deterministic safety boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "registry_id", "registry_hash", "compiler_version", "compiled_at", "entries"],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "registry_id": { "$ref": "#/definitions/id" },
+    "registry_hash": { "$ref": "#/definitions/hash" },
+    "compiler_version": { "$ref": "#/definitions/version" },
+    "compiled_at": { "type": "string", "format": "date-time" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/entry" }
+    }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_id",
+        "version",
+        "description",
+        "operation_family",
+        "executable",
+        "availability",
+        "operation_schema",
+        "read_dependencies",
+        "eligibility_predicates",
+        "parameter_generators",
+        "expected_effects",
+        "cost_estimate",
+        "idempotent",
+        "risk_tier",
+        "required_validators",
+        "execution_authorization",
+        "report_readers",
+        "rollback_method"
+      ],
+      "properties": {
+        "tool_id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "description": { "$ref": "#/definitions/nonEmptyString" },
+        "operation_family": {
+          "enum": [
+            "observe",
+            "diagnose",
+            "mine",
+            "smelt",
+            "assemble",
+            "route",
+            "power",
+            "logistics",
+            "research",
+            "repair",
+            "upgrade",
+            "retire",
+            "reserve_space",
+            "wait",
+            "escalate"
+          ]
+        },
+        "executable": { "type": "boolean" },
+        "availability": { "enum": ["executable", "observation_only"] },
+        "operation_schema": { "$ref": "#/definitions/operationSchema" },
+        "read_dependencies": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/readDependency" }
+        },
+        "eligibility_predicates": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/predicate" }
+        },
+        "parameter_generators": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/parameterGenerator" }
+        },
+        "expected_effects": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/effect" }
+        },
+        "cost_estimate": { "$ref": "#/definitions/costEstimate" },
+        "idempotent": { "type": "boolean" },
+        "risk_tier": { "$ref": "#/definitions/riskTier" },
+        "required_validators": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "execution_authorization": { "$ref": "#/definitions/executionAuthorization" },
+        "report_readers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "rollback_method": { "$ref": "#/definitions/rollbackMethod" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "availability": { "const": "observation_only" } } },
+          "then": { "properties": { "executable": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "executable": { "const": true } } },
+          "then": { "properties": { "availability": { "const": "executable" } } }
+        }
+      ]
+    },
+    "operationSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "version", "type", "required", "properties", "additional_properties"],
+      "properties": {
+        "schema_id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "type": { "const": "object" },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/fieldName" }
+        },
+        "properties": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/definitions/fieldName" },
+          "additionalProperties": { "$ref": "#/definitions/field" }
+        },
+        "additional_properties": { "const": false }
+      }
+    },
+    "fieldName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "description", "nullable"],
+      "properties": {
+        "type": { "enum": ["string", "integer", "number", "boolean", "array", "object"] },
+        "description": { "$ref": "#/definitions/nonEmptyString" },
+        "nullable": { "type": "boolean" },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "pattern": { "$ref": "#/definitions/nonEmptyString" },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": ["string", "number", "integer", "boolean", "null"] }
+        },
+        "item_type": { "enum": ["string", "integer", "number", "boolean", "object"] }
+      }
+    },
+    "readDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "path", "required"],
+      "properties": {
+        "source": { "$ref": "#/definitions/id" },
+        "path": { "$ref": "#/definitions/nonEmptyString" },
+        "required": { "type": "boolean" },
+        "max_age_ticks": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predicate_id", "left_path", "operator", "right_value"],
+      "properties": {
+        "predicate_id": { "$ref": "#/definitions/id" },
+        "left_path": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/fieldName" }
+        },
+        "operator": { "enum": ["equals", "not_equals", "greater_than", "greater_or_equal", "less_than", "less_or_equal", "in", "not_in", "exists", "not_exists"] },
+        "right_value": { "$ref": "#/definitions/value" }
+      }
+    },
+    "value": {
+      "oneOf": [
+        { "type": ["string", "number", "integer", "boolean", "null"] },
+        {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": ["string", "number", "integer", "boolean", "null"] }
+        }
+      ]
+    },
+    "parameterGenerator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator_id", "outputs", "source", "deterministic", "description"],
+      "properties": {
+        "generator_id": { "$ref": "#/definitions/id" },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/fieldName" }
+        },
+        "source": { "$ref": "#/definitions/id" },
+        "deterministic": { "const": true },
+        "description": { "$ref": "#/definitions/nonEmptyString" },
+        "validator_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+    "effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "direction"],
+      "properties": {
+        "metric": { "$ref": "#/definitions/nonEmptyString" },
+        "direction": { "enum": ["increase", "decrease", "preserve", "establish", "remove"] },
+        "target": { "type": ["number", "null"] },
+        "unit": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "costEstimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["material_items", "ticks", "space_tiles"],
+      "properties": {
+        "material_items": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "ticks": { "type": "integer", "minimum": 0 },
+        "space_tiles": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "riskTier": {
+      "enum": ["read_only", "ghost_submit", "reversible_mutation", "destructive_mutation", "human_authorized"]
+    },
+    "executionAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "authorization_kind", "required_actions", "scope_limits"],
+      "properties": {
+        "required": { "const": true },
+        "authorization_kind": { "enum": ["policy", "human", "test"] },
+        "required_actions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "scope_limits": { "$ref": "#/definitions/scopeLimits" }
+      }
+    },
+    "scopeLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_count", "block_filter"],
+      "properties": {
+        "max_count": { "type": "integer", "minimum": 0 },
+        "block_filter": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/nonEmptyString" }
+        }
+      }
+    },
+    "rollbackMethod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "description"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "operation_id": {
+          "anyOf": [{ "$ref": "#/definitions/id" }, { "type": "null" }]
+        },
+        "description": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    }
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_guideline_pack.schema.json",
+  "title": "LayaGuidelinePack",
+  "description": "Compiled, task-scoped, versioned guidelines injected into Laya state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "pack_id",
+    "pack_version",
+    "task_scopes",
+    "goal",
+    "hard_rules",
+    "soft_rules",
+    "tool_inventory",
+    "worked_examples",
+    "provenance",
+    "promotion"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "pack_id": { "$ref": "#/definitions/id" },
+    "pack_version": { "$ref": "#/definitions/version" },
+    "task_scopes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/id" }
+    },
+    "goal": { "$ref": "#/definitions/goal" },
+    "hard_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/hardRule" }
+    },
+    "soft_rules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/softRule" }
+    },
+    "tool_inventory": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/toolRef" }
+    },
+    "worked_examples": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "$ref": "#/definitions/workedExample" }
+    },
+    "provenance": { "$ref": "#/definitions/provenance" },
+    "promotion": { "$ref": "#/definitions/promotion" }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "acceptance_assertion"],
+      "properties": {
+        "statement": { "$ref": "#/definitions/nonEmptyString" },
+        "acceptance_assertion": { "$ref": "#/definitions/nonEmptyString" },
+        "scope_notes": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "hardRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "scope", "kind", "statement", "rationale", "test_assertion", "provenance", "promotion_evidence"],
+      "properties": {
+        "rule_id": { "$ref": "#/definitions/id" },
+        "scope": { "$ref": "#/definitions/scopes" },
+        "kind": { "const": "hard" },
+        "statement": { "$ref": "#/definitions/nonEmptyString" },
+        "rationale": { "$ref": "#/definitions/nonEmptyString" },
+        "test_assertion": { "$ref": "#/definitions/nonEmptyString" },
+        "provenance": { "$ref": "#/definitions/ruleProvenance" },
+        "promotion_evidence": { "$ref": "#/definitions/evidence" }
+      }
+    },
+    "softRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "scope", "kind", "statement", "rationale", "test_assertion", "provenance", "promotion_evidence", "reward_weight"],
+      "properties": {
+        "rule_id": { "$ref": "#/definitions/id" },
+        "scope": { "$ref": "#/definitions/scopes" },
+        "kind": { "const": "soft" },
+        "statement": { "$ref": "#/definitions/nonEmptyString" },
+        "rationale": { "$ref": "#/definitions/nonEmptyString" },
+        "test_assertion": { "$ref": "#/definitions/nonEmptyString" },
+        "provenance": { "$ref": "#/definitions/ruleProvenance" },
+        "promotion_evidence": { "$ref": "#/definitions/evidence" },
+        "reward_weight": { "type": "number" }
+      }
+    },
+    "scopes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/id" }
+    },
+    "ruleProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_documents", "compiled_by", "compiled_at"],
+      "properties": {
+        "source_documents": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/documentRef" }
+        },
+        "compiled_by": { "$ref": "#/definitions/nonEmptyString" },
+        "compiled_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "documentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "hash"],
+      "properties": {
+        "path": { "$ref": "#/definitions/nonEmptyString" },
+        "hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence_refs"],
+      "properties": {
+        "status": { "enum": ["not_required", "proposed", "verified", "rejected"] },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/evidenceRef" }
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "hash"],
+      "properties": {
+        "kind": { "enum": ["scenario", "episode", "evaluation", "failure", "document"] },
+        "id": { "$ref": "#/definitions/id" },
+        "hash": { "$ref": "#/definitions/hash" },
+        "result": { "enum": ["improved", "neutral", "regressed", "safety_violation", "unknown"] }
+      }
+    },
+    "toolRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_id", "registry_version", "when_to_use", "when_not_to_use", "failure_modes"],
+      "properties": {
+        "tool_id": { "$ref": "#/definitions/id" },
+        "registry_version": { "$ref": "#/definitions/version" },
+        "when_to_use": { "$ref": "#/definitions/nonEmptyString" },
+        "when_not_to_use": { "$ref": "#/definitions/nonEmptyString" },
+        "failure_modes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/nonEmptyString" }
+        }
+      }
+    },
+    "workedExample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["example_id", "state_summary", "decision_summary", "outcome_summary"],
+      "properties": {
+        "example_id": { "$ref": "#/definitions/id" },
+        "state_summary": { "$ref": "#/definitions/nonEmptyString" },
+        "decision_summary": { "$ref": "#/definitions/nonEmptyString" },
+        "outcome_summary": { "$ref": "#/definitions/nonEmptyString" },
+        "evidence_ref": { "$ref": "#/definitions/evidenceRef" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_documents", "compiler_version", "compiled_at", "pack_hash"],
+      "properties": {
+        "source_documents": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/documentRef" }
+        },
+        "compiler_version": { "$ref": "#/definitions/version" },
+        "compiled_at": { "type": "string", "format": "date-time" },
+        "pack_hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence", "parent_pack"],
+      "properties": {
+        "status": { "enum": ["proposed", "promoted", "rejected"] },
+        "evidence": {
+          "anyOf": [
+            { "$ref": "#/definitions/promotionEvidence" },
+            { "type": "null" }
+          ]
+        },
+        "parent_pack": {
+          "anyOf": [{ "$ref": "#/definitions/versionedRef" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "promoted" } } },
+          "then": {
+            "properties": {
+              "evidence": {
+                "allOf": [
+                  { "$ref": "#/definitions/promotionEvidence" },
+                  {
+                    "properties": {
+                      "safety_violations": { "const": 0 }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "promotionEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_ref", "dataset_ref", "scenario_refs", "evaluation_ref", "safety_violations"],
+      "properties": {
+        "model_ref": { "$ref": "#/definitions/versionedRef" },
+        "dataset_ref": { "$ref": "#/definitions/versionedRef" },
+        "scenario_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/evidenceRef" }
+        },
+        "evaluation_ref": { "$ref": "#/definitions/evidenceRef" },
+        "safety_violations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "hash"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "$ref": "#/definitions/version" },
+        "hash": { "$ref": "#/definitions/hash" }
+      }
+    }
+  }
+}

@@ -1,0 +1,390 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_decision.schema.json",
+  "title": "LayaDecisionRecord",
+  "description": "Append-only evidence record for one Laya decision, validation, execution, and measured outcome.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "decision_id",
+    "run_id",
+    "episode_id",
+    "tick",
+    "decision_kind",
+    "state",
+    "eligible_options",
+    "pruned_options",
+    "model_output",
+    "selected_action",
+    "execution",
+    "outcome",
+    "next_state",
+    "reward",
+    "attribution",
+    "provenance"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "decision_id": { "$ref": "#/definitions/id" },
+    "run_id": { "$ref": "#/definitions/id" },
+    "episode_id": { "$ref": "#/definitions/id" },
+    "tick": { "type": "integer", "minimum": 0 },
+    "decision_kind": {
+      "enum": ["goal", "operation_family", "variant", "continue_or_wait", "interrupt", "recovery", "escalate"]
+    },
+    "state": { "$ref": "laya_state.schema.json" },
+    "eligible_options": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "$ref": "#/definitions/eligibleOption" }
+    },
+    "pruned_options": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/definitions/prunedOption" }
+    },
+    "model_output": { "$ref": "#/definitions/modelOutput" },
+    "selected_action": { "$ref": "#/definitions/selectedAction" },
+    "execution": { "$ref": "#/definitions/execution" },
+    "outcome": { "$ref": "#/definitions/outcome" },
+    "next_state": {
+      "anyOf": [{ "$ref": "laya_state.schema.json" }, { "type": "null" }]
+    },
+    "reward": { "$ref": "#/definitions/reward" },
+    "attribution": {
+      "anyOf": [{ "$ref": "#/definitions/attribution" }, { "type": "null" }]
+    },
+    "provenance": { "$ref": "#/definitions/provenance" }
+  },
+  "definitions": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "questionId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+    },
+    "eligibleOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option", "validator_ids", "validator_passed"],
+      "properties": {
+        "option": { "$ref": "laya_state.schema.json#/definitions/option" },
+        "validator_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "validator_passed": { "const": true }
+      }
+    },
+    "prunedOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option", "validator_ids", "prune_reason"],
+      "properties": {
+        "option": { "$ref": "laya_state.schema.json#/definitions/option" },
+        "validator_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "prune_reason": {
+          "enum": ["authorization", "scope", "budget", "collision", "fluid", "surface", "force", "stale", "capability", "other"]
+        },
+        "detail": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "modelOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_id", "model_hash", "answers", "temperature", "margin", "entropy", "latency_ms"],
+      "properties": {
+        "model_id": { "$ref": "#/definitions/id" },
+        "model_hash": { "$ref": "#/definitions/hash" },
+        "answers": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/definitions/questionId" },
+          "additionalProperties": { "$ref": "#/definitions/answer" }
+        },
+        "temperature": { "type": "number", "exclusiveMinimum": 0 },
+        "margin": { "type": "number", "minimum": 0, "maximum": 1 },
+        "entropy": { "type": "number", "minimum": 0 },
+        "latency_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "selected_label", "confidence"],
+      "properties": {
+        "type": { "enum": ["choice", "noul", "score"] },
+        "selected_label": {
+          "anyOf": [{ "$ref": "#/definitions/id" }, { "type": "null" }]
+        },
+        "probabilities": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/definitions/id" },
+          "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "logits": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/definitions/id" },
+          "additionalProperties": { "type": "number" }
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "noul": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score": { "type": "number" }
+      },
+      "anyOf": [
+        { "required": ["probabilities"] },
+        { "required": ["noul"] },
+        { "required": ["score"] }
+      ]
+    },
+    "selectedAction": {
+      "oneOf": [
+        { "$ref": "#/definitions/operationAction" },
+        { "$ref": "#/definitions/waitAction" },
+        { "$ref": "#/definitions/escalateAction" }
+      ]
+    },
+    "operationAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "option_id", "tool_id", "signature", "why_rule_ids"],
+      "properties": {
+        "kind": { "const": "operation" },
+        "option_id": { "$ref": "#/definitions/id" },
+        "tool_id": { "$ref": "#/definitions/id" },
+        "signature": { "$ref": "#/definitions/hash" },
+        "why_rule_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+    "waitAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "duration_ticks", "why_rule_ids"],
+      "properties": {
+        "kind": { "const": "wait" },
+        "duration_ticks": { "type": "integer", "minimum": 1 },
+        "why_rule_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+    "escalateAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason", "why_rule_ids"],
+      "properties": {
+        "kind": { "const": "escalate" },
+        "reason": { "$ref": "#/definitions/nonEmptyString" },
+        "why_rule_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "transaction_id", "authorization", "validator_ids", "reports"],
+      "properties": {
+        "status": { "enum": ["not_started", "validated", "submitted", "completed", "failed", "blocked", "escalated"] },
+        "transaction_id": {
+          "anyOf": [{ "$ref": "#/definitions/id" }, { "type": "null" }]
+        },
+        "authorization": {
+          "anyOf": [
+            { "$ref": "#/definitions/authorization" },
+            { "type": "null" }
+          ]
+        },
+        "validator_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/id" }
+        },
+        "reports": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/report" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": { "enum": ["submitted", "completed"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "authorization": {
+                "allOf": [
+                  { "$ref": "#/definitions/authorization" },
+                  { "properties": { "authorized": { "const": true } } }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorized", "source", "scope_hash"],
+      "properties": {
+        "authorized": { "type": "boolean" },
+        "source": {
+          "anyOf": [
+            { "enum": ["policy", "human", "test"] },
+            { "type": "null" }
+          ]
+        },
+        "scope_hash": {
+          "anyOf": [
+            { "$ref": "#/definitions/hash" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "authorized": { "const": true } } },
+          "then": {
+            "properties": {
+              "source": { "enum": ["policy", "human", "test"] },
+              "scope_hash": { "$ref": "#/definitions/hash" }
+            }
+          },
+          "else": {
+            "properties": {
+              "source": { "type": "null" },
+              "scope_hash": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["report_id", "status", "started_tick", "ended_tick", "failure_kind", "measurements"],
+      "properties": {
+        "report_id": { "$ref": "#/definitions/id" },
+        "status": { "enum": ["completed", "failed", "timed_out", "not_available"] },
+        "started_tick": { "type": "integer", "minimum": 0 },
+        "ended_tick": { "type": "integer", "minimum": 0 },
+        "failure_kind": { "$ref": "#/definitions/failureKind" },
+        "measurements": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+          "additionalProperties": { "type": ["number", "integer", "boolean", "null"] }
+        }
+      }
+    },
+    "failureKind": {
+      "enum": [
+        "none", "safety", "identity", "budget", "fixture", "capability", "execution", "strategy",
+        "power_unconnected", "timeout", "collision", "fluid_purity", "authorization", "scope", "contract", "unknown"
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "failure_kind", "tick_delta", "summary", "measurements"],
+      "properties": {
+        "status": { "enum": ["pending", "completed", "failed", "timed_out", "blocked", "escalated"] },
+        "failure_kind": { "$ref": "#/definitions/failureKind" },
+        "tick_delta": { "type": "integer", "minimum": 0 },
+        "summary": { "$ref": "#/definitions/nonEmptyString" },
+        "measurements": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+          "additionalProperties": { "type": ["number", "integer", "boolean", "null"] }
+        }
+      }
+    },
+    "reward": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components", "total"],
+      "properties": {
+        "components": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+          "additionalProperties": { "type": "number" }
+        },
+        "total": { "type": "number" }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "cause", "confidence", "evidence_refs"],
+      "properties": {
+        "status": { "enum": ["pending", "attributed", "not_attributable"] },
+        "cause": {
+          "anyOf": [{ "$ref": "#/definitions/failureKind" }, { "type": "null" }]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/id" }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state_hash", "guideline_pack", "tool_registry", "renderer_version"],
+      "properties": {
+        "state_hash": { "$ref": "#/definitions/hash" },
+        "guideline_pack": { "$ref": "#/definitions/versionedRef" },
+        "tool_registry": { "$ref": "#/definitions/versionedRef" },
+        "renderer_version": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "hash"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "version": { "type": "string", "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+$" },
+        "hash": { "$ref": "#/definitions/hash" }
+      }
+    }
+  }
+}
