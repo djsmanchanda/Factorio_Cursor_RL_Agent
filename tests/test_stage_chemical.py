@@ -140,7 +140,7 @@ def test_rung_defferal_codes_park_set_is_bounded() -> None:
     the ensure path must still swallow ordinary batch deferrals."""
     assert autonomous_builder._CHEMICAL_RUNG_PARK_CODES == frozenset({
         "chemical_capability_handoff", "chemical_capability_wait",
-        "steel_iron_retirement_wait",
+        "steel_iron_retirement_wait", "steel_power_cycle_break",
     })
 
 

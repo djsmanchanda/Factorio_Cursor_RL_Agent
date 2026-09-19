@@ -248,3 +248,147 @@ def test_prep_promotes_for_ladder_before_advanced_circuits(monkeypatch, tmp_path
     ) is True
     assert promoted == [True]
     assert builder.MANAGED_INTERMEDIATE_SOURCES["steel-plate"] == (7, 8)
+
+
+def test_serve_mall_task_retries_medium_pole_after_steel_seed_defer(monkeypatch):
+    """Episode-5162 regression: steel_power_cycle_break must advance steel
+    and park medium-pole for retry rather than aborting as unhandled_exception."""
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    deferred = builder.ProductionPrerequisiteDeferred(
+        "medium-electric-pole waits for the compact steel seed to establish",
+        code="steel_power_cycle_break",
+        state="producing",
+        details={"target": "medium-electric-pole", "steel_target": 16},
+    )
+
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: (_ for _ in ()).throw(deferred),
+    )
+    advanced_rungs = []
+    monkeypatch.setattr(
+        builder, "_advance_parked_chemical_rung",
+        lambda _c, _b, _s, _f, target, rung, *_a: advanced_rungs.append((target, rung)) or False,
+    )
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+
+    priorities = builder.PriorityList.__new__(builder.PriorityList)
+    priorities.items = {}
+    parked = []
+    monkeypatch.setattr(
+        priorities, "defer",
+        lambda item, tick, reason, *, retry_ticks=None: parked.append(
+            (item, tick, reason, retry_ticks or 0),
+        ),
+    )
+    monkeypatch.setattr(
+        priorities, "describe", lambda task, tick: "PRIORITY: medium-electric-pole",
+    )
+    messages = []
+    task = SimpleNamespace(item="medium-electric-pole", target=8)
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 2000, {},
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert advanced_rungs == [("medium-electric-pole", "steel-plate")]
+    assert parked == [("medium-electric-pole", 2000, str(deferred), 3600)]
+    assert any("parked until steel-plate establishes" in message for message in messages)
+
+
+def test_serve_mall_task_parks_medium_pole_even_if_seed_output_cached(monkeypatch):
+    """Seed provider output cache must not cause immediate next-pass spin
+    while steel production has not demonstrably started."""
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    deferred = builder.ProductionPrerequisiteDeferred(
+        "medium-electric-pole waits for the compact steel seed to establish",
+        code="steel_power_cycle_break",
+        state="producing",
+        details={"target": "medium-electric-pole", "steel_target": 16, "rung": "steel-plate"},
+    )
+
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: (_ for _ in ()).throw(deferred),
+    )
+    advanced_rungs = []
+    monkeypatch.setattr(
+        builder, "_advance_parked_chemical_rung",
+        lambda _c, _b, _s, _f, target, rung, *_a: advanced_rungs.append((target, rung)) or True,
+    )
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+
+    priorities = builder.PriorityList.__new__(builder.PriorityList)
+    priorities.items = {}
+    parked = []
+    monkeypatch.setattr(
+        priorities, "defer",
+        lambda item, tick, reason, *, retry_ticks=None: parked.append(
+            (item, tick, reason, retry_ticks or 0),
+        ),
+    )
+    monkeypatch.setattr(
+        priorities, "describe", lambda task, tick: "PRIORITY: medium-electric-pole",
+    )
+    messages = []
+    task = SimpleNamespace(item="medium-electric-pole", target=8)
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 2000, {},
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert advanced_rungs == [("medium-electric-pole", "steel-plate")]
+    assert parked == [("medium-electric-pole", 2000, str(deferred), 3600)]
+    assert any("parked until steel-plate establishes" in message for message in messages)
+
+
+def test_serve_mall_task_serves_medium_pole_when_steel_already_flowing(monkeypatch):
+    """When steel-plate is already flowing, chemical handoff is stale and
+    medium-electric-pole falls through to normal serving."""
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    deferred = builder.ProductionPrerequisiteDeferred(
+        "medium-electric-pole waits for the compact steel seed to establish",
+        code="steel_power_cycle_break",
+        state="producing",
+        details={"target": "medium-electric-pole", "steel_target": 16},
+    )
+
+    monkeypatch.setattr(
+        builder, "_ensure_mall_item",
+        lambda *_a, **_k: (_ for _ in ()).throw(deferred),
+    )
+    monkeypatch.setattr(
+        builder, "_advance_parked_chemical_rung",
+        lambda *_a, **_k: pytest.fail("Should not advance when already flowing"),
+    )
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item == "steel-plate",
+    )
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    monkeypatch.setattr(builder, "_drain_aware_pop_due", lambda *_a, **_k: False)
+
+    priorities = builder.PriorityList.__new__(builder.PriorityList)
+    priorities.items = {}
+    monkeypatch.setattr(
+        priorities, "defer",
+        lambda *_a, **_k: pytest.fail("Should not defer when steel is flowing"),
+    )
+    monkeypatch.setattr(
+        priorities, "describe", lambda task, tick: "PRIORITY: medium-electric-pole",
+    )
+    messages = []
+    task = SimpleNamespace(item="medium-electric-pole", target=8)
+
+    builder._serve_mall_task(
+        object(), object(), "nauvis", "player", task, 2000, {},
+        priorities, (0.0, 0.0), messages.append,
+    )
+
+    assert any(
+        "CHEMICAL HANDOFF STALE: medium-electric-pole rung steel-plate already produces"
+        in m for m in messages
+    )
+

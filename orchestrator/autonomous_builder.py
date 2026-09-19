@@ -7809,6 +7809,7 @@ _CHEMICAL_RUNG_PARK_CODES = frozenset({
     "chemical_capability_handoff",
     "chemical_capability_wait",
     "steel_iron_retirement_wait",
+    "steel_power_cycle_break",
 })
 
 _CHEMICAL_BATCH_TARGETS = {
@@ -8995,7 +8996,11 @@ def _ensure_mall_item(
             "medium-electric-pole waits for the compact steel seed to establish",
             code="steel_power_cycle_break",
             state="producing",
-            details={"target": item, "steel_target": steel_target},
+            details={
+                "target": item,
+                "steel_target": steel_target,
+                "rung": "steel-plate",
+            },
         )
     if (
         item in _POST_STARTER_FULL_STACK_BATCH_ITEMS
@@ -10086,6 +10091,8 @@ def _serve_mall_task(
         if code == "steel_iron_retirement_wait" and not rung:
             # The iron starter's retirement is steel's upstream capability.
             rung = "iron-plate"
+        elif code == "steel_power_cycle_break" and not rung:
+            rung = "steel-plate"
         try:
             rung_flowing = bool(
                 rung and _production_started(client, surface, force, rung)
@@ -10098,6 +10105,17 @@ def _serve_mall_task(
                 "produces; serving normally"
             )
             ready, output = False, None
+        elif code == "steel_power_cycle_break":
+            _advance_parked_chemical_rung(
+                client, bridge, surface, force, item, str(rung), mall_targets,
+                reference_point, emit,
+            )
+            priorities.defer(item, tick, str(deferred), retry_ticks=3600)
+            emit(
+                f"  CHEMICAL WAIT: {item} parked until {rung} establishes "
+                "(retry in 60s)"
+            )
+            return
         else:
             rung_ready = bool(rung) and _advance_parked_chemical_rung(
                 client, bridge, surface, force, item, str(rung), mall_targets,
@@ -11821,7 +11839,12 @@ def _advance_the_goal(
             deferred_details = getattr(deferred, "details", {}) or {}
             rung = deferred_details.get("rung") or (
                 "iron-plate"
-                if deferred_code == "steel_iron_retirement_wait" else None
+                if deferred_code == "steel_iron_retirement_wait"
+                else (
+                    "steel-plate"
+                    if deferred_code == "steel_power_cycle_break"
+                    else None
+                )
             )
             priorities.defer(
                 goal_item, tick or live_base.game_tick(client),
