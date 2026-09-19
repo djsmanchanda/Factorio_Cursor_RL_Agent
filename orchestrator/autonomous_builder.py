@@ -8977,6 +8977,26 @@ def _ensure_mall_item(
             f"Parts mall needs {target} {item}, but no executable recipe "
             "knowledge exists for that construction item"
         )
+    if item == "medium-electric-pole" and not _production_started(
+        client, surface, force, "steel-plate",
+    ):
+        # Pole expansion is the first consumer that exposes the steel/power
+        # cycle: steel needs poles for its own district while the copper mine
+        # needs those poles before it can feed the steel path. Establish the
+        # fenced compact steel seed immediately instead of leaving steel as a
+        # sibling priority that can be deferred forever.
+        steel_target = max(1, math.ceil(float(target) * 2.0))
+        _ensure_mall_item(
+            client, bridge, surface, force, "steel-plate", steel_target,
+            mall_targets, reference_point, emit, background=False,
+            allow_promotion=False,
+        )
+        raise ProductionPrerequisiteDeferred(
+            "medium-electric-pole waits for the compact steel seed to establish",
+            code="steel_power_cycle_break",
+            state="producing",
+            details={"target": item, "steel_target": steel_target},
+        )
     if (
         item in _POST_STARTER_FULL_STACK_BATCH_ITEMS
         and LINE_RECIPES[item].get("machine") in live_base.ASSEMBLER_TIERS
@@ -9039,10 +9059,31 @@ def _ensure_mall_item(
         return True, output
     emit(f"--- parts mall: ensuring {item} production for {mode} {target} ---")
     try:
-        rationed = _rationed_mall_batch(
-            client, bridge, surface, force, item, target, reference_point,
-            emit, force_temporary=force_temporary,
-        )
+        if item == "long-handed-inserter" and _transferable_or_available_stock(
+            client, surface, force,
+        ).get(item, 0) <= 0:
+            # Dense admission is already gated on existing long-handed stock.
+            # Seed the recipe in the ordinary paired cell, restoring any gear
+            # loan first so the compact producer has its real ingredient.
+            for loan in active_bootstrap_loans(client, surface, force):
+                if loan.original_recipe != "iron-gear-wheel":
+                    continue
+                _restore_bootstrap_loan(
+                    client, bridge, surface, force, loan, emit,
+                    reference_point=reference_point,
+                    reason="yielding the gear anchor to seed long-handed-inserter",
+                )
+                raise ProductionPrerequisiteDeferred(
+                    "long-handed-inserter waits for its restored gear anchor",
+                    code="long_handed_gear_anchor_restore",
+                    state="supply_wait",
+                )
+            rationed = False
+        else:
+            rationed = _rationed_mall_batch(
+                client, bridge, surface, force, item, target, reference_point,
+                emit, force_temporary=force_temporary,
+            )
     except ProductionPrerequisiteDeferred as deferred:
         # The batch's prerequisite chain (e.g. a plate whose own foundation
         # bill is not yet affordable) is someone else's pass. Defer like the
