@@ -179,7 +179,7 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
         action for action in actions
         if action["entity"] == "passive-provider-chest"
     )
-    assert "fill_chest" not in provider["inventory_limit"]
+    assert provider["inventory_limit"]["fill_chest"] is True
     assert not list(SCHEMA.iter_errors(plan))
 
 

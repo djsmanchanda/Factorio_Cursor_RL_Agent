@@ -81,4 +81,6 @@ def mall_reserve(
         growth = RESERVE_GROWTH_STACKS if opening > 1 else 1
         stacks = _round_growth(needed, opening, growth)
     count = stacks * stack_size
-    return MallReserve(count, count, stacks)
+    fill_chest = mature or item in {"iron-gear-wheel", "copper-cable"}
+    return MallReserve(count, count, stacks, fill_chest=fill_chest)
+

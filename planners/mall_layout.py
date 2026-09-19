@@ -21,15 +21,19 @@ MALL_MINIMUM_STACKS = {
 MALL_SUPPLY_SECONDS = 15.0
 
 
+_UNLIMITED_CHEST_ITEMS = frozenset({"iron-gear-wheel", "copper-cable"})
+
+
 def _inventory_limit(recipe: str, stock_target: int, *, fill_chest: bool = False) -> dict:
     limit = {
         "name": recipe,
         "count": stock_target,
         "minimum_stacks_by_group": dict(MALL_MINIMUM_STACKS),
     }
-    if fill_chest:
+    if fill_chest or recipe in _UNLIMITED_CHEST_ITEMS:
         limit["fill_chest"] = True
     return limit
+
 
 
 def compact_requests(

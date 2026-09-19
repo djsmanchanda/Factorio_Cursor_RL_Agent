@@ -5038,7 +5038,11 @@ def _refresh_mall_cell(
                 )
                 for position in existing.machine_positions
             )
-            shared_or_fill = plan.fill_provider or shared_output
+            shared_or_fill = (
+                plan.fill_provider
+                or shared_output
+                or item in _MALL_RECIPE_ANCHORS
+            )
             provider_key = (surface, force, item, mall_provider)
             if not shared_or_fill:
                 mall_storage_limit = max(
@@ -8192,11 +8196,7 @@ def ensure_produced(
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,
         minimum_machines=minimum_machines, allow_promotion=allow_promotion,
         storage_limit=storage_limit, fill_provider=fill_provider,
-        shared_provider=(
-            not upgrade_bootstrap
-            and item in _BOOTSTRAP_SHARED_PROVIDER_ITEMS
-            and not _independent_mall_ready(client, surface, force)
-        ),
+        shared_provider=False,
     )
     mall_provider = _refresh_mall_cell(
         client, bridge, surface, force, item, plan, emit,
@@ -8534,7 +8534,7 @@ def _bootstrap_demand_cell_affordable(
         )
         if quad_mall else
         compact_mall_project_bill(
-            item, stock_target=max(1, target), side=side, shared_provider=True,
+            item, stock_target=max(1, target), side=side, shared_provider=False,
             machine_name=cell_machine,
             include_substation=True,
         )
@@ -8871,7 +8871,7 @@ def _rationed_mall_batch(
             emit(
                 f"  BOOTSTRAP MALL CAPACITY: assigning a demand-owned {item} "
                 f"slot within the {'unlimited' if slot_limit is None else f'{slot_limit}-assembler'} pool; "
-                "paired halves share one passive provider"
+                "each slot receives its own dedicated passive provider"
             )
             return False
         if shortage:
@@ -9197,11 +9197,17 @@ def _ensure_mall_item(
             client, surface, force, item, production_target, reference_point,
             emit, background=background,
         )
-        if reserve.fill_chest:
-            emit(
-                f"  MALL RESERVE: {item} is self-sufficient; removing its "
-                "provider bar and stock gate so it can fill the chest"
-            )
+        if reserve.fill_chest or item in _MALL_RECIPE_ANCHORS:
+            if reserve.gate_target is None:
+                emit(
+                    f"  MALL RESERVE: {item} is self-sufficient; removing its "
+                    "provider bar and stock gate so it can fill the chest"
+                )
+            else:
+                emit(
+                    f"  MALL RESERVE: {item} will maintain {reserve.storage_count}; "
+                    "provider chest has no stack limit"
+                )
         else:
             emit(
                 f"  MALL RESERVE: {item} will maintain {reserve.storage_count} "
@@ -9217,7 +9223,7 @@ def _ensure_mall_item(
             upgrade_bootstrap=False, stock_target=production_target,
             stock_gate_target=reserve.gate_target,
             storage_limit=reserve.storage_count,
-            fill_provider=reserve.fill_chest, blocking_stock_target=target,
+            fill_provider=reserve.fill_chest or item in _MALL_RECIPE_ANCHORS, blocking_stock_target=target,
             minimum_machines=minimum_machines,
             allow_promotion=allow_promotion,
         )

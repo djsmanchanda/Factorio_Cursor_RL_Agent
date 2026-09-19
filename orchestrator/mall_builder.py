@@ -838,15 +838,15 @@ def build_compact_mall_stage(
         ),
         substation_position=seed_shared_substation(reference_point),
         stock_gate_target=stock_gate_target,
-        fill_chest=fill_chest,
+        fill_chest=fill_chest or recipe in {"iron-gear-wheel", "copper-cable"},
         request_multiplier_override=request_multiplier_override,
-        shared_provider=shared_provider,
+        shared_provider=False,
     )
     plan["surface"], plan["force"] = surface, force
     machine = _slot_position(origin, side)
     provider = (
         origin[0] + 4.5,
-        origin[1] + (0.5 if side == "left" or shared_provider else 2.5),
+        origin[1] + (0.5 if side == "left" else 2.5),
     )
     substation = (
         seed_shared_substation(reference_point)
