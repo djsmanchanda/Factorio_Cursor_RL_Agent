@@ -2003,20 +2003,26 @@ def test_dedicated_cell_ranks_ahead_of_shared_cell(monkeypatch) -> None:
 
 
 def test_last_anchor_producer_is_never_borrowed(monkeypatch) -> None:
-    line = SimpleNamespace(machine_count=1, machine_positions=[(36.5, 32.5)])
-    monkeypatch.setattr(
-        builder.live_base, "find_line",
-        lambda _c, _s, _f, recipe, _m, **_k: line if recipe == "iron-gear-wheel" else None,
-    )
-    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    for recipe_name in ("iron-gear-wheel", "copper-cable"):
+        line = SimpleNamespace(machine_count=1, machine_positions=[(36.5, 32.5)])
+        monkeypatch.setattr(
+            builder.live_base, "find_line",
+            lambda _c, _s, _f, r, _m, **_k: line if r == recipe_name else None,
+        )
+        for stock_qty in (0, 1, 20, 100):
+            monkeypatch.setattr(
+                builder.live_base, "available_items",
+                lambda *_a: {recipe_name: stock_qty},
+            )
 
-    borrowed = builder._borrow_free_mall_cell(
-        object(), "nauvis", "player", "splitter", (3.0, -1.0),
-        allowed_original_recipes=None, allow_shared_provider=False,
-        require_stocked_original=False, excluded_origins=set(),
-    )
+            borrowed = builder._borrow_free_mall_cell(
+                object(), "nauvis", "player", "splitter", (3.0, -1.0),
+                allowed_original_recipes=None, allow_shared_provider=False,
+                require_stocked_original=False, excluded_origins=set(),
+            )
 
-    assert borrowed is None
+            assert borrowed is None, f"{recipe_name} anchor was borrowed with stock={stock_qty}"
+
 
 
 def test_live_cell_request_window_never_shrinks_below_throughput(monkeypatch) -> None:

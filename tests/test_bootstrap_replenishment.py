@@ -174,4 +174,4 @@ def test_ledger_belt_reserve_uses_other_ghost_bill_not_fixed_floor(tmp_path, mon
         object(), "nauvis", "player", "ledger-belt-consumer", {"splitter": 3},
     )
 
-    assert shortfall == ("transport-belt", 10, 11)
+    assert shortfall == ("transport-belt", 10, 11, 2.0)
