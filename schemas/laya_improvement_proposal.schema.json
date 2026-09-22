@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_improvement_proposal.schema.json",
+  "title": "LayaImprovementProposal",
+  "description": "Reviewable self-improvement proposal derived from a Laya failure packet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "proposal_id", "packet_id", "created_at", "cause", "status", "summary", "rationale", "proposed_change", "evidence", "provenance"],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "proposal_id": { "$ref": "#/definitions/id" },
+    "packet_id": { "$ref": "#/definitions/id" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "cause": { "enum": ["policy", "observation", "tool", "validator", "documentation", "environment"] },
+    "status": { "enum": ["proposed", "accepted", "rejected", "superseded"] },
+    "summary": { "$ref": "#/definitions/longString" },
+    "rationale": { "$ref": "#/definitions/rationale" },
+    "proposed_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "description", "required_tests"],
+      "properties": {
+        "kind": { "enum": ["policy", "observation", "tool", "validator", "documentation", "environment"] },
+        "target": { "$ref": "#/definitions/shortString" },
+        "description": { "$ref": "#/definitions/longString" },
+        "required_tests": { "type": "array", "maxItems": 32, "items": { "$ref": "#/definitions/shortString" } }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["packet_hash", "replay_request_hash", "failure_kind"]
+    },
+    "provenance": { "$ref": "#/definitions/provenance" }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "shortString": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "longString": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "episode_id", "trajectory_id", "scenario_id", "scenario_seed", "scenario_hash", "repository_revision", "guideline_pack", "tool_registry", "model", "source_hash"],
+      "properties": {
+        "run_id": { "$ref": "#/definitions/id" }, "episode_id": { "$ref": "#/definitions/id" }, "trajectory_id": { "$ref": "#/definitions/id" }, "scenario_id": { "$ref": "#/definitions/id" },
+        "scenario_seed": { "type": "integer", "minimum": 0 }, "scenario_hash": { "$ref": "#/definitions/hash" }, "repository_revision": { "$ref": "#/definitions/longString" },
+        "guideline_pack": { "$ref": "#/definitions/versionedRef" }, "tool_registry": { "$ref": "#/definitions/versionedRef" }, "model": { "$ref": "#/definitions/versionedRef" }, "source_hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "versionedRef": {
+      "type": "object", "additionalProperties": false, "required": ["id", "version", "hash"],
+      "properties": { "id": { "$ref": "#/definitions/id" }, "version": { "$ref": "#/definitions/shortString" }, "hash": { "$ref": "#/definitions/hash" } }
+    },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 4096 }
+  }
+}

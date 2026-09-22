@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_failure_packet.schema.json",
+  "title": "LayaFailurePacket",
+  "description": "Bounded disposable replay evidence for one Laya objective failure or drift event.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "packet_id", "created_at", "cause", "failure_kind", "summary", "objective", "replay_request", "provenance", "evidence"],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "packet_id": { "$ref": "#/definitions/id" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "cause": { "enum": ["policy", "observation", "tool", "validator", "documentation", "environment"] },
+    "failure_kind": { "$ref": "#/definitions/shortString" },
+    "summary": { "$ref": "#/definitions/longString" },
+    "objective": { "type": "object", "minProperties": 1, "additionalProperties": true },
+    "replay_request": { "$ref": "#/definitions/replayRequest" },
+    "provenance": { "$ref": "#/definitions/provenance" },
+    "evidence": {
+      "type": "object",
+      "required": ["decision_trace", "execution", "outcome"],
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "shortString": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "longString": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "hash"],
+      "properties": { "id": { "$ref": "#/definitions/id" }, "version": { "$ref": "#/definitions/shortString" }, "hash": { "$ref": "#/definitions/hash" } }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "episode_id", "trajectory_id", "scenario_id", "scenario_seed", "scenario_hash", "repository_revision", "guideline_pack", "tool_registry", "model", "source_hash"],
+      "properties": {
+        "run_id": { "$ref": "#/definitions/id" },
+        "episode_id": { "$ref": "#/definitions/id" },
+        "trajectory_id": { "$ref": "#/definitions/id" },
+        "scenario_id": { "$ref": "#/definitions/id" },
+        "scenario_seed": { "type": "integer", "minimum": 0 },
+        "scenario_hash": { "$ref": "#/definitions/hash" },
+        "repository_revision": { "$ref": "#/definitions/longString" },
+        "guideline_pack": { "$ref": "#/definitions/versionedRef" },
+        "tool_registry": { "$ref": "#/definitions/versionedRef" },
+        "model": { "$ref": "#/definitions/versionedRef" },
+        "source_hash": { "$ref": "#/definitions/hash" }
+      }
+    },
+    "replayRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "scenario", "seed", "initial_state", "decision_context", "variations", "limits"],
+      "properties": {
+        "runtime": { "const": "disposable_training" },
+        "scenario": { "type": "object", "additionalProperties": true },
+        "seed": { "type": "integer", "minimum": 0 },
+        "initial_state": { "type": "object", "additionalProperties": true },
+        "decision_context": { "type": "object", "additionalProperties": true },
+        "variations": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "object", "additionalProperties": true } },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_attempts", "max_ticks"],
+          "properties": { "max_attempts": { "type": "integer", "minimum": 1, "maximum": 64 }, "max_ticks": { "type": "integer", "minimum": 1, "maximum": 10000000 } }
+        }
+      }
+    }
+  }
+}

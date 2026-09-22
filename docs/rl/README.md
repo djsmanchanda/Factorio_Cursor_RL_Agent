@@ -64,18 +64,41 @@ Failures must remain structured evidence. A timeout, no delivery, blocked route,
 ## Relationship to deterministic code
 
 Reuse live game facts, schemas, validators, geometry realization, execution,
-and measurements where they are genuinely generic.  Retire the deterministic
-decision cascade from policy authority.  Its remaining migration role is a
-frozen comparison baseline; it must not be the hidden source of goal ordering,
-strategy, site, scale, wait, or recovery choices.
+and measurements where they are genuinely generic.  Keep the deterministic workflow usable until Laya outperforms it under matched
+conditions. Frozen snapshots support evaluation and rollback. Inside Laya, the
+reused toolkit must not be the hidden source of goal ordering, strategy, site,
+scale, wait, or recovery choices.
 
 Seed-specific tooling may compile legal alternatives.  Laya chooses among
 those alternatives using the live state, goal stack, failure memory, and
 versioned guideline pack.  Validators may reject an illegal choice, but they
 may not replace it with their own preferred strategy.
 
+The first implementation slice is available in `orchestrator/laya_operations.py`,
+`orchestrator/laya_state.py`, `orchestrator/laya_guidelines.py`,
+`orchestrator/laya_decision_telemetry.py`, `training/laya_policy.py`,
+`training/laya_dataset.py`, and `training/laya_finetune.py`.  It is currently
+disposable/shadow infrastructure; real-Nauvis authority remains disabled until
+the M1 integration and M3 held-out gates pass.
+
+The full-loop data seam is available in `training/laya_workflow.py`: workflow
+traces can label goal, operation, site, scale, route, research, upgrade,
+recovery, and wait/act decisions. The Factorio mod's **Laya Coach** window
+exports bounded observations and optional human labels for future fine-tuning;
+it is intentionally read-only and never executes a model action. Deterministic
+disposable episodes also preserve staged decision traces as evidence; those
+traces teach the model what happened without giving the deterministic cascade
+strategic authority.
+
+The RTX 4060 optimization decision and queued hypothesis matrix are documented
+in `docs/rl/Laya_Optimization_Decision.md`.
+
 The retired `experimental/legacy_autonomy/` implementation may supply ideas or small compatible utilities after review. It is never imported wholesale into the active training runtime.
 
 ## Production promotion
 
 Promotion requires zero safety violations, held-out success, non-regression on earlier curriculum families, reproducible lineage, and a measurable advantage over simple and deterministic baselines. Real-base trials begin in shadow or narrowly bounded mode and retain rollback.
+
+The active implementation and coexistence plan is
+`Laya_Implementation_Plan.md`. Laya has a separate opt-in runner; the existing
+deterministic entry points and presentation remain intact.

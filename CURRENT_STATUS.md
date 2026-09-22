@@ -2942,3 +2942,9 @@ that consumed it was not.
 2026-09-17: Aligned the live seed geometry with the expandable blueprint: staggered seed origins `(35,31)` and `(41,36)`, one shared substation at `(43,35)`, and dense requester centres at `(39.5,32.5)`, `(45.5,37.5)`, and `(36.5,42.5)`. This removes the old per-cell substations that occupied the lower expansion bay.
 2026-09-17: Relaxed persistent power-bridge resource avoidance for depleted patches: routes still avoid any corridor containing a patch with at least 1,000,000 ore, but may cross lower-value mine remnants when needed.
 2026-09-17: Resource-protected power bridges now use orthogonal route legs and cardinal search steps; diagonal shortcuts remain available for ordinary non-mine routes.
+
+## [2026-09-22] Independent Laya runner and learning integrity implemented
+- Files: docs/rl/Laya_Implementation_Plan.md, Laya runner/toolkit/sequence/data/evidence modules, reviewed guideline catalog, matched comparison CLI and focused tests.
+- What: Preserved the usable deterministic workflow until matched live outperformance. Added a separate capability-gated disposable Laya runner, non-truncating versioned model input, source-backed guidelines, causal/weighted learning data, exclusive shadow artifacts, pending transaction receipts, failure packets and conservative comparison gates.
+- Evidence: 188 Laya/training tests pass; real tokenizer fits all 2,111 exported historical success cases while 256 unsupported timeout labels are excluded. An independent commit tree also passes integration checks. No GPU training, Factorio execution, production promotion, save change or deployment was performed.
+- Remaining: Broader factory mechanics and workflow data, a compatible trained checkpoint, replay fidelity/automatic learning, and matched live incumbent comparisons. New Python Laya processes load these changes; deterministic and Factorio runtimes require no lifecycle action.

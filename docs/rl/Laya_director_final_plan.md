@@ -2,7 +2,8 @@
 
 # Laya autonomous director — final implementation plan
 
-**Status:** adopted product direction; M0 contracts and the fail-closed registry
+**Status:** adopted product direction; the 2026-09-22 coexistence and delivery
+sequence in `Laya_Implementation_Plan.md` governs current implementation; M0 contracts and the fail-closed registry
 seam are implemented.  This document supersedes the three exploratory Laya
 classifier plans for future design work.  Existing runtime contracts remain in
 force until each is explicitly migrated and verified.
@@ -22,9 +23,10 @@ and promotion process remain the way the director learns and earns authority.
 
 ## 2. Authority split
 
-The current deterministic cascade is being retired as a decision maker.  No
-new product behavior should be added as a priority rule, special-case recovery
-branch, fixed layout preference, or one-off seed workaround.
+The current deterministic workflow remains the usable incumbent until Laya
+outperforms it under matched conditions. The independent Laya runner owns its
+own policy authority. New Laya behavior must not become a priority rule,
+special-case recovery branch, fixed layout preference, or seed workaround.
 
 The retained deterministic subsystem is a world interface and safety shield:
 
@@ -41,7 +43,8 @@ choose repair versus duplication, choose an action site, or silently substitute
 one strategy for another.  Validators may reject an operation or require a
 safe stop; they may not make a policy choice.
 
-The old cascade stays only as a frozen comparison baseline during evaluation.
+The incumbent workflow stays available with its existing dashboard and controls;
+versioned snapshots are frozen for each comparison.
 Once the director becomes primary, a sidecar/model failure produces a safe
 observe/wait/escalate result, not a hidden return to the old cascade.
 
@@ -295,6 +298,13 @@ both runtimes.  Run without changing action selection.  Acceptance: each
 decision has reproducible context/options/outcome linkage and no hidden
 priority selection in the registry.
 
+Implemented in the first local slice: `orchestrator/laya_operations.py`,
+`orchestrator/laya_state.py`, `orchestrator/laya_guidelines.py`,
+`orchestrator/laya_decision_telemetry.py`, the bounded disposable registry in
+`orchestrator/laya_default_registry.py`, and training shadow hooks.  The
+deterministic Nauvis runner is not yet switched to these seams; that remains a
+deliberate M1 integration gate.
+
 ### M2 — data and offline director
 
 Build ETL, dataset-quality reporting, seed-family held-out splits, and the
@@ -304,6 +314,18 @@ Acceptance: an evidence-backed local memory/runtime profile, materially above
 majority and frozen-baseline imitation metrics, calibrated held-out confidence,
 stable latency, and no illegal tool proposals.
 
+Implemented: `training/laya_dataset.py` and
+`tools/build_laya_dataset.py` convert safe disposable transitions into typed
+Laya cases with provenance and stable seed-derived train/calibration/held-out/
+test splits, including stores that predate explicit split metadata.  The local training implementation
+is `training/laya_finetune.py` with `tools/train_laya_4060.py`; it follows the
+upstream RLCD objective with single-GPU LoRA adapters, gradient accumulation,
+proper-scoring rewards, and model checkpoints.  The next gate is the actual
+GPU preflight plus calibration/evaluation run on the user's exclusive 4060.
+The adapter is loadable through `training/laya_runtime.py`; the detached
+`scripts/run_laya_training.sh` runs training and then writes independent
+held-out and test reports through `tools/evaluate_laya.py`.
+
 ### M3 — shadow and disposable co-director
 
 Run Laya on every decision in shadow, then let it execute only in disposable
@@ -311,6 +333,13 @@ episodes.  Mine disagreement cases, improve candidate expressiveness and
 observations, and add scenario reproductions for attributed failure families.
 Acceptance: Laya beats the baseline on frozen seeds with zero safety violations
 and reproducible lineage.
+
+The Factorio-side **Laya Coach** window is part of the M3 data loop. It is
+observation/annotation-only and writes bounded state, goals, corrections,
+outcomes, and optional selected-option labels. Guidance without a presented
+option set is retained as context and cannot become a fabricated target. The
+offline importer converts explicit labels into typed workflow cases while
+preserving runtime provenance.
 
 ### M4 — director-primary disposable factory
 

@@ -23,6 +23,7 @@
     "case_id": { "$ref": "#/definitions/id" },
     "source": { "$ref": "#/definitions/source" },
     "state": { "$ref": "laya_state.schema.json" },
+    "decision_trace": { "$ref": "#/definitions/decisionTrace" },
     "questions": {
       "type": "object",
       "minProperties": 1,
@@ -68,10 +69,12 @@
       "additionalProperties": false,
       "required": ["kind", "run_id", "provenance_hash"],
       "properties": {
-        "kind": { "enum": ["rl_transition", "deterministic_run", "campaign_decision"] },
+        "kind": { "enum": ["rl_transition", "deterministic_run", "campaign_decision", "human_coach"] },
         "run_id": { "$ref": "#/definitions/id" },
         "episode_id": { "$ref": "#/definitions/id" },
         "trajectory_id": { "$ref": "#/definitions/id" },
+        "step_index": { "type": "integer", "minimum": 0 },
+        "decision_kind": { "$ref": "#/definitions/questionId" },
         "scenario_id": { "$ref": "#/definitions/id" },
         "scenario_seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
         "scenario_hash": { "$ref": "#/definitions/hash" },
@@ -113,6 +116,54 @@
         },
         "option_count": { "type": "integer", "minimum": 1, "maximum": 20 },
         "temperature_bucket": { "$ref": "#/definitions/nonEmptyString" }
+      }
+    },
+    "decisionTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trajectory_id", "step_index", "step_count", "decision_kind",
+        "pre_observation", "post_observation", "options", "chosen_action",
+        "executed_action", "outcome", "outcome_ref"
+      ],
+      "properties": {
+        "trajectory_id": { "$ref": "#/definitions/id" },
+        "step_index": { "type": "integer", "minimum": 0 },
+        "step_count": { "type": "integer", "minimum": 1 },
+        "decision_kind": { "$ref": "#/definitions/questionId" },
+        "pre_observation": { "type": "object", "additionalProperties": { "type": "number" } },
+        "post_observation": { "type": "object", "additionalProperties": { "type": "number" } },
+        "options": {
+          "type": "array", "minItems": 1, "maxItems": 20,
+          "items": { "$ref": "laya_state.schema.json#/definitions/option" }
+        },
+        "chosen_action": {
+          "type": "object", "additionalProperties": false,
+          "required": ["option_id", "option"],
+          "properties": {
+            "option_id": { "$ref": "#/definitions/optionId" },
+            "option": { "$ref": "laya_state.schema.json#/definitions/option" }
+          }
+        },
+        "executed_action": {
+          "type": "object", "additionalProperties": false,
+          "required": ["option_id", "action", "execution"],
+          "properties": {
+            "option_id": { "$ref": "#/definitions/optionId" },
+            "action": { "type": "object" },
+            "execution": { "type": "object" }
+          }
+        },
+        "outcome": { "type": "object" },
+        "outcome_ref": {
+          "type": "object", "additionalProperties": false,
+          "required": ["trajectory_id", "step_index", "source_hash"],
+          "properties": {
+            "trajectory_id": { "$ref": "#/definitions/id" },
+            "step_index": { "type": "integer", "minimum": 0 },
+            "source_hash": { "$ref": "#/definitions/hash" }
+          }
+        }
       }
     },
     "optionId": {

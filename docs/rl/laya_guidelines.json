@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "purpose": "Reviewed active-document excerpts for Laya; historical workflows are excluded.",
+  "rules": [
+    {
+      "rule_id": "rule.runtime-isolation", "kind": "hard", "scopes": ["*"],
+      "source": "docs/system_invariants.md",
+      "quote": "Training may not mutate the real save, consume its command channel, or silently replace its planner."
+    },
+    {
+      "rule_id": "rule.plan-legality", "kind": "hard", "scopes": ["*"],
+      "source": "docs/system_invariants.md",
+      "quote": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
+    },
+    {
+      "rule_id": "rule.production-promotion", "kind": "hard", "scopes": ["*"],
+      "source": "docs/system_invariants.md",
+      "quote": "Real-base authority requires an explicitly promoted policy, bounded action scope, observable results, and rollback. Training success alone grants no production authority."
+    },
+    {
+      "rule_id": "rule.measured-completion", "kind": "hard", "scopes": ["*"],
+      "source": "docs/system_invariants.md",
+      "quote": "A running episode is not successful until its measured outcome is recorded."
+    },
+    {
+      "rule_id": "rule.repair-before-duplicate", "kind": "soft", "scopes": ["recovery", "repair", "choose_operation"],
+      "source": "docs/rl/README.md", "quote": "repair usable capacity before duplicating it;"
+    },
+    {
+      "rule_id": "rule.direct-transport", "kind": "soft", "scopes": ["mine", "smelt", "route", "mining_delivery", "furnace_refining"],
+      "source": "docs/rl/README.md", "quote": "prefer short, continuous, direct transport;"
+    },
+    {
+      "rule_id": "rule.sustained-efficiency", "kind": "soft", "scopes": ["*"],
+      "source": "docs/rl/README.md", "quote": "minimize completion time, materials, infrastructure, and energy while sustaining output."
+    },
+    {
+      "rule_id": "rule.expansion-space", "kind": "soft", "scopes": ["mine", "smelt", "select_candidate", "select_site", "expand"],
+      "source": "docs/rl/README.md", "quote": "reserve corridors and future expansion space;"
+    }
+  ]
+}

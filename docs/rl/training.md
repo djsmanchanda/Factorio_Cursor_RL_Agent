@@ -16,6 +16,169 @@ deterministic work is limited to observations, operation compilation, hard
 validation, execution, measurement, or a blocker in those mechanics; new
 strategic behavior belongs in the learned director and its curriculum.
 
+The local Laya data/training path is now available:
+
+```bash
+.venv/bin/python tools/build_laya_dataset.py \
+  --database data/training/experience.db \
+  --derive-seed-splits \
+  --step-level \
+  --output /tmp/factorio-laya-cases.jsonl
+.venv/bin/python tools/laya_preflight.py
+.venv/bin/python tools/train_laya_4060.py \
+  --cases /tmp/factorio-laya-cases.jsonl \
+  --model-dir /path/to/convaiinnovations/laya \
+  --output-dir /path/to/local/laya-4060-checkpoint
+.venv/bin/python tools/evaluate_laya.py \
+  --cases /tmp/factorio-laya-cases.jsonl \
+  --checkpoint /path/to/local/laya-4060-checkpoint \
+  --base-model /path/to/convaiinnovations/laya \
+  --split held_out \
+  --output /path/to/local/laya-4060-checkpoint/evaluation-held-out.json
+```
+
+For a later run, the profile is tunable without changing the learning
+objective. After a short VRAM smoke test, `LAYA_MICRO_BATCH=2` with
+`LAYA_GRADIENT_ACCUMULATION=16` preserves the effective batch while reducing
+per-step overhead; `LAYA_GRADIENT_CHECKPOINTING=0` can improve throughput when
+the measured peak remains safely below the 8 GiB limit. The active run is not
+changed by these settings.
+
+The training command requires separate `train` and `calibration` case splits,
+an exclusive CUDA window, and the optional Laya/Transformers/PEFT/SafeTensors
+dependencies.  It fails closed when CUDA or calibration data is unavailable;
+it does not fall back to the deterministic policy or publish to a model hub.
+The checkpoint is a PEFT adapter plus the fully trained typed decision head;
+`tools/evaluate_laya.py` loads it with the immutable base model and writes the
+held-out promotion evidence.  A checkpoint is eligible for disposable shadow
+only after that report is ready; real Nauvis promotion remains a separate
+explicit gate.
+The RL Observatory `/laya` page is the control and telemetry surface for this
+pipeline: it can start/stop disposable fine-tuning after explicit confirmation
+and shows the trainer's loss, steps, gradient norm, entropy, rewards,
+throughput, VRAM, loss history, and benchmark reports. It never controls
+Nauvis.
+
+### Resumable local fine-tuning
+
+Local fine-tuning writes atomic adapter, optimizer, scheduler, scaler, and RNG
+snapshots beneath `<output-dir>/checkpoints/`. By default it saves every 250
+optimizer steps and retains the newest three snapshots. The interval and
+retention can be changed without modifying the objective:
+
+```bash
+export LAYA_CHECKPOINT_INTERVAL=400
+export LAYA_CHECKPOINT_KEEP=3
+export LAYA_RESUME_CHECKPOINT=latest
+```
+
+`LAYA_RESUME_CHECKPOINT=latest` resumes from the newest compatible snapshot in
+the selected output directory; an explicit snapshot directory may be supplied
+instead. An explicit completed PEFT adapter (one without `trainer_state.pt`)
+is treated as a deliberate warm start, not an exact optimizer resume. The
+resumable launcher retries a failed training process from the newest snapshot,
+while a failed run with no snapshot starts from the initial step-00000000
+snapshot. Snapshots are local recovery artifacts, not promotion checkpoints;
+held-out and test evaluation still gate every final adapter.
+
+### Disposable shadow batch
+
+An evaluated adapter can now be compared against the incumbent policy on a
+single disposable worker. Laya receives the same validated candidates and
+state, but the incumbent remains the only policy allowed to execute. Each
+shadow decision is appended to JSONL with agreement, confidence/escalation,
+and the baseline action:
+
+```bash
+.venv/bin/python tools/run_laya_shadow_batch.py \
+  --workers training-workers-linux.json \
+  --rcon-secret-file /path/to/training/rcon-password \
+  --checkpoint data/laya-checkpoints/laya-flex-v1 \
+  --base-model data/laya-base \
+  --count 10 \
+  --attempts-per-scenario 1 \
+  --output data/laya-shadow/shadow-decisions.jsonl
+```
+
+This command is disposable-training-only. It does not mutate Nauvis, does not
+update the baseline policy, and does not promote the Laya checkpoint.
+
+### Full-loop workflow traces and human coaching
+
+#### Bounded Laya Guided Runner protocol
+
+The Laya Guided Runner advances one strategic seam at a time:
+
+```text
+observe -> serve_goal -> choose_operation -> compile legal options
+  -> select site/scale/route -> execute one transaction -> measure
+  -> accept, recover, wait, or escalate
+```
+
+Execution and safety remain deterministic toolset responsibilities. Laya never
+receives a full build plan or unbounded factory history; it selects a compact
+option identity and the tool registry resolves that identity to the complete
+validated plan. `orchestrator/laya_decision_flow.py` defines stable step IDs,
+parent trajectory links, bounded option summaries, and fail-closed transitions.
+
+The `factorio-decision-v2` representation uses one shared, non-truncating
+sequence builder for training, evaluation and inference. It measures actual
+model tokens, including instructions, option markers and state. Compact
+columnar fields and shared option features retain the information without
+repeating JSON keys; rule/tool provenance remains in the journal. The model
+receives the two most recent decision records, active failure and transaction,
+while the complete history remains external. Overflow rejects the request.
+The earlier JSON-envelope estimator is not a model sequence budget.
+
+Existing `laya-flex-v1` was trained with the old truncating representation and
+remains preserved. New default inference rejects incompatible trained adapters;
+`--allow-legacy-sequence` is available only on evaluation and shadow commands
+for explicitly labelled historical diagnostics. Do not relabel an old adapter
+as v2; collect, train and evaluate the new representation.
+
+Objective drift and failed transactions can be recorded as bounded
+`FailurePacket` replay requests in `training/laya_failure.py`. Packets are
+disposable-training-only, carry the state/decision/tool provenance needed for
+reproduction, and may produce reviewable `ImprovementProposal` records in an
+append-only ledger. Policy failures become fine-tuning cases; observation,
+tool, validator, documentation, and environment failures become regression or
+improvement work. The ledger never edits authoritative code or documentation
+by itself.
+
+The director boundary now accepts explicit multi-step workflow decisions rather
+than assuming every case is `select_candidate`. A transition may carry typed
+`workflow_decisions` for goal serving, operation family, site, scale, route,
+research, upgrade, recovery, or wait/act choices. `training/laya_workflow.py`
+validates those boundaries and fails closed on an unavailable or low-confidence
+model response; candidate generation, hard validation, execution, and outcome
+measurement remain outside the model.
+
+The disposable episode runner now preserves every staged decision's available
+candidate set, selected candidate, pre/post observations, execution report, and
+outcome. Those stage traces are emitted as additional typed workflow cases by
+the dataset adapter, so deterministic execution contributes evidence without
+becoming an undisclosed strategic fallback.
+
+The Factorio mod also includes a **Laya Coach** window. It is observation and
+annotation only: it writes bounded JSON records to
+`script-output/factorio_mod/laya_guidance/`. A note without options and a chosen
+option is advisory context; it is never turned into a fabricated training
+label. When a disposable Laya runner is started with `--guidance-path` pointing
+at that directory, the newest note per focus is injected into the next model
+state as a soft priority/goal. It does not select an action or bypass
+validators. Labelled records can be merged into a dataset with:
+
+```bash
+.venv/bin/python tools/import_laya_coach_data.py \
+  --coach-file /path/to/script-output/factorio_mod/laya_guidance/coach.json \
+  --base-cases /tmp/factorio-laya-cases-all.jsonl \
+  --output /tmp/factorio-laya-cases-with-coaching.jsonl
+```
+
+This creates the data path for the next full-loop fine-tuning run. The current
+`laya-flex-v1` adapter is unchanged and remains mining-candidate-only until a
+new workflow dataset is collected and evaluated.
+
 ## Current system
 
 - `factorio_training_lab/` owns isolated `training/*` surfaces and `training-*` forces.
@@ -96,7 +259,7 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 ### Native Linux workers
 
 On native Linux, workers use the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.17` with its matching
+`~/.local/share/factorio-rl/runtime/factorio-2.1.19` with its matching
 read-data root and isolated writable roots. They do not use `wsl.exe`, Windows
 bridge directories, or a real-base save. Start with one disposable worker and
 one logical slot; increase capacity only after the documented five-minute UPS
@@ -288,3 +451,47 @@ The site may focus a connected spectator on the owned active training surface. I
 - Python-only training change: restart the affected batch, controller, or observer.
 - `factorio_training_lab/*.lua`: deploy the training mod, synchronize `%APPDATA%\Factorio\mods\factorio_training_lab`, restart the affected training worker and GUI Factorio session, then restart its controller if necessary.
 - Training changes never require redeploying the deterministic mod unless shared Lua code was deliberately changed too.
+
+## Independent Laya implementation (2026-09-22)
+
+See `Laya_Implementation_Plan.md` for the coexistence contract. The presentable
+deterministic workflow remains usable until Laya outperforms it under matched
+starting conditions. No existing controller or dashboard entry point is
+redirected.
+
+`tools/run_laya_director.py` exposes a separate opt-in disposable runner for
+`mining_delivery` and `furnace_refining`, requiring the exact worker, scenario,
+endpoint and a checkpoint capability manifest. It chooses operations, candidates,
+waiting and recovery through Laya, invokes validated bound handlers, and records
+full states, observations, transactions and failures. It does not yet implement
+connected factory progression, arbitrary repair, research or production authority.
+The model capability manifest is required evidence of intended scope, not proof
+of model quality. It must be issued after training/evaluation, never invented to
+bypass the gate.
+
+`docs/rl/laya_guidelines.json` selects reviewed excerpts from active documents.
+`orchestrator/laya_knowledge.py` verifies those excerpts still exist and records
+current document hashes. Historical code and archived advice are excluded.
+
+Shadow output paths are exclusive. Each batch now preserves full baseline
+transitions and scenario snapshots beside decision records and records baseline
+completion separately from Laya selection coverage. A shadow success cannot
+qualify as Laya execution success.
+
+Dataset conversion rejects failed actions without explicit reviewer or measured
+counterfactual support, preserves causal pre-action snapshots, and reports
+exclusions. Successful historical choices remain weak imitation evidence, not
+proof that every alternative is worse. Training applies case, question, source
+quality and temporal weights to individual losses, including micro-batch one.
+
+`tools/compare_laya_workflow.py` consumes a frozen suite and independent primary
+execution records. It rejects missing pairs, duplicate artifacts, mismatched
+seeds, easier initial inventory/research/budgets and non-disposable identities.
+Only observed execution from the actual deterministic workflow is accepted as
+replacement comparison evidence; LinUCB is a separate curriculum baseline.
+Passing the gate offers review only and never switches the incumbent.
+
+Current verification is offline tests and real-tokenizer checks. No new model
+was trained or promoted and no live Factorio episode was run for this tranche.
+A compatible checkpoint, broader training data, replay fidelity and matched live
+outcomes remain prerequisites for progressing toward replacement.
