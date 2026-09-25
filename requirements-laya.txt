@@ -1,6 +1,6 @@
 # Optional local Laya fine-tuning dependencies; keep the base test environment lightweight.
 torch>=2.4
-laya>=0.1.6
+laya==0.3.20  # pinned: single-option guard, head checkpointing, marker-target checks
 transformers>=4.48.0
 peft>=0.13.0
 safetensors>=0.4.0
