@@ -19,6 +19,7 @@ from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import state_hash
 from training.contracts import validate_scenario
 from training.isolation import assert_training_identity
+from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_failure import FailureCause, FailurePacket
 from training.laya_toolkit import BoundOption, LayaToolkit, LayaToolkitError, StaleLayaOption
 from training.laya_workflow import LayaWorkflowDirector, LayaWorkflowError
@@ -78,18 +79,25 @@ def load_checkpoint_capabilities(checkpoint: str | Path, scenario_family: str) -
         raise LayaRunnerError(
             f"checkpoint does not declare scenario family {scenario_family!r}"
         )
-    model_id = _identifier(str(payload.get("model_id") or root.name), "laya-director")
+    return {
+        **checkpoint_model_ref(root, model_id=payload.get("model_id")),
+        "request_version": REQUEST_VERSION,
+        "manifest_hash": _file_hash(path),
+        "manifest": payload,
+    }
+
+
+def checkpoint_model_ref(checkpoint: str | Path, *, model_id: Any = None) -> dict[str, str]:
+    """Identify checkpoint weights by content hash; asserts no capability."""
+    root = Path(checkpoint)
     weights = root / "model.safetensors"
     if not weights.is_file():
         weights = root / "adapter_model.safetensors"
     if not weights.is_file():
-        raise LayaRunnerError("checkpoint capability manifest has no model weights beside it")
+        raise LayaRunnerError(f"checkpoint has no model weights: {root}")
     return {
-        "model_id": model_id,
+        "model_id": _identifier(str(model_id or root.name), "laya-director"),
         "model_hash": _file_hash(weights),
-        "request_version": REQUEST_VERSION,
-        "manifest_hash": _file_hash(path),
-        "manifest": payload,
     }
 
 
@@ -208,6 +216,7 @@ class LayaPrimaryRunner:
         *,
         model_ref: Mapping[str, Any],
         knowledge_context: Mapping[str, Any] | None = None,
+        exploration: ExplorationGate | None = None,
         sleeper=time.sleep,
     ) -> None:
         validate_scenario(scenario)
@@ -219,39 +228,31 @@ class LayaPrimaryRunner:
         self.scenario = json.loads(json.dumps(scenario))
         self.director = director
         self.config = config
-        supplied_model_ref = dict(model_ref)
-        supplied_manifest = supplied_model_ref.get("manifest")
-        if not isinstance(supplied_manifest, Mapping):
-            raise LayaRunnerError("runner requires a verified checkpoint capability manifest")
-        manifest_hash = str(supplied_model_ref.get("manifest_hash") or "")
-        if not re.fullmatch(r"sha256:[0-9a-f]{64}", manifest_hash):
-            raise LayaRunnerError("runner requires the checkpoint capability manifest hash")
         self.model_ref = {
             "model_id": _identifier(str(model_ref.get("model_id") or "laya-director"), "laya-director"),
             "model_hash": str(model_ref.get("model_hash") or sha256_hash({"model": "unknown"})),
         }
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.model_ref["model_hash"]):
             raise LayaRunnerError("runner requires an exact checkpoint model hash")
-        self.checkpoint_capabilities = {
-            "request_version": str(supplied_model_ref.get("request_version") or REQUEST_VERSION),
-            "manifest_hash": manifest_hash,
-            "decision_kinds": list(
-                supplied_manifest.get("decision_kinds") or ()
-            ),
-            "scenario_families": list(
-                supplied_manifest.get("scenario_families") or ()
-            ),
-        }
-        if self.checkpoint_capabilities["request_version"] != REQUEST_VERSION:
-            raise LayaRunnerError("injected checkpoint request version does not match the runner")
-        missing_decisions = REQUIRED_DECISIONS - set(self.checkpoint_capabilities["decision_kinds"])
-        if missing_decisions:
-            raise LayaRunnerError(
-                "injected checkpoint lacks director decisions: "
-                + ", ".join(sorted(missing_decisions))
-            )
-        if str(scenario["family"]) not in set(self.checkpoint_capabilities["scenario_families"]):
-            raise LayaRunnerError("injected checkpoint does not cover this scenario family")
+        # The two authorities stay distinct: exploration never carries or
+        # substitutes for a trained capability manifest, and vice versa.
+        if exploration is not None:
+            if "manifest" in model_ref or "manifest_hash" in model_ref:
+                raise LayaRunnerError("exploration runs must not carry a checkpoint capability manifest")
+            if not isinstance(director, ExplorationDirector) or director.gate != exploration:
+                raise LayaRunnerError("exploration runs require the matching ExplorationDirector")
+            self.checkpoint_capabilities = None
+            self.authority = exploration.record()
+        else:
+            if isinstance(director, ExplorationDirector):
+                raise LayaRunnerError("an ExplorationDirector requires the explicit exploration gate")
+            self.checkpoint_capabilities = self._verified_capabilities(model_ref, scenario)
+            self.authority = {
+                "kind": "trained_capabilities",
+                "manifest_hash": self.checkpoint_capabilities["manifest_hash"],
+                "runtime": "disposable_training",
+                "production_authority": False,
+            }
         self.knowledge = dict(knowledge_context or {})
         self.run_id = _identifier(config.run_id, "laya-run")
         self.episode_id = _identifier(f"laya-{self.run_id}", "laya-episode")
@@ -286,6 +287,8 @@ class LayaPrimaryRunner:
                 raise LayaRunnerError("resume worker identity does not match journal")
             if started.get("model") != self.model_ref or started.get("checkpoint_capabilities") != self.checkpoint_capabilities:
                 raise LayaRunnerError("resume checkpoint does not match journal")
+            if started.get("authority") != self.authority:
+                raise LayaRunnerError("resume authority does not match journal")
             if started.get("knowledge_context") != self.knowledge:
                 raise LayaRunnerError("resume guideline context does not match journal")
             # Recovery state cannot be reconstructed from an action receipt
@@ -299,6 +302,38 @@ class LayaPrimaryRunner:
             )
             if isinstance(first_observation, Mapping):
                 self.initial_observation = dict(first_observation)
+
+    @staticmethod
+    def _verified_capabilities(
+        model_ref: Mapping[str, Any], scenario: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        manifest = model_ref.get("manifest")
+        if not isinstance(manifest, Mapping):
+            raise LayaRunnerError("runner requires a verified checkpoint capability manifest")
+        manifest_hash = str(model_ref.get("manifest_hash") or "")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", manifest_hash):
+            raise LayaRunnerError("runner requires the checkpoint capability manifest hash")
+        capabilities = {
+            "request_version": str(model_ref.get("request_version") or REQUEST_VERSION),
+            "manifest_hash": manifest_hash,
+            "decision_kinds": list(manifest.get("decision_kinds") or ()),
+            "scenario_families": list(manifest.get("scenario_families") or ()),
+        }
+        if capabilities["request_version"] != REQUEST_VERSION:
+            raise LayaRunnerError("injected checkpoint request version does not match the runner")
+        missing_decisions = REQUIRED_DECISIONS - set(capabilities["decision_kinds"])
+        if missing_decisions:
+            raise LayaRunnerError(
+                "injected checkpoint lacks director decisions: "
+                + ", ".join(sorted(missing_decisions))
+            )
+        if str(scenario["family"]) not in set(capabilities["scenario_families"]):
+            raise LayaRunnerError("injected checkpoint does not cover this scenario family")
+        return capabilities
+
+    @property
+    def execution_authority(self) -> str:
+        return "exploration" if self.authority["kind"] == "exploration" else "primary"
 
     def run(self) -> dict[str, Any]:
         provisioned = self.config.resume
@@ -320,10 +355,12 @@ class LayaPrimaryRunner:
                     model=self.model_ref,
                     request_version=REQUEST_VERSION,
                     checkpoint_capabilities=self.checkpoint_capabilities,
+                    authority=self.authority,
                     capability_scope={
                         "scenario_families": ["mining_delivery", "furnace_refining"],
                         "decision_kinds": sorted(REQUIRED_DECISIONS),
                         "runtime": "disposable_training",
+                        "trained": self.checkpoint_capabilities is not None,
                         "production_authority": False,
                     },
                 )
@@ -516,6 +553,7 @@ class LayaPrimaryRunner:
             selected_option_id=bound.option.option_id,
             confidence=float(decision["confidence"]),
             response=decision["response"],
+            selection=decision.get("selection"),
             summary=bound.option.summary,
             outcome="pending",
         )
@@ -821,6 +859,7 @@ class LayaPrimaryRunner:
             "decisions": self.decision_count,
             "journal": str(self.journal.path),
             "termination_seq": event["seq"],
+            "execution_authority": self.execution_authority,
             "capability_scope": {
                 "scenario_families": ["mining_delivery", "furnace_refining"],
                 "runtime": "disposable_training",

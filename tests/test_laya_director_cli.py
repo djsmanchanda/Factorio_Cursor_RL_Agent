@@ -56,3 +56,22 @@ def test_cli_rejects_an_endpoint_outside_worker_roster(monkeypatch, tmp_path):
             "--scenario", "not-read.json", "--checkpoint", "not-loaded",
             "--script-output", str(tmp_path), "--port", "27017",
         ])
+
+
+def test_cli_exploration_options_belong_only_to_exploration_mode(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from tools import run_laya_director
+    monkeypatch.setattr(run_laya_director, "load_worker_specs", lambda _path: [
+        SimpleNamespace(worker_id="training-01", host="127.0.0.1", rcon_port=27017, script_output=tmp_path),
+    ])
+    common = [
+        "--worker-id", "training-01", "--scenario", "not-read.json", "--checkpoint", "not-loaded",
+        "--script-output", str(tmp_path), "--port", "27017",
+    ]
+    with pytest.raises(SystemExit):
+        run_laya_director.main(["--mode", "laya-exploration-disposable", *common, "--exploration-seed", "1"])
+    with pytest.raises(SystemExit):
+        run_laya_director.main([
+            "--mode", "laya-primary-disposable", *common,
+            "--exploration-seed", "1", "--exploration-epsilon", "0.2",
+        ])

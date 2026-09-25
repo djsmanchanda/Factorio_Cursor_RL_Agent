@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Path: tools/run_laya_director.py
-# Purpose: Launch the explicitly opted-in Laya-primary disposable runner.
+# Purpose: Launch the explicitly opted-in Laya-primary or exploration disposable runner.
 
 from __future__ import annotations
 
@@ -16,12 +16,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from training.factorio_bridge import FactorioTrainingBridge
+from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_runner import (
     LayaPrimaryRunner,
     LayaRunnerConfig,
+    checkpoint_model_ref,
     load_checkpoint_capabilities,
 )
 from training.laya_runtime import LayaModelPredictor
+from training.laya_sequence import SEQUENCE_VERSION
 from training.laya_workflow import LayaWorkflowDirector
 from training.scheduler import load_worker_specs
 
@@ -31,8 +34,12 @@ def parser() -> argparse.ArgumentParser:
         description="Run the bounded Laya-primary director on one disposable training worker.",
     )
     result.add_argument(
-        "--mode", required=True, choices=("laya-primary-disposable",),
-        help="Explicit opt-in; no production or deterministic fallback mode exists here.",
+        "--mode", required=True,
+        choices=("laya-primary-disposable", "laya-exploration-disposable"),
+        help=(
+            "Explicit opt-in; no production or deterministic fallback mode exists here. "
+            "Exploration lets an untrained checkpoint drive without a capability manifest."
+        ),
     )
     result.add_argument("--worker-id", required=True, help="Explicit disposable worker identity.")
     result.add_argument("--workers", type=Path, default=ROOT / "training-workers-linux.json", help="Configured disposable worker roster; endpoint must match this worker")
@@ -43,7 +50,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost", "::1"))
     result.add_argument("--port", required=True, type=int)
     result.add_argument("--password-env", default="FACTORIO_TRAINING_RCON_PASSWORD")
-    result.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-runs")
+    result.add_argument("--evidence-dir", type=Path, help="Defaults to data/laya-runs, or data/laya-exploration for exploration")
+    result.add_argument("--exploration-seed", type=int, help="Required for exploration; seeds option sampling")
+    result.add_argument("--exploration-epsilon", type=float, help="Required for exploration; probability of a random option")
     result.add_argument("--run-id", default="")
     result.add_argument("--resume", action="store_true")
     result.add_argument("--max-decisions", type=int, default=40)
@@ -66,11 +75,27 @@ def main(argv: list[str] | None = None) -> int:
         parser().error("endpoint and script-output must match the configured disposable worker")
     if args.resume and not args.run_id:
         parser().error("--resume requires the original --run-id")
+    exploring = args.mode == "laya-exploration-disposable"
+    exploration_args = (args.exploration_seed, args.exploration_epsilon)
+    if exploring and None in exploration_args:
+        parser().error("exploration requires --exploration-seed and --exploration-epsilon")
+    if not exploring and exploration_args != (None, None):
+        parser().error("exploration options are only valid with --mode laya-exploration-disposable")
+    evidence_dir = args.evidence_dir or ROOT / "data" / ("laya-exploration" if exploring else "laya-runs")
     try:
         scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         parser().error(f"cannot read scenario: {error}")
-    capabilities = load_checkpoint_capabilities(args.checkpoint, str(scenario.get("family", "")))
+    gate: ExplorationGate | None = None
+    if exploring:
+        try:
+            gate = ExplorationGate(args.exploration_seed, args.exploration_epsilon)
+        except ValueError as error:
+            parser().error(str(error))
+        # Exploration never reads or asserts a capability manifest.
+        model_ref = checkpoint_model_ref(args.checkpoint)
+    else:
+        model_ref = load_checkpoint_capabilities(args.checkpoint, str(scenario.get("family", "")))
     password = os.environ.get(args.password_env)
     if not password:
         parser().error(f"RCON password environment variable {args.password_env!r} is not set")
@@ -80,18 +105,22 @@ def main(argv: list[str] | None = None) -> int:
     knowledge = load_guideline_context(
         ROOT,
         scopes=(
-            str(scenario["family"]), "choose_operation", "select_candidate", "recovery",
+            str(scenario["family"]), "choose_operation", "select_candidate", "wait_or_act", "recovery",
         ),
         max_rules=8,
     )
     predictor = LayaModelPredictor(
         args.checkpoint, base_model_dir=args.base_model, device=args.device,
+        explicit_sequence_version=SEQUENCE_VERSION if exploring else None,
     )
-    director = LayaWorkflowDirector(
-        predictor,
-        confidence_threshold=args.confidence_threshold,
-        request_tokenizer=predictor.tokenizer,
-    )
+    if gate is not None:
+        director = ExplorationDirector(predictor, gate, request_tokenizer=predictor.tokenizer)
+    else:
+        director = LayaWorkflowDirector(
+            predictor,
+            confidence_threshold=args.confidence_threshold,
+            request_tokenizer=predictor.tokenizer,
+        )
     bridge = FactorioTrainingBridge(
         args.script_output,
         host=args.host,
@@ -108,14 +137,15 @@ def main(argv: list[str] | None = None) -> int:
             LayaRunnerConfig(
                 worker_id=args.worker_id,
                 run_id=run_id,
-                evidence_dir=args.evidence_dir,
+                evidence_dir=evidence_dir,
                 max_decisions=args.max_decisions,
                 max_no_progress=args.max_no_progress,
                 max_candidate_retries=args.max_candidate_retries,
                 resume=args.resume,
             ),
-            model_ref=capabilities,
+            model_ref=model_ref,
             knowledge_context=knowledge,
+            exploration=gate,
         ).run()
     finally:
         bridge.close()

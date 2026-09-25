@@ -95,7 +95,14 @@ class LayaModelPredictor:
         base_model_dir: str | Path | None = None,
         device: str | None = None,
         allow_legacy_sequence: bool = False,
+        explicit_sequence_version: str | None = None,
     ) -> None:
+        # Exploration only: render the current representation for an upstream
+        # checkpoint that predates it, instead of legacy truncation.
+        if explicit_sequence_version not in {None, SEQUENCE_VERSION}:
+            raise LayaRuntimeError(
+                f"explicit sequence version must be {SEQUENCE_VERSION!r}"
+            )
         checkpoint = Path(checkpoint_dir)
         if not checkpoint.is_dir():
             raise LayaRuntimeError(f"Laya checkpoint directory does not exist: {checkpoint}")
@@ -152,7 +159,7 @@ class LayaModelPredictor:
         self._render_options = render_options
         self._temp_bucket = temp_bucket
         self.config = config
-        self.sequence_version = resolve_sequence_version(
+        self.sequence_version = explicit_sequence_version or resolve_sequence_version(
             config, allow_legacy_sequence=allow_legacy_sequence,
         )
         self.checkpoint_dir = checkpoint

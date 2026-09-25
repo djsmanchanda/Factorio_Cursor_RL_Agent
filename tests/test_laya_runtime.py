@@ -107,3 +107,10 @@ def test_existing_fine_tuned_adapter_is_identified_as_legacy() -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
     with pytest.raises(LayaRuntimeError, match="legacy truncating"):
         resolve_sequence_version(config)
+
+
+def test_explicit_sequence_version_accepts_only_the_current_representation(tmp_path) -> None:
+    from training.laya_runtime import LayaModelPredictor, LayaRuntimeError
+
+    with pytest.raises(LayaRuntimeError, match="explicit sequence version"):
+        LayaModelPredictor(tmp_path, explicit_sequence_version="factorio-decision-v1")

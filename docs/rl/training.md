@@ -467,7 +467,32 @@ full states, observations, transactions and failures. It does not yet implement
 connected factory progression, arbitrary repair, research or production authority.
 The model capability manifest is required evidence of intended scope, not proof
 of model quality. It must be issued after training/evaluation, never invented to
-bypass the gate.
+bypass the gate. Untrained data collection uses the separate exploration gate
+below instead.
+
+### Exploration gate (disposable data collection)
+
+`--mode laya-exploration-disposable` is a separate, explicitly documented gate
+that lets an untrained checkpoint (normally `data/laya-base/typed-decisions`)
+drive the same runner before any trained director exists. It is not a
+capability manifest and never reads, writes or implies one.
+
+- It requires `--exploration-seed` and `--exploration-epsilon`. Each decision
+  logs the model's distribution, then acts on the model's choice or, with
+  probability epsilon, a seeded uniformly random validated option. The draw is
+  derived from the decision's own state hash, so it is reproducible and
+  resume-safe.
+- Low confidence does not escalate; escalation stays an ordinary option.
+- The journal records `authority.kind = "exploration"`,
+  `checkpoint_capabilities = null`, `capability_scope.trained = false` and a
+  per-decision `selection.source` (`model` or `exploration_random`). The run
+  summary reports `execution_authority = "exploration"`, which the comparison
+  gate rejects because it accepts only `primary`.
+- Evidence defaults to `data/laya-exploration/`, apart from primary runs.
+- Exploration choices are never imitation targets. Only measured outcomes or
+  evaluated counterfactuals may turn them into labels.
+- All hard validators, pre-execution revalidation, disposable identity checks
+  and cleanup are unchanged. There is no real-save or production path.
 
 `docs/rl/laya_guidelines.json` selects reviewed excerpts from active documents.
 `orchestrator/laya_knowledge.py` verifies those excerpts still exist and records

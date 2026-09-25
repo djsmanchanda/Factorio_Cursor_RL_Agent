@@ -10,7 +10,8 @@ import pytest
 
 from orchestrator.laya_state import LayaBudgetProfile
 from training.canonical import plan_hash
-from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig, LayaRunJournal
+from training.laya_exploration import ExplorationDirector, ExplorationGate
+from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig, LayaRunnerError, LayaRunJournal
 from training.laya_workflow import LayaWorkflowDirector
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
 
@@ -263,3 +264,94 @@ def test_director_with_document_guidance_fits_actual_tokenizer(tmp_path):
     starts = [row for row in events if row["type"] == "transaction_started"]
     assert len(starts) == 3
     assert all(any(other["type"] == "tool_result" and other["transaction_id"] == row["transaction_id"] and other["seq"] > row["seq"] for other in events) for row in starts)
+
+
+MODEL_ONLY_REF = {"model_id": "laya-base-typed-decisions", "model_hash": "sha256:" + "3" * 64}
+
+
+def _exploration_runner(tmp_path, bridge, predictor, scenario, gate, *, run_id="explore-test"):
+    director = ExplorationDirector(predictor, gate, budget_profile=LARGE_BUDGET)
+
+    def sleep(_seconds):
+        bridge.waited = True
+        bridge.tick += 60
+        bridge.delivered += 1
+
+    return LayaPrimaryRunner(
+        bridge, scenario, director,
+        LayaRunnerConfig(
+            worker_id="worker-test-1", run_id=run_id, evidence_dir=tmp_path,
+            max_decisions=12, max_no_progress=8,
+        ),
+        model_ref=MODEL_ONLY_REF, exploration=gate, sleeper=sleep,
+    )
+
+
+def _events(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_exploration_gate_drives_without_manifest_and_labels_every_artifact(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(11)
+    bridge = Bridge(scenario)
+
+    def choose(kind, ids, _state):
+        return {"choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s"}.get(kind, ids[-1])
+
+    class Uncertain(Predictor):
+        def predict(self, state, questions):
+            response = super().predict(state, questions)
+            next(iter(response["answers"].values()))["confidence"] = 0.2
+            return response
+
+    gate = ExplorationGate(seed=7, epsilon=0.0)
+    result = _exploration_runner(tmp_path, bridge, Uncertain(choose), scenario, gate).run()
+
+    # Low confidence does not escalate under exploration; the model still acts.
+    assert result["status"] == "completed"
+    assert result["execution_authority"] == "exploration"
+    events = _events(tmp_path / "runs" / "explore-test.jsonl")
+    started = events[0]
+    assert started["authority"]["kind"] == "exploration"
+    assert started["authority"]["comparison_eligible"] is False
+    assert started["checkpoint_capabilities"] is None
+    assert started["capability_scope"]["trained"] is False
+    selections = [event["selection"] for event in events if event["type"] == "decision_result"]
+    assert selections and all(item["source"] == "model" for item in selections)
+
+
+def test_exploration_and_trained_capability_gates_cannot_be_mixed(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(11)
+    gate = ExplorationGate(seed=1, epsilon=0.5)
+    predictor = Predictor(lambda _kind, ids, _state: ids[0])
+    config = LayaRunnerConfig(worker_id="worker-test-1", run_id="mixed", evidence_dir=tmp_path)
+    explorer = ExplorationDirector(predictor, gate, budget_profile=LARGE_BUDGET)
+    plain = LayaWorkflowDirector(predictor, budget_profile=LARGE_BUDGET)
+
+    with pytest.raises(LayaRunnerError, match="must not carry"):
+        LayaPrimaryRunner(Bridge(scenario), scenario, explorer, config, model_ref=MODEL_REF, exploration=gate)
+    with pytest.raises(LayaRunnerError, match="requires the explicit exploration gate"):
+        LayaPrimaryRunner(Bridge(scenario), scenario, explorer, config, model_ref=MODEL_REF)
+    with pytest.raises(LayaRunnerError, match="matching ExplorationDirector"):
+        LayaPrimaryRunner(Bridge(scenario), scenario, plain, config, model_ref=MODEL_ONLY_REF, exploration=gate)
+    with pytest.raises(LayaRunnerError, match="capability manifest"):
+        LayaPrimaryRunner(Bridge(scenario), scenario, plain, config, model_ref=MODEL_ONLY_REF)
+
+
+def test_seeded_exploration_is_reproducible(tmp_path) -> None:
+    def selections(run_id):
+        scenario = generate_mining_delivery_scenario(13)
+        predictor = Predictor(lambda _kind, ids, _state: ids[0])
+        _exploration_runner(
+            tmp_path, Bridge(scenario), predictor, scenario,
+            ExplorationGate(seed=3, epsilon=1.0), run_id=run_id,
+        ).run()
+        return [
+            (event["selected_option_id"], event["selection"]["source"])
+            for event in _events(tmp_path / "runs" / f"{run_id}.jsonl")
+            if event["type"] == "decision_result"
+        ]
+
+    first = selections("explore-a")
+    assert first == selections("explore-b")
+    assert {source for _option, source in first} == {"exploration_random"}
