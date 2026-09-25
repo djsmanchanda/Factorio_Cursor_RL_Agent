@@ -49,3 +49,6 @@ training-workers-linux.json
 data/training/logs/
 data/rl-gpu-venv/
 :memory:.ses
+
+# Local runtime and training logs
+logs/
