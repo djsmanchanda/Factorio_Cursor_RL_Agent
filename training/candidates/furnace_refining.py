@@ -18,8 +18,10 @@ def _candidate(scenario, variant: int) -> dict:
     furnace_pole = {"x": 2.5 if variant == 0 else -2.5, "y": y + 3.0}
     plan = {"surface": scenario["environment"]["surface_name"], "force": scenario["environment"]["force_name"], "phases": [{"name": "furnace_refining", "actions": [
         {"action_type": "place_entity", "entity": "electric-furnace", "position": {"x": furnace_x, "y": y}, "direction": "east", "recipe": scenario["objective"]["item"]},
-        {"action_type": "place_entity", "entity": "fast-inserter", "position": {"x": -2.0, "y": y}, "direction": "east"},
-        {"action_type": "place_entity", "entity": "fast-inserter", "position": {"x": 2.0, "y": y}, "direction": "east"},
+        # Inserters pick up on the side they face (planners/belt_bridge.py), so a
+        # west-to-east source -> furnace -> sink flow faces west.
+        {"action_type": "place_entity", "entity": "fast-inserter", "position": {"x": -2.0, "y": y}, "direction": "west"},
+        {"action_type": "place_entity", "entity": "fast-inserter", "position": {"x": 2.0, "y": y}, "direction": "west"},
         {"action_type": "place_entity", "entity": "medium-electric-pole", "position": source_pole},
         {"action_type": "place_entity", "entity": "medium-electric-pole", "position": middle_pole},
         {"action_type": "place_entity", "entity": "medium-electric-pole", "position": near_furnace_pole},
