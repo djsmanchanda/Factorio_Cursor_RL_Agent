@@ -486,9 +486,13 @@ class LayaPrimaryRunner:
                 report,
                 failed_candidate=self.failed_candidate,
                 allow_retry=self.retry_count < self.config.max_candidate_retries,
+                allow_reselect=(
+                    self.active_failure.get("kind") == "contract"
+                    and self.retry_count < self.config.max_candidate_retries
+                ),
             )
             bound = self._decide("recovery", report, options)
-            if bound.option.option_id.startswith("recovery.retry."):
+            if bound.option.option_id.startswith("recovery.retry.") or bound.option.option_id == "recovery.reselect":
                 self.retry_count += 1
             return self._invoke(bound, report)
 
@@ -616,6 +620,12 @@ class LayaPrimaryRunner:
                 self.retry_count = 0
         elif result.kind == "wait":
             self.current_transaction["status"] = "measuring"
+        elif result.kind == "reselect":
+            # Only a stale selection offers this; the next step re-enters
+            # choose_operation against a fresh catalog.
+            self.active_failure = None
+            self.failed_candidate = None
+            self.current_transaction["status"] = "completed"
         else:
             self.current_transaction["status"] = "completed"
         self.journal.append(

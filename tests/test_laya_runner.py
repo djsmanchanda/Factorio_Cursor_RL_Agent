@@ -355,3 +355,60 @@ def test_seeded_exploration_is_reproducible(tmp_path) -> None:
     first = selections("explore-a")
     assert first == selections("explore-b")
     assert {source for _option, source in first} == {"exploration_random"}
+
+
+def test_ready_to_running_transition_does_not_stale_a_selection(tmp_path) -> None:
+    # Live lab episodes report "ready" before the first build and "running" after.
+    scenario = generate_mining_delivery_scenario(11)
+
+    class ReadyFirst(Bridge):
+        observations = 0
+
+        def observe(self, episode_id):
+            report = super().observe(episode_id)
+            self.observations += 1
+            if self.observations == 1:
+                report["status"] = "ready"
+            return report
+
+    bridge = ReadyFirst(scenario)
+
+    def choose(kind, ids, _state):
+        return {"choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s"}.get(kind, ids[-1])
+
+    result = _runner(tmp_path, bridge, Predictor(choose), scenario).run()
+
+    assert result["status"] == "completed"
+    assert len(bridge.executions) == 1
+
+
+def test_stale_selection_offers_bounded_reselect_recovery(tmp_path) -> None:
+    from training.laya_toolkit import StaleLayaOption
+
+    scenario = generate_mining_delivery_scenario(11)
+    bridge = Bridge(scenario)
+    seen = []
+
+    def choose(kind, ids, _state):
+        seen.append((kind, ids))
+        if kind == "recovery":
+            return "recovery.reselect"
+        return {"choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s"}.get(kind, ids[-1])
+
+    runner = _runner(tmp_path, bridge, Predictor(choose), scenario)
+    original = runner.toolkit._execute_fresh
+    calls = []
+
+    def stale_once(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise StaleLayaOption("objective, status, or scope changed after Laya selected the option")
+        return original(*args)
+
+    runner.toolkit._execute_fresh = stale_once
+    result = runner.run()
+
+    assert result["status"] == "completed"
+    assert len(bridge.executions) == 1
+    recovery_ids = next(ids for kind, ids in seen if kind == "recovery")
+    assert "recovery.reselect" in recovery_ids

@@ -64,11 +64,14 @@ def _scope(scenario: Mapping[str, Any]) -> dict[str, Any]:
 
 def _decision_fingerprint(report: Mapping[str, Any]) -> str:
     objective = report.get("objective") or {}
+    status = report.get("status")
     return sha256_hash({
         "scenario_id": report.get("scenario_id"),
         "surface": report.get("surface"),
         "force": report.get("force"),
-        "status": report.get("status"),
+        # The lab moves ready -> running by itself; both are the same active
+        # phase (episode_world.lua), so that transition must not stale a choice.
+        "status": "active" if status in {"ready", "running"} else status,
         "objective": {
             "target_rate_per_tick": objective.get("target_rate_per_tick"),
             "stage_index": objective.get("stage_index"),
@@ -207,6 +210,7 @@ class LayaToolkit:
         *,
         failed_candidate: Mapping[str, Any] | None,
         allow_retry: bool,
+        allow_reselect: bool = False,
     ) -> tuple[BoundOption, ...]:
         fingerprint = _decision_fingerprint(report)
         options: list[BoundOption] = [
@@ -220,6 +224,18 @@ class LayaToolkit:
                 options.append(self._candidate_bound(
                     candidate, report, option_id=f"recovery.retry.{candidate['action_id']}",
                 ))
+        if allow_reselect:
+            option = self._compile_one({
+                "tool_id": self.family_tool_id,
+                "option_id": "recovery.reselect",
+                "summary": "Discard the stale selection and choose again from a fresh legal catalog.",
+                "features": {"fresh_catalog": 1.0},
+                "scope": self.scope,
+                "parameters": {"observation": fingerprint, "next": "choose_operation"},
+            })
+            options.append(BoundOption(
+                option, lambda: ToolResult(kind="reselect", report=report), fingerprint,
+            ))
         options.append(self._escalate_bound(fingerprint, prefix="recovery.escalate"))
         return tuple(options)
 
