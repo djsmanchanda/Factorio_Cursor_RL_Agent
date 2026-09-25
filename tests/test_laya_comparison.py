@@ -13,7 +13,7 @@ def _evidence():
         "initial_state_hash": "sha256:" + "1" * 64,
         "starting_inventory": {"iron-plate": 20}, "research": [],
         "objective": {"item": "iron-plate", "rate": 1}, "budgets": {"max_ticks": 6000},
-        "factorio_version": "2.1.19", "mod_set_hash": "sha256:" + "2" * 64,
+        "factorio_version": "2.1.20", "mod_set_hash": "sha256:" + "2" * 64,
         "bootstrap_profile": "reduced-v1",
     }
     suite = {"version": "1.0.0", "suite_id": "frozen-test", "cases": [
@@ -26,7 +26,7 @@ def _evidence():
         "execution_id": f"baseline-{i}", "seed": i, "family": "production",
         "runtime": {"kind": "disposable_training", "surface": "training/test", "force": "training-test",
                     "worker_id": "worker-test", "save_id": "save-test", "initial_state_hash": conditions["initial_state_hash"],
-                    "mod_set_hash": conditions["mod_set_hash"], "factorio_version": "2.1.19"},
+                    "mod_set_hash": conditions["mod_set_hash"], "factorio_version": "2.1.20"},
         "metrics": {"objective_completed": True, "safety_violations": 0, "elapsed_ticks": 100, "material_cost": 10, "sustained_rate": 1, "escalations": 0},
     } for i in range(3)]
     challenger = deepcopy(baseline)

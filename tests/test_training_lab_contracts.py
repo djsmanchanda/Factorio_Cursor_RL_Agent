@@ -160,6 +160,13 @@ def test_training_surfaces_use_visible_tiles_and_evict_observers_before_recyclin
     assert "player.set_controller({ type = defines.controllers.spectator })" in world
 
 
+def test_training_lua_avoids_removed_factorio_2120_reads() -> None:
+    source = "\n".join(path.read_text(encoding="utf-8") for path in LAB.glob("*.lua"))
+
+    assert "LuaPlayer.spectator" not in source
+    assert ".fuel_category" not in source
+
+
 def test_fixture_audit_uses_surface_identity_not_global_unit_lookup() -> None:
     source = (LAB / "episode_measurement.lua").read_text(encoding="utf-8")
 

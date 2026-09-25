@@ -55,7 +55,7 @@ the deterministic mod is deployed or that Nauvis/player was observed.
   collection method, and report inspector.
 - [x] Focused schema, bridge, inspector, and Lua-stub regression tests.
 - [x] Lua syntax validation and focused Python test suite.
-- [ ] Disposable Factorio 2.1.14 runtime validation.
+- [ ] Disposable Factorio 2.1.20 runtime validation.
 - [x] Explicitly authorized real-base read-only observation.
 
 ### Phase 2 — completed in the repository
@@ -165,7 +165,7 @@ serialized by Lua as hidden policy.
 
 - [x] Unit/schema tests prove strict contract validation and deterministic
   order.
-- [ ] A disposable Factorio 2.1.14 fixture proves the command registers, reports
+- [ ] A disposable Factorio 2.1.20 fixture proves the command registers, reports
   a working lab and a deliberately starved or unpowered lab, and leaves force
   research, lab inventories, and control behavior unchanged.
 - [x] A real-base observation is optional and requires explicit authorization.  If
