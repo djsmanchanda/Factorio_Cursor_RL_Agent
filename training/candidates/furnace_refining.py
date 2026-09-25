@@ -33,7 +33,8 @@ def _candidate(scenario, variant: int) -> dict:
     digest = plan_hash(plan)
     land = len(occupied_tile_indices([("candidate", plan)]))
     return {"action_id": f"furnace-direct-v{variant}-{digest[7:19]}", "plan_hash": digest, "features": {
-        "predicted_completion": 1.0, "predicted_rate_per_tick": 1.2 / 60.0,
+        # Electric furnace: crafting speed 2 on a 3.2 s plate recipe = 0.625/s.
+        "predicted_completion": 1.0, "predicted_rate_per_tick": 0.625 / 60.0,
         "furnace_count": 1, "inserter_count": 2, "pole_count": counts["medium-electric-pole"],
         "material_cost": sum(_COST[k] * v for k, v in counts.items()), "occupied_land_tiles": land,
         "route_excess_tiles": 0, "route_efficiency": 1.0,

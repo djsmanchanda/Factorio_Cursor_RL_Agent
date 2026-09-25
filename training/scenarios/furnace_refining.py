@@ -13,11 +13,13 @@ _VERSION = "1.2.0"
 _BOUNDS = {"x_min": -32, "y_min": -32, "x_max_exclusive": 32, "y_max_exclusive": 32}
 
 
-def generate_furnace_refining_scenario(seed: int, target_rate_per_second: float = 1.0) -> dict:
+def generate_furnace_refining_scenario(seed: int, target_rate_per_second: float = 0.5) -> dict:
     if not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 65535:
         raise ValueError("seed must be an integer from 0 through 65535")
-    if target_rate_per_second not in (0.5, 1.0, 2.0):
-        raise ValueError("target rate must be one of (0.5, 1.0, 2.0)")
+    # One electric furnace smelts 0.625 plates/s and the budget allows one, so
+    # higher targets were unreachable. They return with multi-furnace scale options.
+    if target_rate_per_second not in (0.5,):
+        raise ValueError("target rate must be 0.5 until multi-furnace candidates exist")
     rng = random.Random(seed)
     ore = rng.choice(_ORES)
     output = _OUTPUTS[ore]
