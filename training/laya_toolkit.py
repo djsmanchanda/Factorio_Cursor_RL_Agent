@@ -246,16 +246,36 @@ class LayaToolkit:
         scenario = _scenario_at_observation(self.scenario, report)
         family = str(self.scenario["family"])
         if family == "furnace_refining":
-            return furnace_refining_candidates(scenario, validate_contract=False)
-        if family == "mining_delivery":
+            candidates = furnace_refining_candidates(scenario, validate_contract=False)
+        elif family == "mining_delivery":
             destinations = tuple((report.get("objective") or {}).get("destination_fixture_ids") or ())
-            return mining_delivery_candidates(
+            candidates = mining_delivery_candidates(
                 scenario,
                 target_rate_per_tick=scenario["objective"]["target_rate_per_tick"],
                 sink_fixture_ids=destinations or None,
                 validate_contract=False,
             )
-        raise LayaToolkitError(f"unsupported Laya-primary scenario family: {family}")
+        else:
+            raise LayaToolkitError(f"unsupported Laya-primary scenario family: {family}")
+        remaining = self._remaining_budget(report)
+        return [candidate for candidate in candidates if self._fundable(candidate["plan"], remaining)]
+
+    def _remaining_budget(self, report: Mapping[str, Any]) -> dict[str, int]:
+        # Mirrors the lab's committed_counts: already-built non-fixture entities
+        # consume the scenario budget, so a second full layout may be illegal.
+        built = (report.get("metrics") or {}).get("built_entities") or {}
+        budget = self.scenario["construction_budget"]
+        return {entity: int(limit) - int(built.get(entity, 0)) for entity, limit in budget.items()}
+
+    @staticmethod
+    def _fundable(plan: Mapping[str, Any], remaining: Mapping[str, int]) -> bool:
+        # Conservative: plan actions that coincide with existing entities are
+        # counted as new, which can only prune, never admit, an illegal plan.
+        counts: dict[str, int] = {}
+        for action in actions(dict(plan)):
+            entity = str(action["entity"])
+            counts[entity] = counts.get(entity, 0) + 1
+        return all(count <= remaining.get(entity, 0) for entity, count in counts.items())
 
     def _candidate_bound(
         self,

@@ -412,3 +412,18 @@ def test_stale_selection_offers_bounded_reselect_recovery(tmp_path) -> None:
     assert len(bridge.executions) == 1
     recovery_ids = next(ids for kind, ids in seen if kind == "recovery")
     assert "recovery.reselect" in recovery_ids
+
+
+def test_candidates_exceeding_remaining_budget_are_not_offered() -> None:
+    # Live: a second full layout was offered, then rejected by the lab budget.
+    from training.laya_toolkit import LayaToolkit
+
+    scenario = generate_mining_delivery_scenario(11)
+    bridge = Bridge(scenario)
+    toolkit = LayaToolkit(bridge, scenario, sleeper=lambda _seconds: None)
+    report = bridge.observe("episode")
+    fresh = toolkit.candidate_options(report)
+    assert fresh
+
+    report["metrics"]["built_entities"] = dict(scenario["construction_budget"])
+    assert toolkit.candidate_options(report) == ()
