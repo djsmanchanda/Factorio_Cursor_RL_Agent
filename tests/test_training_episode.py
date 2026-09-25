@@ -116,6 +116,7 @@ def test_episode_emits_one_valid_transition_and_recycles():
     assert first_action["stage_index"] == 1
     assert first_action["selected_candidate"]["action_id"] == transition["chosen_action_id"]
     assert first_action["pre_action_observation"] == transition["observation"]
+    assert first_action["available_candidates"]
 
 
 def test_staged_episode_records_each_decision_and_observes_immediately_after_upgrade():
@@ -160,6 +161,8 @@ def test_staged_episode_records_each_decision_and_observes_immediately_after_upg
     assert transition["stage_action_trail"][1]["observed_tick"] == 700
     assert transition["stage_action_trail"][1]["post_execution_tick"] == 710
     assert transition["stage_action_trail"][1]["selected_candidate"]["features"]["drill_count"] >= 20
+    assert transition["workflow_decisions"][0]["decision_kind"] == "select_candidate_stage_2"
+    assert transition["workflow_decisions"][0]["chosen_option_id"] == transition["stage_action_trail"][1]["selected_candidate"]["action_id"]
 
 
 def test_episode_recycles_after_execution_error():

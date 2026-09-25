@@ -230,6 +230,21 @@ def _validate_transition_semantics(payload: Mapping) -> None:
             raise ValueError("stage action post_execution_tick cannot precede observed_tick")
         if action["selected_candidate"]["action_id"] not in action_ids:
             raise ValueError("stage action candidate must identify one candidate")
+        available = action.get("available_candidates") or []
+        available_ids = [candidate["action_id"] for candidate in available]
+        if available and action["selected_candidate"]["action_id"] not in available_ids:
+            raise ValueError("stage action candidate must be in its available candidate set")
+    workflow_ids: set[str] = set()
+    for decision in payload.get("workflow_decisions", []):
+        decision_kind = str(decision["decision_kind"])
+        if decision_kind in workflow_ids:
+            raise ValueError("workflow decision kinds must be unique per transition")
+        workflow_ids.add(decision_kind)
+        option_ids = [str(option["option_id"]) for option in decision["options"]]
+        if len(option_ids) != len(set(option_ids)):
+            raise ValueError("workflow decision option ids must be unique")
+        if decision["chosen_option_id"] not in option_ids:
+            raise ValueError("workflow chosen option must identify one presented option")
     reward = payload["reward"]
     computed = sum(float(value) for name, value in reward.items() if name != "total")
     if abs(computed - float(reward["total"])) > 1e-6:

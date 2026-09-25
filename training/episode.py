@@ -70,6 +70,7 @@ def _candidate_record(candidate: Mapping) -> dict:
 def _stage_action_record(
     *, stage_index: int, pre_action_report: Mapping, candidate: Mapping,
     execution: Mapping, post_action_report: Mapping,
+    available_candidates: Sequence[Mapping] | None = None,
 ) -> dict:
     """Preserve decision-time evidence for every in-place staged action."""
     return {
@@ -77,6 +78,9 @@ def _stage_action_record(
         "observed_tick": int(pre_action_report["tick"]),
         "pre_action_observation": _observation(pre_action_report),
         "selected_candidate": _candidate_record(candidate),
+        "available_candidates": [
+            _candidate_record(option) for option in (available_candidates or (candidate,))
+        ],
         "execution": dict(execution),
         "post_execution_tick": int(post_action_report["tick"]),
         "post_action_observation": _observation(post_action_report),
@@ -120,7 +124,7 @@ def _stage_candidates(scenario: Mapping, report: Mapping) -> list[Mapping]:
 def run_episode(
     bridge, scenario: Mapping, candidates: Sequence[Mapping], policy, selection_seed: int,
     *, episode_id: str | None = None, poll_seconds: float = 5.0,
-    stop_event=None,
+    stop_event=None, shadow_policy=None,
     update_policy: bool = True, on_progress=None,
 ) -> dict:
     """Run one candidate, adapting in-place when an ordered demand stage advances."""
@@ -141,6 +145,12 @@ def run_episode(
         initial_report = bridge.observe(identifier)
         _progress(on_progress, "observed", identifier, {**context, "report": initial_report})
         initial = _observation(initial_report)
+        if shadow_policy is not None:
+            from training.laya_shadow import shadow_decision
+            _progress(on_progress, "shadow_decision", identifier, {
+                **context,
+                "decision": shadow_decision(shadow_policy, policy, candidates, initial, selection_seed),
+            })
         chosen = policy.select(candidates, initial, selection_seed)
         _progress(on_progress, "selected", identifier, {
             **context, "chosen_action_id": chosen["action_id"],
@@ -158,6 +168,7 @@ def run_episode(
             candidate=chosen,
             execution=execution,
             post_action_report=report,
+            available_candidates=candidates,
         ))
         _progress(on_progress, "executed", identifier, {
             **context, "chosen_action_id": chosen["action_id"], "execution": execution,
@@ -183,6 +194,16 @@ def run_episode(
                         item for item in stage_catalog
                         if item["action_id"] not in {candidate["action_id"] for candidate in all_candidates}
                     )
+                    if shadow_policy is not None:
+                        from training.laya_shadow import shadow_decision
+                        _progress(on_progress, "shadow_decision", identifier, {
+                            **context,
+                            "stage_index": observed_stage,
+                            "decision": shadow_decision(
+                                shadow_policy, policy, stage_catalog,
+                                _observation(report), selection_seed + observed_stage,
+                            ),
+                        })
                     stage_choice = policy.select(stage_catalog, _observation(report), selection_seed + observed_stage)
                     stage_execution = bridge.execute(
                         identifier, build_layout_authorization([stage_choice["plan"]]), stage_choice["plan"],
@@ -201,6 +222,7 @@ def run_episode(
                         candidate=stage_choice,
                         execution=stage_execution,
                         post_action_report=post_stage_report,
+                        available_candidates=stage_catalog,
                     ))
                     _progress(on_progress, "stage_adapted", identifier, {
                         **context, "stage_index": observed_stage,
@@ -212,6 +234,24 @@ def run_episode(
         failed = execution_total["failed_placements"]
         live_metrics = report["metrics"]
         candidate_metrics = chosen["features"]
+        workflow_decisions = []
+        for trail in stage_action_trail:
+            stage_index = int(trail["stage_index"])
+            if stage_index <= 1:
+                continue
+            options = trail.get("available_candidates") or []
+            chosen_stage = trail["selected_candidate"]["action_id"]
+            workflow_decisions.append({
+                "decision_kind": f"select_candidate_stage_{stage_index}",
+                "instructions": "Choose the next validated candidate after the demand stage advanced.",
+                "options": [
+                    {"option_id": str(option["action_id"]), "summary": str(option["action_id"])}
+                    for option in options[:20]
+                ],
+                "chosen_option_id": chosen_stage,
+                "confidence": 1.0,
+                "label_source": "outcome" if report["status"] == "completed" else "counterfactual",
+            })
         transition = {
             "version": "1.2.0", "episode_id": identifier,
             "scenario_id": scenario["scenario_id"], "scenario_seed": scenario["seed"],
@@ -221,6 +261,7 @@ def run_episode(
             "observation": initial, "candidates": [_candidate_record(item) for item in all_candidates],
             "chosen_action_id": chosen["action_id"], "result": _result(report),
             "stage_action_trail": stage_action_trail,
+            "workflow_decisions": workflow_decisions,
             "metrics": {
                 "initial_rate_per_tick": initial["delivered_rate_per_tick"],
                 "final_rate_per_tick": float(live_metrics.get("rate_per_tick", 0.0)),

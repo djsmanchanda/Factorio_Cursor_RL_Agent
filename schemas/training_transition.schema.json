@@ -38,6 +38,11 @@
       }
     },
     "chosen_action_id": {"type": "string", "minLength": 1},
+    "workflow_decisions": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"$ref": "#/definitions/workflowDecision"}
+    },
     "stage_action_trail": {
       "type": "array",
       "minItems": 1,
@@ -63,6 +68,20 @@
               "features": {
                 "type": "object", "minProperties": 1,
                 "additionalProperties": {"type": "number"}
+              }
+            }
+          },
+          "available_candidates": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["action_id", "plan_hash", "features"],
+              "properties": {
+                "action_id": {"type": "string", "minLength": 1},
+                "plan_hash": {"$ref": "#/definitions/hash"},
+                "features": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number"}}
               }
             }
           },
@@ -147,6 +166,33 @@
       "type": "object",
       "minProperties": 1,
       "additionalProperties": {"type": "number"}
+    },
+    "workflowDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_kind", "options", "chosen_option_id"],
+      "properties": {
+        "decision_kind": {"type": "string", "minLength": 1, "maxLength": 64},
+        "instructions": {"type": "string", "maxLength": 512},
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {"$ref": "#/definitions/workflowOption"}
+        },
+        "chosen_option_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "label_source": {"enum": ["outcome", "counterfactual", "expert", "deterministic", "reviewer"]}
+      }
+    },
+    "workflowOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["option_id", "summary"],
+      "properties": {
+        "option_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
     }
   }
 }
