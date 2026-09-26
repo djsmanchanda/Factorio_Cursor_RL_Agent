@@ -13,6 +13,7 @@ from orchestrator.laya_operations import OperationCompiler, OperationOption, sha
 from planners.plan_validation import actions, entity_footprint_tiles, validate_build_plan
 from planners.sandbox_infrastructure import build_layout_authorization
 from training.candidates import furnace_refining_candidates, mining_delivery_candidates
+from training.candidates.connected_workflow import connected_workflow_candidates
 from training.canonical import plan_hash
 from training.contracts import validate_scenario
 from training.isolation import assert_training_identity
@@ -117,7 +118,7 @@ class LayaToolkit:
     @property
     def family_tool_id(self) -> str:
         family = str(self.scenario["family"])
-        if family not in {"mining_delivery", "furnace_refining"}:
+        if family not in {"mining_delivery", "furnace_refining", "connected_workflow"}:
             raise LayaToolkitError(f"unsupported Laya-primary scenario family: {family}")
         return f"training.{family}"
 
@@ -239,6 +240,25 @@ class LayaToolkit:
         options.append(self._escalate_bound(fingerprint, prefix="recovery.escalate"))
         return tuple(options)
 
+    def serve_goal_options(
+        self, report: Mapping[str, Any], runnable_branch_ids: Sequence[str], executed_plan_hashes: set[str],
+    ) -> tuple[BoundOption, ...]:
+        """Build one runnable, not-yet-built branch each; waiting lets a built branch prove itself.
+
+        The work graph decides which branches are runnable (prerequisites
+        measured and closed); nothing here orders them.
+        """
+        fingerprint = _decision_fingerprint(report)
+        by_branch = {str(item.get("branch_id")): item for item in self._candidates(report)}
+        options = [
+            self._candidate_bound(by_branch[branch_id], report, option_id=f"serve.{branch_id}")
+            for branch_id in runnable_branch_ids
+            if branch_id in by_branch and by_branch[branch_id]["plan_hash"] not in executed_plan_hashes
+        ]
+        options.extend(self._wait_bound(seconds, fingerprint) for seconds in self.WAIT_SECONDS)
+        options.append(self._escalate_bound(fingerprint))
+        return tuple(options)
+
     def candidate_options(self, report: Mapping[str, Any]) -> tuple[BoundOption, ...]:
         return tuple(self._candidate_bound(candidate, report) for candidate in self._candidates(report))
 
@@ -247,6 +267,8 @@ class LayaToolkit:
         family = str(self.scenario["family"])
         if family == "furnace_refining":
             candidates = furnace_refining_candidates(scenario, validate_contract=False)
+        elif family == "connected_workflow":
+            candidates = connected_workflow_candidates(scenario, validate_contract=False)
         elif family == "mining_delivery":
             destinations = tuple((report.get("objective") or {}).get("destination_fixture_ids") or ())
             candidates = mining_delivery_candidates(
@@ -310,6 +332,8 @@ class LayaToolkit:
     def _candidate_summary(candidate: Mapping[str, Any]) -> str:
         # Numeric features are already complete in the model state. Repeating
         # them in the option head wastes the small decision context.
+        if candidate.get("branch_id"):
+            return f"Build the {candidate['branch_id']} branch of the connected workflow."
         return "Build the validated layout described by this option's features."
 
     def _execute_fresh(

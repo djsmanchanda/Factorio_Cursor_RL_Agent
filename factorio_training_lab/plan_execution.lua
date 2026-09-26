@@ -82,11 +82,17 @@ local function exact_entity(surface, force, action)
   local position = action.position
   local entities = surface.find_entities_filtered({
     name = action.entity,
-    area = { { position.x - 0.01, position.y - 0.01 }, { position.x + 0.01, position.y + 0.01 } },
+    area = { { position.x - 0.51, position.y - 0.51 }, { position.x + 0.51, position.y + 0.51 } },
     force = force
   })
+  -- Factorio snaps placements to the tile grid (an integer request for a 1x1
+  -- entity lands on x+0.5), so match the entity on the same tile as the
+  -- request rather than the raw coordinates; a neighbour at x-0.5 is distinct.
+  local tile_x, tile_y = math.floor(position.x + 1e-6), math.floor(position.y + 1e-6)
   for _, entity in pairs(entities) do
-    if entity.position.x == position.x and entity.position.y == position.y then return entity end
+    if math.floor(entity.position.x + 1e-6) == tile_x and math.floor(entity.position.y + 1e-6) == tile_y then
+      return entity
+    end
   end
   return nil
 end

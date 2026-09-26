@@ -160,6 +160,14 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
     if payload["family"] == "mining_delivery":
         if payload["objective"]["item"] != payload["resource_patch"]["resource"]:
             raise ValueError("objective item must match the resource patch")
+    elif payload["family"] == "connected_workflow":
+        objective = payload["objective"]
+        if objective.get("kind") != "produce_item_rate":
+            raise ValueError("connected_workflow objective must produce_item_rate")
+        if objective.get("input_item") != payload["resource_patch"]["resource"]:
+            raise ValueError("connected_workflow input_item must match the ore patch")
+        if not any(fixture["kind"] == "item_source" for fixture in payload["fixtures"]):
+            raise ValueError("connected_workflow requires an item_source fixture")
     else:
         objective = payload["objective"]
         if objective.get("kind") != "smelt_item_rate":

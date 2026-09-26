@@ -63,10 +63,27 @@ def observe_lab_workflow(
                 "available": available,
             },
         }
+    live = metrics.get("live_entities")
+    if isinstance(live, Mapping):
+        # Per-name non-ghost counts from the lab sampler: completion evidence
+        # for construction branches, unlike ghost-inclusive built_entities.
+        # Only items a branch measures by count enter the bounded model view.
+        counted = {
+            spec.get("item") for spec in branch_specs
+            if isinstance(spec, Mapping) and spec.get("metric") == "built_count"
+        }
+        for name, count in live.items():
+            if name in counted and type(count) is int and count >= 0:
+                items.setdefault(name, {
+                    "stock": None, "draw_rate": None, "capacity_rate": None,
+                    "production_rate": None,
+                    "provenance": {"surface": surface, "force": force, "tick": tick,
+                                   "source": "training_lab.live_entities"},
+                })["metrics"] = {"built_count": {"value": count, "sustained_ticks": 0}}
     # This count excludes ghosts in the lab sampler; ordinary built_entities
     # includes ghosts and is not evidence that construction has completed.
     pole_count = metrics.get("electric_pole_count")
-    if type(pole_count) is int and pole_count >= 0:
+    if not isinstance(live, Mapping) and type(pole_count) is int and pole_count >= 0:
         items.setdefault("medium-electric-pole", {
             "stock": None, "draw_rate": None, "capacity_rate": None,
             "production_rate": None,

@@ -26,6 +26,34 @@ def _evidence(graph: WorkGraph, supply: Mapping[str, Any]) -> tuple[dict[str, An
     return projection, sha256_hash({"work_graph": projection, "supply": dict(supply)})
 
 
+def compact_workflow_digest(projection: Mapping[str, Any], supply: Mapping[str, Any]) -> dict[str, Any]:
+    """The bounded branch and per-item supply view the model reads."""
+    items = supply["items"]
+    compact_items = {}
+    for item in sorted(items):
+        facts = items[item]
+        compact_items[item] = {
+            "stock": facts["stock"]["accessible"],
+            "committed": facts["demand"]["committed"]["remaining"],
+            "future_ingredients": facts["demand"].get("recipe_projected"),
+            "draw_rate": facts["demand"]["current_rate"],
+            "output_rate": facts["production"]["observed_rate"],
+            "capacity_rate": facts["production"]["capacity_rate"],
+        }
+    compact_branches = {
+        "ready": [branch["branch_id"] for branch in projection["runnable"]],
+        "blocked": {
+            branch["branch_id"]: {
+                "needs": branch["unmet_prerequisites"],
+                "why": None if branch["blocker"] is None else branch["blocker"]["reason"],
+            }
+            for branch in projection["blocked"]
+        },
+        "closed": [branch["branch_id"] for branch in projection["closed"]],
+    }
+    return {"work_branches": compact_branches, "item_supply": compact_items}
+
+
 def prepare_serve_goal(
     state: Mapping[str, Any], graph: WorkGraph, supply: Mapping[str, Any],
     *, max_options: int = 12, max_items: int = 8,
@@ -80,32 +108,9 @@ def prepare_serve_goal(
             "risk_tier": "read_only",
         })
 
-    compact_items = {}
-    for item in sorted(items):
-        facts = items[item]
-        compact_items[item] = {
-            "stock": facts["stock"]["accessible"],
-            "committed": facts["demand"]["committed"]["remaining"],
-            "future_ingredients": facts["demand"].get("recipe_projected"),
-            "draw_rate": facts["demand"]["current_rate"],
-            "output_rate": facts["production"]["observed_rate"],
-            "capacity_rate": facts["production"]["capacity_rate"],
-        }
-    compact_branches = {
-        "ready": [branch["branch_id"] for branch in projection["runnable"]],
-        "blocked": {
-            branch["branch_id"]: {
-                "needs": branch["unmet_prerequisites"],
-                "why": None if branch["blocker"] is None else branch["blocker"]["reason"],
-            }
-            for branch in projection["blocked"]
-        },
-        "closed": [branch["branch_id"] for branch in projection["closed"]],
-    }
     prepared = copy.deepcopy(dict(state))
     digest = dict(prepared.get("observation_digest") or {})
-    digest["work_branches"] = compact_branches
-    digest["item_supply"] = compact_items
+    digest.update(compact_workflow_digest(projection, supply))
     prepared["observation_digest"] = digest
     prepared["options"] = options
     prepared["provenance"]["renderer_version"] = "branch-goal-preview-v1"

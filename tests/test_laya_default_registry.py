@@ -9,6 +9,7 @@ from orchestrator.laya_default_registry import training_registry
 def test_training_registry_has_only_bounded_operation_capabilities() -> None:
     registry = training_registry()
     assert [entry.tool_id for entry in registry.selection_options()] == [
+        "training.connected_workflow",
         "training.escalate",
         "training.furnace_refining",
         "training.mining_delivery",

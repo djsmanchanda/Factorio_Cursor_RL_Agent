@@ -58,7 +58,7 @@
       "additionalProperties": false,
       "required": ["item", "target_rate_per_tick", "sustain_ticks"],
       "properties": {
-        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone", "iron-plate", "copper-plate", "steel-plate"]},
+        "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone", "iron-plate", "copper-plate", "steel-plate", "iron-gear-wheel", "transport-belt"]},
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
         "sustain_ticks": {"type": "integer", "minimum": 60},
         "stage_index": {"type": "integer", "minimum": 1},
@@ -108,7 +108,19 @@
         "mining_drill_capacity_ticks": {"type": "integer", "minimum": 0},
         "mining_drill_working_ticks": {"type": "integer", "minimum": 0},
         "mining_drill_blocked_ticks": {"type": "integer", "minimum": 0},
-        "mining_drill_idle_ticks": {"type": "integer", "minimum": 0}
+        "mining_drill_idle_ticks": {"type": "integer", "minimum": 0},
+        "live_entities": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "item_production": {
+          "type": "object",
+          "required": ["available", "items"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "items": {"type": "object", "maxProperties": 16, "additionalProperties": {"type": "object"}}
+          }
+        }
       }
     },
     "failure": {

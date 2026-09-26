@@ -28,6 +28,7 @@ def training_registry() -> LayaToolRegistry:
     return LayaToolRegistry([
         _definition("training.mining_delivery", "mine", "ghost_submit", "training.execute"),
         _definition("training.furnace_refining", "smelt", "ghost_submit", "training.execute"),
+        _definition("training.connected_workflow", "assemble", "ghost_submit", "training.execute"),
         _definition("training.wait", "wait", "read_only", "training.observe"),
         _definition("training.escalate", "escalate", "read_only", "training.observe"),
     ])

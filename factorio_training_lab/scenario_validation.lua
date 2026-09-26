@@ -1,5 +1,5 @@
 -- Path: factorio_training_lab/scenario_validation.lua
--- Purpose: Validate the versioned mining-delivery contract before world mutation.
+-- Purpose: Validate the versioned training-scenario contract before world mutation.
 
 local ALLOWED_RESOURCES = {
   ["iron-ore"] = true, ["copper-ore"] = true, coal = true, stone = true
@@ -9,7 +9,8 @@ local ALLOWED_ENTITIES = {
   ["medium-electric-pole"] = true, ["electric-furnace"] = true, splitter = true,
   ["transport-belt"] = true, ["underground-belt"] = true,
   ["express-transport-belt"] = true, ["express-underground-belt"] = true,
-  ["express-loader"] = true
+  ["express-loader"] = true, ["assembling-machine-2"] = true,
+  ["iron-chest"] = true, ["small-electric-pole"] = true
 }
 local POWER_SOURCE_ENTITIES = {
   ["electric-energy-interface"] = true, ["solar-panel"] = true,
@@ -193,6 +194,8 @@ local function validate_objective(scenario, fixtures)
           or objective.item ~= scenario.resource_patch.resource))
       or (scenario.family == "furnace_refining" and (objective.kind ~= "smelt_item_rate"
           or objective.input_item ~= scenario.resource_patch.resource))
+      or (scenario.family == "connected_workflow" and (objective.kind ~= "produce_item_rate"
+          or objective.input_item ~= scenario.resource_patch.resource))
       or type(objective.target_rate_per_tick) ~= "number"
       or objective.target_rate_per_tick <= 0
       or not is_integer(objective.sustain_ticks) or objective.sustain_ticks < 60 then
@@ -275,7 +278,8 @@ local function validate_rewards(scenario)
   if scenario.reward_profile ~= "mining-efficiency-v1"
       and scenario.reward_profile ~= "mining-throughput-leaky-v1"
       and scenario.reward_profile ~= "mining-throughput-cost-v1"
-      and scenario.reward_profile ~= "furnace-efficiency-v1" then
+      and scenario.reward_profile ~= "furnace-efficiency-v1"
+      and scenario.reward_profile ~= "connected-workflow-v1" then
     error("reward_profile is invalid")
   end
   local weights = scenario.reward_weights
@@ -299,7 +303,8 @@ end
 
 local function validate_scenario(scenario)
   if type(scenario) ~= "table" or scenario.version ~= "1.2.0"
-      or (scenario.family ~= "mining_delivery" and scenario.family ~= "furnace_refining")
+      or (scenario.family ~= "mining_delivery" and scenario.family ~= "furnace_refining"
+          and scenario.family ~= "connected_workflow")
       or type(scenario.scenario_id) ~= "string"
       or not valid_hash(scenario.scenario_hash)
       or not is_integer(scenario.seed) or scenario.seed < 0 or scenario.seed > 65535 then

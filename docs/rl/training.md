@@ -495,6 +495,23 @@ seam: the current executable runner handles only mining and furnace scenarios,
 so the next implementation slice must register and validate distinct iron,
 gear, belt, and construction operations in a connected disposable episode.
 
+That slice exists as the `connected_workflow` lab family
+(`training/scenarios/connected_workflow.py`,
+`training/candidates/connected_workflow.py`): ore chest -> electric furnace ->
+plate chest -> gear assembler -> gear chest -> belt assembler -> belt sink,
+plus an independent medium-pole line toward a remote site. Each branch owns
+one validated plan with its own poles; the budget equals their union. For
+this family the runner asks one `serve_goal` question per step: build one
+runnable, not-yet-built branch (prerequisites measured and closed in the work
+graph), wait, or escalate. Gears are never offered before iron production is
+sustained, while construction is available at any time. The model state
+carries the compact work-branch and item-supply digest; journals record the
+work graph at each decision and the final branch outcomes at termination.
+The lab now reports ghost-free `live_entities` counts (construction evidence)
+and matches existing entities by tile, so re-executing a plan is idempotent.
+A scripted live probe on 2.1.20 produced about 0.6 plates/s, 0.2 gears/s and
+0.4 belts/s and completed the belt objective in 45 s.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate

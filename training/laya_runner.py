@@ -19,7 +19,11 @@ from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import state_hash
 from training.contracts import validate_scenario
 from training.isolation import assert_training_identity
+from training.candidates.connected_workflow import branch_specs
+from training.laya_branch_decisions import compact_workflow_digest
 from training.laya_exploration import ExplorationDirector, ExplorationGate
+from training.laya_lab_workflow import observe_lab_workflow
+from training.laya_work_graph import project_work_graph
 from training.laya_failure import FailureCause, FailurePacket
 from training.laya_toolkit import BoundOption, LayaToolkit, LayaToolkitError, StaleLayaOption
 from training.laya_workflow import LayaWorkflowDirector, LayaWorkflowError
@@ -223,8 +227,8 @@ class LayaPrimaryRunner:
         validate_scenario(scenario)
         environment = scenario["environment"]
         assert_training_identity(environment["surface_name"], environment["force_name"])
-        if scenario.get("family") not in {"mining_delivery", "furnace_refining"}:
-            raise LayaRunnerError("initial Laya-primary runner supports mining and furnace training only")
+        if scenario.get("family") not in {"mining_delivery", "furnace_refining", "connected_workflow"}:
+            raise LayaRunnerError("Laya runner supports mining, furnace and connected-workflow training only")
         self.bridge = bridge
         self.scenario = json.loads(json.dumps(scenario))
         self.director = director
@@ -279,6 +283,7 @@ class LayaPrimaryRunner:
         self.decision_count = sum(1 for event in self.journal.events if event.get("type") == "decision")
         self.executed_plan_hashes = self.journal.executed_plan_hashes
         self.last_progress: tuple[Any, ...] | None = None
+        self.work_graph = None
         self.no_progress = 0
         self._last_decision_id = ""
         if config.resume:
@@ -509,6 +514,9 @@ class LayaPrimaryRunner:
                 self.retry_count += 1
             return self._invoke(bound, report)
 
+        if self.scenario["family"] == "connected_workflow":
+            return self._serve_goal_step(report)
+
         fresh_candidates = self._fresh_candidates(report)
         if self.executed_plan_hashes:
             options = self.toolkit.wait_or_act_options(report, can_act=bool(fresh_candidates))
@@ -535,6 +543,22 @@ class LayaPrimaryRunner:
         selected = self._decide("select_candidate", result_report, candidates)
         return self._invoke(selected, result_report)
 
+    def _observe_work(self, report: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        graph, supply = observe_lab_workflow(report, branch_specs(self.scenario), self.work_graph)
+        self.work_graph = graph
+        return project_work_graph(graph), supply
+
+    def _serve_goal_step(self, report: Mapping[str, Any]) -> tuple[Mapping[str, Any], dict[str, Any] | None]:
+        """Choose which runnable branch to build, or wait while built branches prove themselves."""
+        projection, supply = self._observe_work(report)
+        self.journal.append("work_graph", tick=int(report.get("tick") or 0), projection=projection)
+        runnable = [branch["branch_id"] for branch in projection["runnable"]]
+        options = self.toolkit.serve_goal_options(report, runnable, self.executed_plan_hashes)
+        bound = self._decide(
+            "serve_goal", report, options, digest=compact_workflow_digest(projection, supply),
+        )
+        return self._invoke(bound, report)
+
     def _fresh_candidates(self, report: Mapping[str, Any]) -> tuple[BoundOption, ...]:
         return tuple(
             option for option in self.toolkit.candidate_options(report)
@@ -543,10 +567,13 @@ class LayaPrimaryRunner:
 
     def _decide(
         self, decision_kind: str, report: Mapping[str, Any], options: Sequence[BoundOption],
+        *, digest: Mapping[str, Any] | None = None,
     ) -> BoundOption:
         if self.decision_count >= self.config.max_decisions:
             raise LayaWorkflowError("decision budget exhausted")
         state = self._state(report, options)
+        if digest:
+            state["observation_digest"] = {**(state.get("observation_digest") or {}), **digest}
         decision_id = f"decision-{self.decision_count + 1:04d}"
         self.journal.append(
             "decision",
@@ -675,10 +702,17 @@ class LayaPrimaryRunner:
     def _progress_signature(report: Mapping[str, Any]) -> tuple[Any, ...]:
         metrics = report.get("metrics") or {}
         objective = report.get("objective") or {}
+        # Intermediate output (plates, gears) is progress even before the
+        # delivered objective item moves.
+        produced = tuple(sorted(
+            (str(item), facts.get("cumulative_items"))
+            for item, facts in ((metrics.get("item_production") or {}).get("items") or {}).items()
+            if isinstance(facts, Mapping)
+        ))
         return (
             report.get("status"), objective.get("stage_index"),
             metrics.get("delivered_items"), metrics.get("rate_per_tick"),
-            metrics.get("sustained_ticks"), metrics.get("built_entities"),
+            metrics.get("sustained_ticks"), metrics.get("built_entities"), produced,
         )
 
     def _measure_progress(self, report: Mapping[str, Any]) -> None:
@@ -869,10 +903,17 @@ class LayaPrimaryRunner:
         report: Mapping[str, Any],
         reason: str = "",
     ) -> dict[str, Any]:
+        branches = None
+        if self.scenario["family"] == "connected_workflow":
+            # Final branch outcomes are the training signal for scheduling.
+            try:
+                branches = self._observe_work(report)[0]
+            except Exception as error:
+                branches = {"unavailable": str(error)[:256]}
         event = self.journal.append(
             "termination", status=status, reason=reason,
             final_observation=dict(report), decisions=self.decision_count,
-            trajectory_id=self.trajectory_id,
+            trajectory_id=self.trajectory_id, work_graph=branches,
         )
         return {
             "status": status,

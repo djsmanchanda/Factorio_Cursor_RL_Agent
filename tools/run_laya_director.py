@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     knowledge = load_guideline_context(
         ROOT,
         scopes=(
-            str(scenario["family"]), "choose_operation", "select_candidate", "wait_or_act", "recovery",
+            str(scenario["family"]), "serve_goal", "choose_operation", "select_candidate", "wait_or_act", "recovery",
         ),
         max_rules=8,
     )

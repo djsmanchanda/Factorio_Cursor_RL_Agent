@@ -171,6 +171,7 @@ end
 local function audit_entities(surface, force, episode, sample_ticks)
   local allowed = episode.scenario.constraints.allowed_entities
   local allowed_lookup, counts, fixture_lookup = {}, {}, fixture_units(episode)
+  local live_counts = {}
   for _, name in ipairs(allowed) do allowed_lookup[name] = true end
   local forbidden, outside, pole_count, occupied_tiles = 0, 0, 0, 0
   local placed_drills, working_drills, blocked_drills, idle_drills = 0, 0, 0, 0
@@ -185,6 +186,8 @@ local function audit_entities(surface, force, episode, sample_ticks)
         outside = outside + 1
       end
       if entity.type ~= "entity-ghost" then
+        -- Built (non-ghost) counts are construction-completion evidence.
+        live_counts[name] = (live_counts[name] or 0) + 1
         occupied_tiles = occupied_tiles + footprint_tiles(name)
         if entity.force == force and electricity_role(entity) == "consumer" then
           power_consumers[#power_consumers + 1] = entity
@@ -214,6 +217,7 @@ local function audit_entities(surface, force, episode, sample_ticks)
   )
   efficiency.electric_pole_count = pole_count
   efficiency.occupied_footprint_tiles = occupied_tiles
+  efficiency.live_entities = live_counts
   return counts, forbidden, outside, overruns, efficiency, power_consumers
 end
 
@@ -490,6 +494,7 @@ local function observation(payload)
       budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode),
       power_connected = powered,
       electric_pole_count = efficiency.electric_pole_count,
+      live_entities = efficiency.live_entities,
       occupied_footprint_tiles = efficiency.occupied_footprint_tiles,
       placed_mining_drills = efficiency.placed_mining_drills,
       productive_mining_drills = efficiency.productive_mining_drills,
