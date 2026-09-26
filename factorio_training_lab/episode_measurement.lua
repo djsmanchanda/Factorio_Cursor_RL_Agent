@@ -14,6 +14,7 @@ local POWER_STORAGE_TYPES = { accumulator = true }
 local POWER_CONSUMER_TYPES = { inserter = true }
 local POWER_CONSUMER_NAMES = { ["electric-mining-drill"] = true, ["electric-furnace"] = true }
 local RATE_WINDOW_TICKS = 600
+local MAX_ITEM_TELEMETRY_ITEMS = 16
 local FOOTPRINT_TILE_CACHE = {}
 local electricity_role
 
@@ -42,7 +43,7 @@ local function window_rate(samples)
     items = items - expired.items
     ticks = ticks - expired.ticks
   end
-  return ticks > 0 and items / ticks or 0
+  return ticks > 0 and items / ticks or 0, ticks
 end
 
 local function reset_stage_window(episode, tick)
@@ -300,6 +301,8 @@ local function fail_power(episode, reason)
   episode.failure_reason = reason
 end
 
+local item_production_metrics
+
 local function sample_episode(episode, tick)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then fail_safety(episode, "episode surface or force is missing"); return end
@@ -331,7 +334,100 @@ local function sample_episode(episode, tick)
     fail_safety(episode, "training entity constraint violated")
     return
   end
+  episode.item_production_metrics = item_production_metrics(episode, force, tick)
   advance_sample(episode, delivered, tick, delivered_by_sink)
+end
+
+local function telemetry_item_names(episode)
+  local objective, names, seen = episode.scenario.objective, {}, {}
+  local function add(item)
+    if type(item) == "string" and item ~= "" and #names < MAX_ITEM_TELEMETRY_ITEMS
+        and not seen[item] then
+      seen[item] = true
+      names[#names + 1] = item
+    end
+  end
+  add(objective.item)
+  add(objective.input_item)
+  add(episode.scenario.resource_patch and episode.scenario.resource_patch.resource)
+  for _, item in ipairs(objective.workflow_items or {}) do add(item) end
+  return names
+end
+
+item_production_metrics = function(episode, force, tick)
+  local metrics = { available = false, items = {} }
+  local ok, statistics = pcall(function()
+    return force.get_item_production_statistics(game.surfaces[episode.surface_name])
+  end)
+  if not ok or not statistics then
+    for _, item in ipairs(telemetry_item_names(episode)) do
+      metrics.items[item] = { available = false }
+      episode.item_production_samples = episode.item_production_samples or {}
+      episode.item_production_samples[item] = { gap = true, last_tick = tick, samples = {}, sustained_ticks = 0 }
+    end
+    episode.item_production_last_tick = tick
+    return metrics
+  end
+
+  episode.item_production_samples = episode.item_production_samples or {}
+  local last_tick = episode.item_production_last_tick or episode.started_tick or tick
+  if tick <= last_tick and episode.item_production_metrics then
+    return episode.item_production_metrics
+  end
+  local next_last_tick = tick
+  for _, item in ipairs(telemetry_item_names(episode)) do
+    local count_ok, cumulative = pcall(function() return statistics.get_input_count(item) end)
+    if count_ok and type(cumulative) == "number" and cumulative >= 0
+        and cumulative < math.huge then
+      local previous = episode.item_production_samples[item]
+      local sample_ticks = tick - (previous and previous.last_tick or last_tick)
+      local delta = previous and previous.gap and 0
+        or previous and cumulative - previous.cumulative or cumulative
+      if delta >= 0 and sample_ticks >= 0 then
+        local samples = previous and not previous.gap and previous.samples or {}
+        if sample_ticks > 0 and not (previous and previous.gap) then
+          table.insert(samples, { items = delta, ticks = sample_ticks })
+        end
+        local rate, window_ticks = window_rate(samples)
+        local sustained_ticks = previous and previous.sustained_ticks or 0
+        if sample_ticks > 0 then
+          sustained_ticks = delta > 0 and not (previous and previous.gap)
+            and (sustained_ticks + sample_ticks) or 0
+        end
+        episode.item_production_samples[item] = {
+          cumulative = cumulative, samples = samples, sustained_ticks = sustained_ticks,
+          last_tick = tick
+        }
+        metrics.items[item] = {
+          available = true,
+          cumulative_items = cumulative,
+          sample_items = delta,
+          sample_ticks = previous and previous.gap and 0 or sample_ticks,
+          sample_rate_per_tick = sample_ticks > 0 and not (previous and previous.gap)
+            and delta / sample_ticks or 0,
+          window_rate_per_tick = rate,
+          window_ticks = window_ticks,
+          sustained_ticks = sustained_ticks
+        }
+      else
+        metrics.items[item] = { available = false }
+        episode.item_production_samples[item] = {
+          gap = true, last_tick = tick, samples = {}, sustained_ticks = 0
+        }
+      end
+    else
+      metrics.items[item] = { available = false }
+      episode.item_production_samples[item] = {
+        gap = true, last_tick = tick, samples = {}, sustained_ticks = 0
+      }
+    end
+  end
+  episode.item_production_last_tick = next_last_tick
+  metrics.available = next(metrics.items) ~= nil
+  for _, item_metrics in pairs(metrics.items) do
+    if not item_metrics.available then metrics.available = false; break end
+  end
+  return metrics
 end
 
 local function sample_all(tick)
@@ -369,6 +465,8 @@ local function observation(payload)
     fail_safety(episode, "training entity constraint violated")
   end
   local stage, stage_index, stage_count = active_stage(episode)
+  local item_production = episode.item_production_metrics
+    or item_production_metrics(episode, force, game.tick)
   return {
     request_id = payload.request_id, episode_id = payload.episode_id,
     ok = true, status = episode.status, scenario_id = episode.scenario_id,
@@ -400,6 +498,7 @@ local function observation(payload)
       mining_drill_working_ticks = efficiency.mining_drill_working_ticks,
       mining_drill_blocked_ticks = efficiency.mining_drill_blocked_ticks,
       mining_drill_idle_ticks = efficiency.mining_drill_idle_ticks,
+      item_production = item_production,
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }
   }

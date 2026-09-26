@@ -198,6 +198,19 @@ local function validate_objective(scenario, fixtures)
       or not is_integer(objective.sustain_ticks) or objective.sustain_ticks < 60 then
     error("objective is invalid")
   end
+  if objective.workflow_items ~= nil then
+    if type(objective.workflow_items) ~= "table" or #objective.workflow_items > 13 then
+      error("workflow_items must be a bounded list")
+    end
+    local seen = {}
+    for _, item in ipairs(objective.workflow_items) do
+      if type(item) ~= "string" or #item > 80
+          or not string.match(item, "^[a-z][a-z0-9%-]*$") or seen[item] then
+        error("workflow_items contains an invalid or duplicate item")
+      end
+      seen[item] = true
+    end
+  end
   local destination = fixtures[objective.destination_fixture_id]
   if not destination or destination.kind ~= "item_sink" then
     error("objective destination must identify the item sink")

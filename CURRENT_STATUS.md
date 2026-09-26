@@ -2954,3 +2954,9 @@ that consumed it was not.
 - What: added measured branch lifecycle, prerequisite/peer and blocker projection, per-item stock/rate/committed-bill evidence, and bounded disposable `serve_goal` choices with stale-evidence rejection. Current primary runner and model capability scope are unchanged.
 - Evidence: 34 focused tests pass, including the belt/gear/iron plus independent construction case. No live episode, model training, deployment, or production authority change was performed.
 - Lifecycle: none. A compatible model and connected disposable operation handlers are still needed before this choice can execute in Factorio.
+
+## [2026-09-27] Disposable workflow report seam
+- Files: training/laya_{workflow_observation,lab_workflow}.py, factorio_training_lab/{episode_measurement,scenario_validation}.lua, schemas/training_scenario.schema.json, tools/inspect_laya_workflow_report.py, focused tests and docs.
+- What: isolated training reports now expose bounded per-item production counters and measured rate windows; explicit workflow item requests cover iron, gears, and belts. The read-only adapter turns those reports into branch/supply evidence and a bounded `serve_goal` question, preserving unknown facts and rejecting stale or cross-scope choices.
+- Evidence: 92 focused tests pass, 26 optional Lupa tests skip; Lua syntax and the CLI Lua behavior checks pass. No live episode or model training was run. Gear and belt execution handlers remain to be built.
+- Lifecycle: synchronize changed training-lab Lua to affected worker and GUI mod copies, then restart affected Factorio runtime and Python consumer before live use. No deployment or restart performed.

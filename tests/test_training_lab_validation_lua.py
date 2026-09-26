@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from training.scenarios.mining_delivery import generate_mining_delivery_scenario
+from training.canonical import scenario_hash
+from training.contracts import validate_scenario
 
 ROOT = Path(__file__).resolve().parents[1]
 LAB = ROOT / "factorio_training_lab"
@@ -51,6 +53,26 @@ def test_validation_accepts_the_corrected_generated_contract(lua) -> None:
     module = lua.eval('require("scenario_validation")')[0]
 
     assert module.validate_scenario(_to_lua(lua, _scenario())) is not None
+
+
+def test_workflow_item_telemetry_request_is_bounded_on_both_sides(lua) -> None:
+    scenario = _scenario()
+    scenario["objective"]["workflow_items"] = ["iron-plate", "iron-gear-wheel", "transport-belt"]
+    scenario["scenario_hash"] = scenario_hash(scenario)
+    validate_scenario(scenario)
+    module = lua.eval('require("scenario_validation")')[0]
+    assert module.validate_scenario(_to_lua(lua, scenario)) is not None
+
+    scenario["objective"]["workflow_items"].append("iron-gear-wheel")
+    scenario["scenario_hash"] = scenario_hash(scenario)
+    with pytest.raises(ValueError, match="unique"):
+        validate_scenario(scenario)
+    lua.globals().candidate = _to_lua(lua, scenario)
+    ok, message = lua.eval(
+        "(function() return pcall(function() return require('scenario_validation').validate_scenario(candidate) end) end)()"
+    )
+    assert ok is False
+    assert "duplicate" in message
 
 
 def test_validation_rejects_half_tile_power_fixture(lua) -> None:

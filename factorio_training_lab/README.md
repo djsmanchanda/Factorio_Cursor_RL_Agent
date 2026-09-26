@@ -50,3 +50,9 @@ the surface plus its matching training force are recycled automatically.
 The Observatory also exposes an explicit stale-surface cleanup button. It only
 targets unowned `training/*` surfaces, protects active episode registrations,
 skips surfaces with connected players, and requires a confirmation token.
+
+Observations also include `metrics.item_production` for the objective item,
+its declared input, the resource patch, and up to 13 optional
+`objective.workflow_items`. Counts and 600-tick-window rates come from the
+episode's isolated force and surface. Missing statistics remain unavailable;
+the report does not infer stock, committed construction bills, or capacity.

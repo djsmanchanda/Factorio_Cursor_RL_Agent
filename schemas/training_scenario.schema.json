@@ -100,6 +100,10 @@
         "kind": {"enum": ["deliver_item_rate", "smelt_item_rate"]},
         "item": {"enum": ["iron-ore", "copper-ore", "coal", "stone", "iron-plate", "copper-plate", "steel-plate"]},
         "input_item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]},
+        "workflow_items": {
+          "type": "array", "maxItems": 13, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,79}$"}
+        },
         "target_rate_per_tick": {"type": "number", "exclusiveMinimum": 0},
         "sustain_ticks": {"type": "integer", "minimum": 60},
         "destination_fixture_id": {"type": "string", "minLength": 1},

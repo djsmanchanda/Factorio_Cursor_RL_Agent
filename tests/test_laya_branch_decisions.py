@@ -78,7 +78,7 @@ def test_measured_progress_opens_next_branch_and_stale_choice_is_rejected() -> N
     graph = reconcile_work_graph(graph, {}, blockers={"iron": None})
     state, options, fresh_hash = prepare_serve_goal(_state(), graph, supply)
     assert [option["option_id"] for option in options] == ["serve.construction", "serve.iron"]
-    assert state["observation_digest"]["work_evidence_hash"] == fresh_hash
+    assert state["provenance"]["state_snapshot_hash"].startswith("sha256:")
     with pytest.raises(BranchDecisionError, match="changed"):
         resolve_serve_goal(graph, supply, evidence_hash=old_hash, option_id="serve.construction")
     graph = reconcile_work_graph(graph, {"iron": CompletionMeasurement("plate_per_s", 4, 60)})

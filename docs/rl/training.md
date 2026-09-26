@@ -483,6 +483,18 @@ trained capability. The next step is a connected disposable scenario with
 measured belt, gear, iron, and independent construction branches, followed by
 an evaluated checkpoint that supports the new decision sequence.
 
+The disposable training lab now exposes bounded per-item production rates and
+their measured window lengths. `training/laya_lab_workflow.py` adapts one
+isolated lab report into the work graph through
+`training/laya_workflow_observation.py`; absent stock, demand, or capacity stays
+unknown. `tools/inspect_laya_workflow_report.py --report <path> --branches
+<path>` prints the projected graph and supply evidence for review. A focused
+lab-report fixture reaches a bounded `serve_goal` question and rejects a stale
+selection after the observation changes. This is still a read-only workflow
+seam: the current executable runner handles only mining and furnace scenarios,
+so the next implementation slice must register and validate distinct iron,
+gear, belt, and construction operations in a connected disposable episode.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate

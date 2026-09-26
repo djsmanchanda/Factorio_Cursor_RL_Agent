@@ -50,6 +50,13 @@ def prepare_serve_goal(
         raise BranchDecisionError("work projection exceeds the bounded model request")
 
     run = state["run"]
+    for item, facts in items.items():
+        source = facts.get("provenance")
+        if isinstance(source, Mapping) and (
+            ("surface" in source and source["surface"] != run["surface"])
+            or ("force" in source and source["force"] != run["force"])
+        ):
+            raise BranchDecisionError(f"supply evidence for {item} belongs to another training scope")
     options: list[dict[str, Any]] = []
     for branch in runnable:
         branch_id = branch["branch_id"]
@@ -63,10 +70,7 @@ def prepare_serve_goal(
             "tool_id": "training.serve_goal_preview",
             "signature": sha256_hash({"evidence": evidence_hash, "branch_id": branch_id}),
             "plan_hash": None,
-            "summary": (
-                f"Advance {branch_id} for {branch['parent_goal_id']}; "
-                f"measure {target['metric']} >= {target['minimum']:g}"
-            ),
+            "summary": f"{branch_id}: {target['metric']} >= {target['minimum']:g}",
             "features": {
                 "target_minimum": float(target["minimum"]),
                 "required_sustained_ticks": float(target["required_sustained_ticks"]),
@@ -87,21 +91,21 @@ def prepare_serve_goal(
             "output_rate": facts["production"]["observed_rate"],
             "capacity_rate": facts["production"]["capacity_rate"],
         }
-    compact_branches = [
-        {
-            "id": branch["branch_id"],
-            "status": branch["status"],
-            "needs": branch["unmet_prerequisites"],
-            "wake": None if branch["blocker"] is None else branch["blocker"]["wake_condition"],
-        }
-        for group in ("runnable", "blocked", "closed")
-        for branch in projection[group]
-    ]
+    compact_branches = {
+        "ready": [branch["branch_id"] for branch in projection["runnable"]],
+        "blocked": {
+            branch["branch_id"]: {
+                "needs": branch["unmet_prerequisites"],
+                "why": None if branch["blocker"] is None else branch["blocker"]["reason"],
+            }
+            for branch in projection["blocked"]
+        },
+        "closed": [branch["branch_id"] for branch in projection["closed"]],
+    }
     prepared = copy.deepcopy(dict(state))
     digest = dict(prepared.get("observation_digest") or {})
     digest["work_branches"] = compact_branches
     digest["item_supply"] = compact_items
-    digest["work_evidence_hash"] = evidence_hash
     prepared["observation_digest"] = digest
     prepared["options"] = options
     prepared["provenance"]["renderer_version"] = "branch-goal-preview-v1"
