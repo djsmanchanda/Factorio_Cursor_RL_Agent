@@ -427,3 +427,22 @@ def test_candidates_exceeding_remaining_budget_are_not_offered() -> None:
 
     report["metrics"]["built_entities"] = dict(scenario["construction_budget"])
     assert toolkit.candidate_options(report) == ()
+
+
+def test_observer_focus_failure_is_journaled_and_never_changes_the_run(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(11)
+    bridge = Bridge(scenario)
+
+    def choose(kind, ids, _state):
+        return {"choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s"}.get(kind, ids[-1])
+
+    def no_viewer(_episode_id):
+        raise RuntimeError("no Factorio player connected")
+
+    runner = _runner(tmp_path, bridge, Predictor(choose), scenario)
+    runner.on_provisioned = no_viewer
+    result = runner.run()
+
+    assert result["status"] == "completed"
+    observer = [event for event in _events(tmp_path / "runs" / "runner-test.jsonl") if event["type"] == "observer"]
+    assert [event["status"] for event in observer] == ["unavailable"]

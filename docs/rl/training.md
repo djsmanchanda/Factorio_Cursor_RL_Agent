@@ -494,6 +494,13 @@ capability manifest and never reads, writes or implies one.
 - All hard validators, pre-execution revalidation, disposable identity checks
   and cleanup are unchanged. There is no real-save or production path.
 
+Watching a run: join the worker (`127.0.0.1:35000+index`) from a GUI client
+with identical mods, pass `--observe` so the runner spectator-focuses a
+connected player on the episode surface after provisioning, and follow the
+decision feed with `python tools/watch_laya_run.py` (new runs) or
+`python tools/watch_laya_run.py <journal>`. Observer failures are journaled
+and never change the trajectory.
+
 `docs/rl/laya_guidelines.json` selects reviewed excerpts from active documents.
 `orchestrator/laya_knowledge.py` verifies those excerpts still exist and records
 current document hashes. Historical code and archived advice are excluded.

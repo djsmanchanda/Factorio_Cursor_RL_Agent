@@ -9,7 +9,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -217,6 +217,7 @@ class LayaPrimaryRunner:
         model_ref: Mapping[str, Any],
         knowledge_context: Mapping[str, Any] | None = None,
         exploration: ExplorationGate | None = None,
+        on_provisioned: Callable[[str], Any] | None = None,
         sleeper=time.sleep,
     ) -> None:
         validate_scenario(scenario)
@@ -254,6 +255,7 @@ class LayaPrimaryRunner:
                 "production_authority": False,
             }
         self.knowledge = dict(knowledge_context or {})
+        self.on_provisioned = on_provisioned
         self.run_id = _identifier(config.run_id, "laya-run")
         self.episode_id = _identifier(f"laya-{self.run_id}", "laya-episode")
         self.trajectory_id = _identifier(
@@ -331,6 +333,16 @@ class LayaPrimaryRunner:
             raise LayaRunnerError("injected checkpoint does not cover this scenario family")
         return capabilities
 
+    def _notify_observer(self) -> None:
+        # Human viewing is optional and must never change the trajectory.
+        if self.on_provisioned is None:
+            return
+        try:
+            result = self.on_provisioned(self.episode_id)
+            self.journal.append("observer", status="focused", result=result)
+        except Exception as error:
+            self.journal.append("observer", status="unavailable", error=str(error)[:512])
+
     @property
     def execution_authority(self) -> str:
         return "exploration" if self.authority["kind"] == "exploration" else "primary"
@@ -367,6 +379,7 @@ class LayaPrimaryRunner:
                 provision = self.bridge.provision(self.episode_id, self.scenario)
                 provisioned = True
                 self.journal.append("provisioned", report=provision)
+                self._notify_observer()
             report = self.bridge.observe(self.episode_id)
             if self.initial_observation is None:
                 self.initial_observation = dict(report)

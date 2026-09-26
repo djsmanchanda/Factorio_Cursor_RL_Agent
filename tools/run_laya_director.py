@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -60,6 +61,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-candidate-retries", type=int, default=1)
     result.add_argument("--confidence-threshold", type=float, default=0.70)
     result.add_argument("--device")
+    result.add_argument("--observe", action="store_true", help="Spectator-focus a connected Factorio player on the episode surface")
+    result.add_argument("--observer-name", default="", help="Preferred player to focus; defaults to any connected player")
+    result.add_argument("--observe-pause", type=float, default=8.0, help="Seconds to wait after focusing, before the first decision")
     return result
 
 
@@ -128,6 +132,17 @@ def main(argv: list[str] | None = None) -> int:
         password=password,
     )
     run_id = args.run_id or f"laya-{uuid.uuid4().hex[:16]}"
+    on_provisioned = None
+    if args.observe:
+        from training.observer_control import TrainingSurfaceViewer
+
+        viewer = TrainingSurfaceViewer({worker.worker_id: worker}, password, args.observer_name)
+
+        def on_provisioned(episode_id: str) -> dict[str, str]:
+            focused = viewer.focus(worker.worker_id, episode_id)
+            print(f"observer: {focused['observer_name']} viewing {focused['surface']}", file=sys.stderr, flush=True)
+            time.sleep(max(0.0, args.observe_pause))
+            return focused
     try:
         bridge.handshake()
         result = LayaPrimaryRunner(
@@ -146,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
             model_ref=model_ref,
             knowledge_context=knowledge,
             exploration=gate,
+            on_provisioned=on_provisioned,
         ).run()
     finally:
         bridge.close()
