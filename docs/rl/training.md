@@ -479,7 +479,8 @@ capability manifest and never reads, writes or implies one.
 
 - It requires `--exploration-seed` and `--exploration-epsilon`. Each decision
   logs the model's distribution, then acts on the model's choice or, with
-  probability epsilon, a seeded uniformly random validated option. The draw is
+  probability epsilon, a seeded uniformly random validated option (escalation
+  is never sampled at random; the model may still escalate). The draw is
   derived from the decision's own state hash, so it is reproducible and
   resume-safe.
 - Low confidence does not escalate; escalation stays an ordinary option.

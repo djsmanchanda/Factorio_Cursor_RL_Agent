@@ -50,6 +50,11 @@ class ExplorationGate:
         }
 
 
+def _is_escalation(option: Mapping[str, Any]) -> bool:
+    option_id = str(option.get("option_id", ""))
+    return option_id.startswith("escalate.") or option_id.startswith("recovery.escalate.")
+
+
 class ExplorationDirector:
     """Log the model's distribution, then act on it or on a seeded random option.
 
@@ -93,8 +98,11 @@ class ExplorationDirector:
         option_ids = [str(option["option_id"]) for option in normalized]
         model_choice = str(result["selected_option"]["option_id"])
         rng = self._draw(decision_kind, state, option_ids)
-        explore = rng.random() < self.gate.epsilon
-        selected = rng.choice(normalized) if explore else result["selected_option"]
+        # Random draws explore the task, not quitting: a sampled escalation ends
+        # the episode and teaches nothing. The model may still escalate itself.
+        explorable = [option for option in normalized if not _is_escalation(option)]
+        explore = bool(explorable) and rng.random() < self.gate.epsilon
+        selected = rng.choice(explorable) if explore else result["selected_option"]
         result["selected_option"] = selected
         result["selection"] = {
             "authority": EXPLORATION_AUTHORITY,

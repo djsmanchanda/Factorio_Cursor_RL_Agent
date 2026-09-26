@@ -446,3 +446,19 @@ def test_observer_focus_failure_is_journaled_and_never_changes_the_run(tmp_path)
     assert result["status"] == "completed"
     observer = [event for event in _events(tmp_path / "runs" / "runner-test.jsonl") if event["type"] == "observer"]
     assert [event["status"] for event in observer] == ["unavailable"]
+
+
+def test_exploration_never_samples_escalation_at_random(tmp_path) -> None:
+    # Observed live: random escalate.stop picks ended 4/6 episodes the model wanted to continue.
+    scenario = generate_mining_delivery_scenario(13)
+    predictor = Predictor(lambda kind, ids, _state: {
+        "choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s",
+    }.get(kind, ids[0]))
+    _exploration_runner(
+        tmp_path, Bridge(scenario), predictor, scenario, ExplorationGate(seed=5, epsilon=1.0),
+    ).run()
+    random_picks = [
+        event["selected_option_id"] for event in _events(tmp_path / "runs" / "explore-test.jsonl")
+        if event["type"] == "decision_result" and event["selection"]["source"] == "exploration_random"
+    ]
+    assert random_picks and not any("escalate" in option for option in random_picks)
