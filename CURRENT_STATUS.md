@@ -2948,3 +2948,9 @@ that consumed it was not.
 - What: Preserved the usable deterministic workflow until matched live outperformance. Added a separate capability-gated disposable Laya runner, non-truncating versioned model input, source-backed guidelines, causal/weighted learning data, exclusive shadow artifacts, pending transaction receipts, failure packets and conservative comparison gates.
 - Evidence: 188 Laya/training tests pass; real tokenizer fits all 2,111 exported historical success cases while 256 unsupported timeout labels are excluded. An independent commit tree also passes integration checks. No GPU training, Factorio execution, production promotion, save change or deployment was performed.
 - Remaining: Broader factory mechanics and workflow data, a compatible trained checkpoint, replay fidelity/automatic learning, and matched live incumbent comparisons. New Python Laya processes load these changes; deterministic and Factorio runtimes require no lifecycle action.
+
+## [2026-09-27] Laya connected-workflow evidence contract
+- Files: training/laya_{work_graph,supply_evidence,branch_decisions}.py, focused tests, docs/rl/training.md.
+- What: added measured branch lifecycle, prerequisite/peer and blocker projection, per-item stock/rate/committed-bill evidence, and bounded disposable `serve_goal` choices with stale-evidence rejection. Current primary runner and model capability scope are unchanged.
+- Evidence: 34 focused tests pass, including the belt/gear/iron plus independent construction case. No live episode, model training, deployment, or production authority change was performed.
+- Lifecycle: none. A compatible model and connected disposable operation handlers are still needed before this choice can execute in Factorio.

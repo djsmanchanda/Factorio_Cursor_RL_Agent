@@ -470,6 +470,19 @@ of model quality. It must be issued after training/evaluation, never invented to
 bypass the gate. Untrained data collection uses the separate exploration gate
 below instead.
 
+The first connected-workflow contract is now available without changing that
+runner's authority. `training/laya_work_graph.py` tracks prerequisite and
+independent branches, explicit blockers, reservations, and measured closure or
+reopening. `training/laya_supply_evidence.py` projects observed per-item stock,
+rates, committed construction bills, and optional live-recipe ingredient demand;
+unknown rates stay unknown. `training/laya_branch_decisions.py` exposes the
+runnable branches as bounded `serve_goal` choices on disposable state, with a
+hash of the complete evidence and a fresh-state check before resolving a
+selection. These are read-only decision inputs, not executable operations or a
+trained capability. The next step is a connected disposable scenario with
+measured belt, gear, iron, and independent construction branches, followed by
+an evaluated checkpoint that supports the new decision sequence.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate
