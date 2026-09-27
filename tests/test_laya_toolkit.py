@@ -80,17 +80,26 @@ def test_selection_cannot_change_bound_signature_or_scope() -> None:
 
 def test_wait_duration_is_model_selected_from_safe_bounds() -> None:
     scenario = generate_mining_delivery_scenario(10)
-    bridge = Bridge(scenario)
-    waits = []
-    toolkit = LayaToolkit(bridge, scenario, sleeper=waits.append)
-    toolkit.bind_episode("episode-test")
-    options = toolkit.operation_options(bridge.report)
-    selected = next(option for option in options if option.option.option_id == "wait.15s")
+    for speed in (1.0, 4.0):
+        bridge = Bridge(scenario)
+        bridge.report["tick"] = 100
+        waits = []
 
-    result = selected.handler()
+        def sleep(seconds):
+            waits.append(seconds)
+            bridge.report["tick"] += int(seconds * 60 * speed)
 
-    assert waits == [15.0]
-    assert result.kind == "wait"
+        toolkit = LayaToolkit(bridge, scenario, sleeper=sleep, game_speed=speed)
+        toolkit.bind_episode("episode-test")
+        options = toolkit.operation_options(bridge.report)
+        selected = next(option for option in options if option.option.option_id == "wait.15s")
+
+        result = selected.handler()
+
+        # Waits are measured in game ticks; wall time scales with game speed.
+        assert result.kind == "wait"
+        assert 900 <= result.report["tick"] - 100 <= 900 + int(0.05 * 60 * speed) * len(waits)
+        assert sum(waits) < 15.0 / speed + 1.0
 
 
 def test_furnace_mechanics_are_exposed_as_choices_without_ranking() -> None:

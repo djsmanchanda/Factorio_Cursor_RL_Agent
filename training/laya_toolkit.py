@@ -105,8 +105,14 @@ class LayaToolkit:
 
     WAIT_SECONDS = (1.0, 5.0, 15.0)
 
-    def __init__(self, bridge: Any, scenario: Mapping[str, Any], *, sleeper: Callable[[float], None]):
+    def __init__(
+        self, bridge: Any, scenario: Mapping[str, Any], *,
+        sleeper: Callable[[float], None], game_speed: float = 1.0,
+    ):
         validate_scenario(scenario)
+        if not 0.1 <= game_speed <= 64.0:
+            raise LayaToolkitError("game_speed must be between 0.1 and 64")
+        self.game_speed = float(game_speed)
         self.bridge = bridge
         self.scenario = copy.deepcopy(dict(scenario))
         self.sleeper = sleeper
@@ -138,10 +144,22 @@ class LayaToolkit:
         def handle() -> ToolResult:
             if seconds not in self.WAIT_SECONDS:
                 raise LayaToolkitError("wait duration is outside the bounded toolkit")
-            self.sleeper(seconds)
-            return ToolResult(kind="wait", report=self.bridge.observe(self._episode_id), detail=f"waited {seconds:g}s")
+            return ToolResult(kind="wait", report=self._wait_game_seconds(seconds), detail=f"waited {seconds:g} game s")
 
         return BoundOption(option, handle, fingerprint)
+
+    def _wait_game_seconds(self, seconds: float) -> Mapping[str, Any]:
+        """Wait in game ticks, so a sped-up or lagging server waits the same game time."""
+        report = self.bridge.observe(self._episode_id)
+        target = int(report.get("tick") or 0) + int(seconds * 60)
+        # Bounded: a stalled server cannot hold the runner forever.
+        for _ in range(int(seconds * 4) + 8):
+            remaining = target - int(report.get("tick") or 0)
+            if remaining <= 0 or report.get("status") not in {"ready", "running"}:
+                break
+            self.sleeper(min(remaining / (60.0 * self.game_speed), 5.0) + 0.05)
+            report = self.bridge.observe(self._episode_id)
+        return report
 
     def _escalate_bound(self, fingerprint: str, *, prefix: str = "escalate") -> BoundOption:
         option = self._compile_one({

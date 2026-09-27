@@ -191,6 +191,7 @@ class LayaRunnerConfig:
     max_candidate_retries: int = 1
     resume: bool = False
     repository_revision: str = "working-tree"
+    game_speed: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.worker_id:
@@ -271,7 +272,7 @@ class LayaPrimaryRunner:
         self.journal = LayaRunJournal(
             config.evidence_dir / "runs" / f"{self.run_id}.jsonl", resume=config.resume,
         )
-        self.toolkit = LayaToolkit(bridge, self.scenario, sleeper=sleeper)
+        self.toolkit = LayaToolkit(bridge, self.scenario, sleeper=sleeper, game_speed=config.game_speed)
         self.toolkit.bind_episode(self.episode_id)
         self.failures_dir = config.evidence_dir / "failures"
         self.failures_dir.mkdir(parents=True, exist_ok=True)

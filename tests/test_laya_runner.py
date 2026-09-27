@@ -462,3 +462,29 @@ def test_exploration_never_samples_escalation_at_random(tmp_path) -> None:
         if event["type"] == "decision_result" and event["selection"]["source"] == "exploration_random"
     ]
     assert random_picks and not any("escalate" in option for option in random_picks)
+
+
+def test_gate_can_forbid_model_escalation_using_next_best_option(tmp_path) -> None:
+    scenario = generate_mining_delivery_scenario(11)
+    bridge = Bridge(scenario)
+
+    class Quitter(Predictor):
+        def predict(self, state, questions):
+            kind = next(iter(questions))
+            ids = list(questions[kind]["criteria"])
+            probabilities = {option: 0.1 for option in ids}
+            quit_id = next((option for option in ids if "escalate" in option), ids[0])
+            probabilities[quit_id] = 0.6
+            best = {"choose_operation": "operation.mining_delivery", "wait_or_act": "wait.5s"}.get(kind, ids[-1])
+            probabilities[best] = 0.3
+            return {"answers": {kind: {"choice": quit_id, "confidence": 0.6, "probabilities": probabilities}}}
+
+    gate = ExplorationGate(seed=2, epsilon=0.0, allow_model_escalation=False)
+    result = _exploration_runner(tmp_path, bridge, Quitter(lambda *_: None), scenario, gate).run()
+
+    assert result["status"] == "completed"
+    events = _events(tmp_path / "runs" / "explore-test.jsonl")
+    assert events[0]["authority"]["allow_model_escalation"] is False
+    results = [e for e in events if e["type"] == "decision_result"]
+    assert "model_non_escalation" in {e["selection"]["source"] for e in results}
+    assert not any("escalate" in e["selected_option_id"] for e in results)

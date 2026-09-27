@@ -73,6 +73,11 @@ BUDGET_PROFILES: dict[str, LayaBudgetProfile] = {
         "director-1024", max_tokens=1024, state_target_tokens=768,
         question_target_tokens=256, max_options=20,
     ),
+    # Longer director context; checkpoints must be trained at this length.
+    "director-2048": LayaBudgetProfile(
+        "director-2048", max_tokens=2048, state_target_tokens=1536,
+        question_target_tokens=512, max_options=20,
+    ),
     "compact-768": LayaBudgetProfile(
         "compact-768", max_tokens=768, state_target_tokens=576,
         question_target_tokens=192, max_options=16,

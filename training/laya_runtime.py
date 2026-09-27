@@ -96,6 +96,7 @@ class LayaModelPredictor:
         device: str | None = None,
         allow_legacy_sequence: bool = False,
         explicit_sequence_version: str | None = None,
+        max_len: int | None = None,
     ) -> None:
         # Exploration only: render the current representation for an upstream
         # checkpoint that predates it, instead of legacy truncation.
@@ -158,6 +159,11 @@ class LayaModelPredictor:
         self._confidence_from_probs = confidence_from_probs
         self._render_options = render_options
         self._temp_bucket = temp_bucket
+        if max_len is not None:
+            # Explicit inference-length override; it is not a trained capability.
+            if max_len not in {1024, 2048, 4096}:
+                raise LayaRuntimeError("max_len override must be 1024, 2048, or 4096")
+            config = {**config, "max_len": int(max_len)}
         self.config = config
         self.sequence_version = explicit_sequence_version or resolve_sequence_version(
             config, allow_legacy_sequence=allow_legacy_sequence,

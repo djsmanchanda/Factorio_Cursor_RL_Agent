@@ -28,6 +28,9 @@ class ExplorationGate:
 
     seed: int
     epsilon: float
+    # Data collection with an untrained model: its escalations are noise that
+    # end episodes early. Decision/no-progress budgets still stop the run.
+    allow_model_escalation: bool = True
 
     def __post_init__(self) -> None:
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
@@ -41,6 +44,7 @@ class ExplorationGate:
             "trained_capabilities": None,
             "seed": self.seed,
             "epsilon": self.epsilon,
+            "allow_model_escalation": self.allow_model_escalation,
             "runtime": "disposable_training",
             "production_authority": False,
             "comparison_eligible": False,
@@ -103,10 +107,15 @@ class ExplorationDirector:
         explorable = [option for option in normalized if not _is_escalation(option)]
         explore = bool(explorable) and rng.random() < self.gate.epsilon
         selected = rng.choice(explorable) if explore else result["selected_option"]
+        source = "exploration_random" if explore else "model"
+        if not explore and not self.gate.allow_model_escalation and _is_escalation(selected) and explorable:
+            probabilities = next(iter((result["response"].get("answers") or {}).values()), {}).get("probabilities") or {}
+            selected = max(explorable, key=lambda option: float(probabilities.get(str(option["option_id"]), 0.0)))
+            source = "model_non_escalation"
         result["selected_option"] = selected
         result["selection"] = {
             "authority": EXPLORATION_AUTHORITY,
-            "source": "exploration_random" if explore else "model",
+            "source": source,
             "model_choice": model_choice,
             "model_confidence": result["confidence"],
             "epsilon": self.gate.epsilon,

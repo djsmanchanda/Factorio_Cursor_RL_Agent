@@ -512,6 +512,19 @@ and matches existing entities by tile, so re-executing a plan is idempotent.
 A scripted live probe on 2.1.20 produced about 0.6 plates/s, 0.2 gears/s and
 0.4 belts/s and completed the belt objective in 45 s.
 
+Volume: `tools/run_laya_workflow_batch.py --instance <instance_id> --slots N
+--seed-start S --episodes E --game-speed G [--max-len 2048]` runs E exploration
+episodes concurrently on N slots of one worker, sharing one locked GPU model,
+and restores `game.speed` to 1 afterwards. Waits are measured in game ticks,
+so speed changes wall time, not the decision's meaning. Data collection
+forbids model escalation by default (`allow_model_escalation=false` in the
+gate record; the next-best non-escalation option is used and labelled
+`model_non_escalation`); decision and no-progress budgets still end runs.
+`--max-len 2048` is an explicit inference override on the untrained base for
+data collection only; trained checkpoints must be trained at the length they
+run at. Observed: 32 connected episodes on 8 slots at 8x in 115 s wall, 28
+completed, completion 4,138-27,503 ticks (median 7,925).
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate
