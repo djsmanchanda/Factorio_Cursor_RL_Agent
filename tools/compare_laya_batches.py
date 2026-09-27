@@ -19,9 +19,11 @@ def load(path: Path) -> dict[int, dict]:
     return rows
 
 
-def cost(row: dict, max_ticks: int) -> float:
-    # Unfinished episodes cost the full budget, as in counterfactual labels.
-    return float(row["elapsed_ticks"]) if row.get("status") == "completed" and row.get("elapsed_ticks") else float(max_ticks)
+def cost(row: dict, max_ticks: int, material_weight: float = 0.0) -> float:
+    # Same objective as counterfactual labels: completion ticks plus priced
+    # material; unfinished episodes cost the full budget.
+    ticks = float(row["elapsed_ticks"]) if row.get("status") == "completed" and row.get("elapsed_ticks") else float(max_ticks)
+    return ticks + material_weight * float(row.get("material_cost") or 0.0)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -29,13 +31,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidates", nargs="+", type=Path)
     parser.add_argument("--max-ticks", type=int, default=36_000)
+    parser.add_argument("--material-weight", type=float, default=10.0,
+                        help="Ticks per material unit, matching the label objective")
     args = parser.parse_args(argv)
     base = load(args.baseline)
     for path in [args.baseline, *args.candidates]:
         rows = load(path)
         seeds = sorted(set(rows) & set(base))
-        costs = [cost(rows[seed], args.max_ticks) for seed in seeds]
-        deltas = [cost(rows[seed], args.max_ticks) - cost(base[seed], args.max_ticks) for seed in seeds]
+        weight = args.material_weight
+        costs = [cost(rows[seed], args.max_ticks, weight) for seed in seeds]
+        deltas = [cost(rows[seed], args.max_ticks, weight) - cost(base[seed], args.max_ticks, weight) for seed in seeds]
         wins = sum(delta < 0 for delta in deltas)
         print(json.dumps({
             "batch": path.stem, "seeds": len(seeds),

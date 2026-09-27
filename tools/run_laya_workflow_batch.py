@@ -129,8 +129,11 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
     result["wall_seconds"] = round(time.monotonic() - started, 1)
     journal = Path(result.get("journal", ""))
     if journal.is_file():
+        result["material_cost"] = 0.0
         for line in journal.read_text(encoding="utf-8").splitlines():
             event = json.loads(line)
+            if event.get("type") == "transaction_started" and event.get("candidate"):
+                result["material_cost"] += float((event["candidate"].get("features") or {}).get("material_cost") or 0.0)
             if event.get("type") == "termination":
                 final = event.get("final_observation") or {}
                 # The lab's own completion tick when available; observation time lags.
