@@ -145,6 +145,9 @@ class TrainingSurfaceViewer:
             raise ObserverControlError(str(result.get("error", "stale-surface cleanup failed")))
         for field in ("recycled", "pending", "connected", "refused"):
             values = result.get(field, [])
+            # Factorio serializes an empty Lua array as an empty object.
+            if values == {}:
+                values = result[field] = []
             if not isinstance(values, list) or any(
                 not isinstance(value, str) or not value.startswith(worker.surface_prefix)
                 for value in values

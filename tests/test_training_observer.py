@@ -470,3 +470,16 @@ def test_http_dashboard_can_request_a_bounded_training_view(tmp_path) -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_stale_cleanup_accepts_factorio_empty_arrays_as_objects() -> None:
+    # Live 2.1.20: an all-empty cleanup serialized "recycled": {} and was misreported.
+    class EmptyCleanupRcon(CleanupRcon):
+        def command(self, command: str) -> str:
+            payload = json.loads(command.removeprefix("/training_cleanup_orphans "))
+            return json.dumps({"ok": True, "status": "completed", "request_id": payload["request_id"],
+                               "recycled": {}, "pending": {}, "connected": {}, "refused": {}})
+
+    result = _viewer(EmptyCleanupRcon()).recycle_stale("training-01")
+
+    assert result["recycled"] == [] and result["refused"] == []

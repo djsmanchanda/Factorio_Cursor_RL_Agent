@@ -180,8 +180,12 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
         finally:
             pool_slots.release(slot)
 
-    with ThreadPoolExecutor(max_workers=args.slots) as pool:
+    pool = ThreadPoolExecutor(max_workers=args.slots)
+    try:
         results = list(pool.map(job, jobs))
+    finally:
+        # On interrupt, drop queued replays; in-flight episodes still recycle.
+        pool.shutdown(wait=True, cancel_futures=True)
     for k in range(depth):
         point = base["trace"][k]
         costs = {point["choice"]: outcome_cost(base, max_ticks, weight)}
@@ -260,15 +264,20 @@ def main(argv: list[str] | None = None) -> int:
     started, written = time.monotonic(), 0
     try:
         # Seeds run concurrently; each seed's alternatives share the slot pool.
-        with ThreadPoolExecutor(max_workers=max(1, args.slots // 2)) as seeds_pool, out.open("a", encoding="utf-8") as handle:
-            futures = [seeds_pool.submit(label_seed, seed, pool_slots, password, args)
-                       for seed in range(args.seed_start, args.seed_start + args.seeds)]
-            for future in futures:
-                for label in future.result():
-                    handle.write(json.dumps(label, sort_keys=True) + "\n")
-                    written += 1
-                    print(f"seed {label['seed']} k{label['decision_index']} faithful={label['all_alternatives_faithful']} "
-                          f"costs={label['cost_ticks']}", flush=True)
+        seeds_pool = ThreadPoolExecutor(max_workers=max(1, args.slots // 2))
+        try:
+            with out.open("a", encoding="utf-8") as handle:
+                futures = [seeds_pool.submit(label_seed, seed, pool_slots, password, args)
+                           for seed in range(args.seed_start, args.seed_start + args.seeds)]
+                for future in futures:
+                    for label in future.result():
+                        handle.write(json.dumps(label, sort_keys=True) + "\n")
+                        handle.flush()
+                        written += 1
+                        print(f"seed {label['seed']} k{label['decision_index']} faithful={label['all_alternatives_faithful']} "
+                              f"costs={label['cost_ticks']}", flush=True)
+        finally:
+            seeds_pool.shutdown(wait=True, cancel_futures=True)
     finally:
         set_game_speed(host, port, password, 1.0)
     print(json.dumps({"labels": written, "wall_seconds": round(time.monotonic() - started, 1), "output": str(out)}))
