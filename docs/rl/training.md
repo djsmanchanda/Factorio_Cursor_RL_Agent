@@ -525,6 +525,26 @@ data collection only; trained checkpoints must be trained at the length they
 run at. Observed: 32 connected episodes on 8 slots at 8x in 115 s wall, 28
 completed, completion 4,138-27,503 ticks (median 7,925).
 
+Outcome labels: `tools/laya_counterfactual_labels.py` replays each decision
+prefix on its own replica surface, forces every alternative, and finishes with
+a fixed rollout; cost is the lab's `completed_ticks` plus 10 ticks per unit of
+built material (rule.sustained-efficiency). Base rollouts are repeated to
+measure noise (median 180 ticks). `tools/laya_labels_to_cases.py` keeps only
+faithful labels and writes soft-target cases for `build_laya_dataset.py
+--cases-jsonl`. First v2 set: 48 seeds, 446 labels, 398 faithful
+(dataset `74e70f15`).
+
+Evaluation on 32 held-out seeds (`tools/compare_laya_batches.py`, same
+objective): rollout 32/32, median cost 7,751; random 30/32, +3,610; the
+features-only baseline (`training/laya_feature_baseline.py`) 32/32, median
+5,806, better than rollout on 30 seeds; Laya `laya-serve-goal-v1` (2048,
+80 LoRA steps) 26/32, median 14,279. Laya built branches in the right order
+but chose `wait.1s` at nearly every wait point and ran out of decisions. That
+is the known one-step-label trap: labels score "short wait, then the default
+rollout", never "short wait forever". Next: policy iteration (collect states
+from the trained policy, relabel with it as the continuation, retrain) and a
+per-decision cost in the objective.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate
