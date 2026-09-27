@@ -12,6 +12,7 @@ Options:
   --worker-count N       Number of isolated Factorio runtimes (default: 1, max: 50).
   --slots-per-worker N   Logical training slots per runtime (default: 1, max: 80).
   --stagger-seconds N    Delay between worker actions (default: 2).
+  --only N               Act on worker N only (deploy/start/stop/status); others are untouched.
   --root PATH            Native worker-state root (default: ~/.local/share/factorio-rl/training).
   --runtime-root PATH    Private headless Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.20).
   --factorio-bin PATH    Native Factorio executable (defaults below --runtime-root).
@@ -42,6 +43,7 @@ fi
 shift || true
 
 WORKER_COUNT=1
+ONLY=""
 SLOTS_PER_WORKER=1
 STAGGER_SECONDS=2
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/training"
@@ -54,6 +56,7 @@ GUI_MODS_PATH="$HOME/.factorio/mods"
 while (($#)); do
   case "$1" in
     --worker-count) WORKER_COUNT="${2:?missing --worker-count value}"; shift 2 ;;
+    --only) ONLY="${2:?missing --only value}"; shift 2 ;;
     --slots-per-worker) SLOTS_PER_WORKER="${2:?missing --slots-per-worker value}"; shift 2 ;;
     --stagger-seconds) STAGGER_SECONDS="${2:?missing --stagger-seconds value}"; shift 2 ;;
     --root) STATE_ROOT="${2:?missing --root value}"; shift 2 ;;
@@ -295,6 +298,8 @@ status_worker() {
   fi
 }
 
+selected() { [[ -z "$ONLY" || "$1" -eq "$ONLY" ]]; }
+
 case "$ACTION" in
   configure) write_worker_config ;;
   bootstrap)
@@ -307,6 +312,7 @@ case "$ACTION" in
     ;;
   deploy)
     for ((index = 1; index <= WORKER_COUNT; index++)); do
+      selected "$index" || continue
       configure_paths "$index"
       [[ -d "$DATA_ROOT" ]] || die "worker $(worker_suffix "$index") is not bootstrapped"
       sync_mods
@@ -316,10 +322,11 @@ case "$ACTION" in
     ;;
   start)
     for ((index = 1; index <= WORKER_COUNT; index++)); do
+      selected "$index" || continue
       start_worker "$index"
       if (( index < WORKER_COUNT )); then sleep "$STAGGER_SECONDS"; fi
     done
     ;;
-  stop) for ((index = 1; index <= WORKER_COUNT; index++)); do stop_worker "$index"; done ;;
-  status) for ((index = 1; index <= WORKER_COUNT; index++)); do status_worker "$index"; done ;;
+  stop) for ((index = 1; index <= WORKER_COUNT; index++)); do if selected "$index"; then stop_worker "$index"; fi; done ;;
+  status) for ((index = 1; index <= WORKER_COUNT; index++)); do if selected "$index"; then status_worker "$index"; fi; done ;;
 esac

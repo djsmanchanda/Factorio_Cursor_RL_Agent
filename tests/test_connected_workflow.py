@@ -24,7 +24,11 @@ def _world(scenario):
         if fixture["entity"] == "infinity-chest":
             owner[tuple(fixture["position"])] = fixture["id"]
     actions = []
+    # Variants of one branch are alternatives on the same tiles; check one each.
+    first = {}
     for candidate in connected_workflow_candidates(scenario):
+        first.setdefault(candidate["branch_id"], candidate)
+    for candidate in first.values():
         for action in candidate["plan"]["phases"][0]["actions"]:
             actions.append((candidate["branch_id"], action))
             for tile in _tiles(action["entity"], action["position"]["x"], action["position"]["y"]):
@@ -41,7 +45,8 @@ def test_branch_plans_never_overlap_and_fit_the_budget_exactly() -> None:
         for _, action in actions:
             counts[action["entity"]] = counts.get(action["entity"], 0) + 1
         # Every branch owns distinct entities, so no plan relies on idempotent re-placement.
-        assert counts == BUDGET
+        assert counts == {entity: count for entity, count in BUDGET.items()
+                          if entity not in {"assembling-machine-1", "inserter"}}
 
 
 def test_inserters_move_items_along_the_intended_chain() -> None:
@@ -67,3 +72,21 @@ def test_branch_specs_gate_production_but_not_construction() -> None:
     assert tuple(specs) == BRANCH_IDS
     assert specs["gears"]["requires"] == ["iron"] and specs["belts"]["requires"] == ["gears"]
     assert "requires" not in specs["construction"] and specs["construction"]["metric"] == "built_count"
+
+
+def test_variants_share_geometry_and_each_fits_the_budget() -> None:
+    scenario = generate_connected_workflow_scenario(5)
+    by_branch: dict[str, list] = {}
+    for candidate in connected_workflow_candidates(scenario):
+        by_branch.setdefault(candidate["branch_id"], []).append(candidate)
+    assert {branch: len(items) for branch, items in by_branch.items()} == {
+        "iron": 2, "gears": 4, "belts": 4, "construction": 1}
+    for items in by_branch.values():
+        layouts = {tuple((a["position"]["x"], a["position"]["y"], a.get("direction"))
+                         for a in item["plan"]["phases"][0]["actions"]) for item in items}
+        assert len(layouts) == 1 and len({item["plan_hash"] for item in items}) == len(items)
+        for item in items:
+            counts: dict[str, int] = {}
+            for action in item["plan"]["phases"][0]["actions"]:
+                counts[action["entity"]] = counts.get(action["entity"], 0) + 1
+            assert all(count <= BUDGET[entity] for entity, count in counts.items())

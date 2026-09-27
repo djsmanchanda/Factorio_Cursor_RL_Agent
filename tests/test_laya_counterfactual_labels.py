@@ -37,6 +37,7 @@ def test_replica_keeps_world_but_isolates_names() -> None:
 
 def test_unfinished_runs_cost_the_budget_and_targets_prefer_faster() -> None:
     assert outcome_cost({"status": "timed_out", "elapsed_ticks": 900}, 36_000) == 36_000.0
+    assert outcome_cost({"status": "completed", "elapsed_ticks": 3000, "material_cost": 50.0}, 36_000, 10.0) == 3500.0
     target = soft_target({"serve.iron": 3197.0, "wait.15s": 4066.0}, 600.0)
     assert target["serve.iron"] > target["wait.15s"] and abs(sum(target.values()) - 1) < 1e-9
 

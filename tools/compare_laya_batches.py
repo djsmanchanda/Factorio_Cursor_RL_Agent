@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+# Path: tools/compare_laya_batches.py
+# Purpose: Compare policy batch summaries seed by seed on completion rate and completion ticks.
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from pathlib import Path
+
+
+def load(path: Path) -> dict[int, dict]:
+    rows = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        rows[int(row["seed"])] = row
+    return rows
+
+
+def cost(row: dict, max_ticks: int) -> float:
+    # Unfinished episodes cost the full budget, as in counterfactual labels.
+    return float(row["elapsed_ticks"]) if row.get("status") == "completed" and row.get("elapsed_ticks") else float(max_ticks)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("baseline", type=Path)
+    parser.add_argument("candidates", nargs="+", type=Path)
+    parser.add_argument("--max-ticks", type=int, default=36_000)
+    args = parser.parse_args(argv)
+    base = load(args.baseline)
+    for path in [args.baseline, *args.candidates]:
+        rows = load(path)
+        seeds = sorted(set(rows) & set(base))
+        costs = [cost(rows[seed], args.max_ticks) for seed in seeds]
+        deltas = [cost(rows[seed], args.max_ticks) - cost(base[seed], args.max_ticks) for seed in seeds]
+        wins = sum(delta < 0 for delta in deltas)
+        print(json.dumps({
+            "batch": path.stem, "seeds": len(seeds),
+            "completed": sum(rows[seed].get("status") == "completed" for seed in seeds),
+            "median_cost_ticks": statistics.median(costs) if costs else None,
+            "mean_delta_vs_baseline": round(statistics.fmean(deltas), 1) if deltas else None,
+            "faster_than_baseline": wins,
+        }))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

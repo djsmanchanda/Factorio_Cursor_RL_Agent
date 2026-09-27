@@ -73,6 +73,8 @@ def test_serve_goal_gates_on_measured_branches_and_offers_independent_work(tmp_p
     offered = []
 
     def choose(kind, ids, _state):
+        if kind == "select_candidate":
+            return ids[0]
         assert kind == "serve_goal"
         offered.append(ids)
         if "serve.iron" in ids:
@@ -102,6 +104,9 @@ def test_serve_goal_gates_on_measured_branches_and_offers_independent_work(tmp_p
     assert first_gears > 1
     events = [json.loads(line) for line in (tmp_path / "runs" / "workflow-test.jsonl").read_text().splitlines()]
     assert sum(event["type"] == "work_graph" for event in events) == len(offered)
+    variant_questions = [event for event in events if event["type"] == "decision" and event["decision_kind"] == "select_candidate"]
+    # Gears and belts each offer four machine/inserter variants one layer deeper.
+    assert [len(event["options"]) for event in variant_questions] == [2, 4, 4]
     final = next(event for event in events if event["type"] == "termination")["work_graph"]
     assert sorted(branch["branch_id"] for branch in final["closed"]) == ["belts", "construction", "gears", "iron"]
 

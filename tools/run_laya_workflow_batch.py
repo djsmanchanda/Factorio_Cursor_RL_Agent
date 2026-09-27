@@ -44,6 +44,28 @@ class LockedPredictor:
             return self._predictor.predict(state, questions)
 
 
+class RandomPredictor:
+    """Seeded uniform choice among non-escalation options: the floor baseline."""
+
+    tokenizer = None
+
+    def __init__(self, seed: int):
+        import random
+        self._rng = random.Random(f"random-baseline:{seed}")
+
+    def predict(self, state, questions):
+        kind = next(iter(questions))
+        ids = [option for option in questions[kind]["criteria"] if "escalate" not in option]
+        choice = self._rng.choice(ids)
+        return {"answers": {kind: {"choice": choice, "confidence": 1.0 / len(ids),
+                                   "probabilities": {option: 1.0 / len(ids) for option in ids}}}}
+
+
+def _policy_ref(name: str) -> dict[str, str]:
+    import hashlib
+    return {"model_id": f"baseline-{name}", "model_hash": "sha256:" + hashlib.sha256(name.encode()).hexdigest()}
+
+
 def _generator(family: str):
     module_name, function = _GENERATORS[family].split(":")
     module = __import__(module_name, fromlist=[function])
@@ -77,6 +99,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-no-progress", type=int, default=12)
     result.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-exploration")
     result.add_argument("--run-prefix", required=True)
+    result.add_argument("--policy", choices=("laya", "rollout", "random"), default="laya",
+                        help="laya uses --checkpoint; rollout/random are model-free baselines on the same seeds")
     return result
 
 
@@ -101,13 +125,16 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
         bridge.close()
     result["seed"] = scenario["seed"]
     result["inference_max_len"] = args.max_len
+    result["policy"] = args.policy
     result["wall_seconds"] = round(time.monotonic() - started, 1)
     journal = Path(result.get("journal", ""))
     if journal.is_file():
         for line in journal.read_text(encoding="utf-8").splitlines():
             event = json.loads(line)
             if event.get("type") == "termination":
-                result["elapsed_ticks"] = (event.get("final_observation") or {}).get("elapsed_ticks")
+                final = event.get("final_observation") or {}
+                # The lab's own completion tick when available; observation time lags.
+                result["elapsed_ticks"] = (final.get("metrics") or {}).get("completed_ticks", final.get("elapsed_ticks"))
                 graph = event.get("work_graph") or {}
                 result["closed_branches"] = sorted(branch["branch_id"] for branch in graph.get("closed", []))
     return result
@@ -129,12 +156,16 @@ def main(argv: list[str] | None = None) -> int:
     generate = _generator(args.family)
     scenarios = [generate(seed) for seed in range(args.seed_start, args.seed_start + args.episodes)]
 
-    predictor = LayaModelPredictor(
-        args.checkpoint, explicit_sequence_version=SEQUENCE_VERSION, max_len=args.max_len,
-    )
     budget_profile = "director-2048" if args.max_len == 2048 else "director-1024"
-    shared = LockedPredictor(predictor)
-    model_ref = checkpoint_model_ref(args.checkpoint)
+    shared = None
+    if args.policy == "laya":
+        predictor = LayaModelPredictor(
+            args.checkpoint, explicit_sequence_version=SEQUENCE_VERSION, max_len=args.max_len,
+        )
+        shared = LockedPredictor(predictor)
+        model_ref = checkpoint_model_ref(args.checkpoint)
+    else:
+        model_ref = _policy_ref(args.policy)
     knowledge = load_guideline_context(
         ROOT, scopes=(args.family, "serve_goal", "choose_operation", "select_candidate", "wait_or_act", "recovery"),
         max_rules=8,
@@ -151,10 +182,16 @@ def main(argv: list[str] | None = None) -> int:
             slot = free.pop()
         try:
             # Each episode has its own seeded gate; the model is shared.
-            gate = ExplorationGate(scenario["seed"], args.epsilon, args.allow_model_escalation)
-            director = ExplorationDirector(
-                shared, gate, request_tokenizer=shared.tokenizer, budget_profile=budget_profile,
-            )
+            if args.policy == "laya":
+                gate = ExplorationGate(scenario["seed"], args.epsilon, args.allow_model_escalation)
+                director = ExplorationDirector(
+                    shared, gate, request_tokenizer=shared.tokenizer, budget_profile=budget_profile,
+                )
+            else:
+                from tools.laya_counterfactual_labels import ScriptedPredictor
+                baseline = ScriptedPredictor([]) if args.policy == "rollout" else RandomPredictor(scenario["seed"])
+                gate = ExplorationGate(scenario["seed"], 0.0, allow_model_escalation=False)
+                director = ExplorationDirector(baseline, gate, budget_profile=budget_profile)
             return run_episode(slot, scenario, director, gate, model_ref, knowledge, args, password)
         finally:
             with free_lock:

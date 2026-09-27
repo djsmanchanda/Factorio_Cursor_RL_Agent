@@ -88,7 +88,8 @@
           "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
           "splitter", "transport-belt", "underground-belt",
           "express-transport-belt", "express-underground-belt", "express-loader",
-          "assembling-machine-2", "iron-chest", "small-electric-pole"
+          "assembling-machine-2", "iron-chest", "small-electric-pole",
+          "assembling-machine-1", "inserter"
         ]
       },
       "additionalProperties": {"type": "integer", "minimum": 0}
@@ -131,7 +132,8 @@
               "electric-mining-drill", "electric-furnace", "fast-inserter", "medium-electric-pole",
               "splitter", "transport-belt", "underground-belt",
               "express-transport-belt", "express-underground-belt", "express-loader",
-              "assembling-machine-2", "iron-chest", "small-electric-pole"
+              "assembling-machine-2", "iron-chest", "small-electric-pole",
+          "assembling-machine-1", "inserter"
             ]
           }
         }

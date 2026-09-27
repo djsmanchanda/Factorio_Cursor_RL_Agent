@@ -10,7 +10,8 @@ local ALLOWED_ENTITIES = {
   ["transport-belt"] = true, ["underground-belt"] = true,
   ["express-transport-belt"] = true, ["express-underground-belt"] = true,
   ["express-loader"] = true, ["assembling-machine-2"] = true,
-  ["iron-chest"] = true, ["small-electric-pole"] = true
+  ["iron-chest"] = true, ["small-electric-pole"] = true,
+  ["assembling-machine-1"] = true, inserter = true
 }
 local POWER_SOURCE_ENTITIES = {
   ["electric-energy-interface"] = true, ["solar-panel"] = true,

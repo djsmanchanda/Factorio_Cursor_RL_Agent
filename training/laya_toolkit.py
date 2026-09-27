@@ -267,20 +267,48 @@ class LayaToolkit:
         measured and closed); nothing here orders them.
         """
         fingerprint = _decision_fingerprint(report)
-        by_branch = {str(item.get("branch_id")): item for item in self._candidates(report)}
-        options = [
-            self._candidate_bound(by_branch[branch_id], report, option_id=f"serve.{branch_id}")
-            for branch_id in runnable_branch_ids
-            if branch_id in by_branch and by_branch[branch_id]["plan_hash"] not in executed_plan_hashes
-        ]
+        built = {
+            str(item.get("branch_id")) for item in self._candidates(report, fundable_only=False)
+            if item["plan_hash"] in executed_plan_hashes
+        }
+        options = []
+        for branch_id in runnable_branch_ids:
+            if branch_id in built:
+                continue
+            variants = self._branch_variants(report, branch_id)
+            if len(variants) == 1:
+                options.append(self._candidate_bound(variants[0], report, option_id=f"serve.{branch_id}"))
+            elif variants:
+                option = self._compile_one({
+                    "tool_id": self.family_tool_id,
+                    "option_id": f"serve.{branch_id}",
+                    "summary": f"Work on the {branch_id} branch; choose how to build it next.",
+                    "features": {"variant_count": float(len(variants))},
+                    "scope": self.scope,
+                    "parameters": {"observation": fingerprint, "branch": branch_id, "next": "select_candidate"},
+                })
+                options.append(BoundOption(
+                    option, lambda branch=branch_id: ToolResult(kind="choose_variant", report=report, detail=branch),
+                    fingerprint,
+                ))
         options.extend(self._wait_bound(seconds, fingerprint) for seconds in self.WAIT_SECONDS)
         options.append(self._escalate_bound(fingerprint))
         return tuple(options)
 
+    def _branch_variants(self, report: Mapping[str, Any], branch_id: str) -> list[dict[str, Any]]:
+        return [item for item in self._candidates(report) if item.get("branch_id") == branch_id]
+
+    def variant_options(self, report: Mapping[str, Any], branch_id: str) -> tuple[BoundOption, ...]:
+        """The fundable build variants of one chosen branch; no ranking."""
+        return tuple(
+            self._candidate_bound(item, report, option_id=str(item["variant_id"]))
+            for item in self._branch_variants(report, branch_id)
+        )
+
     def candidate_options(self, report: Mapping[str, Any]) -> tuple[BoundOption, ...]:
         return tuple(self._candidate_bound(candidate, report) for candidate in self._candidates(report))
 
-    def _candidates(self, report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def _candidates(self, report: Mapping[str, Any], *, fundable_only: bool = True) -> list[dict[str, Any]]:
         scenario = _scenario_at_observation(self.scenario, report)
         family = str(self.scenario["family"])
         if family == "furnace_refining":
@@ -297,6 +325,8 @@ class LayaToolkit:
             )
         else:
             raise LayaToolkitError(f"unsupported Laya-primary scenario family: {family}")
+        if not fundable_only:
+            return candidates
         remaining = self._remaining_budget(report)
         return [candidate for candidate in candidates if self._fundable(candidate["plan"], remaining)]
 
@@ -350,8 +380,8 @@ class LayaToolkit:
     def _candidate_summary(candidate: Mapping[str, Any]) -> str:
         # Numeric features are already complete in the model state. Repeating
         # them in the option head wastes the small decision context.
-        if candidate.get("branch_id"):
-            return f"Build the {candidate['branch_id']} branch of the connected workflow."
+        if candidate.get("variant_id"):
+            return f"Build the {candidate['branch_id']} branch as {candidate['variant_id']}."
         return "Build the validated layout described by this option's features."
 
     def _execute_fresh(

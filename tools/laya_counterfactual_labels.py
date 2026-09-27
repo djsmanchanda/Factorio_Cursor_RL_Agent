@@ -29,10 +29,10 @@ from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig
 from training.scenarios.connected_workflow import generate_connected_workflow_scenario
 from training.scheduler import load_worker_specs
 
-LABEL_VERSION = "laya-counterfactual-v1"
+LABEL_VERSION = "laya-counterfactual-v2"
 # A fixed continuation after the forced choice: the label measures each option's
 # value under this rollout (one-step policy improvement), not a global optimum.
-ROLLOUT = "build-first-ready-else-wait-5s"
+ROLLOUT = "build-first-ready-default-variant-else-wait-5s"
 
 
 class ReplayDiverged(RuntimeError):
@@ -60,6 +60,7 @@ def rollout_choice(ids: Sequence[str]) -> str:
     retry = [option for option in ids if option.startswith("recovery.retry.")]
     if retry:
         return retry[0]
+    # Variant questions: the first listed variant is the default (am2/fast) layout.
     return next(option for option in ids if "escalate" not in option)
 
 
@@ -108,22 +109,31 @@ def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, A
         ).run()
     finally:
         bridge.close()
-    elapsed = None
+    elapsed, material = None, 0.0
     for line in Path(result["journal"]).read_text(encoding="utf-8").splitlines():
         event = json.loads(line)
+        if event.get("type") == "transaction_started" and event.get("candidate"):
+            # Material committed by every executed build (a stale/failed start is rare).
+            material += float((event["candidate"].get("features") or {}).get("material_cost") or 0.0)
         if event.get("type") == "termination":
             final = event.get("final_observation") or {}
             # The lab's own completion tick; observation time lags by up to a wait.
             elapsed = (final.get("metrics") or {}).get("completed_ticks", final.get("elapsed_ticks"))
     # The predictor raises before recording a decision it cannot replay.
     diverged = len(predictor.trace) < len(prefix)
-    return {"run_id": run_id, "status": result["status"], "elapsed_ticks": elapsed,
+    return {"run_id": run_id, "status": result["status"], "elapsed_ticks": elapsed, "material_cost": material,
             "trace": predictor.trace, "diverged": diverged, "journal": result["journal"]}
 
 
-def outcome_cost(run: dict[str, Any], max_ticks: int) -> float:
+# docs/rl/README.md soft rule (rule.sustained-efficiency): minimize completion
+# time and materials. Material is priced in ticks so both share one scale.
+MATERIAL_TICKS_PER_UNIT = 10.0
+
+
+def outcome_cost(run: dict[str, Any], max_ticks: int, material_weight: float = 0.0) -> float:
     # Unfinished runs cost the full episode budget: slower than any completion.
-    return float(run["elapsed_ticks"]) if run["status"] == "completed" else float(max_ticks)
+    ticks = float(run["elapsed_ticks"]) if run["status"] == "completed" else float(max_ticks)
+    return ticks + material_weight * float(run.get("material_cost") or 0.0)
 
 
 def soft_target(costs: dict[str, float], temperature_ticks: float) -> dict[str, float]:
@@ -148,7 +158,8 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
     with ThreadPoolExecutor(max_workers=args.base_repeats) as pool:
         bases = list(pool.map(base_run, range(args.base_repeats)))
     base = bases[0]
-    base_costs = [outcome_cost(run, max_ticks) for run in bases]
+    weight = args.material_weight
+    base_costs = [outcome_cost(run, max_ticks, weight) for run in bases]
     labels = []
     depth = min(args.depth, len(base["trace"]))
     jobs = []
@@ -173,7 +184,7 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
         results = list(pool.map(job, jobs))
     for k in range(depth):
         point = base["trace"][k]
-        costs = {point["choice"]: outcome_cost(base, max_ticks)}
+        costs = {point["choice"]: outcome_cost(base, max_ticks, weight)}
         faithful = True
         for kk, option, run in results:
             if kk != k:
@@ -184,7 +195,7 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
                     or branch_state["work_branches"] != point["work_branches"]:
                 faithful = False
                 continue
-            costs[option] = outcome_cost(run, max_ticks)
+            costs[option] = outcome_cost(run, max_ticks, weight)
         if len(costs) < 2:
             continue
         labels.append({
@@ -195,6 +206,8 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
             "base_journal": base["journal"], "base_choice": point["choice"],
             "cost_ticks": costs, "all_alternatives_faithful": faithful,
             "base_repeat_costs": base_costs, "noise_ticks": max(base_costs) - min(base_costs),
+            "cost_weights": {"completion_ticks": 1.0, "material_ticks_per_unit": weight,
+                             "guideline": "rule.sustained-efficiency"},
             "soft_target": soft_target(costs, args.temperature_ticks),
         })
     return labels
@@ -230,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--game-speed", type=float, default=8.0)
     parser.add_argument("--max-decisions", type=int, default=60)
     parser.add_argument("--temperature-ticks", type=float, default=600.0)
+    parser.add_argument("--material-weight", type=float, default=MATERIAL_TICKS_PER_UNIT,
+                        help="Ticks charged per unit of built material (0 = time only)")
     parser.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-counterfactual")
     parser.add_argument("--run-prefix", required=True)
     args = parser.parse_args(argv)

@@ -554,11 +554,22 @@ class LayaPrimaryRunner:
         projection, supply = self._observe_work(report)
         self.journal.append("work_graph", tick=int(report.get("tick") or 0), projection=projection)
         runnable = [branch["branch_id"] for branch in projection["runnable"]]
+        digest = compact_workflow_digest(projection, supply)
         options = self.toolkit.serve_goal_options(report, runnable, self.executed_plan_hashes)
-        bound = self._decide(
-            "serve_goal", report, options, digest=compact_workflow_digest(projection, supply),
-        )
-        return self._invoke(bound, report)
+        bound = self._decide("serve_goal", report, options, digest=digest)
+        result_report, termination = self._invoke(bound, report)
+        option_id = bound.option.option_id
+        # A serve option without a bound plan opens the variant question.
+        branch = option_id[len("serve."):] if bound.candidate is None and option_id.startswith("serve.") else None
+        if termination is not None or not branch:
+            return result_report, termination
+        # One layer deeper: how to build the chosen branch.
+        variants = self.toolkit.variant_options(result_report, str(branch))
+        if not variants:
+            self._activate_failure("capability", f"no fundable variant for branch {branch}", result_report)
+            return result_report, None
+        selected = self._decide("select_candidate", result_report, variants, digest=digest)
+        return self._invoke(selected, result_report)
 
     def _fresh_candidates(self, report: Mapping[str, Any]) -> tuple[BoundOption, ...]:
         return tuple(

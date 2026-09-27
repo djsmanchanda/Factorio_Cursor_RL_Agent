@@ -15,8 +15,11 @@ _BOUNDS = {"x_min": -32, "y_min": -32, "x_max_exclusive": 32, "y_max_exclusive":
 _BELT_TARGET_PER_SECOND = 0.15
 BUDGET = {
     "electric-furnace": 1,
+    # Either tier per branch; the budget admits any mix of variants.
     "assembling-machine-2": 2,
+    "assembling-machine-1": 2,
     "fast-inserter": 7,
+    "inserter": 7,
     "iron-chest": 2,
     "small-electric-pole": 4,
     "medium-electric-pole": 4,

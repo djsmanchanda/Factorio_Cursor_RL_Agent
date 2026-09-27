@@ -45,6 +45,27 @@ _CELLS = {
 
 BRANCH_IDS = tuple(_CELLS)
 
+# Variants keep the verified geometry and swap machine/inserter tiers: a real
+# cost-versus-throughput choice. Rates are items per second per entity.
+MACHINES = {"am2": ("assembling-machine-2", 0.75), "am1": ("assembling-machine-1", 0.5)}
+INSERTERS = {"fast": ("fast-inserter", 2.31), "basic": ("inserter", 0.83)}
+# Rough raw-iron cost per entity, for the model's cost features only.
+_ITEM_COST = {
+    "assembling-machine-2": 42, "assembling-machine-1": 22, "fast-inserter": 6.5, "inserter": 4,
+    "electric-furnace": 70, "iron-chest": 8, "small-electric-pole": 1, "medium-electric-pole": 12,
+}
+
+
+def branch_variants(branch_id: str) -> tuple[tuple[str, str | None, str | None], ...]:
+    """(variant_id, machine key, inserter key) choices for one branch."""
+    if branch_id == "construction":
+        return (("construction.line", None, None),)
+    machines = ("am2", "am1") if branch_id in {"gears", "belts"} else (None,)
+    return tuple(
+        (f"{branch_id}.{'-'.join(part for part in (machine, inserter) if part)}", machine, inserter)
+        for machine in machines for inserter in ("fast", "basic")
+    )
+
 
 def branch_specs(scenario: dict) -> tuple[dict, ...]:
     """Measured completion targets for the work graph; no ordering or ranking."""
@@ -63,13 +84,19 @@ def branch_specs(scenario: dict) -> tuple[dict, ...]:
     )
 
 
-def branch_plan(scenario: dict, branch_id: str) -> dict:
+def branch_plan(scenario: dict, branch_id: str, *, machine: str | None = "am2", inserter: str | None = "fast") -> dict:
     if branch_id not in _CELLS:
         raise ValueError(f"unknown connected-workflow branch: {branch_id}")
+    swap = {}
+    if machine:
+        swap["assembling-machine-2"] = MACHINES[machine][0]
+    if inserter:
+        swap["fast-inserter"] = INSERTERS[inserter][0]
     source = next(f for f in scenario["fixtures"] if f["kind"] == "item_source")["position"]
     origin_x, origin_y = source[0] + 3, source[1]
     actions = []
     for entity, (dx, dy), direction, recipe in _CELLS[branch_id]:
+        entity = swap.get(entity, entity)
         action = {"action_type": "place_entity", "entity": entity,
                   "position": {"x": float(origin_x + dx), "y": float(origin_y + dy)}}
         if direction:
@@ -87,25 +114,36 @@ def branch_plan(scenario: dict, branch_id: str) -> dict:
 
 
 def connected_workflow_candidates(scenario: dict, *, validate_contract: bool = True) -> list[dict]:
-    """One candidate per branch, keyed by branch; the runner offers only runnable ones."""
+    """Every variant of every branch; the runner offers only runnable, unbuilt branches."""
     if validate_contract:
         validate_scenario(scenario)
     candidates = []
     for branch_id in BRANCH_IDS:
-        plan = branch_plan(scenario, branch_id)
-        digest = plan_hash(plan)
-        counts: dict[str, int] = {}
-        for action in plan["phases"][0]["actions"]:
-            counts[action["entity"]] = counts.get(action["entity"], 0) + 1
-        candidates.append({
-            "action_id": f"branch-{branch_id}-{digest[7:19]}",
-            "branch_id": branch_id,
-            "plan_hash": digest,
-            "features": {"entity_count": float(sum(counts.values())),
-                         "pole_count": float(sum(v for k, v in counts.items() if k.endswith("electric-pole")))},
-            "plan": plan,
-        })
+        for variant_id, machine, inserter in branch_variants(branch_id):
+            plan = branch_plan(scenario, branch_id, machine=machine, inserter=inserter)
+            digest = plan_hash(plan)
+            counts: dict[str, int] = {}
+            for action in plan["phases"][0]["actions"]:
+                counts[action["entity"]] = counts.get(action["entity"], 0) + 1
+            features = {
+                "entity_count": float(sum(counts.values())),
+                "pole_count": float(sum(v for k, v in counts.items() if k.endswith("electric-pole"))),
+                "material_cost": float(sum(_ITEM_COST.get(k, 0) * v for k, v in counts.items())),
+            }
+            if machine:
+                features["machine_speed"] = MACHINES[machine][1]
+            if inserter:
+                features["inserter_items_per_second"] = INSERTERS[inserter][1]
+            candidates.append({
+                "action_id": variant_id,
+                "branch_id": branch_id,
+                "variant_id": variant_id,
+                "plan_hash": digest,
+                "features": features,
+                "plan": plan,
+            })
     return candidates
 
 
-__all__ = ["BRANCH_IDS", "branch_plan", "branch_specs", "connected_workflow_candidates"]
+__all__ = ["BRANCH_IDS", "INSERTERS", "MACHINES", "branch_plan", "branch_specs", "branch_variants",
+           "connected_workflow_candidates"]
