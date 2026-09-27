@@ -98,6 +98,8 @@ local function advance_sample(episode, delivered, tick, sink_deliveries)
       return episode
     end
     episode.status = "completed"
+    -- Sampled every 60 ticks, independent of when a client next observes.
+    episode.completed_tick = episode.completed_tick or tick
   elseif tick - episode.started_tick >= episode.scenario.constraints.max_episode_ticks then
     episode.status = "timed_out"
     episode.failure_kind = "timeout"
@@ -495,6 +497,7 @@ local function observation(payload)
       power_connected = powered,
       electric_pole_count = efficiency.electric_pole_count,
       live_entities = efficiency.live_entities,
+      completed_ticks = episode.completed_tick and (episode.completed_tick - episode.started_tick) or nil,
       occupied_footprint_tiles = efficiency.occupied_footprint_tiles,
       placed_mining_drills = efficiency.placed_mining_drills,
       productive_mining_drills = efficiency.productive_mining_drills,

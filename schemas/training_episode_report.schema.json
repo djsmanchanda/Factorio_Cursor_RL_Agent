@@ -109,6 +109,7 @@
         "mining_drill_working_ticks": {"type": "integer", "minimum": 0},
         "mining_drill_blocked_ticks": {"type": "integer", "minimum": 0},
         "mining_drill_idle_ticks": {"type": "integer", "minimum": 0},
+        "completed_ticks": {"type": "integer", "minimum": 0},
         "live_entities": {
           "type": "object",
           "additionalProperties": {"type": "integer", "minimum": 0}
