@@ -114,3 +114,29 @@ def test_explicit_sequence_version_accepts_only_the_current_representation(tmp_p
 
     with pytest.raises(LayaRuntimeError, match="explicit sequence version"):
         LayaModelPredictor(tmp_path, explicit_sequence_version="factorio-decision-v1")
+
+
+def test_long_context_profile_requires_single_micro_batch_and_checkpointing() -> None:
+    long = Laya4060Config(max_len=2048, head_max_len=256)
+    assert long.context_profile == "2048"
+    assert preflight(long, torch_module=_TorchUnavailable())["context_profile"] == "2048"
+    with pytest.raises(ValueError, match="micro_batch=1"):
+        Laya4060Config(max_len=2048, micro_batch=2)
+    with pytest.raises(ValueError, match="micro_batch=1"):
+        Laya4060Config(max_len=2048, gradient_checkpointing=False)
+    with pytest.raises(ValueError, match="head_max_len < max_len"):
+        Laya4060Config(max_len=1024, head_max_len=1024)
+
+
+def test_env_profile_defaults_and_overrides(monkeypatch) -> None:
+    from training.laya_runtime import laya_profile_from_env
+
+    for name in ("LAYA_MAX_LEN", "LAYA_HEAD_MAX_LEN", "LAYA_MICRO_BATCH", "LAYA_GRADIENT_CHECKPOINTING"):
+        monkeypatch.delenv(name, raising=False)
+    assert (laya_profile_from_env().max_len, laya_profile_from_env().head_max_len) == (1024, 256)
+    monkeypatch.setenv("LAYA_MAX_LEN", "2048")
+    monkeypatch.setenv("LAYA_HEAD_MAX_LEN", "384")
+    assert (laya_profile_from_env().max_len, laya_profile_from_env().head_max_len) == (2048, 384)
+    monkeypatch.setenv("LAYA_GRADIENT_CHECKPOINTING", "0")
+    with pytest.raises(LayaRuntimeError, match="GRADIENT_CHECKPOINTING=1"):
+        laya_profile_from_env()

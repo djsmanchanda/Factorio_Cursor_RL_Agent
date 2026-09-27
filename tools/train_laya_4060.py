@@ -27,6 +27,9 @@ def main() -> int:
         print(json.dumps({"status": "blocked", "reason": str(error)}, indent=2))
         return 2
     print(json.dumps(report, indent=2, sort_keys=True))
+    if report.get("status") == "interrupted":
+        # 128+signal: the wrapper scripts treat this as a clean, resumable stop.
+        return int(report.get("exit_code", 143))
     return 0
 
 

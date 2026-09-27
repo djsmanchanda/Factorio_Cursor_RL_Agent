@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import math
+import os
 import sqlite3
 import copy
 from collections.abc import Iterable, Mapping
@@ -18,6 +19,7 @@ from referencing import Registry, Resource
 
 from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
+from training.laya_workflow import QUESTION_INSTRUCTIONS
 
 
 class LayaDatasetError(ValueError):
@@ -43,6 +45,21 @@ _HASH = "sha256:" + ("0" * 64)
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def question_instructions(decision_kind: str) -> str:
+    """Return the exact instruction text inference uses for a decision kind.
+
+    Training must see the same question text as ``LayaWorkflowPolicy``; a
+    trace-supplied instruction is never used for a known kind.  Staged
+    candidate kinds (``select_candidate_stage_N``) share the candidate text.
+    """
+    kind = str(decision_kind)
+    if kind in QUESTION_INSTRUCTIONS:
+        return QUESTION_INSTRUCTIONS[kind]
+    if kind.startswith("select_candidate"):
+        return QUESTION_INSTRUCTIONS["select_candidate"]
+    return "Choose the best validated option."
 
 
 def _bounded_quality(value: Any, *, name: str = "source_quality") -> float:
@@ -272,7 +289,7 @@ def transition_to_case(
     questions = {
         "select_candidate": {
             "type": "choice",
-            "instructions": "Choose the next validated candidate for this disposable objective.",
+            "instructions": question_instructions("select_candidate"),
             "criteria": {str(candidate["action_id"]): str(candidate["action_id"]) for candidate in candidates[:20]},
         }
     }
@@ -315,7 +332,7 @@ def transition_to_case(
             question_id = f"{question_id}_{index}"[:64]
         questions[question_id] = {
             "type": "choice",
-            "instructions": str(decision.get("instructions") or f"Choose the next {decision_kind} decision."),
+            "instructions": question_instructions(decision_kind),
             "criteria": {item["option_id"]: item["summary"] for item in normalized},
             "option_ids": option_ids,
             "option_count": len(option_ids),
@@ -668,7 +685,7 @@ def _step_case(
     questions = {
         decision_kind: {
             "type": "choice",
-            "instructions": str(step.get("instructions") or f"Choose the next {decision_kind} decision."),
+            "instructions": question_instructions(decision_kind),
             "criteria": {option["option_id"]: option["summary"] for option in options},
             "option_ids": option_ids,
             "option_count": len(option_ids),
@@ -844,6 +861,93 @@ def iter_cases_from_store(
         connection.close()
 
 
+def _validate_case_targets(case: Mapping[str, Any]) -> None:
+    """Require every gold distribution to be a usable target over real options.
+
+    Explicit soft targets (for example outcome-weighted ``serve_goal`` choices
+    from exploration journals) stay as distributions; only their support and
+    mass are checked here.
+    """
+    questions = case.get("questions") or {}
+    for question_id, gold in (case.get("gold") or {}).items():
+        question = questions.get(question_id)
+        if not isinstance(question, Mapping):
+            raise LayaDatasetError(f"gold answer {question_id!r} has no question")
+        probabilities = gold.get("probabilities") if isinstance(gold, Mapping) else None
+        if probabilities is None:
+            continue
+        criteria = question.get("criteria")
+        if question.get("type") == "choice":
+            allowed = set(criteria) if isinstance(criteria, Mapping) else set()
+            unknown = set(probabilities) - allowed
+            if unknown:
+                raise LayaDatasetError(f"gold target {question_id!r} names unknown options: {sorted(unknown)[:3]}")
+        values = [float(value) for value in probabilities.values()]
+        if any(not math.isfinite(value) or value < 0 for value in values) or sum(values) <= 0:
+            raise LayaDatasetError(f"gold target {question_id!r} is not a probability distribution")
+
+
+def iter_cases_from_jsonl(
+    path: Path | str,
+    *,
+    split: str | None = None,
+    quality_report: dict[str, Any] | None = None,
+    seen_state_hashes: set[str] | None = None,
+) -> Iterable[dict[str, Any]]:
+    """Validate and pass through pre-built Laya cases (e.g. exploration journals).
+
+    Cases are schema-validated, deduplicated by (state hash, question ids),
+    and re-split from ``source.scenario_seed`` so one scenario never spans
+    splits.  Soft ``gold`` distributions are preserved verbatim.
+    """
+    report = quality_report if quality_report is not None else {}
+    for key in ("rows", "emitted", "excluded"):
+        report.setdefault(key, 0)
+    report.setdefault("exclusions", {})
+    seen = seen_state_hashes if seen_state_hashes is not None else set()
+
+    def exclude(reason: str) -> None:
+        report["excluded"] += 1
+        report["exclusions"][reason] = int(report["exclusions"].get(reason, 0)) + 1
+
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            report["rows"] += 1
+            try:
+                case = json.loads(line)
+            except json.JSONDecodeError:
+                exclude("invalid JSON")
+                continue
+            if not isinstance(case, dict):
+                exclude("case is not an object")
+                continue
+            seed = (case.get("source") or {}).get("scenario_seed") if isinstance(case.get("source"), Mapping) else None
+            if isinstance(seed, bool) or not isinstance(seed, int):
+                exclude("case has no scenario_seed for split assignment")
+                continue
+            case["split"] = seed_split(seed)
+            errors = sorted(_CASE_VALIDATOR.iter_errors(case), key=lambda error: list(error.path))
+            if errors:
+                exclude("schema: " + errors[0].message[:100])
+                continue
+            try:
+                _validate_case_targets(case)
+            except (LayaDatasetError, TypeError, ValueError) as error:
+                exclude(str(error).split(":", 1)[0][:120])
+                continue
+            if split is not None and case["split"] != split:
+                continue
+            key = sha256_hash({"state": case["state"], "questions": sorted(case["questions"])})
+            if key in seen:
+                exclude("duplicate state")
+                continue
+            seen.add(key)
+            report["emitted"] += 1
+            yield case
+
+
 def write_cases(cases: Iterable[Mapping[str, Any]], output: Path | str) -> int:
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -856,13 +960,58 @@ def write_cases(cases: Iterable[Mapping[str, Any]], output: Path | str) -> int:
     return count
 
 
+DEFAULT_DATASET_DIR = _ROOT / "data" / "laya-datasets"
+LATEST_DATASET_NAME = "latest.jsonl"
+
+
+def file_sha256(path: Path | str) -> str:
+    """Return the hex SHA-256 of a dataset file."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_cases_content_addressed(
+    cases: Iterable[Mapping[str, Any]],
+    directory: Path | str = DEFAULT_DATASET_DIR,
+) -> tuple[Path, str, int]:
+    """Write cases to ``<directory>/<sha-prefix>.jsonl`` and repoint ``latest.jsonl``.
+
+    Durable, content-addressed datasets survive reboots and let a resumed
+    fine-tune prove it is reading the exact bytes it started with.
+    """
+    root = Path(directory)
+    root.mkdir(parents=True, exist_ok=True)
+    temporary = root / f".building-{os.getpid()}.jsonl"
+    try:
+        count = write_cases(cases, temporary)
+        digest = file_sha256(temporary)
+        final = root / f"{digest[:16]}.jsonl"
+        temporary.replace(final)
+    finally:
+        temporary.unlink(missing_ok=True)
+    latest = root / LATEST_DATASET_NAME
+    link = root / f".latest-{os.getpid()}"
+    link.unlink(missing_ok=True)
+    link.symlink_to(final.name)
+    link.replace(latest)
+    return final, digest, count
+
+
 __all__ = [
+    "DEFAULT_DATASET_DIR",
     "LayaDatasetError",
+    "file_sha256",
+    "iter_cases_from_jsonl",
     "iter_cases_from_store",
+    "question_instructions",
     "seed_split",
     "trajectory_to_cases",
     "transition_to_case",
     "transition_to_cases",
     "transition_to_step_cases",
     "write_cases",
+    "write_cases_content_addressed",
 ]

@@ -155,3 +155,82 @@ def test_terminal_failure_does_not_leak_into_prompt_state() -> None:
     transition["label_source"] = "counterfactual"
     case = transition_to_case(transition, _scenario())
     assert case["state"]["goal_stack"][0]["last_failure_kind"] == "none"
+
+
+def test_dataset_instructions_match_inference_question_text() -> None:
+    from training.laya_workflow import QUESTION_INSTRUCTIONS
+
+    transition = _transition(workflow_decisions=[{
+        "decision_kind": "choose_operation",
+        "instructions": "A trace-specific wording inference never sends.",
+        "options": [{"option_id": "mine", "summary": "Mine ore"}],
+        "chosen_option_id": "mine",
+    }])
+    grouped = transition_to_case(transition, _scenario())
+    steps = transition_to_step_cases(transition, _scenario())
+    assert grouped["questions"]["select_candidate"]["instructions"] == QUESTION_INSTRUCTIONS["select_candidate"]
+    assert grouped["questions"]["choose_operation"]["instructions"] == QUESTION_INSTRUCTIONS["choose_operation"]
+    assert [next(iter(case["questions"].values()))["instructions"] for case in steps] == [
+        QUESTION_INSTRUCTIONS["select_candidate"], QUESTION_INSTRUCTIONS["choose_operation"],
+    ]
+
+
+def _soft_serve_goal_case(seed: int = 7) -> dict:
+    """A pre-built exploration-journal style case with an outcome-weighted soft target."""
+    transition = _transition(
+        scenario_seed=seed,
+        candidates=[
+            {"action_id": "goal.iron", "plan_hash": HASH, "features": {"expected_rate": 1.0}},
+            {"action_id": "goal.copper", "plan_hash": HASH, "features": {"expected_rate": 0.5}},
+        ],
+        chosen_action_id="goal.iron",
+    )
+    case = transition_to_step_cases(transition, _scenario())[0]
+    question = case["questions"].pop("select_candidate")
+    case["questions"]["serve_goal"] = question
+    case["gold"] = {"serve_goal": {"label": "goal.iron", "probabilities": {"goal.iron": 0.7, "goal.copper": 0.3}, "label_source": "outcome", "confidence": 0.8}}
+    case["weights"]["question_weights"] = {"serve_goal": 0.8}
+    return case
+
+
+def test_cases_jsonl_passes_soft_targets_dedupes_and_splits_by_seed(tmp_path) -> None:
+    import json
+
+    from training.laya_dataset import iter_cases_from_jsonl, seed_split
+
+    good = _soft_serve_goal_case()
+    bad = _soft_serve_goal_case()
+    bad["gold"]["serve_goal"]["probabilities"] = {"goal.unknown": 1.0}
+    path = tmp_path / "journal.jsonl"
+    path.write_text("\n".join(json.dumps(case) for case in (good, good, bad)) + "\n", encoding="utf-8")
+    report: dict = {}
+    cases = list(iter_cases_from_jsonl(path, quality_report=report))
+    assert len(cases) == 1
+    assert cases[0]["gold"]["serve_goal"]["probabilities"] == {"goal.iron": 0.7, "goal.copper": 0.3}
+    assert cases[0]["split"] == seed_split(7)
+    assert report["exclusions"]["duplicate state"] == 1
+    assert report["excluded"] == 2
+
+
+def test_build_tool_writes_content_addressed_dataset_and_manifest(tmp_path, monkeypatch) -> None:
+    import json
+    import sys
+
+    import tools.build_laya_dataset as tool
+    from training import laya_dataset
+
+    source = tmp_path / "journal.jsonl"
+    source.write_text(json.dumps(_soft_serve_goal_case()) + "\n", encoding="utf-8")
+    out_dir = tmp_path / "datasets"
+    monkeypatch.setattr(laya_dataset, "DEFAULT_DATASET_DIR", out_dir)
+    monkeypatch.setattr(
+        tool, "write_cases_content_addressed",
+        lambda cases: laya_dataset.write_cases_content_addressed(cases, out_dir),
+    )
+    monkeypatch.setattr(sys, "argv", ["build", "--cases-jsonl", str(source)])
+    assert tool.main() == 0
+    latest = out_dir / "latest.jsonl"
+    digest = laya_dataset.file_sha256(latest)
+    assert latest.resolve().name == f"{digest[:16]}.jsonl"
+    manifest = json.loads((latest.resolve().parent / f"{digest[:16]}.jsonl.manifest.json").read_text())
+    assert manifest["sha256"] == digest and manifest["written"] == 1

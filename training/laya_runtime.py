@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -336,6 +337,9 @@ class LayaModelPredictor:
         return self.predict(state, questions)
 
 
+MAX_CONTEXT_LEN = 8192  # ModernBERT-large positional limit.
+
+
 @dataclass(frozen=True)
 class Laya4060Config:
     profile_id: str = "laya-4060-lora"
@@ -352,9 +356,24 @@ class Laya4060Config:
     fixed_option_width: int | None = None
     fused_adamw: bool = False
 
+    @property
+    def context_profile(self) -> str:
+        """Name the context budget that training persists for inference."""
+        return str(self.max_len)
+
     def __post_init__(self) -> None:
         if self.max_len < 512 or self.head_max_len < 128:
             raise ValueError("Laya context limits are below the supported smoke-test floor")
+        if self.max_len > MAX_CONTEXT_LEN or self.head_max_len >= self.max_len:
+            raise ValueError(
+                f"Laya context needs head_max_len < max_len <= {MAX_CONTEXT_LEN}"
+            )
+        if self.max_len > 1024 and (self.micro_batch != 1 or not self.gradient_checkpointing):
+            # The long-context path only fits an 8 GB card one sequence at a
+            # time with encoder and decision-head activation checkpointing.
+            raise ValueError(
+                "Laya contexts above 1024 tokens require micro_batch=1 and gradient checkpointing"
+            )
         if self.micro_batch < 1 or self.gradient_accumulation < 1 or self.group_size < 1 or self.epochs < 1:
             raise ValueError("Laya training batch settings must be positive")
         if not 0.0 < self.min_free_ratio < 1.0:
@@ -363,6 +382,57 @@ class Laya4060Config:
             raise ValueError("attention_implementation must be sdpa or flex_attention")
         if self.fixed_option_width is not None and self.fixed_option_width < 1:
             raise ValueError("fixed_option_width must be positive when provided")
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value)
+    except ValueError as error:
+        raise LayaRuntimeError(f"{name} must be an integer") from error
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def laya_profile_from_env(**overrides: Any) -> Laya4060Config:
+    """Build the training profile from LAYA_* variables.
+
+    ``LAYA_MAX_LEN``/``LAYA_HEAD_MAX_LEN`` (default 1024/256) select the
+    context profile.  Contexts above 1024 tokens (the "2048" profile) default
+    to micro-batch 1 with gradient checkpointing, which the config enforces.
+    The chosen limits are persisted to ``rl_agent_config.json`` and are what
+    ``LayaModelPredictor`` uses at inference.
+    """
+    max_len = _env_int("LAYA_MAX_LEN", 1024)
+    long_context = max_len > 1024
+    fixed_width = _env_int("LAYA_FIXED_OPTION_WIDTH", 0)
+    values: dict[str, Any] = {
+        "max_len": max_len,
+        "head_max_len": _env_int("LAYA_HEAD_MAX_LEN", 256),
+        "micro_batch": _env_int("LAYA_MICRO_BATCH", 1),
+        "gradient_accumulation": _env_int("LAYA_GRADIENT_ACCUMULATION", 32),
+        "gradient_checkpointing": _env_flag("LAYA_GRADIENT_CHECKPOINTING", True) or long_context,
+        "torch_compile": _env_flag("LAYA_TORCH_COMPILE", False),
+        "attention_implementation": os.environ.get(
+            "LAYA_ATTN_IMPLEMENTATION", os.environ.get("LAYA_ATTENTION_IMPLEMENTATION", "sdpa")
+        ).strip().lower(),
+        "fixed_option_width": fixed_width if fixed_width > 0 else None,
+        "fused_adamw": _env_flag("LAYA_FUSED_ADAMW", False),
+    }
+    if long_context and os.environ.get("LAYA_GRADIENT_CHECKPOINTING", "").strip().lower() in {"0", "false", "no", "off"}:
+        raise LayaRuntimeError("the long-context Laya profile requires LAYA_GRADIENT_CHECKPOINTING=1")
+    values.update(overrides)
+    try:
+        return Laya4060Config(**values)
+    except ValueError as error:
+        raise LayaRuntimeError(str(error)) from error
 
 
 def _torch(torch_module: Any | None = None) -> Any:
@@ -380,6 +450,7 @@ def preflight(config: Laya4060Config | None = None, *, torch_module: Any | None 
     torch = _torch(torch_module)
     profile = {
         "profile": config.profile_id,
+        "context_profile": config.context_profile,
         "max_len": config.max_len,
         "head_max_len": config.head_max_len,
         "micro_batch": config.micro_batch,
@@ -429,7 +500,9 @@ __all__ = [
     "Laya4060Config",
     "LayaModelPredictor",
     "LayaRuntimeError",
+    "MAX_CONTEXT_LEN",
     "autocast_dtype",
+    "laya_profile_from_env",
     "patch_peft_forward",
     "preflight",
     "resolve_sequence_version",
