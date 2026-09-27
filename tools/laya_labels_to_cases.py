@@ -117,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
                 if case is None:
                     excluded[reason] = excluded.get(reason, 0) + 1
                     continue
-                out.write(json.dumps(case, sort_keys=True) + "\n")
+                # Unsorted: criteria order must follow the state's option order.
+                out.write(json.dumps(case) + "\n")
                 emitted += 1
     print(json.dumps({"emitted": emitted, "excluded": excluded, "output": str(args.output)}))
     return 0

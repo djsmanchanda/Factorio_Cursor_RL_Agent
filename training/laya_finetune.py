@@ -317,6 +317,10 @@ def build_training_items(
                 continue
             qtype = question["type"]
             criteria = question.get("criteria", {})
+            order = question.get("option_ids")
+            if qtype == "choice" and isinstance(order, list) and isinstance(criteria, Mapping) and set(order) == set(criteria):
+                # JSON writers may sort object keys; option_ids is the model's option order.
+                criteria = {key: criteria[key] for key in order}
             gold_question = gold[question_id]
             if qtype == "choice":
                 keys = list(criteria)

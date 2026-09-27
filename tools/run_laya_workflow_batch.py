@@ -99,8 +99,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--max-no-progress", type=int, default=12)
     result.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-exploration")
     result.add_argument("--run-prefix", required=True)
-    result.add_argument("--policy", choices=("laya", "rollout", "random"), default="laya",
-                        help="laya uses --checkpoint; rollout/random are model-free baselines on the same seeds")
+    result.add_argument("--policy", choices=("laya", "rollout", "random", "features"), default="laya",
+                        help="laya uses --checkpoint; rollout/random/features are baselines on the same seeds")
+    result.add_argument("--features-model", type=Path, help="JSON model from training/laya_feature_baseline.py")
     return result
 
 
@@ -167,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         shared = LockedPredictor(predictor)
         model_ref = checkpoint_model_ref(args.checkpoint)
+    elif args.policy == "features":
+        import hashlib
+        from training.laya_feature_baseline import FeaturePredictor
+        if args.features_model is None:
+            parser().error("--policy features requires --features-model")
+        features = FeaturePredictor.load(args.features_model)
+        model_ref = {"model_id": "baseline-features",
+                     "model_hash": "sha256:" + hashlib.sha256(args.features_model.read_bytes()).hexdigest()}
     else:
         model_ref = _policy_ref(args.policy)
     knowledge = load_guideline_context(
@@ -192,7 +201,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 from tools.laya_counterfactual_labels import ScriptedPredictor
-                baseline = ScriptedPredictor([]) if args.policy == "rollout" else RandomPredictor(scenario["seed"])
+                baseline = {"rollout": lambda: ScriptedPredictor([]),
+                            "random": lambda: RandomPredictor(scenario["seed"]),
+                            "features": lambda: features}[args.policy]()
                 gate = ExplorationGate(scenario["seed"], 0.0, allow_model_escalation=False)
                 director = ExplorationDirector(baseline, gate, budget_profile=budget_profile)
             return run_episode(slot, scenario, director, gate, model_ref, knowledge, args, password)

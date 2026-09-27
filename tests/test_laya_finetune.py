@@ -298,3 +298,27 @@ def test_resumable_autobuild_requires_explicit_inputs(tmp_path) -> None:
     result = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 2
     assert "LAYA_DATASET_DATABASES" in result.stderr
+
+
+def test_training_items_restore_option_order_from_option_ids(monkeypatch) -> None:
+    # Live: sort_keys JSON alphabetized criteria and every v2 case was rejected.
+    seen = []
+
+    def build_sequence(tokenizer, state, question, max_len, head_max_len):
+        seen.append(list(question["crit"]))
+        return [1, 2, 3], list(range(len(question["crit"])))
+
+    monkeypatch.setattr(finetune, "_require_training_dependencies", lambda: (
+        None, {"choice": 0, "noul": 1, "score": 2}, build_sequence, None,
+        lambda question: list(question["crit"]), None, "factorio-decision-v2",
+    ))
+    sorted_criteria = {"escalate.stop": "Stop", "serve.iron": "Iron", "wait.5s": "Wait"}
+    case = {"state": {}, "questions": {"serve_goal": {
+        "type": "choice", "instructions": "x", "criteria": sorted_criteria,
+        "option_ids": ["serve.iron", "wait.5s", "escalate.stop"]}},
+        "gold": {"serve_goal": {"label": "serve.iron", "probabilities": {"serve.iron": 0.8, "wait.5s": 0.2}}}}
+
+    items = finetune.build_training_items([case], None, max_len=1024, head_max_len=256)
+
+    assert seen == [["serve.iron", "wait.5s", "escalate.stop"]]
+    assert items[0]["target"] == [0.8, 0.2, 0.0]
