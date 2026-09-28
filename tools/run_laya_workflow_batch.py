@@ -142,6 +142,8 @@ def parser() -> argparse.ArgumentParser:
                         help="Worker instance_id, e.g. factorio-training-linux-01; repeat to spread across workers")
     result.add_argument("--slots", type=int, default=4, help="Concurrent episodes per instance")
     result.add_argument("--family", choices=sorted(_GENERATORS), default="connected_workflow")
+    result.add_argument("--level", type=int, default=1,
+                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 expansion")
     result.add_argument("--seed-start", type=int, required=True)
     result.add_argument("--episodes", type=int, required=True)
     result.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "laya-base" / "typed-decisions")
@@ -218,7 +220,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.stepped and args.slots != 1:
         parser().error("--stepped pauses the whole instance clock; each instance needs exactly --slots 1")
     generate = _generator(args.family)
-    scenarios = [generate(seed) for seed in range(args.seed_start, args.seed_start + args.episodes)]
+    seeds = range(args.seed_start, args.seed_start + args.episodes)
+    if args.family == "connected_workflow":
+        scenarios = [generate(seed, level=args.level) for seed in seeds]
+    else:
+        if args.level != 1:
+            parser().error("--level only applies to --family connected_workflow")
+        scenarios = [generate(seed) for seed in seeds]
 
     budget_profile = "director-2048" if args.max_len == 2048 else "director-1024"
     shared = None

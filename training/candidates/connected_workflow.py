@@ -10,7 +10,7 @@ from training.contracts import validate_scenario
 # Layout offsets from the ore-source chest (x+3, y). Integer positions snap to
 # tile centres, as in the furnace family. Inserters pick up on the side they face.
 #   ore -> furnace -> plate chest P -> gear assembler (north) -> gear chest Q -> belt assembler (south) -> sink
-_CELLS = {
+_CELLS_L1 = {
     "iron": [
         ("fast-inserter", (-2, 0), "west", None),
         ("electric-furnace", (0, 0), None, None),
@@ -43,7 +43,32 @@ _CELLS = {
     ],
 }
 
-BRANCH_IDS = tuple(_CELLS)
+# Level 2 (demand-scaling) only: a second furnace, fed by its own ore-source-2
+# fixture, that drops plate directly onto a free edge of the gear assembler's
+# footprint (4,-3), lifting the plate/gear/belt ceiling so a high randomized
+# target is actually reachable. It has no chest of its own -- the gear
+# assembler already has spare craft-rate headroom over what two furnaces can
+# supply, so the shortest legal path is straight into it, one tile at a time
+# like every other inserter here. Measured live on 2.1.20: one furnace alone
+# plateaus around 0.6/0.2/0.4 plate/gear/belt per second; adding this cell
+# roughly doubles plate and gear and lifts belts comfortably above that.
+_CELLS_L2_EXTRA = {
+    "iron2": [
+        ("fast-inserter", (4, -9), "north", None),   # ore-source-2 -> furnace2
+        ("electric-furnace", (4, -7), None, None),
+        ("fast-inserter", (4, -5), "north", None),   # furnace2 -> gear assembler (4,-4)
+        ("small-electric-pole", (3, -9), None, None),
+        ("small-electric-pole", (3, -5), None, None),
+    ],
+}
+
+BRANCH_IDS = tuple(_CELLS_L1)
+
+
+def _cells_for(scenario: dict) -> dict:
+    """The cell set for this scenario's curriculum level; level 1 is untouched."""
+    level = int((scenario.get("curriculum") or {}).get("level", 1))
+    return {**_CELLS_L1, **_CELLS_L2_EXTRA} if level >= 2 else _CELLS_L1
 
 # Variants keep the verified geometry and swap machine/inserter tiers: a real
 # cost-versus-throughput choice. Rates are items per second per entity.
@@ -70,7 +95,8 @@ def branch_variants(branch_id: str) -> tuple[tuple[str, str | None, str | None],
 def branch_specs(scenario: dict) -> tuple[dict, ...]:
     """Measured completion targets for the work graph; no ordering or ranking."""
     belt_target = float(scenario["objective"]["target_rate_per_tick"])
-    return (
+    level = int((scenario.get("curriculum") or {}).get("level", 1))
+    specs = [
         {"branch_id": "iron", "parent_goal_id": "goal.belts", "item": "iron-plate",
          "metric": "production_rate", "target_minimum": 0.4 / 60.0, "required_sustained_ticks": 600},
         {"branch_id": "gears", "parent_goal_id": "goal.belts", "item": "iron-gear-wheel",
@@ -80,12 +106,23 @@ def branch_specs(scenario: dict) -> tuple[dict, ...]:
          "metric": "production_rate", "target_minimum": belt_target, "required_sustained_ticks": 600,
          "requires": ["gears"]},
         {"branch_id": "construction", "parent_goal_id": "goal.remote-power", "item": "medium-electric-pole",
-         "metric": "built_count", "target_minimum": len(_CELLS["construction"])},
-    )
+         "metric": "built_count", "target_minimum": len(_CELLS_L1["construction"])},
+    ]
+    if level >= 2:
+        # Offered only once "iron" is closed (furnace 1 measured producing).
+        # Gated on a *count* of electric-furnace, not a rate, so it closes the
+        # moment the second furnace exists rather than re-measuring plate rate
+        # under a threshold that would already be true from furnace 1 alone.
+        specs.append({
+            "branch_id": "iron2", "parent_goal_id": "goal.iron-scale", "item": "electric-furnace",
+            "metric": "built_count", "target_minimum": 2, "requires": ["iron"],
+        })
+    return tuple(specs)
 
 
 def branch_plan(scenario: dict, branch_id: str, *, machine: str | None = "am2", inserter: str | None = "fast") -> dict:
-    if branch_id not in _CELLS:
+    cells = _cells_for(scenario)
+    if branch_id not in cells:
         raise ValueError(f"unknown connected-workflow branch: {branch_id}")
     swap = {}
     if machine:
@@ -95,7 +132,7 @@ def branch_plan(scenario: dict, branch_id: str, *, machine: str | None = "am2", 
     source = next(f for f in scenario["fixtures"] if f["kind"] == "item_source")["position"]
     origin_x, origin_y = source[0] + 3, source[1]
     actions = []
-    for entity, (dx, dy), direction, recipe in _CELLS[branch_id]:
+    for entity, (dx, dy), direction, recipe in cells[branch_id]:
         entity = swap.get(entity, entity)
         action = {"action_type": "place_entity", "entity": entity,
                   "position": {"x": float(origin_x + dx), "y": float(origin_y + dy)}}
@@ -118,7 +155,7 @@ def connected_workflow_candidates(scenario: dict, *, validate_contract: bool = T
     if validate_contract:
         validate_scenario(scenario)
     candidates = []
-    for branch_id in BRANCH_IDS:
+    for branch_id in _cells_for(scenario):
         for variant_id, machine, inserter in branch_variants(branch_id):
             plan = branch_plan(scenario, branch_id, machine=machine, inserter=inserter)
             digest = plan_hash(plan)

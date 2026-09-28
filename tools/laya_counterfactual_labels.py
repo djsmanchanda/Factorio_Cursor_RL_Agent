@@ -50,8 +50,16 @@ def replica(scenario: dict[str, Any], tag: str) -> dict[str, Any]:
     return copy
 
 
+#  Level 1 only ever offers BRANCH_IDS, so appending the level-2 expansion
+# branch here changes nothing for level-1 replays (its serve option is never
+# in `ids`); it only gives the scripted rollout something to build when a
+# high randomized level-2 target actually needs the second furnace. It is
+# checked last so the core chain and construction are always finished first.
+_ROLLOUT_BRANCH_PRIORITY = BRANCH_IDS + ("iron2",)
+
+
 def rollout_choice(ids: Sequence[str]) -> str:
-    for branch in BRANCH_IDS:
+    for branch in _ROLLOUT_BRANCH_PRIORITY:
         if f"serve.{branch}" in ids:
             return f"serve.{branch}"
     for preferred in ("recovery.reselect", "wait.5s"):
@@ -161,7 +169,7 @@ def soft_target(costs: dict[str, float], temperature_ticks: float) -> dict[str, 
 
 
 def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
-    scenario = generate_connected_workflow_scenario(seed)
+    scenario = generate_connected_workflow_scenario(seed, level=args.level)
     max_ticks = int(scenario["constraints"]["max_episode_ticks"])
     def base_run(index):
         slot, password = pool_slots.acquire()
@@ -257,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=Path, default=ROOT / "training-workers-linux.json")
     parser.add_argument("--instance", required=True, action="append", help="Repeat to spread across workers")
     parser.add_argument("--slots", type=int, default=8, help="Concurrent episodes per instance")
+    parser.add_argument("--level", type=int, default=1,
+                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 expansion")
     parser.add_argument("--seed-start", type=int, required=True)
     parser.add_argument("--seeds", type=int, required=True)
     parser.add_argument("--depth", type=int, default=6, help="Branch at the first K base decisions")
