@@ -106,8 +106,15 @@ def test_item_telemetry_is_force_scoped_bounded_and_tracks_rates() -> None:
         assert(second.window_ticks == 120)
         assert(second.sustained_ticks == 120)
 
+        -- One empty sample inside the rolling window is not a stop: slow items
+        -- often produce nothing in a 60-tick sample.
         game.tick = 180
         measurement.sample_all(180)
+        assert(episode_state.item_production_metrics.items['iron-plate'].sustained_ticks == 180)
+
+        -- A whole window without output is.
+        game.tick = 900
+        measurement.sample_all(900)
         assert(episode_state.item_production_metrics.items['iron-plate'].sustained_ticks == 0)
         """
     )

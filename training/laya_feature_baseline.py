@@ -21,7 +21,9 @@ _KINDS = ("serve", "wait", "variant", "escalate", "other")
 # Feature set 2 adds measured demand context, so a policy can learn when
 # expanding supply pays (per-second rates; unknown rates read as zero).
 _SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
-FEATURE_SET = 2
+# Feature set 3 adds time and how many waits were just taken, so repeated waits
+# in an otherwise unchanged state are distinguishable.
+FEATURE_SET = 3
 
 
 def _kind(option_id: str) -> str:
@@ -45,6 +47,16 @@ def _demand_context(state: Mapping[str, Any]) -> list[float]:
     return [target, current / target if target > 0 else 0.0, *rates]
 
 
+def _time_context(state: Mapping[str, Any]) -> list[float]:
+    elapsed = float((state.get("run") or {}).get("elapsed_ticks") or 0.0) / 60.0
+    waits = 0
+    for event in reversed(state.get("recent_history") or ()):
+        if not str(event.get("summary") or "").startswith("Wait"):
+            break
+        waits += 1
+    return [math.log1p(elapsed), float(waits)]
+
+
 def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_set: int = FEATURE_SET) -> np.ndarray:
     features = option.get("features") or {}
     option_id = str(option.get("option_id") or option.get("id"))
@@ -54,6 +66,8 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_s
                float(len(branches.get("blocked") or {}))]
     if feature_set >= 2:
         context += _demand_context(state)
+    if feature_set >= 3:
+        context += _time_context(state)
     numeric = [math.log1p(max(0.0, float(features.get(name) or 0.0))) for name in _OPTION_FEATURES]
     onehot = [1.0 if kind == name else 0.0 for name in _KINDS]
     # Kind-by-context interactions let "wait" depend on how much is still open.

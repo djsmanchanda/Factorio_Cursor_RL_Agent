@@ -38,7 +38,10 @@ local function window_rate(samples)
     items = items + sample.items
     ticks = ticks + sample.ticks
   end
-  while ticks > RATE_WINDOW_TICKS and #samples > 1 do
+  -- Expire a sample only while a full window remains, so once enough time has
+  -- passed the window is always >= RATE_WINDOW_TICKS. Trimming to <= the window
+  -- made its length (a closure criterion) depend on sample boundaries.
+  while #samples > 1 and ticks - samples[1].ticks >= RATE_WINDOW_TICKS do
     local expired = table.remove(samples, 1)
     items = items - expired.items
     ticks = ticks - expired.ticks
@@ -397,7 +400,10 @@ item_production_metrics = function(episode, force, tick)
         local rate, window_ticks = window_rate(samples)
         local sustained_ticks = previous and previous.sustained_ticks or 0
         if sample_ticks > 0 then
-          sustained_ticks = delta > 0 and not (previous and previous.gap)
+          -- Continuous while the rolling window shows output: a slow item (one
+          -- plate per ~100 ticks) often has empty 60-tick samples, and resetting
+          -- on those made branch closure depend on sampling phase.
+          sustained_ticks = rate > 0 and not (previous and previous.gap)
             and (sustained_ticks + sample_ticks) or 0
         end
         episode.item_production_samples[item] = {

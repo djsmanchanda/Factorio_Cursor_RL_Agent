@@ -566,6 +566,24 @@ separate episodes), and an episode took 3.5 s wall instead of 6.9 s. Bursts are
 still paced by `game.speed`, so 64 is the ceiling. Scale by adding one-slot
 instances; pausing is per instance, so a paused instance must never share slots.
 
+Stepped labels exposed two measurement artefacts. Branch closure required the
+lab's rate window to span 600 ticks, but the window was trimmed to at most 600,
+so closure depended on sample boundaries; the window now keeps at least 600
+ticks once available. Per-item `sustained_ticks` reset on any empty 60-tick
+sample; it now resets only when the whole window is empty. Even with exact
+measurement, the scripted rollout checks every 5 s, so a 1 s offset often
+catches a closure one check earlier: one-step labels then prefer `wait.1s` in
+states a memoryless policy cannot tell apart, and it loops. Features set 3 adds
+elapsed time and the current wait streak, and policy iteration (the learned
+policy as continuation) prices such loops as timeouts.
+
+Unattended runs: `scripts/laya_overnight.sh [HOURS]` alternates level 1 and 2
+policy-iteration rounds (`scripts/laya_policy_iteration_round.sh`) on 12
+one-slot stepped instances at speed 32, retrains the features policy each
+round, fine-tunes Laya every second round with a gentle GPU profile, evaluates
+on held-out seeds against the scripted rollout, restarts stopped workers, and
+stops the fleet at the deadline. Results: `data/laya-pi/overnight/summary.log`.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate

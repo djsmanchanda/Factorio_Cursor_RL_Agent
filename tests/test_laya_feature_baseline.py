@@ -41,3 +41,12 @@ def test_demand_context_lets_expansion_depend_on_target() -> None:
 
     cases = [case(target) for target in (0.1, 0.2, 0.3, 0.6, 0.65, 0.7) * 4]
     assert accuracy(train(cases, epochs=400), cases) == 1.0
+
+
+def test_consecutive_waits_change_the_features() -> None:
+    from training.laya_feature_baseline import option_vector
+
+    option = {"option_id": "wait.1s", "features": {"wait_seconds": 1.0}}
+    fresh = {"run": {"elapsed_ticks": 60}, "recent_history": []}
+    looped = {"run": {"elapsed_ticks": 60}, "recent_history": [{"summary": "Wait 1 second."}] * 3}
+    assert (option_vector(option, fresh) != option_vector(option, looped)).any()

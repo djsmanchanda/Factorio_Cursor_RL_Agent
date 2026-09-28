@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from orchestrator.laya_state import validate_state
 from training.laya_workflow import QUESTION_INSTRUCTIONS
+from tools.laya_counterfactual_labels import soft_target
 
 
 def _hash(value: Any) -> str:
@@ -37,8 +38,9 @@ def _decision_state(journal: Path, index: int) -> tuple[dict[str, Any], dict[str
     return started, decisions[index]
 
 
-def label_to_case(label: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
-    """Return (case, "") or (None, exclusion reason)."""
+def label_to_case(label: dict[str, Any], temperature_ticks: float | None = None) -> tuple[dict[str, Any] | None, str]:
+    """Return (case, ""), or (None, exclusion reason). A temperature recomputes the soft target
+    from the measured costs; stepped labels are precise enough for a much sharper one."""
     if not label.get("all_alternatives_faithful"):
         # A missing alternative would be scored as worst; refuse rather than guess.
         return None, "unfaithful alternative"
@@ -48,7 +50,7 @@ def label_to_case(label: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     if option_ids != list(label["options"]):
         return None, "journal options differ from label"
     kind = str(label["decision_kind"])
-    target = label["soft_target"]
+    target = soft_target(label["cost_ticks"], temperature_ticks) if temperature_ticks else label["soft_target"]
     probabilities = {option_id: float(target.get(option_id, 0.0)) for option_id in option_ids}
     total = sum(probabilities.values())
     probabilities = {option_id: value / total for option_id, value in probabilities.items()}
@@ -107,13 +109,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("labels", nargs="+", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--temperature-ticks", type=float,
+                        help="Recompute soft targets from measured costs (default: keep the labeller's)")
     args = parser.parse_args(argv)
     emitted, excluded = 0, {}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as out:
         for path in args.labels:
             for line in path.read_text(encoding="utf-8").splitlines():
-                case, reason = label_to_case(json.loads(line))
+                case, reason = label_to_case(json.loads(line), args.temperature_ticks)
                 if case is None:
                     excluded[reason] = excluded.get(reason, 0) + 1
                     continue
