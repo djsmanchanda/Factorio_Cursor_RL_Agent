@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.run_laya_workflow_batch import set_game_speed
+from tools.run_laya_workflow_batch import instance_slots, set_speed_all
 from training.canonical import scenario_hash
 from training.candidates.connected_workflow import BRANCH_IDS
 from training.contracts import validate_scenario
@@ -27,11 +27,11 @@ from training.factorio_bridge import FactorioTrainingBridge
 from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig
 from training.scenarios.connected_workflow import generate_connected_workflow_scenario
-from training.scheduler import load_worker_specs
 
-LABEL_VERSION = "laya-counterfactual-v2"
-# A fixed continuation after the forced choice: the label measures each option's
-# value under this rollout (one-step policy improvement), not a global optimum.
+LABEL_VERSION = "laya-counterfactual-v3"
+# The continuation after the forced choice: the label measures each option's
+# value under it (one step of policy improvement), not a global optimum. Policy
+# iteration replaces this scripted rollout with the current learned policy.
 ROLLOUT = "build-first-ready-default-variant-else-wait-5s"
 
 
@@ -64,13 +64,22 @@ def rollout_choice(ids: Sequence[str]) -> str:
     return next(option for option in ids if "escalate" not in option)
 
 
+def greedy_non_escalation(predictor, state, questions) -> str:
+    """The continuation policy's best option; data collection never escalates."""
+    kind = next(iter(questions))
+    probabilities = predictor.predict(state, questions)["answers"][kind]["probabilities"]
+    allowed = [option for option in questions[kind]["criteria"] if "escalate" not in option]
+    return max(allowed, key=lambda option: probabilities.get(option, 0.0))
+
+
 class ScriptedPredictor:
-    """Replay a prefix of option ids, then follow the rollout; records what was offered."""
+    """Replay a prefix of option ids, then follow the continuation; records what was offered."""
 
     tokenizer = None
 
-    def __init__(self, prefix: Sequence[str]):
+    def __init__(self, prefix: Sequence[str], continuation: Any = None):
         self.prefix = list(prefix)
+        self.continuation = continuation
         self.trace: list[dict[str, Any]] = []
 
     def predict(self, state, questions):
@@ -81,6 +90,8 @@ class ScriptedPredictor:
             choice = self.prefix[index]
             if choice not in ids:
                 raise ReplayDiverged(f"decision {index}: {choice} not offered in {ids}")
+        elif self.continuation is not None:
+            choice = greedy_non_escalation(self.continuation, state, questions)
         else:
             choice = rollout_choice(ids)
         digest = (state.get("observation_digest") or {}).get("work_branches")
@@ -90,11 +101,11 @@ class ScriptedPredictor:
 
 
 def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, Any]:
-    predictor = ScriptedPredictor(prefix)
+    predictor = ScriptedPredictor(prefix, args.continuation_policy)
     gate = ExplorationGate(scenario["seed"], 0.0, allow_model_escalation=False)
     director = ExplorationDirector(predictor, gate, budget_profile="director-2048")
     model_ref = {"model_id": "counterfactual-rollout-v1",
-                 "model_hash": "sha256:" + hashlib.sha256(f"{LABEL_VERSION}:{ROLLOUT}".encode()).hexdigest()}
+                 "model_hash": "sha256:" + hashlib.sha256(f"{LABEL_VERSION}:{args.continuation_id}".encode()).hexdigest()}
     # Report polling latency becomes game-tick jitter at raised speed.
     bridge = FactorioTrainingBridge(slot.script_output, host=slot.host, port=slot.rcon_port,
                                     password=password, poll_interval=args.poll_interval)
@@ -122,18 +133,24 @@ def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, A
     # The predictor raises before recording a decision it cannot replay.
     diverged = len(predictor.trace) < len(prefix)
     return {"run_id": run_id, "status": result["status"], "elapsed_ticks": elapsed, "material_cost": material,
+            "decisions": result.get("decisions", len(predictor.trace)),
             "trace": predictor.trace, "diverged": diverged, "journal": result["journal"]}
 
 
 # docs/rl/README.md soft rule (rule.sustained-efficiency): minimize completion
 # time and materials. Material is priced in ticks so both share one scale.
 MATERIAL_TICKS_PER_UNIT = 10.0
+# Each decision costs a model call and a round trip; without a price, a policy
+# can burn its whole decision budget on 1 s waits at no cost in the labels.
+DECISION_TICKS = 60.0
 
 
-def outcome_cost(run: dict[str, Any], max_ticks: int, material_weight: float = 0.0) -> float:
+def outcome_cost(run: dict[str, Any], max_ticks: int, material_weight: float = 0.0,
+                 decision_ticks: float = 0.0) -> float:
     # Unfinished runs cost the full episode budget: slower than any completion.
     ticks = float(run["elapsed_ticks"]) if run["status"] == "completed" else float(max_ticks)
-    return ticks + material_weight * float(run.get("material_cost") or 0.0)
+    return (ticks + material_weight * float(run.get("material_cost") or 0.0)
+            + decision_ticks * float(run.get("decisions") or 0))
 
 
 def soft_target(costs: dict[str, float], temperature_ticks: float) -> dict[str, float]:
@@ -143,23 +160,24 @@ def soft_target(costs: dict[str, float], temperature_ticks: float) -> dict[str, 
     return {option: weight / total for option, weight in weights.items()}
 
 
-def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
+def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
     scenario = generate_connected_workflow_scenario(seed)
     max_ticks = int(scenario["constraints"]["max_episode_ticks"])
     def base_run(index):
-        slot = pool_slots.acquire()
+        slot, password = pool_slots.acquire()
         try:
             return run_forced(slot, password, replica(scenario, f"b{index}"), [],
                               run_id=f"{args.run_prefix}-{seed}-base{index}", args=args)
         finally:
-            pool_slots.release(slot)
+            pool_slots.release((slot, password))
 
     # Identical rollouts measure replay timing noise; the first is the trajectory.
     with ThreadPoolExecutor(max_workers=args.base_repeats) as pool:
         bases = list(pool.map(base_run, range(args.base_repeats)))
     base = bases[0]
-    weight = args.material_weight
-    base_costs = [outcome_cost(run, max_ticks, weight) for run in bases]
+    def cost(run):
+        return outcome_cost(run, max_ticks, args.material_weight, args.decision_ticks)
+    base_costs = [cost(run) for run in bases]
     labels = []
     depth = min(args.depth, len(base["trace"]))
     jobs = []
@@ -173,12 +191,12 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
 
     def job(item):
         k, option, prefix, tag = item
-        slot = pool_slots.acquire()
+        slot, password = pool_slots.acquire()
         try:
             return k, option, run_forced(slot, password, replica(scenario, tag), prefix,
                                          run_id=f"{args.run_prefix}-{seed}-k{k}-{option}", args=args)
         finally:
-            pool_slots.release(slot)
+            pool_slots.release((slot, password))
 
     pool = ThreadPoolExecutor(max_workers=args.slots)
     try:
@@ -188,7 +206,7 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
         pool.shutdown(wait=True, cancel_futures=True)
     for k in range(depth):
         point = base["trace"][k]
-        costs = {point["choice"]: outcome_cost(base, max_ticks, weight)}
+        costs = {point["choice"]: cost(base)}
         faithful = True
         for kk, option, run in results:
             if kk != k:
@@ -199,19 +217,19 @@ def label_seed(seed, pool_slots, password, args) -> list[dict[str, Any]]:
                     or branch_state["work_branches"] != point["work_branches"]:
                 faithful = False
                 continue
-            costs[option] = outcome_cost(run, max_ticks, weight)
+            costs[option] = cost(run)
         if len(costs) < 2:
             continue
         labels.append({
-            "version": LABEL_VERSION, "rollout": ROLLOUT, "seed": seed,
+            "version": LABEL_VERSION, "rollout": args.continuation_id, "seed": seed,
             "scenario_id": scenario["scenario_id"], "decision_index": k,
             "decision_kind": point["kind"], "options": point["options"],
             "work_branches": point["work_branches"],
             "base_journal": base["journal"], "base_choice": point["choice"],
             "cost_ticks": costs, "all_alternatives_faithful": faithful,
             "base_repeat_costs": base_costs, "noise_ticks": max(base_costs) - min(base_costs),
-            "cost_weights": {"completion_ticks": 1.0, "material_ticks_per_unit": weight,
-                             "guideline": "rule.sustained-efficiency"},
+            "cost_weights": {"completion_ticks": 1.0, "material_ticks_per_unit": args.material_weight,
+                             "ticks_per_decision": args.decision_ticks, "guideline": "rule.sustained-efficiency"},
             "soft_target": soft_target(costs, args.temperature_ticks),
         })
     return labels
@@ -237,8 +255,8 @@ class SlotPool:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=Path, default=ROOT / "training-workers-linux.json")
-    parser.add_argument("--instance", required=True)
-    parser.add_argument("--slots", type=int, default=8)
+    parser.add_argument("--instance", required=True, action="append", help="Repeat to spread across workers")
+    parser.add_argument("--slots", type=int, default=8, help="Concurrent episodes per instance")
     parser.add_argument("--seed-start", type=int, required=True)
     parser.add_argument("--seeds", type=int, required=True)
     parser.add_argument("--depth", type=int, default=6, help="Branch at the first K base decisions")
@@ -249,25 +267,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--temperature-ticks", type=float, default=600.0)
     parser.add_argument("--material-weight", type=float, default=MATERIAL_TICKS_PER_UNIT,
                         help="Ticks charged per unit of built material (0 = time only)")
+    parser.add_argument("--decision-ticks", type=float, default=DECISION_TICKS,
+                        help="Ticks charged per decision the run took (0 = none)")
+    parser.add_argument("--continuation", choices=("rollout", "features"), default="rollout",
+                        help="Policy after the forced choice; features = policy iteration on that model")
+    parser.add_argument("--features-model", type=Path, help="JSON model for --continuation features")
     parser.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-counterfactual")
     parser.add_argument("--run-prefix", required=True)
     args = parser.parse_args(argv)
-    slots = [worker for worker in load_worker_specs(args.workers) if worker.instance_id == args.instance][: args.slots]
-    if len(slots) < args.slots:
-        parser.error("not enough configured slots on that instance")
-    password = (Path(slots[0].script_output).parent / "rcon-password").read_text(encoding="utf-8").strip()
+    try:
+        slots = instance_slots(args.workers, args.instance, args.slots)
+    except ValueError as error:
+        parser.error(str(error))
+    args.continuation_policy, args.continuation_id = None, ROLLOUT
+    if args.continuation == "features":
+        from training.laya_feature_baseline import FeaturePredictor
+        if args.features_model is None:
+            parser.error("--continuation features requires --features-model")
+        args.continuation_policy = FeaturePredictor.load(args.features_model)
+        digest = hashlib.sha256(args.features_model.read_bytes()).hexdigest()[:16]
+        args.continuation_id = f"policy:features:{digest}"
+    args.slots = len(slots)
     out = args.evidence_dir / "labels" / f"{args.run_prefix}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     pool_slots = SlotPool(slots)
-    host, port = slots[0].host, slots[0].rcon_port
-    print(f"game.speed -> {set_game_speed(host, port, password, args.game_speed)}", flush=True)
+    print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
     started, written = time.monotonic(), 0
     try:
         # Seeds run concurrently; each seed's alternatives share the slot pool.
         seeds_pool = ThreadPoolExecutor(max_workers=max(1, args.slots // 2))
         try:
             with out.open("a", encoding="utf-8") as handle:
-                futures = [seeds_pool.submit(label_seed, seed, pool_slots, password, args)
+                futures = [seeds_pool.submit(label_seed, seed, pool_slots, args)
                            for seed in range(args.seed_start, args.seed_start + args.seeds)]
                 for future in futures:
                     for label in future.result():
@@ -279,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             seeds_pool.shutdown(wait=True, cancel_futures=True)
     finally:
-        set_game_speed(host, port, password, 1.0)
+        set_speed_all(slots, 1.0)
     print(json.dumps({"labels": written, "wall_seconds": round(time.monotonic() - started, 1), "output": str(out)}))
     return 0
 

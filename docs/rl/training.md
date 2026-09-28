@@ -545,6 +545,18 @@ rollout", never "short wait forever". Next: policy iteration (collect states
 from the trained policy, relabel with it as the continuation, retrain) and a
 per-decision cost in the objective.
 
+Policy iteration (2026-09-29). Batches and labelling spread across workers:
+repeat `--instance` and give `--slots` per instance, e.g. four workers x four
+slots = 16 concurrent episodes (32 held-out episodes in 20 s wall at 8x). 8x is
+the fidelity ceiling: at 16x report latency added about 1,850 ticks per episode
+and changed decisions, so scale with slots, not speed. The objective now
+charges `--decision-ticks` (default 60) per decision in labels and
+`compare_laya_batches.py`, so a policy that burns its budget on 1 s waits pays
+for it. `--continuation features --features-model <json>` makes the labeller
+follow a learned policy after the forced choice (base trajectory included),
+so each round labels Q under the current policy instead of the fixed rollout;
+`tools/train_laya_features.py` fits the next policy from the resulting cases.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate

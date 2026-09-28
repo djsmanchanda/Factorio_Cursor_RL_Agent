@@ -27,6 +27,18 @@ def test_forced_prefix_then_rollout_and_divergence() -> None:
         ScriptedPredictor(["serve.gears"]).predict({}, _question(["serve.iron", "wait.5s"]))
 
 
+def test_policy_continuation_follows_model_but_never_escalates() -> None:
+    class Model:
+        def predict(self, state, questions):
+            return {"answers": {"serve_goal": {"probabilities": {"escalate.stop": 0.9, "wait.1s": 0.02, "wait.5s": 0.08}}}}
+
+    predictor = ScriptedPredictor(["serve.iron"], continuation=Model())
+    predictor.predict({}, _question(["serve.iron", "wait.5s"]))
+    answer = predictor.predict({}, _question(["serve.gears", "wait.1s", "wait.5s", "escalate.stop"]))
+    # After the prefix the policy, not the scripted rollout, picks: its best non-escalation option.
+    assert answer["answers"]["serve_goal"]["choice"] == "wait.5s"
+
+
 def test_replica_keeps_world_but_isolates_names() -> None:
     scenario = generate_connected_workflow_scenario(801)
     copy = replica(scenario, "k0o2")
@@ -38,6 +50,8 @@ def test_replica_keeps_world_but_isolates_names() -> None:
 def test_unfinished_runs_cost_the_budget_and_targets_prefer_faster() -> None:
     assert outcome_cost({"status": "timed_out", "elapsed_ticks": 900}, 36_000) == 36_000.0
     assert outcome_cost({"status": "completed", "elapsed_ticks": 3000, "material_cost": 50.0}, 36_000, 10.0) == 3500.0
+    # Each decision is priced, so twenty 1 s waits cost more than four 5 s waits.
+    assert outcome_cost({"status": "completed", "elapsed_ticks": 3000, "decisions": 20}, 36_000, 0.0, 60.0) == 4200.0
     target = soft_target({"serve.iron": 3197.0, "wait.15s": 4066.0}, 600.0)
     assert target["serve.iron"] > target["wait.15s"] and abs(sum(target.values()) - 1) < 1e-9
 

@@ -80,11 +80,34 @@ def set_game_speed(host: str, port: int, password: str, speed: float) -> str:
         client.close()
 
 
+def instance_slots(workers: Path, instances: list[str], per_instance: int) -> list[tuple[Any, str]]:
+    """(slot, rcon password) for the first N slots of each named worker instance."""
+    specs = load_worker_specs(workers)
+    result = []
+    for instance in instances:
+        slots = [worker for worker in specs if worker.instance_id == instance]
+        if not 1 <= per_instance <= len(slots):
+            raise ValueError(f"instance {instance!r} has {len(slots)} configured slots, need {per_instance}")
+        password = (Path(slots[0].script_output).parent / "rcon-password").read_text(encoding="utf-8").strip()
+        result.extend((slot, password) for slot in slots[:per_instance])
+    return result
+
+
+def set_speed_all(slots: list[tuple[Any, str]], speed: float) -> dict[str, str]:
+    """Game speed is per Factorio instance; set it once on each."""
+    seen = {}
+    for slot, password in slots:
+        if slot.instance_id not in seen:
+            seen[slot.instance_id] = set_game_speed(slot.host, slot.rcon_port, password, speed)
+    return seen
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--workers", type=Path, default=ROOT / "training-workers-linux.json")
-    result.add_argument("--instance", required=True, help="Worker instance_id, e.g. factorio-training-linux-01")
-    result.add_argument("--slots", type=int, default=4, help="Concurrent episodes on the instance")
+    result.add_argument("--instance", required=True, action="append",
+                        help="Worker instance_id, e.g. factorio-training-linux-01; repeat to spread across workers")
+    result.add_argument("--slots", type=int, default=4, help="Concurrent episodes per instance")
     result.add_argument("--family", choices=sorted(_GENERATORS), default="connected_workflow")
     result.add_argument("--seed-start", type=int, required=True)
     result.add_argument("--episodes", type=int, required=True)
@@ -150,13 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     from training.laya_sequence import SEQUENCE_VERSION
 
     args = parser().parse_args(argv)
-    slots = [worker for worker in load_worker_specs(args.workers) if worker.instance_id == args.instance]
-    if not slots or not 1 <= args.slots <= len(slots):
-        parser().error(f"instance {args.instance!r} has {len(slots)} configured slots")
-    slots = slots[: args.slots]
+    try:
+        slots = instance_slots(args.workers, args.instance, args.slots)
+    except ValueError as error:
+        parser().error(str(error))
     if not 1 <= args.episodes <= 10_000 or not 0.1 <= args.game_speed <= 64:
         parser().error("episodes must be 1..10000 and game speed 0.1..64")
-    password = (Path(slots[0].script_output).parent / "rcon-password").read_text(encoding="utf-8").strip()
     generate = _generator(args.family)
     scenarios = [generate(seed) for seed in range(args.seed_start, args.seed_start + args.episodes)]
 
@@ -184,14 +206,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary_path = args.evidence_dir / "batches" / f"{args.run_prefix}.jsonl"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    host, port = slots[0].host, slots[0].rcon_port
-    print(f"game.speed -> {set_game_speed(host, port, password, args.game_speed)}", flush=True)
+    print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
     free = list(slots)
     free_lock = threading.Lock()
 
     def task(scenario):
         with free_lock:
-            slot = free.pop()
+            slot, password = free.pop()
         try:
             # Each episode has its own seeded gate; the model is shared.
             if args.policy == "laya":
@@ -209,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_episode(slot, scenario, director, gate, model_ref, knowledge, args, password)
         finally:
             with free_lock:
-                free.append(slot)
+                free.append((slot, password))
 
     counts: dict[str, int] = {}
     started = time.monotonic()
@@ -224,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"ticks={result.get('elapsed_ticks')} closed={result.get('closed_branches')} "
                       f"wall={result['wall_seconds']}s {result.get('error', '')}", flush=True)
     finally:
-        set_game_speed(host, port, password, 1.0)
+        set_speed_all(slots, 1.0)
     print(json.dumps({"episodes": len(scenarios), "statuses": counts,
                       "wall_seconds": round(time.monotonic() - started, 1), "summary": str(summary_path)}))
     return 0
