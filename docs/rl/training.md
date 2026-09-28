@@ -557,6 +557,15 @@ follow a learned policy after the forced choice (base trajectory included),
 so each round labels Q under the current policy instead of the fixed rollout;
 `tools/train_laya_features.py` fits the next policy from the resulting cases.
 
+Stepped mode (`--stepped --slots 1 --game-speed 64`, both tools): each
+instance runs one episode with `game.tick_paused = true`, and waits advance the
+clock by exactly N ticks with `game.ticks_to_run`, so RCON and inference
+latency cost no game ticks. Observed on 2.1.20: identical replays went from
+137 ticks of spread at 8x to 0 (a sub-60-tick sampling phase remains between
+separate episodes), and an episode took 3.5 s wall instead of 6.9 s. Bursts are
+still paced by `game.speed`, so 64 is the ceiling. Scale by adding one-slot
+instances; pausing is per instance, so a paused instance must never share slots.
+
 ### Exploration gate (disposable data collection)
 
 `--mode laya-exploration-disposable` is a separate, explicitly documented gate

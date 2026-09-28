@@ -214,3 +214,37 @@ class FactorioTrainingBridge:
         return self._training_command("training_recycle", episode_id, {
             "confirmation_token": "RECYCLE_TRAINING_EPISODE",
         }, final_status="completed")
+
+    def advance_ticks(self, episode_id: str, ticks: int) -> int:
+        """Stepped mode only: advance the instance's paused clock by exactly `ticks`.
+
+        The instance-wide clock (tick_paused/ticks_to_run) is not per-episode,
+        so this requires the instance to hold exactly one training episode;
+        callers (LayaToolkit with stepped=True) are responsible for that.
+        """
+        if ticks <= 0:
+            return int(self.tick())
+        response = self._rcon.command(
+            "/sc "
+            "if not game.tick_paused then error('stepped bridge requires game.tick_paused') end "
+            f"local target = game.tick + {int(ticks)} "
+            f"game.ticks_to_run = {int(ticks)} "
+            "rcon.print(target)"
+        )
+        if "error" in response.lower():
+            raise TrainingBridgeError(f"advance_ticks[{episode_id}]: {response.strip()}")
+        target = int(response.strip())
+        deadline = time.monotonic() + self._command_timeout
+        while time.monotonic() < deadline:
+            current = self.tick()
+            if current >= target:
+                return current
+            time.sleep(self._poll_interval)
+        raise TrainingBridgeError("timed out waiting for stepped ticks to advance")
+
+    def tick(self) -> int:
+        """Read the instance's current game tick without advancing it."""
+        response = self._rcon.command("/sc rcon.print(game.tick)")
+        if "error" in response.lower():
+            raise TrainingBridgeError(response.strip())
+        return int(response.strip())

@@ -107,12 +107,13 @@ class LayaToolkit:
 
     def __init__(
         self, bridge: Any, scenario: Mapping[str, Any], *,
-        sleeper: Callable[[float], None], game_speed: float = 1.0,
+        sleeper: Callable[[float], None], game_speed: float = 1.0, stepped: bool = False,
     ):
         validate_scenario(scenario)
         if not 0.1 <= game_speed <= 64.0:
             raise LayaToolkitError("game_speed must be between 0.1 and 64")
         self.game_speed = float(game_speed)
+        self.stepped = bool(stepped)
         self.bridge = bridge
         self.scenario = copy.deepcopy(dict(scenario))
         self.sleeper = sleeper
@@ -150,6 +151,12 @@ class LayaToolkit:
 
     def _wait_game_seconds(self, seconds: float) -> Mapping[str, Any]:
         """Wait in game ticks, so a sped-up or lagging server waits the same game time."""
+        if self.stepped:
+            # The instance's clock is paused; advance it by exactly the
+            # requested ticks instead of sleeping wall time and polling. No
+            # RCON/inference latency can leak into the game clock this way.
+            self.bridge.advance_ticks(self._episode_id, int(seconds * 60))
+            return self.bridge.observe(self._episode_id)
         report = self.bridge.observe(self._episode_id)
         target = int(report.get("tick") or 0) + int(seconds * 60)
         # Bounded: a stalled server cannot hold the runner forever.

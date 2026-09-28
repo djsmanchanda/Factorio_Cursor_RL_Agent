@@ -102,6 +102,34 @@ def test_wait_duration_is_model_selected_from_safe_bounds() -> None:
         assert sum(waits) < 15.0 / speed + 1.0
 
 
+def test_stepped_wait_advances_ticks_directly_without_sleeping() -> None:
+    """Stepped mode must jump exactly the requested ticks with no wall-clock noise."""
+    scenario = generate_mining_delivery_scenario(12)
+    bridge = Bridge(scenario)
+    bridge.report["tick"] = 100
+    bridge.advance_calls: list[tuple[str, int]] = []
+
+    def advance_ticks(episode_id, ticks):
+        bridge.advance_calls.append((episode_id, ticks))
+        bridge.report["tick"] += ticks
+
+    bridge.advance_ticks = advance_ticks
+
+    def sleep(_seconds):
+        raise AssertionError("stepped mode must never sleep wall time")
+
+    toolkit = LayaToolkit(bridge, scenario, sleeper=sleep, stepped=True)
+    toolkit.bind_episode("episode-test")
+    options = toolkit.operation_options(bridge.report)
+    selected = next(option for option in options if option.option.option_id == "wait.15s")
+
+    result = selected.handler()
+
+    assert result.kind == "wait"
+    assert bridge.advance_calls == [("episode-test", 900)]
+    assert result.report["tick"] == 1000  # exact: no polling jitter is possible
+
+
 def test_furnace_mechanics_are_exposed_as_choices_without_ranking() -> None:
     scenario = generate_furnace_refining_scenario(11)
     bridge = Bridge(scenario)

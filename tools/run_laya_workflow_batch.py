@@ -80,6 +80,30 @@ def set_game_speed(host: str, port: int, password: str, speed: float) -> str:
         client.close()
 
 
+def set_stepped_mode(host: str, port: int, password: str, enabled: bool, speed: float = 1.0) -> str:
+    """Pause/unpause an instance's clock for stepped (one-slot) episodes.
+
+    Measured live on factorio-training-linux-06 (2.1.20): `ticks_to_run`
+    bursts are paced by game.speed, not run "as fast as the CPU allows" (3000
+    ticks at speed=64 took ~0.79s wall, matching 3000/60/64). So a high speed
+    is still set for the paused instance; the win is that no clock advances
+    at all between explicit advance_ticks bursts, so RCON/inference latency
+    can no longer leak into the game clock. Unpausing restores game.speed to
+    1, matching the normal-mode cleanup contract.
+    """
+    client = RconClient(host, port, password, timeout=15.0)
+    try:
+        if enabled:
+            return client.command(
+                f"/sc game.speed = {float(speed)} game.tick_paused = true rcon.print(game.tick_paused)"
+            ).strip()
+        return client.command(
+            "/sc game.tick_paused = false game.speed = 1 rcon.print(game.tick_paused)"
+        ).strip()
+    finally:
+        client.close()
+
+
 def instance_slots(workers: Path, instances: list[str], per_instance: int) -> list[tuple[Any, str]]:
     """(slot, rcon password) for the first N slots of each named worker instance."""
     specs = load_worker_specs(workers)
@@ -102,6 +126,15 @@ def set_speed_all(slots: list[tuple[Any, str]], speed: float) -> dict[str, str]:
     return seen
 
 
+def set_stepped_all(slots: list[tuple[Any, str]], enabled: bool, speed: float = 1.0) -> dict[str, str]:
+    """tick_paused (and, while enabling, game.speed) is per instance; set it once on each."""
+    seen = {}
+    for slot, password in slots:
+        if slot.instance_id not in seen:
+            seen[slot.instance_id] = set_stepped_mode(slot.host, slot.rcon_port, password, enabled, speed)
+    return seen
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--workers", type=Path, default=ROOT / "training-workers-linux.json")
@@ -114,6 +147,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "laya-base" / "typed-decisions")
     result.add_argument("--epsilon", type=float, default=0.3)
     result.add_argument("--game-speed", type=float, default=1.0)
+    result.add_argument("--stepped", action="store_true",
+                        help="Pause each instance's clock and advance ticks explicitly for waits; "
+                             "eliminates RCON/inference latency as game-tick noise. Requires --slots 1.")
     result.add_argument("--max-len", type=int, choices=(1024, 2048), default=1024,
                         help="Inference context; 2048 on an untrained base is for data collection only")
     result.add_argument("--allow-model-escalation", action="store_true",
@@ -139,7 +175,7 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
             LayaRunnerConfig(
                 worker_id=slot.worker_id, run_id=run_id, evidence_dir=args.evidence_dir,
                 max_decisions=args.max_decisions, max_no_progress=args.max_no_progress,
-                game_speed=args.game_speed,
+                game_speed=args.game_speed, stepped=args.stepped,
             ),
             model_ref=model_ref, knowledge_context=knowledge, exploration=gate,
         ).run()
@@ -179,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         parser().error(str(error))
     if not 1 <= args.episodes <= 10_000 or not 0.1 <= args.game_speed <= 64:
         parser().error("episodes must be 1..10000 and game speed 0.1..64")
+    if args.stepped and args.slots != 1:
+        parser().error("--stepped pauses the whole instance clock; each instance needs exactly --slots 1")
     generate = _generator(args.family)
     scenarios = [generate(seed) for seed in range(args.seed_start, args.seed_start + args.episodes)]
 
@@ -206,7 +244,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     summary_path = args.evidence_dir / "batches" / f"{args.run_prefix}.jsonl"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
+    if args.stepped:
+        print(f"tick_paused -> {set_stepped_all(slots, True, args.game_speed)}", flush=True)
+    else:
+        print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
     free = list(slots)
     free_lock = threading.Lock()
 
@@ -245,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                       f"ticks={result.get('elapsed_ticks')} closed={result.get('closed_branches')} "
                       f"wall={result['wall_seconds']}s {result.get('error', '')}", flush=True)
     finally:
-        set_speed_all(slots, 1.0)
+        set_stepped_all(slots, False) if args.stepped else set_speed_all(slots, 1.0)
     print(json.dumps({"episodes": len(scenarios), "statuses": counts,
                       "wall_seconds": round(time.monotonic() - started, 1), "summary": str(summary_path)}))
     return 0

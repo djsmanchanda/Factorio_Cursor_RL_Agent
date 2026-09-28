@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.run_laya_workflow_batch import instance_slots, set_speed_all
+from tools.run_laya_workflow_batch import instance_slots, set_speed_all, set_stepped_all
 from training.canonical import scenario_hash
 from training.candidates.connected_workflow import BRANCH_IDS
 from training.contracts import validate_scenario
@@ -115,7 +115,7 @@ def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, A
             bridge, scenario, director,
             LayaRunnerConfig(worker_id=slot.worker_id, run_id=run_id, evidence_dir=args.evidence_dir,
                              max_decisions=args.max_decisions, max_no_progress=args.max_decisions,
-                             game_speed=args.game_speed),
+                             game_speed=args.game_speed, stepped=args.stepped),
             model_ref=model_ref, exploration=gate,
         ).run()
     finally:
@@ -263,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-repeats", type=int, default=3, help="Repeat the base rollout to measure noise")
     parser.add_argument("--poll-interval", type=float, default=0.05, help="Bridge report polling, wall seconds")
     parser.add_argument("--game-speed", type=float, default=8.0)
+    parser.add_argument("--stepped", action="store_true",
+                        help="Pause each instance's clock and advance ticks explicitly for waits, "
+                             "removing RCON/inference latency as replay noise. Requires --slots 1.")
     parser.add_argument("--max-decisions", type=int, default=60)
     parser.add_argument("--temperature-ticks", type=float, default=600.0)
     parser.add_argument("--material-weight", type=float, default=MATERIAL_TICKS_PER_UNIT,
@@ -275,6 +278,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence-dir", type=Path, default=ROOT / "data" / "laya-counterfactual")
     parser.add_argument("--run-prefix", required=True)
     args = parser.parse_args(argv)
+    if args.stepped and args.slots != 1:
+        parser.error("--stepped pauses the whole instance clock; each instance needs exactly --slots 1")
     try:
         slots = instance_slots(args.workers, args.instance, args.slots)
     except ValueError as error:
@@ -291,7 +296,10 @@ def main(argv: list[str] | None = None) -> int:
     out = args.evidence_dir / "labels" / f"{args.run_prefix}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     pool_slots = SlotPool(slots)
-    print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
+    if args.stepped:
+        print(f"tick_paused -> {set_stepped_all(slots, True, args.game_speed)}", flush=True)
+    else:
+        print(f"game.speed -> {set_speed_all(slots, args.game_speed)}", flush=True)
     started, written = time.monotonic(), 0
     try:
         # Seeds run concurrently; each seed's alternatives share the slot pool.
@@ -310,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             seeds_pool.shutdown(wait=True, cancel_futures=True)
     finally:
-        set_speed_all(slots, 1.0)
+        set_stepped_all(slots, False) if args.stepped else set_speed_all(slots, 1.0)
     print(json.dumps({"labels": written, "wall_seconds": round(time.monotonic() - started, 1), "output": str(out)}))
     return 0
 

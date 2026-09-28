@@ -192,6 +192,83 @@ def test_bridge_maps_observe_to_the_observation_report_kind(tmp_path):
 
     assert report["kind"] == "observation"
 
+class TickRcon:
+    """Fake RCON answering the /sc scripts used by stepped-mode tick advance.
+
+    `catch_up_after` simulates the CPU needing a couple of polls before the
+    requested ticks have actually finished running.
+    """
+
+    def __init__(self, *, paused: bool = True, start_tick: int = 100, catch_up_after: int = 0):
+        self.tick = start_tick
+        self.paused = paused
+        self.catch_up_after = catch_up_after
+        self._pending = 0
+        self._reads_since_request = 0
+        self.commands: list[str] = []
+
+    def command(self, text: str) -> str:
+        self.commands.append(text)
+        if text == "/sc rcon.print(game.tick)":
+            if self._pending:
+                self._reads_since_request += 1
+                if self._reads_since_request > self.catch_up_after:
+                    self.tick += self._pending
+                    self._pending = 0
+            return str(self.tick)
+        if "game.ticks_to_run" in text:
+            if not self.paused:
+                return "Error: stepped bridge requires game.tick_paused"
+            marker = "game.tick + "
+            start = text.index(marker) + len(marker)
+            end = text.index(" ", start)
+            requested = int(text[start:end])
+            self._pending = requested
+            self._reads_since_request = 0
+            return str(self.tick + requested)
+        return ""
+
+    def close(self) -> None:
+        pass
+
+
+def test_advance_ticks_returns_immediately_for_zero_or_negative(tmp_path):
+    rcon = TickRcon()
+    bridge = FactorioTrainingBridge(tmp_path, host="127.0.0.1", port=27015, password="x", rcon=rcon)
+
+    assert bridge.advance_ticks("episode-1", 0) == 100
+    assert not any("ticks_to_run" in command for command in rcon.commands)
+
+
+def test_advance_ticks_polls_until_the_target_tick_is_reached(tmp_path):
+    rcon = TickRcon(start_tick=200, catch_up_after=2)
+    bridge = FactorioTrainingBridge(
+        tmp_path, host="127.0.0.1", port=27015, password="x", rcon=rcon, poll_interval=0.001,
+    )
+
+    result = bridge.advance_ticks("episode-1", 60)
+
+    assert result == 260
+    tick_reads = [command for command in rcon.commands if command == "/sc rcon.print(game.tick)"]
+    assert len(tick_reads) >= 2  # actually polled, not just trusted the first read
+
+
+def test_advance_ticks_fails_fast_if_the_instance_is_not_paused(tmp_path):
+    rcon = TickRcon(paused=False)
+    bridge = FactorioTrainingBridge(tmp_path, host="127.0.0.1", port=27015, password="x", rcon=rcon)
+
+    with pytest.raises(TrainingBridgeError, match="tick_paused"):
+        bridge.advance_ticks("episode-1", 60)
+
+
+def test_bridge_tick_reads_without_advancing(tmp_path):
+    rcon = TickRcon(start_tick=42)
+    bridge = FactorioTrainingBridge(tmp_path, host="127.0.0.1", port=27015, password="x", rcon=rcon)
+
+    assert bridge.tick() == 42
+    assert bridge.tick() == 42
+
+
 def test_bridge_throttles_pruning_across_shared_slots(tmp_path, monkeypatch):
     monkeypatch.setattr(factorio_bridge, "_NEXT_REPORT_PRUNE", {})
     first = FactorioTrainingBridge(
