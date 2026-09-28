@@ -18,6 +18,10 @@ _OPTION_FEATURES = (
     "inserter_items_per_second", "wait_seconds", "variant_count",
 )
 _KINDS = ("serve", "wait", "variant", "escalate", "other")
+# Feature set 2 adds measured demand context, so a policy can learn when
+# expanding supply pays (per-second rates; unknown rates read as zero).
+_SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
+FEATURE_SET = 2
 
 
 def _kind(option_id: str) -> str:
@@ -32,13 +36,24 @@ def _kind(option_id: str) -> str:
     return "other"
 
 
-def option_vector(option: Mapping[str, Any], state: Mapping[str, Any]) -> np.ndarray:
+def _demand_context(state: Mapping[str, Any]) -> list[float]:
+    gap = state.get("acceptance_gap") or {}
+    target = float(gap.get("target") or 0.0) * 60.0
+    current = float(gap.get("current") or 0.0) * 60.0
+    supply = (state.get("observation_digest") or {}).get("item_supply") or {}
+    rates = [float((supply.get(item) or {}).get("output_rate") or 0.0) * 60.0 for item in _SUPPLY_ITEMS]
+    return [target, current / target if target > 0 else 0.0, *rates]
+
+
+def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_set: int = FEATURE_SET) -> np.ndarray:
     features = option.get("features") or {}
     option_id = str(option.get("option_id") or option.get("id"))
     kind = _kind(option_id)
     branches = ((state.get("observation_digest") or {}).get("work_branches") or {})
     context = [float(len(branches.get("ready") or [])), float(len(branches.get("closed") or [])),
                float(len(branches.get("blocked") or {}))]
+    if feature_set >= 2:
+        context += _demand_context(state)
     numeric = [math.log1p(max(0.0, float(features.get(name) or 0.0))) for name in _OPTION_FEATURES]
     onehot = [1.0 if kind == name else 0.0 for name in _KINDS]
     # Kind-by-context interactions let "wait" depend on how much is still open.
@@ -46,13 +61,13 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any]) -> np.nda
     return np.array(numeric + onehot + interactions, dtype=np.float64)
 
 
-def _case_rows(case: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray] | None:
+def _case_rows(case: Mapping[str, Any], feature_set: int = FEATURE_SET) -> tuple[np.ndarray, np.ndarray] | None:
     kind = next(iter(case["questions"]))
     ids = case["questions"][kind]["option_ids"]
     by_id = {str(option.get("option_id") or option.get("id")): option for option in case["state"]["options"]}
     if any(option_id not in by_id for option_id in ids):
         return None
-    matrix = np.stack([option_vector(by_id[option_id], case["state"]) for option_id in ids])
+    matrix = np.stack([option_vector(by_id[option_id], case["state"], feature_set) for option_id in ids])
     probabilities = case["gold"][kind]["probabilities"]
     target = np.array([float(probabilities.get(option_id, 0.0)) for option_id in ids])
     return matrix, target / max(target.sum(), 1e-12)
@@ -74,8 +89,8 @@ def train(cases: Sequence[Mapping[str, Any]], *, epochs: int = 400, rate: float 
             probabilities /= probabilities.sum()
             gradient += ((matrix - mean) / scale).T @ (probabilities - target) / len(rows)
         weights -= rate * gradient
-    return {"version": "laya-feature-baseline-v1", "mean": mean.tolist(), "scale": scale.tolist(),
-            "weights": weights.tolist(), "cases": len(rows)}
+    return {"version": "laya-feature-baseline-v1", "feature_set": FEATURE_SET, "mean": mean.tolist(),
+            "scale": scale.tolist(), "weights": weights.tolist(), "cases": len(rows)}
 
 
 class FeaturePredictor:
@@ -87,6 +102,8 @@ class FeaturePredictor:
         self.mean = np.array(model["mean"])
         self.scale = np.array(model["scale"])
         self.weights = np.array(model["weights"])
+        # Models saved before feature sets existed used set 1.
+        self.feature_set = int(model.get("feature_set", 1))
 
     @classmethod
     def load(cls, path: Path) -> "FeaturePredictor":
@@ -97,7 +114,7 @@ class FeaturePredictor:
         ids = list(questions[kind]["criteria"])
         by_id = {str(option.get("option_id") or option.get("id")): option for option in state.get("options") or ()}
         scores = np.array([
-            float(((option_vector(by_id[option_id], state) - self.mean) / self.scale) @ self.weights)
+            float(((option_vector(by_id[option_id], state, self.feature_set) - self.mean) / self.scale) @ self.weights)
             if option_id in by_id else -1e9 for option_id in ids
         ])
         probabilities = np.exp(scores - scores.max())

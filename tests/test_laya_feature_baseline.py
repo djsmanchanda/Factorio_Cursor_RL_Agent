@@ -24,3 +24,20 @@ def test_learns_cheaper_variant_regardless_of_order() -> None:
     assert accuracy(model, cases) == 1.0
     answer = FeaturePredictor(model).predict(cases[1]["state"], cases[1]["questions"])
     assert answer["answers"]["select_candidate"]["choice"] == "iron.basic"
+
+
+def test_demand_context_lets_expansion_depend_on_target() -> None:
+    def case(target_per_second: float):
+        options = [{"option_id": "serve.iron2", "features": {"material_cost": 90.0}},
+                   {"option_id": "wait.5s", "features": {"wait_seconds": 5.0}}]
+        ids = [option["option_id"] for option in options]
+        expand = target_per_second > 0.5
+        state = {"options": options,
+                 "acceptance_gap": {"target": target_per_second / 60.0, "current": 0.4 / 60.0},
+                 "observation_digest": {"item_supply": {"transport-belt": {"output_rate": 0.4 / 60.0}}}}
+        gold = "serve.iron2" if expand else "wait.5s"
+        return {"state": state, "questions": {"serve_goal": {"option_ids": ids, "criteria": {i: i for i in ids}}},
+                "gold": {"serve_goal": {"label": gold, "probabilities": {i: float(i == gold) for i in ids}}}}
+
+    cases = [case(target) for target in (0.1, 0.2, 0.3, 0.6, 0.65, 0.7) * 4]
+    assert accuracy(train(cases, epochs=400), cases) == 1.0
