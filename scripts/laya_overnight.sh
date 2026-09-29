@@ -11,7 +11,8 @@
 # Usage: nohup setsid scripts/laya_overnight.sh [HOURS] > data/laya-pi/overnight/driver.log 2>&1 &
 # Resume a finished run: LAYA_RESUME_ROUND=N (last completed round), LAYA_START_POLICY=<features json>,
 # LAYA_L1_SEED / LAYA_L2_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
-# rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1.
+# rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1,
+# LAYA_FINETUNE_TIMEOUT (default 150m; raise it when the GPU is power-capped).
 #
 # Concurrent/named runs: LAYA_RUN_NAME (default "overnight") selects the run directory
 # data/laya-pi/$LAYA_RUN_NAME and its summary.log; LAYA_PREFIX (default "ov") namespaces every
@@ -98,7 +99,7 @@ laya_finetune() {
     || { log "laya $tag: dataset build failed"; return; }
   # Gentle GPU profile: micro-batch 1 with checkpointing, low CPU priority.
   (cd "$REPO" && LAYA_MAX_LEN=2048 LAYA_HEAD_MAX_LEN=256 LAYA_MICRO_BATCH=1 LAYA_GRADIENT_ACCUMULATION=16 \
-    LAYA_GRADIENT_CHECKPOINTING=1 LAYA_CHECKPOINT_INTERVAL=25 timeout 150m nice -n 10 "$PY" tools/train_laya_4060.py \
+    LAYA_GRADIENT_CHECKPOINTING=1 LAYA_CHECKPOINT_INTERVAL=25 timeout "${LAYA_FINETUNE_TIMEOUT:-150m}" nice -n 10 "$PY" tools/train_laya_4060.py \
     --cases "$dataset" --model-dir "$REPO/data/laya-base/typed-decisions" --output-dir "$ckpt") > "$RUN/train-$tag.log" 2>&1 \
     || { log "laya $tag: training failed (see $RUN/train-$tag.log)"; return; }
   log "laya $tag: trained -> $ckpt"
