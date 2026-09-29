@@ -62,12 +62,59 @@ _CELLS_L2_EXTRA = {
     ],
 }
 
+# Level 3 (second product) only: a copper -> cable -> circuits chain built in
+# space free of every other branch (verified offline, see
+# tests/test_connected_workflow_level3.py), plus a dedicated furnace1 tap so
+# the circuit assembler gets iron-plate without competing geometrically with
+# gears/belts for P's own inserters.
+#   ore-source-copper -> copper furnace -> copper-plate chest U
+#   U -> cable assembler (copper-cable) -> cable chest S
+#   furnace1 (south tap) -> iron-plate chest P2 --\
+#   S -----------------------------------------------> circuit assembler -> circuit-sink
+_CELLS_L3_EXTRA = {
+    "copper": [
+        ("fast-inserter", (-14, 6), "west", None),   # ore-source-copper -> furnace
+        ("electric-furnace", (-12, 6), None, None),
+        ("fast-inserter", (-10, 6), "west", None),   # furnace -> copper-plate chest U
+        ("iron-chest", (-9, 6), None, None),
+        ("small-electric-pole", (-14, 5), None, None),
+        ("small-electric-pole", (-10, 5), None, None),
+        # Copper has no prerequisite branch, so it can be the very first thing
+        # built (measured live: it was). Its own furnace/inserters are too far
+        # from the power source for its two local poles alone, so these two
+        # relay poles bridge back on their own -- copper never depends on
+        # iron/cable/circuits existing first to stay powered.
+        ("small-electric-pole", (-4, 1), None, None),
+        ("small-electric-pole", (-10, 4), None, None),
+    ],
+    "cable": [
+        ("fast-inserter", (-8, 6), "west", None),    # U -> cable assembler
+        ("assembling-machine-2", (-6, 6), None, "copper-cable"),
+        ("fast-inserter", (-4, 6), "west", None),    # cable assembler -> cable chest S
+        ("iron-chest", (-3, 6), None, None),
+        ("small-electric-pole", (-6, 4), None, None),
+    ],
+    "circuits": [
+        ("fast-inserter", (0, 2), "north", None),    # furnace1 -> iron-plate chest P2
+        ("iron-chest", (0, 3), None, None),
+        ("fast-inserter", (-1, 3), "east", None),    # P2 -> circuit assembler (east side)
+        ("assembling-machine-2", (-3, 3), None, "electronic-circuit"),
+        ("fast-inserter", (-3, 5), "south", None),   # cable chest S -> circuit assembler (south side)
+        ("fast-inserter", (-5, 3), "east", None),    # circuit assembler -> circuit-sink (west side)
+        ("small-electric-pole", (-3, 1), None, None),
+        ("small-electric-pole", (1, 2), None, None),
+        ("small-electric-pole", (-4, 5), None, None),
+    ],
+}
+
 BRANCH_IDS = tuple(_CELLS_L1)
 
 
 def _cells_for(scenario: dict) -> dict:
     """The cell set for this scenario's curriculum level; level 1 is untouched."""
     level = int((scenario.get("curriculum") or {}).get("level", 1))
+    if level >= 3:
+        return {**_CELLS_L1, **_CELLS_L2_EXTRA, **_CELLS_L3_EXTRA}
     return {**_CELLS_L1, **_CELLS_L2_EXTRA} if level >= 2 else _CELLS_L1
 
 # Variants keep the verified geometry and swap machine/inserter tiers: a real
@@ -85,7 +132,7 @@ def branch_variants(branch_id: str) -> tuple[tuple[str, str | None, str | None],
     """(variant_id, machine key, inserter key) choices for one branch."""
     if branch_id == "construction":
         return (("construction.line", None, None),)
-    machines = ("am2", "am1") if branch_id in {"gears", "belts"} else (None,)
+    machines = ("am2", "am1") if branch_id in {"gears", "belts", "cable", "circuits"} else (None,)
     return tuple(
         (f"{branch_id}.{'-'.join(part for part in (machine, inserter) if part)}", machine, inserter)
         for machine in machines for inserter in ("fast", "basic")
@@ -108,15 +155,43 @@ def branch_specs(scenario: dict) -> tuple[dict, ...]:
         {"branch_id": "construction", "parent_goal_id": "goal.remote-power", "item": "medium-electric-pole",
          "metric": "built_count", "target_minimum": len(_CELLS_L1["construction"])},
     ]
-    if level >= 2:
+    if level == 2:
         # Offered only once "iron" is closed (furnace 1 measured producing).
         # Gated on a *count* of electric-furnace, not a rate, so it closes the
         # moment the second furnace exists rather than re-measuring plate rate
         # under a threshold that would already be true from furnace 1 alone.
+        # (Level 2 has no other furnace-building branch, so a count of 2
+        # unambiguously means iron2's own furnace exists.)
         specs.append({
             "branch_id": "iron2", "parent_goal_id": "goal.iron-scale", "item": "electric-furnace",
             "metric": "built_count", "target_minimum": 2, "requires": ["iron"],
         })
+    elif level >= 3:
+        # Level 3 also has a "copper" branch that builds its own
+        # electric-furnace, so a raw count of 2 is satisfied by iron+copper
+        # alone -- measured live: iron2 showed "closed" the instant copper was
+        # built, was never actually offered again, and iron-plate stayed
+        # pinned at one furnace's ~0.6/s for the rest of the episode. Counting
+        # to 3 (iron + copper + iron2) requires iron2's own furnace to exist
+        # too; copper is a hard physical prerequisite for a completing
+        # episode anyway (circuits needs it), so this never blocks closure.
+        specs.append({
+            "branch_id": "iron2", "parent_goal_id": "goal.iron-scale", "item": "electric-furnace",
+            "metric": "built_count", "target_minimum": 3, "requires": ["iron"],
+        })
+    if level >= 3:
+        requirements = scenario["objective"]["requirements"]
+        circuit_target = float(next(r for r in requirements if r["id"] == "circuits")["target_rate_per_tick"])
+        specs.extend([
+            {"branch_id": "copper", "parent_goal_id": "goal.circuits", "item": "copper-plate",
+             "metric": "production_rate", "target_minimum": 0.4 / 60.0, "required_sustained_ticks": 600},
+            {"branch_id": "cable", "parent_goal_id": "goal.circuits", "item": "copper-cable",
+             "metric": "production_rate", "target_minimum": 0.05 / 60.0, "required_sustained_ticks": 600,
+             "requires": ["copper"]},
+            {"branch_id": "circuits", "parent_goal_id": "goal.circuits", "item": "electronic-circuit",
+             "metric": "production_rate", "target_minimum": circuit_target, "required_sustained_ticks": 600,
+             "requires": ["iron", "cable"]},
+        ])
     return tuple(specs)
 
 

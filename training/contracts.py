@@ -104,6 +104,8 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
             raise ValueError("power_storage fixture must use an accumulator")
         if kind in _FIXTURE_ENTITIES and entity != _FIXTURE_ENTITIES[kind]:
             raise ValueError("fixture kind must use its approved instrumentation entity")
+        if "fill_item" in fixture and kind != "item_source":
+            raise ValueError("fill_item is only meaningful on an item_source fixture")
     objective = payload["objective"]
     stages = objective.get("stages") or []
     if stages:
@@ -125,8 +127,19 @@ def _validate_fixtures_and_budget(payload: Mapping, world: Mapping) -> None:
     destination = fixtures.get(payload["objective"]["destination_fixture_id"])
     if destination is None or destination["kind"] != "item_sink":
         raise ValueError("objective destination must identify an item_sink fixture")
-    if len(fixtures) > 4:
-        raise ValueError("mining delivery scenarios permit at most two item sinks")
+    max_fixtures = 8 if payload["family"] == "connected_workflow" else 4
+    if len(fixtures) > max_fixtures:
+        raise ValueError("scenario declares more fixtures than its family permits")
+    requirements = objective.get("requirements") or ()
+    if requirements:
+        seen_requirement_ids: set[str] = set()
+        for requirement in requirements:
+            if requirement["id"] in seen_requirement_ids:
+                raise ValueError("objective requirement ids must be unique")
+            seen_requirement_ids.add(requirement["id"])
+            requirement_fixture = fixtures.get(requirement["destination_fixture_id"])
+            if requirement_fixture is None or requirement_fixture["kind"] != "item_sink":
+                raise ValueError("objective requirement destination must identify an item_sink fixture")
     stages = payload["objective"].get("stages")
     if stages is not None:
         stage_ids: set[str] = set()

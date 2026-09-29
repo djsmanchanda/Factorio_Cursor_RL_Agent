@@ -23,7 +23,11 @@ _KINDS = ("serve", "wait", "variant", "escalate", "other")
 _SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
 # Feature set 3 adds time and how many waits were just taken, so repeated waits
 # in an otherwise unchanged state are distinguishable.
-FEATURE_SET = 3
+# Feature set 4 adds a second, family-agnostic demand target (e.g. level 3's
+# circuit rate) so the policy can see a resource-contested parallel objective,
+# not just the belt-style primary one. Zero-filled when a scenario has none,
+# so the vector shape never depends on how many secondary targets exist.
+FEATURE_SET = 4
 
 
 def _kind(option_id: str) -> str:
@@ -47,6 +51,18 @@ def _demand_context(state: Mapping[str, Any]) -> list[float]:
     return [target, current / target if target > 0 else 0.0, *rates]
 
 
+def _secondary_demand_context(state: Mapping[str, Any]) -> list[float]:
+    secondary = (state.get("observation_digest") or {}).get("secondary_targets") or {}
+    if not secondary:
+        return [0.0, 0.0]
+    # Level 3 has exactly one parallel target; a future multi-target scenario
+    # would need a bounded aggregation, not tracked here yet.
+    first = next(iter(secondary.values()))
+    target = float(first.get("target_rate_per_tick") or 0.0) * 60.0
+    current = float(first.get("output_rate") or 0.0) * 60.0
+    return [target, current / target if target > 0 else 0.0]
+
+
 def _time_context(state: Mapping[str, Any]) -> list[float]:
     elapsed = float((state.get("run") or {}).get("elapsed_ticks") or 0.0) / 60.0
     waits = 0
@@ -68,6 +84,8 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_s
         context += _demand_context(state)
     if feature_set >= 3:
         context += _time_context(state)
+    if feature_set >= 4:
+        context += _secondary_demand_context(state)
     numeric = [math.log1p(max(0.0, float(features.get(name) or 0.0))) for name in _OPTION_FEATURES]
     onehot = [1.0 if kind == name else 0.0 for name in _KINDS]
     # Kind-by-context interactions let "wait" depend on how much is still open.

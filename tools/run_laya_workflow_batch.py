@@ -153,7 +153,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--slots", type=int, default=4, help="Concurrent episodes per instance")
     result.add_argument("--family", choices=sorted(_GENERATORS), default="connected_workflow")
     result.add_argument("--level", type=int, default=1,
-                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 expansion")
+                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 "
+                             "expansion, 3 adds a competing circuit product line")
     result.add_argument("--seed-start", type=int, required=True)
     result.add_argument("--episodes", type=int, required=True)
     result.add_argument("--checkpoint", type=Path, default=ROOT / "data" / "laya-base" / "typed-decisions")

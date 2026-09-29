@@ -312,6 +312,84 @@ end
 
 local item_production_metrics
 
+-- Every requirement an episode must sustain to complete: the legacy top-level
+-- objective fields (always requirement 1, "primary") plus any parallel
+-- objective.requirements (level-3+ multi-product objectives).
+local function requirement_list(episode)
+  local objective = episode.scenario.objective
+  local list = { {
+    id = "primary", item = objective.item, target_rate_per_tick = objective.target_rate_per_tick,
+    sustain_ticks = objective.sustain_ticks, destination_fixture_id = objective.destination_fixture_id,
+  } }
+  for _, requirement in ipairs(objective.requirements or {}) do
+    list[#list + 1] = requirement
+  end
+  return list
+end
+
+local function ensure_requirement_state(episode)
+  episode.requirement_state = episode.requirement_state or {}
+  for _, requirement in ipairs(requirement_list(episode)) do
+    episode.requirement_state[requirement.id] = episode.requirement_state[requirement.id] or {
+      rate_samples = {}, rate_per_tick = 0, sustained_ticks = 0, closed = false, delivered_items = 0,
+    }
+  end
+  return episode.requirement_state
+end
+
+-- Multi-requirement objectives (level 3+): each item sustains its OWN target
+-- independently and, once sustained for its own window, latches closed (like
+-- a work-graph branch) so a requirement that finishes early does not have to
+-- keep producing while a resource-contested sibling catches up. The episode
+-- completes once every requirement is closed.
+local function advance_multi_requirement_sample(episode, surface, force, tick)
+  local sample_ticks = tick - episode.last_sample_tick
+  if sample_ticks <= 0 then return end
+  local state = ensure_requirement_state(episode)
+  local requirements = requirement_list(episode)
+  local all_closed, total_delivered = true, 0
+  for _, requirement in ipairs(requirements) do
+    local record = state[requirement.id]
+    local fixture = episode.fixtures[requirement.destination_fixture_id]
+    local entity = fixture and fixture_entity(surface, force, fixture)
+    local inventory = entity and entity.get_inventory(defines.inventory.chest)
+    if not inventory then fail_safety(episode, "item sink inventory is unavailable"); return end
+    local count = inventory.get_item_count(requirement.item)
+    if count > 0 then inventory.remove({ name = requirement.item, count = count }) end
+    record.delivered_items = record.delivered_items + count
+    total_delivered = total_delivered + count
+    table.insert(record.rate_samples, { items = count, ticks = sample_ticks })
+    record.rate_per_tick = window_rate(record.rate_samples)
+    if not record.closed then
+      if record.rate_per_tick + 1e-9 >= requirement.target_rate_per_tick then
+        record.sustained_ticks = record.sustained_ticks + sample_ticks
+      else
+        record.sustained_ticks = 0
+      end
+      if record.sustained_ticks >= requirement.sustain_ticks then record.closed = true end
+    end
+    if not record.closed then all_closed = false end
+  end
+  episode.last_sample_tick = tick
+  episode.sample_ticks = sample_ticks
+  episode.sample_items = total_delivered
+  episode.delivered_items = (episode.delivered_items or 0) + total_delivered
+  -- Legacy single-item fields mirror the primary requirement so unrelated
+  -- callers (progress signatures, failure packets) keep reading one number.
+  local primary = state[requirements[1].id]
+  episode.rate_per_tick = primary.rate_per_tick
+  episode.sustained_ticks = primary.sustained_ticks
+  episode.status = "running"
+  if all_closed then
+    episode.status = "completed"
+    episode.completed_tick = episode.completed_tick or tick
+  elseif tick - episode.started_tick >= episode.scenario.constraints.max_episode_ticks then
+    episode.status = "timed_out"
+    episode.failure_kind = "timeout"
+    episode.failure_reason = "maximum episode ticks elapsed"
+  end
+end
+
 local function sample_episode(episode, tick)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then fail_safety(episode, "episode surface or force is missing"); return end
@@ -326,6 +404,17 @@ local function sample_episode(episode, tick)
   local powered, power_reason = power_state(surface, force, episode, consumers)
   episode.power_connected = powered
   if not powered then fail_power(episode, power_reason); return end
+  if episode.scenario.objective.requirements then
+    episode.forbidden_entities, episode.out_of_bounds_entities = forbidden, outside
+    episode.budget_overruns = overruns
+    if forbidden > 0 or outside > 0 or overruns > 0 then
+      fail_safety(episode, "training entity constraint violated")
+      return
+    end
+    episode.item_production_metrics = item_production_metrics(episode, force, tick)
+    advance_multi_requirement_sample(episode, surface, force, tick)
+    return
+  end
   local sink_ids = episode.sink_fixture_ids or { episode.sink_fixture_id }
   local delivered_by_sink, delivered = {}, 0
   local item = episode.scenario.objective.item
@@ -360,6 +449,7 @@ local function telemetry_item_names(episode)
   add(objective.input_item)
   add(episode.scenario.resource_patch and episode.scenario.resource_patch.resource)
   for _, item in ipairs(objective.workflow_items or {}) do add(item) end
+  for _, requirement in ipairs(objective.requirements or {}) do add(requirement.item) end
   return names
 end
 
@@ -479,6 +569,22 @@ local function observation(payload)
   local stage, stage_index, stage_count = active_stage(episode)
   local item_production = episode.item_production_metrics
     or item_production_metrics(episode, force, game.tick)
+  local requirement_progress = nil
+  if episode.requirement_state then
+    requirement_progress = {}
+    for _, requirement in ipairs(requirement_list(episode)) do
+      local record = episode.requirement_state[requirement.id]
+      requirement_progress[#requirement_progress + 1] = {
+        id = requirement.id, item = requirement.item,
+        target_rate_per_tick = requirement.target_rate_per_tick,
+        sustain_ticks = requirement.sustain_ticks,
+        rate_per_tick = record and record.rate_per_tick or 0,
+        sustained_ticks = record and record.sustained_ticks or 0,
+        delivered_items = record and record.delivered_items or 0,
+        closed = record and record.closed or false,
+      }
+    end
+  end
   return {
     request_id = payload.request_id, episode_id = payload.episode_id,
     ok = true, status = episode.status, scenario_id = episode.scenario_id,
@@ -513,6 +619,7 @@ local function observation(payload)
       mining_drill_blocked_ticks = efficiency.mining_drill_blocked_ticks,
       mining_drill_idle_ticks = efficiency.mining_drill_idle_ticks,
       item_production = item_production,
+      requirement_progress = requirement_progress,
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }
   }

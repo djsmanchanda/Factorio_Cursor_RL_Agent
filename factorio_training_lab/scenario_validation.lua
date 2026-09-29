@@ -137,8 +137,9 @@ end
 
 local function validate_fixtures(scenario)
   local fixtures, ids, kinds = scenario.fixtures, {}, {}
-  if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > 4 then
-    error("mining delivery requires a source, one or two sinks, and optional power storage")
+  local max_fixtures = scenario.family == "connected_workflow" and 8 or 4
+  if type(fixtures) ~= "table" or #fixtures < 2 or #fixtures > max_fixtures then
+    error("scenario declares more fixtures than its family permits")
   end
   for index, fixture in ipairs(fixtures) do
     local label = "fixtures[" .. index .. "]"
@@ -152,6 +153,9 @@ local function validate_fixtures(scenario)
     if not (valid_source or valid_storage or valid_item_source or valid_sink)
         or ((valid_source or valid_storage) and kinds[fixture.kind]) then
       error(label .. " must be one approved fixture kind")
+    end
+    if fixture.fill_item ~= nil and (fixture.kind ~= "item_source" or not ALLOWED_RESOURCES[fixture.fill_item]) then
+      error(label .. " fill_item must be an approved resource on an item_source fixture")
     end
     if fixture.kind == "power_source"
         and (not is_integer(fixture.position[1]) or not is_integer(fixture.position[2])) then
@@ -260,6 +264,33 @@ local function validate_objective(scenario, fixtures)
     for _, fixture_id in ipairs(first.destination_fixture_ids) do first_destinations[fixture_id] = true end
     if not first_destinations[objective.destination_fixture_id] then
       error("legacy objective destination must be in the first stage")
+    end
+  end
+  local requirements = objective.requirements
+  if requirements ~= nil then
+    if type(requirements) ~= "table" or #requirements < 1 or #requirements > 4 then
+      error("objective requirements must contain between 1 and 4 entries")
+    end
+    local requirement_ids = {}
+    for index, requirement in ipairs(requirements) do
+      local label = "objective.requirements[" .. index .. "]"
+      if type(requirement) ~= "table" or type(requirement.id) ~= "string"
+          or requirement.id == "" or requirement_ids[requirement.id] then
+        error(label .. " identity is invalid")
+      end
+      if type(requirement.item) ~= "string" or #requirement.item > 80
+          or not string.match(requirement.item, "^[a-z][a-z0-9%-]*$") then
+        error(label .. " item is invalid")
+      end
+      if type(requirement.target_rate_per_tick) ~= "number" or requirement.target_rate_per_tick <= 0
+          or not is_integer(requirement.sustain_ticks) or requirement.sustain_ticks < 60 then
+        error(label .. " rate or sustain is invalid")
+      end
+      local requirement_fixture = fixtures[requirement.destination_fixture_id]
+      if not requirement_fixture or requirement_fixture.kind ~= "item_sink" then
+        error(label .. " destination must identify an item sink")
+      end
+      requirement_ids[requirement.id] = true
     end
   end
   if type(constraints) ~= "table" or constraints.allow_fixture_deconstruction ~= false

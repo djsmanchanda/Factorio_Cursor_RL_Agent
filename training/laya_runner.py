@@ -557,7 +557,8 @@ class LayaPrimaryRunner:
         projection, supply = self._observe_work(report)
         self.journal.append("work_graph", tick=int(report.get("tick") or 0), projection=projection)
         runnable = [branch["branch_id"] for branch in projection["runnable"]]
-        digest = compact_workflow_digest(projection, supply)
+        secondary_requirements = self.scenario["objective"].get("requirements", ())
+        digest = compact_workflow_digest(projection, supply, secondary_requirements)
         options = self.toolkit.serve_goal_options(report, runnable, self.executed_plan_hashes)
         bound = self._decide("serve_goal", report, options, digest=digest)
         result_report, termination = self._invoke(bound, report)

@@ -50,12 +50,15 @@ def replica(scenario: dict[str, Any], tag: str) -> dict[str, Any]:
     return copy
 
 
-#  Level 1 only ever offers BRANCH_IDS, so appending the level-2 expansion
-# branch here changes nothing for level-1 replays (its serve option is never
-# in `ids`); it only gives the scripted rollout something to build when a
-# high randomized level-2 target actually needs the second furnace. It is
-# checked last so the core chain and construction are always finished first.
-_ROLLOUT_BRANCH_PRIORITY = BRANCH_IDS + ("iron2",)
+#  Level 1 only ever offers BRANCH_IDS, so appending the level-2/3 expansion
+# branches here changes nothing for level-1 replays (their serve options are
+# never in `ids`); they only give the scripted rollout something to build
+# when a high randomized target actually needs them (iron2) or the level-3
+# circuit objective requires the second product line at all (copper, cable,
+# circuits). Checked last so the core chain and construction are always
+# finished first; copper/cable/circuits are still ordered by their own
+# dependency (cable needs copper, circuits needs iron+cable).
+_ROLLOUT_BRANCH_PRIORITY = BRANCH_IDS + ("iron2", "copper", "cable", "circuits")
 
 
 def rollout_choice(ids: Sequence[str]) -> str:
@@ -266,7 +269,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--instance", required=True, action="append", help="Repeat to spread across workers")
     parser.add_argument("--slots", type=int, default=8, help="Concurrent episodes per instance")
     parser.add_argument("--level", type=int, default=1,
-                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 expansion")
+                        help="connected_workflow curriculum level; 2 adds the demand-scaling iron2 "
+                             "expansion, 3 adds a competing circuit product line")
     parser.add_argument("--seed-start", type=int, required=True)
     parser.add_argument("--seeds", type=int, required=True)
     parser.add_argument("--depth", type=int, default=6, help="Branch at the first K base decisions")

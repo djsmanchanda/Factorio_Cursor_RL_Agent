@@ -121,6 +121,12 @@
             "available": {"type": "boolean"},
             "items": {"type": "object", "maxProperties": 16, "additionalProperties": {"type": "object"}}
           }
+        },
+        "requirement_progress": {
+          "description": "Multi-requirement objectives only (level 3+): per-item sustained-rate progress toward episode completion.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {"type": "object"}
         }
       }
     },

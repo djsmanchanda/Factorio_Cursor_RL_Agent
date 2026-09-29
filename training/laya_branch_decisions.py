@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from orchestrator.laya_operations import sha256_hash
@@ -26,8 +26,18 @@ def _evidence(graph: WorkGraph, supply: Mapping[str, Any]) -> tuple[dict[str, An
     return projection, sha256_hash({"work_graph": projection, "supply": dict(supply)})
 
 
-def compact_workflow_digest(projection: Mapping[str, Any], supply: Mapping[str, Any]) -> dict[str, Any]:
-    """The bounded branch and per-item supply view the model reads."""
+def compact_workflow_digest(
+    projection: Mapping[str, Any], supply: Mapping[str, Any],
+    secondary_requirements: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """The bounded branch and per-item supply view the model reads.
+
+    `secondary_requirements` are a connected_workflow objective's parallel
+    items (beyond the primary belt-style target already in acceptance_gap),
+    e.g. level 3's circuit target: each must ALSO sustain its own rate for the
+    episode to complete. Exposed by requirement id so the same shape covers
+    zero, one, or several parallel targets without a family-specific field.
+    """
     items = supply["items"]
     compact_items = {}
     for item in sorted(items):
@@ -51,7 +61,15 @@ def compact_workflow_digest(projection: Mapping[str, Any], supply: Mapping[str, 
         },
         "closed": [branch["branch_id"] for branch in projection["closed"]],
     }
-    return {"work_branches": compact_branches, "item_supply": compact_items}
+    secondary_targets = {
+        str(requirement["id"]): {
+            "item": requirement["item"],
+            "target_rate_per_tick": float(requirement["target_rate_per_tick"]),
+            "output_rate": (items.get(requirement["item"]) or {}).get("production", {}).get("observed_rate"),
+        }
+        for requirement in secondary_requirements
+    }
+    return {"work_branches": compact_branches, "item_supply": compact_items, "secondary_targets": secondary_targets}
 
 
 def prepare_serve_goal(

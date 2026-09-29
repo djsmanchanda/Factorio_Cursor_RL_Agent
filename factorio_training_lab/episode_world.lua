@@ -175,7 +175,9 @@ local function place_fixtures(surface, force, scenario)
     -- script-controlled guard that keeps episode fixtures protected.
     entity.minable_flag, entity.destructible, entity.rotatable = false, false, false
     if fixture.kind == "item_source" then
-      local input_item = scenario.objective.input_item
+      -- A fixture's own fill_item lets a second, independent supply (e.g. a
+      -- copper-ore source) differ from the primary objective.input_item.
+      local input_item = fixture.fill_item or scenario.objective.input_item
       if not input_item then error("item_source requires objective.input_item") end
       local inventory = entity.get_inventory(defines.inventory.chest)
       if not inventory then error("item_source inventory is unavailable") end
@@ -231,12 +233,28 @@ local function build_episode(payload, scenario)
 end
 
 local function existing_result(payload, scenario)
-  local episode = shared.ensure_storage().episodes[payload.episode_id]
+  local state = shared.ensure_storage()
+  local episode = state.episodes[payload.episode_id]
   if not episode then return nil end
   if episode.scenario_hash ~= payload.scenario_hash
       or episode.surface_name ~= scenario.environment.surface_name
       or episode.force_name ~= scenario.environment.force_name then
     error("episode_id already belongs to a different scenario")
+  end
+  -- A controller can be interrupted after deleting an episode surface but
+  -- before the force-merge event clears its storage record. Do not treat that
+  -- tombstone as an idempotent live episode: remove only the stale record and
+  -- let the normal name-availability path recreate the disposable world.
+  local surface = game.surfaces[episode.surface_name]
+  local force = game.forces[episode.force_name]
+  local active = episode.status == "ready" or episode.status == "running"
+  if not surface or not force or not active then
+    state.episodes[payload.episode_id] = nil
+    shared.clear_episode_uploads(payload.episode_id)
+    if not force then
+      state.pending_force_merges[episode.force_name] = nil
+    end
+    return nil
   end
   return {
     request_id = payload.request_id, episode_id = payload.episode_id,
