@@ -9,6 +9,9 @@
 # edits during the night cannot break it.
 #
 # Usage: nohup setsid scripts/laya_overnight.sh [HOURS] > data/laya-pi/overnight/driver.log 2>&1 &
+# Resume a finished run: LAYA_RESUME_ROUND=N (last completed round), LAYA_START_POLICY=<features json>,
+# LAYA_L1_SEED / LAYA_L2_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
+# rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1.
 set -uo pipefail
 
 HOURS=${1:-7.5}
@@ -64,10 +67,18 @@ compare() {
 }
 
 all_cases() { ls "$OUT"/ov-r*-cases.jsonl 2>/dev/null; }
+# Laya's dataset may skip early rounds whose one-step labels teach wait loops.
+laya_cases() {
+  local file n
+  for file in $(all_cases); do
+    n=${file##*/ov-r}; n=${n%%-*}
+    (( n >= ${LAYA_MIN_CASE_ROUND:-1} )) && echo "$file"
+  done
+}
 
 laya_finetune() {
   local tag=$1 dataset="$RUN/dataset-$1.jsonl" ckpt="$REPO/data/laya-checkpoints/laya-overnight-$1"
-  local cases=(); mapfile -t cases < <(all_cases)
+  local cases=(); mapfile -t cases < <(laya_cases)
   local inputs=(); for c in "${cases[@]}"; do inputs+=(--cases-jsonl "$c"); done
   log "laya $tag: dataset from ${#cases[@]} case files"
   "$PY" "$REPO/tools/build_laya_dataset.py" "${inputs[@]}" --output "$dataset" > "$RUN/dataset-$tag.log" 2>&1 \
@@ -87,12 +98,13 @@ laya_finetune() {
 # 0. Scripted-rollout baselines on both levels (every later evaluation compares against these).
 heal_workers
 for level in 1 2; do
-  evaluate "ov-eval-rollout-L$level" "$level" --policy rollout
+  [[ -f "$BATCHES/ov-eval-rollout-L$level.jsonl" ]] || evaluate "ov-eval-rollout-L$level" "$level" --policy rollout
 done
-latest=rollout
+latest=${LAYA_START_POLICY:-rollout}
+[[ -n "${LAYA_FINETUNE_FIRST:-}" ]] && laya_finetune "r${LAYA_RESUME_ROUND:-0}-min${LAYA_MIN_CASE_ROUND:-1}"
 
 # 1..N. Rounds until the deadline leaves too little time for another one.
-round=0; l1_seed=5101; l2_seed=6001; round_seconds=3600
+round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}; round_seconds=3600
 while (( $(remaining) > round_seconds + 600 )); do
   round=$((round + 1))
   level=$(( round % 2 == 1 ? 2 : 1 ))
