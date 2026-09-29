@@ -5,27 +5,40 @@
 # Alternates connected_workflow level 1 and level 2 policy-iteration rounds on 12 one-slot
 # instances, retrains the features policy on all stepped cases each round, fine-tunes Laya every
 # second round on the same cases, evaluates everything on held-out seeds 4001-4032, and appends
-# results to data/laya-pi/overnight/summary.log. Code runs from a snapshot of HEAD so worktree
+# results to data/laya-pi/<run>/summary.log. Code runs from a snapshot of HEAD so worktree
 # edits during the night cannot break it.
 #
 # Usage: nohup setsid scripts/laya_overnight.sh [HOURS] > data/laya-pi/overnight/driver.log 2>&1 &
 # Resume a finished run: LAYA_RESUME_ROUND=N (last completed round), LAYA_START_POLICY=<features json>,
 # LAYA_L1_SEED / LAYA_L2_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
 # rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1.
+#
+# Concurrent/named runs: LAYA_RUN_NAME (default "overnight") selects the run directory
+# data/laya-pi/$LAYA_RUN_NAME and its summary.log; LAYA_PREFIX (default "ov") namespaces every
+# round/eval/checkpoint name so a second run never collides with another run's files in the
+# shared data/laya-pi and data/laya-exploration/batches directories. Both default to today's
+# unnamed behaviour, so existing invocations are unaffected.
+#
+# Graceful stop: create "$RUN/stop-requested" (any content). The driver checks for it at the top
+# of every round-loop iteration, finishes the round in flight, then runs its normal final
+# evaluation and worker shutdown -- it never leaves an in-progress round half-written.
 set -uo pipefail
 
 HOURS=${1:-7.5}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PY="$REPO/.venv/bin/python"
 MANAGE="$REPO/scripts/manage_linux_training_worker.sh"
-OUT="$REPO/data/laya-pi"; RUN="$OUT/overnight"; SUMMARY="$RUN/summary.log"
+OUT="$REPO/data/laya-pi"; RUN="$OUT/${LAYA_RUN_NAME:-overnight}"; SUMMARY="$RUN/summary.log"
 BATCHES="$REPO/data/laya-exploration/batches"
+PREFIX=${LAYA_PREFIX:-ov}
+STOP_FILE="$RUN/stop-requested"
 export LAYA_INSTANCES=${LAYA_INSTANCES:-"01 02 03 04 06 07 08 09 10 11 12 13"}
 export LAYA_PROCS=${LAYA_PROCS:-3} LAYA_SPEED=${LAYA_SPEED:-32}
 WORKERS=($LAYA_INSTANCES)
 SEEDS_PER_ROUND=${LAYA_SEEDS_PER_ROUND:-36}
 DEADLINE=$(( $(date +%s) + $(awk "BEGIN { print int($HOURS * 3600) }") ))
 mkdir -p "$RUN"
+rm -f "$STOP_FILE"
 
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$SUMMARY"; }
 remaining() { echo $(( DEADLINE - $(date +%s) )); }
@@ -61,23 +74,23 @@ evaluate() {
 
 compare() {
   local level=$1; shift
-  local base="$BATCHES/ov-eval-rollout-L$level.jsonl"
+  local base="$BATCHES/$PREFIX-eval-rollout-L$level.jsonl"
   [[ -f "$base" && -f "$1" ]] || { log "missing batch for comparison: $1"; return; }
   "$PY" "$REPO/tools/compare_laya_batches.py" "$base" "$@" 2>&1 | tail -n +2 | tee -a "$SUMMARY"
 }
 
-all_cases() { ls "$OUT"/ov-r*-cases.jsonl 2>/dev/null; }
+all_cases() { ls "$OUT"/"$PREFIX"-r*-cases.jsonl 2>/dev/null; }
 # Laya's dataset may skip early rounds whose one-step labels teach wait loops.
 laya_cases() {
   local file n
   for file in $(all_cases); do
-    n=${file##*/ov-r}; n=${n%%-*}
+    n=${file##*/"$PREFIX"-r}; n=${n%%-*}
     (( n >= ${LAYA_MIN_CASE_ROUND:-1} )) && echo "$file"
   done
 }
 
 laya_finetune() {
-  local tag=$1 dataset="$RUN/dataset-$1.jsonl" ckpt="$REPO/data/laya-checkpoints/laya-overnight-$1"
+  local tag=$1 dataset="$RUN/dataset-$1.jsonl" ckpt="$REPO/data/laya-checkpoints/laya-${LAYA_RUN_NAME:-overnight}-$1"
   local cases=(); mapfile -t cases < <(laya_cases)
   local inputs=(); for c in "${cases[@]}"; do inputs+=(--cases-jsonl "$c"); done
   log "laya $tag: dataset from ${#cases[@]} case files"
@@ -91,27 +104,31 @@ laya_finetune() {
   log "laya $tag: trained -> $ckpt"
   local level
   for level in 1 2; do
-    evaluate "ov-eval-laya-$tag-L$level" "$level" --policy laya --epsilon 0 --checkpoint "$ckpt"
+    evaluate "$PREFIX-eval-laya-$tag-L$level" "$level" --policy laya --epsilon 0 --checkpoint "$ckpt"
   done
 }
 
 # 0. Scripted-rollout baselines on both levels (every later evaluation compares against these).
 heal_workers
 for level in 1 2; do
-  [[ -f "$BATCHES/ov-eval-rollout-L$level.jsonl" ]] || evaluate "ov-eval-rollout-L$level" "$level" --policy rollout
+  [[ -f "$BATCHES/$PREFIX-eval-rollout-L$level.jsonl" ]] || evaluate "$PREFIX-eval-rollout-L$level" "$level" --policy rollout
 done
 latest=${LAYA_START_POLICY:-rollout}
 [[ -n "${LAYA_FINETUNE_FIRST:-}" ]] && laya_finetune "r${LAYA_RESUME_ROUND:-0}-min${LAYA_MIN_CASE_ROUND:-1}"
 
-# 1..N. Rounds until the deadline leaves too little time for another one.
+# 1..N. Rounds until the deadline leaves too little time for another one, or a graceful stop is requested.
 round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}; round_seconds=3600
 while (( $(remaining) > round_seconds + 600 )); do
+  if [[ -f "$STOP_FILE" ]]; then
+    log "stop requested; finishing after round $round"
+    break
+  fi
   round=$((round + 1))
   level=$(( round % 2 == 1 ? 2 : 1 ))
   if (( level == 1 )); then seed=$l1_seed; l1_seed=$((l1_seed + SEEDS_PER_ROUND)); else seed=$l2_seed; l2_seed=$((l2_seed + SEEDS_PER_ROUND)); fi
   # Rounds 1-2 label each level under the scripted rollout; later rounds iterate on the learned policy.
   cont=$latest; (( round <= 2 )) && cont=rollout
-  name="ov-r$round"
+  name="$PREFIX-r$round"
   heal_workers
   mapfile -t previous < <(all_cases)
   started=$(date +%s)
@@ -135,7 +152,7 @@ done
 if [[ "$latest" != rollout ]]; then
   for level in 1 2; do
     # Run ids must be unique across runs: the runner refuses to reuse a journal.
-    evaluate "ov-eval-final-r$round-L$level" "$level" --policy features --features-model "$latest"
+    evaluate "$PREFIX-eval-final-r$round-L$level" "$level" --policy features --features-model "$latest"
   done
 fi
 log "final features policy: $latest"

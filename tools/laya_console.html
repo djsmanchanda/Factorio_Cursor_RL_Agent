@@ -1,0 +1,121 @@
+<!-- Path: tools/laya_console.html -->
+<!-- Purpose: Local live status and start/stop console for the Laya overnight training driver. -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="action-token" content="__ACTION_TOKEN__">
+  <title>Laya Operations Console</title>
+  <link rel="stylesheet" href="/laya_console.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">LOOPBACK · LAYA TRAINING DRIVER</p>
+      <h1>Laya Operations Console</h1>
+      <p class="subtitle">Watch policy-iteration rounds label, retrain, fine-tune, and evaluate Laya overnight.</p>
+    </div>
+    <div class="connection-cluster">
+      <div class="status-cluster">
+        <span id="driver-status" class="status">Driver</span>
+      </div>
+      <p class="run-address"><span>RUN</span><code id="run-name">—</code></p>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel status-panel" aria-labelledby="status-heading">
+      <div class="panel-heading">
+        <div><p class="eyebrow">STATUS</p><h2 id="status-heading">Run &amp; phase</h2></div>
+        <span id="phase-state" class="operation-state" role="status">Loading…</span>
+      </div>
+      <dl id="config-grid" class="config-grid"></dl>
+      <div id="round-detail" class="round-detail"></div>
+      <div id="labeller-wrap" class="labeller-wrap" hidden>
+        <h3>Labeller progress</h3>
+        <table><thead><tr><th>Process</th><th>Labels</th><th>Last write</th><th>State</th></tr></thead>
+        <tbody id="labeller-body"></tbody></table>
+      </div>
+      <div class="workers-gpu-grid">
+        <div>
+          <h3>Workers</h3>
+          <table><thead><tr><th>Instance</th><th>State</th></tr></thead>
+          <tbody id="worker-body"><tr><td colspan="2" class="empty-row">No active run.</td></tr></tbody></table>
+        </div>
+        <div>
+          <h3>GPU &amp; host</h3>
+          <dl id="gpu-grid" class="config-grid"></dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel controls-panel" aria-labelledby="controls-heading">
+      <div class="panel-heading">
+        <div><p class="eyebrow">CONTROL ROOM</p><h2 id="controls-heading">Start &amp; stop</h2></div>
+        <p id="controls-message" class="action-message">Ready.</p>
+      </div>
+      <form id="start-form" class="start-form">
+        <label>Hours <input id="start-hours" type="number" step="0.1" min="0.1" value="6"></label>
+        <label>Instances <input id="start-instances" placeholder="auto (14 15 16 for tests)"></label>
+        <label>Procs <input id="start-procs" type="number" min="1" value="3"></label>
+        <label>Speed <input id="start-speed" type="number" min="0.1" max="64" value="32"></label>
+        <label>Seeds/round <input id="start-seeds" type="number" min="1" value="36"></label>
+        <label>Run name <input id="start-run-name" value="overnight"></label>
+        <label>Prefix <input id="start-prefix" value="ov"></label>
+        <label>Min case round <input id="start-min-case-round" type="number" min="1" placeholder="optional"></label>
+        <label class="checkbox-label"><input id="start-finetune-first" type="checkbox"> Fine-tune first</label>
+        <label class="checkbox-label"><input id="start-auto-resume" type="checkbox" checked> Auto-resume from last round</label>
+        <fieldset id="manual-resume-fields" class="manual-resume-fields" hidden>
+          <legend>Manual resume (auto-resume off)</legend>
+          <label>Resume round <input id="start-resume-round" type="number" min="0" value="0"></label>
+          <label>Start policy <input id="start-policy" placeholder="rollout or features json path"></label>
+          <label>L1 seed <input id="start-l1-seed" type="number" value="5101"></label>
+          <label>L2 seed <input id="start-l2-seed" type="number" value="6001"></label>
+        </fieldset>
+        <button type="submit" class="primary">Start run</button>
+      </form>
+      <div class="stop-actions">
+        <button id="stop-after-round" type="button" class="warn">Stop after current round</button>
+        <button id="stop-now" type="button" class="danger">Stop now</button>
+      </div>
+      <p id="action-message" class="action-message">No console action has run yet.</p>
+    </section>
+
+    <section class="panel results-panel" aria-labelledby="results-heading">
+      <div class="panel-heading">
+        <div><p class="eyebrow">RESULTS</p><h2 id="results-heading">Evaluations vs. rollout baseline</h2></div>
+        <span id="results-state" class="operation-state" role="status">Loading…</span>
+      </div>
+      <div class="best-grid" id="best-grid"></div>
+      <div class="trend-grid" id="trend-grid"></div>
+      <div class="results-table-wrap">
+        <table>
+          <thead><tr><th>Batch</th><th>Level</th><th>Seeds</th><th>Completed</th><th>Median cost (ticks)</th><th>Median decisions</th><th>Δ vs rollout</th><th>Faster than rollout</th></tr></thead>
+          <tbody id="results-body"><tr><td colspan="8" class="empty-row">No evaluations yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel console-panel">
+      <div class="panel-heading console-heading">
+        <div><p class="eyebrow">LIVE OUTPUT</p><h2>Log tail</h2></div>
+        <div class="console-tools">
+          <label><input id="follow-log" type="checkbox" checked> Follow</label>
+          <button id="clear-view" class="small" type="button">Clear view</button>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Log selection">
+        <button class="tab active" data-log="summary">Summary</button>
+        <button class="tab" data-log="round">Current round</button>
+      </nav>
+      <pre id="log-output">Waiting for log output…</pre>
+    </section>
+  </main>
+
+  <footer>
+    Bound to <code>127.0.0.1:9138</code>. Controls run fixed local commands only; there is no command input.
+  </footer>
+  <script src="/laya_console.js"></script>
+</body>
+</html>

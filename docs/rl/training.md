@@ -642,3 +642,50 @@ Current verification is offline tests and real-tokenizer checks. No new model
 was trained or promoted and no live Factorio episode was run for this tranche.
 A compatible checkpoint, broader training data, replay fidelity and matched live
 outcomes remain prerequisites for progressing toward replacement.
+
+### Laya Operations Console
+
+`tools/laya_console_server.py` is a loopback-only (`127.0.0.1:9138`) console for
+`scripts/laya_overnight.sh`, structured like the deterministic
+[operations console](../factorio_operations.md) (same `ThreadingHTTPServer`,
+per-session action token on every POST, and dark control-room UI). Start it
+with:
+
+```bash
+.venv/bin/python tools/laya_console_server.py --port 9138
+```
+
+then open `http://127.0.0.1:9138/`. It never launches Factorio itself; it only
+starts/stops the driver script and reads its logs and evidence files.
+
+- **Status panel**: whether a driver process is active (detected by scanning
+  `/proc` for `scripts/laya_overnight.sh`, disambiguated by each process's own
+  `LAYA_RUN_NAME`/`LAYA_PREFIX` environment when more than one is running at
+  once), its run configuration, current round/level, phase (`evaluating
+  baseline` / `labelling` / `training features` / `evaluating` / `fine-tuning
+  laya` / `done`) derived from `summary.log` plus the round's cases/features/
+  eval-batch files, per-process labeller progress (flagging a process stale
+  past 45 minutes with no new label), per-worker status, and `nvidia-smi`/host
+  memory.
+- **Results panel**: every `summary.log` evaluation versus that level's rollout
+  baseline, the best features policy and best Laya checkpoint per level, and an
+  inline per-round median-cost trend.
+- **Live log tail**: `summary.log` and whichever round/eval log file in the run
+  directory changed most recently.
+- **Controls** (token-protected POST, with a confirming dialog in the UI):
+  **Start run** refuses if any driver is already active; by default it
+  auto-resumes from the newest `features-<prefix>-r*.json` on disk (36-seed
+  rounds, odd = level 2, even = level 1, seeds from 5101/6001), or accepts
+  manual `LAYA_RESUME_ROUND`/`LAYA_START_POLICY`/`LAYA_L1_SEED`/`LAYA_L2_SEED`.
+  **Stop after current round** drops a `stop-requested` file in the run
+  directory, which the driver checks at the top of every round-loop iteration
+  before its normal final evaluation and worker shutdown. **Stop now** kills
+  the driver's process group, sends `/sc game.tick_paused = false game.speed =
+  1` to each of its instances over RCON, and stops its workers.
+
+`scripts/laya_overnight.sh` accepts `LAYA_RUN_NAME` (run directory under
+`data/laya-pi/`, default `overnight`) and `LAYA_PREFIX` (namespaces every
+round/eval/checkpoint name, default `ov`) so a console-started test run never
+collides with a concurrently running one in the shared `data/laya-pi` and
+`data/laya-exploration/batches` directories. Both default to today's unnamed
+behaviour.
