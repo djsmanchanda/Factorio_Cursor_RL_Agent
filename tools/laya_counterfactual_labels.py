@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.run_laya_workflow_batch import instance_slots, set_speed_all, set_stepped_all
+from tools.run_laya_workflow_batch import guideline_context, instance_slots, set_speed_all, set_stepped_all
 from training.canonical import scenario_hash
 from training.candidates.connected_workflow import BRANCH_IDS
 from training.contracts import validate_scenario
@@ -124,7 +124,7 @@ def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, A
             LayaRunnerConfig(worker_id=slot.worker_id, run_id=run_id, evidence_dir=args.evidence_dir,
                              max_decisions=args.max_decisions, max_no_progress=args.max_decisions,
                              game_speed=args.game_speed, stepped=args.stepped),
-            model_ref=model_ref, exploration=gate,
+            model_ref=model_ref, knowledge_context=args.knowledge, exploration=gate,
         ).run()
     finally:
         bridge.close()
@@ -303,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         digest = hashlib.sha256(args.features_model.read_bytes()).hexdigest()[:16]
         args.continuation_id = f"policy:features:{digest}"
     args.slots = len(slots)
+    # Same rules as live runs, so labelled states match what Laya sees in use.
+    args.knowledge = guideline_context("connected_workflow")
     out = args.evidence_dir / "labels" / f"{args.run_prefix}.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     pool_slots = SlotPool(slots)

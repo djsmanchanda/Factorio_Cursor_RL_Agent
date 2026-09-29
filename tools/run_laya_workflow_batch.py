@@ -66,6 +66,16 @@ def _policy_ref(name: str) -> dict[str, str]:
     return {"model_id": f"baseline-{name}", "model_hash": "sha256:" + hashlib.sha256(name.encode()).hexdigest()}
 
 
+def guideline_context(family: str):
+    """The guideline rules a decision state carries. Labels and live runs must share
+    it: Laya reads these rules, so a mismatch shifts its inputs between training and use."""
+    from orchestrator.laya_knowledge import load_guideline_context
+    return load_guideline_context(
+        ROOT, scopes=(family, "serve_goal", "choose_operation", "select_candidate", "wait_or_act", "recovery"),
+        max_rules=8,
+    )
+
+
 def _generator(family: str):
     module_name, function = _GENERATORS[family].split(":")
     module = __import__(module_name, fromlist=[function])
@@ -206,7 +216,6 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
 
 
 def main(argv: list[str] | None = None) -> int:
-    from orchestrator.laya_knowledge import load_guideline_context
     from training.laya_runtime import LayaModelPredictor
     from training.laya_sequence import SEQUENCE_VERSION
 
@@ -246,10 +255,7 @@ def main(argv: list[str] | None = None) -> int:
                      "model_hash": "sha256:" + hashlib.sha256(args.features_model.read_bytes()).hexdigest()}
     else:
         model_ref = _policy_ref(args.policy)
-    knowledge = load_guideline_context(
-        ROOT, scopes=(args.family, "serve_goal", "choose_operation", "select_candidate", "wait_or_act", "recovery"),
-        max_rules=8,
-    )
+    knowledge = guideline_context(args.family)
     summary_path = args.evidence_dir / "batches" / f"{args.run_prefix}.jsonl"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     if args.stepped:

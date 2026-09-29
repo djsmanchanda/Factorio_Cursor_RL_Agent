@@ -49,6 +49,17 @@ def _ece(confidences: list[float], correct: list[bool], bins: int = 10) -> float
     return error
 
 
+def _in_option_order(questions: dict[str, Any]) -> dict[str, Any]:
+    """Dataset writers sort JSON keys; option_ids is the model's option order (as in fine-tuning)."""
+    result = {}
+    for question_id, question in questions.items():
+        order, criteria = question.get("option_ids"), question.get("criteria")
+        if isinstance(order, list) and isinstance(criteria, dict) and set(order) == set(criteria):
+            question = {**question, "criteria": {key: criteria[key] for key in order}}
+        result[question_id] = question
+    return result
+
+
 def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split: str, device: str | None, *, allow_legacy_sequence: bool = False) -> dict[str, Any]:
     cases = load_cases(cases_path, split=split)
     extra = {"allow_legacy_sequence": True} if allow_legacy_sequence else {}
@@ -63,13 +74,14 @@ def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split
     failures: list[str] = []
     for case in cases:
         started = time.perf_counter()
+        questions_in_order = _in_option_order(case["questions"])
         try:
-            result = predictor.predict(case["state"], case["questions"])
+            result = predictor.predict(case["state"], questions_in_order)
         except Exception as error:  # a malformed case must not become silent credit
             failures.append(f"{case.get('case_id', 'unknown')}: {type(error).__name__}: {error}")
             continue
         latencies.append(time.perf_counter() - started)
-        for question_id, question in case["questions"].items():
+        for question_id, question in questions_in_order.items():
             gold = (case.get("gold") or {}).get(question_id) or {}
             answer = (result.get("answers") or {}).get(question_id) or {}
             criteria = question.get("criteria") or {}
@@ -147,3 +159,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
