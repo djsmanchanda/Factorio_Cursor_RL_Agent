@@ -134,7 +134,8 @@ done
 # Final: the latest features policy on both levels, then shut the fleet down.
 if [[ "$latest" != rollout ]]; then
   for level in 1 2; do
-    evaluate "ov-eval-final-L$level" "$level" --policy features --features-model "$latest"
+    # Run ids must be unique across runs: the runner refuses to reuse a journal.
+    evaluate "ov-eval-final-r$round-L$level" "$level" --policy features --features-model "$latest"
   done
 fi
 log "final features policy: $latest"
