@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from jsonschema import Draft7Validator
+from training.laya_failure import is_safe_lab_timeout
 
 LABEL_VERSION = "laya-counterfactual-v4"
 _VALIDATOR = Draft7Validator(json.loads(
@@ -55,6 +56,8 @@ def journal_outcome(journal: str) -> dict[str, Any]:
     elif kind == "timeout" and final.get("status") == "timed_out":
         # The lab horizon is a policy non-completion, not infrastructure failure.
         cause = "policy"
+        if is_safe_lab_timeout(final):
+            status = "timed_out"
     elif status == "completed":
         cause = "none"
     return {

@@ -33,6 +33,12 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
     bin_dir = tmp_path / "bin"
     executable(bin_dir / "git", '#!/bin/bash\ncase "$3" in archive) cat "$LAYA_ARCHIVE";; rev-parse) echo frozen;; *) exit 2;; esac\n')
     calls = tmp_path / "calls"
+    # The frozen driver must continue even if the original file changes while
+    # a round is running (Bash otherwise resumes at stale byte offsets).
+    round_script = repo / 'scripts/laya_policy_iteration_round.sh'
+    round_script.write_text(round_script.read_text()+'\nprintf "#!/bin/bash\\nexit 77\\n" > "$LAYA_REPO/scripts/laya_overnight.sh"\n')
+    with tarfile.open(archive, 'w') as out:
+        out.add(repo / 'scripts', arcname='scripts')
     env = {k: v for k, v in os.environ.items() if not k.startswith('LAYA_')}
     env.update(PATH=f'{bin_dir}:{env["PATH"]}', LAYA_ARCHIVE=str(archive), LAYA_CALLS=str(calls),
                LAYA_RUN_NAME="bounded", LAYA_PREFIX="t", LAYA_INSTANCES="01 02", LAYA_MAX_ROUNDS="3",

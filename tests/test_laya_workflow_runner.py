@@ -153,3 +153,31 @@ def test_level3_refuses_legacy_completion_evidence(tmp_path, version, expected):
         events = [json.loads(line) for line in open(result["journal"])]
         terminal = next(event for event in events if event["type"] == "termination")
         assert "deploy before running" in terminal["reason"]
+
+
+def test_safe_lab_horizon_remains_policy_timeout_in_runner_and_journal(tmp_path):
+    from training.laya_counterfactual import journal_outcome
+    scenario = generate_connected_workflow_scenario(3)
+    class HorizonBridge(WorkflowBridge):
+        def observe(self, episode):
+            report = super().observe(episode)
+            report.update(status='timed_out', failure={'kind':'timeout','reason':'maximum episode ticks elapsed'})
+            report['metrics'].update(forbidden_entities=0,out_of_bounds_entities=0,budget_overruns=0,fixtures_valid=True)
+            report['metrics']['factory_health'] = {'version':'1.0.0','tick':report['tick'],
+                'phases':{'iron':{'statuses':{'working':1}}},'sources':{'ore':{'items':{'iron-ore':1000}}}}
+            return report
+    bridge=HorizonBridge(scenario)
+    gate=ExplorationGate(seed=3,epsilon=0)
+    result=LayaPrimaryRunner(
+        bridge,scenario,ExplorationDirector(Predictor(lambda kind,ids,state:ids[0]),gate,budget_profile=LARGE_BUDGET),
+        LayaRunnerConfig(worker_id='test',run_id='horizon-test',evidence_dir=tmp_path),
+        model_ref=MODEL_ONLY_REF,exploration=gate,
+    ).run()
+    assert result['status']=='timed_out'
+    outcome=journal_outcome(result['journal'])
+    assert outcome['status']=='timed_out' and outcome['failure_cause']=='policy'
+    assert bridge.recycled==1
+    events=[json.loads(line) for line in open(result['journal'])]
+    packet_path=next(e['path'] for e in events if e['type']=='failure_packet')
+    packet=json.loads(open(packet_path).read())
+    assert packet['evidence']['outcome']['report']['metrics']['factory_health']['hash'].startswith('sha256:')

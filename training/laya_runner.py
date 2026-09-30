@@ -24,7 +24,7 @@ from training.laya_branch_decisions import compact_workflow_digest
 from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_lab_workflow import observe_lab_workflow
 from training.laya_work_graph import project_work_graph
-from training.laya_failure import FailureCause, FailurePacket
+from training.laya_failure import FailureCause, FailurePacket, is_safe_lab_timeout
 from training.laya_toolkit import BoundOption, LayaToolkit, LayaToolkitError, StaleLayaOption
 from training.laya_workflow import LayaWorkflowDirector, LayaWorkflowError
 
@@ -401,6 +401,11 @@ class LayaPrimaryRunner:
                 status = str(report.get("status") or "ready")
                 if status == "completed":
                     termination = self._terminate("completed", report=report)
+                    break
+                if is_safe_lab_timeout(report):
+                    self._failure_packet(FailureCause.POLICY, 'timeout',
+                                         'Laya did not complete within the episode tick budget', report=report)
+                    termination = self._terminate('timed_out', report=report)
                     break
                 if status not in {"ready", "running"}:
                     self._failure_packet(
@@ -869,6 +874,18 @@ class LayaPrimaryRunner:
         report: Mapping[str, Any],
         evidence: Mapping[str, Any] | None = None,
     ) -> Path:
+        def packet_report(source):
+            bounded = dict(source)
+            metrics = dict(bounded.get('metrics') or {})
+            health = metrics.get('factory_health')
+            if health is not None:
+                # The complete observation is already in the append-only
+                # journal. Reference deep telemetry instead of overflowing
+                # the bounded failure-packet nesting contract.
+                metrics['factory_health'] = {'version':health.get('version'), 'tick':health.get('tick'),
+                                             'hash':sha256_hash(health), 'journal':str(self.journal.path)}
+                bounded['metrics'] = metrics
+            return bounded
         packet = FailurePacket.create(
             cause=cause,
             failure_kind=_identifier(failure_kind, "unknown"),
@@ -881,7 +898,7 @@ class LayaPrimaryRunner:
             replay_request={
                 "runtime": "disposable_training", "scenario": self.scenario,
                 "seed": int(self.scenario["seed"]),
-                "initial_state": dict(self.initial_observation or report),
+                "initial_state": packet_report(self.initial_observation or report),
                 "decision_context": {
                     "current_transaction": self.current_transaction,
                     "recent_history": self.journal.recent_history(),
@@ -903,7 +920,7 @@ class LayaPrimaryRunner:
             evidence={
                 "decision_trace": self.journal.recent_history(),
                 "execution": dict((evidence or {}).get("execution") or {}),
-                "outcome": {"report": dict(report), **{key: value for key, value in (evidence or {}).items() if key != "execution"}},
+                "outcome": {"report": packet_report(report), **{key: value for key, value in (evidence or {}).items() if key != "execution"}},
             },
         )
         path = self.failures_dir / f"{packet.packet_id}.json"

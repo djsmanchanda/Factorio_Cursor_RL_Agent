@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft7Validator
+from training.isolation import assert_training_identity
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,20 @@ FAILURE_CAUSES = tuple(item.value for item in FailureCause)
 PROPOSAL_STATUSES = ("proposed", "accepted", "rejected", "superseded")
 MAX_PACKET_BYTES = 64 * 1024
 MAX_PROPOSAL_BYTES = 32 * 1024
+
+
+def is_safe_lab_timeout(report: Mapping[str, Any]) -> bool:
+    """An observed episode horizon is policy evidence only with explicit health."""
+    if report.get('status') != 'timed_out' or (report.get('failure') or {}).get('kind') != 'timeout':
+        return False
+    try:
+        assert_training_identity(report.get('surface'),report.get('force'))
+    except (ValueError,TypeError):
+        return False
+    metrics = report.get('metrics') or {}
+    return (all(type(metrics.get(key)) is int and metrics[key] == 0 for key in
+                ('forbidden_entities','out_of_bounds_entities','budget_overruns'))
+            and metrics.get('fixtures_valid') is True and metrics.get('power_connected') is True)
 
 
 def _now() -> str:

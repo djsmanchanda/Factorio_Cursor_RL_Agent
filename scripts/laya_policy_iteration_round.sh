@@ -25,6 +25,32 @@ OUT="$REPO/data/laya-pi"; LABELS="$REPO/data/laya-counterfactual"
 mkdir -p "$OUT"
 cd "$CODE"
 
+# Probe the exact new seed block before spending hours replaying a collapsed
+# teacher. This only selects lab continuation; live policy authority is unchanged.
+if [[ "$CONT" != rollout ]]; then
+  gate_args=()
+  for n in "${INSTANCES[@]}"; do gate_args+=(--instance "factorio-training-linux-$n"); done
+  for policy in rollout features; do
+    policy_args=(--policy "$policy")
+    [[ "$policy" == rollout ]] || policy_args+=(--features-model "$CONT")
+    timeout 1h "$PY" tools/run_laya_workflow_batch.py "${gate_args[@]}" --slots 1 --stepped --game-speed "$SPEED" \
+      --level "$LEVEL" "${policy_args[@]}" --seed-start "$SEED_START" --episodes "$SEEDS" \
+      --max-len 2048 --max-decisions 60 --max-no-progress 60 \
+      --evidence-dir "$REPO/data/laya-exploration" --run-prefix "gate-$ROUND-$policy-L$LEVEL" \
+      > "$OUT/gate-$ROUND-$policy.log" 2>&1 || { echo "teacher probe failed"; exit 2; }
+  done
+  "$PY" tools/laya_teacher_gate.py "$REPO/data/laya-exploration/batches/gate-$ROUND-rollout-L$LEVEL.jsonl" \
+    "$REPO/data/laya-exploration/batches/gate-$ROUND-features-L$LEVEL.jsonl" \
+    --seed-start "$SEED_START" --episodes "$SEEDS" > "$OUT/gate-$ROUND.json"
+  gate_status=$?
+  cat "$OUT/gate-$ROUND.json"
+  case "$gate_status" in
+    0) ;;
+    3) echo "teacher regressed on the new cohort; labelling under verified rollout"; CONT=rollout ;;
+    *) echo "teacher gate blocked; no labels collected"; exit 2 ;;
+  esac
+fi
+
 cont_args=(--continuation rollout)
 [[ "$CONT" == rollout ]] || cont_args=(--continuation features --features-model "$CONT")
 

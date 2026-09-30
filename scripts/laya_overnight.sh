@@ -30,7 +30,7 @@
 set -uo pipefail
 
 HOURS=${1:-7.5}
-REPO=$(cd "$(dirname "$0")/.." && pwd)
+REPO=${LAYA_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
 PY="$REPO/.venv/bin/python"
 MANAGE="$REPO/scripts/manage_linux_training_worker.sh"
 OUT="$REPO/data/laya-pi"; RUN="$OUT/${LAYA_RUN_NAME:-overnight}"; SUMMARY="$RUN/summary.log"
@@ -59,9 +59,15 @@ remaining() { echo $(( DEADLINE - $(date +%s) )); }
 
 # Freeze the code for the whole night.
 export LAYA_CODE="$RUN/code"
-rm -rf "$LAYA_CODE"; mkdir -p "$LAYA_CODE"
-git -C "$REPO" archive HEAD | tar -x -C "$LAYA_CODE"
-cp "$REPO/training-workers-linux.json" "$LAYA_CODE/training-workers-linux.json"
+if [[ "${LAYA_DRIVER_FROZEN:-0}" != 1 ]]; then
+  rm -rf "$LAYA_CODE"; mkdir -p "$LAYA_CODE"
+  git -C "$REPO" archive HEAD | tar -x -C "$LAYA_CODE" || exit 2
+  cp "$REPO/training-workers-linux.json" "$LAYA_CODE/training-workers-linux.json" || exit 2
+  export LAYA_REPO="$REPO" LAYA_DRIVER_FROZEN=1
+  # Bash reads a script incrementally. Freeze the outer driver too, before
+  # labelling pauses it and worktree edits could move its unread file offsets.
+  exec bash "$LAYA_CODE/scripts/laya_overnight.sh" "$@"
+fi
 log "start: $HOURS h, code $(git -C "$REPO" rev-parse --short HEAD), instances ${WORKERS[*]}, procs $LAYA_PROCS, speed $LAYA_SPEED"
 
 heal_workers() {
@@ -95,18 +101,21 @@ compare() {
 }
 
 all_cases() {
-  local file corrected
-  for file in "$OUT"/"$PREFIX"-r*-cases.jsonl; do
-    [[ -f "$file" ]] || continue
-    corrected="${LAYA_RELABELED_CASE_DIR:-$OUT/relabel-v4}/${file##*/}"
-    if [[ -f "$corrected" ]]; then printf '%s\n' "$corrected"; else printf '%s\n' "$file"; fi
+  local file corrected source_prefix
+  for source_prefix in ${LAYA_CASE_PREFIXES:-$PREFIX}; do
+    [[ "$source_prefix" =~ ^[A-Za-z0-9_.-]+$ ]] || { log "invalid case prefix" >&2; return 2; }
+    for file in "$OUT"/"$source_prefix"-r*-cases.jsonl; do
+      [[ -f "$file" ]] || continue
+      corrected="${LAYA_RELABELED_CASE_DIR:-$OUT/relabel-v4}/${file##*/}"
+      if [[ -f "$corrected" ]]; then printf '%s\n' "$corrected"; else printf '%s\n' "$file"; fi
+    done
   done
 }
 # Laya's dataset may skip early rounds whose one-step labels teach wait loops.
 laya_cases() {
   local file n
   for file in $(all_cases); do
-    n=${file##*/"$PREFIX"-r}; n=${n%%-*}
+    n=${file##*-r}; n=${n%%-*}
     (( n >= ${LAYA_MIN_CASE_ROUND:-1} )) && echo "$file"
   done
 }

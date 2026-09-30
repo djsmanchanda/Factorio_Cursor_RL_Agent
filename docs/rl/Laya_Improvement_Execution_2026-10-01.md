@@ -125,3 +125,44 @@ materials, depletion, power/transport limits and endurance objectives. The
 matched deterministic opening and an independent promotion suite remain
 required before any real-base authority. None of those stages is claimed
 complete by the bounded run or the observation smoke.
+
+## Wind-down and continuation safeguards
+
+The user requested a quick wind-down. Workers 01–13 are stopped; demo worker
+14 and the operations console remain running. No successor run is scheduled
+and no new Laya adapter was trained. The first experiment finished r34/L2
+and r35/L1, then stopped before its final evaluations/fine-tune. Original
+configuration and all journals remain preserved.
+
+Measured r35 features L1: 32/32, mean cost 6,088, p95 6,104, cheaper on all
+32 development pairs versus scripted mean 6,866.5. This is a features-policy
+result on repeatedly used seeds, not a Laya or promotion result. On training
+seeds 6613/6615/6618, the r33 continuation waited without building.
+
+The outer driver failed with exit 2 while reading the working Bash file after
+an edit changed unread offsets. Inner tools were frozen, but the outer driver
+was not. New launches re-exec the outer script from the committed frozen
+checkout. The integration harness overwrites the original during a round and
+verifies that the frozen driver still completes its rotation and cleanup.
+
+New policy-iteration rounds probe the proposed features teacher and scripted
+reference on the exact new seed block before labelling. The teacher gate
+rejects completion/mean-cost regressions; tool/safety/evidence errors or an
+all-failed teacher pair block the round rather than silently selecting a
+policy. Named experiments may import prior case prefixes explicitly.
+
+The last teacher probe exposed a failure-packet nesting overflow from the new
+health telemetry. Failure packets now reference its content hash and journal
+while preserving full facts in the original observations. Explicitly safe lab
+horizon failures are reported as policy timeouts, with absent safety facts
+remaining environment failures. Forty focused checks passed, including the
+new teacher guard, timeout/health failure-packet path and mutable-driver
+regression, plus shell syntax. The teacher guard has unit evidence; its live
+probe remained blocked, and no follow-up live run was started during wind-down.
+
+Required next lifecycle: deploy the health mod to the stopped fleet and matching
+GUI, then launch new frozen consumers. Worker 05 already has the verified health
+mod; other workers retain the earlier joint-sustain mod. First rerun the teacher
+guard and failure path, then resume bounded three-level training. Seeded fault
+training and upgrades, finite economy, endurance and the matched deterministic
+promotion benchmark remain outstanding.

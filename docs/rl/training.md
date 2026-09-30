@@ -185,6 +185,22 @@ restart the stopped fleet plus its consumers before collecting the next
 health-aware training cohort. The bounded run frozen at `2db0ee6` continues
 with its earlier observation contract and must finish before fleet deployment.
 
+### Verified training continuations and driver isolation
+
+Before a features continuation labels a new seed block, the round driver
+measures that continuation and rollout under matched conditions on that block.
+`tools/laya_teacher_gate.py` retains the candidate only without completion or
+mean-cost regression. A verified reference can bootstrap a regressed teacher;
+runtime/safety/evidence errors and an all-failed pair block the round. This is
+training orchestration, never a live model fallback or production promotion.
+
+The outer Bash driver now re-execs from the same immutable committed checkout
+as its tools, protecting a running job from edits to unread shell text.
+`LAYA_CASE_PREFIXES="ov new-run"` explicitly imports prior cases into a named
+experiment; round-window filtering applies to both prefixes. Safe lab horizon
+failures remain policy timeouts. Failure packets hash/reference deep factory
+health while the full observation remains in the append-only journal.
+
 ### Restoration choices
 
 The connected-workflow toolkit can offer `repair.<variant>` for a previously
