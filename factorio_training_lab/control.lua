@@ -33,3 +33,10 @@ script.on_event(defines.events.on_player_joined_game, function(event)
   local player = game.get_player(event.player_index)
   if player then world.reveal_active_episodes(player) end
 end)
+
+-- Read-only observer access for the Laya Coach window in the companion mod.
+remote.add_interface("factorio_training_lab", {
+  active_worlds = world.active_worlds,
+  view_world = world.view_world,
+  leave_world = world.leave_world,
+})

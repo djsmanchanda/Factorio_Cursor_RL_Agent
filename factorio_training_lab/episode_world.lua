@@ -580,6 +580,48 @@ local function focus_observer(payload)
   }
 end
 
+-- Observer access for other mods' GUIs (the Laya Coach window): list the active
+-- training worlds and step a player onto one as a spectator, or back. Viewing never
+-- changes an episode; recycling evacuates viewers to the observatory.
+local function active_worlds()
+  local list = {}
+  for _, episode in pairs(shared.ensure_storage().episodes) do
+    if (episode.status == "ready" or episode.status == "running") and game.surfaces[episode.surface_name] then
+      local scenario = episode.scenario
+      list[#list + 1] = {
+        surface = episode.surface_name, episode_id = episode.episode_id, status = episode.status,
+        family = scenario.family, level = (scenario.curriculum or {}).level, seed = scenario.seed,
+      }
+    end
+  end
+  table.sort(list, function(a, b) return a.surface < b.surface end)
+  return list
+end
+
+local function view_world(player_index, surface_name)
+  local player = game.get_player(player_index)
+  if not player then return { ok = false, message = "unknown player" } end
+  local episode
+  for _, item in pairs(shared.ensure_storage().episodes) do
+    if item.surface_name == surface_name then episode = item break end
+  end
+  local surface = episode and game.surfaces[episode.surface_name]
+  if not surface then return { ok = false, message = "training world is no longer active" } end
+  local bounds = episode.scenario.environment.bounds
+  player.set_controller({ type = defines.controllers.spectator })
+  chart_episode(player, surface, bounds)
+  local center = { x = (bounds.x_min + bounds.x_max_exclusive) / 2, y = (bounds.y_min + bounds.y_max_exclusive) / 2 }
+  if not player.teleport(center, surface) then return { ok = false, message = "unable to enter " .. surface_name } end
+  return { ok = true, message = "Viewing " .. surface_name }
+end
+
+local function leave_world(player_index)
+  local player = game.get_player(player_index)
+  if not player then return { ok = false, message = "unknown player" } end
+  player.teleport({ x = 0, y = 0 }, observatory_surface())
+  return { ok = true, message = "Back in the observatory" }
+end
+
 local function focus_command(command)
   local ok, result = pcall(function()
     return focus_observer(shared.parse_command(command))
@@ -636,6 +678,9 @@ return {
   fill_visible_floor = fill_visible_floor,
   focus_observer = focus_observer,
   reveal_active_episodes = reveal_active_episodes,
+  active_worlds = active_worlds,
+  view_world = view_world,
+  leave_world = leave_world,
   register_commands = register_commands,
   view_episode = view_episode,
   ensure_names_available = ensure_names_available

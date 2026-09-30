@@ -174,7 +174,26 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--policy", choices=("laya", "rollout", "random", "features"), default="laya",
                         help="laya uses --checkpoint; rollout/random/features are baselines on the same seeds")
     result.add_argument("--features-model", type=Path, help="JSON model from training/laya_feature_baseline.py")
+    result.add_argument("--observe", action="store_true",
+                        help="Spectator-focus a connected Factorio player on each episode (demo runs: --slots 1, not --stepped)")
+    result.add_argument("--observer-name", default="", help="Player to focus; defaults to any connected player")
+    result.add_argument("--observe-pause", type=float, default=5.0, help="Seconds to wait after focusing, before the first decision")
     return result
+
+
+def observer_hook(slot, password, args):
+    """Viewing is optional and never changes the trajectory; the runner journals failures."""
+    if not args.observe:
+        return None
+    from training.observer_control import TrainingSurfaceViewer
+    viewer = TrainingSurfaceViewer({slot.worker_id: slot}, password, args.observer_name)
+
+    def on_provisioned(episode_id: str) -> dict[str, str]:
+        focused = viewer.focus(slot.worker_id, episode_id)
+        print(f"observer: {focused['observer_name']} viewing {focused['surface']}", flush=True)
+        time.sleep(max(0.0, args.observe_pause))
+        return focused
+    return on_provisioned
 
 
 def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args, password) -> dict:
@@ -191,6 +210,7 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
                 game_speed=args.game_speed, stepped=args.stepped,
             ),
             model_ref=model_ref, knowledge_context=knowledge, exploration=gate,
+            on_provisioned=observer_hook(slot, password, args),
         ).run()
     except Exception as error:  # One episode's failure must not stop the batch.
         result = {"status": "error", "run_id": run_id, "error": f"{type(error).__name__}: {error}"[:400]}
@@ -227,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
         parser().error(str(error))
     if not 1 <= args.episodes <= 10_000 or not 0.1 <= args.game_speed <= 64:
         parser().error("episodes must be 1..10000 and game speed 0.1..64")
+    if args.observe and (args.stepped or args.slots != 1 or len(args.instance) != 1):
+        parser().error("--observe is for demo runs: one --instance, --slots 1, and not --stepped")
     if args.stepped and args.slots != 1:
         parser().error("--stepped pauses the whole instance clock; each instance needs exactly --slots 1")
     generate = _generator(args.family)

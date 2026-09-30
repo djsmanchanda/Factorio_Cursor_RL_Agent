@@ -19,6 +19,7 @@ require("science_telemetry")
 require("logistic_inventory")
 require("live_execution")
 require("spidertron_builder")
+local laya_coach = require("laya_coach")
 
 script.on_event(defines.events.on_robot_built_entity, function(event)
   -- Factorio 2.0: event field renamed from created_entity to entity.
@@ -47,8 +48,10 @@ end)
 
 script.on_init(function()
   shared.ensure_storage()
+  laya_coach.on_init()
 end)
 
 script.on_configuration_changed(function()
   shared.ensure_storage()
+  laya_coach.on_configuration_changed()
 end)
