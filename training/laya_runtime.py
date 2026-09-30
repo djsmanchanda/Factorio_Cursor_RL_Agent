@@ -418,6 +418,7 @@ def laya_profile_from_env(**overrides: Any) -> Laya4060Config:
         "head_max_len": _env_int("LAYA_HEAD_MAX_LEN", 256),
         "micro_batch": _env_int("LAYA_MICRO_BATCH", 1),
         "gradient_accumulation": _env_int("LAYA_GRADIENT_ACCUMULATION", 32),
+        "epochs": _env_int("LAYA_EPOCHS", 4),
         "gradient_checkpointing": _env_flag("LAYA_GRADIENT_CHECKPOINTING", True) or long_context,
         "torch_compile": _env_flag("LAYA_TORCH_COMPILE", False),
         "attention_implementation": os.environ.get(

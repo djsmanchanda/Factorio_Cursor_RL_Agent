@@ -13,6 +13,10 @@
 # LAYA_L1_SEED / LAYA_L2_SEED / LAYA_L3_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
 # rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1,
 # LAYA_FINETUNE_TIMEOUT (default 150m; raise it when the GPU is power-capped).
+# Bounded experiments: LAYA_MAX_ROUNDS caps new rounds (0 = time budget only),
+# LAYA_FINETUNE_EVERY controls cadence (0 = disabled), LAYA_FINETUNE_FINAL=1
+# trains after the rounds, and LAYA_REFERENCE_CHECKPOINT evaluates a frozen
+# reference adapter before training. LAYA_EPOCHS sets the fine-tune epoch count.
 #
 # Concurrent/named runs: LAYA_RUN_NAME (default "overnight") selects the run directory
 # data/laya-pi/$LAYA_RUN_NAME and its summary.log; LAYA_PREFIX (default "ov") namespaces every
@@ -38,6 +42,10 @@ export LAYA_PROCS=${LAYA_PROCS:-3} LAYA_SPEED=${LAYA_SPEED:-32}
 WORKERS=($LAYA_INSTANCES)
 SEEDS_PER_ROUND=${LAYA_SEEDS_PER_ROUND:-36}
 LEVELS=(${LAYA_LEVELS:-2 1 3})
+MAX_ROUNDS=${LAYA_MAX_ROUNDS:-0}; FINETUNE_EVERY=${LAYA_FINETUNE_EVERY:-2}
+for value in "$MAX_ROUNDS" "$FINETUNE_EVERY"; do
+  [[ "$value" =~ ^[0-9]+$ ]] || { echo "round controls must be nonnegative integers"; exit 2; }
+done
 (( ${#LEVELS[@]} > 0 )) || { echo "LAYA_LEVELS must not be empty"; exit 2; }
 for level in "${LEVELS[@]}"; do
   case "$level" in 1|2|3) ;; *) echo "unsupported workflow level: $level"; exit 2 ;; esac
@@ -128,17 +136,28 @@ for level in "${LEVELS[@]}"; do
   [[ -f "$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl" ]] || evaluate "$PREFIX-eval-rollout-v4-L$level" "$level" --policy rollout
 done
 latest=${LAYA_START_POLICY:-rollout}
+if [[ -n "${LAYA_REFERENCE_CHECKPOINT:-}" ]]; then
+  for level in "${LEVELS[@]}"; do
+    evaluate "$PREFIX-eval-laya-${LAYA_REFERENCE_TAG:-reference}-L$level" "$level" --policy laya --epsilon 0 --checkpoint "$LAYA_REFERENCE_CHECKPOINT"
+  done
+fi
 [[ -n "${LAYA_FINETUNE_FIRST:-}" ]] && laya_finetune "r${LAYA_RESUME_ROUND:-0}-min${LAYA_MIN_CASE_ROUND:-1}"
 
 # 1..N. Rounds until the deadline leaves too little time for another one, or a graceful stop is requested.
 round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}
 l3_seed=${LAYA_L3_SEED:-8101}; round_seconds=3600
+rounds_started=0
 while (( $(remaining) > round_seconds + 600 )); do
+  if (( MAX_ROUNDS > 0 && rounds_started >= MAX_ROUNDS )); then
+    log "round limit reached: $MAX_ROUNDS new rounds"
+    break
+  fi
   if [[ -f "$STOP_FILE" ]]; then
     log "stop requested; finishing after round $round"
     break
   fi
   round=$((round + 1))
+  rounds_started=$((rounds_started + 1))
   level=${LEVELS[$(( (round - 1) % ${#LEVELS[@]} ))]}
   case "$level" in
     1) seed=$l1_seed; l1_seed=$((l1_seed + SEEDS_PER_ROUND)) ;;
@@ -178,9 +197,13 @@ PY
   # Measured round time sets the stopping margin.
   round_seconds=$(( $(date +%s) - started ))
   log "$name: done in $((round_seconds / 60)) min, $(( $(remaining) / 60 )) min left"
-  if (( round % 2 == 0 && $(remaining) > 5400 )); then laya_finetune "r$round"; fi
+  if (( FINETUNE_EVERY > 0 && round % FINETUNE_EVERY == 0 && $(remaining) > 5400 )); then laya_finetune "r$round"; fi
   heal_workers
 done
+
+if [[ "${LAYA_FINETUNE_FINAL:-0}" == 1 && ! -f "$STOP_FILE" ]] && (( rounds_started > 0 && $(remaining) > 600 )); then
+  laya_finetune "r$round-final"
+fi
 
 # Final: the latest features policy on every enabled level, then shut down.
 if [[ "$latest" != rollout ]]; then

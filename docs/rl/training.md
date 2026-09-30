@@ -159,6 +159,18 @@ recorded separately.
 
 ### Resumable local fine-tuning
 
+For a bounded curriculum experiment, set `LAYA_MAX_ROUNDS=3` to cap the
+number of new rounds in addition to the driver's time budget. Set
+`LAYA_FINETUNE_EVERY=0 LAYA_FINETUNE_FINAL=1 LAYA_EPOCHS=2` to perform one
+two-epoch fine-tune after those rounds rather than training mid-rotation.
+`LAYA_REFERENCE_CHECKPOINT` optionally evaluates a frozen adapter before
+training; `LAYA_REFERENCE_TAG` names its diagnostic batch. Every evaluation
+uses the same enabled levels and 32-seed development cohort. These repeatedly
+observed seeds are development diagnostics, not untouched promotion evidence.
+Existing defaults remain four epochs, fine-tuning every second round, and a
+time-limited number of rounds. The time budget stops new stages; an in-flight
+stage can finish after it, so host supervision needs a separate hard timeout.
+
 Local fine-tuning writes atomic adapter, optimizer, scheduler, scaler, and RNG
 snapshots beneath `<output-dir>/checkpoints/`. By default it saves every 250
 optimizer steps and retains the newest three snapshots. The interval and

@@ -140,3 +140,19 @@ def test_env_profile_defaults_and_overrides(monkeypatch) -> None:
     monkeypatch.setenv("LAYA_GRADIENT_CHECKPOINTING", "0")
     with pytest.raises(LayaRuntimeError, match="GRADIENT_CHECKPOINTING=1"):
         laya_profile_from_env()
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "two"])
+def test_bounded_training_epochs_reject_invalid_values(monkeypatch, value) -> None:
+    from training.laya_runtime import laya_profile_from_env
+
+    monkeypatch.setenv("LAYA_EPOCHS", value)
+    with pytest.raises(LayaRuntimeError):
+        laya_profile_from_env()
+
+
+def test_bounded_training_epochs_are_recorded(monkeypatch) -> None:
+    from training.laya_runtime import laya_profile_from_env
+
+    monkeypatch.setenv("LAYA_EPOCHS", "2")
+    assert laya_profile_from_env().epochs == 2
