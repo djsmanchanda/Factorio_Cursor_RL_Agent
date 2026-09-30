@@ -174,6 +174,41 @@ def test_derive_autoresume_from_features_files(isolated_data_dirs):
     assert derived["start_policy"] == str(out_dir / "features-t-r5.json")
 
 
+def test_autoresume_uses_logged_levels_and_retains_accepted_policy(isolated_data_dirs):
+    out_dir, _ = isolated_data_dirs
+    for n in range(1, 5):
+        (out_dir / f"features-t-r{n}.json").write_text("{}")
+    run = out_dir / "testrun"
+    run.mkdir()
+    (run / "summary.log").write_text("\n".join([
+        "[2026-09-30 12:00:00] t-r1: level 2 seeds 6001+36 continuation rollout",
+        "[2026-09-30 13:00:00] t-r2: level 1 seeds 5101+36 continuation rollout",
+        "[2026-09-30 14:00:00] t-r3: level 3 seeds 8101+36 continuation rollout",
+        "[2026-09-30 15:00:00] t-r4: level 2 seeds 6037+36 continuation features-t-r3.json",
+        "[2026-09-30 16:00:00] t-r5: level 1 seeds 5137+36 continuation features-t-r3.json",
+    ]))
+    accepted = out_dir / "features-t-r3.json"
+    (out_dir / "continuation-t.json").write_text(json.dumps({"policy": str(accepted), "round": 3}))
+    derived = runtime.derive_autoresume(prefix="t", out_dir=out_dir)
+    assert derived["resume_round"] == 5
+    assert derived["start_policy"] == str(accepted)
+    assert (derived["l1_seed"], derived["l2_seed"], derived["l3_seed"]) == (5173, 6073, 8137)
+
+
+def test_level3_results_are_visible(isolated_data_dirs):
+    out_dir, _ = isolated_data_dirs
+    run = out_dir / "testrun"
+    run.mkdir()
+    _write_summary(run, [START_LINE, json.dumps({"batch": "t-eval-rollout-v4-L3", "seeds": 32,
+                                               "completed": 32, "median_cost_ticks": 6000}),
+                         json.dumps({"batch": "eval-t-r3-L3", "seeds": 32,
+                                     "completed": 32, "median_cost_ticks": 5900})])
+    result = runtime.build_results("testrun")
+    assert result["rollout_baseline"][3]["completed"] == 32
+    assert result["best_features"][3]["batch"] == "eval-t-r3-L3"
+    assert result["trend"][3][0]["round"] == 3
+
+
 def test_derive_autoresume_with_no_history_defaults_to_rollout(isolated_data_dirs):
     out_dir, _ = isolated_data_dirs
     derived = runtime.derive_autoresume(prefix="t", out_dir=out_dir)

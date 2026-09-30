@@ -2,7 +2,7 @@
 # Path: scripts/laya_overnight.sh
 # Purpose: Unattended stepped Laya training for a fixed number of hours, then a clean shutdown.
 #
-# Alternates connected_workflow level 1 and level 2 policy-iteration rounds on 12 one-slot
+# Rotates connected_workflow levels 2, 1, 3 on 12 one-slot
 # instances, retrains the features policy on all stepped cases each round, fine-tunes Laya every
 # second round on the same cases, evaluates everything on held-out seeds 4001-4032, and appends
 # results to data/laya-pi/<run>/summary.log. Code runs from a snapshot of HEAD so worktree
@@ -10,7 +10,7 @@
 #
 # Usage: nohup setsid scripts/laya_overnight.sh [HOURS] > data/laya-pi/overnight/driver.log 2>&1 &
 # Resume a finished run: LAYA_RESUME_ROUND=N (last completed round), LAYA_START_POLICY=<features json>,
-# LAYA_L1_SEED / LAYA_L2_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
+# LAYA_L1_SEED / LAYA_L2_SEED / LAYA_L3_SEED (next unused training seeds), LAYA_MIN_CASE_ROUND=K (Laya trains only on
 # rounds >= K, e.g. 3 to drop the scripted-continuation rounds), LAYA_FINETUNE_FIRST=1,
 # LAYA_FINETUNE_TIMEOUT (default 150m; raise it when the GPU is power-capped).
 #
@@ -37,6 +37,11 @@ export LAYA_INSTANCES=${LAYA_INSTANCES:-"01 02 03 04 06 07 08 09 10 11 12 13"}
 export LAYA_PROCS=${LAYA_PROCS:-3} LAYA_SPEED=${LAYA_SPEED:-32}
 WORKERS=($LAYA_INSTANCES)
 SEEDS_PER_ROUND=${LAYA_SEEDS_PER_ROUND:-36}
+LEVELS=(${LAYA_LEVELS:-2 1 3})
+(( ${#LEVELS[@]} > 0 )) || { echo "LAYA_LEVELS must not be empty"; exit 2; }
+for level in "${LEVELS[@]}"; do
+  case "$level" in 1|2|3) ;; *) echo "unsupported workflow level: $level"; exit 2 ;; esac
+done
 DEADLINE=$(( $(date +%s) + $(awk "BEGIN { print int($HOURS * 3600) }") ))
 mkdir -p "$RUN"
 rm -f "$STOP_FILE"
@@ -112,31 +117,39 @@ laya_finetune() {
     || { log "laya $tag: training failed (see $RUN/train-$tag.log)"; return; }
   log "laya $tag: trained -> $ckpt"
   local level
-  for level in 1 2; do
+  for level in "${LEVELS[@]}"; do
     evaluate "$PREFIX-eval-laya-$tag-L$level" "$level" --policy laya --epsilon 0 --checkpoint "$ckpt"
   done
 }
 
-# 0. Scripted-rollout baselines on both levels (every later evaluation compares against these).
+# 0. Scripted-rollout baselines on every enabled level.
 heal_workers
-for level in 1 2; do
+for level in "${LEVELS[@]}"; do
   [[ -f "$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl" ]] || evaluate "$PREFIX-eval-rollout-v4-L$level" "$level" --policy rollout
 done
 latest=${LAYA_START_POLICY:-rollout}
 [[ -n "${LAYA_FINETUNE_FIRST:-}" ]] && laya_finetune "r${LAYA_RESUME_ROUND:-0}-min${LAYA_MIN_CASE_ROUND:-1}"
 
 # 1..N. Rounds until the deadline leaves too little time for another one, or a graceful stop is requested.
-round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}; round_seconds=3600
+round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}
+l3_seed=${LAYA_L3_SEED:-8101}; round_seconds=3600
 while (( $(remaining) > round_seconds + 600 )); do
   if [[ -f "$STOP_FILE" ]]; then
     log "stop requested; finishing after round $round"
     break
   fi
   round=$((round + 1))
-  level=$(( round % 2 == 1 ? 2 : 1 ))
-  if (( level == 1 )); then seed=$l1_seed; l1_seed=$((l1_seed + SEEDS_PER_ROUND)); else seed=$l2_seed; l2_seed=$((l2_seed + SEEDS_PER_ROUND)); fi
+  level=${LEVELS[$(( (round - 1) % ${#LEVELS[@]} ))]}
+  case "$level" in
+    1) seed=$l1_seed; l1_seed=$((l1_seed + SEEDS_PER_ROUND)) ;;
+    2) seed=$l2_seed; l2_seed=$((l2_seed + SEEDS_PER_ROUND)) ;;
+    3) seed=$l3_seed; l3_seed=$((l3_seed + SEEDS_PER_ROUND)) ;;
+  esac
   # Rounds 1-2 label each level under the scripted rollout; later rounds iterate on the learned policy.
   cont=$latest; (( round <= 2 )) && cont=rollout
+  # A teacher trained only on earlier levels cannot label the new decision
+  # menu reliably. Bootstrap L3 explicitly until its first accepted round.
+  if (( level == 3 )) && [[ ! -f "$RUN/level3-ready" ]]; then cont=rollout; fi
   name="$PREFIX-r$round"
   heal_workers
   mapfile -t previous < <(all_cases)
@@ -147,6 +160,15 @@ while (( $(remaining) > round_seconds + 600 )); do
   if [[ -f "$OUT/features-$name.json" ]]; then
     if compare "$level" "$BATCHES/eval-$name-L$level.jsonl"; then
       latest="$OUT/features-$name.json"
+      (( level == 3 )) && touch "$RUN/level3-ready"
+      "$PY" - "$OUT/continuation-$PREFIX.json" "$latest" "$round" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+temporary = path.with_suffix('.tmp')
+temporary.write_text(json.dumps({'version': '1.0.0', 'policy': sys.argv[2], 'round': int(sys.argv[3])}) + '\n')
+temporary.replace(path)
+PY
     else
       log "$name: comparison blocked; retaining continuation $(basename "$latest")"
     fi
@@ -160,9 +182,9 @@ while (( $(remaining) > round_seconds + 600 )); do
   heal_workers
 done
 
-# Final: the latest features policy on both levels, then shut the fleet down.
+# Final: the latest features policy on every enabled level, then shut down.
 if [[ "$latest" != rollout ]]; then
-  for level in 1 2; do
+  for level in "${LEVELS[@]}"; do
     # Run ids must be unique across runs: the runner refuses to reuse a journal.
     evaluate "$PREFIX-eval-final-r$round-L$level" "$level" --policy features --features-model "$latest"
   done

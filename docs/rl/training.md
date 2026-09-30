@@ -136,10 +136,26 @@ that expansion improves **simultaneous delivered output**, check a longer
 steady-state interval for buffering artefacts, and retain earlier-level
 regression cohorts. Narrow or extend the demand range from those measurements.
 
+The September 30 deployment and capacity checks are recorded in
+`Laya_Level3_Live_Verification_2026-09-30.md`: the scripted rollout completed
+32/32 validation seeds, and paired 25-minute measurements confirmed that a
+second furnace roughly doubles average belt delivery across all four tier
+combinations. Individual short delivery windows remain bursty.
+
+New driver launches rotate levels 2, 1, 3 by default. Set `LAYA_LEVELS="2 1"`
+to retain the earlier rotation. Level 3 starts with seed 8101 and a scripted
+continuation until its first accepted features round; later rounds use the
+learned continuation. Baseline, Laya and final features evaluations cover every
+enabled level. Console resume reads explicit level/seed/count log records,
+preserves consumed partial-round seed blocks and uses the accepted continuation
+record when present. Older histories without those records retain their
+two-level fallback. No new training run is launched by this configuration change.
+
 The runner rejects level-3 completion from a lab lacking the declared joint
 measurement version. Old level-3 checkpoints/results are not promotion
 evidence for this new scenario. No fleet deployment or rotation change is
-performed by changing these repository files.
+performed merely by changing these repository files; deployment evidence is
+recorded separately.
 
 ### Resumable local fine-tuning
 

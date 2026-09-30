@@ -144,7 +144,7 @@ ROUND_START_RE = re.compile(
 )
 ROUND_DONE_RE = re.compile(
     _TS + r" (?P<prefix>[A-Za-z0-9_.-]+)-r(?P<round>\d+): done in (?P<mins>\d+) min, "
-    r"(?P<left>\d+) min left$"
+    r"(?P<left>-?\d+) min left$"
 )
 NO_FEATURES_RE = re.compile(_TS + r" (?P<prefix>[A-Za-z0-9_.-]+)-r(?P<round>\d+): no features model produced")
 FINETUNE_DATASET_RE = re.compile(_TS + r" laya (?P<tag>\S+): dataset from (?P<files>\d+) case files$")
@@ -528,14 +528,14 @@ def build_results(run_name: str | None = None) -> dict:
 
     best_features: dict[int, dict] = {}
     best_laya: dict[int, dict] = {}
-    trend: dict[int, list[dict]] = {1: [], 2: []}
+    trend: dict[int, list[dict]] = {1: [], 2: [], 3: []}
     def rank(row):
         return (float(row.get("completed", 0)) / max(1, int(row.get("seeds", 0))),
                 -float(row.get("mean_cost_ticks", row["median_cost_ticks"])))
 
     for row in rows:
         level = row.get("level")
-        if level not in (1, 2) or row.get("median_cost_ticks") is None:
+        if level not in (1, 2, 3) or row.get("median_cost_ticks") is None:
             continue
         if row["kind"] in ("features", "final-features"):
             match = re.search(r"-r(\d+)-L\d+$", str(row.get("batch", "")))
@@ -552,7 +552,7 @@ def build_results(run_name: str | None = None) -> dict:
             if row.get("status") != "blocked" and (current is None or rank(row) > rank(current)):
                 best_laya[level] = row
 
-    rollout = {row["level"]: row for row in rows if row.get("kind") == "rollout" and row.get("level") in (1, 2)}
+    rollout = {row["level"]: row for row in rows if row.get("kind") == "rollout" and row.get("level") in (1, 2, 3)}
     return {
         "run_name": run_name, "rows": rows,
         "rollout_baseline": rollout,
@@ -571,26 +571,55 @@ def derive_autoresume(
     seeds_per_round: int = DEFAULT_SEEDS_PER_ROUND,
     l1_start: int = DEFAULT_L1_SEED, l2_start: int = DEFAULT_L2_SEED,
 ) -> dict:
-    """Derive LAYA_RESUME_ROUND / LAYA_START_POLICY / LAYA_L1_SEED / LAYA_L2_SEED
-    from the features models already on disk for this prefix. Rounds are
-    36-seed blocks; odd rounds are level 2, even rounds are level 1."""
+    """Resume from consumed seed blocks and the accepted continuation.
+
+    Historical models without logs retain the original two-level fallback.
+    Logged rounds carry their level explicitly, including partial rounds.
+    """
     pattern = re.compile(rf"^features-{re.escape(prefix)}-r(\d+)\.json$")
     rounds = []
     for path in out_dir.glob(f"features-{prefix}-r*.json"):
         match = pattern.match(path.name)
         if match:
             rounds.append(int(match.group(1)))
-    if not rounds:
+    logged = []
+    for summary in out_dir.glob("*/summary.log"):
+        for line in summary.read_text(encoding="utf-8").splitlines():
+            match = ROUND_START_RE.match(line.strip())
+            if match and match.group("prefix") == prefix:
+                logged.append({key: int(match.group(key)) for key in ("round", "level", "seed", "count")})
+    if not rounds and not logged:
         return {"resume_round": 0, "start_policy": "rollout", "l1_seed": l1_start, "l2_seed": l2_start}
-    last_round = max(rounds)
+    last_round = max(rounds + [row["round"] for row in logged])
     l1_rounds = sum(1 for r in range(1, last_round + 1) if r % 2 == 0)
     l2_rounds = sum(1 for r in range(1, last_round + 1) if r % 2 == 1)
-    return {
+    result = {
         "resume_round": last_round,
-        "start_policy": str(out_dir / f"features-{prefix}-r{last_round}.json"),
+        "start_policy": str(out_dir / f"features-{prefix}-r{max(rounds)}.json") if rounds else "rollout",
         "l1_seed": l1_start + l1_rounds * seeds_per_round,
         "l2_seed": l2_start + l2_rounds * seeds_per_round,
     }
+    if logged:
+        legacy_rounds = min(row["round"] for row in logged) - 1
+        legacy_defaults = {1: l1_start + (legacy_rounds // 2) * seeds_per_round,
+                           2: l2_start + ((legacy_rounds + 1) // 2) * seeds_per_round,
+                           3: 8101}
+        for level, default in ((1, l1_start), (2, l2_start), (3, 8101)):
+            consumed = [row["seed"] + row["count"] for row in logged if row["level"] == level]
+            result[f"l{level}_seed"] = max([default, legacy_defaults[level], *consumed])
+    accepted = out_dir / f"continuation-{prefix}.json"
+    if accepted.exists():
+        try:
+            record = json.loads(accepted.read_text(encoding="utf-8"))
+            if record.get("version", "1.0.0") != "1.0.0":
+                raise ValueError("unsupported accepted-continuation version")
+            policy = Path(record["policy"])
+            if not policy.is_file():
+                raise ValueError("accepted continuation is missing")
+            result["start_policy"] = str(policy)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise OperationError(f"Invalid accepted continuation: {error}") from error
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -626,11 +655,13 @@ def build_start_env(request: StartRequest) -> dict[str, str]:
         start_policy = request.start_policy or derived["start_policy"]
         l1_seed = request.l1_seed if request.l1_seed is not None else derived["l1_seed"]
         l2_seed = request.l2_seed if request.l2_seed is not None else derived["l2_seed"]
+        l3_seed = derived.get("l3_seed", 8101)
     else:
         resume_round = request.resume_round or 0
         start_policy = request.start_policy or "rollout"
         l1_seed = request.l1_seed if request.l1_seed is not None else DEFAULT_L1_SEED
         l2_seed = request.l2_seed if request.l2_seed is not None else DEFAULT_L2_SEED
+        l3_seed = int(env.get("LAYA_L3_SEED", 8101))
     env.update({
         "LAYA_INSTANCES": " ".join(request.instances or DEFAULT_INSTANCES),
         "LAYA_PROCS": str(request.procs),
@@ -642,6 +673,7 @@ def build_start_env(request: StartRequest) -> dict[str, str]:
         "LAYA_START_POLICY": start_policy,
         "LAYA_L1_SEED": str(l1_seed),
         "LAYA_L2_SEED": str(l2_seed),
+        "LAYA_L3_SEED": str(l3_seed),
     })
     if request.min_case_round is not None:
         env["LAYA_MIN_CASE_ROUND"] = str(request.min_case_round)

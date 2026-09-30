@@ -190,7 +190,7 @@ async function refreshResults() {
     resultsState.textContent = `${(data.rows || []).length} EVALUATIONS`;
 
     bestGrid.replaceChildren();
-    [1, 2].forEach(level => {
+    [1, 2, 3].forEach(level => {
       const features = (data.best_features || {})[level];
       const laya = (data.best_laya || {})[level];
       const card = document.createElement('div');
@@ -204,6 +204,7 @@ async function refreshResults() {
     trendGrid.replaceChildren();
     renderTrend(trendGrid, 1, (data.trend || {})[1]);
     renderTrend(trendGrid, 2, (data.trend || {})[2]);
+    renderTrend(trendGrid, 3, (data.trend || {})[3]);
 
     resultsBody.replaceChildren();
     const rows = data.rows || [];

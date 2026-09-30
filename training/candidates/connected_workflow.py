@@ -132,7 +132,7 @@ _CELLS_L3 = {
         ("assembling-machine-2", (0, 5), None, "electronic-circuit"),
         ("fast-inserter", (-2, 6), "west", None),
         ("fast-inserter", (0, 7), "north", None),
-        ("small-electric-pole", (2, 3), None, None),
+        ("small-electric-pole", (-2, 4), None, None),
         ("small-electric-pole", (2, 6), None, None),
     ],
 }

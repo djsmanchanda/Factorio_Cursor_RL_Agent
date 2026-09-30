@@ -288,6 +288,19 @@ def test_two_furnaces_feed_the_same_store_and_both_product_paths():
         assert (action["entity"], action["position"]["x"], action["position"]["y"]) in reachable
 
 
+def test_every_level3_consumer_has_pole_coverage():
+    for seed in (0, 1, 3, 7, 311, 65535):
+        _, actions = _world(generate_connected_workflow_scenario(seed, level=3))
+        poles = [(a["position"], 2.5 if a["entity"] == "small-electric-pole" else 3.5)
+                 for _, a in actions if a["entity"].endswith("electric-pole")]
+        for branch, action in actions:
+            if action["entity"] not in {"fast-inserter", "electric-furnace", "assembling-machine-2"}:
+                continue
+            position = action["position"]
+            assert any(abs(position["x"] - pole["x"]) <= radius and
+                       abs(position["y"] - pole["y"]) <= radius for pole, radius in poles), (branch, action)
+
+
 def test_multi_product_objective_schema_and_semantics() -> None:
     scenario = generate_connected_workflow_scenario(3, level=3)
     validate_scenario(scenario)  # sanity: a real level-3 scenario is valid
