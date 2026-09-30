@@ -21,10 +21,11 @@ def test_round_cap_rotates_three_levels_and_stops_only_selected_workers(tmp_path
     executable(driver, (ROOT / "scripts/laya_overnight.sh").read_text())
     (repo / "training-workers-linux.json").write_text('{}')
     executable(repo / "scripts/manage_linux_training_worker.sh", '#!/bin/bash\necho "$*" >> "$LAYA_CALLS"\n')
-    executable(repo / ".venv/bin/python", '#!/bin/bash\nexit 0\n')
+    executable(repo / ".venv/bin/python", '#!/bin/bash\necho "$*" >> "$LAYA_PYTHON_CALLS"\nexit 0\n')
     executable(repo / "scripts/laya_policy_iteration_round.sh", '''#!/bin/bash
 mkdir -p "$LAYA_REPO/data/laya-pi" "$LAYA_REPO/data/laya-exploration/batches"
 echo '{}' > "$LAYA_REPO/data/laya-pi/features-$1.json"
+echo '{}' > "$LAYA_REPO/data/laya-pi/$1-cases.jsonl"
 echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
 ''')
     archive = tmp_path / "code.tar"
@@ -33,6 +34,11 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
     bin_dir = tmp_path / "bin"
     executable(bin_dir / "git", '#!/bin/bash\ncase "$3" in archive) cat "$LAYA_ARCHIVE";; rev-parse) echo frozen;; *) exit 2;; esac\n')
     calls = tmp_path / "calls"
+    python_calls = tmp_path / 'python-calls'
+    history = repo / 'data/laya-pi'
+    history.mkdir(parents=True)
+    for n in range(1,4):
+        (history / f'hist-r{n}-cases.jsonl').write_text('{}\n')
     # The frozen driver must continue even if the original file changes while
     # a round is running (Bash otherwise resumes at stale byte offsets).
     round_script = repo / 'scripts/laya_policy_iteration_round.sh'
@@ -41,6 +47,8 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
         out.add(repo / 'scripts', arcname='scripts')
     env = {k: v for k, v in os.environ.items() if not k.startswith('LAYA_')}
     env.update(PATH=f'{bin_dir}:{env["PATH"]}', LAYA_ARCHIVE=str(archive), LAYA_CALLS=str(calls),
+               LAYA_PYTHON_CALLS=str(python_calls), LAYA_CASE_PREFIXES='hist t', LAYA_CASE_WINDOW_ROUNDS='2',
+               LAYA_FINETUNE_FINAL='1',
                LAYA_RUN_NAME="bounded", LAYA_PREFIX="t", LAYA_INSTANCES="01 02", LAYA_MAX_ROUNDS="3",
                LAYA_FINETUNE_EVERY="0", LAYA_SEEDS_PER_ROUND="6")
     result = subprocess.run([str(driver), "4"], env=env, capture_output=True, text=True, timeout=15)
@@ -54,3 +62,10 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
     assert "done; training workers stopped" in summary
     stops = [line for line in calls.read_text().splitlines() if line.startswith('stop ')]
     assert stops == ['stop --worker-count 20 --only 1', 'stop --worker-count 20 --only 2']
+    commands=python_calls.read_text().splitlines()
+    dataset=next(line for line in commands if 'tools/build_laya_dataset.py' in line)
+    assert all(f'{prefix}-r{n}-cases.jsonl' in dataset for prefix in ('hist','t') for n in (2,3))
+    assert 'r1-cases.jsonl' not in dataset
+    offline=next(i for i,line in enumerate(commands) if 'tools/evaluate_laya.py' in line)
+    live=next(i for i,line in enumerate(commands) if 'eval-laya-r3-final-L' in line)
+    assert offline<live

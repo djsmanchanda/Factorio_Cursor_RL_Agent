@@ -17,6 +17,7 @@
 # LAYA_FINETUNE_EVERY controls cadence (0 = disabled), LAYA_FINETUNE_FINAL=1
 # trains after the rounds, and LAYA_REFERENCE_CHECKPOINT evaluates a frozen
 # reference adapter before training. LAYA_EPOCHS sets the fine-tune epoch count.
+# LAYA_CASE_WINDOW_ROUNDS limits Laya to recent rounds (0 = fixed minimum only).
 #
 # Concurrent/named runs: LAYA_RUN_NAME (default "overnight") selects the run directory
 # data/laya-pi/$LAYA_RUN_NAME and its summary.log; LAYA_PREFIX (default "ov") namespaces every
@@ -43,7 +44,8 @@ WORKERS=($LAYA_INSTANCES)
 SEEDS_PER_ROUND=${LAYA_SEEDS_PER_ROUND:-36}
 LEVELS=(${LAYA_LEVELS:-2 1 3})
 MAX_ROUNDS=${LAYA_MAX_ROUNDS:-0}; FINETUNE_EVERY=${LAYA_FINETUNE_EVERY:-2}
-for value in "$MAX_ROUNDS" "$FINETUNE_EVERY"; do
+CASE_WINDOW=${LAYA_CASE_WINDOW_ROUNDS:-0}
+for value in "$MAX_ROUNDS" "$FINETUNE_EVERY" "$CASE_WINDOW"; do
   [[ "$value" =~ ^[0-9]+$ ]] || { echo "round controls must be nonnegative integers"; exit 2; }
 done
 (( ${#LEVELS[@]} > 0 )) || { echo "LAYA_LEVELS must not be empty"; exit 2; }
@@ -113,10 +115,14 @@ all_cases() {
 }
 # Laya's dataset may skip early rounds whose one-step labels teach wait loops.
 laya_cases() {
-  local file n
+  local file n minimum=${LAYA_MIN_CASE_ROUND:-1}
+  local current_round=${round:-${LAYA_RESUME_ROUND:-0}}
+  if (( CASE_WINDOW > 0 && current_round - CASE_WINDOW + 1 > minimum )); then
+    minimum=$((current_round - CASE_WINDOW + 1))
+  fi
   for file in $(all_cases); do
     n=${file##*-r}; n=${n%%-*}
-    (( n >= ${LAYA_MIN_CASE_ROUND:-1} )) && echo "$file"
+    (( n >= minimum )) && echo "$file"
   done
 }
 
@@ -133,6 +139,10 @@ laya_finetune() {
     --cases "$dataset" --model-dir "$REPO/data/laya-base/typed-decisions" --output-dir "$ckpt") > "$RUN/train-$tag.log" 2>&1 \
     || { log "laya $tag: training failed (see $RUN/train-$tag.log)"; return; }
   log "laya $tag: trained -> $ckpt"
+  (cd "$LAYA_CODE" && timeout 30m "$PY" tools/evaluate_laya.py --cases "$dataset" \
+    --checkpoint "$ckpt" --base-model "$REPO/data/laya-base/typed-decisions" --split held_out \
+    --output "$ckpt/evaluation-held-out.json") > "$RUN/offline-$tag.log" 2>&1 \
+    || { log "laya $tag: offline evaluation failed; live evaluation skipped"; return; }
   local level
   for level in "${LEVELS[@]}"; do
     evaluate "$PREFIX-eval-laya-$tag-L$level" "$level" --policy laya --epsilon 0 --checkpoint "$ckpt"
@@ -186,7 +196,9 @@ while (( $(remaining) > round_seconds + 600 )); do
   LAYA_REPO="$REPO" "$LAYA_CODE/scripts/laya_policy_iteration_round.sh" "$name" "$level" "$seed" "$SEEDS_PER_ROUND" "$cont" "${previous[@]}" \
     > "$RUN/$name.log" 2>&1
   if [[ -f "$OUT/features-$name.json" ]]; then
-    if compare "$level" "$BATCHES/eval-$name-L$level.jsonl"; then
+    if compare "$level" "$BATCHES/eval-$name-L$level.jsonl" && \
+      "$PY" "$LAYA_CODE/tools/laya_teacher_gate.py" "$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl" \
+        "$BATCHES/eval-$name-L$level.jsonl" --seed-start 4001 --episodes 32 > "$RUN/$name-admission.json"; then
       latest="$OUT/features-$name.json"
       (( level == 3 )) && touch "$RUN/level3-ready"
       "$PY" - "$OUT/continuation-$PREFIX.json" "$latest" "$round" <<'PY'

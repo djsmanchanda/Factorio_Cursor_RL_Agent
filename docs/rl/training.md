@@ -232,6 +232,13 @@ two-epoch fine-tune after those rounds rather than training mid-rotation.
 training; `LAYA_REFERENCE_TAG` names its diagnostic batch. Every evaluation
 uses the same enabled levels and 32-seed development cohort. These repeatedly
 observed seeds are development diagnostics, not untouched promotion evidence.
+`LAYA_CASE_WINDOW_ROUNDS=8` advances the minimum case round before each
+fine-tune, keeping the student on the latest eight rounds across imported case
+prefixes. Every completed adapter receives offline held-out case evaluation
+before its disposable live cohort; failed offline evaluation skips that cohort.
+Features continuation admission also rejects completion/mean-cost regression
+on the matched development cohort.
+
 Existing defaults remain four epochs, fine-tuning every second round, and a
 time-limited number of rounds. The time budget stops new stages; an in-flight
 stage can finish after it, so host supervision needs a separate hard timeout.
