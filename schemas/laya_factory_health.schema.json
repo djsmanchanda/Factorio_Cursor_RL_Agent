@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "laya_factory_health.schema.json",
+  "title": "Bounded disposable factory health",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "surface", "force", "tick", "stock_scope", "phases", "sources", "resource_remaining", "construction_remaining"],
+  "properties": {
+    "version": {"const": "1.0.0"},
+    "surface": {"type": "string", "minLength": 1, "maxLength": 128},
+    "force": {"type": "string", "minLength": 1, "maxLength": 128},
+    "tick": {"type": "integer", "minimum": 0},
+    "stock_scope": {"const": "owned_inventory_and_held_items"},
+    "resource_remaining": {"$ref": "#/definitions/count"},
+    "construction_remaining": {
+      "type": "object", "maxProperties": 64,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 128},
+      "additionalProperties": {"$ref": "#/definitions/count"}
+    },
+    "phases": {
+      "type": "object", "maxProperties": 16,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 128},
+      "additionalProperties": {"$ref": "#/definitions/phase"}
+    },
+    "sources": {
+      "type": "object", "maxProperties": 16,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 128},
+      "additionalProperties": {"$ref": "#/definitions/inventory"}
+    }
+  },
+  "definitions": {
+    "count": {"type": "integer", "minimum": 0},
+    "inventory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["available", "items"],
+      "properties": {
+        "available": {"type": "boolean"},
+        "items": {
+          "type": "object", "maxProperties": 16,
+          "propertyNames": {"type": "string", "minLength": 1, "maxLength": 128},
+          "additionalProperties": {"$ref": "#/definitions/count"}
+        }
+      }
+    },
+    "phase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entities", "machines", "statuses", "power", "stock", "machine_sample_ticks", "working_sample_ticks"],
+      "properties": {
+        "entities": {"$ref": "#/definitions/count"},
+        "machines": {"$ref": "#/definitions/count"},
+        "machine_sample_ticks": {"$ref": "#/definitions/count"},
+        "working_sample_ticks": {"$ref": "#/definitions/count"},
+        "statuses": {
+          "type": "object", "additionalProperties": false,
+          "required": ["working", "starved", "blocked", "unpowered", "disabled", "idle", "other"],
+          "properties": {
+            "working": {"$ref": "#/definitions/count"}, "starved": {"$ref": "#/definitions/count"},
+            "blocked": {"$ref": "#/definitions/count"}, "unpowered": {"$ref": "#/definitions/count"},
+            "disabled": {"$ref": "#/definitions/count"}, "idle": {"$ref": "#/definitions/count"},
+            "other": {"$ref": "#/definitions/count"}
+          }
+        },
+        "power": {
+          "type": "object", "additionalProperties": false,
+          "required": ["consumers", "disconnected", "empty"],
+          "properties": {
+            "consumers": {"$ref": "#/definitions/count"}, "disconnected": {"$ref": "#/definitions/count"},
+            "empty": {"$ref": "#/definitions/count"}
+          }
+        },
+        "stock": {
+          "type": "object", "additionalProperties": false,
+          "required": ["input", "output", "buffer", "held"],
+          "properties": {
+            "input": {"$ref": "#/definitions/inventory"}, "output": {"$ref": "#/definitions/inventory"},
+            "buffer": {"$ref": "#/definitions/inventory"}, "held": {"$ref": "#/definitions/inventory"}
+          }
+        }
+      }
+    }
+  }
+}

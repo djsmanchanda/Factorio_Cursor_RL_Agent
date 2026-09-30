@@ -229,6 +229,7 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
         "stepped": args.stepped,
         # With a running clock, inference/report latency depends on game speed.
         "game_speed": args.game_speed,
+        "observation_version": "workflow-supply-v1",
     }
     result["wall_seconds"] = round(time.monotonic() - started, 1)
     journal = Path(result.get("journal", ""))
@@ -238,6 +239,8 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
         result["material_cost"] = 0.0
         for line in journal.read_text(encoding="utf-8").splitlines():
             event = json.loads(line)
+            if event.get("type") == "observation" and (event.get("observation", {}).get("metrics") or {}).get("factory_health"):
+                result["comparison_conditions"]["observation_version"] = "workflow-health-v1"
             if event.get("type") == "transaction_started" and event.get("candidate"):
                 result["material_cost"] += float((event["candidate"].get("features") or {}).get("material_cost") or 0.0)
             if event.get("type") == "termination":

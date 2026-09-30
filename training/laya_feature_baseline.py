@@ -27,7 +27,9 @@ _SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
 # circuit rate) so the policy can see a resource-contested parallel objective,
 # not just the belt-style primary one. Zero-filled when a scenario has none,
 # so the vector shape never depends on how many secondary targets exist.
-FEATURE_SET = 4
+# Set 5 adds observed cell health and WIP stock. Previous model widths remain
+# unchanged; unknown telemetry carries a presence flag instead of healthy zeros.
+FEATURE_SET = 5
 
 
 def _kind(option_id: str) -> str:
@@ -73,6 +75,24 @@ def _time_context(state: Mapping[str, Any]) -> list[float]:
     return [math.log1p(elapsed), float(waits)]
 
 
+def _health_context(state: Mapping[str, Any]) -> list[float]:
+    health = (state.get("observation_digest") or {}).get("factory_health")
+    if not health:
+        return [0.0] * 11
+    columns = health["phase_columns"]
+    totals = {name: sum(float(row[index] or 0) for row in health["phases"])
+              for index, name in enumerate(columns) if name != "sampled_working_fraction"}
+    machines = max(totals["machines"], 1.0)
+    consumers = max(totals["consumers"], 1.0)
+    stock = {role: sum(row[3] for row in health["stock"] if row[1] == role)
+             for role in ("input", "output", "buffer", "held")}
+    return [1.0, math.log1p(totals["machines"]), totals["working"] / machines,
+            totals["starved"] / machines, totals["blocked"] / machines,
+            totals["disconnected"] / consumers, totals["empty_power"] / consumers,
+            math.log1p(stock["input"]), math.log1p(stock["output"]), math.log1p(stock["buffer"]),
+            float(bool(health["unknown_stock"]))]
+
+
 def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_set: int = FEATURE_SET) -> np.ndarray:
     features = option.get("features") or {}
     option_id = str(option.get("option_id") or option.get("id"))
@@ -86,6 +106,8 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_s
         context += _time_context(state)
     if feature_set >= 4:
         context += _secondary_demand_context(state)
+    if feature_set >= 5:
+        context += _health_context(state)
     numeric = [math.log1p(max(0.0, float(features.get(name) or 0.0))) for name in _OPTION_FEATURES]
     onehot = [1.0 if kind == name else 0.0 for name in _KINDS]
     # Kind-by-context interactions let "wait" depend on how much is still open.

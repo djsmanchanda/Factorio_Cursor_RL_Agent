@@ -130,6 +130,16 @@
             "items": {"type": "object", "maxProperties": 16, "additionalProperties": {"type": "object"}}
           }
         },
+        "item_consumption": {
+          "description": "Engine consumption counters measured independently of inventory change and sink delivery.",
+          "type": "object", "additionalProperties": false,
+          "required": ["available", "items"],
+          "properties": {
+            "available": {"type": "boolean"},
+            "items": {"type": "object", "maxProperties": 16, "additionalProperties": {"type": "object"}}
+          }
+        },
+        "factory_health": {"$ref": "laya_factory_health.schema.json"},
         "requirement_progress": {
           "description": "Current per-item sustained-rate progress. Completion requires a shared interval in which every requirement meets target; closure reopens on shortfall.",
           "type": "array",

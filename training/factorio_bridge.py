@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from jsonschema import Draft7Validator
+from referencing import Registry, Resource
 
 from planners.plan_validation import actions, validate_build_plan
 from tools.rcon_client import RconClient
@@ -52,7 +53,9 @@ class FactorioTrainingBridge:
         self._command_timeout = command_timeout
         self._retain_reports = _REPORT_RETENTION
         schema_path = Path(__file__).resolve().parents[1] / "schemas" / "training_episode_report.schema.json"
-        self._report_validator = Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+        health_path = schema_path.with_name("laya_factory_health.schema.json")
+        registry = Registry().with_resource(health_path.name, Resource.from_contents(json.loads(health_path.read_text())))
+        self._report_validator = Draft7Validator(json.loads(schema_path.read_text(encoding="utf-8")), registry=registry)
 
     def close(self) -> None:
         self._rcon.close()

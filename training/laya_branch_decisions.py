@@ -10,6 +10,7 @@ from typing import Any
 from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from training.laya_work_graph import WorkGraph, project_work_graph
+from training.laya_factory_health import compact_factory_health
 
 
 class BranchDecisionError(ValueError):
@@ -69,7 +70,10 @@ def compact_workflow_digest(
         }
         for requirement in secondary_requirements
     }
-    return {"work_branches": compact_branches, "item_supply": compact_items, "secondary_targets": secondary_targets}
+    digest = {"work_branches": compact_branches, "item_supply": compact_items, "secondary_targets": secondary_targets}
+    if supply.get("factory_health") is not None:
+        digest["factory_health"] = compact_factory_health(supply["factory_health"])
+    return digest
 
 
 def prepare_serve_goal(

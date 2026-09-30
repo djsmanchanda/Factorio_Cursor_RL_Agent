@@ -3,6 +3,7 @@
 
 local shared = require("training_shared")
 local geometry = require("training_geometry")
+local workflow_health = require("workflow_health")
 
 local POWER_SOURCE_TYPES = {
   ["electric-energy-interface"] = true,
@@ -314,6 +315,7 @@ local function fail_power(episode, reason)
 end
 
 local item_production_metrics
+local item_consumption_metrics
 
 -- Every requirement an episode must sustain to complete: the legacy top-level
 -- objective fields (always requirement 1, "primary") plus any parallel
@@ -399,6 +401,7 @@ local function sample_episode(episode, tick)
     fail_safety(episode, "protected fixture is missing or changed")
     return
   end
+  workflow_health.sample(episode, surface, force, tick)
   local sample_ticks = tick - episode.last_sample_tick
   local _, forbidden, outside, overruns, _, consumers = audit_entities(
     surface, force, episode, sample_ticks
@@ -414,6 +417,7 @@ local function sample_episode(episode, tick)
       return
     end
     episode.item_production_metrics = item_production_metrics(episode, force, tick)
+    episode.item_consumption_metrics = item_consumption_metrics(episode, force, tick)
     advance_multi_requirement_sample(episode, surface, force, tick)
     return
   end
@@ -435,6 +439,7 @@ local function sample_episode(episode, tick)
     return
   end
   episode.item_production_metrics = item_production_metrics(episode, force, tick)
+  episode.item_consumption_metrics = item_consumption_metrics(episode, force, tick)
   advance_sample(episode, delivered, tick, delivered_by_sink)
 end
 
@@ -455,7 +460,8 @@ local function telemetry_item_names(episode)
   return names
 end
 
-item_production_metrics = function(episode, force, tick)
+local function item_flow_metrics(episode, force, tick, method, prefix)
+  local sample_key, tick_key, cache_key = prefix .. "_samples", prefix .. "_last_tick", prefix .. "_metrics"
   local metrics = { available = false, items = {} }
   local ok, statistics = pcall(function()
     return force.get_item_production_statistics(game.surfaces[episode.surface_name])
@@ -463,24 +469,24 @@ item_production_metrics = function(episode, force, tick)
   if not ok or not statistics then
     for _, item in ipairs(telemetry_item_names(episode)) do
       metrics.items[item] = { available = false }
-      episode.item_production_samples = episode.item_production_samples or {}
-      episode.item_production_samples[item] = { gap = true, last_tick = tick, samples = {}, sustained_ticks = 0 }
+      episode[sample_key] = episode[sample_key] or {}
+      episode[sample_key][item] = { gap = true, last_tick = tick, samples = {}, sustained_ticks = 0 }
     end
-    episode.item_production_last_tick = tick
+    episode[tick_key] = tick
     return metrics
   end
 
-  episode.item_production_samples = episode.item_production_samples or {}
-  local last_tick = episode.item_production_last_tick or episode.started_tick or tick
-  if tick <= last_tick and episode.item_production_metrics then
-    return episode.item_production_metrics
+  episode[sample_key] = episode[sample_key] or {}
+  local last_tick = episode[tick_key] or episode.started_tick or tick
+  if tick <= last_tick and episode[cache_key] then
+    return episode[cache_key]
   end
   local next_last_tick = tick
   for _, item in ipairs(telemetry_item_names(episode)) do
-    local count_ok, cumulative = pcall(function() return statistics.get_input_count(item) end)
+    local count_ok, cumulative = pcall(function() return statistics[method](item) end)
     if count_ok and type(cumulative) == "number" and cumulative >= 0
         and cumulative < math.huge then
-      local previous = episode.item_production_samples[item]
+      local previous = episode[sample_key][item]
       local sample_ticks = tick - (previous and previous.last_tick or last_tick)
       local delta = previous and previous.gap and 0
         or previous and cumulative - previous.cumulative or cumulative
@@ -498,12 +504,12 @@ item_production_metrics = function(episode, force, tick)
           sustained_ticks = rate > 0 and not (previous and previous.gap)
             and (sustained_ticks + sample_ticks) or 0
         end
-        episode.item_production_samples[item] = {
+        episode[sample_key][item] = {
           cumulative = cumulative, samples = samples, sustained_ticks = sustained_ticks,
           last_tick = tick
         }
         metrics.items[item] = {
-          available = true,
+          available = true, window_end_tick = tick,
           cumulative_items = cumulative,
           sample_items = delta,
           sample_ticks = previous and previous.gap and 0 or sample_ticks,
@@ -515,23 +521,30 @@ item_production_metrics = function(episode, force, tick)
         }
       else
         metrics.items[item] = { available = false }
-        episode.item_production_samples[item] = {
+        episode[sample_key][item] = {
           gap = true, last_tick = tick, samples = {}, sustained_ticks = 0
         }
       end
     else
       metrics.items[item] = { available = false }
-      episode.item_production_samples[item] = {
+      episode[sample_key][item] = {
         gap = true, last_tick = tick, samples = {}, sustained_ticks = 0
       }
     end
   end
-  episode.item_production_last_tick = next_last_tick
+  episode[tick_key] = next_last_tick
   metrics.available = next(metrics.items) ~= nil
   for _, item_metrics in pairs(metrics.items) do
     if not item_metrics.available then metrics.available = false; break end
   end
   return metrics
+end
+
+item_production_metrics = function(episode, force, tick)
+  return item_flow_metrics(episode, force, tick, "get_input_count", "item_production")
+end
+item_consumption_metrics = function(episode, force, tick)
+  return item_flow_metrics(episode, force, tick, "get_output_count", "item_consumption")
 end
 
 local function sample_all(tick)
@@ -585,6 +598,7 @@ local function observation(payload)
   local stage, stage_index, stage_count = active_stage(episode)
   local item_production = episode.item_production_metrics
     or item_production_metrics(episode, force, game.tick)
+  local remaining_resource = resource_remaining(surface, episode)
   local requirement_progress = nil
   local required_sustain_ticks = stage.sustain_ticks
   if episode.scenario.objective.requirements then
@@ -621,7 +635,7 @@ local function observation(payload)
       sample_items = episode.sample_items, rate_per_tick = episode.rate_per_tick,
       sustained_ticks = episode.sustained_ticks, stage_index = stage_index,
       stage_id = stage.id or "default", sink_rate_per_tick = episode.sink_rate_per_tick or {},
-      resource_remaining = resource_remaining(surface, episode), built_entities = counts,
+      resource_remaining = remaining_resource, built_entities = counts,
       forbidden_entities = forbidden, out_of_bounds_entities = outside,
       budget_overruns = overruns, fixtures_valid = check_fixtures(surface, force, episode),
       power_connected = powered,
@@ -640,6 +654,8 @@ local function observation(payload)
       mining_drill_blocked_ticks = efficiency.mining_drill_blocked_ticks,
       mining_drill_idle_ticks = efficiency.mining_drill_idle_ticks,
       item_production = item_production,
+      item_consumption = episode.item_consumption_metrics or item_consumption_metrics(episode, force, game.tick),
+      factory_health = workflow_health.snapshot(episode, surface, force, game.tick, telemetry_item_names(episode), electricity_role, counts, remaining_resource),
       requirement_progress = requirement_progress,
     },
     failure = { kind = episode.failure_kind, reason = episode.failure_reason }

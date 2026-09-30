@@ -8,6 +8,7 @@ from typing import Any
 from training.isolation import assert_training_identity
 from training.laya_work_graph import WorkGraph
 from training.laya_workflow_observation import WorkflowObservationError, observe_workflow
+from training.laya_factory_health import validate_factory_health
 
 
 def observe_lab_workflow(
@@ -16,9 +17,9 @@ def observe_lab_workflow(
 ) -> tuple[WorkGraph, dict[str, Any]]:
     """Use real disposable item counters, leaving unreported supply unknown.
 
-    This is a read-only bridge. The training lab does not yet report inventory,
-    construction bills, or every recipe, so those facts cannot be inferred from
-    entity counts or a historical output counter.
+    Stock in cell inventories is WIP, not evidence of transferable materials.
+    Missing counters, reachable stock, construction bills and capacity remain
+    unknown; they are never inferred from entity counts or inventory changes.
     """
     if not isinstance(lab_report, Mapping):
         raise WorkflowObservationError("training lab report must be an object")
@@ -38,6 +39,12 @@ def observe_lab_workflow(
     if not isinstance(production, Mapping) or not isinstance(production.get("items"), Mapping):
         raise WorkflowObservationError("training lab item production telemetry is unavailable")
     raw_items = production["items"]
+    consumption = metrics.get("item_consumption") or {}
+    if not isinstance(consumption, Mapping):
+        raise WorkflowObservationError("training lab consumption telemetry is invalid")
+    consumed_items = consumption.get("items", {})
+    if not isinstance(consumed_items, Mapping) or len(consumed_items) > 16:
+        raise WorkflowObservationError("training lab consumption telemetry exceeds its bound or is invalid")
     if len(raw_items) > 16:
         raise WorkflowObservationError("training lab item production telemetry exceeds its bound")
     started_tick, elapsed_ticks = lab_report.get("started_tick"), lab_report.get("elapsed_ticks")
@@ -49,9 +56,16 @@ def observe_lab_workflow(
         if not isinstance(item, str) or not isinstance(raw, Mapping):
             raise WorkflowObservationError("training lab item production entry is invalid")
         available = raw.get("available") is True
+        consumed = consumed_items.get(item, {})
+        if not isinstance(consumed, Mapping):
+            raise WorkflowObservationError("training lab consumption entry is invalid")
+        for flow in (raw, consumed):
+            end_tick = flow.get("window_end_tick")
+            if end_tick is not None and (type(end_tick) is not int or not started_tick <= end_tick <= tick):
+                raise WorkflowObservationError("training lab flow window has invalid tick provenance")
         items[item] = {
             "stock": None,
-            "draw_rate": None,
+            "draw_rate": consumed.get("window_rate_per_tick") if consumed.get("available") is True else None,
             "capacity_rate": None,
             "production_rate": raw.get("window_rate_per_tick") if available else None,
             # A productive-tick streak is not proof that the target rate held.
@@ -61,6 +75,8 @@ def observe_lab_workflow(
                 "surface": surface, "force": force, "tick": tick,
                 "source": "training_lab.item_production",
                 "available": available,
+                "production_window_end_tick": raw.get("window_end_tick"),
+                "consumption_window_end_tick": consumed.get("window_end_tick"),
             },
         }
     live = metrics.get("live_entities")
@@ -112,7 +128,13 @@ def observe_lab_workflow(
         "runtime": "disposable_training", "surface": surface, "force": force,
         "items": items, "branch_measurements": branch_measurements,
     }
-    return observe_workflow(report, branch_specs, previous_graph)
+    graph, supply = observe_workflow(report, branch_specs, previous_graph)
+    if metrics.get("factory_health") is not None:
+        try:
+            supply["factory_health"] = validate_factory_health(metrics["factory_health"], lab_report)
+        except ValueError as error:
+            raise WorkflowObservationError(str(error)) from error
+    return graph, supply
 
 
 __all__ = ["observe_lab_workflow"]

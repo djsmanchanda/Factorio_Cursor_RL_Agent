@@ -157,6 +157,34 @@ evidence for this new scenario. No fleet deployment or rotation change is
 performed merely by changing these repository files; deployment evidence is
 recorded separately.
 
+### Factory bottleneck observations
+
+`workflow-health-v1` adds phase-owned input/output/buffer/held stock, source
+inventory, machine working/starved/blocked/unpowered status counts, electrical
+connectivity and empty-energy counts, sampled working fraction, remaining
+patch resources, and remaining entity allowances. It is defined by
+`schemas/laya_factory_health.schema.json`. Unknown reads stay unknown; WIP and
+source inventories never become transferable construction stock. Sampled
+working fraction is status sampling, not an exact utilization or capacity
+measurement. Sustainable capacity remains unknown until measured.
+
+Production and consumption use independent engine counters and rolling windows;
+inventory changes and sink removals do not substitute for consumption. Each
+flow records its window end tick. The adapter validates health scope/freshness
+and bounds before the shared branch renderer feeds labels and live decisions.
+Features policy set 5 reads health with a presence mask; older checkpoints
+retain their original feature widths. New batch evidence identifies the
+observation version, so different input profiles cannot compare silently.
+
+The four-seed worker-05 probe completed 4/4; all 120 decisions fit the real
+2,048-token tokenizer (maximum 1,932), and two counterfactual prefixes exported
+health-bearing cases. Full evidence is in
+`Laya_Improvement_Execution_2026-10-01.md`. The first report-schema rejection
+is retained. Only worker 05 received this mod during verification; deploy and
+restart the stopped fleet plus its consumers before collecting the next
+health-aware training cohort. The bounded run frozen at `2db0ee6` continues
+with its earlier observation contract and must finish before fleet deployment.
+
 ### Resumable local fine-tuning
 
 For a bounded curriculum experiment, set `LAYA_MAX_ROUNDS=3` to cap the
