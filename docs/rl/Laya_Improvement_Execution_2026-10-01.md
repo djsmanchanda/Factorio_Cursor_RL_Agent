@@ -166,3 +166,51 @@ mod; other workers retain the earlier joint-sustain mod. First rerun the teacher
 guard and failure path, then resume bounded three-level training. Seeded fault
 training and upgrades, finite economy, endurance and the matched deterministic
 promotion benchmark remain outstanding.
+
+## Eight-hour overnight run started
+
+At the user's subsequent request, `overnight-20261001-health` started at
+03:51 IST under `laya-overnight-20261001-health.service`, frozen at `67d84a4`.
+Its host limit is eight hours, deadline **11:51 IST on October 1**, with scoped
+worker cleanup on completion, error or timeout. A six-hour collection/iteration
+budget reserves up to two hours for remaining training/evaluation. A slow
+in-flight stage can still be interrupted at the host deadline; its journals
+and periodic training checkpoints are retained, without promotion credit.
+
+Configuration:
+
+- Twelve workers: 01–04, 06–13, one stepped slot each, speed 32, three labellers.
+- Twenty-four seeds per round; resume round 35, so the next levels are L3/L2/L1.
+- Next banks: L1 5683, L2 6619, L3 8109. Prefix `nh01` imports `ov` history.
+- r35 features is the initial continuation; L3 bootstraps with rollout until
+  its first accepted features cohort. Every later features teacher is checked
+  on its new seed block before labelling.
+- Laya trains on the latest eight rounds, minimum round 29, for two epochs;
+  fine-tuning every third round and a final pass when time permits. Training
+  timeout is 120 minutes with periodic checkpoints.
+- Fresh scripted and r26-min19 diagnostic cohorts on all three levels. Each
+  completed new adapter receives offline held-out case evaluation before
+  disposable live evaluation on development seeds 4001–4032.
+
+Preflight verified the formerly failing teacher/failure path: rollout and r35
+features both completed 2/4 on seeds 6613–6616, with two correctly attributed
+policy timeouts each, zero tool/safety errors; features mean 23,397 versus
+25,658.5, admitted by the teacher gate. Two high-demand seeds remain unsolved
+by this fixture/reference; they are not converted into positive failed waits.
+Dataset preflight retained 928 cases, including 708 train, 71 calibration and
+88 held-out, and excluded 1,646 obsolete costs-only cases.
+
+Deployed both mods to workers 01–14 and GUI, retaining the installed shared
+trash-requester hash `f4c2178ded05`. All 14 copies match the deployment snapshot.
+The unoccupied demo worker was reloaded and returned fresh health/joint-output
+evidence; it remains separate and running. The training workers reloaded at
+launch and their baseline journals expose the health observation profile.
+Fresh baselines completed L1 32/32, L2 28/32, L3 32/32, zero tool/safety errors.
+The active outer driver path was verified under the immutable run checkout.
+
+Evidence/configuration: `data/laya-overnight-preflight/` and
+`data/laya-pi/overnight-20261001-health/experiment.json`, logs, datasets and
+admission records. Console: http://127.0.0.1:9138/. Reopen an old Factorio GUI
+session before joining the updated workers. No chained successor run or
+real-base promotion is scheduled; the repeated development seeds cannot
+establish untouched promotion evidence.
