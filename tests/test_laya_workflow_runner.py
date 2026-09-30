@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from tests.test_laya_runner import LARGE_BUDGET, MODEL_ONLY_REF, Predictor
 from training.laya_exploration import ExplorationDirector, ExplorationGate
@@ -124,3 +125,31 @@ def test_live_entity_counts_enter_supply_only_for_counted_branches() -> None:
     graph, supply = observe_lab_workflow(report, branch_specs(scenario))
     assert set(supply["items"]) == {"iron-plate", "iron-gear-wheel", "transport-belt", "medium-electric-pole"}
     assert "construction" in {branch.branch_id for branch in graph.branches if branch.status == "closed"}
+
+
+@pytest.mark.parametrize("version,expected", [(None, "failed"), ("joint-sustain-v2", "completed")])
+def test_level3_refuses_legacy_completion_evidence(tmp_path, version, expected):
+    scenario = generate_connected_workflow_scenario(3, level=3)
+
+    class CompletedBridge(WorkflowBridge):
+        def observe(self, episode):
+            report = super().observe(episode)
+            report["status"] = "completed"
+            if version is not None:
+                report["metrics"]["multi_requirement_version"] = version
+            return report
+
+    bridge = CompletedBridge(scenario)
+    gate = ExplorationGate(seed=3, epsilon=0)
+    result = LayaPrimaryRunner(
+        bridge, scenario, ExplorationDirector(Predictor(lambda kind, ids, state: ids[0]), gate,
+                                             budget_profile=LARGE_BUDGET),
+        LayaRunnerConfig(worker_id="test", run_id="version-test", evidence_dir=tmp_path),
+        model_ref=MODEL_ONLY_REF, exploration=gate,
+    ).run()
+    assert result["status"] == expected
+    assert bridge.recycled == 1
+    if version is None:
+        events = [json.loads(line) for line in open(result["journal"])]
+        terminal = next(event for event in events if event["type"] == "termination")
+        assert "deploy before running" in terminal["reason"]

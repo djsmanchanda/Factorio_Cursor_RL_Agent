@@ -117,6 +117,24 @@ def test_lab_bridge_requires_scoped_current_telemetry() -> None:
         observe_lab_workflow(report, BRANCHES)
 
 
+def test_phase_owned_completion_never_uses_total_furnace_count():
+    spec = {"branch_id": "iron2", "parent_goal_id": "goal.expand", "item": "electric-furnace",
+            "metric": "built_count", "target_minimum": 1, "measurement_scope": "connected_workflow.iron2"}
+    report = _report()
+    report["metrics"]["live_entities"] = {"electric-furnace": 3}
+    graph, _ = observe_lab_workflow(report, [spec])
+    assert graph.branches[0].status == "open"  # Old mod: owned evidence is unknown.
+    report["metrics"]["live_entities_by_phase"] = {"connected_workflow.copper": {"electric-furnace": 1}}
+    graph, _ = observe_lab_workflow(report, [spec])
+    assert graph.branches[0].status == "open"
+    report["metrics"]["live_entities_by_phase"]["connected_workflow.iron2"] = {"electric-furnace": 1}
+    graph, _ = observe_lab_workflow(report, [spec])
+    assert graph.branches[0].status == "closed"
+    report["metrics"]["live_entities_by_phase"]["connected_workflow.iron2"] = {}
+    graph, _ = observe_lab_workflow(report, [spec], graph)
+    assert graph.branches[0].status == "open"
+
+
 def test_report_inspector_exposes_current_branch_evidence(tmp_path, capsys) -> None:
     report_path, branches_path = tmp_path / "report.json", tmp_path / "branches.json"
     report_path.write_text(json.dumps(_report()), encoding="utf-8")

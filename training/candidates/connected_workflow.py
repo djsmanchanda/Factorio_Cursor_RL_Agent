@@ -62,16 +62,9 @@ _CELLS_L2_EXTRA = {
     ],
 }
 
-# Level 3 (second product) only: a copper -> cable -> circuits chain built in
-# space free of every other branch (verified offline, see
-# tests/test_connected_workflow_level3.py), plus a dedicated furnace1 tap so
-# the circuit assembler gets iron-plate without competing geometrically with
-# gears/belts for P's own inserters.
-#   ore-source-copper -> copper furnace -> copper-plate chest U
-#   U -> cable assembler (copper-cable) -> cable chest S
-#   furnace1 (south tap) -> iron-plate chest P2 --\
-#   S -----------------------------------------------> circuit assembler -> circuit-sink
-_CELLS_L3_EXTRA = {
+# Copper and cable form the independent upstream half of level 3. Local
+# relays let copper run before the shared iron service has been built.
+_COPPER_CELLS_L3 = {
     "copper": [
         ("fast-inserter", (-14, 6), "west", None),   # ore-source-copper -> furnace
         ("electric-furnace", (-12, 6), None, None),
@@ -79,13 +72,11 @@ _CELLS_L3_EXTRA = {
         ("iron-chest", (-9, 6), None, None),
         ("small-electric-pole", (-14, 5), None, None),
         ("small-electric-pole", (-10, 5), None, None),
-        # Copper has no prerequisite branch, so it can be the very first thing
-        # built (measured live: it was). Its own furnace/inserters are too far
-        # from the power source for its two local poles alone, so these two
-        # relay poles bridge back on their own -- copper never depends on
-        # iron/cable/circuits existing first to stay powered.
-        ("small-electric-pole", (-4, 1), None, None),
+        # Copper can be chosen first. Its relay poles reach the source without
+        # relying on another branch to provide power infrastructure.
+        ("small-electric-pole", (-4, 3), None, None),
         ("small-electric-pole", (-10, 4), None, None),
+        ("small-electric-pole", (1, -1), None, None),
     ],
     "cable": [
         ("fast-inserter", (-8, 6), "west", None),    # U -> cable assembler
@@ -94,16 +85,55 @@ _CELLS_L3_EXTRA = {
         ("iron-chest", (-3, 6), None, None),
         ("small-electric-pole", (-6, 4), None, None),
     ],
+}
+
+# Level 3 has two furnaces feeding one plate store. North serves gears/belts;
+# south serves circuits. Expansion changes shared supply rather than one sink.
+_CELLS_L3 = {
+    "iron": [
+        ("fast-inserter", (-5, 0), "west", None),
+        ("electric-furnace", (-3, 0), None, None),
+        ("fast-inserter", (-1, 0), "west", None),
+        ("iron-chest", (0, 0), None, None),
+        ("fast-inserter", (0, -1), "south", None),
+        ("iron-chest", (0, -2), None, None),
+        ("fast-inserter", (0, 1), "north", None),
+        ("iron-chest", (0, 2), None, None),
+        ("small-electric-pole", (-5, -1), None, None),
+        ("small-electric-pole", (-1, -1), None, None),
+    ],
+    "iron2": [
+        ("fast-inserter", (5, 0), "east", None),
+        ("electric-furnace", (3, 0), None, None),
+        ("fast-inserter", (1, 0), "east", None),
+        ("small-electric-pole", (5, -1), None, None),
+        ("small-electric-pole", (2, 2), None, None),
+    ],
+    "gears": [
+        ("fast-inserter", (0, -3), "south", None),
+        ("assembling-machine-2", (0, -5), None, "iron-gear-wheel"),
+        ("fast-inserter", (-2, -6), "east", None),
+        ("iron-chest", (-3, -6), None, None),
+        ("small-electric-pole", (2, -4), None, None),
+        ("small-electric-pole", (-2, -7), None, None),
+    ],
+    "belts": [
+        ("fast-inserter", (-1, -2), "east", None),
+        ("fast-inserter", (-3, -5), "north", None),
+        ("assembling-machine-2", (-3, -3), None, "transport-belt"),
+        ("fast-inserter", (-5, -3), "east", None),
+        ("small-electric-pole", (-5, -4), None, None),
+    ],
+    "construction": [("medium-electric-pole", (4, y), None, None) for y in (-5, -12, -19, -26)],
+    "copper": _COPPER_CELLS_L3["copper"],
+    "cable": _COPPER_CELLS_L3["cable"],
     "circuits": [
-        ("fast-inserter", (0, 2), "north", None),    # furnace1 -> iron-plate chest P2
-        ("iron-chest", (0, 3), None, None),
-        ("fast-inserter", (-1, 3), "east", None),    # P2 -> circuit assembler (east side)
-        ("assembling-machine-2", (-3, 3), None, "electronic-circuit"),
-        ("fast-inserter", (-3, 5), "south", None),   # cable chest S -> circuit assembler (south side)
-        ("fast-inserter", (-5, 3), "east", None),    # circuit assembler -> circuit-sink (west side)
-        ("small-electric-pole", (-3, 1), None, None),
-        ("small-electric-pole", (1, 2), None, None),
-        ("small-electric-pole", (-4, 5), None, None),
+        ("fast-inserter", (0, 3), "north", None),
+        ("assembling-machine-2", (0, 5), None, "electronic-circuit"),
+        ("fast-inserter", (-2, 6), "west", None),
+        ("fast-inserter", (0, 7), "north", None),
+        ("small-electric-pole", (2, 3), None, None),
+        ("small-electric-pole", (2, 6), None, None),
     ],
 }
 
@@ -114,7 +144,7 @@ def _cells_for(scenario: dict) -> dict:
     """The cell set for this scenario's curriculum level; level 1 is untouched."""
     level = int((scenario.get("curriculum") or {}).get("level", 1))
     if level >= 3:
-        return {**_CELLS_L1, **_CELLS_L2_EXTRA, **_CELLS_L3_EXTRA}
+        return _CELLS_L3
     return {**_CELLS_L1, **_CELLS_L2_EXTRA} if level >= 2 else _CELLS_L1
 
 # Variants keep the verified geometry and swap machine/inserter tiers: a real
@@ -167,17 +197,11 @@ def branch_specs(scenario: dict) -> tuple[dict, ...]:
             "metric": "built_count", "target_minimum": 2, "requires": ["iron"],
         })
     elif level >= 3:
-        # Level 3 also has a "copper" branch that builds its own
-        # electric-furnace, so a raw count of 2 is satisfied by iron+copper
-        # alone -- measured live: iron2 showed "closed" the instant copper was
-        # built, was never actually offered again, and iron-plate stayed
-        # pinned at one furnace's ~0.6/s for the rest of the episode. Counting
-        # to 3 (iron + copper + iron2) requires iron2's own furnace to exist
-        # too; copper is a hard physical prerequisite for a completing
-        # episode anyway (circuits needs it), so this never blocks closure.
+        # Count actual entities owned by this transaction, not unrelated furnaces.
         specs.append({
             "branch_id": "iron2", "parent_goal_id": "goal.iron-scale", "item": "electric-furnace",
-            "metric": "built_count", "target_minimum": 3, "requires": ["iron"],
+            "metric": "built_count", "target_minimum": 1, "requires": ["iron"],
+            "measurement_scope": "connected_workflow.iron2",
         })
     if level >= 3:
         requirements = scenario["objective"]["requirements"]
@@ -205,7 +229,8 @@ def branch_plan(scenario: dict, branch_id: str, *, machine: str | None = "am2", 
     if inserter:
         swap["fast-inserter"] = INSERTERS[inserter][0]
     source = next(f for f in scenario["fixtures"] if f["kind"] == "item_source")["position"]
-    origin_x, origin_y = source[0] + 3, source[1]
+    offset = 6 if int(scenario["curriculum"]["level"]) >= 3 else 3
+    origin_x, origin_y = source[0] + offset, source[1]
     actions = []
     for entity, (dx, dy), direction, recipe in cells[branch_id]:
         entity = swap.get(entity, entity)

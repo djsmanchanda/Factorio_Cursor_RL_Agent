@@ -15,6 +15,7 @@ from training.candidates.connected_workflow import (
     BRANCH_IDS,
     branch_specs,
     connected_workflow_candidates,
+    branch_plan,
 )
 from training.contracts import validate_scenario
 from training.laya_branch_decisions import compact_workflow_digest, prepare_serve_goal
@@ -27,7 +28,7 @@ from training.scenarios.connected_workflow import (
     generate_connected_workflow_scenario,
 )
 
-_SIZE = {"electric-furnace": 3, "assembling-machine-2": 3}
+_SIZE = {"electric-furnace": 3, "assembling-machine-2": 3, "assembling-machine-1": 3}
 _STEP = {"east": (1, 0), "west": (-1, 0), "north": (0, -1), "south": (0, 1)}
 
 # Captured from the pre-existing generator before level-3 work began; any
@@ -56,17 +57,23 @@ def _tiles(entity: str, x: float, y: float) -> set[tuple[int, int]]:
             for dx in range(-radius, radius + 1) for dy in range(-radius, radius + 1)}
 
 
-def _world(scenario):
+def _world(scenario, *, machine="am2", inserter="fast"):
     owner = {}
     for fixture in scenario["fixtures"]:
         if fixture["entity"] == "infinity-chest":
             owner[tuple(fixture["position"])] = fixture["id"]
+        elif fixture["entity"] == "electric-energy-interface":
+            x, y = fixture["position"]
+            # Reserve the source's 2x2 footprint, not just its center.
+            for dx in (-1, 0):
+                for dy in (-1, 0):
+                    owner[(x + dx, y + dy)] = fixture["id"]
     actions = []
     first = {}
     for candidate in connected_workflow_candidates(scenario):
         first.setdefault(candidate["branch_id"], candidate)
     for candidate in first.values():
-        for action in candidate["plan"]["phases"][0]["actions"]:
+        for action in branch_plan(scenario, candidate["branch_id"], machine=machine, inserter=inserter)["phases"][0]["actions"]:
             actions.append((candidate["branch_id"], action))
             for tile in _tiles(action["entity"], action["position"]["x"], action["position"]["y"]):
                 assert tile not in owner, f"{candidate['branch_id']}:{action} overlaps {owner[tile]}"
@@ -123,12 +130,12 @@ def test_level3_ore_source_copper_fills_copper_ore() -> None:
 def test_level3_branch_plans_never_overlap_across_all_variants() -> None:
     for seed in (0, 1, 3, 7, 311, 65535):
         scenario = generate_connected_workflow_scenario(seed, level=3)
-        owner, actions = _world(scenario)
-        counts: dict[str, int] = {}
-        for _, action in actions:
-            counts[action["entity"]] = counts.get(action["entity"], 0) + 1
-        assert counts == {entity: count for entity, count in BUDGET_LEVEL3.items()
-                          if entity not in {"assembling-machine-1", "inserter"}}
+        for machine, inserter in (("am2", "fast"), ("am1", "basic"), ("am1", "fast"), ("am2", "basic")):
+            owner, actions = _world(scenario, machine=machine, inserter=inserter)
+            counts: dict[str, int] = {}
+            for _, action in actions:
+                counts[action["entity"]] = counts.get(action["entity"], 0) + 1
+            assert all(count <= BUDGET_LEVEL3[entity] for entity, count in counts.items())
 
 
 def test_copper_cable_circuits_feed_chain_directions() -> None:
@@ -153,7 +160,7 @@ def test_copper_cable_circuits_feed_chain_directions() -> None:
         ("iron-chest", "assembling-machine-2"), ("assembling-machine-2", "iron-chest"),
     ])
     assert sorted(moves_for("circuits")) == sorted([
-        ("electric-furnace", "iron-chest"), ("iron-chest", "assembling-machine-2"),
+        ("iron-chest", "assembling-machine-2"),
         ("iron-chest", "assembling-machine-2"), ("assembling-machine-2", "circuit-sink"),
     ])
 
@@ -176,13 +183,8 @@ def test_branch_gating_copper_cable_circuits() -> None:
     assert by_id["cable"]["requires"] == ["copper"]
     assert by_id["circuits"]["requires"] == ["iron", "cable"]
     assert by_id["copper"].get("requires") in (None, [])
-    # Level 2's iron2 gate (a raw electric-furnace count of 2) is unambiguous
-    # there, but level 3 also has a "copper" branch that builds its own
-    # furnace, so counting to 2 there would falsely close iron2 the instant
-    # copper exists -- measured live, before this fix, iron2 was never built
-    # and iron-plate output stayed pinned at one furnace's ~0.6/s. Level 3
-    # must count to 3 (iron + copper + iron2).
-    assert by_id["iron2"]["target_minimum"] == 3
+    assert by_id["iron2"]["target_minimum"] == 1
+    assert by_id["iron2"]["measurement_scope"] == "connected_workflow.iron2"
 
     surface, force = scenario["environment"]["surface_name"], scenario["environment"]["force_name"]
     base_report = {
@@ -221,26 +223,17 @@ def test_branch_gating_copper_cable_circuits() -> None:
     assert statuses["circuits"] == "open"
 
 
-def test_iron2_does_not_falsely_close_when_only_copper_built() -> None:
-    """Regression: measured live, iron+copper alone used to satisfy iron2's
-
-    old target_minimum=2 furnace count, closing iron2 before its own furnace
-    ever existed -- the branch then vanished from "runnable" forever (a
-    closed branch is never offered again), and iron-plate output stayed
-    pinned at one furnace's ~0.6/s for the rest of the episode.
-    """
+def test_iron2_requires_its_own_furnace_and_reopens_when_it_is_lost() -> None:
     scenario = generate_connected_workflow_scenario(3, level=3)
     specs = branch_specs(scenario)
     surface, force = scenario["environment"]["surface_name"], scenario["environment"]["force_name"]
 
-    # "iron" itself already closed (so only the furnace-count gate remains)
-    # plus iron + copper built (2 electric-furnaces total): iron2 must stay
-    # open, not closed by copper's furnace standing in for its own.
+    # Global counts never establish the existence of a named production branch.
     two_furnaces_report = {
         "runtime": "disposable_training", "surface": surface, "force": force,
         "items": {
             "iron-plate": {"production_rate": 0.4 / 60.0 + 0.001, "production_sustained_ticks": 600},
-            "electric-furnace": {"metrics": {"built_count": {"value": 2, "sustained_ticks": 0}}},
+            "electric-furnace": {"metrics": {"built_count": {"value": 30, "sustained_ticks": 0}}},
         },
     }
     graph, _ = observe_workflow(two_furnaces_report, specs)
@@ -248,12 +241,51 @@ def test_iron2_does_not_falsely_close_when_only_copper_built() -> None:
     assert statuses["iron"] == "closed"
     assert statuses["iron2"] != "closed"
 
-    # iron + copper + iron2's own furnace (3 total): now it may close.
     three_furnaces_report = copy.deepcopy(two_furnaces_report)
-    three_furnaces_report["items"]["electric-furnace"]["metrics"]["built_count"]["value"] = 3
+    three_furnaces_report["branch_measurements"] = {
+        "iron2": {"metric": "built_count", "value": 1, "sustained_ticks": 0},
+    }
     graph, _ = observe_workflow(three_furnaces_report, specs)
     statuses = {branch.branch_id: branch.status for branch in graph.branches}
     assert statuses["iron2"] == "closed"
+    three_furnaces_report["branch_measurements"]["iron2"]["value"] = 0
+    graph, _ = observe_workflow(three_furnaces_report, specs, graph)
+    assert next(b for b in graph.branches if b.branch_id == "iron2").status != "closed"
+
+
+def test_two_furnaces_feed_the_same_store_and_both_product_paths():
+    scenario = generate_connected_workflow_scenario(3, level=3)
+    _, actions = _world(scenario)
+    source = next(f for f in scenario["fixtures"] if f["id"] == "ore-source")["position"]
+    origin = (source[0] + 6, source[1])
+    nodes = {}
+    for branch, action in actions:
+        if action["entity"] == "fast-inserter":
+            continue
+        node = (action["entity"], action["position"]["x"], action["position"]["y"])
+        for tile in _tiles(*node):
+            nodes[tile] = node
+    edges = {}
+    for branch, action in actions:
+        if action["entity"] != "fast-inserter":
+            continue
+        x, y = action["position"]["x"], action["position"]["y"]
+        dx, dy = _STEP[action["direction"]]
+        pickup, drop = nodes.get((x + dx, y + dy)), nodes.get((x - dx, y - dy))
+        if pickup and drop:
+            edges.setdefault(pickup, set()).add(drop)
+    shared = ("iron-chest", *origin)
+    for dx in (-3, 3):
+        assert shared in edges[("electric-furnace", origin[0] + dx, origin[1])]
+    reachable, pending = set(), [shared]
+    while pending:
+        node = pending.pop()
+        if node not in reachable:
+            reachable.add(node)
+            pending.extend(edges.get(node, ()))
+    for branch in ("gears", "belts", "circuits"):
+        action = next(a for b, a in actions if b == branch and a["entity"] == "assembling-machine-2")
+        assert (action["entity"], action["position"]["x"], action["position"]["y"]) in reachable
 
 
 def test_multi_product_objective_schema_and_semantics() -> None:

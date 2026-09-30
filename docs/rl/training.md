@@ -110,6 +110,37 @@ snapshot-based jobs keep their old labelling/training behavior. No lab Lua
 deployment is required: launch a new driver/consumer to use the new code, then
 train and independently evaluate a new checkpoint.
 
+### Revised level-3 shared supply and joint service
+
+The revised level 3 uses `connected-workflow-l3-v2-*` scenario identities and
+the `shared-plate-supply-v2` / `joint-sustain-v2` curriculum tags. Both iron
+furnaces feed one plate chest, with separate plate feeds for gears/belts and
+circuits. The second furnace can contribute to either chain. Level-1 and
+level-2 scenario hashes and cell layouts retain their earlier contracts.
+
+The lab requires all product targets over a common sustain interval;
+previously satisfied products reopen on a current shortfall. Expansion
+completion uses actual phase-owned furnace counts through the lab adapter's
+`branch_measurements`, never a global count that copper could satisfy. Lost
+entities reopen that construction obligation. This adds completion evidence;
+repair/upgrade operations remain the next action-space milestone.
+
+Belt demand is provisionally sampled from 0.06–0.35/s and circuit demand from
+0.02–0.18/s. Recipe arithmetic motivates the range, but it does not establish
+real capacity or the distribution between the plate feeds. Geometry,
+connections, budget and measurement behavior are tested offline. Before
+adding this level to automatic rotation, deploy the lab to stopped disposable
+workers, restart affected workers/GUI and Python consumers, and run a stepped
+capacity sweep with and without expansion across basic/fast variants. Verify
+that expansion improves **simultaneous delivered output**, check a longer
+steady-state interval for buffering artefacts, and retain earlier-level
+regression cohorts. Narrow or extend the demand range from those measurements.
+
+The runner rejects level-3 completion from a lab lacking the declared joint
+measurement version. Old level-3 checkpoints/results are not promotion
+evidence for this new scenario. No fleet deployment or rotation change is
+performed by changing these repository files.
+
 ### Resumable local fine-tuning
 
 Local fine-tuning writes atomic adapter, optimizer, scheduler, scaler, and RNG

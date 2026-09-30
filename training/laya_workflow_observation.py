@@ -81,6 +81,7 @@ def observe_workflow(
     except ValueError as exc:
         raise WorkflowObservationError(str(exc)) from exc
     items = _object(report.get("items"), "report items")
+    branch_measurements = _object(report.get("branch_measurements", {}), "branch measurements")
     if not isinstance(branch_specs, Sequence) or isinstance(branch_specs, (str, bytes)):
         raise WorkflowObservationError("branch_specs must be a sequence")
 
@@ -112,12 +113,22 @@ def observe_workflow(
         )
         branches.append(branch)
         facts = items.get(item)
-        if facts is not None:
+        if spec.get("measurement_scope") is not None:
+            raw = branch_measurements.get(branch_id)
+            if raw is not None:
+                record = _object(raw, f"branch {branch_id} measurement")
+                measurements[branch_id] = CompletionMeasurement(
+                    _text(record.get("metric"), "branch measurement metric"), record.get("value"),
+                    _ticks(record.get("sustained_ticks"), "branch measurement sustained_ticks"),
+                )
+        elif facts is not None:
             measurement = _measurement(_object(facts, f"items.{item}"), metric)
             if measurement is not None:
                 measurements[branch_id] = measurement
 
     graph = WorkGraph(tuple(branches))
+    if set(branch_measurements) - {branch.branch_id for branch in branches}:
+        raise WorkflowObservationError("measurements reference unknown branches")
     if previous_graph is not None:
         old = {branch.branch_id: (branch.parent_goal_id, branch.requires) for branch in previous_graph.branches}
         new = {branch.branch_id: (branch.parent_goal_id, branch.requires) for branch in graph.branches}

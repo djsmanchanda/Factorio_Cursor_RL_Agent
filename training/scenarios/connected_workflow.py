@@ -43,49 +43,23 @@ BUDGET_LEVEL2 = {
     "inserter": BUDGET["inserter"] + 2,
     "small-electric-pole": BUDGET["small-electric-pole"] + 2,
 }
-# Level 3 (second product line): a green-circuit chain (copper ore -> copper
-# furnace -> copper-cable assembler -> circuit assembler) that also consumes
-# iron-plate, so it competes with gears/belts for the one iron furnace (with
-# the level-2 iron2 expansion still available). The circuit target stays well
-# under the copper chain's own ~0.42 circuits/s ceiling (one copper furnace at
-# 0.625 plate/s, halved by the 1:3 cable ratio) so the binding constraint is
-# always the shared iron-plate supply, not the independent copper supply.
+# Level 3: both iron furnaces feed a shared store, then separate plate taps
+# serve gears/belts and circuits. Targets straddle the nominal one-furnace
+# belt share (~0.21/s versus ~0.42/s with two), before transport losses.
+# These are curriculum bounds, not live-verified capacity claims: run a
+# stepped capacity sweep before enabling this revised level in rotation.
 _CIRCUIT_TARGET_RANGE_LEVEL3 = (0.02, 0.18)
-# Level 3's own belt range (narrower than level 2's 0.08-0.70): once circuits
-# exists it draws a roughly fixed ~0.4 iron-plate/s (copper-side-limited,
-# independent of its own configured target -- see scenario comment above),
-# on top of gears/belts' own ~1.5x iron-plate-per-belt conversion.
-#
-# IMPORTANT, measured live on 2.1.20 (worker 05, forced-rollout probes with
-# and without iron2 at fixed belt targets, verified via requirement_progress
-# and built-branch lists): the level-3 belt ceiling is ~0.20/s **with or
-# without iron2** -- 0.20/s completed and 0.24/s failed in both conditions.
-# iron2 does not currently relieve the belt bottleneck at level 3: its extra
-# furnace output feeds the gear assembler (see training/candidates/
-# connected_workflow.py's _CELLS_L2_EXTRA "iron2" cell), not the shared
-# iron-plate chest that belts and circuits both draw from, so it cannot add
-# belt throughput once circuits is also drawing from that same plate supply.
-# A real "iron2 helps belts at level 3" curriculum needs a level-3-only iron2
-# variant (or an added cell) that feeds the shared plate chest instead of the
-# gear assembler directly -- not built here; this range only needs to keep
-# episodes feasible with the existing cells. Range chosen so nearly all seeds
-# complete within max_episode_ticks under the scripted rollout.
-_BELT_TARGET_RANGE_LEVEL3 = (0.06, 0.19)
-# Adds: one copper furnace (copper), one cable assembler (cable), one circuit
-# assembler with its own furnace1 iron-plate tap (circuits) -- see
-# training/candidates/connected_workflow.py for the verified, collision-free
-# geometry and training/laya_toolkit.py-adjacent docs for the branch graph.
+_BELT_TARGET_RANGE_LEVEL3 = (0.06, 0.35)
 BUDGET_LEVEL3 = {
     **BUDGET_LEVEL2,
     "electric-furnace": BUDGET_LEVEL2["electric-furnace"] + 1,
     "assembling-machine-2": 4,
     "assembling-machine-1": 4,
-    "fast-inserter": BUDGET_LEVEL2["fast-inserter"] + 8,
-    "inserter": BUDGET_LEVEL2["inserter"] + 8,
-    "iron-chest": BUDGET_LEVEL2["iron-chest"] + 3,
-    # +6 for copper/cable/circuits' own poles, +2 for copper's power relay
-    # back to the source (see training/candidates/connected_workflow.py).
-    "small-electric-pole": BUDGET_LEVEL2["small-electric-pole"] + 8,
+    "fast-inserter": BUDGET_LEVEL2["fast-inserter"] + 9,
+    "inserter": BUDGET_LEVEL2["inserter"] + 9,
+    "iron-chest": BUDGET_LEVEL2["iron-chest"] + 4,
+    # Includes independent power reach for the copper-first choice.
+    "small-electric-pole": BUDGET_LEVEL2["small-electric-pole"] + 9,
 }
 _REWARD_WEIGHTS = {
     "completion": 10.0, "throughput": 8.0, "elapsed_tick": -0.0001,
@@ -126,15 +100,15 @@ def generate_connected_workflow_scenario(seed: int, *, level: int = 1) -> dict:
         circuit_target = round(rng.uniform(*_CIRCUIT_TARGET_RANGE_LEVEL3), 3)
         budget = dict(BUDGET_LEVEL3)
         tags = ["connected-workflow", "iron-gear-belt", "independent-construction",
-                "demand-scaling", "second-product"]
-        slug = f"connected-workflow-l3-{seed:04x}"
+                "demand-scaling", "second-product", "shared-plate-supply-v2", "joint-sustain-v2"]
+        slug = f"connected-workflow-l3-v2-{seed:04x}"
         extra_fixtures = [
             {"id": "ore-source-2", "kind": "item_source", "entity": "infinity-chest",
-             "position": [origin_x + 4, origin_y - 10], "protected": True},
+             "position": [origin_x + 6, origin_y], "protected": True},
             {"id": "ore-source-copper", "kind": "item_source", "entity": "infinity-chest",
              "fill_item": "copper-ore", "position": [origin_x - 15, origin_y + 6], "protected": True},
             {"id": "circuit-sink", "kind": "item_sink", "entity": "infinity-chest",
-             "position": [origin_x - 6, origin_y + 3], "protected": True},
+             "position": [origin_x, origin_y + 8], "protected": True},
         ]
         workflow_items = [
             "iron-plate", "iron-gear-wheel", "transport-belt",
@@ -162,11 +136,11 @@ def generate_connected_workflow_scenario(seed: int, *, level: int = 1) -> dict:
         "resource_patch": {"resource": "iron-ore", "bounds": {"x1": 20, "y1": 20, "x2": 23, "y2": 23}, "amount_per_tile": 100_000},
         "fixtures": [
             {"id": "power-source", "kind": "power_source", "entity": "electric-energy-interface",
-             "position": [origin_x + 1, origin_y - 2], "protected": True},
+             "position": [origin_x + (2 if level == 3 else 1), origin_y - 2], "protected": True},
             {"id": "ore-source", "kind": "item_source", "entity": "infinity-chest",
-             "position": [origin_x - 3, origin_y], "protected": True},
+             "position": [origin_x - (6 if level == 3 else 3), origin_y], "protected": True},
             {"id": "belt-sink", "kind": "item_sink", "entity": "infinity-chest",
-             "position": [origin_x + 7, origin_y + 3], "protected": True},
+             "position": [origin_x - 6, origin_y - 3] if level == 3 else [origin_x + 7, origin_y + 3], "protected": True},
             *extra_fixtures,
         ],
         "construction_budget": budget,

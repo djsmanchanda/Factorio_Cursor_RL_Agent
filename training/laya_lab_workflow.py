@@ -90,9 +90,27 @@ def observe_lab_workflow(
             "provenance": {"surface": surface, "force": force, "tick": tick,
                            "source": "training_lab.live_electric_poles"},
         })["metrics"] = {"built_count": {"value": pole_count, "sustained_ticks": 0}}
+    branch_measurements = {}
+    owned = metrics.get("live_entities_by_phase")
+    if owned is not None:
+        if not isinstance(owned, Mapping) or len(owned) > 16:
+            raise WorkflowObservationError("phase-owned entity telemetry exceeds its bound or is invalid")
+        for spec in branch_specs:
+            scope = spec.get("measurement_scope")
+            if scope is None:
+                continue
+            counts = owned.get(scope, {})
+            if not isinstance(counts, Mapping):
+                raise WorkflowObservationError("phase-owned entity counts are invalid")
+            count = counts.get(spec["item"], 0)
+            if type(count) is not int or count < 0:
+                raise WorkflowObservationError("phase-owned entity count is invalid")
+            branch_measurements[spec["branch_id"]] = {
+                "metric": "built_count", "value": count, "sustained_ticks": 0,
+            }
     report = {
         "runtime": "disposable_training", "surface": surface, "force": force,
-        "items": items,
+        "items": items, "branch_measurements": branch_measurements,
     }
     return observe_workflow(report, branch_specs, previous_graph)
 

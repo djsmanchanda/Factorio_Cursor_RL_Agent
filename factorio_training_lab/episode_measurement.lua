@@ -178,12 +178,14 @@ local function audit_entities(surface, force, episode, sample_ticks)
   local allowed_lookup, counts, fixture_lookup = {}, {}, fixture_units(episode)
   local live_counts = {}
   for _, name in ipairs(allowed) do allowed_lookup[name] = true end
-  local forbidden, outside, pole_count, occupied_tiles = 0, 0, 0, 0
+  local forbidden, outside, pole_count, occupied_tiles, ground_items = 0, 0, 0, 0, 0
   local placed_drills, working_drills, blocked_drills, idle_drills = 0, 0, 0, 0
   local power_consumers = {}
   for _, entity in pairs(surface.find_entities()) do
     local neutral_resource = entity.type == "resource" and entity.force.name == "neutral"
-    if not neutral_resource and not fixture_lookup[entity.unit_number] then
+    if entity.type == "item-entity" then
+      ground_items = ground_items + 1
+    elseif not neutral_resource and not fixture_lookup[entity.unit_number] then
       local name = entity.type == "entity-ghost" and entity.ghost_name or entity.name
       counts[name] = (counts[name] or 0) + 1
       if entity.force ~= force or not allowed_lookup[name] then forbidden = forbidden + 1 end
@@ -223,6 +225,7 @@ local function audit_entities(surface, force, episode, sample_ticks)
   efficiency.electric_pole_count = pole_count
   efficiency.occupied_footprint_tiles = occupied_tiles
   efficiency.live_entities = live_counts
+  efficiency.ground_item_entities = ground_items
   return counts, forbidden, outside, overruns, efficiency, power_consumers
 end
 
@@ -337,17 +340,15 @@ local function ensure_requirement_state(episode)
   return episode.requirement_state
 end
 
--- Multi-requirement objectives (level 3+): each item sustains its OWN target
--- independently and, once sustained for its own window, latches closed (like
--- a work-graph branch) so a requirement that finishes early does not have to
--- keep producing while a resource-contested sibling catches up. The episode
--- completes once every requirement is closed.
+-- Continuing services must satisfy their targets together. Losing any target
+-- resets the common acceptance interval and reopens that requirement.
 local function advance_multi_requirement_sample(episode, surface, force, tick)
   local sample_ticks = tick - episode.last_sample_tick
   if sample_ticks <= 0 then return end
   local state = ensure_requirement_state(episode)
   local requirements = requirement_list(episode)
-  local all_closed, total_delivered = true, 0
+  local all_meet_target, total_delivered = true, 0
+  local common_required_ticks = 0
   for _, requirement in ipairs(requirements) do
     local record = state[requirement.id]
     local fixture = episode.fixtures[requirement.destination_fixture_id]
@@ -360,16 +361,17 @@ local function advance_multi_requirement_sample(episode, surface, force, tick)
     total_delivered = total_delivered + count
     table.insert(record.rate_samples, { items = count, ticks = sample_ticks })
     record.rate_per_tick = window_rate(record.rate_samples)
-    if not record.closed then
-      if record.rate_per_tick + 1e-9 >= requirement.target_rate_per_tick then
-        record.sustained_ticks = record.sustained_ticks + sample_ticks
-      else
-        record.sustained_ticks = 0
-      end
-      if record.sustained_ticks >= requirement.sustain_ticks then record.closed = true end
+    if record.rate_per_tick + 1e-9 >= requirement.target_rate_per_tick then
+      record.sustained_ticks = record.sustained_ticks + sample_ticks
+    else
+      record.sustained_ticks = 0
+      all_meet_target = false
     end
-    if not record.closed then all_closed = false end
+    record.closed = record.sustained_ticks >= requirement.sustain_ticks
+    common_required_ticks = math.max(common_required_ticks, requirement.sustain_ticks)
   end
+  episode.joint_sustained_ticks = all_meet_target
+    and ((episode.joint_sustained_ticks or 0) + sample_ticks) or 0
   episode.last_sample_tick = tick
   episode.sample_ticks = sample_ticks
   episode.sample_items = total_delivered
@@ -378,9 +380,9 @@ local function advance_multi_requirement_sample(episode, surface, force, tick)
   -- callers (progress signatures, failure packets) keep reading one number.
   local primary = state[requirements[1].id]
   episode.rate_per_tick = primary.rate_per_tick
-  episode.sustained_ticks = primary.sustained_ticks
+  episode.sustained_ticks = episode.joint_sustained_ticks
   episode.status = "running"
-  if all_closed then
+  if episode.joint_sustained_ticks >= common_required_ticks then
     episode.status = "completed"
     episode.completed_tick = episode.completed_tick or tick
   elseif tick - episode.started_tick >= episode.scenario.constraints.max_episode_ticks then
@@ -550,6 +552,20 @@ local function resource_remaining(surface, episode)
   return total
 end
 
+local function live_by_phase(surface, force, episode)
+  local result = {}
+  for phase, entities in pairs(episode.phase_entities or {}) do
+    local counts = {}
+    for _, entity in pairs(entities) do
+      if entity.valid and entity.surface == surface and entity.force == force and entity.type ~= "entity-ghost" then
+        counts[entity.name] = (counts[entity.name] or 0) + 1
+      end
+    end
+    result[phase] = counts
+  end
+  return result
+end
+
 local function observation(payload)
   local episode = shared.episode_for(payload.episode_id)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
@@ -570,10 +586,12 @@ local function observation(payload)
   local item_production = episode.item_production_metrics
     or item_production_metrics(episode, force, game.tick)
   local requirement_progress = nil
-  if episode.requirement_state then
+  local required_sustain_ticks = stage.sustain_ticks
+  if episode.scenario.objective.requirements then
     requirement_progress = {}
     for _, requirement in ipairs(requirement_list(episode)) do
-      local record = episode.requirement_state[requirement.id]
+      required_sustain_ticks = math.max(required_sustain_ticks, requirement.sustain_ticks)
+      local record = (episode.requirement_state or {})[requirement.id]
       requirement_progress[#requirement_progress + 1] = {
         id = requirement.id, item = requirement.item,
         target_rate_per_tick = requirement.target_rate_per_tick,
@@ -593,7 +611,7 @@ local function observation(payload)
     objective = {
       item = episode.scenario.objective.item,
       target_rate_per_tick = stage.target_rate_per_tick,
-      sustain_ticks = stage.sustain_ticks,
+      sustain_ticks = required_sustain_ticks,
       stage_index = stage_index, stage_count = stage_count, stage_id = stage.id or "default",
       destination_fixture_ids = stage_destinations(episode, stage)
     },
@@ -609,6 +627,9 @@ local function observation(payload)
       power_connected = powered,
       electric_pole_count = efficiency.electric_pole_count,
       live_entities = efficiency.live_entities,
+      live_entities_by_phase = live_by_phase(surface, force, episode),
+      ground_item_entities = efficiency.ground_item_entities,
+      multi_requirement_version = episode.scenario.objective.requirements and "joint-sustain-v2" or nil,
       completed_ticks = episode.completed_tick and (episode.completed_tick - episode.started_tick) or nil,
       occupied_footprint_tiles = efficiency.occupied_footprint_tiles,
       placed_mining_drills = efficiency.placed_mining_drills,

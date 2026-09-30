@@ -69,11 +69,16 @@ def test_observation_report_is_schema_valid() -> None:
             "mining_drill_working_ticks": 2160,
             "mining_drill_blocked_ticks": 1440,
             "mining_drill_idle_ticks": 1440,
+            "live_entities_by_phase": {"connected_workflow.iron2": {"electric-furnace": 1}},
+            "ground_item_entities": 1,
+            "multi_requirement_version": "joint-sustain-v2",
         },
         "failure": {"kind": "none", "reason": ""},
     }
 
     assert list(_validator().iter_errors(report)) == []
+    report["metrics"]["live_entities_by_phase"]["connected_workflow.iron2"]["electric-furnace"] = -1
+    assert list(_validator().iter_errors(report))
 
 
 def test_failed_report_requires_an_error() -> None:

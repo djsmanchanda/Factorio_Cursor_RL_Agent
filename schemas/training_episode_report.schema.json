@@ -114,6 +114,14 @@
           "type": "object",
           "additionalProperties": {"type": "integer", "minimum": 0}
         },
+        "live_entities_by_phase": {
+          "description": "Actual surviving entities owned by successful plan phases; ghosts and cross-scope entities do not count.",
+          "type": "object", "maxProperties": 16,
+          "propertyNames": {"type": "string", "minLength": 1, "maxLength": 128},
+          "additionalProperties": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}}
+        },
+        "ground_item_entities": {"type": "integer", "minimum": 0},
+        "multi_requirement_version": {"const": "joint-sustain-v2"},
         "item_production": {
           "type": "object",
           "required": ["available", "items"],
@@ -123,7 +131,7 @@
           }
         },
         "requirement_progress": {
-          "description": "Multi-requirement objectives only (level 3+): per-item sustained-rate progress toward episode completion.",
+          "description": "Current per-item sustained-rate progress. Completion requires a shared interval in which every requirement meets target; closure reopens on shortfall.",
           "type": "array",
           "maxItems": 8,
           "items": {"type": "object"}

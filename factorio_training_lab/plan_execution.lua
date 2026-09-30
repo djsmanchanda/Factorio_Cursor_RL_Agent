@@ -106,7 +106,7 @@ end
 local function committed_counts(surface, force, episode)
   local counts, fixtures = {}, fixture_units(episode)
   for _, entity in pairs(surface.find_entities_filtered({ force = force })) do
-    if not fixtures[entity.unit_number] then
+    if entity.type ~= "item-entity" and not fixtures[entity.unit_number] then
       local name = entity.type == "entity-ghost" and entity.ghost_name or entity.name
       counts[name] = (counts[name] or 0) + 1
     end
@@ -116,8 +116,16 @@ end
 
 local function plan_actions(plan, episode, surface, force)
   local allowed, counts, result, new_positions = {}, committed_counts(surface, force, episode), {}, {}
+  local phases = {}
+  for name in pairs(episode.phase_entities or {}) do phases[name] = true end
   for _, entity in ipairs(episode.scenario.constraints.allowed_entities) do allowed[entity] = true end
   for _, phase in ipairs(plan.phases) do
+    local name = phase.name or "training"
+    if type(name) ~= "string" or #name == 0 or #name > 128 then error("BuildPlan phase name is invalid") end
+    phases[name] = true
+    local phase_count = 0
+    for _ in pairs(phases) do phase_count = phase_count + 1 end
+    if phase_count > 16 then error("training phase ownership exceeds its bound") end
     if type(phase.actions) ~= "table" then error("BuildPlan phase actions are invalid") end
     for _, action in ipairs(phase.actions) do
       if action.action_type ~= "place_entity" or not allowed[action.entity]
@@ -137,6 +145,17 @@ local function plan_actions(plan, episode, surface, force)
   end
   if #result == 0 then error("BuildPlan has no physical placement actions") end
   return result
+end
+
+local function record_phase_entity(episode, phase, entity)
+  if not entity or not entity.valid or not entity.unit_number then return end
+  episode.phase_entities = episode.phase_entities or {}
+  episode.phase_entities[phase] = episode.phase_entities[phase] or {}
+  -- A retry does not transfer a previously owned entity into another branch.
+  for owner, entities in pairs(episode.phase_entities) do
+    if owner ~= phase and entities[entity.unit_number] then return end
+  end
+  episode.phase_entities[phase][entity.unit_number] = entity
 end
 local function point_distance(left, right)
   local dx, dy = left.x - right.x, left.y - right.y
@@ -168,7 +187,9 @@ local function place_action(surface, force, episode, item, execution)
     if direction == nil then error("BuildPlan direction is invalid") end
   end
   execution.attempted_placements = execution.attempted_placements + 1
-  if exact_entity(surface, force, action) then
+  local existing = exact_entity(surface, force, action)
+  if existing then
+    record_phase_entity(episode, item.phase, existing)
     execution.already_present_placements = execution.already_present_placements + 1
     return
   end
@@ -177,7 +198,7 @@ local function place_action(surface, force, episode, item, execution)
   if action.recipe then details.recipe = action.recipe end
   local entity = surface.create_entity(details)
   if entity and entity.valid then
-
+    record_phase_entity(episode, item.phase, entity)
     execution.succeeded_placements = execution.succeeded_placements + 1
     connect_power_network(surface, force, episode, entity)
   else

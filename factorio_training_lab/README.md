@@ -56,3 +56,27 @@ its declared input, the resource patch, and up to 13 optional
 `objective.workflow_items`. Counts and 600-tick-window rates come from the
 episode's isolated force and surface. Missing statistics remain unavailable;
 the report does not infer stock, committed construction bills, or capacity.
+
+Multi-product objectives require every output target to hold over a common
+sustain interval. `metrics.multi_requirement_version = "joint-sustain-v2"`
+identifies this measurement contract. A requirement's `closed` flag reopens
+when its current window falls below target. The top-level `sustained_ticks`
+reports the shared interval, and the objective's sustain duration is the
+longest required duration. Separate historical successes cannot complete a
+simultaneous production objective.
+
+The executor preserves entity ownership by plan phase. Observations expose
+`metrics.live_entities_by_phase` with actual surviving counts, excluding
+ghosts and entities outside the episode scope. A retry does not transfer an
+entity to another phase. Phase names are bounded to 16 per episode and 128
+characters. This lets expansion completion use its own furnace rather than
+the total number of furnaces, including copper smelters.
+
+Dropped items are reported as `metrics.ground_item_entities`; they do not
+count toward construction budgets, occupied infrastructure or forbidden
+builds. Existing entity, fixture, force and bounds protections still apply.
+
+These changes require deployment of the training-lab mod and an affected
+Factorio runtime reload before live use. Revised level-3 Python runs reject
+reports without `joint-sustain-v2`. Use fresh episodes after deployment; no
+old measurement result becomes evidence for the new contract.

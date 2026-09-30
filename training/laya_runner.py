@@ -394,6 +394,10 @@ class LayaPrimaryRunner:
                 self.initial_observation = dict(report)
             while termination is None:
                 self._record_observation(report)
+                if (self.scenario["family"] == "connected_workflow"
+                        and int(self.scenario["curriculum"]["level"]) >= 3
+                        and (report.get("metrics") or {}).get("multi_requirement_version") != "joint-sustain-v2"):
+                    raise LayaRunnerError("level 3 requires the joint-sustain-v2 training lab; deploy before running")
                 status = str(report.get("status") or "ready")
                 if status == "completed":
                     termination = self._terminate("completed", report=report)
