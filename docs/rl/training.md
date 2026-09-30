@@ -185,6 +185,27 @@ restart the stopped fleet plus its consumers before collecting the next
 health-aware training cohort. The bounded run frozen at `2db0ee6` continues
 with its earlier observation contract and must finish before fleet deployment.
 
+### Restoration choices
+
+The connected-workflow toolkit can offer `repair.<variant>` for a previously
+executed cell whose current phase-owned counts show missing entities. It retains
+survivors, prices the missing bill, and rechecks that bill before execution.
+The lab performs the final exact-position, collision and budget validation;
+there is no automatically selected repair priority. Unknown ownership,
+unexecuted plans, foreign scope and inactive episodes cannot justify a repair.
+Features set 6 adds repair/context terms and preserves older set-5 vectors.
+An explicit failed recycle report now fails immediately instead of waiting for
+a successful completion report until the command timeout.
+
+A controlled worker-05 outlet-loss probe restored one inserter, retained four
+survivors and completed joint service at 7,800 ticks. This establishes a repair
+primitive; it does not establish learned repair behavior. Seeded fault events
+for counterfactual training, persistent active-layout provenance for upgrades,
+transport/configuration repairs and finite capital accounting remain required.
+See `Laya_Improvement_Execution_2026-10-01.md` for the evidence and limitations.
+Python consumers need a restart to offer the new choices. The bounded experiment
+continues with its frozen earlier menu.
+
 ### Resumable local fine-tuning
 
 For a bounded curriculum experiment, set `LAYA_MAX_ROUNDS=3` to cap the

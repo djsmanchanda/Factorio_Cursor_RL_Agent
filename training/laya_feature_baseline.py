@@ -29,7 +29,8 @@ _SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
 # so the vector shape never depends on how many secondary targets exist.
 # Set 5 adds observed cell health and WIP stock. Previous model widths remain
 # unchanged; unknown telemetry carries a presence flag instead of healthy zeros.
-FEATURE_SET = 5
+# Set 6 exposes restoration cost/context without changing saved set-5 widths.
+FEATURE_SET = 6
 
 
 def _kind(option_id: str) -> str:
@@ -109,9 +110,13 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_s
     if feature_set >= 5:
         context += _health_context(state)
     numeric = [math.log1p(max(0.0, float(features.get(name) or 0.0))) for name in _OPTION_FEATURES]
+    if feature_set >= 6:
+        numeric.append(float(features.get('repair') or 0.0))
     onehot = [1.0 if kind == name else 0.0 for name in _KINDS]
     # Kind-by-context interactions let "wait" depend on how much is still open.
     interactions = [onehot[index] * value for index in range(len(_KINDS)) for value in context]
+    if feature_set >= 6:
+        interactions.extend(float(features.get('repair') or 0.0) * value for value in context)
     return np.array(numeric + onehot + interactions, dtype=np.float64)
 
 

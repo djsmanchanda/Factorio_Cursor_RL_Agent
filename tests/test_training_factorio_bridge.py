@@ -136,6 +136,25 @@ def test_bridge_binds_provision_and_recycle_reports(tmp_path):
     assert rcon.closed
 
 
+def test_failed_recycle_reports_error_without_waiting_for_success(tmp_path, monkeypatch):
+    class FailedRecycle:
+        def command(self, command):
+            payload = json.loads(command.split(' ',1)[1])
+            directory = tmp_path / 'factorio_training_lab/reports'
+            directory.mkdir(parents=True)
+            report = {'version':'1.1.0','kind':'recycle','request_id':payload['request_id'],
+                      'episode_id':payload['episode_id'],'tick':1,'ok':False,'status':'failed',
+                      'error':'episode surface is missing'}
+            (directory/'failed.json').write_text(json.dumps(report))
+            return ''
+    def unexpected_wait(_):
+        raise AssertionError('a matching terminal failure must not wait for completed status')
+    monkeypatch.setattr('training.factorio_bridge.time.sleep',unexpected_wait)
+    bridge = FactorioTrainingBridge(tmp_path,host='127.0.0.1',port=28005,password='test',rcon=FailedRecycle())
+    with pytest.raises(TrainingBridgeError,match='episode surface is missing'):
+        bridge.recycle('failed-episode')
+
+
 def test_bridge_chunks_large_physical_plan_before_execution(tmp_path):
     rcon = ReportRcon(tmp_path)
     bridge = FactorioTrainingBridge(

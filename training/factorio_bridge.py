@@ -163,7 +163,8 @@ class FactorioTrainingBridge:
             known,
             lambda item: item.get("request_id") == request_id
             and item.get("episode_id") == episode_id
-            and (item.get("kind") != kind or final_status is None or item.get("status") == final_status),
+            and (item.get("kind") != kind or item.get("ok") is False
+                 or final_status is None or item.get("status") == final_status),
         )
         self._maybe_prune_reports(report_path)
         self._validate_report(report, kind)

@@ -17,6 +17,7 @@ from training.candidates.connected_workflow import connected_workflow_candidates
 from training.canonical import plan_hash
 from training.contracts import validate_scenario
 from training.isolation import assert_training_identity
+from training.laya_repair import restoration_candidates
 
 
 class LayaToolkitError(RuntimeError):
@@ -279,6 +280,10 @@ class LayaToolkit:
             if item["plan_hash"] in executed_plan_hashes
         }
         options = []
+        options.extend(
+            self._candidate_bound(candidate, report, option_id=candidate['action_id'])
+            for candidate in self._restoration_candidates(report, executed_plan_hashes)
+        )
         for branch_id in runnable_branch_ids:
             if branch_id in built:
                 continue
@@ -301,6 +306,12 @@ class LayaToolkit:
         options.extend(self._wait_bound(seconds, fingerprint) for seconds in self.WAIT_SECONDS)
         options.append(self._escalate_bound(fingerprint))
         return tuple(options)
+
+    def _restoration_candidates(self, report, executed_plan_hashes):
+        if self.scenario['family'] != 'connected_workflow':
+            return []
+        return restoration_candidates(self._candidates(report, fundable_only=False), report,
+                                      executed_plan_hashes, self._remaining_budget(report))
 
     def _branch_variants(self, report: Mapping[str, Any], branch_id: str) -> list[dict[str, Any]]:
         return [item for item in self._candidates(report) if item.get("branch_id") == branch_id]
@@ -372,6 +383,7 @@ class LayaToolkit:
             "parameters": {
                 "action_id": str(candidate["action_id"]),
                 "observation": fingerprint,
+                **({"missing_entities": dict(candidate["missing_entities"])} if candidate.get('repair') else {}),
             },
         }
         option = self._compile_one(raw)
@@ -388,6 +400,8 @@ class LayaToolkit:
         # Numeric features are already complete in the model state. Repeating
         # them in the option head wastes the small decision context.
         if candidate.get("variant_id"):
+            if candidate.get('repair'):
+                return f"Restore missing entities in the {candidate['branch_id']} branch as {candidate['variant_id']}; retain survivors."
             return f"Build the {candidate['branch_id']} branch as {candidate['variant_id']}."
         return "Build the validated layout described by this option's features."
 
@@ -400,7 +414,8 @@ class LayaToolkit:
         fresh_report = self.bridge.observe(self._episode_id)
         if _decision_fingerprint(fresh_report) != selected_fingerprint:
             raise StaleLayaOption("objective, status, or scope changed after Laya selected the option")
-        fresh_by_id = {str(item["action_id"]): item for item in self._candidates(fresh_report)}
+        catalog = self._restoration_candidates(fresh_report, {selected['plan_hash']}) if selected.get('repair') else self._candidates(fresh_report)
+        fresh_by_id = {str(item["action_id"]): item for item in catalog}
         candidate = fresh_by_id.get(str(selected["action_id"]))
         if candidate is None:
             raise StaleLayaOption("selected candidate is absent from the fresh legal catalog")

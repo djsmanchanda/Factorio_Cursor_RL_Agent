@@ -78,6 +78,40 @@ Artifacts: `data/laya-health-validation/`, including original failed journals,
 Each probe recycled its disposable surface; worker 05 is stopped afterward.
 This proves telemetry/mechanics, not health-aware learned performance.
 
+## Restoration action verified
+
+The old compiler suppressed a branch after historical plan execution, even
+when surviving construction later disappeared. `training/laya_repair.py` now
+compiles unranked restoration choices only for known executed layouts with
+current phase-owned evidence of losses. It prices the missing entities, retains
+survivors through idempotent placement, verifies fresh missing quantities in
+its bound signature, and delegates exact collisions/budgets to the lab.
+Unknown ownership, unexpected survivors, an exhausted allowance or inactive
+runtime cannot authorize a restoration. Features set 6 adds repair/context
+terms without changing set-5 checkpoint dimensions.
+
+A controlled worker-05 L3 probe (seed 7001) removed one owned belt-output
+inserter before running the factory. After 6,000 ticks, belt delivery remained
+zero. Selecting the compiled restoration placed exactly one entity and retained
+all four surviving entities in that phase. Joint service completed at 7,800
+ticks; entity/bounds/budget violations were zero and cleanup completed.
+The repair option disappeared after the cell was whole again.
+
+This was an explicitly selected mechanics intervention, not a trained model's
+repair decision, a training label or a production-base repair. The first probe
+helpers exposed configuration/scope mistakes and an overly long tick burst
+that passed terminal-world cleanup; those artifacts are retained. The final
+probe observes in bounded steps and stops at completion.
+
+The cleanup failure exposed a bridge bug: its recycle-report filter waited for
+`completed` even when the matching request had already returned `ok=false`.
+It now surfaces the terminal error immediately. A second recycle of the already
+recycled probe returned its actual error in 0.030 seconds instead of the old
+120-second timeout. Focused restoration/toolkit/features/runner/health/bridge
+checks passed. Evidence: `data/laya-health-validation/repair-probe.json`,
+`recycle-failure.json`, and the corrected `repair_probe.py`. Worker 05 is
+stopped again; no new Lua deployment was needed for this Python action seam.
+
 ## Remaining sequence and lifecycle
 
 The bounded experiment must finish before changing its fleet's Lua. Deploy the
@@ -85,8 +119,8 @@ health mod to stopped workers and matching GUI, restart the affected Factorio
 runtimes and Python consumers, and use fresh observation-matched batches for
 the next training cohort. Retraining is needed for Laya to learn the new facts.
 
-Next implementation is a legal repair/upgrade/expansion menu with faulted
-curriculum states and measured outcomes. It is followed by finite construction
+Next implementation is seeded fault curriculum and authoritative active-layout
+provenance for upgrade choices, followed by further expansion/transport edits. It is followed by finite construction
 materials, depletion, power/transport limits and endurance objectives. The
 matched deterministic opening and an independent promotion suite remain
 required before any real-base authority. None of those stages is claimed
