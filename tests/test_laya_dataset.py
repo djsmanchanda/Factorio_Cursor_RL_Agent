@@ -212,6 +212,26 @@ def test_cases_jsonl_passes_soft_targets_dedupes_and_splits_by_seed(tmp_path) ->
     assert report["excluded"] == 2
 
 
+def test_snapshot_input_resolves_corrected_copy_without_rewriting_source(tmp_path):
+    import json
+    from training.laya_dataset import iter_cases_from_jsonl
+
+    stale = _soft_serve_goal_case()
+    stale["case_id"] = "cf-legacy"
+    stale["label_provenance"] = {"method": "counterfactual", "evidence_hash": "sha256:" + "1" * 64,
+                                "notes": "costs-only"}
+    path = tmp_path / "round-cases.jsonl"
+    original = json.dumps(stale) + "\n"
+    path.write_text(original)
+    assert list(iter_cases_from_jsonl(path)) == []
+    corrected = _soft_serve_goal_case()
+    directory = tmp_path / "relabel-v4"
+    directory.mkdir()
+    (directory / path.name).write_text(json.dumps(corrected) + "\n")
+    assert [r["case_id"] for r in iter_cases_from_jsonl(path)] == [corrected["case_id"]]
+    assert path.read_text() == original
+
+
 def test_build_tool_writes_content_addressed_dataset_and_manifest(tmp_path, monkeypatch) -> None:
     import json
     import sys

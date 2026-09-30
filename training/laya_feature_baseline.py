@@ -106,20 +106,34 @@ def _case_rows(case: Mapping[str, Any], feature_set: int = FEATURE_SET) -> tuple
 
 
 def train(cases: Sequence[Mapping[str, Any]], *, epochs: int = 400, rate: float = 0.05, l2: float = 1e-3) -> dict[str, Any]:
-    rows = [row for row in (_case_rows(case) for case in cases) if row is not None]
+    rows = []
+    for case in cases:
+        row = _case_rows(case)
+        if row is None:
+            continue
+        kind = next(iter(case["questions"]))
+        factors = case.get("weights") or {}
+        weight = (float(factors.get("case_weight", 1.0))
+                  * float((factors.get("question_weights") or {}).get(kind, 1.0))
+                  * float(factors.get("source_quality", 1.0))
+                  * float(factors.get("temporal_decay", 1.0)))
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError("case weights must be finite and nonnegative")
+        if weight > 0:
+            rows.append((*row, weight))
     if not rows:
         raise ValueError("no usable cases")
     width = rows[0][0].shape[1]
-    stacked = np.concatenate([matrix for matrix, _ in rows])
+    stacked = np.concatenate([matrix for matrix, _, _ in rows])
     mean, scale = stacked.mean(axis=0), stacked.std(axis=0) + 1e-6
     weights = np.zeros(width)
     for _ in range(epochs):
         gradient = l2 * weights
-        for matrix, target in rows:
+        for matrix, target, weight in rows:
             scores = ((matrix - mean) / scale) @ weights
             probabilities = np.exp(scores - scores.max())
             probabilities /= probabilities.sum()
-            gradient += ((matrix - mean) / scale).T @ (probabilities - target) / len(rows)
+            gradient += weight * ((matrix - mean) / scale).T @ (probabilities - target) / len(rows)
         weights -= rate * gradient
     return {"version": "laya-feature-baseline-v1", "feature_set": FEATURE_SET, "mean": mean.tolist(),
             "scale": scale.tolist(), "weights": weights.tolist(), "cases": len(rows)}

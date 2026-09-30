@@ -9,6 +9,7 @@ from tools.laya_counterfactual_labels import (
     ReplayDiverged, ScriptedPredictor, outcome_cost, replica, rollout_choice, soft_target,
 )
 from training.scenarios.connected_workflow import generate_connected_workflow_scenario
+from training.laya_counterfactual import LABEL_VERSION, journal_outcome, preference_target
 
 
 def _question(ids):
@@ -76,10 +77,14 @@ def test_faithful_label_becomes_schema_valid_soft_target_case(tmp_path) -> None:
     first = next(json.loads(line) for line in open(result["journal"]) if '"type":"decision"' in line)
     options = [option["option_id"] for option in first["options"]]
     costs = {option: 3000.0 + 100 * index for index, option in enumerate(options) if "escalate" not in option}
-    label = {"version": "laya-counterfactual-v1", "rollout": "r", "seed": 7, "scenario_id": scenario["scenario_id"],
+    outcome = {"status": "completed", "failure_cause": "none", "failure_kind": "none", "reason": "",
+               "elapsed_ticks": 3000, "safety_violations": 0, "progress": {}, "journal": result["journal"]}
+    label = {"version": LABEL_VERSION, "rollout": "r", "seed": 7, "scenario_id": scenario["scenario_id"],
              "decision_index": 0, "decision_kind": "serve_goal", "options": options,
              "base_journal": result["journal"], "cost_ticks": costs, "all_alternatives_faithful": True,
-             "noise_ticks": 50.0, "soft_target": soft_target(costs, 600.0)}
+             "noise_ticks": 50.0, "soft_target": soft_target(costs, 600.0),
+             "outcomes": {option: dict(outcome) for option in costs}, "base_repeat_outcomes": [outcome],
+             "temperature_ticks": 600.0, "preference_weight": 0.3, "preference_exclusion": ""}
 
     case, reason = label_to_case(label)
     assert reason == "" and abs(sum(case["gold"]["serve_goal"]["probabilities"].values()) - 1) < 1e-9
@@ -88,3 +93,79 @@ def test_faithful_label_becomes_schema_valid_soft_target_case(tmp_path) -> None:
     path.write_text(json.dumps(case) + "\n")
     assert len(list(iter_cases_from_jsonl(path))) == 1
     assert label_to_case({**label, "all_alternatives_faithful": False}) == (None, "unfaithful alternative")
+    assert label_to_case({**label, "outcomes": {}})[0] is None
+    failed = {**outcome, "status": "timed_out", "failure_cause": "policy", "failure_kind": "timeout"}
+    unresolved = {**label, "outcomes": {option: failed for option in costs}, "base_repeat_outcomes": [failed]}
+    assert label_to_case(unresolved) == (None, "unresolved all-failed continuation")
+    mixed = {**label, "outcomes": {option: failed for option in costs}}
+    completed_option = next(iter(costs))
+    mixed["outcomes"][completed_option] = outcome
+    mixed["cost_ticks"] = {**costs, completed_option: 50000.0}
+    case, reason = label_to_case(mixed)
+    assert reason == "" and case["gold"]["serve_goal"]["probabilities"][completed_option] == 1.0
+    # Previously exported costs-only cases cannot slip back into accumulated training.
+    stale = {**case, "label_provenance": {**case["label_provenance"], "notes": "old costs-only label"}}
+    path.write_text(json.dumps(stale) + "\n")
+    report = {}
+    assert list(iter_cases_from_jsonl(path, quality_report=report)) == []
+    assert report["excluded"] == 1
+
+
+def test_all_failed_waits_are_unresolved_and_tool_failures_are_quarantined():
+    failed = {"status": "timed_out", "failure_cause": "policy", "safety_violations": 0}
+    costs = {"build": 39460.0, "wait": 38460.0}
+    assert preference_target(costs, {"build": failed, "wait": failed}, 100, 0) == (
+        None, 0.0, "unresolved all-failed continuation")
+    completed = {"status": "completed", "failure_cause": "none", "failure_kind": "none", "safety_violations": 0}
+    for cause in ("tool", "environment", "validator", "unknown"):
+        assert preference_target(costs, {"build": completed, "wait": {**failed, "failure_cause": cause}},
+                                 100, 0)[2] == "non-policy alternative outcome"
+
+
+def test_confidence_uses_best_two_completions_not_an_expensive_third():
+    completed = {"status": "completed", "failure_cause": "none", "failure_kind": "none", "safety_violations": 0}
+    costs = {"a": 6000.0, "b": 6010.0, "c": 30000.0}
+    target, weight, reason = preference_target(costs, {o: completed for o in costs}, 100, 20)
+    assert reason == "" and weight == 0.3 and target["a"] > target["b"]
+
+
+@pytest.mark.parametrize("temperature", [0, -1, float("nan"), float("inf")])
+def test_invalid_temperature_rejected(temperature):
+    with pytest.raises(ValueError):
+        soft_target({"a": 1.0}, temperature)
+
+
+def test_legacy_outcomes_are_recovered_from_journals_and_missing_evidence_fails(tmp_path):
+    import json
+    from tools.laya_labels_to_cases import label_to_case
+    from training.laya_counterfactual import label_outcomes
+
+    def write(name, status, kind, cause):
+        path = tmp_path / name
+        rows = [{"type": "failure_packet", "cause": cause},
+                {"type": "termination", "status": status, "final_observation": {
+                    "status": "timed_out", "failure": {"kind": kind}, "metrics": {}, "elapsed_ticks": 36000}}]
+        path.write_text("\n".join(json.dumps(r) for r in rows))
+        return path
+
+    base = write("round-7-base0.jsonl", "failed", "timeout", "environment")
+    alternate = write("round-7-k0-wait.5s.jsonl", "failed", "timeout", "environment")
+    label = {"version": "laya-counterfactual-v3", "base_journal": str(base), "base_choice": "serve.iron",
+             "seed": 7, "decision_index": 0, "cost_ticks": {"serve.iron": 39000.0, "wait.5s": 38000.0},
+             "options": ["serve.iron", "wait.5s", "escalate.stop"], "all_alternatives_faithful": True}
+    outcomes = label_outcomes(label)
+    assert {r["failure_cause"] for r in outcomes.values()} == {"policy"}
+    assert label_to_case(label) == (None, "unresolved all-failed continuation")
+    journal_outcome.cache_clear()
+    alternate.unlink()
+    assert label_to_case(label) == (None, "unavailable or invalid outcome evidence")
+
+
+def test_cleanup_failure_overrides_objective_success(tmp_path):
+    import json
+    path = tmp_path / "cleanup.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in [
+        {"type": "termination", "status": "completed", "final_observation": {"metrics": {}}},
+        {"type": "cleanup", "status": "failed"},
+    ]))
+    assert journal_outcome(str(path))["status"] == "cleanup_failed"

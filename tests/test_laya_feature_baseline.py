@@ -50,3 +50,14 @@ def test_consecutive_waits_change_the_features() -> None:
     fresh = {"run": {"elapsed_ticks": 60}, "recent_history": []}
     looped = {"run": {"elapsed_ticks": 60}, "recent_history": [{"summary": "Wait 1 second."}] * 3}
     assert (option_vector(option, fresh) != option_vector(option, looped)).any()
+
+
+def test_weighted_evidence_dominates_conflicting_low_weight_labels():
+    important = _case(True)
+    important["weights"] = {"case_weight": 1.0, "question_weights": {"select_candidate": 1.0}}
+    weak = _case(True)
+    weak["gold"]["select_candidate"]["probabilities"] = {"iron.basic": 0.0, "iron.fast": 1.0}
+    weak["weights"] = {"case_weight": 0.01}
+    model = train([important] + [weak] * 10, epochs=300)
+    answer = FeaturePredictor(model).predict(important["state"], important["questions"])
+    assert answer["answers"]["select_candidate"]["choice"] == "iron.basic"

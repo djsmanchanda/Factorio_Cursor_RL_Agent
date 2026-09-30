@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from training.laya_feature_baseline import accuracy, train
+from training.laya_dataset import iter_cases_from_jsonl
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,12 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=400)
     args = parser.parse_args(argv)
-    cases = [json.loads(line) for path in args.cases for line in path.read_text(encoding="utf-8").splitlines() if line]
+    quality: dict = {}
+    cases = [case for path in args.cases for case in iter_cases_from_jsonl(path, split="train", quality_report=quality)]
     model = train(cases, epochs=args.epochs)
     model["sources"] = [str(path) for path in args.cases]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(model, indent=1), encoding="utf-8")
-    print(json.dumps({"cases": model["cases"], "train_top1": round(accuracy(model, cases), 3), "output": str(args.output)}))
+    print(json.dumps({"cases": model["cases"], "train_top1": round(accuracy(model, cases), 3),
+                      "quality": quality, "output": str(args.output)}))
     return 0
 
 

@@ -141,8 +141,9 @@ async function refreshStatus() {
 function formatRow(row) {
   return [
     row.batch, row.level ?? '—', row.seeds, row.completed,
-    row.median_cost_ticks ?? '—', row.median_decisions ?? '—',
-    row.mean_delta_vs_baseline ?? '—', row.faster_than_baseline ?? '—',
+    row.median_cost_ticks ?? '—', row.mean_cost_ticks ?? '—', row.p95_cost_ticks ?? '—',
+    row.completion_losses ?? '—', row.mean_delta_vs_baseline ?? '—',
+    row.lower_cost_pairs ?? row.faster_than_baseline ?? '—',
   ];
 }
 
@@ -209,7 +210,7 @@ async function refreshResults() {
     if (!rows.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 8;
+      td.colSpan = 10;
       td.className = 'empty-row';
       td.textContent = 'No evaluations yet.';
       tr.append(td);

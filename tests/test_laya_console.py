@@ -144,6 +144,22 @@ def test_build_results_best_and_trend(isolated_data_dirs):
     assert rounds_seen == {1, 2, 3}
 
 
+def test_results_prefer_completion_and_reject_blocked_median_winner(isolated_data_dirs):
+    out_dir, _ = isolated_data_dirs
+    run_dir = out_dir / "testrun"
+    run_dir.mkdir()
+    _write_summary(run_dir, [START_LINE, *[json.dumps(row) for row in [
+        {"batch": "t-eval-rollout-v4-L1", "seeds": 32, "completed": 32, "median_cost_ticks": 6854},
+        {"batch": "t-eval-laya-r26-L1", "seeds": 32, "completed": 32,
+         "median_cost_ticks": 6167, "mean_cost_ticks": 6272, "status": "diagnostic_only"},
+        {"batch": "t-eval-laya-r28-L1", "seeds": 32, "completed": 28,
+         "median_cost_ticks": 6148, "mean_cost_ticks": 10596, "status": "blocked"},
+    ]]])
+    result = runtime.build_results("testrun")
+    assert result["best_laya"][1]["batch"] == "t-eval-laya-r26-L1"
+    assert result["rollout_baseline"][1]["batch"] == "t-eval-rollout-v4-L1"
+
+
 def test_derive_autoresume_from_features_files(isolated_data_dirs):
     out_dir, _ = isolated_data_dirs
     for round_num in range(1, 6):

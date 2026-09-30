@@ -75,12 +75,20 @@ evaluate() {
 
 compare() {
   local level=$1; shift
-  local base="$BATCHES/$PREFIX-eval-rollout-L$level.jsonl"
-  [[ -f "$base" && -f "$1" ]] || { log "missing batch for comparison: $1"; return; }
-  "$PY" "$REPO/tools/compare_laya_batches.py" "$base" "$@" 2>&1 | tail -n +2 | tee -a "$SUMMARY"
+  local base="$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl"
+  [[ -f "$base" && -f "$1" ]] || { log "missing batch for comparison: $1"; return 1; }
+  "$PY" "$LAYA_CODE/tools/compare_laya_batches.py" "$base" "$@" --seed-start 4001 --episodes 32 \
+    2>&1 | tee -a "$SUMMARY"
 }
 
-all_cases() { ls "$OUT"/"$PREFIX"-r*-cases.jsonl 2>/dev/null; }
+all_cases() {
+  local file corrected
+  for file in "$OUT"/"$PREFIX"-r*-cases.jsonl; do
+    [[ -f "$file" ]] || continue
+    corrected="${LAYA_RELABELED_CASE_DIR:-$OUT/relabel-v4}/${file##*/}"
+    if [[ -f "$corrected" ]]; then printf '%s\n' "$corrected"; else printf '%s\n' "$file"; fi
+  done
+}
 # Laya's dataset may skip early rounds whose one-step labels teach wait loops.
 laya_cases() {
   local file n
@@ -95,10 +103,10 @@ laya_finetune() {
   local cases=(); mapfile -t cases < <(laya_cases)
   local inputs=(); for c in "${cases[@]}"; do inputs+=(--cases-jsonl "$c"); done
   log "laya $tag: dataset from ${#cases[@]} case files"
-  "$PY" "$REPO/tools/build_laya_dataset.py" "${inputs[@]}" --output "$dataset" > "$RUN/dataset-$tag.log" 2>&1 \
+  "$PY" "$LAYA_CODE/tools/build_laya_dataset.py" "${inputs[@]}" --output "$dataset" > "$RUN/dataset-$tag.log" 2>&1 \
     || { log "laya $tag: dataset build failed"; return; }
   # Gentle GPU profile: micro-batch 1 with checkpointing, low CPU priority.
-  (cd "$REPO" && LAYA_MAX_LEN=2048 LAYA_HEAD_MAX_LEN=256 LAYA_MICRO_BATCH=1 LAYA_GRADIENT_ACCUMULATION=16 \
+  (cd "$LAYA_CODE" && LAYA_MAX_LEN=2048 LAYA_HEAD_MAX_LEN=256 LAYA_MICRO_BATCH=1 LAYA_GRADIENT_ACCUMULATION=16 \
     LAYA_GRADIENT_CHECKPOINTING=1 LAYA_CHECKPOINT_INTERVAL=25 timeout "${LAYA_FINETUNE_TIMEOUT:-150m}" nice -n 10 "$PY" tools/train_laya_4060.py \
     --cases "$dataset" --model-dir "$REPO/data/laya-base/typed-decisions" --output-dir "$ckpt") > "$RUN/train-$tag.log" 2>&1 \
     || { log "laya $tag: training failed (see $RUN/train-$tag.log)"; return; }
@@ -112,7 +120,7 @@ laya_finetune() {
 # 0. Scripted-rollout baselines on both levels (every later evaluation compares against these).
 heal_workers
 for level in 1 2; do
-  [[ -f "$BATCHES/$PREFIX-eval-rollout-L$level.jsonl" ]] || evaluate "$PREFIX-eval-rollout-L$level" "$level" --policy rollout
+  [[ -f "$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl" ]] || evaluate "$PREFIX-eval-rollout-v4-L$level" "$level" --policy rollout
 done
 latest=${LAYA_START_POLICY:-rollout}
 [[ -n "${LAYA_FINETUNE_FIRST:-}" ]] && laya_finetune "r${LAYA_RESUME_ROUND:-0}-min${LAYA_MIN_CASE_ROUND:-1}"
@@ -137,8 +145,11 @@ while (( $(remaining) > round_seconds + 600 )); do
   LAYA_REPO="$REPO" "$LAYA_CODE/scripts/laya_policy_iteration_round.sh" "$name" "$level" "$seed" "$SEEDS_PER_ROUND" "$cont" "${previous[@]}" \
     > "$RUN/$name.log" 2>&1
   if [[ -f "$OUT/features-$name.json" ]]; then
-    latest="$OUT/features-$name.json"
-    compare "$level" "$BATCHES/eval-$name-L$level.jsonl"
+    if compare "$level" "$BATCHES/eval-$name-L$level.jsonl"; then
+      latest="$OUT/features-$name.json"
+    else
+      log "$name: comparison blocked; retaining continuation $(basename "$latest")"
+    fi
   else
     log "$name: no features model produced (see $RUN/$name.log)"
   fi

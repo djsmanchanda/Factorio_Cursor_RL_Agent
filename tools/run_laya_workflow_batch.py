@@ -23,6 +23,9 @@ from training.factorio_bridge import FactorioTrainingBridge
 from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig, checkpoint_model_ref
 from training.scheduler import load_worker_specs
+from orchestrator.laya_operations import sha256_hash
+from training.laya_runner import REQUEST_VERSION
+from training.laya_counterfactual import journal_outcome
 
 _GENERATORS = {
     "connected_workflow": "training.scenarios.connected_workflow:generate_connected_workflow_scenario",
@@ -219,9 +222,19 @@ def run_episode(slot, scenario: dict, director, gate, model_ref, knowledge, args
     result["seed"] = scenario["seed"]
     result["inference_max_len"] = args.max_len
     result["policy"] = args.policy
+    result["comparison_conditions"] = {
+        "scenario_hash": scenario["scenario_hash"], "request_version": REQUEST_VERSION,
+        "guideline_hash": sha256_hash(knowledge), "max_len": args.max_len,
+        "max_decisions": args.max_decisions, "max_no_progress": args.max_no_progress,
+        "stepped": args.stepped,
+        # With a running clock, inference/report latency depends on game speed.
+        "game_speed": args.game_speed,
+    }
     result["wall_seconds"] = round(time.monotonic() - started, 1)
     journal = Path(result.get("journal", ""))
     if journal.is_file():
+        outcome = journal_outcome(str(journal))
+        result["safety_violations"] = outcome["safety_violations"]
         result["material_cost"] = 0.0
         for line in journal.read_text(encoding="utf-8").splitlines():
             event = json.loads(line)
@@ -281,6 +294,11 @@ def main(argv: list[str] | None = None) -> int:
     knowledge = guideline_context(args.family)
     summary_path = args.evidence_dir / "batches" / f"{args.run_prefix}.jsonl"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    if summary_path.exists():
+        raise ValueError(f"batch already exists: {summary_path}")
+    with summary_path.with_suffix(".manifest.json").open("x", encoding="utf-8") as handle:
+        json.dump({"version": "1.0.0", "expected_seeds": list(seeds),
+                    "scenario_hashes": {str(s["seed"]): s["scenario_hash"] for s in scenarios}}, handle)
     if args.stepped:
         print(f"tick_paused -> {set_stepped_all(slots, True, args.game_speed)}", flush=True)
     else:

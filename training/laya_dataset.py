@@ -910,6 +910,15 @@ def iter_cases_from_jsonl(
         report["excluded"] += 1
         report["exclusions"][reason] = int(report["exclusions"].get(reason, 0)) + 1
 
+    from training.laya_counterfactual import needs_outcome_relabel
+
+    path = Path(path)
+    corrected = path.parent / "relabel-v4" / path.name
+    # Old snapshot drivers pass original filenames to the current ETL. Prefer
+    # a separately verified export without rewriting their source evidence.
+    if corrected.is_file():
+        path = corrected
+
     with Path(path).open(encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -922,6 +931,9 @@ def iter_cases_from_jsonl(
                 continue
             if not isinstance(case, dict):
                 exclude("case is not an object")
+                continue
+            if needs_outcome_relabel(case):
+                exclude("legacy counterfactual case requires outcome relabelling")
                 continue
             seed = (case.get("source") or {}).get("scenario_seed") if isinstance(case.get("source"), Mapping) else None
             if isinstance(seed, bool) or not isinstance(seed, int):

@@ -59,6 +59,57 @@ and shows the trainer's loss, steps, gradient norm, entropy, rewards,
 throughput, VRAM, loss history, and benchmark reports. It never controls
 Nauvis.
 
+### Completion-first counterfactual evidence
+
+Counterfactual labels now use `laya-counterfactual-v4`, defined in
+`schemas/laya_counterfactual_label.schema.json`. Each alternative preserves
+its terminal status, cause, failure kind, safety counts, progress, replay
+identity and cost. Preference targets give positive credit only to completing
+alternatives. A cheap timeout cannot outrank an expensive completion.
+All-failed continuations remain in the label store with an unresolved reason;
+they do not produce a positive wait training case. Tool, environment,
+validator and safety failures are quarantined from policy preferences.
+Confidence compares the best two completing alternatives against replay noise.
+
+Versions 1–3 can be re-exported by `tools/laya_labels_to_cases.py` only when
+their original replay journals are available. Costs-only converted `cf-*`
+cases are excluded from both dataset building and features training. Re-export
+old round labels into a separate directory, preserving originals:
+
+```bash
+mkdir -p data/laya-pi/relabel-v4
+.venv/bin/python tools/laya_labels_to_cases.py \
+  data/laya-counterfactual/labels/ov-r27-p*.jsonl \
+  --temperature-ticks 100 \
+  --output data/laya-pi/relabel-v4/ov-r27-cases.jsonl
+```
+
+The overnight driver's future launches prefer corrected round files with the
+same basename under `data/laya-pi/relabel-v4/`; override that directory with
+`LAYA_RELABELED_CASE_DIR`. The features teacher trains only the seed-derived
+training split and now applies case/question weights. Existing checkpoints
+retain their old training history and require a new fine-tune for this fix.
+Dataset ETL also resolves corrected siblings when older snapshot drivers pass
+the original case paths. Rounds 19–30 were re-exported without changing their
+source files: 4,915 usable cases remain and 1,138 all-failed labels are excluded.
+
+New workflow batches write a frozen expected-seed manifest before execution
+and record declared scenario, guideline, renderer, context, decision-budget
+and clock conditions plus safety counts. The lab comparator rejects duplicate
+or missing seeds, absent evidence and mismatched conditions. It reports mean,
+p95, completion wins/losses, completed-pair cost wins and errors separately.
+Lower cost when both runs fail is not a completion win. Legacy batches lacking
+these conditions require fresh evaluation. New overnight launches use fresh
+`rollout-v4` baselines and retain their continuation when comparison is blocked.
+Comparisons run from the driver's frozen code checkout.
+
+These are disposable lab diagnostics; they do not establish deployed mod/save
+hashes, a win against the full deterministic workflow or production authority.
+The stricter matched-workflow promotion gate remains separate. Already running
+snapshot-based jobs keep their old labelling/training behavior. No lab Lua
+deployment is required: launch a new driver/consumer to use the new code, then
+train and independently evaluate a new checkpoint.
+
 ### Resumable local fine-tuning
 
 Local fine-tuning writes atomic adapter, optimizer, scheduler, scaler, and RNG

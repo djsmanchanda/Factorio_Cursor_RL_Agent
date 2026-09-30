@@ -7,7 +7,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import sys
 import threading
 import time
@@ -26,9 +25,9 @@ from training.contracts import validate_scenario
 from training.factorio_bridge import FactorioTrainingBridge
 from training.laya_exploration import ExplorationDirector, ExplorationGate
 from training.laya_runner import LayaPrimaryRunner, LayaRunnerConfig
+from training.laya_counterfactual import LABEL_VERSION, journal_outcome, preference_target, soft_target
 from training.scenarios.connected_workflow import generate_connected_workflow_scenario
 
-LABEL_VERSION = "laya-counterfactual-v3"
 # The continuation after the forced choice: the label measures each option's
 # value under it (one step of policy improvement), not a global optimum. Policy
 # iteration replaces this scripted rollout with the current learned policy.
@@ -143,9 +142,12 @@ def run_forced(slot, password, scenario, prefix, *, run_id, args) -> dict[str, A
             elapsed = (final.get("metrics") or {}).get("completed_ticks", final.get("elapsed_ticks"))
     # The predictor raises before recording a decision it cannot replay.
     diverged = len(predictor.trace) < len(prefix)
+    outcome = journal_outcome(result["journal"])
+    outcome.update(material_cost=material, decisions=result.get("decisions", len(predictor.trace)),
+                   run_id=run_id, scenario_hash=scenario["scenario_hash"])
     return {"run_id": run_id, "status": result["status"], "elapsed_ticks": elapsed, "material_cost": material,
             "decisions": result.get("decisions", len(predictor.trace)),
-            "trace": predictor.trace, "diverged": diverged, "journal": result["journal"]}
+            "trace": predictor.trace, "diverged": diverged, "journal": result["journal"], "outcome": outcome}
 
 
 # docs/rl/README.md soft rule (rule.sustained-efficiency): minimize completion
@@ -158,17 +160,10 @@ DECISION_TICKS = 60.0
 
 def outcome_cost(run: dict[str, Any], max_ticks: int, material_weight: float = 0.0,
                  decision_ticks: float = 0.0) -> float:
-    # Unfinished runs cost the full episode budget: slower than any completion.
+    # Diagnostic composite cost. Preference targets separately prioritize completion.
     ticks = float(run["elapsed_ticks"]) if run["status"] == "completed" else float(max_ticks)
     return (ticks + material_weight * float(run.get("material_cost") or 0.0)
             + decision_ticks * float(run.get("decisions") or 0))
-
-
-def soft_target(costs: dict[str, float], temperature_ticks: float) -> dict[str, float]:
-    best = min(costs.values())
-    weights = {option: math.exp(-(cost - best) / temperature_ticks) for option, cost in costs.items()}
-    total = sum(weights.values())
-    return {option: weight / total for option, weight in weights.items()}
 
 
 def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
@@ -218,6 +213,7 @@ def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
     for k in range(depth):
         point = base["trace"][k]
         costs = {point["choice"]: cost(base)}
+        outcomes = {point["choice"]: base["outcome"]}
         faithful = True
         for kk, option, run in results:
             if kk != k:
@@ -229,8 +225,11 @@ def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
                 faithful = False
                 continue
             costs[option] = cost(run)
+            outcomes[option] = run["outcome"]
         if len(costs) < 2:
             continue
+        noise = max(base_costs) - min(base_costs)
+        target, weight, exclusion = preference_target(costs, outcomes, args.temperature_ticks, noise)
         labels.append({
             "version": LABEL_VERSION, "rollout": args.continuation_id, "seed": seed,
             "scenario_id": scenario["scenario_id"], "decision_index": k,
@@ -238,10 +237,12 @@ def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
             "work_branches": point["work_branches"],
             "base_journal": base["journal"], "base_choice": point["choice"],
             "cost_ticks": costs, "all_alternatives_faithful": faithful,
-            "base_repeat_costs": base_costs, "noise_ticks": max(base_costs) - min(base_costs),
+            "outcomes": outcomes, "base_repeat_outcomes": [run["outcome"] for run in bases],
+            "base_repeat_costs": base_costs, "noise_ticks": noise,
             "cost_weights": {"completion_ticks": 1.0, "material_ticks_per_unit": args.material_weight,
                              "ticks_per_decision": args.decision_ticks, "guideline": "rule.sustained-efficiency"},
-            "soft_target": soft_target(costs, args.temperature_ticks),
+            "temperature_ticks": args.temperature_ticks,
+            "soft_target": target, "preference_weight": weight, "preference_exclusion": exclusion,
         })
     return labels
 

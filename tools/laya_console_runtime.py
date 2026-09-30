@@ -152,7 +152,7 @@ FINETUNE_TRAINED_RE = re.compile(_TS + r" laya (?P<tag>\S+): trained -> (?P<ckpt
 FINETUNE_FAILED_RE = re.compile(_TS + r" laya (?P<tag>\S+): (?:dataset build|training) failed")
 FINAL_LINE_RE = re.compile(_TS + r" final features policy: (?P<policy>\S+)$")
 DONE_LINE_RE = re.compile(_TS + r" done; training workers stopped$")
-BASELINE_BATCH_RE = re.compile(r'^"?(?P<prefix>[A-Za-z0-9_.-]+)-eval-rollout-L(?P<level>\d+)$')
+BASELINE_BATCH_RE = re.compile(r'^"?(?P<prefix>[A-Za-z0-9_.-]+)-eval-rollout(?:-v4)?-L(?P<level>\d+)$')
 
 
 def _parse_ts(value: str) -> datetime:
@@ -506,7 +506,7 @@ def _batch_level(name: str) -> int | None:
 
 
 def _batch_kind(name: str) -> str:
-    if "eval-rollout-L" in name or name.endswith(tuple(f"-rollout-L{n}" for n in (1, 2))):
+    if re.search(r"-eval-rollout(?:-v4)?-L\d+$", name):
         return "rollout"
     if "eval-laya-" in name:
         return "laya"
@@ -529,6 +529,10 @@ def build_results(run_name: str | None = None) -> dict:
     best_features: dict[int, dict] = {}
     best_laya: dict[int, dict] = {}
     trend: dict[int, list[dict]] = {1: [], 2: []}
+    def rank(row):
+        return (float(row.get("completed", 0)) / max(1, int(row.get("seeds", 0))),
+                -float(row.get("mean_cost_ticks", row["median_cost_ticks"])))
+
     for row in rows:
         level = row.get("level")
         if level not in (1, 2) or row.get("median_cost_ticks") is None:
@@ -538,14 +542,14 @@ def build_results(run_name: str | None = None) -> dict:
             round_num = int(match.group(1)) if match else None
             trend[level].append({"round": round_num, "median_cost_ticks": row["median_cost_ticks"], "series": "features"})
             current = best_features.get(level)
-            if current is None or row["median_cost_ticks"] < current["median_cost_ticks"]:
+            if row.get("status") != "blocked" and (current is None or rank(row) > rank(current)):
                 best_features[level] = row
         elif row["kind"] == "laya":
             match = re.search(r"-r(\d+)-L\d+$", str(row.get("batch", "")))
             round_num = int(match.group(1)) if match else None
             trend[level].append({"round": round_num, "median_cost_ticks": row["median_cost_ticks"], "series": "laya"})
             current = best_laya.get(level)
-            if current is None or row["median_cost_ticks"] < current["median_cost_ticks"]:
+            if row.get("status") != "blocked" and (current is None or rank(row) > rank(current)):
                 best_laya[level] = row
 
     rollout = {row["level"]: row for row in rows if row.get("kind") == "rollout" and row.get("level") in (1, 2)}
