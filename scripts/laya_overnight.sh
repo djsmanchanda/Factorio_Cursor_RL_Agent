@@ -131,7 +131,8 @@ laya_finetune() {
   local cases=(); mapfile -t cases < <(laya_cases)
   local inputs=(); for c in "${cases[@]}"; do inputs+=(--cases-jsonl "$c"); done
   log "laya $tag: dataset from ${#cases[@]} case files"
-  "$PY" "$LAYA_CODE/tools/build_laya_dataset.py" "${inputs[@]}" --output "$dataset" > "$RUN/dataset-$tag.log" 2>&1 \
+  "$PY" "$LAYA_CODE/tools/build_laya_dataset.py" "${inputs[@]}" --require-sampling-version episode-relative-v1 \
+    --output "$dataset" > "$RUN/dataset-$tag.log" 2>&1 \
     || { log "laya $tag: dataset build failed"; return; }
   # Gentle GPU profile: micro-batch 1 with checkpointing, low CPU priority.
   (cd "$LAYA_CODE" && LAYA_MAX_LEN=2048 LAYA_HEAD_MAX_LEN=256 LAYA_MICRO_BATCH=1 LAYA_GRADIENT_ACCUMULATION=16 \

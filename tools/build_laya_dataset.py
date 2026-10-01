@@ -38,6 +38,7 @@ def main() -> int:
     )
     parser.add_argument("--split", choices=("train", "calibration", "held_out", "test"))
     parser.add_argument("--derive-seed-splits", action="store_true", help="derive stable train/calibration/held-out/test splits from scenario seeds")
+    parser.add_argument('--require-sampling-version', choices=('episode-relative-v1', 'global-60-v1'))
     parser.add_argument(
         "--step-level", action="store_true",
         help="emit one provenance-linked case per staged or typed workflow decision",
@@ -45,6 +46,8 @@ def main() -> int:
     args = parser.parse_args()
     if not args.database and not args.cases_jsonl:
         parser.error("provide at least one --database or --cases-jsonl input")
+    if args.database and args.require_sampling_version:
+        parser.error('sampling-version filtering requires provenance-bearing --cases-jsonl inputs')
     quality = {"rows": 0, "emitted": 0, "excluded": 0, "exclusions": {}}
     jsonl_quality = {"rows": 0, "emitted": 0, "excluded": 0, "exclusions": {}}
 
@@ -69,6 +72,7 @@ def main() -> int:
                 continue
             yield from iter_cases_from_jsonl(
                 path, split=args.split, quality_report=jsonl_quality, seen_state_hashes=seen,
+                required_sampling_version=args.require_sampling_version,
             )
 
     cases = itertools.chain(cases_from_databases(), cases_from_jsonl())
@@ -89,6 +93,7 @@ def main() -> int:
             "split": args.split,
             "derive_seed_splits": args.derive_seed_splits,
             "step_level": args.step_level,
+            "required_sampling_version": args.require_sampling_version,
         },
         "dataset_quality": quality,
         "cases_jsonl_quality": jsonl_quality,

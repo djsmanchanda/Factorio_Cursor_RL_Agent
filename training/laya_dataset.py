@@ -893,6 +893,7 @@ def iter_cases_from_jsonl(
     split: str | None = None,
     quality_report: dict[str, Any] | None = None,
     seen_state_hashes: set[str] | None = None,
+    required_sampling_version: str | None = None,
 ) -> Iterable[dict[str, Any]]:
     """Validate and pass through pre-built Laya cases (e.g. exploration journals).
 
@@ -934,6 +935,13 @@ def iter_cases_from_jsonl(
                 continue
             if needs_outcome_relabel(case):
                 exclude("legacy counterfactual case requires outcome relabelling")
+                continue
+            provenance = case.get('label_provenance')
+            if required_sampling_version is not None and (
+                not isinstance(provenance, Mapping)
+                or provenance.get('sampling_version') != required_sampling_version
+            ):
+                exclude('case requires current sampling evidence')
                 continue
             seed = (case.get("source") or {}).get("scenario_seed") if isinstance(case.get("source"), Mapping) else None
             if isinstance(seed, bool) or not isinstance(seed, int):

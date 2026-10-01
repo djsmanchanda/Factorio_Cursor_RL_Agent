@@ -86,3 +86,61 @@ pass fresh paired cohorts across all levels before another unattended run.
 Lifecycle: start a new Python consumer/frozen driver to apply the safeguards.
 No Lua deployment or Factorio restart is required. The new guard does not
 repair existing model weights; reliability and real-base promotion remain open.
+
+## Continued after reboot: measurement clock repaired
+
+The starting-state wait preference had a concrete measurement cause. On seed
+8109, the old build-first replay reached 600 episode ticks while reporting only
+563 ticks of production evidence. The required 600-tick branch window therefore
+unlocked construction at the next observation, 900 ticks. Waiting one second
+before building shifted polling and unlocked it at 660 ticks instead. The
+labels rewarded that delay under the scripted continuation.
+
+Sampling now runs on each episode's own 60-tick cadence. A live probe exposed
+an additional endpoint issue: `ticks_to_run` pauses before the endpoint's
+`on_tick` event. At an exact paused boundary, observing now finishes the due
+sample once. Repeated observations and the later event cannot count it again.
+The production window at 600 elapsed ticks now covers the full 600 ticks.
+
+`episode-relative-v1` is recorded in reports, outcomes, labels and case
+provenance. Batch conditions prevent comparison across sampler versions.
+New overnight dataset builds and features training require this sampler's
+evidence, excluding historical global-clock cases without rewriting them.
+Generic dataset/training commands retain an explicit optional filter.
+
+Observed worker-05 results, stepped speed 32:
+
+| Seed | Build-first cost | Initial 1s wait cost | Wait penalty |
+| --- | ---: | ---: | ---: |
+| 8109 | 13,020 | 13,140 | +120 |
+| 8110 | 10,440 | 10,560 | +120 |
+
+Both starting labels now prefer building. All six alternatives per seed
+completed, and base repeats agree. Four scripted development episodes per
+level completed 4/4 on L1, L2 and L3, with zero safety violations. These small
+cohorts verify measurement behavior; they do not establish student reliability
+or promotion. A mixed dataset probe retained the two corrected cases and
+excluded all 665 old round-39 cases.
+
+Verification: 46 tests passed; 26 optional Lupa tests were skipped because Lupa
+is not installed. The Lua CLI behavioral tests exercised all 60 start phases
+and the paused endpoint. Shell syntax and scoped whitespace checks passed.
+The first live attempt's strict-schema rejection and the incomplete first
+clock correction are preserved separately, without training credit.
+
+Evidence: `data/laya-pi/regression-20261001/relative-clock-verification.json`,
+`relative-clock-probe-v3.log`, and `cohort-L*.log`; corresponding labels and
+episode journals use the `relative-clock-probe-v3-20261001` and
+`relative-clock-regression-20261001-L*` prefixes.
+
+Lifecycle: deployed both mods to worker 05 and GUI, preserving shared trash
+hash `f4c2178ded05`; verified the installed sampler hashes and stopped worker
+05 after completion. Other workers still need this lab deployment and reload
+before new collection. Restart/reopen a GUI session that predates deployment.
+The console remains stopped after reboot. No new fine-tune or long run was
+started, and the real deterministic runtime/save was untouched.
+
+Next: collect fresh trajectory coverage across all three levels, including
+states visited by the student, then train with the corrected sampler's labels
+and evaluate on fresh paired cohorts. Existing adapters still carry their old
+training history; this measurement fix alone does not repair their weights.

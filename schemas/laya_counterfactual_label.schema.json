@@ -7,6 +7,7 @@
   "properties": {
     "version": {"const": "laya-counterfactual-v4"},
     "options": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+    "sampling_version": {"enum": ["global-60-v1", "episode-relative-v1"]},
     "cost_ticks": {"type": "object", "minProperties": 2, "additionalProperties": {"type": "number", "minimum": 0}},
     "outcomes": {"type": "object", "minProperties": 2, "additionalProperties": {"$ref": "#/definitions/outcome"}},
     "base_repeat_outcomes": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/outcome"}},
@@ -28,7 +29,8 @@
         "elapsed_ticks": {"type": ["number", "null"], "minimum": 0},
         "safety_violations": {"type": "integer", "minimum": 0},
         "progress": {"type": "object"},
-        "journal": {"type": "string", "minLength": 1}
+        "journal": {"type": "string", "minLength": 1},
+        "sampling_version": {"enum": ["global-60-v1", "episode-relative-v1"]}
       }
     }
   }

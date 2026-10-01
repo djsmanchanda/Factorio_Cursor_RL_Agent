@@ -77,7 +77,7 @@ labels=("$LABELS/labels/$ROUND"-p*.jsonl)
 "$PY" tools/laya_labels_to_cases.py "${labels[@]}" --temperature-ticks "${LAYA_TEMPERATURE:-100}" \
   --output "$OUT/$ROUND-cases.jsonl" || exit 1
 "$PY" tools/train_laya_features.py "$OUT/$ROUND-cases.jsonl" "${PREVIOUS_CASES[@]}" \
-  --output "$OUT/features-$ROUND.json" || exit 1
+  --require-sampling-version episode-relative-v1 --output "$OUT/features-$ROUND.json" || exit 1
 
 all=()
 for n in "${INSTANCES[@]}"; do all+=(--instance "factorio-training-linux-$n"); done

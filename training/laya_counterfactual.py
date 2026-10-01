@@ -71,6 +71,7 @@ def journal_outcome(journal: str) -> dict[str, Any]:
             "delivered_items", "rate_per_tick", "sustained_ticks",
         )},
         "journal": journal,
+        "sampling_version": metrics.get('sampling_version', 'global-60-v1'),
     }
 
 

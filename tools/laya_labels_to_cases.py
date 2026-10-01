@@ -82,6 +82,13 @@ def label_to_case(label: dict[str, Any], temperature_ticks: float | None = None)
     state = decision["state"]
     validate_state(state)
     costs = label["cost_ticks"]
+    sampling_versions = {outcome.get('sampling_version', 'global-60-v1')
+                         for outcome in [*outcomes.values(), *repeats]}
+    if len(sampling_versions) != 1:
+        return None, 'inconsistent sampling versions'
+    sampling_version = sampling_versions.pop()
+    if label.get('sampling_version', sampling_version) != sampling_version:
+        return None, 'inconsistent sampling versions'
     evidence = _hash({"label": label, "outcomes": outcomes, "repeats": repeats, "target": target, "state": state})
     case = {
         "version": "1.0.0",
@@ -121,6 +128,7 @@ def label_to_case(label: dict[str, Any], temperature_ticks: float | None = None)
         "split": "train",  # Reassigned from scenario_seed by the dataset builder.
         "label_provenance": {
             "method": "counterfactual", "evidence_hash": evidence,
+            "sampling_version": sampling_version,
             "notes": f"completion-first-v1 {label['version']} rollout={label['rollout']} costs={costs} noise={label.get('noise_ticks')}",
         },
     }

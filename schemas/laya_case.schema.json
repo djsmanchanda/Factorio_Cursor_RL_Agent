@@ -237,7 +237,8 @@
         "method": { "enum": ["direct_outcome", "expert_distillation", "counterfactual", "hindsight", "reviewer"] },
         "evidence_hash": { "$ref": "#/definitions/hash" },
         "reviewer_id": { "$ref": "#/definitions/id" },
-        "notes": { "$ref": "#/definitions/nonEmptyString" }
+        "notes": { "$ref": "#/definitions/nonEmptyString" },
+        "sampling_version": { "enum": ["global-60-v1", "episode-relative-v1"] }
       }
     }
   }

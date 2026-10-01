@@ -214,14 +214,15 @@ def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
         point = base["trace"][k]
         costs = {point["choice"]: cost(base)}
         outcomes = {point["choice"]: base["outcome"]}
-        faithful = True
+        faithful = len({run['outcome']['sampling_version'] for run in bases}) == 1
         for kk, option, run in results:
             if kk != k:
                 continue
             branch_state = run["trace"][k] if len(run["trace"]) > k else None
             # Faithful only if the replay reached the same branch point.
             if run["diverged"] or not branch_state or branch_state["options"] != point["options"] \
-                    or branch_state["work_branches"] != point["work_branches"]:
+                    or branch_state["work_branches"] != point["work_branches"] \
+                    or run['outcome']['sampling_version'] != base['outcome']['sampling_version']:
                 faithful = False
                 continue
             costs[option] = cost(run)
@@ -232,6 +233,7 @@ def label_seed(seed, pool_slots, args) -> list[dict[str, Any]]:
         target, weight, exclusion = preference_target(costs, outcomes, args.temperature_ticks, noise)
         labels.append({
             "version": LABEL_VERSION, "rollout": args.continuation_id, "seed": seed,
+            "sampling_version": base['outcome']['sampling_version'],
             "scenario_id": scenario["scenario_id"], "decision_index": k,
             "decision_kind": point["kind"], "options": point["options"],
             "work_branches": point["work_branches"],

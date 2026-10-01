@@ -44,6 +44,15 @@ def test_mismatched_execution_conditions_block(field):
         compare(baseline, challenger, {1, 2, 3}, (36000, 10, 60))
 
 
+def test_global_and_relative_sampler_cohorts_cannot_compare():
+    baseline, challenger = rows(), rows()
+    for seed in baseline:
+        baseline[seed]['comparison_conditions']['sampling_version'] = 'global-60-v1'
+        challenger[seed]['comparison_conditions']['sampling_version'] = 'episode-relative-v1'
+    with pytest.raises(ValueError, match='conditions differ'):
+        compare(baseline, challenger, {1, 2, 3}, (36000, 10, 60))
+
+
 def test_missing_conditions_and_safety_are_not_fabricated():
     baseline, challenger = rows(), rows()
     challenger[1].pop("comparison_conditions")

@@ -18,7 +18,9 @@ script.on_configuration_changed(function()
   shared.ensure_storage()
 end)
 
-script.on_nth_tick(60, function(event)
+-- Each episode owns its 60-tick cadence; global clock phase must not change
+-- the measured window or reward an initial wait that shifts later polling.
+script.on_event(defines.events.on_tick, function(event)
   measurement.sample_all(event.tick)
   if event.tick % 600 == 0 then
     world.cleanup_orphan_surfaces(event.tick)

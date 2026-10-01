@@ -140,6 +140,7 @@
           }
         },
         "factory_health": {"$ref": "laya_factory_health.schema.json"},
+        "sampling_version": {"enum": ["global-60-v1", "episode-relative-v1"]},
         "requirement_progress": {
           "description": "Current per-item sustained-rate progress. Completion requires a shared interval in which every requirement meets target; closure reopens on shortfall.",
           "type": "array",

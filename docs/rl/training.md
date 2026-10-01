@@ -110,6 +110,25 @@ snapshot-based jobs keep their old labelling/training behavior. No lab Lua
 deployment is required: launch a new driver/consumer to use the new code, then
 train and independently evaluate a new checkpoint.
 
+### Episode-relative measurement clock
+
+`episode-relative-v1` anchors the 60-tick sampler to each episode start.
+Observations finish a due sample at an exact paused endpoint because Factorio's
+`ticks_to_run` can stop before that endpoint's tick event. Each due sample is
+counted once. This prevents an initial wait from improving a label by shifting
+the production-window boundary. Reports, replay outcomes and exported case
+provenance carry the sampler version; batch comparison rejects mixed versions.
+
+New overnight student dataset builds and features training use
+`--require-sampling-version episode-relative-v1`. Old global-clock labels stay
+preserved for diagnosis and are excluded from these new training inputs.
+Fresh train/calibration coverage is required before fine-tuning; an old case
+window cannot substitute for corrected measurements. Standalone ETL and
+features commands accept the same optional filter. Deployment and two live
+starting-state counterfactuals are recorded in
+`Laya_Regression_Repair_2026-10-01.md`. Deploy/reload the lab on the remaining
+stopped fleet before collecting the next run, and use fresh matched baselines.
+
 ### Revised level-3 shared supply and joint service
 
 The revised level 3 uses `connected-workflow-l3-v2-*` scenario identities and

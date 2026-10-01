@@ -22,11 +22,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("cases", nargs="+", type=Path, help="Case JSONL from tools/laya_labels_to_cases.py")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=400)
+    parser.add_argument('--require-sampling-version', choices=('episode-relative-v1', 'global-60-v1'))
     args = parser.parse_args(argv)
     quality: dict = {}
-    cases = [case for path in args.cases for case in iter_cases_from_jsonl(path, split="train", quality_report=quality)]
+    cases = [case for path in args.cases for case in iter_cases_from_jsonl(
+        path, split="train", quality_report=quality, required_sampling_version=args.require_sampling_version)]
     model = train(cases, epochs=args.epochs)
     model["sources"] = [str(path) for path in args.cases]
+    model['sampling_version'] = args.require_sampling_version
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(model, indent=1), encoding="utf-8")
     print(json.dumps({"cases": model["cases"], "train_top1": round(accuracy(model, cases), 3),

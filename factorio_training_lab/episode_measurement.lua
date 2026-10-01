@@ -547,11 +547,17 @@ item_consumption_metrics = function(episode, force, tick)
   return item_flow_metrics(episode, force, tick, "get_output_count", "item_consumption")
 end
 
+local function sample_if_due(episode, tick)
+  if (episode.status == "ready" or episode.status == "running")
+        and tick > episode.started_tick and (tick - episode.started_tick) % 60 == 0
+        and tick > episode.last_sample_tick then
+    sample_episode(episode, tick)
+  end
+end
+
 local function sample_all(tick)
   for _, episode in pairs(shared.ensure_storage().episodes) do
-    if episode.status == "ready" or episode.status == "running" then
-      sample_episode(episode, tick)
-    end
+    sample_if_due(episode, tick)
   end
 end
 
@@ -581,6 +587,9 @@ end
 
 local function observation(payload)
   local episode = shared.episode_for(payload.episode_id)
+  -- ticks_to_run pauses before the endpoint's on_tick event. Complete the
+  -- due sample from the finished world, once, rather than serving stale flow.
+  sample_if_due(episode, game.tick)
   local surface, force = game.surfaces[episode.surface_name], game.forces[episode.force_name]
   if not surface or not force then error("episode surface or force is missing") end
   local counts, forbidden, outside, overruns, efficiency, consumers = audit_entities(
@@ -630,6 +639,7 @@ local function observation(payload)
       destination_fixture_ids = stage_destinations(episode, stage)
     },
     metrics = {
+      sampling_version = "episode-relative-v1",
       delivered_items = episode.delivered_items, stage_delivered_items = episode.stage_delivered_items,
       sample_ticks = episode.sample_ticks,
       sample_items = episode.sample_items, rate_per_tick = episode.rate_per_tick,

@@ -92,6 +92,18 @@ def test_faithful_label_becomes_schema_valid_soft_target_case(tmp_path) -> None:
     path = tmp_path / "cases.jsonl"
     path.write_text(json.dumps(case) + "\n")
     assert len(list(iter_cases_from_jsonl(path))) == 1
+    report = {}
+    assert list(iter_cases_from_jsonl(path, required_sampling_version='episode-relative-v1', quality_report=report)) == []
+    assert report['exclusions'] == {'case requires current sampling evidence': 1}
+    current_label = {**label, 'sampling_version': 'episode-relative-v1',
+                     'outcomes': {option: {**outcome, 'sampling_version': 'episode-relative-v1'} for option in costs},
+                     'base_repeat_outcomes': [{**outcome, 'sampling_version': 'episode-relative-v1'}]}
+    current_case, reason = label_to_case(current_label)
+    assert reason == ''
+    path.write_text(json.dumps(current_case) + '\n')
+    assert len(list(iter_cases_from_jsonl(path, required_sampling_version='episode-relative-v1'))) == 1
+    mixed_clock = {**current_label, 'base_repeat_outcomes': [outcome]}
+    assert label_to_case(mixed_clock) == (None, 'inconsistent sampling versions')
     assert label_to_case({**label, "all_alternatives_faithful": False}) == (None, "unfaithful alternative")
     assert label_to_case({**label, "outcomes": {}})[0] is None
     failed = {**outcome, "status": "timed_out", "failure_cause": "policy", "failure_kind": "timeout"}
