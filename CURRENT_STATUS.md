@@ -3023,3 +3023,8 @@ that consumed it was not.
 - What: added LAYA_FINAL_RESERVE_SECONDS and shared LAYA_EVAL_START/COUNT controls so collection leaves a final learning window and every evaluator/gate uses the same configurable cohort.
 - Evidence: 10 focused driver/teacher tests pass, including no new collection inside the reserve, scoped worker shutdown and custom-cohort propagation; shell syntax is valid.
 - Lifecycle: launch a new frozen driver. Background deployment/start evidence is recorded separately after verification.
+
+## [2026-10-01] Five-hour corrected-sampler Laya run active
+- What: started background-20261001-corrected at 21:54 IST, frozen 25f1a36, under laya-corrected-20261001-5h.service. Hard stop October 2 02:54 IST, scoped cleanup and task sleep inhibitor. Twelve workers 01–04/06–13, 24 seeds/round, levels 2/1/3, current-sampler cases only, 75-minute final reserve, one final two-epoch fine-tune; fresh development seeds 45101–45132.
+- Evidence: all twelve deployed lab/shared copies and GUI match; shared fix f4c2178ded05 preserved. GPU ready. Fresh scripted L1 32/32, L2 26/32, L3 32/32, zero runtime/safety errors. Collection uses episode-relative-v1 and has recorded 96 labels; service limits/worker ownership/inhibitor and console detection verified. Details: docs/rl/Laya_Background_Run_2026-10-01.md.
+- Lifecycle: deployed and active; reopen an old GUI session before joining. Workers 05/14 stopped; console restored at 127.0.0.1:9138 and stays up independently. No successor run or real-base promotion; inspect results after completion.
