@@ -3018,3 +3018,8 @@ that consumed it was not.
 - What: episode-relative 60-tick sampling plus exactly-once paused-endpoint catch-up removes the window shift that rewarded an initial wait. Sampler versions now travel through reports, labels and cases; new overnight trainers reject old global-clock evidence.
 - Evidence: 46 tests pass, 26 optional Lupa tests skip. Live worker-05 counterfactuals on L3 seeds 8109/8110 now price an initial 1s wait 120 ticks above building; scripted L1/L2/L3 each complete 4/4 with zero safety violations. Mixed ETL retains two corrected cases and excludes 665 old cases. Details: docs/rl/Laya_Regression_Repair_2026-10-01.md.
 - Lifecycle: deployed/reloaded worker 05 and GUI with preserved shared hash f4c2178ded05; worker 05 stopped after verification. Remaining fleet needs lab deployment/reload and new consumers before collection. No fine-tune, unattended run, real-base action or promotion; fresh training coverage remains next.
+
+## [2026-10-01] Bounded Laya run reserves final training/evaluation time
+- What: added LAYA_FINAL_RESERVE_SECONDS and shared LAYA_EVAL_START/COUNT controls so collection leaves a final learning window and every evaluator/gate uses the same configurable cohort.
+- Evidence: 10 focused driver/teacher tests pass, including no new collection inside the reserve, scoped worker shutdown and custom-cohort propagation; shell syntax is valid.
+- Lifecycle: launch a new frozen driver. Background deployment/start evidence is recorded separately after verification.

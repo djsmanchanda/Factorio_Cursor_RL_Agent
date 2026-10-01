@@ -129,6 +129,15 @@ starting-state counterfactuals are recorded in
 `Laya_Regression_Repair_2026-10-01.md`. Deploy/reload the lab on the remaining
 stopped fleet before collecting the next run, and use fresh matched baselines.
 
+`LAYA_FINAL_RESERVE_SECONDS` reserves time before the driver stops collecting
+new rounds for its final fine-tune and evaluation (default 0). Set it to the
+measured expected duration of those stages plus margin; use a host service
+runtime limit for the overall hard deadline. `LAYA_EVAL_START` and
+`LAYA_EVAL_COUNT` configure the same matched development cohort in the driver,
+round evaluator and all-level teacher gates. Defaults remain 4001/32. New
+cohorts become development data when repeatedly used for admission; production
+promotion still requires separately untouched scenarios.
+
 ### Revised level-3 shared supply and joint service
 
 The revised level 3 uses `connected-workflow-l3-v2-*` scenario identities and

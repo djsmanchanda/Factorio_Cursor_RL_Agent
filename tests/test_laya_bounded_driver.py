@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import tarfile
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,8 @@ def executable(path, content):
     path.chmod(0o755)
 
 
-def test_round_cap_rotates_three_levels_and_stops_only_selected_workers(tmp_path):
+@pytest.mark.parametrize('reserve_seconds', (0, 14400))
+def test_round_cap_rotates_three_levels_and_stops_only_selected_workers(tmp_path, reserve_seconds):
     repo = tmp_path / "repo"
     driver = repo / "scripts/laya_overnight.sh"
     executable(driver, (ROOT / "scripts/laya_overnight.sh").read_text())
@@ -49,20 +51,28 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
     env.update(PATH=f'{bin_dir}:{env["PATH"]}', LAYA_ARCHIVE=str(archive), LAYA_CALLS=str(calls),
                LAYA_PYTHON_CALLS=str(python_calls), LAYA_CASE_PREFIXES='hist t', LAYA_CASE_WINDOW_ROUNDS='2',
                LAYA_FINETUNE_FINAL='1',
+               LAYA_FINAL_RESERVE_SECONDS=str(reserve_seconds), LAYA_EVAL_START='4501', LAYA_EVAL_COUNT='16',
                LAYA_RUN_NAME="bounded", LAYA_PREFIX="t", LAYA_INSTANCES="01 02", LAYA_MAX_ROUNDS="3",
                LAYA_FINETUNE_EVERY="0", LAYA_SEEDS_PER_ROUND="6")
     result = subprocess.run([str(driver), "4"], env=env, capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
     summary = (repo / "data/laya-pi/bounded/summary.log").read_text()
+    stops = [line for line in calls.read_text().splitlines() if line.startswith('stop ')]
+    assert stops == ['stop --worker-count 20 --only 1', 'stop --worker-count 20 --only 2']
+    commands=python_calls.read_text().splitlines()
+    cohorts = [line for line in commands if 'tools/run_laya_workflow_batch.py' in line or 'tools/compare_laya_batches.py' in line]
+    assert cohorts and all('--seed-start 4501 --episodes 16' in line for line in cohorts)
+    if reserve_seconds:
+        assert 't-r1: level' not in summary
+        assert not any('tools/train_laya_4060.py' in line for line in commands)
+        assert 'done; training workers stopped' in summary
+        return
     assert "t-r1: level 2 seeds 6001+6" in summary
     assert "t-r2: level 1 seeds 5101+6" in summary
     assert "t-r3: level 3 seeds 8101+6 continuation rollout" in summary
     assert "t-r4:" not in summary
     assert "round limit reached: 3 new rounds" in summary
     assert "done; training workers stopped" in summary
-    stops = [line for line in calls.read_text().splitlines() if line.startswith('stop ')]
-    assert stops == ['stop --worker-count 20 --only 1', 'stop --worker-count 20 --only 2']
-    commands=python_calls.read_text().splitlines()
     admissions = [line for line in commands if 'tools/laya_teacher_gate.py' in line]
     assert len(admissions) == 3
     assert all(line.count('--level-pair') == 3 for line in admissions)

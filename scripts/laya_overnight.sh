@@ -18,6 +18,8 @@
 # trains after the rounds, and LAYA_REFERENCE_CHECKPOINT evaluates a frozen
 # reference adapter before training. LAYA_EPOCHS sets the fine-tune epoch count.
 # LAYA_CASE_WINDOW_ROUNDS limits Laya to recent rounds (0 = fixed minimum only).
+# LAYA_FINAL_RESERVE_SECONDS keeps collection from consuming the final training/evaluation window.
+# LAYA_EVAL_START / LAYA_EVAL_COUNT choose the matched development cohort on every enabled level.
 #
 # Concurrent/named runs: LAYA_RUN_NAME (default "overnight") selects the run directory
 # data/laya-pi/$LAYA_RUN_NAME and its summary.log; LAYA_PREFIX (default "ov") namespaces every
@@ -45,9 +47,13 @@ SEEDS_PER_ROUND=${LAYA_SEEDS_PER_ROUND:-36}
 LEVELS=(${LAYA_LEVELS:-2 1 3})
 MAX_ROUNDS=${LAYA_MAX_ROUNDS:-0}; FINETUNE_EVERY=${LAYA_FINETUNE_EVERY:-2}
 CASE_WINDOW=${LAYA_CASE_WINDOW_ROUNDS:-0}
-for value in "$MAX_ROUNDS" "$FINETUNE_EVERY" "$CASE_WINDOW"; do
+FINAL_RESERVE=${LAYA_FINAL_RESERVE_SECONDS:-0}
+EVAL_START=${LAYA_EVAL_START:-4001}; EVAL_COUNT=${LAYA_EVAL_COUNT:-32}
+for value in "$MAX_ROUNDS" "$FINETUNE_EVERY" "$CASE_WINDOW" "$FINAL_RESERVE" "$EVAL_START"; do
   [[ "$value" =~ ^[0-9]+$ ]] || { echo "round controls must be nonnegative integers"; exit 2; }
 done
+[[ "$EVAL_COUNT" =~ ^[0-9]+$ ]] && (( EVAL_COUNT > 0 )) || { echo "evaluation count must be positive"; exit 2; }
+export LAYA_EVAL_START="$EVAL_START" LAYA_EVAL_COUNT="$EVAL_COUNT"
 (( ${#LEVELS[@]} > 0 )) || { echo "LAYA_LEVELS must not be empty"; exit 2; }
 for level in "${LEVELS[@]}"; do
   case "$level" in 1|2|3) ;; *) echo "unsupported workflow level: $level"; exit 2 ;; esac
@@ -89,7 +95,7 @@ evaluate() {
   local name=$1 level=$2; shift 2
   heal_workers
   (cd "$LAYA_CODE" && timeout 90m "$PY" tools/run_laya_workflow_batch.py $(instance_args) --slots 1 --stepped \
-    --game-speed "$LAYA_SPEED" --level "$level" --seed-start 4001 --episodes 32 --max-len 2048 --max-decisions 60 \
+    --game-speed "$LAYA_SPEED" --level "$level" --seed-start "$EVAL_START" --episodes "$EVAL_COUNT" --max-len 2048 --max-decisions 60 \
     --evidence-dir "$REPO/data/laya-exploration" --run-prefix "$name" "$@") > "$RUN/$name.log" 2>&1
   compare "$level" "$BATCHES/$name.jsonl"
 }
@@ -98,7 +104,7 @@ compare() {
   local level=$1; shift
   local base="$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl"
   [[ -f "$base" && -f "$1" ]] || { log "missing batch for comparison: $1"; return 1; }
-  "$PY" "$LAYA_CODE/tools/compare_laya_batches.py" "$base" "$@" --seed-start 4001 --episodes 32 \
+  "$PY" "$LAYA_CODE/tools/compare_laya_batches.py" "$base" "$@" --seed-start "$EVAL_START" --episodes "$EVAL_COUNT" \
     2>&1 | tee -a "$SUMMARY"
 }
 
@@ -167,7 +173,7 @@ fi
 round=${LAYA_RESUME_ROUND:-0}; l1_seed=${LAYA_L1_SEED:-5101}; l2_seed=${LAYA_L2_SEED:-6001}
 l3_seed=${LAYA_L3_SEED:-8101}; round_seconds=3600
 rounds_started=0
-while (( $(remaining) > round_seconds + 600 )); do
+while (( $(remaining) > round_seconds + 600 + FINAL_RESERVE )); do
   if (( MAX_ROUNDS > 0 && rounds_started >= MAX_ROUNDS )); then
     log "round limit reached: $MAX_ROUNDS new rounds"
     break
@@ -212,7 +218,7 @@ while (( $(remaining) > round_seconds + 600 )); do
       admission_pairs+=(--level-pair "$admission_level" "$BATCHES/$PREFIX-eval-rollout-v4-L$admission_level.jsonl" "$admission_batch")
     done
     if "$PY" "$LAYA_CODE/tools/laya_teacher_gate.py" "${admission_pairs[@]}" \
-        --seed-start 4001 --episodes 32 > "$RUN/$name-admission.json"; then
+        --seed-start "$EVAL_START" --episodes "$EVAL_COUNT" > "$RUN/$name-admission.json"; then
       latest="$OUT/features-$name.json"
       (( level == 3 )) && touch "$RUN/level3-ready"
       "$PY" - "$OUT/continuation-$PREFIX.json" "$latest" "$round" <<'PY'
