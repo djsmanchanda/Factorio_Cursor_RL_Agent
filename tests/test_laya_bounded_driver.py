@@ -63,6 +63,11 @@ echo '{}' > "$LAYA_REPO/data/laya-exploration/batches/eval-$1-L$2.jsonl"
     stops = [line for line in calls.read_text().splitlines() if line.startswith('stop ')]
     assert stops == ['stop --worker-count 20 --only 1', 'stop --worker-count 20 --only 2']
     commands=python_calls.read_text().splitlines()
+    admissions = [line for line in commands if 'tools/laya_teacher_gate.py' in line]
+    assert len(admissions) == 3
+    assert all(line.count('--level-pair') == 3 for line in admissions)
+    assert all(f't-admit-r{round}-L{level}' in '\n'.join(commands)
+               for round, levels in ((1, (1, 3)), (2, (2, 3)), (3, (1, 2))) for level in levels)
     dataset=next(line for line in commands if 'tools/build_laya_dataset.py' in line)
     assert all(f'{prefix}-r{n}-cases.jsonl' in dataset for prefix in ('hist','t') for n in (2,3))
     assert 'r1-cases.jsonl' not in dataset

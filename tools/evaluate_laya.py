@@ -60,9 +60,11 @@ def _in_option_order(questions: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split: str, device: str | None, *, allow_legacy_sequence: bool = False) -> dict[str, Any]:
+def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split: str, device: str | None, *, allow_legacy_sequence: bool = False, allow_unrecorded_input_profile: bool = False) -> dict[str, Any]:
     cases = load_cases(cases_path, split=split)
     extra = {"allow_legacy_sequence": True} if allow_legacy_sequence else {}
+    if allow_unrecorded_input_profile:
+        extra['allow_unrecorded_input_profile'] = True
     predictor = LayaModelPredictor(checkpoint_dir, base_model_dir=base_model_dir, device=device, **extra)
     exact = 0
     questions = 0
@@ -111,6 +113,7 @@ def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split
     report = {
         "version": "1.0.0",
         "legacy_diagnostic": allow_legacy_sequence,
+        "input_profile_diagnostic": allow_unrecorded_input_profile,
         "sequence_version": getattr(predictor, "sequence_version", "unknown"),
         "status": "ready" if not failures and questions else "blocked",
         "split": split,
@@ -128,7 +131,8 @@ def evaluate(cases_path: Path, checkpoint_dir: Path, base_model_dir: Path, split
         "promotion": {
             "zero_inference_failures": not failures,
             "held_out_evidence_present": bool(questions),
-            "eligible_for_disposable_shadow": not failures and bool(questions),
+            "eligible_for_disposable_shadow": not failures and bool(questions) and not (
+                allow_legacy_sequence or allow_unrecorded_input_profile),
             "eligible_for_real_nauvis": False,
         },
     }
@@ -143,10 +147,14 @@ def main() -> int:
     parser.add_argument("--split", default="held_out", choices=("held_out", "test", "calibration", "train"))
     parser.add_argument("--device")
     parser.add_argument("--allow-legacy-sequence", action="store_true", help="Explicit diagnostic scoring of a preserved legacy checkpoint")
+    parser.add_argument('--allow-unrecorded-input-profile', action='store_true',
+                        help='Diagnostic replay of preserved checkpoints with unrecorded observations; grants no shadow eligibility')
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     try:
-        report = evaluate(args.cases, args.checkpoint, args.base_model, args.split, args.device, allow_legacy_sequence=args.allow_legacy_sequence)
+        report = evaluate(args.cases, args.checkpoint, args.base_model, args.split, args.device,
+                          allow_legacy_sequence=args.allow_legacy_sequence,
+                          allow_unrecorded_input_profile=args.allow_unrecorded_input_profile)
     except (LayaRuntimeError, ValueError, OSError) as error:
         report = {"version": "1.0.0", "status": "blocked", "reason": str(error)}
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
@@ -159,4 +167,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

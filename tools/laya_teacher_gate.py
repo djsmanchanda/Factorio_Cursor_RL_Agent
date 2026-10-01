@@ -38,17 +38,50 @@ def assess(baseline, candidate, expected):
     return 0, {**report,'status':'admitted'}
 
 
+def assess_levels(baselines, candidates, expected):
+    """A globally reused teacher must pass every enabled curriculum level."""
+    if not baselines or set(baselines) != set(candidates):
+        return 2, {'status': 'blocked', 'reason': 'missing enabled-level evidence',
+                   'eligible_for_real_nauvis': False}
+    reports = {}
+    codes = []
+    for level in sorted(baselines):
+        code, report = assess(baselines[level], candidates[level], expected)
+        reports[str(level)] = report
+        codes.append(code)
+    code = 2 if 2 in codes else 3 if 3 in codes else 0
+    return code, {'version': '1.0.0', 'purpose': 'training_teacher',
+                  'status': {0: 'admitted', 2: 'blocked', 3: 'use_reference'}[code],
+                  'levels': reports, 'eligible_for_real_nauvis': False}
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('baseline',type=Path)
-    parser.add_argument('candidate',type=Path)
+    parser.add_argument('baseline',type=Path,nargs='?')
+    parser.add_argument('candidate',type=Path,nargs='?')
+    parser.add_argument('--level-pair', nargs=3, action='append', metavar=('LEVEL', 'BASELINE', 'CANDIDATE'),
+                        help='Repeat for every enabled level before admitting a global continuation')
     parser.add_argument('--seed-start',type=int,required=True)
     parser.add_argument('--episodes',type=int,required=True)
     args=parser.parse_args(argv)
     if args.seed_start<0 or args.episodes<1:
         parser.error('expected cohort must have a nonnegative start and positive size')
+    if args.level_pair:
+        if args.baseline or args.candidate:
+            parser.error('use positional batches or --level-pair, not both')
+        levels = [pair[0] for pair in args.level_pair]
+        if len(set(levels)) != len(levels) or any(level not in {'1', '2', '3'} for level in levels):
+            parser.error('level pairs require unique workflow levels 1, 2 or 3')
+    elif args.baseline is None or args.candidate is None:
+        parser.error('provide both batches or --level-pair')
     try:
-        code,report=assess(load(args.baseline),load(args.candidate),set(range(args.seed_start,args.seed_start+args.episodes)))
+        expected = set(range(args.seed_start, args.seed_start + args.episodes))
+        if args.level_pair:
+            code, report = assess_levels(
+                {level: load(Path(base)) for level, base, _ in args.level_pair},
+                {level: load(Path(candidate)) for level, _, candidate in args.level_pair}, expected)
+        else:
+            code,report=assess(load(args.baseline),load(args.candidate),expected)
     except (OSError,ValueError) as error:
         code,report=2,{'status':'blocked','reason':str(error),'eligible_for_real_nauvis':False}
     print(json.dumps(report))

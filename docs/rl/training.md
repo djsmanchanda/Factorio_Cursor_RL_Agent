@@ -159,6 +159,23 @@ recorded separately.
 
 ### Factory bottleneck observations
 
+Checkpoints trained by the current code record supported `input_profiles`
+separately from the token sequence version. Core workflow and health-bearing
+workflow inputs are distinct profiles. A preserved checkpoint without profile
+metadata rejects health inputs by default; explicit offline diagnosis uses
+`tools/evaluate_laya.py --allow-unrecorded-input-profile` and cannot establish
+shadow eligibility. Frozen weights/metadata remain unchanged. New training
+records only positively weighted, retained profiles and requires matching
+calibration coverage. See `Laya_Regression_Repair_2026-10-01.md` for the paired
+input replay and the unresolved newer-model wait behavior.
+
+One accepted features teacher is reused across levels. New overnight drivers
+evaluate each candidate on every enabled level before changing this global
+continuation pointer. Admission requires no per-seed completion losses or
+errors/safety failures and no mean-cost regression at equal completion on any
+level. This adds evaluation time to each round; the new-seed teacher preflight
+still runs before labels are collected.
+
 `workflow-health-v1` adds phase-owned input/output/buffer/held stock, source
 inventory, machine working/starved/blocked/unpowered status counts, electrical
 connectivity and empty-energy counts, sampled working fraction, remaining

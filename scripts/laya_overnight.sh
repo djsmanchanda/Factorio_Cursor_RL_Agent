@@ -196,9 +196,22 @@ while (( $(remaining) > round_seconds + 600 )); do
   LAYA_REPO="$REPO" "$LAYA_CODE/scripts/laya_policy_iteration_round.sh" "$name" "$level" "$seed" "$SEEDS_PER_ROUND" "$cont" "${previous[@]}" \
     > "$RUN/$name.log" 2>&1
   if [[ -f "$OUT/features-$name.json" ]]; then
-    if compare "$level" "$BATCHES/eval-$name-L$level.jsonl" && \
-      "$PY" "$LAYA_CODE/tools/laya_teacher_gate.py" "$BATCHES/$PREFIX-eval-rollout-v4-L$level.jsonl" \
-        "$BATCHES/eval-$name-L$level.jsonl" --seed-start 4001 --episodes 32 > "$RUN/$name-admission.json"; then
+    # One continuation serves all levels. A good current-level score cannot
+    # grant it authority to label a previously solved level that it regresses.
+    admission_pairs=()
+    for admission_level in "${LEVELS[@]}"; do
+      if [[ "$admission_level" == "$level" ]]; then
+        admission_batch="$BATCHES/eval-$name-L$level.jsonl"
+        compare "$level" "$admission_batch"
+      else
+        admission_name="$PREFIX-admit-r$round-L$admission_level"
+        evaluate "$admission_name" "$admission_level" --policy features --features-model "$OUT/features-$name.json"
+        admission_batch="$BATCHES/$admission_name.jsonl"
+      fi
+      admission_pairs+=(--level-pair "$admission_level" "$BATCHES/$PREFIX-eval-rollout-v4-L$admission_level.jsonl" "$admission_batch")
+    done
+    if "$PY" "$LAYA_CODE/tools/laya_teacher_gate.py" "${admission_pairs[@]}" \
+        --seed-start 4001 --episodes 32 > "$RUN/$name-admission.json"; then
       latest="$OUT/features-$name.json"
       (( level == 3 )) && touch "$RUN/level3-ready"
       "$PY" - "$OUT/continuation-$PREFIX.json" "$latest" "$round" <<'PY'
@@ -206,7 +219,8 @@ import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
 temporary = path.with_suffix('.tmp')
-temporary.write_text(json.dumps({'version': '1.0.0', 'policy': sys.argv[2], 'round': int(sys.argv[3])}) + '\n')
+temporary.write_text(json.dumps({'version': '1.0.0', 'policy': sys.argv[2], 'round': int(sys.argv[3]),
+                                 'admission_scope': 'all_enabled_levels'}) + '\n')
 temporary.replace(path)
 PY
     else

@@ -1,0 +1,42 @@
+# Path: training/laya_input_profile.py | Purpose: Track observation representations separately from token sequence syntax.
+
+from collections.abc import Mapping
+
+from training.laya_factory_health import VERSION as HEALTH_VERSION
+
+STATE_PROFILE = 'state-v1'
+CORE_PROFILE = 'workflow-core-v1'
+HEALTH_PROFILE = 'workflow-health-v1'
+INPUT_PROFILES = frozenset({STATE_PROFILE, CORE_PROFILE, HEALTH_PROFILE})
+
+
+def input_profile(state: Mapping) -> str:
+    observation = state.get('observation_digest') or {}
+    if not isinstance(observation, Mapping):
+        raise ValueError('observation digest must be a mapping')
+    health = observation.get('factory_health')
+    if health is not None:
+        if not isinstance(health, Mapping) or health.get('version') != HEALTH_VERSION:
+            raise ValueError('unsupported factory health observation representation')
+        return HEALTH_PROFILE
+    if 'work_branches' in observation or 'item_supply' in observation:
+        return CORE_PROFILE
+    return STATE_PROFILE
+
+
+def require_input_profile(config: Mapping, state: Mapping, *, allow_unrecorded: bool = False) -> str:
+    profile = input_profile(state)
+    supported = config.get('input_profiles')
+    if supported is None:
+        # Preserved v2 adapters predate health telemetry. They may still be
+        # diagnosed explicitly, but must not silently receive the new facts.
+        if profile == HEALTH_PROFILE and not allow_unrecorded:
+            raise ValueError('checkpoint has no recorded workflow-health-v1 training; '
+                             'retrain or use an explicit unrecorded-profile diagnostic')
+        return profile
+    if (not isinstance(supported, list) or not supported
+            or any(not isinstance(value, str) or value not in INPUT_PROFILES for value in supported)):
+        raise ValueError('checkpoint has invalid input_profiles metadata')
+    if profile not in supported:
+        raise ValueError(f'checkpoint was not trained for input profile {profile!r}')
+    return profile

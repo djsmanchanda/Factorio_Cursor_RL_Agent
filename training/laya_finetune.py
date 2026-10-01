@@ -23,6 +23,7 @@ from training.laya_runtime import (
     preflight,
 )
 from training.laya_sequence import LayaSequenceError
+from training.laya_input_profile import input_profile
 
 
 class LayaFineTuneError(RuntimeError):
@@ -379,6 +380,7 @@ def build_training_items(
                 "case_id": str(case.get("case_id", "")),
                 "question_id": str(question_id),
                 "sequence_version": sequence_version,
+                "input_profile": input_profile(state),
             })
     if not items:
         raise LayaFineTuneError("no model sequences could be built from the dataset")
@@ -710,6 +712,11 @@ def train_local(
     items = build_training_items(cases, tokenizer, max_len=config.runtime.max_len, head_max_len=config.runtime.head_max_len, stats=build_stats)
     calibration_stats: dict[str, int] = {}
     calibration_items = build_training_items(calibration_cases, tokenizer, max_len=config.runtime.max_len, head_max_len=config.runtime.head_max_len, stats=calibration_stats)
+    trained_profiles = sorted({item['input_profile'] for item in items if item['weight'] > 0})
+    calibration_profiles = {item['input_profile'] for item in calibration_items}
+    if not trained_profiles or calibration_profiles - set(trained_profiles):
+        raise LayaFineTuneError('each calibration input profile requires positively weighted training examples')
+    model_config['input_profiles'] = trained_profiles
     lengths = [len(item["ids"]) for item in items]
     calibration_batches = _eval_batches([len(item["ids"]) for item in calibration_items], config.runtime.micro_batch)
     # Compiled graphs are static; round lengths to bound recompilation.
@@ -1143,6 +1150,7 @@ def train_local(
         "profile": config.runtime.profile_id,
         "cases": len(items),
         "calibration_cases": len(calibration_items),
+        "input_profiles": trained_profiles,
         "context_overflow": build_stats.get("context_overflow", 0) + calibration_stats.get("context_overflow", 0),
         "steps": steps,
         "optimizer_steps": optimizer_steps,

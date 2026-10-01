@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from training.laya_input_profile import require_input_profile
+
 from training.laya_sequence import (
     LEGACY_SEQUENCE_VERSION,
     SEQUENCE_VERSION,
@@ -98,6 +100,7 @@ class LayaModelPredictor:
         allow_legacy_sequence: bool = False,
         explicit_sequence_version: str | None = None,
         max_len: int | None = None,
+        allow_unrecorded_input_profile: bool = False,
     ) -> None:
         # Exploration only: render the current representation for an upstream
         # checkpoint that predates it, instead of legacy truncation.
@@ -166,6 +169,7 @@ class LayaModelPredictor:
                 raise LayaRuntimeError("max_len override must be 1024, 2048, or 4096")
             config = {**config, "max_len": int(max_len)}
         self.config = config
+        self.allow_unrecorded_input_profile = allow_unrecorded_input_profile
         self.sequence_version = explicit_sequence_version or resolve_sequence_version(
             config, allow_legacy_sequence=allow_legacy_sequence,
         )
@@ -222,6 +226,12 @@ class LayaModelPredictor:
         """Run bounded typed questions and return the Laya/Jev answer shape."""
         if not questions:
             raise LayaRuntimeError("Laya inference received no questions")
+        try:
+            input_profile = require_input_profile(
+                self.config, state, allow_unrecorded=self.allow_unrecorded_input_profile,
+            )
+        except ValueError as error:
+            raise LayaRuntimeError(str(error)) from error
         items: list[dict[str, Any]] = []
         question_ids = list(questions)
         for question_id in question_ids:
@@ -329,6 +339,8 @@ class LayaModelPredictor:
                 "input_tokens": input_tokens,
                 "output_tokens": 0,
                 "sequence_version": self.sequence_version,
+                "input_profile": input_profile,
+                "unrecorded_profile_diagnostic": self.allow_unrecorded_input_profile,
             },
         }
 

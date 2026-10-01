@@ -2,7 +2,7 @@
 
 import copy
 
-from tools.laya_teacher_gate import assess
+from tools.laya_teacher_gate import assess, assess_levels, main
 from training.laya_failure import is_safe_lab_timeout
 
 
@@ -47,3 +47,32 @@ def test_horizon_is_policy_failure_only_with_scoped_explicit_safety_health():
         assert not is_safe_lab_timeout(missing)
     report['surface']='nauvis'
     assert not is_safe_lab_timeout(report)
+
+
+def test_global_teacher_rejects_earlier_level_completion_regression():
+    baseline = {1: {1: row()}, 2: {1: row(ticks=200)}, 3: {1: row()}}
+    candidate = {1: {1: row()}, 2: {1: row()}, 3: {1: row('timed_out')}}
+    code, report = assess_levels(baseline, candidate, {1})
+    assert code == 3
+    assert report['levels']['2']['status'] == 'admitted'
+    assert report['levels']['3']['candidate']['completion_losses'] == 1
+    assert report['status'] == 'use_reference'
+
+
+def test_global_teacher_requires_complete_matching_evidence_for_every_level():
+    baseline = {1: {1: row()}, 3: {1: row()}}
+    assert assess_levels(baseline, {1: {1: row()}}, {1})[0] == 2
+    assert assess_levels(baseline, {1: {1: row('timed_out')}, 3: {}}, {1})[0] == 2
+    assert assess_levels(baseline, baseline, {1})[0] == 0
+
+
+def test_multi_level_cli_uses_every_supplied_pair(tmp_path, capsys):
+    import json
+    base = tmp_path / 'base.jsonl'
+    good = tmp_path / 'good.jsonl'
+    bad = tmp_path / 'bad.jsonl'
+    for path, result in ((base, row(ticks=200)), (good, row()), (bad, row('timed_out'))):
+        path.write_text(json.dumps({'seed': 1, **result}) + '\n')
+    assert main(['--level-pair', '2', str(base), str(good), '--level-pair', '3', str(base), str(bad),
+                 '--seed-start', '1', '--episodes', '1']) == 3
+    assert json.loads(capsys.readouterr().out)['status'] == 'use_reference'
