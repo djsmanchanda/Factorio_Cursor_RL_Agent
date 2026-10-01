@@ -138,6 +138,21 @@ round evaluator and all-level teacher gates. Defaults remain 4001/32. New
 cohorts become development data when repeatedly used for admission; production
 promotion still requires separately untouched scenarios.
 
+Features policy set 7 adds option-numeric × state-context interactions. In
+sets 1–6, two build variants of the same kind had a fixed relative score:
+kind × context terms cancelled, so demand could not change the speed/cost
+tradeoff. The new features let measured demand, flows and health influence
+variant ranking. Earlier saved feature sets keep their original vectors.
+This is learned expressiveness, not a new build-order rule; new teachers still
+require paired all-level admission before continuation use.
+
+`tools/laya_day_queue.py` chains an existing disposable run, a corrected-data
+teacher fit/admission, further collection/fine-tuning, and separate paired lab
+validation under one timezone-explicit deadline. It preserves consumed partial
+seed blocks and honors predecessor pause/stop markers. An optional micro-batch
+2/accumulation-8 throughput pilot retains effective batch 16 and the 2,048-token
+profile, and runs only with sufficient budget. It grants no real-base authority.
+
 ### Revised level-3 shared supply and joint service
 
 The revised level 3 uses `connected-workflow-l3-v2-*` scenario identities and

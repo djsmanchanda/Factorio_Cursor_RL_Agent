@@ -30,7 +30,9 @@ _SUPPLY_ITEMS = ("iron-plate", "iron-gear-wheel", "transport-belt")
 # Set 5 adds observed cell health and WIP stock. Previous model widths remain
 # unchanged; unknown telemetry carries a presence flag instead of healthy zeros.
 # Set 6 exposes restoration cost/context without changing saved set-5 widths.
-FEATURE_SET = 6
+# Set 7 lets speed/cost/wait tradeoffs depend on measured demand and health.
+# Kind-by-context alone cancels between two variants of the same kind.
+FEATURE_SET = 7
 
 
 def _kind(option_id: str) -> str:
@@ -117,6 +119,8 @@ def option_vector(option: Mapping[str, Any], state: Mapping[str, Any], feature_s
     interactions = [onehot[index] * value for index in range(len(_KINDS)) for value in context]
     if feature_set >= 6:
         interactions.extend(float(features.get('repair') or 0.0) * value for value in context)
+    if feature_set >= 7:
+        interactions.extend(value * fact for value in numeric[:len(_OPTION_FEATURES)] for fact in context)
     return np.array(numeric + onehot + interactions, dtype=np.float64)
 
 

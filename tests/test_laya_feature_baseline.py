@@ -61,3 +61,33 @@ def test_weighted_evidence_dominates_conflicting_low_weight_labels():
     model = train([important] + [weak] * 10, epochs=300)
     answer = FeaturePredictor(model).predict(important["state"], important["questions"])
     assert answer["answers"]["select_candidate"]["choice"] == "iron.basic"
+
+
+def test_variant_tradeoff_can_change_with_demand_and_legacy_width_is_preserved():
+    import numpy as np
+    from training.laya_feature_baseline import option_vector
+
+    def case(target):
+        row = _case(True)
+        row['state']['acceptance_gap'] = {'target': target / 60, 'current': 0}
+        row['state']['options'][0]['features'].update(machine_speed=0.5)
+        row['state']['options'][1]['features'].update(material_cost=160, machine_speed=1.5)
+        choice = 'iron.basic' if target < 0.5 else 'iron.fast'
+        row['gold']['select_candidate'] = {'label': choice, 'probabilities': {i: float(i == choice)
+                                             for i in row['questions']['select_candidate']['option_ids']}}
+        return row
+
+    low, high = case(0.1), case(0.9)
+    def delta(row, version):
+        options = row['state']['options']
+        return option_vector(options[1], row['state'], version) - option_vector(options[0], row['state'], version)
+    assert np.allclose(delta(low, 6), delta(high, 6))
+    assert not np.allclose(delta(low, 7), delta(high, 7))
+    legacy = option_vector(low['state']['options'][0], low['state'], 6)
+    assert np.array_equal(option_vector(low['state']['options'][0], low['state'], 7)[:len(legacy)], legacy)
+    cases = [case(t) for t in (0.1, 0.2, 0.3, 0.7, 0.8, 0.9) * 4]
+    model = train(cases, epochs=400)
+    predictor = FeaturePredictor(model)
+    for t, expected in ((0.25, 'iron.basic'), (0.85, 'iron.fast')):
+        row = case(t)
+        assert predictor.predict(row['state'], row['questions'])['answers']['select_candidate']['choice'] == expected
