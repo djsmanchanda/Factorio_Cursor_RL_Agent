@@ -62,3 +62,36 @@ and new Python consumers are active. Reopen a GUI session that predates this
 deployment before joining. The real deterministic server/save is untouched.
 No policy is promoted automatically; learned results must be inspected after
 completion and later pass separate held-out promotion gates.
+
+## Pause and continuation on October 2
+
+The user paused the run at 23:31 IST on October 1 after approximately 5,831
+active seconds. The service and all workers stopped. Four rounds were complete;
+round 5's seed block was interrupted before round evaluation. No student
+fine-tune had started. Every features continuation candidate had failed its
+global gate, so the accepted continuation remained scripted rollout.
+
+On the user's `continue`, all 357 complete labels from the interrupted round
+were exported without changing the original labels or replay journals. The
+retained corrected dataset has 2,218 cases: 1,579 train, 326 calibration,
+207 held-out and 106 test, with no ETL exclusions. All twelve installed worker
+mod trees still matched deployment evidence; no redeployment was required.
+
+Continuation started at **01:55 IST on October 2** under
+`laya-corrected-20261002-resume.service`, run
+`data/laya-pi/background-20261002-resume/`, prefix `rc02`. Its hard limit is the
+remaining **12,168 active seconds**, not another five hours. Stop begins by
+**05:18 IST on October 2**, followed by up to two minutes of cleanup. The
+user-requested paused interval does not consume active training time.
+
+The new driver freezes `f2f2600` (runtime code unchanged from `25f1a36`) and
+imports `rc01 rc02` case history. Collection starts at round 6, preserving and
+skipping the whole consumed round-5 block. Next banks are L1 5755, L2 6715 and
+L3 8224. The same 75-minute final reserve, two-epoch final fine-tune, corrected
+sampler filter and matched development cohort remain in effect.
+
+The parent run's `pause.json` is preserved and `resume.json` links the
+continuation; the new `experiment.json` records the remaining budget and
+lineage. Original frozen code, raw evidence and journal identities are intact.
+The console is restored as `laya-operations-console-v7.service` at the same
+URL. Workers 05/14 remain outside this run and no real-base authority is given.
