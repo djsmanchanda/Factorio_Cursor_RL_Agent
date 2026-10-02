@@ -60,7 +60,8 @@ def collect(args):
                 try:
                     prepare(SimpleNamespace(root=branch, source_save=Path(prefix["save"]),
                         mods_source=parent / "server/mods", game_port=args.game_port, rcon_port=args.rcon_port,
-                        ancestor_source_sha256=prefix["ancestor_source_sha256"]))
+                        ancestor_source_sha256=prefix["ancestor_source_sha256"],
+                        quad_centers=prefix["facts"].get("quad_centers", [])))
                     live = SavedWorldAdapter(branch)
                     before = live.query()
                     fingerprint = replay_fingerprint(before)

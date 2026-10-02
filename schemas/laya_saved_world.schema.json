@@ -20,6 +20,7 @@
     "consumption": {"$ref": "#/definitions/stock"},
     "researched": {"type": "object", "additionalProperties": {"const": true}},
     "pending_ghosts": {"type": "integer", "minimum": 0},
+    "quad_centers": {"type": "array", "items": {"$ref": "#/definitions/position"}},
     "infrastructure_counts": {"$ref": "#/definitions/stock"},
     "recipes": {"type": "object", "additionalProperties": {"type": "object", "required": ["ingredients", "product_amount", "energy_ticks"], "properties": {"ingredients": {"type": "array", "items": {"type": "object", "required": ["name", "amount"], "properties": {"name": {"type": "string"}, "amount": {"type": "number", "exclusiveMinimum": 0}}}}, "product_amount": {"type": "number", "exclusiveMinimum": 0}, "energy_ticks": {"type": "integer", "minimum": 1}}}}
   },

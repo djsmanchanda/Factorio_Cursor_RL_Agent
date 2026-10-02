@@ -521,7 +521,7 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
             plan = generate_quad_mall_layout(
                 "iron-gear-wheel", "assembling-machine-1",
                 spec["ingredients"], spec["amounts"], center, group,
-                inserter_type="inserter", support_inserter_type="inserter",
+                inserter_type="inserter", support_inserter_type="long-handed-inserter",
                 include_substation=True, craft_time=spec["craft_time"],
             )
             reserved.update(planned_footprint_tiles(plan))

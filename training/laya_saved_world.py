@@ -18,7 +18,7 @@ from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from planners.plan_validation import actions, validate_build_plan
 from planners.sandbox_infrastructure import build_layout_authorization
-from planners.laya_quad_cell import generate_quad_slot
+from planners.laya_quad_cell import generate_quad_slot, quad_centers_from_plan, quad_reservation_reason
 from planners.quad_mall_layout import DENSE_MALL_MODULE_OFFSETS
 
 PROFILE = "saved-world-v1"
@@ -240,6 +240,7 @@ def decision_state(facts, candidates, run_id, model_ref, objective, history=(), 
                                "logistic_radius": p["logistic_radius"]} for p in facts["ports"] if p["energy"] > 0],
             "machine_status_counts": {status: sum(m["status"] == status for m in facts["machines"])
                                       for status in sorted({m["status"] for m in facts["machines"]})},
+            "quad_reserved_centers": facts.get("quad_centers", []),
             "flow_items": sorted(facts["production"]),
             "production_counts": {n: v for n, v in facts["production"].items() if v},
             "consumption_counts": {n: v for n, v in facts["consumption"].items() if v}}},
@@ -300,6 +301,16 @@ class SavedWorldAdapter:
     def close(self):
         self.bridge.close()
 
+    def quad_centers(self):
+        centers = {(p["x"], p["y"]) for p in self.manifest.get("quad_centers", [])}
+        # Reserve as soon as a selected horizontal slot is durably submitted,
+        # including while its bots/configuration are still pending.
+        for path in (self.root / "evidence").glob("transaction-*.json"):
+            receipt = load_json(path)
+            if (receipt.get("submission") or {}).get("ok"):
+                centers.update((p["x"], p["y"]) for p in quad_centers_from_plan(receipt["candidate"]["plan"]))
+        return [{"x": x, "y": y} for x, y in sorted(centers)]
+
     def checkpoint(self):
         """Save a paused prefix for independent, immutable branch replays."""
         before = self.query()
@@ -327,6 +338,7 @@ class SavedWorldAdapter:
 
     def query(self, candidates=None, inspect=None):
         verify_instance(self.root)
+        centers = self.quad_centers()
         name = f"laya_saved_world/{uuid.uuid4().hex}.json"
         request = json.dumps({"bounds": BOUNDS, "candidates": candidates, "inspect": inspect}, separators=(",", ":"))
         source = self.lua_source
@@ -344,7 +356,14 @@ class SavedWorldAdapter:
         if not result["ok"]:
             raise SavedWorldError(result["error"])
         value = result["value"]
+        if candidates is not None:
+            for candidate in candidates:
+                protected = centers + quad_centers_from_plan(candidate["plan"])
+                reason = quad_reservation_reason(candidate["plan"], protected)
+                if reason:
+                    value["validations"][candidate["option_id"]] = {"reason": reason}
         if candidates is None and inspect is None:
+            value["quad_centers"] = centers
             for key in ("ports", "poles", "machines", "resources"):
                 if value.get(key) == {}:
                     value[key] = []

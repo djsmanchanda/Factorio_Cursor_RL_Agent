@@ -22,6 +22,7 @@ def replay_fingerprint(facts):
         grids.setdefault(p.get("grid"), []).append((p["position"]["x"], p["position"]["y"]))
     return sha256_hash({"tick": facts["tick"], "networks": networks,
         "surface": facts.get("surface"), "force": facts.get("force"),
+        "quad_centers": sorted(facts.get("quad_centers", []), key=lambda p: (p["x"], p["y"])),
         "ports": sorted(ports, key=lambda p: (p["position"]["x"], p["position"]["y"])),
         "poles": sorted(poles, key=lambda p: (p["position"]["x"], p["position"]["y"])),
         "grids": sorted(sorted(positions) for positions in grids.values()),

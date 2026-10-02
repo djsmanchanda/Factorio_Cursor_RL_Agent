@@ -36,6 +36,14 @@ metadata does not constitute training or approval.
   Defer recipes, requester sections and inventory limits until observing the
   exact bot-built entities. Each quad slot owns a stable requester section;
   changing its recipe preserves other slots' sections.
+  Before long-handed inserters exist in available provider/storage stock,
+  only the left/right slots can be submitted. Each new top/bottom slot must
+  fund both required long-handed inserters; regular inserters cannot substitute.
+  Selecting a horizontal module reserves its future vertical machine/arm
+  footprints without placing ghosts or reserving construction items there.
+  Other builds are rejected if they occupy that reserved space. Reservations
+  survive pending construction, runner restarts and saved-prefix forks and
+  enter the policy observation and replay fingerprint.
   Pending configurations reconcile the already selected intent. Ambiguous
   interrupted submissions require review and are never silently replayed.
 - Advance the paused world by exact engine ticks, measure independent engine
@@ -181,3 +189,15 @@ the changes; no mod deployment or production/GUI restart was performed.
 
 The separate mall supply contract and its implemented accounting seam are in
 [Laya mall supply](Laya_Mall_Supply.md). Its live fixture remains separate work.
+
+The user's follow-up clarified the horizontal-first expansion contract above.
+Sixty-one focused checks pass. Read-only live legality probes found no admitted
+vertical slots with 20 regular inserters and zero long-handed inserters, rejected
+a pole in an empty reserved vertical footprint, and admitted a correctly funded
+slot with two long-handed inserters. A paused prefix fork retained all reserved
+centers and matched the full observed-state fingerprint. Evidence:
+`data/laya-saved-world/quad-reservation-verification-20261003.json` and
+`quad-reserved-fork-20261003/reservation-restoration.json`. These probes placed
+no entities or ghosts. All test servers were stopped; the source hash is unchanged.
+Lifecycle: restart affected Python runners; no mod deployment or production
+server restart is required.

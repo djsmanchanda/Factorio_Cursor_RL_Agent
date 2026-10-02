@@ -191,6 +191,12 @@ def test_quad_vertical_transfers_use_long_handed_inserters_in_order() -> None:
     )
 
 
+def test_quad_cannot_substitute_regular_vertical_inserters() -> None:
+    with pytest.raises(ValueError, match="require long-handed"):
+        generate_quad_mall_layout("iron-gear-wheel", "assembling-machine-1", ["iron-plate"], [2],
+                                  (10.5, 10.5), "top", craft_time=.5, support_inserter_type="inserter")
+
+
 def test_dense_vertical_supports_are_always_long_handed() -> None:
     assert quad_support_inserter_type("electronic-circuit") == (
         "long-handed-inserter"

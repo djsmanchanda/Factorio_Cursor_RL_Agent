@@ -1,6 +1,7 @@
 # Path: planners/laya_quad_cell.py | Purpose: Realize one selected quad-mall slot using shared geometry, without a mall allocation policy.
 
 from planners.quad_mall_layout import QUAD_MALL_MACHINE_OFFSETS, generate_quad_mall_layout
+from planners.plan_validation import actions, entity_footprint_tiles
 
 
 def generate_quad_slot(recipe, spec, center, side):
@@ -45,3 +46,37 @@ def generate_quad_slot(recipe, spec, center, side):
         if action["entity"] == "requester-chest":
             action["logistic_sections"][0]["group"] = f"laya-quad:{center[0]:g}:{center[1]:g}:{side}"
     return selected
+
+
+def quad_centers_from_plan(plan):
+    centers = set()
+    for action in actions(plan):
+        if action.get("entity") != "requester-chest":
+            continue
+        p = action["position"]
+        prefix = f"laya-quad:{p['x']:g}:{p['y']:g}:"
+        if any(s.get("group") in {prefix + side for side in QUAD_MALL_MACHINE_OFFSETS}
+               for s in action.get("logistic_sections", [])):
+            centers.add((p["x"], p["y"]))
+    return [{"x": x, "y": y} for x, y in sorted(centers)]
+
+
+def quad_reservation_reason(plan, centers):
+    """Protect future vertical slots, allowing only their complete long-arm geometry."""
+    placements = list(actions(plan))
+    signature = lambda a: (a["entity"], a["position"]["x"], a["position"]["y"], a.get("direction", "north"))
+    submitted = {signature(a) for a in placements}
+    spec = {"ingredients": [{"name": "iron-plate", "amount": 2}], "energy_ticks": 30, "product_amount": 1}
+    for center in centers:
+        for side in ("north", "south"):
+            reserved = [a for a in generate_quad_slot("iron-gear-wheel", spec, (center["x"], center["y"]), side)
+                        if a["entity"] in {"assembling-machine-1", "long-handed-inserter"}]
+            allowed = {signature(a) for a in reserved}
+            tiles = frozenset().union(*(entity_footprint_tiles(a) for a in reserved))
+            for action in placements:
+                if entity_footprint_tiles(action) & tiles and signature(action) not in allowed:
+                    return "reserved_quad_expansion"
+            machine = next(a for a in reserved if a["entity"] == "assembling-machine-1")
+            if signature(machine) in submitted and not allowed <= submitted:
+                return "quad_vertical_requires_long_handed_inserters"
+    return None

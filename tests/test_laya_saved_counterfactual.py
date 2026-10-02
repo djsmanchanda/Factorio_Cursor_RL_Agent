@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from planners.laya_quad_cell import generate_quad_slot
+from planners.laya_quad_cell import generate_quad_slot, quad_centers_from_plan, quad_reservation_reason
 from planners.plan_validation import validate_build_plan
 from training.laya_starter_kit import STARTER_ITEMS, verify_starter_kit
 from training.laya_saved_counterfactual import assess, label_to_case, replay_fingerprint
@@ -77,6 +77,50 @@ def test_recipe_changes_reuse_only_the_selected_slots_request_section():
     assert group("iron-gear-wheel", (10.5, 10.5), "west") == group("transport-belt", (10.5, 10.5), "west")
     assert group("iron-gear-wheel", (10.5, 10.5), "west") != group("iron-gear-wheel", (10.5, 10.5), "north")
     assert group("iron-gear-wheel", (10.5, 10.5), "west") != group("iron-gear-wheel", (16.5, 15.5), "west")
+
+
+@pytest.mark.parametrize("side", ["north", "south"])
+def test_reserved_vertical_space_accepts_only_complete_long_arm_slots(side):
+    center = {"x": 10.5, "y": 10.5}
+    plan = {"phases": [{"actions": generate_quad_slot("iron-gear-wheel", facts()["recipes"]["iron-gear-wheel"], (10.5, 10.5), side)}]}
+    assert quad_reservation_reason(plan, [center]) is None
+    regular = copy.deepcopy(plan)
+    for a in regular["phases"][0]["actions"]:
+        if a["entity"] == "long-handed-inserter":
+            a["entity"] = "inserter"
+    assert quad_reservation_reason(regular, [center]) == "reserved_quad_expansion"
+    no_arms = copy.deepcopy(plan)
+    no_arms["phases"][0]["actions"] = [a for a in no_arms["phases"][0]["actions"] if a["entity"] != "long-handed-inserter"]
+    assert quad_reservation_reason(no_arms, [center]) == "quad_vertical_requires_long_handed_inserters"
+    intruder = {"phases": [{"actions": [{"entity": "substation", "position": {"x": 10, "y": 5 if side == "north" else 16}}]}]}
+    assert quad_reservation_reason(intruder, [center]) == "reserved_quad_expansion"
+
+
+def test_horizontal_seed_reserves_expansion_before_construction_finishes(tmp_path):
+    import json
+    from training.laya_saved_world import SavedWorldAdapter
+    plan = {"phases": [{"actions": generate_quad_slot("iron-gear-wheel", facts()["recipes"]["iron-gear-wheel"], (10.5, 10.5), "west")} ]}
+    center = {"x": 10.5, "y": 10.5}
+    assert quad_centers_from_plan(plan) == [center]
+    assert quad_reservation_reason(plan, [center]) is None
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    adapter.manifest = {"quad_centers": [{"x": -10.5, "y": -10.5}]}
+    (tmp_path / "evidence").mkdir()
+    receipt = {"status": "pending", "candidate": {"plan": plan}, "submission": {"ok": True}}
+    path = tmp_path / "evidence/transaction-selected.json"
+    path.write_text(json.dumps(receipt))
+    assert adapter.quad_centers() == [{"x": -10.5, "y": -10.5}, center]
+    receipt["submission"]["ok"] = False
+    path.write_text(json.dumps(receipt))
+    assert adapter.quad_centers() == [{"x": -10.5, "y": -10.5}]
+
+
+def test_prefix_fingerprint_includes_reserved_expansion_space():
+    f = kit_facts()
+    changed = copy.deepcopy(f)
+    changed["quad_centers"] = [{"x": 10.5, "y": 10.5}]
+    assert replay_fingerprint(f) != replay_fingerprint(changed)
 
 
 @pytest.mark.parametrize("field", ["recipes", "resources", "researched"])

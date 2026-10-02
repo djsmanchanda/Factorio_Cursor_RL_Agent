@@ -56,6 +56,8 @@ def generate_quad_mall_layout(
     """
     if group not in QUAD_MALL_GROUP_MACHINES:
         raise ValueError("Quad mall group must be 'top' or 'bottom'")
+    if support_inserter_type not in (None, "long-handed-inserter"):
+        raise ValueError("Quad vertical slots require long-handed inserters")
     section = {
         "group": recipe_group_name(recipe, group),
         "requests": recipe_group_requests(ingredients, amounts),

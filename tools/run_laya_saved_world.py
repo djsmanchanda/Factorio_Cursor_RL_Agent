@@ -53,6 +53,7 @@ def prepare(args):
         if len(ancestor) != 64 or any(c not in "0123456789abcdef" for c in ancestor):
             raise SavedWorldError("invalid ancestor save hash")
         manifest["ancestor_source_sha256"] = ancestor
+    manifest["quad_centers"] = getattr(args, "quad_centers", [])
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "bootstrap"))
     manifest["initial_copy_sha256"] = file_hash(root / "server/saves/mod_playground.zip")
