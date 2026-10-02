@@ -7,13 +7,21 @@ from training.laya_factory_health import VERSION as HEALTH_VERSION
 STATE_PROFILE = 'state-v1'
 CORE_PROFILE = 'workflow-core-v1'
 HEALTH_PROFILE = 'workflow-health-v1'
-INPUT_PROFILES = frozenset({STATE_PROFILE, CORE_PROFILE, HEALTH_PROFILE})
+SAVED_WORLD_PROFILE = 'saved-world-v1'
+INPUT_PROFILES = frozenset({STATE_PROFILE, CORE_PROFILE, HEALTH_PROFILE, SAVED_WORLD_PROFILE})
 
 
 def input_profile(state: Mapping) -> str:
     observation = state.get('observation_digest') or {}
     if not isinstance(observation, Mapping):
         raise ValueError('observation digest must be a mapping')
+    if 'saved_world' in observation:
+        saved = observation['saved_world']
+        if not isinstance(saved, Mapping) or saved.get('version') != SAVED_WORLD_PROFILE:
+            raise ValueError('unsupported saved-world observation representation')
+        if 'factory_health' in observation or 'work_branches' in observation or 'item_supply' in observation:
+            raise ValueError('saved-world facts cannot be disguised as workflow inputs')
+        return SAVED_WORLD_PROFILE
     health = observation.get('factory_health')
     if health is not None:
         if not isinstance(health, Mapping) or health.get('version') != HEALTH_VERSION:
@@ -28,6 +36,8 @@ def require_input_profile(config: Mapping, state: Mapping, *, allow_unrecorded: 
     profile = input_profile(state)
     supported = config.get('input_profiles')
     if supported is None:
+        if profile == SAVED_WORLD_PROFILE:
+            raise ValueError('checkpoint has no recorded saved-world-v1 training; retrain for saved-world decisions')
         # Preserved v2 adapters predate health telemetry. They may still be
         # diagnosed explicitly, but must not silently receive the new facts.
         if profile == HEALTH_PROFILE and not allow_unrecorded:

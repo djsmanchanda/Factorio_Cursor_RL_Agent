@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Laya saved-world factual observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tick", "surface", "force", "mods", "networks", "ports", "poles", "machines", "resources", "player_stock", "production", "consumption", "researched", "pending_ghosts"],
+  "properties": {
+    "version": {"const": "saved-world-v1"},
+    "tick": {"type": "integer", "minimum": 0},
+    "surface": {"const": "nauvis"},
+    "force": {"const": "player"},
+    "mods": {"type": "object", "additionalProperties": {"type": "string"}},
+    "networks": {"type": "object", "additionalProperties": {"$ref": "#/definitions/network"}},
+    "ports": {"type": "array", "items": {"type": "object", "required": ["position", "network", "energy", "construction_radius", "logistic_radius"], "properties": {"position": {"$ref": "#/definitions/position"}, "network": {"type": "string"}, "energy": {"$ref": "#/definitions/count"}, "construction_radius": {"$ref": "#/definitions/count"}, "logistic_radius": {"$ref": "#/definitions/count"}}}},
+    "poles": {"type": "array", "items": {"type": "object", "required": ["name", "position", "wire", "supply", "grid", "generated"], "properties": {"name": {"type": "string"}, "position": {"$ref": "#/definitions/position"}, "wire": {"$ref": "#/definitions/count"}, "supply": {"$ref": "#/definitions/count"}, "grid": {"type": "string"}, "generated": {"type": "boolean"}}}},
+    "machines": {"type": "array", "items": {"type": "object", "required": ["name", "position", "energy", "status"], "properties": {"name": {"type": "string"}, "position": {"$ref": "#/definitions/position"}, "energy": {"$ref": "#/definitions/count"}, "status": {"type": "string"}}}},
+    "resources": {"type": "array", "items": {"type": "object", "required": ["item", "position", "remaining"], "properties": {"item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]}, "position": {"$ref": "#/definitions/position"}, "remaining": {"$ref": "#/definitions/count"}}}},
+    "player_stock": {"type": "object", "additionalProperties": {"$ref": "#/definitions/stock"}},
+    "production": {"$ref": "#/definitions/stock"},
+    "consumption": {"$ref": "#/definitions/stock"},
+    "researched": {"type": "object", "additionalProperties": {"const": true}},
+    "pending_ghosts": {"type": "integer", "minimum": 0}
+  },
+  "definitions": {
+    "count": {"type": "number", "minimum": 0},
+    "stock": {"type": "object", "additionalProperties": {"$ref": "#/definitions/count"}},
+    "position": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},
+    "network": {"type": "object", "additionalProperties": false, "required": ["items", "reserved", "construction_robots", "available_construction_robots", "logistic_robots"], "properties": {"items": {"$ref": "#/definitions/stock"}, "reserved": {"$ref": "#/definitions/stock"}, "construction_robots": {"type": "integer", "minimum": 0}, "available_construction_robots": {"type": "integer", "minimum": 0}, "logistic_robots": {"type": "integer", "minimum": 0}}}
+  }
+}

@@ -102,3 +102,8 @@ Promotion requires zero safety violations, held-out success, non-regression on e
 The active implementation and coexistence plan is
 `Laya_Implementation_Plan.md`. Laya has a separate opt-in runner; the existing
 deterministic entry points and presentation remain intact.
+
+The [saved-world adapter](Laya_Saved_World_Adapter.md) adds isolated exact-copy
+`mod_playground` observations and funded bot construction. Its live mechanics
+replays are verified; saved-world Laya training and matched baseline comparison
+remain separate gates.
