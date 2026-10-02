@@ -98,14 +98,17 @@ def generate_quad_mall_layout(
             machine_action["logistic_condition"] = stock_gate(recipe, stock_gate_target)
         actions.append(machine_action)
         if side in {"north", "south"}:
-            input_position = _position(center, (0.0, -3.0 if side == "north" else 3.0))
-            output_position = _position(center, (0.0, -2.0 if side == "north" else 2.0))
+            # Two-tile pickup reaches the requester; the return arm faces
+            # outward to extract from the machine into the adjacent provider.
+            input_position = _position(center, (0.0, -2.0 if side == "north" else 2.0))
+            output_position = _position(center, (0.0, -3.0 if side == "north" else 3.0))
             direction = "south" if side == "north" else "north"
+            output_direction = "north" if side == "north" else "south"
             actions.extend([
                 {"action_type": "place_entity", "entity": support_inserter_type or "long-handed-inserter",
                  "position": input_position, "direction": direction},
                 {"action_type": "place_entity", "entity": support_inserter_type or "long-handed-inserter",
-                 "position": output_position, "direction": direction},
+                 "position": output_position, "direction": output_direction},
             ])
         else:
             x = -1.0 if side == "west" else 1.0

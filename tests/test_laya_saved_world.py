@@ -10,6 +10,7 @@ from training.laya_input_profile import input_profile, require_input_profile
 from training.laya_saved_world import (
     PROFILE, SavedWorldAdapter, SavedWorldError, bounded_menu, compile_candidates,
     decision_state, measured_outcome, owned_root,
+    submission_plan, configuration_actions,
 )
 
 
@@ -19,7 +20,8 @@ def facts():
             "networks": {"1": {"items": {"electric-furnace": 3, "inserter": 4},
                                   "reserved": {"electric-furnace": 2}, "construction_robots": 50}},
             "machines": [], "pending_ghosts": 2, "resources": [],
-            "production": {"iron-plate": 20}, "consumption": {"iron-ore": 20}}
+            "production": {"iron-plate": 20}, "consumption": {"iron-ore": 20},
+            "recipes": {"iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}], "product_amount": 1, "energy_ticks": 30}}}
 
 
 def test_saved_world_profile_cannot_reuse_a_lab_checkpoint_or_unrecorded_override():
@@ -56,15 +58,16 @@ def test_small_menu_retains_all_legal_families_and_seeded_site_diversity():
     assert menu != bounded_menu(candidates, 13)
 
 
-def test_compiler_produces_funded_ghost_intents_and_reverses_inserter_pickup_direction():
+def test_compiler_produces_ghost_intents_with_horizontal_seed_and_long_arm_expansion():
     candidates = compile_candidates(facts())
     assert {c["family"] for c in candidates} == {"expand", "smelt", "assemble"}
     for candidate in candidates:
         for phase in candidate["plan"]["phases"]:
             for action in phase["actions"]:
                 assert action["action_type"] == "place_ghost"
-                if action["entity"] == "inserter":
-                    assert action["direction"] == "west"  # Picks west, drops east.
+    assembly = [c for c in candidates if c["family"] == "assemble"]
+    assert any(any(a["entity"] == "long-handed-inserter" for a in c["plan"]["phases"][0]["actions"]) for c in assembly)
+    assert any(not any(a["entity"] == "long-handed-inserter" for a in c["plan"]["phases"][0]["actions"]) for c in assembly)
 
 
 def test_measured_flow_uses_engine_counters_not_inventory_or_elapsed_wall_time():
@@ -151,3 +154,17 @@ def test_measured_feedback_enters_next_policy_state_without_inventing_capacity()
     assert feedback["production_per_second"]["iron-plate"] == .7
     assert feedback["window_ticks"] == 600
     assert state["state_digest"]["production"]["rate_target"] is None
+
+
+def test_quad_chest_inventory_settings_are_deferred_until_bot_construction():
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    original = copy.deepcopy(candidate["plan"])
+    ghosts = submission_plan(original)
+    assert all(set(a) <= {"action_type", "entity", "position", "direction"}
+               for p in ghosts["phases"] for a in p["actions"])
+    configs = configuration_actions(original)
+    assert any(a.get("clear_inventory_limit") for a in configs)
+    assert any(a.get("logistic_sections") for a in configs)
+    assert any(a.get("recipe") for a in configs)
+    assert all(a["action_type"] == "configure_entity" for a in configs)
+    assert original == candidate["plan"]

@@ -15,9 +15,11 @@ end
 
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
-  player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0}
+  player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
+  infrastructure_counts={}, recipes={}}
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
+  facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
   if e.type == "generator" or e.type == "solar-panel" or e.type == "electric-energy-interface" then
     local ok, id = pcall(function() return e.electric_network_id end)
     if ok and id then generation[tostring(id)] = true end
@@ -71,8 +73,30 @@ for _, p in pairs(game.players) do
 end
 for name, tech in pairs(force.technologies) do if tech.researched then facts.researched[name]=true end end
 local stats=force.get_item_production_statistics(surface)
-for _, name in ipairs({"iron-ore","copper-ore","coal","stone","iron-plate","copper-plate","steel-plate",
-  "iron-gear-wheel","copper-cable","electronic-circuit","transport-belt","inserter"}) do
+local recipe_names={"iron-plate","copper-plate","stone-brick","steel-plate","iron-gear-wheel","copper-cable",
+  "electronic-circuit","transport-belt","inserter","long-handed-inserter","medium-electric-pole",
+  "assembling-machine-1","electric-mining-drill","electric-furnace","requester-chest","passive-provider-chest",
+  "roboport","pipe","underground-belt","splitter","assembling-machine-2","chemical-plant","oil-refinery","pumpjack"}
+for _, name in ipairs(recipe_names) do
+  local r=force.recipes[name]
+  if r and r.enabled then
+    local ingredients={}; local solid=true
+    for _, part in pairs(r.ingredients) do
+      if part.type=="fluid" then solid=false end
+      table.insert(ingredients,{name=part.name,amount=part.amount})
+    end
+    if solid then
+      local amount=0
+      for _,part in pairs(r.products) do if part.name==name then amount=part.amount or 0 end end
+      if amount>0 then facts.recipes[name]={ingredients=ingredients,product_amount=amount,
+        energy_ticks=math.max(1,math.floor(r.energy*60+.5))} end
+    end
+  end
+end
+for _, name in ipairs({"iron-ore","copper-ore","coal","stone"}) do
+  facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
+end
+for _,name in ipairs(recipe_names) do
   facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
 end
 local bounds=request.bounds
@@ -116,7 +140,14 @@ if request.inspect then
   return result
 end
 local function validate(candidate)
-  local net=facts.networks[candidate.network]
+  local network=candidate.network
+  if candidate.network_anchor then
+    network=nil
+    for _,port in ipairs(facts.ports) do
+      if port.position.x==candidate.network_anchor.x and port.position.y==candidate.network_anchor.y then network=port.network end
+    end
+  end
+  local net=network and facts.networks[network]
   if not net or net.construction_robots==0 then return "no_construction_network" end
   local bill={}
   for _, phase in ipairs(candidate.plan.phases) do
@@ -124,28 +155,44 @@ local function validate(candidate)
       if a.action_type~="place_ghost" then return "ghosts_only" end
       local p=a.position
       if p.x<bounds.x_min+2 or p.y<bounds.y_min+2 or p.x>=bounds.x_max_exclusive-2 or p.y>=bounds.y_max_exclusive-2 then return "scope" end
-      if not in_network(p,candidate.network) then return "construction_coverage" end
+      if not in_network(p,network) then return "construction_coverage" end
       local prototype=prototypes.entity[a.entity]
       if not prototype then return "prototype" end
       if prototype.type=="logistic-container" then
         local serving=surface.find_logistic_network_by_position(p,force)
-        if not serving or tostring(serving.network_id)~=candidate.network then return "logistic_coverage" end
+        if not serving or tostring(serving.network_id)~=network then return "logistic_coverage" end
         if net.logistic_robots==0 then return "no_logistic_robots" end
       end
       local item=(prototype.items_to_place_this or {})[1]
       if not item then return "unfundable_prototype" end
-      bill[item.name]=(bill[item.name] or 0)+item.count
-      if not surface.can_place_entity{name=a.entity,position=p,direction=defines.direction[a.direction or "north"],force=force} then return "collision" end
+      local exists=false
+      for _,e in pairs(surface.find_entities_filtered{position=p,name=a.entity,force=force}) do
+        if e.position.x==p.x and e.position.y==p.y then exists=true end
+      end
+      if not exists then
+        bill[item.name]=(bill[item.name] or 0)+item.count
+        if not surface.can_place_entity{name=a.entity,position=p,direction=defines.direction[a.direction or "north"],force=force} then return "collision" end
+      end
+      if a.recipe then
+        local r=force.recipes[a.recipe]
+        if not r or not r.enabled then return "recipe_unavailable" end
+        local supported=false
+        for _,category in pairs(r.categories or r.prototype.categories or {}) do
+          if prototype.crafting_categories and prototype.crafting_categories[category] then supported=true end
+        end
+        if not supported then return "recipe_category" end
+        if prototype.ingredient_count and prototype.ingredient_count>0 and #r.ingredients>prototype.ingredient_count then return "recipe_ingredients" end
+      end
     end
   end
   for name,count in pairs(bill) do
     if (net.items[name] or 0)-(net.reserved[name] or 0)<count then return "item_shortfall:"..name end
   end
-  return nil
+  return nil,bill
 end
 if request.candidates then
   local results={}
-  for _, c in ipairs(request.candidates) do results[c.option_id]={reason=validate(c)} end
+  for _, c in ipairs(request.candidates) do local reason,bill=validate(c); results[c.option_id]={reason=reason,bill=bill} end
   return {tick=game.tick, validations=results}
 end
 return facts

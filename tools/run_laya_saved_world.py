@@ -18,6 +18,7 @@ from training.laya_input_profile import require_input_profile
 from training.laya_saved_world import (
     PROFILE, SavedWorldAdapter, SavedWorldError, decision_state, file_hash, owned_root,
 )
+from training.laya_starter_kit import verify_starter_kit
 
 
 def manager(root, action):
@@ -47,6 +48,11 @@ def prepare(args):
     manifest = {"version": PROFILE, "runtime": "disposable_saved_world", "production_authority": False,
                 "comparison_eligible": False, "source_save": str(source), "source_sha256": file_hash(source),
                 "game_port": args.game_port, "rcon_port": args.rcon_port, "mod_hashes": {}}
+    ancestor = getattr(args, "ancestor_source_sha256", None)
+    if ancestor is not None:
+        if len(ancestor) != 64 or any(c not in "0123456789abcdef" for c in ancestor):
+            raise SavedWorldError("invalid ancestor save hash")
+        manifest["ancestor_source_sha256"] = ancestor
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "bootstrap"))
     manifest["initial_copy_sha256"] = file_hash(root / "server/saves/mod_playground.zip")
@@ -63,6 +69,7 @@ def prepare(args):
         adapter.bridge.command('/sc game.tick_paused=true; game.ticks_to_run=0; rcon.print("saved-world-paused")')
         facts = adapter.query()
         (root / "initial-state.json").write_text(json.dumps(facts, indent=2) + "\n")
+        (root / "starter-kit-check.json").write_text(json.dumps(verify_starter_kit(facts), indent=2) + "\n")
     finally:
         adapter.close()
     if file_hash(source) != manifest["source_sha256"]:

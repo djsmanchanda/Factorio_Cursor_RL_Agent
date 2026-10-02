@@ -13,13 +13,15 @@
     "networks": {"type": "object", "additionalProperties": {"$ref": "#/definitions/network"}},
     "ports": {"type": "array", "items": {"type": "object", "required": ["position", "network", "energy", "construction_radius", "logistic_radius"], "properties": {"position": {"$ref": "#/definitions/position"}, "network": {"type": "string"}, "energy": {"$ref": "#/definitions/count"}, "construction_radius": {"$ref": "#/definitions/count"}, "logistic_radius": {"$ref": "#/definitions/count"}}}},
     "poles": {"type": "array", "items": {"type": "object", "required": ["name", "position", "wire", "supply", "grid", "generated"], "properties": {"name": {"type": "string"}, "position": {"$ref": "#/definitions/position"}, "wire": {"$ref": "#/definitions/count"}, "supply": {"$ref": "#/definitions/count"}, "grid": {"type": "string"}, "generated": {"type": "boolean"}}}},
-    "machines": {"type": "array", "items": {"type": "object", "required": ["name", "position", "energy", "status"], "properties": {"name": {"type": "string"}, "position": {"$ref": "#/definitions/position"}, "energy": {"$ref": "#/definitions/count"}, "status": {"type": "string"}}}},
+    "machines": {"type": "array", "items": {"type": "object", "required": ["name", "position", "energy", "status"], "properties": {"name": {"type": "string"}, "position": {"$ref": "#/definitions/position"}, "energy": {"$ref": "#/definitions/count"}, "status": {"type": "string"}, "recipe": {"type": "string"}}}},
     "resources": {"type": "array", "items": {"type": "object", "required": ["item", "position", "remaining"], "properties": {"item": {"enum": ["iron-ore", "copper-ore", "coal", "stone"]}, "position": {"$ref": "#/definitions/position"}, "remaining": {"$ref": "#/definitions/count"}}}},
     "player_stock": {"type": "object", "additionalProperties": {"$ref": "#/definitions/stock"}},
     "production": {"$ref": "#/definitions/stock"},
     "consumption": {"$ref": "#/definitions/stock"},
     "researched": {"type": "object", "additionalProperties": {"const": true}},
-    "pending_ghosts": {"type": "integer", "minimum": 0}
+    "pending_ghosts": {"type": "integer", "minimum": 0},
+    "infrastructure_counts": {"$ref": "#/definitions/stock"},
+    "recipes": {"type": "object", "additionalProperties": {"type": "object", "required": ["ingredients", "product_amount", "energy_ticks"], "properties": {"ingredients": {"type": "array", "items": {"type": "object", "required": ["name", "amount"], "properties": {"name": {"type": "string"}, "amount": {"type": "number", "exclusiveMinimum": 0}}}}, "product_amount": {"type": "number", "exclusiveMinimum": 0}, "energy_ticks": {"type": "integer", "minimum": 1}}}}
   },
   "definitions": {
     "count": {"type": "number", "minimum": 0},

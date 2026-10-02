@@ -43,6 +43,14 @@ _CASE_VALIDATOR = Draft7Validator(_SCHEMAS["laya_case.schema.json"], registry=_R
 _HASH = "sha256:" + ("0" * 64)
 
 
+def validate_case(case: Mapping[str, Any]) -> None:
+    """Validate measured cases from adapters using the shared dataset contract."""
+    errors = list(_CASE_VALIDATOR.iter_errors(case))
+    if errors:
+        raise LayaDatasetError(f"generated case failed validation: {errors[0].message}")
+    _validate_case_targets(case)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

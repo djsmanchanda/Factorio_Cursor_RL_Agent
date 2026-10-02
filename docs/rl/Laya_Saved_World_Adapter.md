@@ -26,14 +26,16 @@ metadata does not constitute training or approval.
 - Observe actual provider/storage stock per network, outstanding ghost bills,
   player inventory separately, bot counts/coverage, power-grid anchors, machine
   states/recipes, resource samples, research and engine production/consumption.
-- Compile parameterized mining, furnace, gear/belt assembly and powered-roboport
+- Compile parameterized mining, furnace, enabled solid-recipe quad slots and powered-roboport
   expansion alternatives, plus two bounded waits. Seeded menu sampling preserves
   legal operation/product coverage; no strategy ranks the alternatives.
 - Validate plan schema, internal footprints, live collisions, scope, construction
   coverage, required logistic delivery coverage and current network funding.
   Validate again immediately before the exact selected transaction.
 - Submit only atomic funded ghosts through the existing mod layout executor.
-  Configure recipes/requesters only after observing the exact bot-built entities.
+  Defer recipes, requester sections and inventory limits until observing the
+  exact bot-built entities. Each quad slot owns a stable requester section;
+  changing its recipe preserves other slots' sections.
   Pending configurations reconcile the already selected intent. Ambiguous
   interrupted submissions require review and are never silently replayed.
 - Advance the paused world by exact engine ticks, measure independent engine
@@ -114,7 +116,7 @@ baseline hashes were verified unchanged; both test servers were stopped.
    lab regression coverage, then run the bounded saved-world director from
    fresh copies. Inference failures/uncertainty stop safely; no baseline fallback.
 3. **Expand the executable menu.** Current scope is a fixed 256×256 survey,
-   sampled sites, one-machine cells, two assembly recipes, and one-hop coverage
+   sampled sites, one-machine furnace cells, AM1 quad slots, and one-hop coverage
    expansion using stocked substations. Add scale/route alternatives, repair,
    mall funding, actual power generation, fluids and research mechanics with
    measured curricula. Logistic transport is currently the only cell-delivery
@@ -127,3 +129,55 @@ baseline hashes were verified unchanged; both test servers were stopped.
 Lifecycle for this milestone: launch new adapter processes to use the Python
 and RCON helper changes. No installed mod redeployment, production-server
 restart or GUI change is required.
+
+## Quad and counterfactual verification — October 3, 2026
+
+Resumed the unfinished tranche from the October 3 handoff. Live verification
+found and corrected two mechanics failures: clearing a ghost chest's nonexistent
+inventory, and vertical long arms both feeding the machine instead of extracting
+its output. Settings now apply after construction; the shared quad generator
+uses a requester-facing input arm and a machine-facing output arm. This shared
+Python geometry fix also applies to future deterministic quad plans.
+
+The original starter kit matches exactly, including 50 construction and 50
+logistic robots. A saved paused prefix restored its tick and observed-state
+fingerprint exactly. Recipe/category checks, reused-entity funding and shared
+requester sections were exercised in Factorio 2.1.20 with frozen installed mods.
+
+Fresh evidence: `data/laya-saved-world/quad-final-20261003/`. Explicit replays
+mined iron and copper, smelted plates, made gears, cable, circuits, inserters and
+long-handed inserters, then delivered 18 belts from a north slot and 10 from a
+south slot during their respective checks. A recipe change manufactured two
+additional assemblers before the south expansion. Every transaction ended with
+zero pending ghosts. These windows include construction/configuration; they
+do not establish joint sustained throughput or learned decisions. Earlier failed
+worlds and diagnostic receipts remain preserved separately.
+
+`tools/collect_laya_saved_world.py` saves one paused prefix and sequentially
+forks its alternatives, preserving ancestor identity and common engine horizons.
+It stops at the first tool failure, retains outcomes, excludes invalid/all-failed
+comparisons, and writes train-only cases for the source lineage. Example:
+
+```bash
+.venv/bin/python tools/collect_laya_saved_world.py \
+  --parent data/laya-saved-world/example \
+  --output data/laya-saved-world/example-counterfactuals \
+  --menus 1 --seed 4 --horizon-ticks 3600 --sustain-ticks 1200
+```
+
+The diagnostic pilot at `data/laya-saved-world/cf-pilot-20261003/` measured eight
+alternatives with one starting fingerprint and identical 3,600-tick horizons.
+Mining sustained 0.8/0.6/0.6/0.6 ore/s over four 300-tick endpoint windows;
+seven other actions failed the ore objective without tool/safety errors. One
+validated completion-first case resulted. This single-world diagnostic has no
+independent calibration/evaluation coverage and is insufficient for fine-tuning.
+It uses a fixed measurement continuation, not a full factory policy rollout.
+
+The final eight-option state with measured flows fits the real tokenizer at
+1,811/2,048 tokens; no model weights were loaded. The source hash remains
+`9763436071d2ad138e2844a81c7bbd6891218f612c9bf69dc5bede6517c6d5bb`.
+All owned test servers were stopped. Restart affected Python consumers to use
+the changes; no mod deployment or production/GUI restart was performed.
+
+The separate mall supply contract and its implemented accounting seam are in
+[Laya mall supply](Laya_Mall_Supply.md). Its live fixture remains separate work.
