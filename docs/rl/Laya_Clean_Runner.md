@@ -107,15 +107,29 @@ evidence.
 
 ## Current state
 
-Run: `tools/run_laya_clean.py prepare|run|stop --root data/laya-saved-world/<name>`
-(default ports 34230/27130). Core: `training/laya_clean_runner.py`; mission
-data: `training/laya_mission.py`; journal: `<root>/evidence/clean-decisions.jsonl`.
+Console: `.venv/bin/python tools/laya_ops_server.py` → http://127.0.0.1:9140/
+(modelled on the deterministic console at 9137): game/RCON/runner status and
+connect address, mission ladder, status board with bottleneck and blocked
+needs, latest choice and menu, recent decisions, provider stock, guidelines in
+use, live log tabs, and fixed actions (start/stop runner, fresh episode,
+start/stop server, sync GUI mods, stop console). One episode is current at a
+time (`data/laya-saved-world/laya-ops-current.json`); default ports 34230/27130.
+
+CLI: `tools/run_laya_clean.py prepare|run|stop --root data/laya-saved-world/<name>`.
+`run` is live by default (game unpaused at `--speed`, decisions taken while the
+factory runs) and unlimited with `--decisions 0`; it ends on mission complete,
+safe stop (3 consecutive failures) or SIGTERM after the current decision.
+`--stepped` keeps the paused fixed-tick mode. Artifacts under the root:
+`logs/laya-runner.log` (deterministic `RUN START`/`+Ns`/`RUN END` format),
+`laya-runner.pid.json`, `laya-runner.heartbeat.json`,
+`evidence/clean-decisions.jsonl`, `evidence/latest-status.json`, transaction
+receipts. Checkpoint save/resume is not implemented.
 
 - World interface: the saved-world adapter (live legality/funding checks,
   mod layout executor, exact tick stepping, receipts).
 - Options are tagged with the need they serve; construction items that checks
-  report missing become `stock:<item>` needs; already-built options are pruned
-  as `no_op`; needs without legal options are journaled with reasons.
+  report missing become `stock:<item>` needs; options whose main entity
+  already exists are pruned as `no_op`; needs without legal options are journaled with reasons.
 - Power relays come in two variants (substation chain, or medium-pole hops
   ending on one substation); the policy chooses.
 - Policy: seeded exploration (`authority: exploration`) until a compatible

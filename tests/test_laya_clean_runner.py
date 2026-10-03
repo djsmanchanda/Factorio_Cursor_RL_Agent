@@ -34,7 +34,9 @@ def validator(shortfall_for=()):
             if needs_requester and c.get("product") in shortfall_for:
                 result[c["option_id"]] = {"reason": "item_shortfall:requester-chest"}
             else:
-                result[c["option_id"]] = {"reason": None, "bill": {"inserter": 1}}
+                primary = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
+                           "assemble": "assembling-machine-1"}[c["family"]]
+                result[c["option_id"]] = {"reason": None, "bill": {primary: 1, "inserter": 1}}
         return result
     return validate
 
@@ -128,9 +130,11 @@ def test_coverage_hop_that_reaches_an_unmet_resource_serves_that_need():
 def test_already_built_options_are_pruned_and_blocked_needs_say_why():
     def validate(candidates):
         # Expansions are already built (empty bill); gear slots lack requesters.
-        return {c["option_id"]: {"reason": None, "bill": {}} if c["family"] == "expand" else
+        # Expansions only need new relay substations: their roboport already exists.
+        return {c["option_id"]: {"reason": None, "bill": {"substation": 2}} if c["family"] == "expand" else
                 ({"reason": "item_shortfall:requester-chest"} if c.get("product") == "iron-gear-wheel"
-                 else {"reason": None, "bill": {"inserter": 1}}) for c in candidates}
+                 else {"reason": None, "bill": {"electric-furnace": 1, "electric-mining-drill": 1,
+                                                "assembling-machine-1": 1}}) for c in candidates}
     world = facts()
     menu = compile_menu(world, compile_status(world, PHASES[0]["targets"]), validate, seed=4)
     assert "coverage" not in {n["need_id"] for n in menu["needs"]}
@@ -172,3 +176,32 @@ def test_pole_variant_that_overlaps_its_own_build_is_not_offered():
     if variant is not None:
         from planners.plan_validation import validate_build_plan
         validate_build_plan(variant["plan"])  # Offered variants never overlap their own build.
+
+
+def test_live_world_waits_on_the_running_clock_without_pausing():
+    from training.laya_clean_runner import LiveWorld
+
+    class Bridge:
+        def __init__(self):
+            self.now, self.commands = 1000, []
+
+        def command(self, text):
+            self.commands.append(text)
+            if "rcon.print(game.tick)" in text:
+                self.now += 120  # The server keeps running between polls.
+                return str(self.now)
+            return "live"
+
+    world = object.__new__(LiveWorld)
+    world.bridge, world.speed = Bridge(), 1.0
+    world.advance(300)
+    assert world.bridge.now >= 1300
+    assert not any("tick_paused=true" in c for c in world.bridge.commands)
+    assert any("tick_paused=false" in c and "game.speed=1.0" in c for c in world.bridge.commands)
+
+
+def test_live_world_observes_with_the_shared_helper_minus_only_the_pause_assertion():
+    from pathlib import Path
+    from training.laya_clean_runner import PAUSED_ASSERTION
+    source = Path("training/laya_saved_world.lua").read_text()
+    assert source.count(PAUSED_ASSERTION) == 1  # Live mode fails closed if this changes.

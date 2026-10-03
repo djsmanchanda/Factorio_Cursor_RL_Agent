@@ -1,0 +1,42 @@
+/* Path: tools/laya_ops.css */
+/* Purpose: Laya console layout and extras on top of the deterministic console's dashboard.css. */
+.mission-panel { grid-column: 1 / -1; grid-row: 1; }
+.board-panel { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+.controls { grid-column: 1; grid-row: 3; }
+.console-panel { grid-column: 2; grid-row: 3 / span 3; }
+.logistic-inventory-panel { grid-column: 1; grid-row: 4; }
+.guideline-panel { grid-column: 1; grid-row: 5; }
+.decision-panel { grid-column: 1 / -1; grid-row: 6; min-width: 0; }
+.mission-panel .research-help, .board-panel .research-help, .decision-panel .research-help,
+.decision-panel details { padding: 0 20px; }
+.board-panel .research-help:last-child, .mission-panel .research-help { padding-bottom: 14px; }
+.decision-panel details { margin-bottom: 12px; color: var(--muted); }
+.decision-panel details pre { height: auto; max-height: 300px; margin-top: 8px; }
+
+.board-panel table, .decision-panel table { width: 100%; border-collapse: collapse; font: .75rem/1.35 ui-monospace, monospace; }
+.board-panel th, .board-panel td, .decision-panel th, .decision-panel td {
+  padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top;
+}
+.board-panel th, .decision-panel th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
+.decision-panel tbody { max-height: 520px; }
+.cond-satisfied { color: var(--green); }
+.cond-unbuilt, .cond-recipe_unavailable, .cond-power_limited { color: var(--red); }
+.cond-input_starved, .cond-output_blocked, .cond-under_capacity, .cond-short { color: var(--yellow); }
+.cond-unmeasured { color: var(--muted); }
+.row-failure td { color: var(--red); }
+.row-phase td { color: var(--green); font-weight: 700; }
+
+.phase-ladder { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 16px 20px; list-style: none; }
+.phase-ladder li { padding: 8px 12px; border: 1px solid var(--line); color: var(--muted); font: 700 .75rem/1.2 ui-monospace, monospace; }
+.phase-ladder li.reached { border-color: #395b3a; color: var(--green); }
+.phase-ladder li.current { border-color: var(--orange); color: var(--text); background: #e8872f16; }
+
+.guidelines { margin: 0; padding: 16px 20px 16px 36px; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.guidelines .hard { color: var(--text); }
+.status.warning::before { background: var(--yellow); }
+
+@media (max-width: 1200px) {
+  .mission-panel, .board-panel, .controls, .console-panel, .logistic-inventory-panel, .guideline-panel, .decision-panel {
+    grid-column: 1; grid-row: auto;
+  }
+}

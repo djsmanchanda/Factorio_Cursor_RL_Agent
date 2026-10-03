@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import time
 import traceback
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -34,7 +35,7 @@ from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from orchestrator.laya_operations import sha256_hash
 from planners.infrastructure_geometry import boxes_overlap, step_points
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
-from training.laya_saved_world import compile_candidates, decision_state, ghost
+from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state, ghost
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
@@ -42,8 +43,50 @@ WAIT_TICKS = (300, 1800)
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
 MAX_CONSECUTIVE_FAILURES = 3
 MEDIUM_POLE_WIRE = 9.0
+# The entity each family exists to add; live checks credit entities already placed.
+PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
+                  "assemble": "assembling-machine-1"}
+PAUSED_ASSERTION = 'assert(game.tick_paused and game.ticks_to_run == 0, "saved-world clock must be paused")'
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
+
+
+class LiveWorld(SavedWorldAdapter):
+    """Live play: the game clock runs unpaused while Laya observes and decides.
+
+    Replaces the adapter's paused fixed-tick stepping; each measurement window
+    is the real number of ticks that elapsed.
+    """
+
+    def __init__(self, root: Path, speed: float = 1.0) -> None:
+        super().__init__(root)
+        if not 0.25 <= speed <= 8:
+            raise SavedWorldError("live speed must be 0.25..8")
+        self.speed = speed
+        # The shared helper requires a paused clock for stepped exactness. One
+        # /sc command runs inside a single tick, so a live snapshot is still
+        # atomic; drop only that assertion and fail closed if it changes.
+        if PAUSED_ASSERTION not in self.lua_source:
+            raise SavedWorldError("saved-world helper changed; live observation assertion not found")
+        self.lua_source = self.lua_source.replace(PAUSED_ASSERTION, "")
+
+    def tick(self) -> int:
+        return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
+
+    def go_live(self) -> None:
+        self.bridge.command(f'/sc game.tick_paused=false; game.ticks_to_run=0; game.speed={self.speed}; rcon.print("live")')
+
+    def advance(self, ticks: int) -> None:
+        if not isinstance(ticks, int) or not 1 <= ticks <= 18000:
+            raise SavedWorldError("step must be 1..18000 ticks")
+        start = self.tick()
+        self.go_live()  # Idempotent; restores the clock if anything paused it.
+        deadline = time.monotonic() + ticks / 60 / self.speed + 60
+        while time.monotonic() < deadline:
+            if self.tick() >= start + ticks:
+                return
+            time.sleep(0.5)
+        raise SavedWorldError("live game clock did not advance")
 
 
 def need_of(candidate: Mapping) -> str | None:
@@ -165,8 +208,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 if result is None:
                     continue
                 reason = result.get("reason")
-                if not reason and not result.get("bill"):
-                    reason = "no_op"  # Everything it would place already exists.
+                primary = PRIMARY_ENTITY.get(candidate["family"])
+                if not reason and (not result.get("bill") or (primary and primary not in result["bill"])):
+                    reason = "no_op"  # Its main entity already exists; only relay pieces would be new.
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -255,20 +299,48 @@ def _append(path: Path, record: Mapping) -> None:
         out.write(json.dumps(record, sort_keys=True) + "\n")
 
 
-def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int, measure_ticks: int,
-        seed: int, run_id: str) -> dict:
+def _stock(facts: Mapping) -> dict[str, int]:
+    stock: Counter = Counter()
+    for network in facts["networks"].values():
+        stock.update({k: int(v) for k, v in network["items"].items()})
+    return dict(sorted(stock.items()))
+
+
+def _write_status(path: Path | None, payload: Mapping) -> None:
+    if path is None:
+        return
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def _status_line(board: Mapping) -> str:
+    return " | ".join(f"{n['item']} {n['condition']} {n['measured'] if n['measured'] is not None else '?'}/{n['required']:g}"
+                      for n in board["needs"])
+
+
+def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
+        seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
+        should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
-    Any failure is journaled and the loop continues; it stops safely after
-    ``MAX_CONSECUTIVE_FAILURES`` in a row.  It never falls back to another
-    decision maker.
+    ``decisions=None`` runs until the mission completes, the safe-stop rule
+    fires or ``should_stop`` turns true.  Any failure is journaled and the
+    loop continues; it stops safely after ``MAX_CONSECUTIVE_FAILURES`` in a
+    row.  It never falls back to another decision maker.
     """
     reached: list[str] = []
     history: list[dict] = []
     measurement = None
     failures = 0
+    last_status = last_blocked = None
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    for index in range(decisions):
+    index = -1
+    while decisions is None or index + 1 < decisions:
+        index += 1
+        if should_stop():
+            summary["stop"] = "stopped"
+            break
         record: dict[str, Any] = {"run_id": run_id, "index": index, "authority": policy.authority}
         try:
             adapter.reconcile()
@@ -278,6 +350,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int, measure_
             while phase and phase_reached(board):
                 reached.append(phase["phase_id"])
                 _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
+                emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
                 phase = current_phase(reached)
                 board = compile_status(facts, phase["targets"], measurement) if phase else None
             if phase is None:
@@ -286,16 +359,41 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int, measure_
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index)
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
             choice = policy.choose(state, menu)
+            chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
+            compact = compact_status(board)
             record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="pending",
-                          board=compact_status(board), menu={n["need_id"]: n["options"] for n in menu["needs"]},
+                          board=compact, menu={n["need_id"]: n["options"] for n in menu["needs"]},
                           rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"], choice=choice,
-                          summary=next(o["summary"] for o in menu["options"] if o["option_id"] == choice["option_id"]))
+                          summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
+            emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
+                 f"p={choice['probability']:.3f} authority={policy.authority}: {chosen['summary']}")
+            status = _status_line(compact)
+            if status != last_status:
+                emit(f"  STATUS: {status}")
+                last_status = status
+            if compact["bottleneck"]:
+                emit("  BOTTLENECK: " + " | ".join(compact["bottleneck"]))
+            blocked = "; ".join(f"{need} " + ",".join(f"{r}={c}" for r, c in sorted(reasons.items()))
+                                for need, reasons in sorted(menu["blocked"].items()))
+            if blocked != last_blocked:
+                emit(f"  BLOCKED: {blocked or 'none'}")
+                last_blocked = blocked
+            _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
+                                        "reached": reached, "board": compact, "blocked": menu["blocked"],
+                                        "menu": {n["need_id"]: [next(o["summary"] for o in menu["options"] if o["option_id"] == i)
+                                                                for i in n["options"]] for n in menu["needs"]},
+                                        "choice": {**choice, "summary": chosen["summary"]}, "stock": _stock(facts),
+                                        "guidelines": state["guidelines"], "authority": policy.authority,
+                                        "decisions": summary["decisions"], "failures": summary["failures"],
+                                        "measured_per_s": record.get("measured_per_s")})
             receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
             measurement = receipt["measurement"]
             record.update(status=receipt["status"], measured_per_s={
                 k: round(v["per_second"], 3) for k, v in measurement["production"].items() if v["per_second"]})
             _append(journal, record)
+            emit(f"  OUTCOME: {receipt['status']} over {measurement['window_ticks']} ticks; produced "
+                 + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],
                             "summary": record["summary"][:120],
                             "outcome": "completed" if receipt["status"] == "observed" else "pending"})
@@ -307,8 +405,12 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int, measure_
             record.update(event="failure", status="failed", error_type=type(error).__name__, error=str(error)[:500],
                           trace=traceback.format_exc().splitlines()[-6:])
             _append(journal, record)
+            emit(f"FAILURE {failures}/{MAX_CONSECUTIVE_FAILURES}: {type(error).__name__}: {str(error)[:300]}")
             if failures >= MAX_CONSECUTIVE_FAILURES:
                 summary["stop"] = "safe_stop_after_repeated_failures"
+                emit(f"SAFE STOP: {MAX_CONSECUTIVE_FAILURES} consecutive failures; last: {str(error)[:200]}")
                 break
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
+    emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
+         f"phases={','.join(reached) or 'none'}")
     return summary

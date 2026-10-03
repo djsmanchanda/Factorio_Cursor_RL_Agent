@@ -74,7 +74,8 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     upgrade = needs["copper-cable"]["upgrade"]
     assert upgrade["to"] == "assembling-machine-2" and upgrade["target_recipe_enabled"]
     assert upgrade["gain_per_machine_per_s"] == pytest.approx(1.0)
-    assert bottleneck_chain(board)[:2] == ["electronic-circuit:input_starved", "copper-cable:under_capacity"]
+    assert bottleneck_chain(board)[0].startswith("electronic-circuit:input_starved <- copper-cable:under_capacity")
+    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unavailable"  # One chain per unmet goal.
 
 
 def test_unbuilt_and_satisfied_needs_and_unknown_measurement_stays_unknown():

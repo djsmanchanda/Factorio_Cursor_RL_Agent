@@ -1,0 +1,133 @@
+<!-- Path: tools/laya_ops.html -->
+<!-- Purpose: Laya Operations Console page: live mission status, decisions, logs and fixed runner/server controls. -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="action-token" content="__ACTION_TOKEN__">
+  <title>Laya Operations Console</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/laya_ops.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">LOCAL · DISPOSABLE MOD_PLAYGROUND COPY · LAYA CLEAN RUNNER</p>
+      <h1>Laya Operations Console</h1>
+      <p class="subtitle">Watch Laya read the factory status, choose, build and measure — live.</p>
+      <p class="subtitle">Episode <code id="episode-name">none</code> · <span id="authority-note">authority: exploration until a trained checkpoint exists</span></p>
+    </div>
+    <div class="connection-cluster">
+      <div class="status-cluster">
+        <span id="game-status" class="status">Game</span>
+        <span id="rcon-status" class="status">RCON</span>
+        <span id="runner-status" class="status">Runner</span>
+      </div>
+      <p class="game-address"><span>CONNECT IN FACTORIO</span><code id="game-address">—</code></p>
+      <p id="heartbeat" class="action-message">No heartbeat.</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel mission-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">MISSION LADDER</p><h2>mod_playground → mining productivity 4</h2></div>
+        <p id="phase-state" class="operation-state">Waiting</p>
+      </div>
+      <ol id="phase-ladder" class="phase-ladder"></ol>
+      <p id="phase-targets" class="research-help">Phase targets appear when the runner reports.</p>
+    </section>
+
+    <section class="panel board-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">STATUS BOARD</p><h2>What the goal needs, what is short, and why</h2></div>
+        <p id="board-tick" class="operation-state">—</p>
+      </div>
+      <div class="priority-table-wrap">
+        <table>
+          <thead><tr><th>Item</th><th>Condition</th><th>Required /s</th><th>Measured /s</th><th>Capacity /s</th><th>Machines</th><th>Stock</th><th>Short inputs</th><th>Upgrade</th></tr></thead>
+          <tbody id="board-body"><tr><td colspan="9" class="empty-priority">Waiting for the runner…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="research-help"><strong>Bottleneck:</strong> <span id="bottleneck">—</span></p>
+      <p class="research-help"><strong>Blocked needs:</strong> <span id="blocked">—</span></p>
+    </section>
+
+    <section class="panel decision-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">DECISIONS</p><h2>Latest choice and menu</h2></div>
+        <p id="decision-count" class="operation-state">0 decisions</p>
+      </div>
+      <p class="research-help"><strong>Last choice:</strong> <span id="last-choice">—</span></p>
+      <details><summary>Menu offered at the last decision (need → options)</summary><pre id="menu" class="evidence-text">—</pre></details>
+      <div class="priority-table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Tick</th><th>Phase</th><th>Need</th><th>Choice</th><th>p</th><th>Outcome</th><th>Measured</th></tr></thead>
+          <tbody id="decision-body"><tr><td colspan="8" class="empty-priority">No decisions yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel controls">
+      <div class="panel-heading">
+        <div><p class="eyebrow">CONTROL ROOM</p><h2>Frequent actions</h2></div>
+        <p id="operation-state" class="operation-state">Ready</p>
+      </div>
+      <div class="action-grid">
+        <button data-action="start_runner"><strong>Start Laya runner</strong><span>Live, no decision limit, on the current world. Stops on mission complete, safe stop, or Stop.</span></button>
+        <button data-action="stop_runner" class="quiet"><strong>Stop Laya runner</strong><span>Stop after the current decision; Factorio keeps running.</span></button>
+        <button data-action="fresh_episode" data-confirm="FRESH_EPISODE" class="danger"><strong>Start fresh episode</strong><span>Stop runner and server, copy saves/mod_playground.zip into a new disposable world, start the live runner.</span></button>
+        <button data-action="start_server"><strong>Start Factorio server</strong><span>Restart this episode's isolated server from its own saved state.</span></button>
+        <button data-action="stop_server" data-confirm="STOP_SERVER" class="danger"><strong>Stop Factorio server</strong><span>Stop the runner, then save and stop this episode's server.</span></button>
+        <button data-action="sync_gui_mods" data-confirm="SYNC_GUI_MODS" class="warn"><strong>Sync GUI mods</strong><span>Copy this server's project mods into ~/.factorio/mods (backup kept) so the client can join.</span></button>
+        <button data-action="stop_console" data-confirm="STOP_CONSOLE" class="danger"><strong>Stop console</strong><span>Shut down this web console only.</span></button>
+      </div>
+      <p id="action-message" class="action-message">No console action has run yet.</p>
+    </section>
+
+    <section class="panel logistic-inventory-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">LIVE LOGISTICS</p><h2>Provider &amp; storage stock</h2></div>
+        <p id="stock-count" class="operation-state">—</p>
+      </div>
+      <div class="logistic-inventory-table-wrap">
+        <table><thead><tr><th>Item</th><th>Available</th></tr></thead>
+          <tbody id="stock-body"><tr><td colspan="2" class="empty-priority">Waiting for the runner…</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section class="panel guideline-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">GUIDELINES IN THIS DECISION</p><h2>Rules Laya reads</h2></div>
+        <p class="operation-state">docs/rl/Laya_Strategy_Guidelines.md</p>
+      </div>
+      <ul id="guidelines" class="guidelines"><li>Waiting for the runner…</li></ul>
+    </section>
+
+    <section class="panel console-panel">
+      <div class="panel-heading console-heading">
+        <div><p class="eyebrow">LIVE OUTPUT</p><h2 id="console-title">Laya runner</h2></div>
+        <div class="console-tools">
+          <label><input id="follow-log" type="checkbox" checked> Follow</label>
+          <button id="clear-view" class="small">Clear view</button>
+          <button id="copy-log" class="small">Copy</button>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="Log selection">
+        <button class="tab active" data-log="runner">Runner</button>
+        <button class="tab" data-log="journal">Decision journal</button>
+        <button class="tab" data-log="stdout">Runner stdout</button>
+        <button class="tab" data-log="server">Factorio server</button>
+        <button class="tab" data-log="actions">Console actions</button>
+      </nav>
+      <pre id="log-output" aria-live="polite">Waiting for log output…</pre>
+    </section>
+  </main>
+
+  <footer>
+    Bound to <code>127.0.0.1:9140</code>. Buttons run fixed local commands only; there is no command input. The deterministic console (9137) is separate.
+  </footer>
+  <script src="/laya_ops.js"></script>
+</body>
+</html>

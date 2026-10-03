@@ -213,22 +213,25 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
 
 
 def bottleneck_chain(board: Mapping) -> list[str]:
-    """Follow short inputs from each unmet goal item to its deepest unmet cause.
+    """One causal chain per unmet goal item, following short inputs to the deepest cause.
 
-    This is causal attribution over measured facts, not a choice of remedy.
+    Each chain reads ``goal:condition <- input:condition <- ...``.  This is
+    causal attribution over measured facts, not a choice of remedy.
     """
     needs = {n["item"]: n for n in board["needs"]}
-    chain: list[str] = []
+    chains: list[str] = []
     for item in sorted(board["targets"]):
         current = needs[item]
-        seen = set()
+        links, seen = [], set()
         while current["condition"] != "satisfied" and current["item"] not in seen:
             seen.add(current["item"])
-            chain.append(f"{current['item']}:{current['condition']}")
+            links.append(f"{current['item']}:{current['condition']}")
             if not current["short_inputs"]:
                 break
             current = needs[current["short_inputs"][0]]
-    return chain
+        if links:
+            chains.append(" <- ".join(links))
+    return chains
 
 
 def compact_status(board: Mapping, limit: int = 12) -> dict:
