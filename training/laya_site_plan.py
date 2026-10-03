@@ -31,9 +31,10 @@ from training.laya_saved_world import ghost
 VERSION = "laya-site-plan-v1"
 SAMPLE_SPACING = 4.0  # saved-world resource survey grid
 SMELTED = {"iron-ore": "iron-plate", "copper-ore": "copper-plate", "stone": "stone-brick"}
-# A basic six-furnace module (planners/smelter_block, variant "basic") is 15 tiles wide;
-# strips hold two module columns (2*12+3) where space allows, else one column.
-STRIP_WIDTHS = (27.0, 15.0)
+# A basic six-furnace module (planners/smelter_block, variant "basic") is 15 tiles wide and an
+# 18-furnace line (Start-Middle-Middle-End) is 32 deep: 34 fits two parallel lines across an
+# east/west strip or one long line down a north/south strip; 15 is the one-module fallback.
+STRIP_WIDTHS = (34.0, 15.0)
 CORRIDOR_WIDTH = 5.0  # reserved for future belts on both sides of a strip
 SMALL_PATCH_RADIUS = 250.0
 SMALL_PATCH_SAMPLES = 16  # survey cells (~256 tiles); smaller patches cannot host module-fed mine lines  # small patches are used only if no larger one lies within this of the base
@@ -303,10 +304,10 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
                 if action["entity"] in CORRIDOR_ENTITIES:
                     continue
                 return reject("reserved:corridor", action)
-            starter_ore = family == "starter" and SMELTED.get(subject) == product  # The starter's own patch.
+            starter_ore = family in ("starter", "line") and SMELTED.get(subject) == product  # Its own patch.
             if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore):
                 return reject(f"reserved:{zone['purpose']}", action)
-            if kind == "smelt" and not ((family in ("smelt", "starter") and product == subject)
+            if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject)
                                         or (family == "mine" and SMELTED.get(product) == subject)):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "mall":

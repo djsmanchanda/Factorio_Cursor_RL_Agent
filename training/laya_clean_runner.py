@@ -38,6 +38,7 @@ from training.laya_guided_policy import load_preferences, matches, option_featur
 from training.laya_power import POLES, power_variants
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
+from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_candidates
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
@@ -49,7 +50,7 @@ EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" 
 MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
-                  "starter": "electric-mining-drill",
+                  "starter": "electric-mining-drill", "line": "electric-furnace",
                   "assemble": "assembling-machine-1"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
@@ -223,6 +224,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                                             or (c["family"] == "mine" and c.get("product") in STARTER_ORE.values()))]
     plates = {plate for plate, ore in STARTER_ORE.items() if plate in unmet or ore in unmet}
     proposed += starter_candidates(facts, site_plan, plates, set(starters))
+    # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.
+    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters})
     proposed += ring_expand_candidates(facts, site_plan)
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)

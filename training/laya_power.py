@@ -151,10 +151,51 @@ def _variant(candidate: Mapping, build: list[dict], poles: list[tuple[str, tuple
             "summary": f"{summary} via {label}", "power": tag}
 
 
+def internal_power_variant(candidate: Mapping, facts: Mapping) -> dict | None:
+    """Keep a build's own poles (template networks) and link each one to the grid or a linked pole."""
+    build = list(candidate["plan"]["phases"][0]["actions"])
+    grid = [p for p in facts["poles"] if p["generated"]]
+    internal = [(a["entity"], _xy(a)) for a in build if a["entity"] in POLES]
+    if not grid or not internal:
+        return None
+    supplies = [((p["position"]["x"], p["position"]["y"]), p["supply"]) for p in grid]
+    supplies += [(xy, POLES[name][0]) for name, xy in internal]
+    if not all(any(_covers(xy, s, a) for xy, s in supplies) for a in build if a["entity"] in POWERED):
+        return None  # The build's own poles must power its machines.
+    network = [((p["position"]["x"], p["position"]["y"]), float(p["wire"])) for p in grid]
+    blocked = [*build, *world_obstacles(facts)]
+    links: list[tuple[str, tuple[float, float]]] = []
+    pending = list(internal)
+    while pending:
+        name, xy = min(pending, key=lambda item: min(math.dist(item[1], p) for p, _ in network))
+        pending.remove((name, xy))
+        reach = POLES[name][1]
+        if not any(math.dist(xy, p) <= min(reach, wire) for p, wire in network):
+            start = min(network, key=lambda item: math.dist(item[0], xy))[0]
+            hops = _link([start], xy, blocked)
+            links += [("medium-electric-pole", h) for h in hops]
+            network += [(h, POLES["medium-electric-pole"][1]) for h in hops]
+            blocked += [{"entity": "medium-electric-pole", "position": {"x": h[0], "y": h[1]}} for h in hops]
+        network.append((xy, reach))
+    plan = {**candidate["plan"], "phases": [{**candidate["plan"]["phases"][0],
+                                             "actions": [ghost(n, x, y) for n, (x, y) in links] + build}]}
+    try:
+        validate_build_plan(plan)
+    except ValueError:
+        return None
+    digest = sha256_hash({"plan": plan, "network_anchor": candidate.get("network_anchor")})
+    return {**candidate, "option_id": f"{candidate['family']}.i{digest[7:17]}", "plan": plan,
+            "summary": f"{candidate['summary']} via its own poles" + (f" + {len(links)} link poles" if links else ""),
+            "power": "i"}
+
+
 def power_variants(candidate: Mapping, facts: Mapping) -> list[dict]:
     """Legal power alternatives for one build; never the generator's substation chain."""
     if not candidate.get("plan"):
         return [dict(candidate)]
+    if candidate.get("internal_power"):
+        variant = internal_power_variant(candidate, facts)
+        return [variant] if variant else []
     power, build = split_build(candidate)
     grid = [p for p in facts["poles"] if p["generated"]]
     targets = [a for a in build if a["entity"] in POWERED]
