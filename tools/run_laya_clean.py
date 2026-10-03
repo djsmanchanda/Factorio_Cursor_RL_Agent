@@ -32,6 +32,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.laya_helper_agent import RUN_INDEX, launch as launch_helper
+from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
 from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
 from training.laya_run_log import RunLog
@@ -108,10 +109,15 @@ def main(argv=None) -> int:
             log.end()
     # Index the run for later comparisons, then start the read-only post-run review.
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
+             "ended": datetime.now().astimezone().isoformat(timespec="seconds"), "summary": summary}
     with RUN_INDEX.open("a") as out:
-        out.write(json.dumps({"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode,
-                              "started": started, "ended": datetime.now().astimezone().isoformat(timespec="seconds"),
-                              "summary": summary}) + "\n")
+        out.write(json.dumps(index) + "\n")
+    try:
+        entry = record_laya_run(index)
+        print(f"RUN LEDGER: {entry['outcome']} highest={entry['highest_milestone']} -> {LEDGER}")
+    except Exception as error:  # The ledger is bookkeeping; it never fails a run.
+        print(f"RUN LEDGER: not recorded: {error}")
     if not args.no_helper:
         print("LAYA HELPER: started " + launch_helper(run_id, paths["log"]))
     print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), **summary}))

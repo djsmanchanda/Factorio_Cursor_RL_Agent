@@ -125,6 +125,15 @@ safe stop (3 consecutive failures) or SIGTERM after the current decision.
 `evidence/clean-decisions.jsonl`, `evidence/latest-status.json`, transaction
 receipts. Checkpoint save/resume is not implemented.
 
+After every run: the run is appended to the shared LLM-free run ledger
+(`tools/run_ledger.py` → `~/.local/share/factorio-rl/run-ledger.jsonl` and
+`.csv`: milestones, outcome, failure cause, limiting factor, log file,
+commit; deterministic runs are recorded the same way) and the read-only
+OpenCode Laya Helper (`tools/laya_helper_agent.py`, config
+`docs/rl/laya_helper.json`) compares it with the latest Laya run from an
+earlier commit and the deterministic reference, writing
+`docs/rl/laya_helper_runs/<run_id>/findings.md`.
+
 - World interface: the saved-world adapter (live legality/funding checks,
   mod layout executor, exact tick stepping, receipts).
 - Options are tagged with the need they serve; construction items that checks

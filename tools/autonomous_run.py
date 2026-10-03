@@ -884,6 +884,13 @@ def main(argv: list[str] | None = None) -> int:
             logger.emit("RUN END")
             logger.close()
             heartbeat_path.unlink(missing_ok=True)
+            # Append this run to the shared LLM-free run ledger; it never affects the run.
+            try:
+                from tools.run_ledger import record_deterministic_run
+                revision = _episode_metadata(getattr(args, "episode_manifest", None)).get("repository_revision")
+                record_deterministic_run(log_path, run_id=args.run_id or None, commit=str(revision) if revision else None)
+            except Exception:
+                pass
             # Finalize after RUN END so the persisted tail contains the full
             # terminal runner evidence, while still delegating result writes to
             # the monitor's atomic result path.

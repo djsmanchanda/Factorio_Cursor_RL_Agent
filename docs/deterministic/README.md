@@ -147,6 +147,14 @@ duplicate excerpt lines, cap individual lines and the total excerpt, and refuse
 model calls above a 36,000-character prompt ceiling so a 16K local review
 context retains room for the system rubric and structured answer.
 
+Every runner invocation also appends one row to the shared, LLM-free run
+ledger after `RUN END` (`tools/run_ledger.py`;
+`~/.local/share/factorio-rl/run-ledger.jsonl` and `.csv`): milestones seen in
+the log (`log_markers_v1`, e.g. `PLATE STARTER`, `[modular refinery …]
+RESOLVED`, `CHEMICAL LADDER: plastic-bar`, `GOAL MET`), outcome, typed
+blocker code and message, log file and commit. Laya runs are recorded in the
+same ledger. `python tools/run_ledger.py backfill` indexes archived logs.
+
 For compact handoffs and cross-run lookup, use the [run context workflow](run_context.md).
 
 For repeated plastic acceptance and reviewed automatic fixes, use the [reliability workflow](reliability_workflow.md).
