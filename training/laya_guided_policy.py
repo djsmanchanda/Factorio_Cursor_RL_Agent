@@ -75,6 +75,9 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
         return all(any(left.get(name, stock.get(name, 0)) < count for name, count in (g.get("bill") or {}).items())
                    for g in goal_builds)
 
+    # Items being made now (measured > 0); an input neither made nor stocked would leave a requester waiting.
+    made = {row["item"] for row in status.get("needs") or [] if (row.get("measured") or 0) > 0}
+
     features = {}
     for option in menu["options"]:
         need = option.get("need_id", "wait")
@@ -91,6 +94,7 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
                 for name, count in spend(option).items() if name in (menu.get("goal_reserve") or {})),
             "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
+            "inputs_missing": any(stock.get(name, 0) == 0 and name not in made for name in (option.get("draws") or {})),
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in spend(option).items()),
             "bill_items": sum((option.get("bill") or {}).values())}
     return features

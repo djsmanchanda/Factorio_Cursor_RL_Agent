@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "variant_id": "inputs-first",
+  "description": "Weight the inputs-first rule: builds whose requested inputs are neither made nor stocked x0.1.",
+  "catalog_patch": {
+    "mission.inputs-first": {"prefer": [{"when": {"inputs_missing": true}, "weight": 0.1}]}
+  }
+}

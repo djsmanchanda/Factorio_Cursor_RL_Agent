@@ -292,6 +292,16 @@
       ]
     },
     {
+      "rule_id": "mission.inputs-first",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Build a machine after its inputs are made or stocked; a machine whose input nobody makes locks its other inputs in its requester, so build the missing input first.",
+      "prefer": []
+    },
+    {
       "rule_id": "mission.wait-rule",
       "kind": "soft",
       "scopes": [

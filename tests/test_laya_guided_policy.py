@@ -136,3 +136,15 @@ def test_requester_draws_count_as_spending():
     s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 11, "assembling-machine-1": 5}}}
     features = option_features(s, m)["asm.c"]
     assert features["dips_goal_reserve"] and features["scarce"]
+
+
+def test_builds_whose_inputs_nobody_makes_are_flagged():
+    from training.laya_guided_policy import option_features
+    m = menu()
+    m["options"][3]["draws"] = {"inserter": 15, "iron-gear-wheel": 15}
+    s = state([])
+    s["observation_digest"]["factory_status"]["needs"] = [{"item": "iron-gear-wheel", "required": 0.1, "measured": 0.0}]
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 18}}}
+    assert option_features(s, m)["asm.c"]["inputs_missing"]
+    s["observation_digest"]["factory_status"]["needs"][0]["measured"] = 0.2
+    assert not option_features(s, m)["asm.c"]["inputs_missing"]
