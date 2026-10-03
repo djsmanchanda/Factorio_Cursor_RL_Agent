@@ -169,6 +169,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
     stock_targets = {item: rate for item, rate in (stock or {}).items() if item not in targets}
     recipes = facts.get("recipes") or {}
     demand = goal_demand({**targets, **stock_targets}, recipes)
+    goal_only = goal_demand(targets, recipes)  # Phase goals are judged on these rates alone.
     stock = accessible_stock(facts)
     by_recipe: dict[str, list[Mapping]] = defaultdict(list)
     for machine in facts.get("machines") or []:
@@ -203,6 +204,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         needs.append({
             "need_id": f"item:{item}", "item": item, "built": int(built.get(item, 0)), "depth": info["depth"], "consumers": info["consumers"],
             "required_per_s": required, "measured_per_s": measured,
+            "goal_required_per_s": goal_only[item]["required_per_s"] if item in goal_only else 0.0,
             "consumed_per_s": _measured(measurement, "consumption", item),
             "gap_per_s": None if measured is None else max(0.0, required - measured),
             "capacity_per_s": capacity, "machines": dict(tiers), "status_counts": dict(statuses),
@@ -224,6 +226,13 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         "construction": {"pending_ghosts": int(facts.get("pending_ghosts", 0)),
                          "shortfall": construction_shortfall(facts)},
     }
+
+
+def goal_met(need: Mapping) -> bool:
+    """A goal item meets its phase rate (stock demand on the same item is not part of the goal)."""
+    measured = need["measured_per_s"]
+    goal = need.get("goal_required_per_s", need["required_per_s"])
+    return measured is not None and measured >= goal * SATISFIED_SHARE
 
 
 def bottleneck_chain(board: Mapping) -> list[str]:
@@ -260,6 +269,8 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
                "measured": None if need["measured_per_s"] is None else round(need["measured_per_s"], 3),
                "capacity": None if need["capacity_per_s"] is None else round(need["capacity_per_s"], 3),
                "machines": sum(need["machines"].values()), "stock": need["stock"]}
+        if need.get("goal_required_per_s") and abs(need["goal_required_per_s"] - need["required_per_s"]) > 1e-9:
+            row["goal"] = round(need["goal_required_per_s"], 3)  # Phase goal; 'required' also counts stock demand.
         if need["short_inputs"]:
             row["short_inputs"] = need["short_inputs"]
         if need["upgrade"]:
@@ -278,10 +289,10 @@ def apply_to_state(state: dict, board: Mapping) -> dict:
     goals = [needs[item] for item in board["targets"]]
     measured = [g["measured_per_s"] for g in goals]
     current = None if None in measured else sum(measured)
-    target = sum(g["required_per_s"] for g in goals)
+    target = sum(g.get("goal_required_per_s", g["required_per_s"]) for g in goals)
     for goal in state["goal_stack"]:
         goal["gap"] = None if current is None else max(0.0, target - current)
-        if current is not None and all(g["condition"] == "satisfied" for g in goals):
+        if current is not None and all(goal_met(g) for g in goals):
             goal["status"] = "satisfied"
     gap = state["acceptance_gap"]
     gap.update(current=current, target=target, remaining=None if current is None else max(0.0, target - current))

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from training.laya_factory_status import goal_met
+
 MISSION_ID = "mod-playground-mining-productivity-4"
 
 PHASES: tuple[dict, ...] = (
@@ -54,4 +56,4 @@ def current_phase(reached: Sequence[str]) -> dict | None:
 def phase_reached(board: Mapping) -> bool:
     """Every phase target measured as satisfied on the status board."""
     needs = {n["item"]: n for n in board["needs"]}
-    return board["measured"] and all(needs[item]["condition"] == "satisfied" for item in board["targets"])
+    return board["measured"] and all(goal_met(needs[item]) for item in board["targets"])

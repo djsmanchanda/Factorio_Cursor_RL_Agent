@@ -451,7 +451,7 @@ def _status_line(board: Mapping) -> str:
 
 
 STALL_DECISIONS = 12
-STOCK_RATE = 0.05  # items/s of demand for each construction item reported short
+STOCK_RATE = 0.01  # items/s of demand per short construction item: enough to expose its inputs
 RATE_WINDOW_TICKS = 7200  # Board rates span at least 2 game minutes; bot deliveries are bursty.
 
 
@@ -478,8 +478,12 @@ def rolling_measurement(samples: list[tuple[int, Mapping, Mapping]], window: int
 def _goal_gap(board: Mapping) -> float:
     """Remaining goal rate across phase targets; unmeasured counts as the whole target."""
     needs = {n["item"]: n for n in board["needs"]}
-    return sum(needs[item]["gap_per_s"] if needs[item]["gap_per_s"] is not None else needs[item]["required_per_s"]
-               for item in board["targets"])
+    total = 0.0
+    for item in board["targets"]:
+        need = needs[item]
+        goal = need.get("goal_required_per_s", need["required_per_s"])
+        total += goal if need["measured_per_s"] is None else max(0.0, goal - need["measured_per_s"])
+    return total
 
 
 def _built_counts(adapter: Any) -> dict[str, int]:

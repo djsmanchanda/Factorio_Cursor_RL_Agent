@@ -119,3 +119,15 @@ def test_short_construction_items_expose_their_input_chain_without_becoming_goal
     needs = {n["item"]: n for n in board["needs"]}
     assert board["targets"] == {"iron-gear-wheel": 1.0} and "steel-plate" in needs
     assert any(chain.startswith("medium-electric-pole:unbuilt") for chain in bottleneck_chain(board))
+
+
+def test_stock_demand_never_raises_the_phase_goal():
+    from training.laya_mission import phase_reached
+    recipes = {**RECIPES, "medium-electric-pole": recipe([("steel-plate", 2), ("iron-plate", 2)], 30),
+               "steel-plate": recipe([("iron-plate", 5)], 960)}
+    facts = {**world([machine("electric-furnace", "iron-plate", "working")]), "recipes": recipes}
+    measured = flows(iron_plate=0.6)
+    board = compile_status(facts, {"iron-plate": 0.5}, measured, stock={"medium-electric-pole": 0.5})
+    iron = next(n for n in board["needs"] if n["item"] == "iron-plate")
+    assert iron["required_per_s"] > 1.0 and iron["goal_required_per_s"] == 0.5
+    assert phase_reached(board)  # 0.6/s meets the 0.5/s goal even though stock wants more iron.
