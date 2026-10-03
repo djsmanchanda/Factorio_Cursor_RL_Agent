@@ -135,3 +135,34 @@ compilation, live circuit/plastic/buffer pilots and a successful exact-model
 read-only Muse review. Validation covers unchanged defaults, cloned request
 identities, stock-lock arithmetic, productivity demand, assembly/fluid geometry,
 protected power obstacles, ownership expiry and exclusion of invalid pairs.
+
+## Verified launch
+
+The block began **2026-10-04 04:57:15 IST**, including preparation/helper
+observation, and ends **12:57:15 IST**. The twelve-host actor fleet launched
+at approximately 05:17 IST under `laya-context-growth-20261004.service`;
+Muse runs under `laya-context-muse-20261004.service`, with its original
+`ses_efc0acf7dffeSAkWv7gtTN9Xj8` session retained. Both services have an exact
+remaining-window runtime cap and owned cgroup shutdown.
+
+Frozen code: **17e2029**. The initial twelve hosts have separately pinned
+ports/processes, matching source hashes and exact starter-kit checks.
+Their live decision journals and heartbeats are recorded in
+`<run>/launch-verification.json`. No cohort outcome is claimed at launch.
+The check-in schedule is **06:57, 08:57, 10:57 and 12:57 IST**. Results and
+recommendations are saved automatically; this does not promise an unsolicited
+chat message when the current conversation is inactive.
+
+Files owned by this suite: `training/laya_experiment_context.py`,
+`training/laya_component_lab.py`, `tools/run_laya_component.py`,
+`tools/run_laya_context_suite.py`, `tools/laya_experiment_helper.py`,
+`factorio_training_lab/production_fixture.lua`, context variants/tests and this
+document. Shared additive changes are in `training/laya_clean_runner.py`,
+`training/laya_guided_policy.py`, `training/laya_factory_status.py`,
+`training/laya_power.py`, `tools/run_laya_clean.py`, `tools/laya_experiment.py`,
+and the lab control/fixture-ownership seam. Coordinate before editing those
+interfaces. Live execution reads the frozen worktree, not later edits here.
+
+Stop control: `systemctl --user stop laya-context-growth-20261004.service`
+stops only this suite's actor cgroup. Stop its observer separately with
+`systemctl --user stop laya-context-muse-20261004.service`. Evidence is retained.
