@@ -169,7 +169,7 @@ class Operations:
         latest = reports[-1]
         text = latest.read_text(errors="replace")
         return {"run_id": latest.parent.name, "path": str(latest.relative_to(REPO_ROOT)), "text": text[-60000:],
-                "in_progress": "_Review in progress" in text}
+                "in_progress": "in progress (started" in text}
 
     def ledger(self, limit: int = 20) -> list[dict]:
         """Newest rows of the shared run ledger (both systems, local times)."""

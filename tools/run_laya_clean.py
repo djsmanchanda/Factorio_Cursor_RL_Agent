@@ -96,6 +96,8 @@ def main(argv=None) -> int:
         log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=args.speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
+        if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
+            log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
             if not args.stepped:
                 adapter.go_live()
@@ -122,8 +124,6 @@ def main(argv=None) -> int:
         print(f"RUN LEDGER: {entry['outcome']} highest={entry['highest_milestone']} -> {LEDGER}")
     except Exception as error:  # The ledger is bookkeeping; it never fails a run.
         print(f"RUN LEDGER: not recorded: {error}")
-    if not args.no_helper:
-        print("LAYA HELPER: started " + launch_helper(run_id, paths["log"]))
     print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), **summary}))
     return 0
 

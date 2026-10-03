@@ -19,6 +19,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -186,54 +187,139 @@ def recent_commits() -> str:
     return result.stdout.strip() or "unavailable"
 
 
-def review(run_id: str, opencode: str, timeout: int = 1800) -> Path:
-    config = load_config()
-    runs = run_index()
-    current = next(r for r in runs if r["run_id"] == run_id)
-    previous = previous_run(current, runs)
+def _ask(config: dict, work: Path, message: str, session: str | None, title: str, retry: str,
+         timeout: int = 1800) -> str:
+    """One OpenCode turn (new or resumed session), resumed up to twice on failure; returns the session id."""
+    for attempt in range(3):
+        command = [OPENCODE[0], "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config["model"],
+                   "--variant", config["variant"], "--auto"]
+        command += ["--session", session] if session else ["--title", title]
+        result = subprocess.run(command + [message], cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
+        stamp = len(list(work.glob("opencode-*.jsonl")))
+        (work / f"opencode-{stamp:03d}.jsonl").write_text(result.stdout + result.stderr)
+        session = session or _session_id(result.stdout + result.stderr)
+        if result.returncode == 0 and session:
+            return session
+        message = retry
+    raise RuntimeError(f"OpenCode failed three times; transcripts in {work}")
+
+
+OPENCODE = ["opencode"]
+OBSERVE_INTERVAL_S = 600
+
+
+def _paths(run_id: str) -> tuple[Path, Path]:
     report = REPORT_ROOT / run_id / "findings.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     work = DATA_ROOT / run_id
     work.mkdir(parents=True, exist_ok=True)
+    return report, work
+
+
+def _header(report: Path, run_id: str, note: str) -> None:
+    if not report.exists():
+        report.write_text(f"<!-- Path: {report.relative_to(REPO_ROOT)} | Purpose: Read-only Laya Helper findings for {run_id}. -->\n\n"
+                          f"# Laya Helper findings — {run_id}\n\n_{note} (started {local_stamp()})._\n")
+
+
+def final_review(run_id: str, session: str | None = None) -> Path:
+    """Full post-run comparison, in the observer's session when there is one."""
+    config = load_config()
+    runs = run_index()
+    current = next(r for r in runs if r["run_id"] == run_id)
+    previous = previous_run(current, runs)
+    report, work = _paths(run_id)
+    _header(report, run_id, "Review in progress")
     packet = work / "evidence-packet.md"
     packet.write_text(build_packet(current, previous, config))
-    report.write_text(f"<!-- Path: {report.relative_to(REPO_ROOT)} | Purpose: Read-only Laya Helper findings for {run_id}. -->\n\n"
-                      f"# Laya Helper findings — {run_id}\n\n_Review in progress (started {local_stamp()})._\n")
     message = prompt(current, previous, packet, report, recent_commits())
-    session = None
-    for attempt in range(3):
-        command = [opencode, "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config["model"],
-                   "--variant", config["variant"], "--auto"]
-        command += ["--session", session] if session else ["--title", f"Laya Helper {run_id}"]
-        result = subprocess.run(command + [message], cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
-        (work / f"opencode-{attempt}.jsonl").write_text(result.stdout + result.stderr)
-        session = session or _session_id(result.stdout + result.stderr)
-        if result.returncode == 0:
-            return report
-        message = ("Continue the same read-only Laya helper review from where it stopped; finish the findings "
-                   f"document at {report}. Do not restart or create another report.")
-    raise RuntimeError(f"OpenCode failed three times; transcripts in {work}")
+    if session:
+        message += ("\nKeep the '## Live observations' section you wrote during the run; add the six sections after it "
+                    "and say which live observations the final evidence confirmed or refuted.")
+    _ask(config, work, message, session, f"Laya Helper {run_id}",
+         "Continue the same read-only Laya helper review from where it stopped; finish the findings "
+         f"document at {report}. Do not restart or create another report.")
+    return report
 
 
-def launch(run_id: str, log: Path) -> str:
-    """Start the helper detached from the runner; it outlives the runner process."""
+review = final_review
+
+
+def _run_slice_since(log: Path, run_id: str, offset_lines: int) -> tuple[list[str], int]:
+    lines = run_log_slice(log, run_id)
+    return lines[offset_lines:], len(lines)
+
+
+def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL_S, max_hours: float = 12) -> Path:
+    """Live observer: checkpoint notes every ``interval`` seconds, then the final review in the same session."""
+    config = load_config()
+    report, work = _paths(run_id)
+    _header(report, run_id, "Live observation in progress")
+    status = root / "evidence/latest-status.json"
+    pid_record = root / "laya-runner.pid.json"
+    session, seen, deadline, checkpoint = None, 0, time.monotonic() + max_hours * 3600, 0
+    intro = f"""You are the read-only live observer for Laya run {run_id} (repository {REPO_ROOT}).
+All times are local time ({zone_label()}). {WORKFLOW_NOTE}
+You will receive a checkpoint every {interval // 60} minutes. At each checkpoint append at most 10 lines under a
+'## Live observations' heading in {report}: timestamped (local time) notes on stalls, wasted decisions, blocked needs,
+suspected root causes with the evidence line, and one falsifiable signal to watch next. Do not repeat unchanged state.
+Strategy rules Laya reads: docs/rl/Laya_Strategy_Guidelines.md and docs/rl/laya_mission_guidelines.json (prefer entries
+steer the guided policy). Remain read-only: only write {report}; no code edits, commits, lifecycle actions or RCON."""
+    while time.monotonic() < deadline:
+        new, seen_now = _run_slice_since(log, run_id, seen)
+        ended = any(line.rstrip().endswith("RUN END") for line in new)
+        runner_alive = pid_record.exists()
+        if new or session is None:
+            checkpoint += 1
+            packet = work / f"checkpoint-{checkpoint:03d}.md"
+            latest = status.read_text()[:20000] if status.is_file() else "{}"
+            packet.write_text(f"# Checkpoint {checkpoint} — {local_stamp()}\n\n## New runner log lines\n```text\n"
+                              f"{compact_log(new, budget=12000)}\n```\n## Latest decision status (JSON)\n```json\n{latest}\n```\n")
+            message = (intro if session is None else "") + f"\nCheckpoint {checkpoint}: read {packet} and append to {report}."
+            try:
+                session = _ask(config, work, message, session, f"Laya Observer {run_id}",
+                               f"Continue the read-only live observation; process {packet} and append to {report}.", timeout=900)
+            except Exception as error:  # A failed checkpoint is noted; the final review still runs.
+                with report.open("a") as out:
+                    out.write(f"\n_Checkpoint {checkpoint} failed: {type(error).__name__}: {str(error)[:200]}_\n")
+            seen = seen_now
+        if ended or not runner_alive:
+            break
+        time.sleep(interval)
+    for _ in range(60):  # The runner indexes the run right after RUN END.
+        if any(r["run_id"] == run_id for r in run_index()):
+            break
+        time.sleep(2)
+    return final_review(run_id, session)
+
+
+def launch(run_id: str, log: Path, root: Path | None = None) -> str:
+    """Start the helper detached from the runner; with ``root`` it observes live from RUN START."""
     out = DATA_ROOT / run_id / "helper.log"
     out.parent.mkdir(parents=True, exist_ok=True)
+    command = [sys.executable, str(Path(__file__)), "--run-id", run_id, "--log", str(log)]
+    if root is not None:
+        command += ["--observe-root", str(root)]
     with out.open("ab") as handle:
-        process = subprocess.Popen([sys.executable, str(Path(__file__)), "--run-id", run_id, "--log", str(log)],
-                                   cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT,
-                                   start_new_session=True)
+        process = subprocess.Popen(command, cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=handle,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
     return f"pid={process.pid} log={out}"
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--log", type=Path, help="Runner log to append the completion line to")
+    parser.add_argument("--log", type=Path, help="Runner log (observed live, and the completion line is appended)")
+    parser.add_argument("--observe-root", type=Path, help="Episode root: observe live from RUN START, then review")
+    parser.add_argument("--interval", type=int, default=OBSERVE_INTERVAL_S)
     parser.add_argument("--opencode-bin", default=shutil.which("opencode") or "opencode")
     args = parser.parse_args(argv)
+    OPENCODE[0] = args.opencode_bin
     try:
-        report = review(args.run_id, args.opencode_bin)
+        if args.observe_root and args.log:
+            report = observe(args.run_id, args.log, args.observe_root, args.interval)
+        else:
+            report = final_review(args.run_id)
         line = f"LAYA HELPER: findings complete {report}"
     except Exception as error:  # Reported in the runner log; never retried silently.
         line = f"LAYA HELPER: stopped after failure: {type(error).__name__}: {str(error)[:300]}"

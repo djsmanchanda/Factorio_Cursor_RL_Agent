@@ -132,9 +132,10 @@ After every run: the run is appended to the shared LLM-free run ledger
 `.csv`: local start/end, run length, milestones, outcome, failure cause,
 limiting factor, log file, commit; deterministic runs are recorded the same way) and the read-only
 OpenCode Laya Helper (`tools/laya_helper_agent.py`, config
-`docs/rl/laya_helper.json`) compares it with the latest Laya run from an
-earlier commit and the deterministic reference, writing
-`docs/rl/laya_helper_runs/<run_id>/findings.md`.
+`docs/rl/laya_helper.json`) observes live from `RUN START` (a checkpoint
+every 10 minutes appends "Live observations"), then in the same session
+compares the run with the latest Laya run from an earlier commit and the
+deterministic reference, writing `docs/rl/laya_helper_runs/<run_id>/findings.md`.
 
 - World interface: the saved-world adapter (live legality/funding checks,
   mod layout executor, exact tick stepping, receipts).

@@ -61,8 +61,24 @@ def test_review_writes_findings_through_one_read_only_opencode_session(tmp_path,
     fake.write_text("#!/bin/sh\necho '{\"sessionID\": \"ses_1\"}'\nfor a; do last=$a; done\n"
                     "echo \"$last\" > \"$(dirname \"$0\")/prompt.txt\"\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    report = helper.review("now", str(fake))
+    monkeypatch.setattr(helper, "OPENCODE", [str(fake)])
+    report = helper.review("now")
     assert report == tmp_path / "reports/now/findings.md" and report.is_file()
     message = (tmp_path / "prompt.txt").read_text()
     assert "read-only" in message and "context management" in message and "fine-tuning" in message
     assert "do not edit code" in message
+
+
+def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, monkeypatch):
+    setup(tmp_path, monkeypatch)
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/bin/sh\necho '{\"sessionID\": \"ses_live\"}'\nfor a; do last=$a; done\n"
+                    "echo '---CALL---' >> \"$(dirname \"$0\")/calls.txt\"\necho \"$@\" >> \"$(dirname \"$0\")/calls.txt\"\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(helper, "OPENCODE", [str(fake)])
+    root = tmp_path / "now"  # RUN END already logged and no runner PID record: one checkpoint, then the review.
+    report = helper.observe("now", root / "logs/laya-runner.log", root, interval=1)
+    calls = (tmp_path / "calls.txt").read_text().split("---CALL---")[1:]
+    assert report.is_file() and len(calls) == 2
+    assert "live observer" in calls[0] and "--session ses_live" in calls[1] and "Live observations" in calls[1]
+    assert (tmp_path / "data/now/checkpoint-001.md").is_file()
