@@ -59,9 +59,16 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     goal_builds = [o for o in menu["options"] if o["family"] != "wait" and is_goal(o)]
     goal_options = bool(goal_builds)
 
+    def spend(option: Mapping) -> dict[str, int]:
+        """What a build takes from the network: its bill plus what its requester chests will pull in."""
+        total = dict(option.get("bill") or {})
+        for name, count in (option.get("draws") or {}).items():
+            total[name] = total.get(name, 0) + count
+        return total
+
     def starves_goal(option: Mapping) -> bool:
-        """Its bill leaves too little of some item for every legal goal build to still be affordable."""
-        bill = option.get("bill") or {}
+        """What it takes leaves too little of some item for every legal goal build to still be affordable."""
+        bill = spend(option)
         if not goal_builds or is_goal(option) or not bill:
             return False
         left = {name: stock.get(name, 0) - count for name, count in bill.items()}
@@ -81,10 +88,10 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             # A side build that would leave less than the unbuilt goal starters need (menu["goal_reserve"]).
             "dips_goal_reserve": not is_goal(option) and any(
                 stock.get(name, 0) - count < (menu.get("goal_reserve") or {}).get(name, 0)
-                for name, count in (option.get("bill") or {}).items() if name in (menu.get("goal_reserve") or {})),
+                for name, count in spend(option).items() if name in (menu.get("goal_reserve") or {})),
             "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
-            "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),
+            "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in spend(option).items()),
             "bill_items": sum((option.get("bill") or {}).values())}
     return features
 

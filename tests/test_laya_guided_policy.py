@@ -122,3 +122,17 @@ def test_side_builds_dipping_below_the_unbuilt_starters_kit_are_flagged():
     assert option_features(s, m)["asm.c"]["dips_goal_reserve"]       # 4 - 3 < 2
     s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 5}}}
     assert not option_features(s, m)["asm.c"]["dips_goal_reserve"]
+
+
+def test_requester_draws_count_as_spending():
+    from training.laya_guided_policy import option_features
+    m = menu()
+    m["goal_reserve"] = {"inserter": 2}
+    m["options"][3]["bill"] = {"assembling-machine-1": 1}
+    m["options"][3]["draws"] = {"inserter": 10}     # a long-handed-inserter cell requests inserters
+    s = state([])
+    s["observation_digest"]["factory_status"]["needs"] = [{"item": "copper-ore", "required": 0.5},
+                                                          {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 11, "assembling-machine-1": 5}}}
+    features = option_features(s, m)["asm.c"]
+    assert features["dips_goal_reserve"] and features["scarce"]

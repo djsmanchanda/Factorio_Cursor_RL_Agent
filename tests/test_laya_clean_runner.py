@@ -293,3 +293,10 @@ def test_coverage_approaches_only_planned_ore_sites():
     reach = planned_sites(facts, plan)
     assert _need_key(reach, hop(30), {"copper-ore"}) == "item:copper-ore"
     assert _need_key(reach, hop(-30), {"copper-ore"}) == "coverage"
+
+
+def test_requested_items_count_sections_with_their_multiplier():
+    from training.laya_clean_runner import requested_items
+    chest = {"entity": "requester-chest", "logistic_sections": [
+        {"group": "g", "requests": [{"name": "inserter", "count": 1}, {"name": "iron-plate", "count": 2}], "multiplier": 15}]}
+    assert requested_items({"plan": {"phases": [{"actions": [chest]}]}}) == {"inserter": 15, "iron-plate": 30}

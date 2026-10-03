@@ -211,6 +211,19 @@ def _build_only(candidate: Mapping) -> dict:
     return {**candidate["plan"], "phases": [{**phase, "actions": actions}]}
 
 
+def requested_items(candidate: Mapping) -> dict[str, int]:
+    """Items the build's requester chests will pull from the network once built (beyond its bill)."""
+    draws: dict[str, int] = {}
+    for phase in (candidate.get("plan") or {}).get("phases", []):
+        for action in phase["actions"]:
+            sections = [{"requests": action.get("logistic_requests") or []}] + list(action.get("logistic_sections") or [])
+            for section in sections:
+                for request in section["requests"]:
+                    count = int(request.get("count", 0)) * int(section.get("multiplier", 1))
+                    draws[request["name"]] = draws.get(request["name"], 0) + count
+    return draws
+
+
 def planned_sites(facts: Mapping, plan: Mapping | None) -> Mapping:
     """Facts whose resources are only the planned ore zones' sites, for ores that have one.
 
@@ -335,7 +348,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                     if reason.startswith("item_shortfall:"):
                         shortfalls[reason.split(":", 1)[1]] += 1
                     continue
-                legal[need].append({**candidate, "bill": result.get("bill") or {}, "need_id": need})
+                legal[need].append({**candidate, "bill": result.get("bill") or {}, "draws": requested_items(candidate),
+                                     "need_id": need})
         return legal
 
     legal = check(by_need)
@@ -477,7 +491,7 @@ def _option_record(option: Mapping) -> dict:
     plan = option.get("plan")
     return {"option_id": option["option_id"], "family": option["family"], "need_id": option.get("need_id"),
             "product": option.get("product"), "power": option.get("power"), "summary": option.get("summary"),
-            "bill": option.get("bill"), "wait_ticks": option.get("wait_ticks"),
+            "bill": option.get("bill"), "draws": option.get("draws"), "wait_ticks": option.get("wait_ticks"),
             "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
             "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
 
