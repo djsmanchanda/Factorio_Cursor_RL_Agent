@@ -20,21 +20,21 @@ MISSION_ID = "mod-playground-mining-productivity-4"
 PHASES: tuple[dict, ...] = (
     {"phase_id": "C1", "name": "starter_mall",
      "targets": {"iron-gear-wheel": 0.25, "copper-cable": 0.5, "stone": 0.25},
-     "scopes": ("mission.goal", "mission.opening", "mission.mine", "mission.mall", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.opening", "mission.mine", "mission.mall", "mission.transport")},
     {"phase_id": "C2", "name": "iron_copper_rollout",
      "targets": {"iron-plate": 3.0, "copper-plate": 3.0},
-     "scopes": ("mission.goal", "mission.opening", "mission.mine", "mission.smelt", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.opening", "mission.mine", "mission.smelt", "mission.transport")},
     {"phase_id": "C3", "name": "stone_rollout",
      "targets": {"stone-brick": 1.5},
-     "scopes": ("mission.goal", "mission.mine", "mission.smelt", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.mine", "mission.smelt", "mission.transport")},
     {"phase_id": "C4", "name": "first_plastic", "targets": {"plastic-bar": 0.5},
-     "scopes": ("mission.goal", "mission.build", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.build", "mission.transport")},
     {"phase_id": "C6", "name": "advanced_circuits", "targets": {"advanced-circuit": 0.25},
-     "scopes": ("mission.goal", "mission.build", "mission.assemble", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.build", "mission.assemble", "mission.transport")},
     {"phase_id": "S1", "name": "science_packs",
      "targets": {"automation-science-pack": 0.5, "logistic-science-pack": 0.5,
                  "chemical-science-pack": 0.25, "production-science-pack": 0.25},
-     "scopes": ("mission.goal", "mission.research", "mission.assemble", "mission.transport")},
+     "scopes": ("mission.goal", "mission.power", "mission.research", "mission.assemble", "mission.transport")},
 )
 
 

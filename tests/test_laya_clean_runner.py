@@ -16,7 +16,8 @@ def facts():
     return {"tick": 100, "pending_ghosts": 0, "machines": [], "production": {}, "consumption": {},
             "ports": [{"position": {"x": 0, "y": 0}, "network": "1", "energy": 100,
                        "construction_radius": 55, "logistic_radius": 25}],
-            "poles": [{"generated": True, "position": {"x": 2, "y": 2}, "wire": 18}],
+            "poles": [{"name": "substation", "generated": True, "position": {"x": 2, "y": 2}, "wire": 18, "supply": 9,
+                       "grid": "1"}],
             "networks": {"1": {"items": {"electric-mining-drill": 5, "inserter": 20}, "reserved": {},
                                "construction_robots": 50}},
             "resources": [{"item": "iron-ore", "position": {"x": 20, "y": 20}}],
@@ -141,41 +142,6 @@ def test_already_built_options_are_pruned_and_blocked_needs_say_why():
     assert menu["blocked"]["coverage"] == {"no_op": menu["rejected"]["no_op"]}
     assert set(menu["blocked"]["item:iron-gear-wheel"]) == {"item_shortfall:requester-chest"}
     assert menu["blocked"]["item:stone"] == {"no_candidate": 1}
-
-
-def test_medium_pole_relay_variant_keeps_the_build_and_one_substation():
-    import math
-    from training.laya_clean_runner import pole_relay_variant
-    from training.laya_saved_world import compile_candidates
-    world = facts()
-    world["resources"] = [{"item": "iron-ore", "position": {"x": 40.5, "y": 30.5}}]
-    mine = next(c for c in compile_candidates(world) if c["family"] == "mine")
-    variant = pole_relay_variant(mine, world)
-    before, after = mine["plan"]["phases"][0]["actions"], variant["plan"]["phases"][0]["actions"]
-    assert sum(a["entity"] == "substation" for a in before) >= 2
-    assert sum(a["entity"] == "substation" for a in after) == 1
-    assert [a for a in after if a["entity"] not in ("substation", "medium-electric-pole")] == \
-           [a for a in before if a["entity"] != "substation"]
-    points = [(2, 2)] + [(a["position"]["x"], a["position"]["y"]) for a in after
-                         if a["entity"] in ("substation", "medium-electric-pole")]
-    assert all(math.dist(a, b) <= 9 for a, b in zip(points, points[1:]))
-    assert variant["option_id"] != mine["option_id"] and variant["option_id"].startswith("mine.p")
-
-
-def test_pole_variant_that_overlaps_its_own_build_is_not_offered():
-    # Live failure 2026-10-03: a relay hop landed on the plan's own roboport.
-    from training.laya_clean_runner import pole_relay_variant
-    from training.laya_saved_world import ghost
-    world = facts()
-    plan_actions = [ghost("substation", 12, -10), ghost("substation", 24, -21), ghost("substation", 35, -32),
-                    ghost("roboport", 35, -33)]
-    candidate = {"family": "expand", "option_id": "expand.x", "summary": "Extend", "network_anchor": {"x": 0, "y": 0},
-                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
-                          "phases": [{"name": "saved-world-expand", "actions": plan_actions}]}}
-    variant = pole_relay_variant(candidate, world)
-    if variant is not None:
-        from planners.plan_validation import validate_build_plan
-        validate_build_plan(variant["plan"])  # Offered variants never overlap their own build.
 
 
 def test_live_world_waits_on_the_running_clock_without_pausing():

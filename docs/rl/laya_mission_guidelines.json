@@ -3,74 +3,168 @@
   "purpose": "Clean Laya runner mission catalog: hard invariants plus the user's mod_playground strategy (docs/rl/Laya_Strategy_Guidelines.md). Scopes are mission.* so other runners never select these rules.",
   "rules": [
     {
-      "rule_id": "rule.runtime-isolation", "kind": "hard", "scopes": ["*"],
+      "rule_id": "rule.runtime-isolation",
+      "kind": "hard",
+      "scopes": [
+        "*"
+      ],
       "source": "docs/system_invariants.md",
       "quote": "Training may not mutate the real save, consume its command channel, or silently replace its planner."
     },
     {
-      "rule_id": "rule.plan-legality", "kind": "hard", "scopes": ["*"],
+      "rule_id": "rule.plan-legality",
+      "kind": "hard",
+      "scopes": [
+        "*"
+      ],
       "source": "docs/system_invariants.md",
       "quote": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
     },
     {
-      "rule_id": "rule.production-promotion", "kind": "hard", "scopes": ["*"],
+      "rule_id": "rule.production-promotion",
+      "kind": "hard",
+      "scopes": [
+        "*"
+      ],
       "source": "docs/system_invariants.md",
       "quote": "Real-base authority requires an explicitly promoted policy, bounded action scope, observable results, and rollback. Training success alone grants no production authority."
     },
     {
-      "rule_id": "rule.measured-completion", "kind": "hard", "scopes": ["*"],
+      "rule_id": "rule.measured-completion",
+      "kind": "hard",
+      "scopes": [
+        "*"
+      ],
       "source": "docs/system_invariants.md",
       "quote": "A running episode is not successful until its measured outcome is recorded."
     },
     {
-      "rule_id": "mission.goal", "kind": "soft", "scopes": ["mission.goal"],
+      "rule_id": "mission.goal",
+      "kind": "soft",
+      "scopes": [
+        "mission.goal"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Start from the mod_playground starter kit and reach advanced circuits, then self-expand and meet all item needs."
     },
     {
-      "rule_id": "mission.science", "kind": "soft", "scopes": ["mission.goal", "mission.research"],
+      "rule_id": "mission.science",
+      "kind": "soft",
+      "scopes": [
+        "mission.research"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "After advanced circuits, research mining productivity 4 by building assembly lines for automation, logistic, chemical and production science packs and their precursors, feeding the packs to labs, then moving to the next science item."
     },
     {
-      "rule_id": "mission.no-gifts", "kind": "soft", "scopes": ["mission.goal", "mission.build"],
+      "rule_id": "mission.no-gifts",
+      "kind": "soft",
+      "scopes": [
+        "mission.goal",
+        "mission.build"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items."
     },
     {
-      "rule_id": "mission.starter-mines", "kind": "soft", "scopes": ["mission.opening", "mission.mine"],
+      "rule_id": "mission.starter-mines",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mine"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Build starter mines for iron, copper and stone first."
     },
     {
-      "rule_id": "mission.starter-mall", "kind": "soft", "scopes": ["mission.opening", "mission.mall"],
+      "rule_id": "mission.starter-mall",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mall"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Start the mall with four assembling machines: two permanent slots for copper cable and iron gear wheels, the rest rotating to whatever item is in demand."
     },
     {
-      "rule_id": "mission.plate-lines", "kind": "soft", "scopes": ["mission.opening", "mission.mine", "mission.smelt"],
+      "rule_id": "mission.plate-lines",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mine",
+        "mission.smelt"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Then build six-drill mine and furnace lines for iron and copper, and expand them as demand grows."
     },
     {
-      "rule_id": "mission.furnace-reference", "kind": "soft", "scopes": ["mission.smelt"],
+      "rule_id": "mission.furnace-reference",
+      "kind": "soft",
+      "scopes": [
+        "mission.smelt"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Treat 12 iron, 12 copper and 6 stone furnaces as a reference allocation; measure whether ore supply and demand justify it."
     },
     {
-      "rule_id": "mission.bot-supply", "kind": "soft", "scopes": ["mission.transport", "mission.mall", "mission.assemble"],
+      "rule_id": "mission.bot-supply",
+      "kind": "soft",
+      "scopes": [
+        "mission.transport",
+        "mission.mall",
+        "mission.assemble"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Use logistic bots to supply one or two machines and mall machines."
     },
     {
-      "rule_id": "mission.belt-transfer", "kind": "soft", "scopes": ["mission.transport", "mission.assemble", "mission.smelt"],
+      "rule_id": "mission.belt-transfer",
+      "kind": "soft",
+      "scopes": [
+        "mission.transport",
+        "mission.assemble",
+        "mission.smelt"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers."
     },
     {
-      "rule_id": "mission.quad-long-arms", "kind": "soft", "scopes": ["mission.mall"],
+      "rule_id": "mission.quad-long-arms",
+      "kind": "soft",
+      "scopes": [
+        "mission.mall"
+      ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Reserve the top and bottom quad slots until long-handed inserters are manufactured; regular inserters cannot replace them."
+    },
+    {
+      "rule_id": "mission.substation-areas",
+      "kind": "soft",
+      "scopes": [
+        "mission.power",
+        "mission.mine",
+        "mission.mall"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Use substations only in mine and mall areas, where one substation powers many machines and there is space for it."
+    },
+    {
+      "rule_id": "mission.medium-poles",
+      "kind": "soft",
+      "scopes": [
+        "mission.power"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Elsewhere use medium electric poles: one costs about 12 iron plates and 1 copper plate, while a substation costs about 60 iron plates, 28 copper plates and 10 plastic."
+    },
+    {
+      "rule_id": "mission.big-pole-relay",
+      "kind": "soft",
+      "scopes": [
+        "mission.power"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables."
     }
   ]
 }

@@ -36,6 +36,16 @@ Use logistic bots to supply one or two machines and mall machines.
 
 Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers.
 
+## Power
+
+Use substations only in mine and mall areas, where one substation powers many machines and there is space for it.
+
+Elsewhere use medium electric poles: one costs about 12 iron plates and 1 copper plate, while a substation costs about 60 iron plates, 28 copper plates and 10 plastic.
+
+For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables.
+
+The substation restriction is enforced when power layouts are generated (`training/laya_power.py`): substations are offered only for mine and mall builds and never as relay chains. Builds already inside existing coverage are offered with no new poles.
+
 ## Mall expansion
 
 Reserve the top and bottom quad slots until long-handed inserters are manufactured; regular inserters cannot replace them.

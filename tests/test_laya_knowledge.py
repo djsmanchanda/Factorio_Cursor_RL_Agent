@@ -49,7 +49,8 @@ def test_mission_catalog_is_separate_and_scopes_the_users_transport_rule():
     ids = [rule["rule_id"] for rule in context["guidelines"]]
     assert ids[4:] == ["mission.bot-supply", "mission.belt-transfer"]
     # Every quoted passage still matches the strategy document.
-    assert len(load_guideline_context(ROOT, ["*"], catalog=mission, max_rules=16)["guidelines"]) == 14
+    total = len(json.loads((ROOT / mission).read_text())["rules"])
+    assert len(load_guideline_context(ROOT, ["*"], catalog=mission, max_rules=16)["guidelines"]) == min(16, total)
     # Existing runners' default catalog never sees mission rules.
     assert not any(r["rule_id"].startswith("mission.") for r in load_guideline_context(ROOT, ["*"])["guidelines"])
     with pytest.raises(LayaKnowledgeError, match="under docs/rl"):

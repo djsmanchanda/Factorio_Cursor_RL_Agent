@@ -19,7 +19,6 @@ says so.
 from __future__ import annotations
 
 import json
-import math
 import random
 import time
 import traceback
@@ -32,20 +31,20 @@ from orchestrator.laya_knowledge import load_guideline_context
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
-from orchestrator.laya_operations import sha256_hash
-from planners.infrastructure_geometry import boxes_overlap, step_points
-from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
-from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state, ghost
+from training.laya_power import power_variants
+from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
 WAIT_TICKS = (300, 1800)
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
 MAX_CONSECUTIVE_FAILURES = 3
-MEDIUM_POLE_WIRE = 9.0
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
                   "assemble": "assembling-machine-1"}
+# Recipes the clean runner needs exported in addition to the shared helper's list.
+RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
+EXTRA_RECIPES = ("big-electric-pole", "iron-stick")
 PAUSED_ASSERTION = 'assert(game.tick_paused and game.ticks_to_run == 0, "saved-world clock must be paused")'
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
@@ -69,6 +68,11 @@ class LiveWorld(SavedWorldAdapter):
         if PAUSED_ASSERTION not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; live observation assertion not found")
         self.lua_source = self.lua_source.replace(PAUSED_ASSERTION, "")
+        # Export big poles and iron sticks too, so they can become stock needs.
+        if RECIPE_LIST_END not in self.lua_source:
+            raise SavedWorldError("saved-world helper changed; recipe list end not found")
+        extra = "".join(f',"{name}"' for name in EXTRA_RECIPES)
+        self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
 
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
@@ -124,45 +128,6 @@ def newly_reached(facts: Mapping, candidate: Mapping) -> set[str]:
     return reached
 
 
-def pole_relay_variant(candidate: Mapping, facts: Mapping) -> dict | None:
-    """Same build, relaying power over medium poles and ending on one substation.
-
-    The generator relays every build over substation chains, which exhausts
-    the kit's substations.  This variant keeps the final substation (identical
-    coverage of the build) and replaces the earlier hops; the policy chooses.
-    """
-    actions = candidate["plan"]["phases"][0]["actions"]
-    relay = 0
-    while relay < len(actions) and actions[relay]["entity"] == "substation":
-        relay += 1
-    poles = [p for p in facts["poles"] if p["generated"]]
-    if relay < 2 or not poles:
-        return None
-    end = actions[relay - 1]["position"]
-    target = (end["x"], end["y"])
-    anchor = min(poles, key=lambda p: math.dist((p["position"]["x"], p["position"]["y"]), target))
-    # Spacing 7 keeps rounded hops inside the medium pole's 9-tile wire reach.
-    start = (anchor["position"]["x"], anchor["position"]["y"])
-    kept = list(actions[relay - 1:])
-    # Drop hops that would overlap the build itself, then require every gap
-    # (anchor -> hops -> final substation) to stay within wire reach.
-    hops = [(x + .5, y + .5) for x, y in step_points(start, target, 7)[:-1]
-            if not any(boxes_overlap((x + .5, y + .5), 1, (a["position"]["x"], a["position"]["y"]),
-                                     ENTITY_FOOTPRINTS.get(a["entity"], 1)) for a in kept)]
-    chain = [start, *hops, target]
-    if any(math.dist(a, b) > MEDIUM_POLE_WIRE for a, b in zip(chain, chain[1:])):
-        return None
-    new_actions = [ghost("medium-electric-pole", x, y) for x, y in hops] + kept
-    plan = {**candidate["plan"], "phases": [{**candidate["plan"]["phases"][0], "actions": new_actions}]}
-    try:
-        validate_build_plan(plan)  # Same self-overlap check the generator applies.
-    except ValueError:
-        return None
-    digest = sha256_hash({"plan": plan, "network_anchor": candidate["network_anchor"]})
-    return {**candidate, "option_id": f"{candidate['family']}.p{digest[7:18]}", "plan": plan,
-            "summary": candidate["summary"] + " via medium-pole relay"}
-
-
 def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     picked = []
     for key in sorted(groups):
@@ -172,18 +137,24 @@ def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     return picked
 
 
+def _compile(facts: Mapping, products: set[str], seed: int) -> list[dict]:
+    """Generator candidates for only the products a need can use (speed, not a choice)."""
+    recipes = {k: v for k, v in facts["recipes"].items() if k in products}
+    return compile_candidates({**facts, "recipes": recipes}, seed)
+
+
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
-                 per_need_checked: int = 8, per_need_shown: int = 2) -> dict:
+                 per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
     """Group legal options by the unmet need they serve.
 
+    Each sampled build is offered with its power alternatives (training/laya_power.py).
     Construction items that legal checks report missing (``item_shortfall``)
     become ``stock:<item>`` needs served by assembling that item.  Sampling per
     need is seeded exploration of sites; it never ranks needs or options.
     """
     rng = random.Random(seed)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
-    proposed = compile_candidates(facts, seed)
-    proposed += [v for v in (pole_relay_variant(c, facts) for c in proposed) if v]
+    proposed = _compile(facts, unmet, seed)
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
         need = need_of(candidate)
@@ -199,10 +170,17 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     reasons: dict[str, Counter] = defaultdict(Counter)
 
     def check(groups):
-        sample = _sample(groups, per_need_checked, rng)
+        expanded = {}
+        for need in sorted(groups):
+            builds = list(groups[need])
+            rng.shuffle(builds)
+            expanded[need] = [v for c in builds[:per_need_checked] for v in power_variants(c, facts)]
+            if builds and not expanded[need]:
+                reasons[need]["no_power_layout"] += 1
+        sample = [v for variants in expanded.values() for v in variants]
         results = validate(sample) if sample else {}
         legal: dict[str, list] = defaultdict(list)
-        for need, candidates in groups.items():
+        for need, candidates in expanded.items():
             for candidate in candidates:
                 result = results.get(candidate["option_id"])
                 if result is None:
@@ -210,7 +188,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 reason = result.get("reason")
                 primary = PRIMARY_ENTITY.get(candidate["family"])
                 if not reason and (not result.get("bill") or (primary and primary not in result["bill"])):
-                    reason = "no_op"  # Its main entity already exists; only relay pieces would be new.
+                    reason = "no_op"  # Its main entity already exists; only power pieces would be new.
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -222,7 +200,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     stock_groups: dict[str, list] = defaultdict(list)
-    for candidate in proposed:
+    for candidate in _compile(facts, set(shortfalls), seed) if shortfalls else ():
         if candidate["family"] == "assemble" and candidate.get("product") in shortfalls:
             stock_groups[f"stock:{candidate['product']}"].append(candidate)
     legal.update(check(stock_groups))
