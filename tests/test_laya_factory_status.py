@@ -109,3 +109,13 @@ def test_runner_built_machines_that_never_ran_are_idle_not_unbuilt():
     gear = board["needs"][0]
     assert gear["condition"] == "built_idle" and gear["built"] == 2
     assert compile_status(world([]), {"iron-gear-wheel": 1.0})["needs"][0]["condition"] == "unbuilt"
+
+
+def test_short_construction_items_expose_their_input_chain_without_becoming_goals():
+    recipes = {**RECIPES, "medium-electric-pole": recipe([("steel-plate", 2), ("iron-plate", 2)], 30),
+               "steel-plate": recipe([("iron-plate", 5)], 960)}
+    facts = {**world([]), "recipes": recipes}
+    board = compile_status(facts, {"iron-gear-wheel": 1.0}, stock={"medium-electric-pole": 0.05})
+    needs = {n["item"]: n for n in board["needs"]}
+    assert board["targets"] == {"iron-gear-wheel": 1.0} and "steel-plate" in needs
+    assert any(chain.startswith("medium-electric-pole:unbuilt") for chain in bottleneck_chain(board))

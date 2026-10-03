@@ -404,6 +404,7 @@ def _status_line(board: Mapping) -> str:
 
 
 STALL_DECISIONS = 12
+STOCK_RATE = 0.05  # items/s of demand for each construction item reported short
 RATE_WINDOW_TICKS = 7200  # Board rates span at least 2 game minutes; bot deliveries are bursty.
 
 
@@ -513,6 +514,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf}
     samples: list[tuple[int, Mapping, Mapping]] = []
+    stock_demand: dict[str, float] = {}
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -527,14 +529,14 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             measurement = rolling_measurement(samples) or measurement
             phase = current_phase(reached)
             built = _built_counts(adapter)
-            board = compile_status(facts, phase["targets"], measurement, built) if phase else None
+            board = compile_status(facts, phase["targets"], measurement, built, stock_demand) if phase else None
             while phase and phase_reached(board):
                 stall.update(since=0, best_gap=math.inf)
                 reached.append(phase["phase_id"])
                 _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
                 emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
                 phase = current_phase(reached)
-                board = compile_status(facts, phase["targets"], measurement, built) if phase else None
+                board = compile_status(facts, phase["targets"], measurement, built, stock_demand) if phase else None
             if phase is None:
                 summary["stop"] = "mission_complete"
                 break
@@ -547,6 +549,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 continue
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
                                 site_plan=site_plan)
+            # Items the checks found short become small demand targets on the next board.
+            stock_demand = {item: STOCK_RATE for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
             choice = policy.choose(state, menu)
             distribution = choice.pop("distribution", None)

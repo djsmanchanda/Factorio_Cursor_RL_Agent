@@ -156,7 +156,7 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
 
 
 def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Mapping | None = None,
-                   built: Mapping[str, int] | None = None) -> dict:
+                   built: Mapping[str, int] | None = None, stock: Mapping[str, float] | None = None) -> dict:
     """Build the full status board for ``targets`` (items/s) from saved-world facts.
 
     ``built`` counts machines the runner itself built per product (from its
@@ -164,8 +164,11 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
     "built but idle" from "unbuilt".
     """
     built = built or {}
+    # Construction items reported short join the demand tree at a small rate, so their
+    # inputs (e.g. steel for poles) become visible needs; goals stay the phase targets.
+    stock_targets = {item: rate for item, rate in (stock or {}).items() if item not in targets}
     recipes = facts.get("recipes") or {}
-    demand = goal_demand(targets, recipes)
+    demand = goal_demand({**targets, **stock_targets}, recipes)
     stock = accessible_stock(facts)
     by_recipe: dict[str, list[Mapping]] = defaultdict(list)
     for machine in facts.get("machines") or []:
@@ -214,7 +217,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
                                       if conditions.get(part["name"]) not in (None, "satisfied"))
     needs.sort(key=lambda n: (n["depth"], n["item"]))
     return {
-        "version": VERSION, "targets": dict(sorted(targets.items())), "measured": measurement is not None,
+        "version": VERSION, "targets": dict(sorted(targets.items())), "stock_targets": dict(sorted(stock_targets.items())),
+        "measured": measurement is not None,
         "window_ticks": None if measurement is None else measurement.get("window_ticks"),
         "needs": needs,
         "construction": {"pending_ghosts": int(facts.get("pending_ghosts", 0)),
@@ -230,7 +234,7 @@ def bottleneck_chain(board: Mapping) -> list[str]:
     """
     needs = {n["item"]: n for n in board["needs"]}
     chains: list[str] = []
-    for item in sorted(board["targets"]):
+    for item in [*sorted(board["targets"]), *sorted(board.get("stock_targets") or {})]:
         current = needs[item]
         links, seen = [], set()
         while current["condition"] != "satisfied" and current["item"] not in seen:
