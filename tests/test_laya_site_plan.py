@@ -111,3 +111,10 @@ def test_starters_follow_the_deterministic_geometry_and_only_once():
     assert counts["electric-mining-drill"] == 2 and counts["electric-furnace"] == 2 and counts["passive-provider-chest"] == 1
     assert reservation_reason(plan, starters[0]) is None  # A starter may stand on its own patch.
     assert starter_candidates(world, plan, {"iron-plate"}, {"iron-plate"}) == []  # Only the first build is a starter.
+
+
+def test_base_is_the_starter_roboport_however_ports_are_ordered():
+    from training.laya_site_plan import _base
+    facts = {"ports": [{"position": {"x": 40, "y": 40}, "energy": 1}, {"position": {"x": 3, "y": -1}, "energy": 1}],
+             "poles": [{"generated": True, "position": {"x": 0, "y": 0}}, {"generated": True, "position": {"x": 6, "y": -4}}]}
+    assert _base(facts) == (3, -1)

@@ -151,6 +151,14 @@ deterministic reference, writing `docs/rl/laya_helper_runs/<run_id>/findings.md`
   that take another purpose's land are rejected (`reserved:*`).
 - Mission order starts with C0 (iron and copper starter plates) before the
   starter mall, so mall builds are not offered until C0 is measured.
+- Plates: the first build of iron, copper and stone is the deterministic direct
+  starter (`training/laya_starters.py`); later capacity is smelting lines
+  (`training/laya_lines.py`): one column of the approved Start/Middle/End units
+  (6 or 18 furnaces) fed by a paired-drill mine unit and a corridor haul, with
+  sized provider taps, grown in parallel. Live mechanics check 2026-10-04
+  (`data/laya-saved-world/line-mechanics-20261004a`, fixture items, not Laya
+  evidence): a 6-furnace iron line was built by bots (171 entities, 0 failed) and
+  ran at 3.9 ore/s and 3.75 plates/s with all six furnaces working.
 - Policy: the doc-guided policy (`training/laya_guided_policy.py`,
   `authority: guided_exploration`) until a compatible Laya checkpoint exists.
   It weights each option by the `prefer` entries of the rules present in that

@@ -117,6 +117,18 @@ def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float) ->
     return belts if len(belts) <= MAX_HAUL else None
 
 
+def _reachable(actions: list[dict], ports: list[Mapping], network: str) -> bool:
+    """Every entity inside construction range, provider chests inside logistic range, of one network."""
+    own = [p for p in ports if p["network"] == network]
+
+    def within(position: Mapping, radius_key: str) -> bool:
+        return any(max(abs(position["x"] - p["position"]["x"]), abs(position["y"] - p["position"]["y"]))
+                   <= p[radius_key] - 1 for p in own)
+
+    return all(within(a["position"], "construction_radius") for a in actions) and all(
+        within(a["position"], "logistic_radius") for a in actions if a["entity"] == "passive-provider-chest")
+
+
 def _samples(facts: Mapping, ore: str, rect: list[float]) -> list[tuple[float, float]]:
     return [(s["position"]["x"], s["position"]["y"]) for s in facts["resources"] if s["item"] == ore
             and rect[0] <= s["position"]["x"] <= rect[2] and rect[1] <= s["position"]["y"] <= rect[3]]
@@ -157,6 +169,8 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         if route is None:
                             continue
                         actions = mine + route + line_units(plate, rows, lx, ly) + output_taps(rows, lx, ly)
+                        if not _reachable(actions, ports, port["network"]):
+                            continue
                         built = {"surface": "nauvis", "force": "player", "atomic": True,
                                  "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
                         try:

@@ -37,6 +37,7 @@ SMELTED = {"iron-ore": "iron-plate", "copper-ore": "copper-plate", "stone": "sto
 STRIP_WIDTHS = (34.0, 15.0)
 CORRIDOR_WIDTH = 5.0  # reserved for future belts on both sides of a strip
 SMALL_PATCH_RADIUS = 250.0
+BASE_CORE = 12.0  # half-size of the starter area strips must avoid
 SMALL_PATCH_SAMPLES = 16  # survey cells (~256 tiles); smaller patches cannot host module-fed mine lines  # small patches are used only if no larger one lies within this of the base
 CORRIDOR_ENTITIES = frozenset({"transport-belt", "underground-belt", "splitter", "fast-transport-belt",
                                "medium-electric-pole", "big-electric-pole"})
@@ -126,8 +127,23 @@ def _strip_and_corridors(patch: Rect, side: str, width: float) -> tuple[Rect, li
 
 
 def _base(facts: Mapping) -> tuple[float, float]:
-    port = next(p for p in facts["ports"] if p["energy"] > 0)
+    """The starter roboport: the powered port nearest the centre of the generated power grid.
+
+    Port order from the game is arbitrary, and later coverage adds ports far from the base.
+    """
+    ports = [p for p in facts["ports"] if p["energy"] > 0]
+    grid = [p["position"] for p in facts.get("poles", []) if p.get("generated")]
+    if not grid:
+        return ports[0]["position"]["x"], ports[0]["position"]["y"]
+    cx, cy = sum(p["x"] for p in grid) / len(grid), sum(p["y"] for p in grid) / len(grid)
+    port = min(ports, key=lambda p: math.dist((p["position"]["x"], p["position"]["y"]), (cx, cy)))
     return port["position"]["x"], port["position"]["y"]
+
+
+def _base_core(facts: Mapping) -> Rect:
+    """Starter area kept free of smelting strips (roboport, kit chest, starter power)."""
+    bx, by = _base(facts)
+    return Rect(bx - BASE_CORE, by - BASE_CORE, bx + BASE_CORE, by + BASE_CORE)
 
 
 def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
@@ -144,7 +160,7 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
         if not own:
             continue
         nearest = _rect(min(own, key=lambda p: _distance_to(_rect(p["rect"]), base))["rect"])
-        taken = [_rect(z["rect"]) for z in zones] + list(avoid)
+        taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts)]
         sides = sorted(("west", "east", "north", "south"),
                        key=lambda side: math.dist(_strip_and_corridors(nearest, side, STRIP_WIDTHS[0])[0].centre, base))
         choice = next(((strip, corridors) for width in STRIP_WIDTHS for side in sides
@@ -307,7 +323,8 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
             starter_ore = family in ("starter", "line") and SMELTED.get(subject) == product  # Its own patch.
             if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore):
                 return reject(f"reserved:{zone['purpose']}", action)
-            if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject)
+            # Roboports may stand in a smelting strip: its lines' provider taps need logistic coverage.
+            if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject) or family == "expand"
                                         or (family == "mine" and SMELTED.get(product) == subject)):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "mall":
