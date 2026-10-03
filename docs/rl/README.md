@@ -108,6 +108,14 @@ The [saved-world adapter](Laya_Saved_World_Adapter.md) adds isolated exact-copy
 replays are verified; saved-world Laya training and matched baseline comparison
 remain separate gates.
 
+`training/laya_factory_status.py` compiles Laya's factory status board from
+saved-world facts: goal demand expanded through live recipes, measured supply,
+machine capacity, separated conditions (unbuilt, recipe unavailable, input
+starved, output blocked, power limited, under capacity, satisfied), upgrade
+facts and construction shortfalls, plus a causal bottleneck chain. It fills the
+decision state's goal/gap/bottleneck fields and never ranks needs or remedies;
+need-tagged build/scale/upgrade/repair operations built on it are next.
+
 The [supplied-input mall](Laya_Mall_Supply.md) provides a separate seeded economy,
 queue-selected consumed-batch supply upgrades and long-inserter-funded quad
 expansion. Its live mechanics are verified; it uses `mall-world-v1` and still
