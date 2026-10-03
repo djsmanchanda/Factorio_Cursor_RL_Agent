@@ -413,7 +413,8 @@ class SavedWorldAdapter:
             plan = candidate["plan"]
             if plan.get("surface") != self.surface or plan.get("force") != self.force or plan.get("atomic") is not True:
                 raise SavedWorldError("saved-world plans require explicit atomic Nauvis/player scope")
-            allowed = {"action_type", "entity", "position", "direction", "recipe", "logistic_requests", "logistic_sections", "clear_inventory_limit"}
+            allowed = {"action_type", "entity", "position", "direction", "recipe", "logistic_requests", "logistic_sections",
+                       "clear_inventory_limit", "input_priority", "output_priority"}  # splitter priorities (refinery units)
             if any(a.get("action_type") != "place_ghost" or set(a) - allowed for a in actions(plan)):
                 raise SavedWorldError("saved-world submissions allow funded ghosts only")
         elif candidate.get("family") != "wait" or candidate.get("wait_ticks") not in (300, 1800):
