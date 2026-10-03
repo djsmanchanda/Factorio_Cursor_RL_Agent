@@ -640,9 +640,11 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                             "outcome": "completed" if receipt["status"] == "observed" else "pending"})
             summary["decisions"] += 1
             failures = 0
-            # Stall: no new build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
+            # Stall: no need-serving build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
             gap = _goal_gap(compile_status(facts, phase["targets"], measurement, built))
-            progressed = (chosen["family"] != "wait" and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
+            # Untagged coverage serves no current need, so it does not count as progress.
+            served = chosen["family"] != "wait" and chosen.get("need_id") != "coverage"
+            progressed = (served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
             stall["best_gap"] = min(stall["best_gap"], gap)
             stall["since"] = 0 if progressed else stall["since"] + 1
             if stall["since"] >= STALL_DECISIONS:

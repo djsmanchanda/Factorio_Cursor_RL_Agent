@@ -231,3 +231,20 @@ def test_stock_items_are_sampled_from_the_mall_zone_only():
     by_id = {o["option_id"]: o for o in menu["options"]}
     stock = next(n for n in menu["needs"] if n["need_id"] == "stock:requester-chest")
     assert stock["options"] and all(reservation_reason(plan, by_id[o]) is None for o in stock["options"])
+
+
+def test_coverage_that_serves_no_need_does_not_count_as_progress(tmp_path):
+    class CoverageOnly(FakeAdapter):
+        def query(self, candidates=None):
+            if candidates is not None:  # Only roboport hops are buildable; nothing serves a need.
+                return {"validations": {c["option_id"]: ({"reason": None, "bill": {"roboport": 1, "medium-electric-pole": 1}}
+                                                         if c["family"] == "expand" else {"reason": "collision"})
+                                        for c in candidates}}
+            return copy.deepcopy(self.world)
+
+    from training.laya_guided_policy import GuidedPolicy
+    world_without_ore = CoverageOnly()
+    world_without_ore.world["resources"] = []
+    summary = run(world_without_ore, GuidedPolicy(1, epsilon=1.0), journal=tmp_path / "j.jsonl", decisions=60,
+                  measure_ticks=300, seed=0, run_id="t")
+    assert summary["stop"] == "stalled"
