@@ -277,6 +277,7 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
             row["upgrade"] = f"{need['upgrade']['from']}->{need['upgrade']['to']}x{need['upgrade']['eligible_machines']}"
         rows.append(row)
     return {"version": VERSION, "needs": rows, "omitted": max(0, len(board["needs"]) - limit),
+            "stock_targets": sorted(board.get("stock_targets") or {}),
             "bottleneck": bottleneck_chain(board), "construction_shortfall": board["construction"]["shortfall"]}
 
 

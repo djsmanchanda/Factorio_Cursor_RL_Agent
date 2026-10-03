@@ -258,6 +258,12 @@
             "need": "stock:*"
           },
           "weight": 2.5
+        },
+        {
+          "when": {
+            "stock_target": true
+          },
+          "weight": 2.5
         }
       ]
     },

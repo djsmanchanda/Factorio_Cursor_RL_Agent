@@ -79,3 +79,10 @@ def test_phase_goal_items_outweigh_stock_chain_items():
     rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
     assert rows["mine.a"]["features"]["goal_need"] and rows["mine.a"]["weight"] == 3.0
     assert not rows["asm.c"]["features"]["goal_need"]
+
+
+def test_short_construction_items_on_the_board_get_the_construction_item_preference():
+    s = state(["mission.make-construction-items"])
+    s["observation_digest"]["factory_status"]["stock_targets"] = ["iron-plate"]
+    rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
+    assert rows["smelt.b"]["features"]["stock_target"] and rows["smelt.b"]["weight"] == 2.5

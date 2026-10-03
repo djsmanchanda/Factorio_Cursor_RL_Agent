@@ -58,6 +58,7 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
             "deepest_bottleneck": item in deepest, "others_available": others,
             "goal_need": item in goal_items,
+            "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),
             "bill_items": sum((option.get("bill") or {}).values())}
