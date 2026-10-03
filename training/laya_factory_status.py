@@ -303,6 +303,8 @@ def apply_to_state(state: dict, board: Mapping) -> dict:
     production = state["state_digest"]["production"]
     production.update(rate_now=current, rate_target=target)
     chain = bottleneck_chain(board)
-    production["bottleneck_hint"] = " | ".join(chain) if chain else None
+    # The state's hint is a bounded string (512); the full chains stay in factory_status.
+    hint = " | ".join(chain)
+    production["bottleneck_hint"] = (hint if len(hint) <= 512 else hint[:509] + "...") if chain else None
     state.setdefault("observation_digest", {})["factory_status"] = compact_status(board)
     return state

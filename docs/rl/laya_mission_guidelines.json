@@ -200,13 +200,20 @@
         "mission.decide"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Serve the current phase's goals first: actions on items its goals need come before stock and other needs.",
+      "quote": "Serve the current phase's goals first: actions on items its goals need come before stock and other needs, which wait while a goal action is possible.",
       "prefer": [
         {
           "when": {
             "goal_need": true
           },
           "weight": 3.0
+        },
+        {
+          "when": {
+            "goal_need": false,
+            "goal_options_available": true
+          },
+          "weight": 0.2
         }
       ]
     },

@@ -49,6 +49,11 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     for network in ((state.get("observation_digest") or {}).get("saved_world") or {}).get("provider_stock", {}).values():
         for name, count in network.items():
             stock[name] = stock.get(name, 0) + int(count)
+    def is_goal(option: Mapping) -> bool:
+        need = option.get("need_id", "wait")
+        return (need.split(":", 1)[1] if ":" in need else None) in goal_items
+
+    goal_options = any(is_goal(o) for o in menu["options"] if o["family"] != "wait")
     features = {}
     for option in menu["options"]:
         need = option.get("need_id", "wait")
@@ -57,7 +62,7 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "need": need, "family": option["family"], "power": option.get("power"), "product": option.get("product"),
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
             "deepest_bottleneck": item in deepest, "others_available": others,
-            "goal_need": item in goal_items,
+            "goal_need": item in goal_items, "goal_options_available": goal_options,
             "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),

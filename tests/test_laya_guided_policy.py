@@ -86,3 +86,11 @@ def test_short_construction_items_on_the_board_get_the_construction_item_prefere
     s["observation_digest"]["factory_status"]["stock_targets"] = ["iron-plate"]
     rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
     assert rows["smelt.b"]["features"]["stock_target"] and rows["smelt.b"]["weight"] == 2.5
+
+
+def test_non_goal_options_wait_while_a_goal_action_is_possible():
+    s = state(["mission.phase-goals-first"])
+    s["observation_digest"]["factory_status"]["needs"] = [
+        {"item": "copper-ore", "required": 0.5}, {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
+    rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
+    assert rows["asm.c"]["weight"] == pytest.approx(0.2) and rows["mine.a"]["weight"] == 3.0

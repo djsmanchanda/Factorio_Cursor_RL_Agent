@@ -24,7 +24,7 @@ Use only the starter kit and items the factory manufactures; never borrow player
 
 ## Deciding
 
-Serve the current phase's goals first: actions on items its goals need come before stock and other needs.
+Serve the current phase's goals first: actions on items its goals need come before stock and other needs, which wait while a goal action is possible.
 
 Serve the bottleneck: prefer actions on items in the current bottleneck chain, deepest unmet input first.
 
@@ -44,7 +44,7 @@ Plan land before building: protect ore patches for mining, keep a smelting strip
 
 Ignore small ore patches unless no larger patch of that resource lies within 250 tiles of the base; small patches get no reservation. A patch is small below the deterministic new-site minimum of 200,000 ore or about 256 tiles of ore.
 
-A smelting strip is at least one six-furnace module wide (three furnaces, 9 tiles, plus 2 for the belt and 1 spare on each side; the basic module is 15 tiles) and two module columns where space allows, with 5-tile belt corridors kept free on both sides for future belts.
+A smelting strip is at least one six-furnace module wide (three furnaces, 9 tiles, plus 2 for the belt and 1 spare on each side; the basic module is 15 tiles) and 34 tiles where space allows (two parallel lines, or one 18-furnace line of Start-Middle-Middle-End), with 5-tile belt corridors kept free on both sides for future belts.
 
 The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
 
