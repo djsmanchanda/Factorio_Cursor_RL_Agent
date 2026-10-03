@@ -103,6 +103,13 @@ function renderLatest(latest) {
   fill($("stock-body"), stock.map(([item, count]) => {
     const tr = document.createElement("tr"); cell(tr, item); cell(tr, count); return tr;
   }), 2, "Empty.");
+  const plan = latest.site_plan;
+  $("plan-state").textContent = plan ? (plan.mall_site ? `Mall at (${plan.mall_site.join(", ")})` : "Mall unzoned") : "Unplanned";
+  fill($("plan-body"), (plan ? plan.zones : []).map((z) => {
+    const tr = document.createElement("tr");
+    cell(tr, z.zone_id); cell(tr, z.purpose); cell(tr, z.rect.map((v) => Math.round(v)).join(", "));
+    return tr;
+  }), 3, "No site plan yet.");
   const list = $("guidelines");
   list.replaceChildren();
   (latest.guidelines || []).forEach((g) => {

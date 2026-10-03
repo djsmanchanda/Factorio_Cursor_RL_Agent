@@ -32,6 +32,7 @@ from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_power import power_variants
+from training.laya_site_plan import base_zones, draw_command, load_plan, plan_options, reservation_reason, save_plan
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,26 @@ def newly_reached(facts: Mapping, candidate: Mapping) -> set[str]:
     return reached
 
 
+APPROACH_TILES = 16.0  # A hop "approaches" an unreachable ore when it closes at least this much distance.
+
+
+def approaches(facts: Mapping, candidate: Mapping, ores: set[str]) -> set[str]:
+    """Unmet ores with no site in logistic reach that this coverage hop moves substantially closer to."""
+    ports = [p for p in facts["ports"] if p["energy"] > 0]
+    new = [a["position"] for phase in candidate["plan"]["phases"] for a in phase["actions"] if a["entity"] == "roboport"]
+    if not ports or not new:
+        return set()
+    result = set()
+    for ore in ores:
+        sites = [s["position"] for s in facts["resources"] if s["item"] == ore]
+        if not sites or any(_in_reach(p["position"], s, p["logistic_radius"]) for p in ports for s in sites):
+            continue
+        gap = lambda origin: min(max(abs(s["x"] - origin["x"]), abs(s["y"] - origin["y"])) for s in sites)
+        if min(gap(p["position"]) for p in ports) - min(gap(n) for n in new) >= APPROACH_TILES:
+            result.add(ore)
+    return result
+
+
 def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     picked = []
     for key in sorted(groups):
@@ -144,7 +165,7 @@ def _compile(facts: Mapping, products: set[str], seed: int) -> list[dict]:
 
 
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
-                 per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
+                 site_plan: Mapping | None = None, per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -159,8 +180,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     for candidate in proposed:
         need = need_of(candidate)
         if need == "coverage":
-            ores = newly_reached(facts, candidate) & unmet
-            # A coverage hop that brings an unmet resource into reach serves it.
+            ores = (newly_reached(facts, candidate) & unmet) or approaches(facts, candidate, unmet)
+            # A coverage hop that reaches (or closes on) an unmet resource serves it.
             by_need[f"item:{sorted(ores)[0]}" if ores else "coverage"].append(candidate)
         elif need in unmet:
             by_need[f"item:{need}"].append(candidate)
@@ -174,9 +195,18 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         for need in sorted(groups):
             builds = list(groups[need])
             rng.shuffle(builds)
-            expanded[need] = [v for c in builds[:per_need_checked] for v in power_variants(c, facts)]
-            if builds and not expanded[need]:
+            variants = [v for c in builds[:per_need_checked] for v in power_variants(c, facts)]
+            if builds and not variants:
                 reasons[need]["no_power_layout"] += 1
+            expanded[need] = []
+            for variant in variants:
+                # Land reservation is a hard rule: reject builds on another purpose's land.
+                reason = reservation_reason(site_plan, variant) if site_plan else None
+                if reason:
+                    reasons[need][reason] += 1
+                    rejected[reason.split(":", 1)[0]] += 1
+                else:
+                    expanded[need].append(variant)
         sample = [v for variants in expanded.values() for v in variants]
         results = validate(sample) if sample else {}
         legal: dict[str, list] = defaultdict(list)
@@ -297,6 +327,39 @@ def _status_line(board: Mapping) -> str:
                       for n in board["needs"])
 
 
+def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> None:
+    """Outline reserved zones in game for spectators; drawing failures never stop the run."""
+    bridge = getattr(adapter, "bridge", None)
+    if bridge is None:
+        return
+    try:
+        bridge.command(draw_command(plan))
+    except Exception as error:  # Rendering is cosmetic.
+        emit(f"  ZONES NOT DRAWN: {type(error).__name__}: {str(error)[:160]}")
+
+
+def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Policy", record: dict, journal: Path,
+                   run_id: str, history: list, emit: Callable[[str], None]) -> dict:
+    """One planning decision: the policy chooses the mall site; ore and smelting land is reserved."""
+    options = plan_options(facts)
+    if not options:
+        emit("PLAN: no mall site clears the reserved land; ore and smelting zones reserved, mall unzoned")
+        return {"version": "laya-site-plan-v1", "mall_site": None, "zones": base_zones(facts)}
+    menu = {"needs": [{"need_id": "plan:site", "condition": "unplanned", "options": [o["option_id"] for o in options]}],
+            "options": options, "blocked": {}, "rejected": {}, "shortfalls": {}}
+    state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, None)
+    choice = policy.choose(state, menu)
+    chosen = next(o for o in options if o["option_id"] == choice["option_id"])
+    record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="planned", choice=choice,
+                  summary=chosen["summary"], menu={"plan:site": [o["option_id"] for o in options]},
+                  site_plan=chosen["site_plan"])
+    _append(journal, record)
+    emit(f"PLAN DECISION {record['index']} p={choice['probability']:.3f} authority={policy.authority}: {chosen['summary']}")
+    for zone in chosen["site_plan"]["zones"]:
+        emit(f"  ZONE {zone['zone_id']} {zone['purpose']} rect={[round(v, 1) for v in zone['rect']]}")
+    return chosen["site_plan"]
+
+
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None) -> dict:
@@ -312,6 +375,10 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     measurement = None
     failures = 0
     last_status = last_blocked = None
+    plan_path = journal.parent / "site-plan.json"
+    site_plan = load_plan(plan_path)
+    if site_plan:
+        _draw_zones(adapter, site_plan, emit)
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     index = -1
     while decisions is None or index + 1 < decisions:
@@ -334,7 +401,15 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             if phase is None:
                 summary["stop"] = "mission_complete"
                 break
-            menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index)
+            if site_plan is None:
+                # Planning comes first: reserve land before anything is built.
+                site_plan = _plan_decision(facts, board, phase, policy, record, journal, run_id, history, emit)
+                save_plan(plan_path, site_plan)
+                _draw_zones(adapter, site_plan, emit)
+                summary["decisions"] += 1
+                continue
+            menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
+                                site_plan=site_plan)
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
             choice = policy.choose(state, menu)
             chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
@@ -364,6 +439,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "choice": {**choice, "summary": chosen["summary"]}, "stock": _stock(facts),
                                         "guidelines": state["guidelines"], "authority": policy.authority,
                                         "decisions": summary["decisions"], "failures": summary["failures"],
+                                        "site_plan": site_plan,
                                         "measured_per_s": record.get("measured_per_s")})
             receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
             measurement = receipt["measurement"]

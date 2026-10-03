@@ -5,7 +5,7 @@ import json
 
 from training.laya_clean_runner import ExplorationPolicy, build_state, compile_menu, need_of, run
 from training.laya_factory_status import compile_status
-from training.laya_mission import PHASES, current_phase, phase_reached
+from training.laya_mission import current_phase, phase, phase_reached
 
 
 def recipe(ingredients, ticks, amount=1):
@@ -43,7 +43,7 @@ def validator(shortfall_for=()):
 
 
 def test_menu_tags_unmet_needs_and_turns_item_shortfalls_into_stock_needs():
-    board = compile_status(facts(), PHASES[0]["targets"])
+    board = compile_status(facts(), phase("C1")["targets"])
     menu = compile_menu(facts(), board, validator(shortfall_for={"iron-gear-wheel"}), seed=1)
     needs = {n["need_id"]: n for n in menu["needs"]}
     assert {"item:iron-ore", "item:iron-plate", "item:copper-cable", "coverage", "wait"} <= set(needs)
@@ -56,9 +56,9 @@ def test_menu_tags_unmet_needs_and_turns_item_shortfalls_into_stock_needs():
 
 
 def test_state_carries_board_mission_guidelines_and_need_tags():
-    board = compile_status(facts(), PHASES[0]["targets"])
+    board = compile_status(facts(), phase("C1")["targets"])
     menu = compile_menu(facts(), board, validator(), seed=2)
-    state = build_state(facts(), menu, board, PHASES[0], "test", ExplorationPolicy.model_ref, [], None)
+    state = build_state(facts(), menu, board, phase("C1"), "test", ExplorationPolicy.model_ref, [], None)
     ids = {g["rule_id"] for g in state["guidelines"]}
     assert {"mission.starter-mall", "mission.bot-supply", "mission.belt-transfer"} <= ids
     assert all(o["summary"].startswith("[") for o in state["options"])
@@ -97,8 +97,11 @@ def test_loop_journals_before_acting_and_survives_isolated_failures(tmp_path):
     summary = run(adapter, ExplorationPolicy(0), journal=journal, decisions=4, measure_ticks=300, seed=0, run_id="t")
     rows = [json.loads(line) for line in journal.read_text().splitlines()]
     assert summary["decisions"] == 3 and summary["failures"] == 1 and summary["stop"] == "decision_budget"
+    # Decision 0 plans the land before anything is built; no world mutation.
+    assert rows[0]["status"] == "planned" and rows[0]["choice"]["need_id"] == "plan:site"
+    assert (tmp_path / "site-plan.json").is_file() and adapter.calls == 3
     pending = [r for r in rows if r.get("status") == "pending"]
-    assert len(pending) == 4 and all(r["authority"] == "exploration" for r in pending)
+    assert len(pending) == 3 and all(r["authority"] == "exploration" for r in pending)
     assert [r["event"] for r in rows].count("failure") == 1 and rows[-1]["event"] == "summary"
 
 
@@ -109,7 +112,9 @@ def test_loop_stops_safely_after_repeated_failures(tmp_path):
 
 
 def test_mission_ladder_advances_only_on_measured_satisfaction():
-    assert current_phase([])["phase_id"] == "C1" and current_phase(["C1"])["phase_id"] == "C2"
+    # Iron and copper starters come first (user priority), then the starter mall.
+    assert current_phase([])["phase_id"] == "C0" and current_phase(["C0"])["phase_id"] == "C1"
+    assert set(current_phase([])["targets"]) == {"iron-plate", "copper-plate"}
     world = facts()
     assert not phase_reached(compile_status(world, {"iron-plate": 0.5}))
     measured = {"window_ticks": 600, "consumption": {}, "production": {"iron-plate": {"per_second": 0.5}}}
@@ -119,7 +124,7 @@ def test_mission_ladder_advances_only_on_measured_satisfaction():
 def test_coverage_hop_that_reaches_an_unmet_resource_serves_that_need():
     world = facts()
     world["resources"].append({"item": "copper-ore", "position": {"x": 50, "y": 0}})  # logistic reach 19 from (32,0)
-    menu = compile_menu(world, compile_status(world, PHASES[0]["targets"]), validator(), seed=3)
+    menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validator(), seed=3)
     by_id = {o["option_id"]: o for o in menu["options"]}
     copper = next(n for n in menu["needs"] if n["need_id"] == "item:copper-ore")
     # The same hop, relayed over substations or medium poles.
@@ -137,7 +142,7 @@ def test_already_built_options_are_pruned_and_blocked_needs_say_why():
                  else {"reason": None, "bill": {"electric-furnace": 1, "electric-mining-drill": 1,
                                                 "assembling-machine-1": 1}}) for c in candidates}
     world = facts()
-    menu = compile_menu(world, compile_status(world, PHASES[0]["targets"]), validate, seed=4)
+    menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validate, seed=4)
     assert "coverage" not in {n["need_id"] for n in menu["needs"]}
     assert menu["blocked"]["coverage"] == {"no_op": menu["rejected"]["no_op"]}
     assert set(menu["blocked"]["item:iron-gear-wheel"]) == {"item_shortfall:requester-chest"}

@@ -20,9 +20,15 @@ After advanced circuits, research mining productivity 4 by building assembly lin
 
 Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items.
 
+## Planning
+
+Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone.
+
+The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode.
+
 ## Opening
 
-Build starter mines for iron, copper and stone first.
+First priority: iron and copper starter mines and furnaces; stone and the mall follow.
 
 Start the mall with four assembling machines: two permanent slots for copper cable and iron gear wheels, the rest rotating to whatever item is in demand.
 

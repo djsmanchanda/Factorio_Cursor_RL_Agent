@@ -130,8 +130,15 @@ receipts. Checkpoint save/resume is not implemented.
 - Options are tagged with the need they serve; construction items that checks
   report missing become `stock:<item>` needs; options whose main entity
   already exists are pruned as `no_op`; needs without legal options are journaled with reasons.
-- Power relays come in two variants (substation chain, or medium-pole hops
-  ending on one substation); the policy chooses.
+- Power (`training/laya_power.py`): existing coverage, a medium-pole cover, a
+  big-pole relay for long distances, or a shared substation for mine/mall
+  builds only; never substation relay chains. The policy chooses.
+- Land (`training/laya_site_plan.py`): the first decision of an episode picks
+  the mall site; ore patches, smelting strips beside the nearest iron, copper
+  and stone patches, and the mall zone are reserved and drawn in game. Options
+  that take another purpose's land are rejected (`reserved:*`).
+- Mission order starts with C0 (iron and copper starter plates) before the
+  starter mall, so mall builds are not offered until C0 is measured.
 - Policy: seeded exploration (`authority: exploration`) until a compatible
   Laya checkpoint exists. Its decisions are training data, not learned play.
 

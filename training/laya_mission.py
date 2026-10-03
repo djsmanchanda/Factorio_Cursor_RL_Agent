@@ -18,6 +18,10 @@ from collections.abc import Mapping, Sequence
 MISSION_ID = "mod-playground-mining-productivity-4"
 
 PHASES: tuple[dict, ...] = (
+    # User priority 2026-10-03: iron and copper starters before the mall or stone.
+    {"phase_id": "C0", "name": "iron_copper_starter",
+     "targets": {"iron-plate": 0.5, "copper-plate": 0.5},
+     "scopes": ("mission.goal", "mission.power", "mission.plan", "mission.mine", "mission.smelt", "mission.transport")},
     {"phase_id": "C1", "name": "starter_mall",
      "targets": {"iron-gear-wheel": 0.25, "copper-cable": 0.5, "stone": 0.25},
      "scopes": ("mission.goal", "mission.power", "mission.opening", "mission.mine", "mission.mall", "mission.transport")},

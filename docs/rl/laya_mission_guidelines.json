@@ -74,7 +74,7 @@
         "mission.mine"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Build starter mines for iron, copper and stone first."
+      "quote": "First priority: iron and copper starter mines and furnaces; stone and the mall follow."
     },
     {
       "rule_id": "mission.starter-mall",
@@ -165,6 +165,15 @@
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables."
+    },
+    {
+      "rule_id": "mission.land-plan",
+      "kind": "soft",
+      "scopes": [
+        "mission.plan"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone."
     }
   ]
 }

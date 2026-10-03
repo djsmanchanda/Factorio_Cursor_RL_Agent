@@ -3,10 +3,14 @@
 .mission-panel { grid-column: 1 / -1; grid-row: 1; }
 .board-panel { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
 .controls { grid-column: 1; grid-row: 3; }
-.console-panel { grid-column: 2; grid-row: 3 / span 3; }
+.console-panel { grid-column: 2; grid-row: 3 / span 4; }
 .logistic-inventory-panel { grid-column: 1; grid-row: 4; }
 .guideline-panel { grid-column: 1; grid-row: 5; }
-.decision-panel { grid-column: 1 / -1; grid-row: 6; min-width: 0; }
+.plan-panel { grid-column: 1; grid-row: 6; }
+.plan-panel table { width: 100%; border-collapse: collapse; font: .75rem/1.35 ui-monospace, monospace; }
+.plan-panel th, .plan-panel td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.plan-panel .research-help { padding: 12px 20px 0; }
+.decision-panel { grid-column: 1 / -1; grid-row: 7; min-width: 0; }
 .mission-panel .research-help, .board-panel .research-help, .decision-panel .research-help,
 .decision-panel details { padding: 0 20px; }
 .board-panel .research-help:last-child, .mission-panel .research-help { padding-bottom: 14px; }
@@ -36,7 +40,7 @@
 .status.warning::before { background: var(--yellow); }
 
 @media (max-width: 1200px) {
-  .mission-panel, .board-panel, .controls, .console-panel, .logistic-inventory-panel, .guideline-panel, .decision-panel {
+  .mission-panel, .board-panel, .controls, .console-panel, .logistic-inventory-panel, .guideline-panel, .plan-panel, .decision-panel {
     grid-column: 1; grid-row: auto;
   }
 }
