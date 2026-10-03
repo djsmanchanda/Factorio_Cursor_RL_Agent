@@ -267,3 +267,14 @@ def test_records_mark_waits_with_no_legal_build_and_coverage_reach(tmp_path):
     menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validator(), seed=3)
     hops = [o for o in menu["options"] if o["family"] == "expand" and o["need_id"] == "item:copper-ore"]
     assert hops and all(set(h["coverage_reach"]) == {"reaches", "approaches"} for h in hops)
+
+
+def test_menu_fits_the_state_limit_with_unique_options_and_journals_what_did_not_fit():
+    from training.laya_clean_runner import MAX_MENU
+    world = facts()
+    world["recipes"].update({f"part-{i}": recipe([("iron-plate", 1)], 30) for i in range(25)})
+    targets = {f"part-{i}": 0.1 for i in range(25)}
+    menu = compile_menu(world, compile_status(world, targets), validator(), seed=6)
+    ids = [o["option_id"] for o in menu["options"]]
+    assert len(ids) <= MAX_MENU and len(ids) == len(set(ids)) and menu["omitted_needs"]
+    assert all(len(n["options"]) == 1 for n in menu["needs"] if n["need_id"] != "wait")

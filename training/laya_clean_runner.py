@@ -43,6 +43,7 @@ from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compil
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
 WAIT_TICKS = (300, 1800)
+MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
 MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
@@ -291,6 +292,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     stock = [c for c in (_compile(facts, set(shortfalls), seed) if shortfalls else ())
              if c["family"] == "assemble" and c.get("product") in shortfalls]
     for candidate in on_free_land(stock, lambda c: f"stock:{c['product']}"):
+        if f"item:{candidate['product']}" in legal:
+            continue  # Already a board need with its own options; one need per product.
         stock_groups[f"stock:{candidate['product']}"].append(candidate)
     legal.update(check(stock_groups))
 
@@ -298,9 +301,23 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         reasons[need].update(counts)
         rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
     conditions = {f"item:{n['item']}": n["condition"] for n in board["needs"]}
-    needs, options = [], []
-    for need in sorted(legal):
-        shown = _sample({need: legal[need]}, per_need_shown, rng)
+    # The decision state holds at most MAX_MENU options (waits included). Order needs by the
+    # board's goal-tree order (not by gap), then stock and coverage; shrink to one option per
+    # need when crowded, and journal what did not fit.
+    board_order = [f"item:{n['item']}" for n in board["needs"]]
+    ordered = sorted(legal, key=lambda n: (board_order.index(n) if n in board_order else len(board_order),
+                                           n.startswith("coverage"), n))
+    room = MAX_MENU - len(WAIT_TICKS)
+    per_need = per_need_shown if len(ordered) * per_need_shown <= room else 1
+    needs, options, seen, omitted_needs = [], [], set(), []
+    for need in ordered:
+        shown = [c for c in _sample({need: legal[need]}, per_need, rng) if c["option_id"] not in seen]
+        if not shown:
+            continue
+        if len(options) + len(shown) > room:
+            omitted_needs.append(need)
+            continue
+        seen.update(c["option_id"] for c in shown)
         options.extend(shown)
         needs.append({"need_id": need, "condition": conditions.get(need, "shortfall" if need.startswith("stock:") else "available"),
                       "options": [c["option_id"] for c in shown]})
@@ -316,7 +333,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             blocked[f"item:{item}"] = {"no_candidate": 1}
     return {"needs": needs, "options": options, "proposed": len(proposed), "blocked": blocked,
             "rejected": dict(rejected), "shortfalls": dict(shortfalls),
-            "land_rejections": {k: v for k, v in land_examples.items() if k in blocked}}
+            "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
+            "omitted_needs": omitted_needs}
 
 
 class Policy(Protocol):
@@ -590,6 +608,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"],
                           land_rejections=menu.get("land_rejections"), choice=choice,
                           no_legal_build=not any(o["family"] != "wait" for o in menu["options"]),
+                          omitted_needs=menu.get("omitted_needs"),
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
             emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
