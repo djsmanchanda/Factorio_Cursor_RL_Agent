@@ -36,7 +36,7 @@ from orchestrator.research_queue import ResearchQueueError, load_queue, update_i
 from helper_agent.cli import launch_processor as launch_helper_agent_processor
 from helper_agent.packet_builder import build_case_packet, write_packet
 from tools.opencode_helper_agent import launch_helper as launch_opencode_helper
-from core.ist_time import ist_stamp
+from core.local_time import local_stamp
 from tools.runner_log_retention import archive_runner_sessions
 from tools.runner_process import runner_pid_record
 from tools.rcon_client import RconClient
@@ -104,7 +104,7 @@ class _RunLogger:
         return signature
 
     def emit(self, message: str) -> None:
-        observed = ist_stamp()
+        observed = local_stamp()
         with self._lock:
             self._sequence += 1
             elapsed = int(time.monotonic() - self._started)
@@ -228,7 +228,7 @@ def _write_runner_heartbeat(path: Path) -> None:
     payload = {
         "pid": os.getpid(),
         "ppid": os.getppid(),
-        "observed_at": ist_stamp(),
+        "observed_at": local_stamp(),
     }
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(
@@ -732,7 +732,7 @@ def main(argv: list[str] | None = None) -> int:
         heartbeat_thread.start()
         _patch_episode_manifest(
             getattr(args, "episode_manifest", None),
-            started_at=ist_stamp(),
+            started_at=local_stamp(),
             bootstrap_profile=args.bootstrap_profile,
         )
         _start_opencode_helper(args, log_path=log_path, emit=logger.emit)
@@ -878,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
             _patch_episode_manifest(
                 getattr(args, "episode_manifest", None),
-                ended_at=ist_stamp(),
+                ended_at=local_stamp(),
                 termination_reason=termination_reason,
             )
             logger.flush_compaction()

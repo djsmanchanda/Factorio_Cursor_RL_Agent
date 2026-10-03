@@ -123,8 +123,8 @@ Supply, construction, coverage, power, first-output, retirement, and failure
 states therefore remain comparable even when their human-readable messages
 change.
 
-Human runner logs write one second-precision absolute IST (Asia/Kolkata,
-+05:30) timestamp in the
+Human runner logs write one second-precision absolute local-time
+timestamp in the
 `RUN START: ts=...` header, then prefix later messages with whole-second elapsed
 times such as `+15s`. Structured decision JSONL uses schema `v=2`, with `ts`
 only on the first event and compact `seq`, `dt`, `type`, and `message` fields.
@@ -150,7 +150,7 @@ context retains room for the system rubric and structured answer.
 
 Every runner invocation also appends one row to the shared, LLM-free run
 ledger after `RUN END` (`tools/run_ledger.py`;
-`~/.local/share/factorio-rl/run-ledger.jsonl` and `.csv`; IST start/end and
+`~/.local/share/factorio-rl/run-ledger.jsonl` and `.csv`; local start/end and
 run length): milestones seen in
 the log (`log_markers_v1`, e.g. `PLATE STARTER`, `[modular refinery …]
 RESOLVED`, `CHEMICAL LADDER: plastic-bar`, `GOAL MET`), outcome, typed

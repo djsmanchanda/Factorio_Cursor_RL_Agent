@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.ist_time import ist_stamp, run_length, to_ist
+from core.local_time import local_stamp, run_length, to_local, zone_label
 from tools.opencode_helper_agent import _session_id
 
 CONFIG = REPO_ROOT / "docs/rl/laya_helper.json"
@@ -120,7 +120,7 @@ def journal_summary(journal: Path, run_id: str) -> dict:
 
 def _seconds(run: dict) -> int | None:
     try:
-        return int((datetime.fromisoformat(to_ist(run["ended"])) - datetime.fromisoformat(to_ist(run["started"]))).total_seconds())
+        return int((datetime.fromisoformat(to_local(run["ended"])) - datetime.fromisoformat(to_local(run["started"]))).total_seconds())
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -131,7 +131,7 @@ def laya_section(title: str, run: dict | None) -> str:
     root = Path(run["root"])
     lines = run_log_slice(root / "logs/laya-runner.log", run["run_id"])
     return (f"## {title}\n\nrun_id={run['run_id']} commit={run.get('commit')} root={root} mode={run.get('mode')}\n"
-            f"started={to_ist(run.get('started'))} ended={to_ist(run.get('ended'))} (IST) "
+            f"started={to_local(run.get('started'))} ended={to_local(run.get('ended'))} (local time) "
             f"run_length={run_length(_seconds(run))}\n\n### Journal summary\n```json\n"
             f"{json.dumps(journal_summary(root / 'evidence/clean-decisions.jsonl', run['run_id']), indent=1)[:12000]}\n```\n"
             f"### Runner log (compacted)\n```text\n{compact_log(lines)}\n```\n")
@@ -148,7 +148,7 @@ def deterministic_section(reference: dict) -> str:
 def build_packet(current: dict, previous: dict | None, config: dict) -> str:
     return "\n".join([
         f"# Laya post-run evidence packet — {current['run_id']}\n",
-        f"Generated {ist_stamp()}. All times are IST (Asia/Kolkata, UTC+05:30); log '+Ns' prefixes are seconds since RUN START.\n",
+        f"Generated {local_stamp()}. All times are local time ({zone_label()}); log '+Ns' prefixes are seconds since RUN START.\n",
         WORKFLOW_NOTE, "",
         laya_section("Current Laya run", current),
         laya_section("Previous Laya run (latest earlier commit)", previous),
@@ -160,7 +160,7 @@ def prompt(current: dict, previous: dict | None, packet: Path, report: Path, com
     return f"""You are the read-only Laya Helper Agent for the Factorio Laya project. Work in {REPO_ROOT}.
 Read the evidence packet at {packet}. It contains the run that just ended ({current['run_id']}, commit {current.get('commit')}),
 the latest Laya run from an earlier commit ({previous['run_id'] if previous else 'none'}), and a reference deterministic run.
-All times are IST (Asia/Kolkata, UTC+05:30); report times in IST and run lengths as h/m/s.
+All times are local time ({zone_label()}); report times in local time and run lengths as h/m/s.
 The deterministic and Laya systems are different workflows (the packet explains both); compare outcomes, milestones,
 time to each milestone, failure modes and causes, not log formats. Read the cited repository code and docs as needed
 (docs/rl/Laya_Clean_Runner.md, docs/rl/Laya_Strategy_Guidelines.md, training/laya_clean_runner.py and the modules it uses).
@@ -198,7 +198,7 @@ def review(run_id: str, opencode: str, timeout: int = 1800) -> Path:
     packet = work / "evidence-packet.md"
     packet.write_text(build_packet(current, previous, config))
     report.write_text(f"<!-- Path: {report.relative_to(REPO_ROOT)} | Purpose: Read-only Laya Helper findings for {run_id}. -->\n\n"
-                      f"# Laya Helper findings — {run_id}\n\n_Review in progress (started {ist_stamp()} IST)._\n")
+                      f"# Laya Helper findings — {run_id}\n\n_Review in progress (started {local_stamp()})._\n")
     message = prompt(current, previous, packet, report, recent_commits())
     session = None
     for attempt in range(3):

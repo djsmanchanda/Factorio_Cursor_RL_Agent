@@ -33,7 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.run_laya_clean import runner_paths
-from core.ist_time import ist_stamp, now_ist
+from core.local_time import local_stamp, now_local
 from tools.run_ledger import LEDGER
 from tools.runner_process import running_runner_pid
 from training.laya_mission import PHASES
@@ -102,7 +102,7 @@ class Operations:
 
     def _log(self, message: str) -> None:
         WORLDS.mkdir(parents=True, exist_ok=True)
-        stamp = ist_stamp()
+        stamp = local_stamp()
         with ACTIONS_LOG.open("a", encoding="utf-8") as out:
             out.write(f"{stamp} {message}\n")
 
@@ -172,7 +172,7 @@ class Operations:
                 "in_progress": "_Review in progress" in text}
 
     def ledger(self, limit: int = 20) -> list[dict]:
-        """Newest rows of the shared run ledger (both systems, IST times)."""
+        """Newest rows of the shared run ledger (both systems, local times)."""
         if not LEDGER.is_file():
             return []
         rows = [json.loads(line) for line in LEDGER.read_text().splitlines() if line.strip()]
@@ -296,14 +296,14 @@ class Operations:
             self._stop_runner()
             if _pid_alive(current / "server/factorio.pid"):
                 self._cli("stop", "--root", str(current))
-        root = WORLDS / ("clean-" + now_ist().strftime("%Y%m%d-%H%M%S"))
+        root = WORLDS / ("clean-" + now_local().strftime("%Y%m%d-%H%M%S"))
         self._cli("prepare", "--root", str(root))
         POINTER.write_text(json.dumps({"root": str(root)}) + "\n")
         return "Fresh episode prepared from saves/mod_playground.zip. " + self._start_runner()
 
     def _sync_gui_mods(self) -> str:
         root = self._require_root()
-        backup = GUI_MODS.parent / ("mods-backup-" + now_ist().strftime("%Y%m%d-%H%M%S"))
+        backup = GUI_MODS.parent / ("mods-backup-" + now_local().strftime("%Y%m%d-%H%M%S"))
         backup.mkdir(parents=True)
         for name in PROJECT_MODS:
             source, target = root / "server/mods" / name, GUI_MODS / name

@@ -149,7 +149,7 @@ async function refreshLedger() {
   const rows = await getJSON("/api/ledger");
   fill($("ledger-body"), rows.map((r) => {
     const tr = document.createElement("tr");
-    cell(tr, r.system); cell(tr, (r.started || "").replace("T", " ").replace("+05:30", "")); cell(tr, r.run_length);
+    cell(tr, r.system); cell(tr, (r.started || "").replace("T", " ").replace(/[+-]\d\d:\d\d$/, "")); cell(tr, r.run_length);
     cell(tr, r.commit); cell(tr, r.highest_milestone); cell(tr, r.outcome);
     cell(tr, [r.failure_cause, r.limiting_factor].filter(Boolean).join(" · "));
     cell(tr, (r.log_file || "").split("/").slice(-3).join("/"));

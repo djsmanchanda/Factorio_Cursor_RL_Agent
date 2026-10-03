@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Mapping
 
-from core.ist_time import ist_stamp
+from core.local_time import local_stamp
 from orchestrator.bootstrap_profiles import BOOTSTRAP_PROFILES
 from orchestrator.work_state import WORK_CLASSIFICATIONS, WORK_STATES
 
@@ -22,7 +22,7 @@ class MissionStateError(RuntimeError):
 
 
 def _now() -> str:
-    return ist_stamp()
+    return local_stamp()
 
 
 def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:

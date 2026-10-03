@@ -55,10 +55,14 @@ def test_laya_entry_uses_measured_phases_and_reports_the_limiting_factor(tmp_pat
     assert entry["log_file"].endswith("logs/laya-runner.log") and entry["decisions"] == 1
 
 
-def test_times_are_ist_and_run_length_is_readable(tmp_path):
-    from core.ist_time import run_length, to_ist
-    assert to_ist("2026-10-03T14:30:00Z") == "2026-10-03T20:00:00+05:30"
-    assert to_ist("2026-10-03T20:00:00") == "2026-10-03T20:00:00+05:30"  # Naive local values are IST.
+def test_times_are_local_and_run_length_is_readable(tmp_path, monkeypatch):
+    import time
+    from core.local_time import run_length, to_local, zone_label
+    monkeypatch.setenv("TZ", "Asia/Kolkata")  # The machine's zone; pinned so the test is portable.
+    time.tzset()
+    assert zone_label() == "IST, UTC+05:30"
+    assert to_local("2026-10-03T14:30:00Z") == "2026-10-03T20:00:00+05:30"
+    assert to_local("2026-10-03T20:00:00") == "2026-10-03T20:00:00+05:30"  # Naive values are local wall-clock times.
     assert run_length(5726) == "1h 35m 26s" and run_length(75) == "1m 15s"
     entry = run_ledger.record({"system": "laya", "run_id": "z", "started": "2026-10-03T14:30:00Z",
                                "ended": "2026-10-03T14:40:00+00:00", "duration_s": 600, "milestones": []},
@@ -66,3 +70,5 @@ def test_times_are_ist_and_run_length_is_readable(tmp_path):
     assert entry["started"].endswith("+05:30") and entry["ended"] == "2026-10-03T20:10:00+05:30"
     assert entry["run_length"] == "10m 00s"
     assert list(csv.DictReader((tmp_path / "l.csv").open()))[0]["run_length"] == "10m 00s"
+    monkeypatch.delenv("TZ")
+    time.tzset()

@@ -4,7 +4,7 @@
 
 """Run ledger shared by the deterministic runner and the clean Laya runner.
 
-Times are IST (Asia/Kolkata, UTC+05:30); ``run_length`` is human-readable.
+Times are local time (the machine zone, IST here); ``run_length`` is human-readable.
 
 Each finished run appends one JSON line to ``run-ledger.jsonl`` and the CSV
 view ``run-ledger.csv`` is regenerated from it.  Entries are keyed by
@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.ist_time import run_length, to_ist
+from core.local_time import run_length, to_local
 from tools.run_log_format import parse_timed_run_log_line
 
 LEDGER = Path(os.environ.get("FACTORIO_RL_RUN_LEDGER", Path.home() / ".local/share/factorio-rl/run-ledger.jsonl"))
@@ -79,10 +79,10 @@ def _read(path: Path) -> list[dict]:
 def record(entry: dict, ledger: Path | None = None) -> dict:
     """Insert or replace one run (keyed by system and run_id) and regenerate the CSV.
 
-    All times are stored in IST (Asia/Kolkata, +05:30) with a readable run length.
+    All times are stored in local time with a readable run length.
     """
     ledger = ledger or LEDGER
-    entry = {**entry, "started": to_ist(entry.get("started")), "ended": to_ist(entry.get("ended")),
+    entry = {**entry, "started": to_local(entry.get("started")), "ended": to_local(entry.get("ended")),
              "run_length": run_length(entry.get("duration_s"))}
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with (ledger.with_suffix(".lock")).open("w") as lock:
@@ -184,7 +184,7 @@ def laya_entry(index: dict) -> dict:
     rows = [r for r in _read(root / "evidence/clean-decisions.jsonl") if r.get("run_id") == index["run_id"]]
     # Run ids end in the Unix start time; it is the fallback when the index lacks one.
     epoch = re.search(r"-(\d{10})$", index["run_id"])
-    started_text = to_ist(index.get("started")) or (to_ist(datetime.fromtimestamp(int(epoch.group(1)), tz=timezone.utc))
+    started_text = to_local(index.get("started")) or (to_local(datetime.fromtimestamp(int(epoch.group(1)), tz=timezone.utc))
                                                     if epoch else None)
     started = datetime.fromisoformat(started_text) if started_text else None
     milestones = []
@@ -203,7 +203,7 @@ def laya_entry(index: dict) -> dict:
     duration = _laya_log_seconds(root / "logs/laya-runner.log", index["run_id"])
     if duration is None and started and index.get("ended") and not index.get("backfilled"):
         try:
-            duration = int((datetime.fromisoformat(to_ist(index["ended"])) - started).total_seconds())
+            duration = int((datetime.fromisoformat(to_local(index["ended"])) - started).total_seconds())
         except (TypeError, ValueError):
             duration = None
     ended = (started + timedelta(seconds=duration)).isoformat() if started and duration is not None else None
