@@ -44,11 +44,11 @@ def owned_root(path: Path) -> Path:
     return path
 
 
-def verify_instance(root: Path) -> dict:
+def verify_instance(root: Path, *, runtime="disposable_saved_world") -> dict:
     """Pin the OS process, save, ports, mods and script-output before any RCON."""
     root = owned_root(root)
     manifest = json.loads((root / "manifest.json").read_text())
-    if manifest.get("runtime") != "disposable_saved_world" or manifest.get("production_authority") is not False:
+    if runtime not in {"disposable_saved_world", "disposable_mall"} or manifest.get("runtime") != runtime or manifest.get("production_authority") is not False:
         raise SavedWorldError("not an explicitly disposable saved-world manifest")
     if file_hash(root / "baseline.zip") != manifest["source_sha256"]:
         raise SavedWorldError("immutable baseline hash changed")
@@ -285,9 +285,12 @@ def configuration_actions(plan):
 
 
 class SavedWorldAdapter:
+    runtime = "disposable_saved_world"
+    surface = "nauvis"
+    force = "player"
     def __init__(self, root: Path):
         self.root = owned_root(root)
-        self.manifest = verify_instance(self.root)
+        self.manifest = verify_instance(self.root, runtime=self.runtime)
         self.lua_source = Path(__file__).with_suffix(".lua").read_text()
         self.code_hashes = {str(p.relative_to(ROOT)): file_hash(p) for p in (
             Path(__file__), Path(__file__).with_suffix(".lua"), ROOT / "schemas/laya_saved_world.schema.json",
@@ -337,7 +340,7 @@ class SavedWorldAdapter:
                 "mod_hashes": self.manifest["mod_hashes"]}
 
     def query(self, candidates=None, inspect=None):
-        verify_instance(self.root)
+        verify_instance(self.root, runtime=self.runtime)
         centers = self.quad_centers()
         name = f"laya_saved_world/{uuid.uuid4().hex}.json"
         request = json.dumps({"bounds": BOUNDS, "candidates": candidates, "inspect": inspect}, separators=(",", ":"))
@@ -387,7 +390,7 @@ class SavedWorldAdapter:
     def advance(self, ticks):
         if not isinstance(ticks, int) or not 1 <= ticks <= 18000:
             raise SavedWorldError("step must be 1..18000 ticks")
-        verify_instance(self.root)
+        verify_instance(self.root, runtime=self.runtime)
         start = self.query()["tick"]
         self.bridge.command(f"/sc game.tick_paused=true; game.speed=16; game.ticks_to_run={ticks}")
         deadline = time.monotonic() + max(30, ticks / 60)
@@ -408,7 +411,7 @@ class SavedWorldAdapter:
         candidate = matches[0]
         if candidate.get("plan"):
             plan = candidate["plan"]
-            if plan.get("surface") != "nauvis" or plan.get("force") != "player" or plan.get("atomic") is not True:
+            if plan.get("surface") != self.surface or plan.get("force") != self.force or plan.get("atomic") is not True:
                 raise SavedWorldError("saved-world plans require explicit atomic Nauvis/player scope")
             allowed = {"action_type", "entity", "position", "direction", "recipe", "logistic_requests", "logistic_sections", "clear_inventory_limit"}
             if any(a.get("action_type") != "place_ghost" or set(a) - allowed for a in actions(plan)):
@@ -441,7 +444,7 @@ class SavedWorldAdapter:
         if owned and owned["pending"] == 0 and owned["missing"] == 0:
             configs = configuration_actions(candidate["plan"])
             if configs:
-                plan = {"surface": "nauvis", "force": "player", "atomic": True,
+                plan = {"surface": self.surface, "force": self.force, "atomic": True,
                         "phases": [{"name": "configure-observed-build", "actions": configs}]}
                 receipt["configuration"] = load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
                 if not receipt["configuration"]["ok"]:
@@ -471,7 +474,7 @@ class SavedWorldAdapter:
             if owned["pending"] == 0 and owned["missing"] == 0:
                 configs = configuration_actions(candidate["plan"])
                 if configs:
-                    plan = {"surface": "nauvis", "force": "player", "atomic": True,
+                    plan = {"surface": self.surface, "force": self.force, "atomic": True,
                             "phases": [{"name": "finish-selected-configuration", "actions": configs}]}
                     receipt["configuration"] = load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
                     if not receipt["configuration"]["ok"]:

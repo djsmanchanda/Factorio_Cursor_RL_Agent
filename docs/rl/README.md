@@ -107,3 +107,8 @@ The [saved-world adapter](Laya_Saved_World_Adapter.md) adds isolated exact-copy
 `mod_playground` observations and funded bot construction. Its live mechanics
 replays are verified; saved-world Laya training and matched baseline comparison
 remain separate gates.
+
+The [supplied-input mall](Laya_Mall_Supply.md) provides a separate seeded economy,
+queue-selected consumed-batch supply upgrades and long-inserter-funded quad
+expansion. Its live mechanics are verified; it uses `mall-world-v1` and still
+requires its own measured learning/calibration and baseline comparison.

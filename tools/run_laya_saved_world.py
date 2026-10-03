@@ -32,6 +32,9 @@ def manager(root, action):
 
 
 def prepare(args):
+    runtime = getattr(args, "runtime", "disposable_saved_world")
+    if runtime not in {"disposable_saved_world", "disposable_mall"}:
+        raise SavedWorldError("unsupported disposable runtime")
     root = owned_root(args.root)
     source = args.source_save.resolve()
     if root.exists():
@@ -45,7 +48,7 @@ def prepare(args):
     shutil.copy2(ROOT / "scripts/manage_linux_deterministic_server.sh", frozen / "scripts")
     for name, folder in [("factorio_cursor_rl_agent", "factorio_mod"), ("factorio_training_lab", "factorio_training_lab")]:
         shutil.copytree(args.mods_source / name, frozen / folder)
-    manifest = {"version": PROFILE, "runtime": "disposable_saved_world", "production_authority": False,
+    manifest = {"version": PROFILE, "runtime": runtime, "production_authority": False,
                 "comparison_eligible": False, "source_save": str(source), "source_sha256": file_hash(source),
                 "game_port": args.game_port, "rcon_port": args.rcon_port, "mod_hashes": {}}
     ancestor = getattr(args, "ancestor_source_sha256", None)
@@ -54,6 +57,9 @@ def prepare(args):
             raise SavedWorldError("invalid ancestor save hash")
         manifest["ancestor_source_sha256"] = ancestor
     manifest["quad_centers"] = getattr(args, "quad_centers", [])
+    if runtime == "disposable_mall":
+        manifest["version"] = args.mall["version"]
+        manifest["mall"] = args.mall
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "bootstrap"))
     manifest["initial_copy_sha256"] = file_hash(root / "server/saves/mod_playground.zip")
@@ -65,6 +71,10 @@ def prepare(args):
     manifest["repository_revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "start"))
+    if runtime == "disposable_mall":
+        if file_hash(source) != manifest["source_sha256"]:
+            raise SavedWorldError("source save changed during preparation")
+        return {"root": str(root), "status": "mall_host_prepared"}
     adapter = SavedWorldAdapter(root)
     try:
         adapter.bridge.command('/sc game.tick_paused=true; game.ticks_to_run=0; rcon.print("saved-world-paused")')

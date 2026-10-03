@@ -1,0 +1,376 @@
+{
+  "$comment": "Path: schemas/laya_mall_world.schema.json | Purpose: Version the isolated mall observations and engine-owned supply/customer ledger.",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "tick",
+    "elapsed_ticks",
+    "revision",
+    "scenario",
+    "surface",
+    "force",
+    "mods",
+    "provider_stock",
+    "reserved",
+    "wip",
+    "production",
+    "consumption",
+    "recipes",
+    "construction_committed",
+    "pending_ghosts",
+    "served",
+    "customer_removed",
+    "queue",
+    "robots",
+    "machines",
+    "ledger",
+    "completed_at"
+  ],
+  "properties": {
+    "version": {
+      "const": "mall-world-v1"
+    },
+    "tick": {
+      "type": "number",
+      "minimum": 0
+    },
+    "elapsed_ticks": {
+      "type": "number",
+      "minimum": 0
+    },
+    "revision": {
+      "type": "number",
+      "minimum": 0
+    },
+    "scenario": {
+      "type": "object",
+      "required": [
+        "version",
+        "scenario_hash",
+        "surface",
+        "force",
+        "kit",
+        "centers",
+        "fixtures",
+        "demands",
+        "max_episode_ticks"
+      ],
+      "properties": {
+        "version": {
+          "const": "mall-world-v1"
+        },
+        "scenario_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^laya-mall/"
+        },
+        "force": {
+          "type": "string",
+          "pattern": "^laya-mall-"
+        },
+        "kit": {
+          "const": {
+            "requester-chest": 10,
+            "passive-provider-chest": 20,
+            "assembling-machine-1": 6,
+            "inserter": 12
+          }
+        },
+        "centers": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "fixtures": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8
+        },
+        "demands": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "item",
+              "count",
+              "release_ticks",
+              "due_ticks"
+            ]
+          }
+        },
+        "max_episode_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 36000
+        }
+      }
+    },
+    "surface": {
+      "type": "string",
+      "pattern": "^laya-mall/"
+    },
+    "force": {
+      "type": "string",
+      "pattern": "^laya-mall-"
+    },
+    "mods": {
+      "type": "object"
+    },
+    "provider_stock": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "reserved": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "wip": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "production": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "consumption": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "recipes": {
+      "type": "object"
+    },
+    "construction_committed": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "pending_ghosts": {
+      "type": "number",
+      "minimum": 0
+    },
+    "served": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "customer_removed": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "queue": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "expansion",
+          "circuits",
+          "belts"
+        ]
+      }
+    },
+    "robots": {
+      "type": "object",
+      "required": [
+        "construction",
+        "logistic"
+      ],
+      "properties": {
+        "construction": {
+          "type": "number",
+          "minimum": 0
+        },
+        "logistic": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "machines": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "position",
+          "energy",
+          "status",
+          "input",
+          "output",
+          "active"
+        ],
+        "properties": {
+          "name": {
+            "const": "assembling-machine-1"
+          },
+          "position": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            }
+          },
+          "energy": {
+            "type": "number",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "recipe": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "required": [
+        "version",
+        "tick",
+        "baseline_production",
+        "spent_crafting",
+        "upgrades",
+        "rate_halves_per_second",
+        "accrued_120ths",
+        "fixture_delivered",
+        "consumption_receipts"
+      ],
+      "properties": {
+        "version": {
+          "const": "mall-earned-supply-v1"
+        },
+        "tick": {
+          "type": "number",
+          "minimum": 0
+        },
+        "baseline_production": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "spent_crafting": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "upgrades": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rate_halves_per_second": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "accrued_120ths": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "fixture_delivered": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "consumption_receipts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "completed_at": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }
+}
