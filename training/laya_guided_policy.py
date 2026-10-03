@@ -78,6 +78,10 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "deepest_bottleneck": item in deepest, "others_available": others,
             "goal_need": item in goal_items, "goal_options_available": goal_options,
             "starves_goal": starves_goal(option),
+            # A side build that would leave less than the unbuilt goal starters need (menu["goal_reserve"]).
+            "dips_goal_reserve": not is_goal(option) and any(
+                stock.get(name, 0) - count < (menu.get("goal_reserve") or {}).get(name, 0)
+                for name, count in (option.get("bill") or {}).items() if name in (menu.get("goal_reserve") or {})),
             "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),

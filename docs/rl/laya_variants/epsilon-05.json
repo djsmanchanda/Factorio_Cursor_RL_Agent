@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "variant_id": "epsilon-05",
+  "description": "Smaller exploration floor: epsilon 0.05 (baseline 0.15).",
+  "policy": {"epsilon": 0.05}
+}

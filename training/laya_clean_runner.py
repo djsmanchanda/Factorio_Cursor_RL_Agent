@@ -40,7 +40,7 @@ from training.laya_power import POLES, power_variants
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
-from training.laya_starters import STARTER_ORE, starter_candidates
+from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -382,8 +382,15 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     for item in sorted(unmet):
         if f"item:{item}" not in by_need:
             blocked[f"item:{item}"] = {"no_candidate": 1}
+    # Kit items the phase's still-unbuilt starters will need, so side builds can see what they would take.
+    goal_reserve: dict[str, int] = {}
+    for plate in STARTER_ORE:
+        need = next((n for n in board["needs"] if n["item"] == plate), None)
+        if need and need.get("goal_required_per_s", need.get("required", 0)) > 0 and plate not in starters:
+            for name, count in starter_bill(plate).items():
+                goal_reserve[name] = goal_reserve.get(name, 0) + count
     return {"needs": needs, "options": options, "proposed": len(proposed), "blocked": blocked,
-            "rejected": dict(rejected), "shortfalls": dict(shortfalls),
+            "rejected": dict(rejected), "shortfalls": dict(shortfalls), "goal_reserve": goal_reserve,
             "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
             "omitted_needs": omitted_needs}
 

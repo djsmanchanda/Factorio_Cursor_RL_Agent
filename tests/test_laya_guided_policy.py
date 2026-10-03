@@ -108,3 +108,17 @@ def test_side_builds_that_would_leave_no_goal_build_affordable_are_flagged():
     assert option_features(s, m)["asm.c"]["starves_goal"]          # 4 - 3 leaves 1 < 2
     s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 6}}}
     assert not option_features(s, m)["asm.c"]["starves_goal"]      # 6 - 3 leaves 3 >= 2
+
+
+def test_side_builds_dipping_below_the_unbuilt_starters_kit_are_flagged():
+    from training.laya_guided_policy import option_features
+    m = menu()
+    m["goal_reserve"] = {"inserter": 2}
+    m["options"][3]["bill"] = {"inserter": 3}       # stock cell (side build)
+    s = state([])
+    s["observation_digest"]["factory_status"]["needs"] = [{"item": "copper-ore", "required": 0.5},
+                                                          {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 4}}}
+    assert option_features(s, m)["asm.c"]["dips_goal_reserve"]       # 4 - 3 < 2
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 5}}}
+    assert not option_features(s, m)["asm.c"]["dips_goal_reserve"]

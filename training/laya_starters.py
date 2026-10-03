@@ -24,6 +24,15 @@ DIRECTIONS = ("north", "east", "south", "west")
 SAMPLE_HALF = 2.5  # survey samples are 4 tiles apart; a drill within this of a sample sits on ore
 
 
+def starter_bill(plate: str) -> dict[str, int]:
+    """Entities one direct starter of ``plate`` places (its power comes on top)."""
+    actions = generate_direct_smelter(plate, STARTER_ORE[plate], (0.5, 0.5), "north")["phases"][0]["actions"]
+    bill: dict[str, int] = {}
+    for action in actions:
+        bill[action["entity"]] = bill.get(action["entity"], 0) + 1
+    return bill
+
+
 def _on_ore(position: tuple[float, float], samples: list[tuple[float, float]]) -> bool:
     return any(max(abs(position[0] - x), abs(position[1] - y)) <= SAMPLE_HALF for x, y in samples)
 
