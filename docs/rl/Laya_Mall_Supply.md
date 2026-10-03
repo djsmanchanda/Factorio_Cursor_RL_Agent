@@ -140,3 +140,39 @@ validation and self-sustain/production promotion evidence.
 Lifecycle: start a new mall Python consumer/fresh disposable episode. No mod
 redeploy, GUI change or real-base restart is required. No background mall
 training job or automatic promotion was launched by this implementation.
+
+## Live Factorio spectator viewing
+
+A connected GUI client can watch an owned mall at normal engine speed:
+
+```bash
+.venv/bin/python tools/run_laya_mall.py watch \
+  --root data/laya-saved-world/mall-example \
+  --observer YOUR_FACTORIO_NAME --watch-seconds 600
+```
+
+The server must already be running. Connect in Factorio to its manifest game
+endpoint (default `127.0.0.1:34196`) using the exact frozen server mod set.
+`watch` waits for the named observer, moves that player to the isolated mall
+force/surface in spectator mode, and advances exact 60-tick supply quanta at
+speed 1. Omitting `--observer` selects only a single unambiguous connected player.
+No model or build decisions run. Disconnecting pauses further steps while the
+viewer waits, with a bounded connection timeout. The requested duration is
+clamped to the existing episode tick budget; expiry leaves the world paused and
+the server available for inspection. `live-view.json` records the actual view
+state, observer, scope and advanced ticks. Stop the server with the usual `stop`
+action when finished.
+
+On October 3, `mall-view-20261003-a` was started from an immutable copy of the
+verified completed-mall prefix. A separate GUI profile under that root's
+`client/` uses copied, hash-matched mods; the normal GUI profile was not redeployed.
+Factorio 2.1.20 joined as `LeonidasUIP`, and the engine confirmed the player on
+`laya-mall/0-9f99e638` / `laya-mall-0-9f99e638` with spectator control. Two normal-speed
+seconds delivered exactly five iron and two copper plates, with zero pending
+ghosts. Four focused viewer tests cover scope selection, bounded duration,
+disconnected/ambiguous observers and speed validation. This is live mechanics
+viewing of the completed mall, separate from training or policy evaluation.
+
+Lifecycle: the private mall server and isolated GUI client are intentionally
+left available for the user; normal-speed viewing pauses at the remaining
+episode budget. No mod deployment or real-base lifecycle action is required.

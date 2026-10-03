@@ -187,6 +187,24 @@ if request.op=="inspect" then
   return out
 end
 if request.op=="observe" or request.op=="initialize" then return facts end
+if request.op=="view_status" then
+  local viewers={}
+  for _,p in pairs(game.connected_players) do
+    table.insert(viewers,{name=p.name,surface=p.surface.name,force=p.force.name,spectator=p.controller_type==defines.controllers.spectator})
+  end
+  return {players=viewers,tick=game.tick,paused=game.tick_paused}
+end
+if request.op=="view" then
+  assert(type(request.observer)=="string" and #request.observer>0 and #request.observer<=128,"named observer required")
+  local player=game.get_player(request.observer)
+  assert(player and player.connected,"observer is not connected")
+  player.set_controller{type=defines.controllers.spectator}; player.force=force
+  force.chart(surface,{{cfg.bounds.x_min,cfg.bounds.y_min},{cfg.bounds.x_max_exclusive,cfg.bounds.y_max_exclusive}})
+  assert(player.teleport({x=-4,y=0},surface),"observer teleport failed")
+  player.zoom=.8
+  player.print("Laya mall live view: supplied-input mechanics, spectator only. No trained mall policy is running.")
+  return {observer=player.name,surface=player.surface.name,force=player.force.name,spectator=player.controller_type==defines.controllers.spectator}
+end
 assert(request.nonce and request.operation_hash,"mutation identity required")
 local previous=s.receipts[request.nonce]
 if previous then assert(previous.operation_hash==request.operation_hash,"nonce reused for another intent"); return previous end

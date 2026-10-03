@@ -36,6 +36,7 @@ class MallWorld(SavedWorldAdapter):
         paths = [Path(__file__), Path(__file__).with_suffix('.lua'), Path(__file__).with_name('laya_mall.py'),
                  Path(__file__).with_name('laya_mall_supply.py'), Path(__file__).with_name('laya_saved_world.py'),
                  Path(__file__).with_name('laya_input_profile.py'),repo/'schemas/laya_mall_world.schema.json',
+                 Path(__file__).with_name('laya_mall_view.py'),
                  repo/'tools/run_laya_mall.py',repo/'tools/run_laya_saved_world.py',repo/'planners/laya_quad_cell.py',
                  repo/'planners/quad_mall_layout.py',repo/'planners/mall_layout.py']
         self.code_hashes = {str(p): file_hash(p) for p in paths}
@@ -104,15 +105,16 @@ class MallWorld(SavedWorldAdapter):
             elif not results[c['option_id']].get('reason'):legal.append({**c,'bill':results[c['option_id']].get('bill') or {}})
         return (legal if full else bounded_menu(legal,seed)), {'proposed':proposed,'validations':results}
 
-    def advance(self, ticks):
+    def advance(self, ticks, *, speed=16):
         if type(ticks) is not int or not 1<=ticks<=18000:raise SavedWorldError('mall step must be 1..18000 ticks')
+        if type(speed) is not int or speed not in (1,16):raise SavedWorldError('mall speed must be 1 for viewing or 16 for training')
         self.require_clear_mutations()
         before=self.query()
         if before['elapsed_ticks']+ticks>self.scenario['max_episode_ticks']:raise SavedWorldError('mall episode tick budget exhausted')
         for offset in range(0,ticks,60):
             quantum=min(60,ticks-offset)
             start=self.query()
-            self.bridge.command(f'/sc game.tick_paused=true; game.speed=16; game.ticks_to_run={quantum}')
+            self.bridge.command(f'/sc game.tick_paused=true; game.speed={speed}; game.ticks_to_run={quantum}')
             deadline=time.monotonic()+30
             while time.monotonic()<deadline:
                 state=json.loads(self.bridge.command('/sc rcon.print(helpers.table_to_json({tick=game.tick,paused=game.tick_paused,remaining=game.ticks_to_run}))'))

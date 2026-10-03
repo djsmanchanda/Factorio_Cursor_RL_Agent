@@ -41,7 +41,7 @@ def prepare(args):
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action',choices=['prepare','observe','replay','run','stop'])
+    p.add_argument('action',choices=['prepare','observe','replay','run','watch','stop'])
     p.add_argument('--root',type=Path,required=True)
     p.add_argument('--source-save',type=Path,default=ROOT/'saves/mod_playground.zip')
     p.add_argument('--mods-source',type=Path,default=Path.home()/'.local/share/factorio-rl/deterministic/mods')
@@ -50,6 +50,8 @@ def main(argv=None):
     p.add_argument('--module',type=int);p.add_argument('--side',choices=['west','east','north','south'])
     p.add_argument('--full-menu',action='store_true');p.add_argument('--measure-ticks',type=int,default=600)
     p.add_argument('--checkpoint',type=Path);p.add_argument('--decisions',type=int,default=30)
+    p.add_argument('--watch-seconds',type=int,default=600);p.add_argument('--observer')
+    p.add_argument('--connect-timeout',type=int,default=300)
     args=p.parse_args(argv)
     if not 1<=args.decisions<=100 or not 60<=args.measure_ticks<=1800:p.error('bounded decisions/measurement required')
     if args.action=='prepare':print(json.dumps(prepare(args)),flush=True);return 0
@@ -61,6 +63,10 @@ def main(argv=None):
         require_input_profile(config,{'observation_digest':{'mall':{'version':MALL_PROFILE}}})
     world=MallWorld(root);history=[];measurement=None;director=None
     try:
+        if args.action=='watch':
+            from training.laya_mall_view import watch
+            print(json.dumps(watch(world,seconds=args.watch_seconds,observer=args.observer,connect_timeout=args.connect_timeout)),flush=True)
+            return 0
         for index in range(args.decisions if args.action=='run' else 1):
             if args.action!='observe':world.reconcile()
             facts=world.query()
