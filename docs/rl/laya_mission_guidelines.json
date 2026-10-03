@@ -275,6 +275,23 @@
       ]
     },
     {
+      "rule_id": "mission.protect-goal-stock",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Never spend construction items the current phase goals' builds still need; a side build that would leave no goal build affordable waits.",
+      "prefer": [
+        {
+          "when": {
+            "starves_goal": true
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
       "rule_id": "mission.wait-rule",
       "kind": "soft",
       "scopes": [

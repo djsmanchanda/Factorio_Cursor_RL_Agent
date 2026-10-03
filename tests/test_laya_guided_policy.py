@@ -94,3 +94,17 @@ def test_non_goal_options_wait_while_a_goal_action_is_possible():
         {"item": "copper-ore", "required": 0.5}, {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
     rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
     assert rows["asm.c"]["weight"] == pytest.approx(0.2) and rows["mine.a"]["weight"] == 3.0
+
+
+def test_side_builds_that_would_leave_no_goal_build_affordable_are_flagged():
+    from training.laya_guided_policy import option_features
+    m = menu()
+    m["options"][1]["bill"] = {"inserter": 2}       # goal build (copper-ore mine)
+    m["options"][3]["bill"] = {"inserter": 3}       # stock cell
+    s = state([])
+    s["observation_digest"]["factory_status"]["needs"] = [{"item": "copper-ore", "required": 0.5},
+                                                          {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 4}}}
+    assert option_features(s, m)["asm.c"]["starves_goal"]          # 4 - 3 leaves 1 < 2
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"inserter": 6}}}
+    assert not option_features(s, m)["asm.c"]["starves_goal"]      # 6 - 3 leaves 3 >= 2

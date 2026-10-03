@@ -143,9 +143,12 @@ def newly_reached(facts: Mapping, candidate: Mapping) -> set[str]:
         return set()
     radius = ports[0]["logistic_radius"]
     new = [a["position"] for phase in candidate["plan"]["phases"] for a in phase["actions"] if a["entity"] == "roboport"]
+    # Only resources with no site in reach today: coverage cannot help an ore already reachable.
+    reachable_now = {site["item"] for site in facts["resources"]
+                     if any(_in_reach(p["position"], site["position"], p["logistic_radius"]) for p in ports)}
     reached = set()
     for site in facts["resources"]:
-        if any(_in_reach(p["position"], site["position"], p["logistic_radius"]) for p in ports):
+        if site["item"] in reachable_now:
             continue
         if any(_in_reach(n, site["position"], radius) for n in new):
             reached.add(site["item"])

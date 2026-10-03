@@ -30,6 +30,8 @@ Serve the bottleneck: prefer actions on items in the current bottleneck chain, d
 
 Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.
 
+Never spend construction items the current phase goals' builds still need; a side build that would leave no goal build affordable waits.
+
 Conserve scarce starter items: prefer builds that leave enough poles, chests and inserters for the next builds; a build that spends most of what is left of an item needs a strong reason.
 
 Wait only when nothing useful can be built, or while construction and deliveries are still arriving.

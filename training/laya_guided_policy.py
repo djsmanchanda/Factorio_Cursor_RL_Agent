@@ -45,15 +45,29 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     phase = (state.get("observation_digest") or {}).get("mission_phase")
     conditions = {n["need_id"]: n.get("condition") for n in menu["needs"]}
     others = any(o["family"] != "wait" for o in menu["options"])
+    # Accessible stock: provider/storage items minus what pending ghosts already reserve.
+    world = (state.get("observation_digest") or {}).get("saved_world") or {}
     stock: dict[str, int] = {}
-    for network in ((state.get("observation_digest") or {}).get("saved_world") or {}).get("provider_stock", {}).values():
-        for name, count in network.items():
-            stock[name] = stock.get(name, 0) + int(count)
+    for network, items in (world.get("provider_stock") or {}).items():
+        reserved = (world.get("reserved_stock") or {}).get(network, {})
+        for name, count in items.items():
+            stock[name] = stock.get(name, 0) + max(0, int(count) - int(reserved.get(name, 0)))
     def is_goal(option: Mapping) -> bool:
         need = option.get("need_id", "wait")
         return (need.split(":", 1)[1] if ":" in need else None) in goal_items
 
-    goal_options = any(is_goal(o) for o in menu["options"] if o["family"] != "wait")
+    goal_builds = [o for o in menu["options"] if o["family"] != "wait" and is_goal(o)]
+    goal_options = bool(goal_builds)
+
+    def starves_goal(option: Mapping) -> bool:
+        """Its bill leaves too little of some item for every legal goal build to still be affordable."""
+        bill = option.get("bill") or {}
+        if not goal_builds or is_goal(option) or not bill:
+            return False
+        left = {name: stock.get(name, 0) - count for name, count in bill.items()}
+        return all(any(left.get(name, stock.get(name, 0)) < count for name, count in (g.get("bill") or {}).items())
+                   for g in goal_builds)
+
     features = {}
     for option in menu["options"]:
         need = option.get("need_id", "wait")
@@ -63,6 +77,7 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
             "deepest_bottleneck": item in deepest, "others_available": others,
             "goal_need": item in goal_items, "goal_options_available": goal_options,
+            "starves_goal": starves_goal(option),
             "stock_target": item in set(status.get("stock_targets") or []),
             # A bill that would use more than half of what is left of any item spends scarce stock.
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),
