@@ -160,8 +160,10 @@ deterministic reference, writing `docs/rl/laya_helper_runs/<run_id>/findings.md`
   `--policy exploration` keeps the uniform baseline.
 - Training data: `evidence/decision-states.jsonl` records every decision
   (including planning and failed executions) with the exact model-input state,
-  every option's features, the policy's full distribution and matched rules,
-  the choice and the measured outcome. Nothing is filtered at write time;
+  every option's features (including each coverage hop's reached/approached
+  resources), the policy's full distribution and matched rules, the choice,
+  the measured outcome, and `no_legal_build` when only waits were legal (an
+  honest wait, not a "chose not to build" label). Nothing is filtered at write time;
   sifting useful from useless records is a later, explicit step.
 - Stall rule: a run ends as `stalled` after 12 decisions with no new build,
   no phase and no goal-gap improvement, so unattended loops keep moving.

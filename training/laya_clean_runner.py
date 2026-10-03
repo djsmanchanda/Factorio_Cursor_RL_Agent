@@ -184,10 +184,13 @@ def _build_only(candidate: Mapping) -> dict:
     return {**candidate["plan"], "phases": [{**phase, "actions": actions}]}
 
 
-def _need_key(facts: Mapping, candidate: Mapping, unmet: set[str]) -> str:
+def _need_key(facts: Mapping, candidate: dict, unmet: set[str]) -> str:
     need = need_of(candidate)
     if need == "coverage":
-        ores = (newly_reached(facts, candidate) & unmet) or approaches(facts, candidate, unmet)
+        reached = newly_reached(facts, candidate) & unmet
+        approached = approaches(facts, candidate, unmet) if not reached else set()
+        candidate["coverage_reach"] = {"reaches": sorted(reached), "approaches": sorted(approached)}  # Journaled.
+        ores = reached or approached
         return f"item:{sorted(ores)[0]}" if ores else "coverage"
     return f"item:{need}"
 
@@ -395,7 +398,7 @@ def _option_record(option: Mapping) -> dict:
     return {"option_id": option["option_id"], "family": option["family"], "need_id": option.get("need_id"),
             "product": option.get("product"), "power": option.get("power"), "summary": option.get("summary"),
             "bill": option.get("bill"), "wait_ticks": option.get("wait_ticks"),
-            "plan_hash": sha256_hash(plan) if plan else None,
+            "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
             "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
 
 
@@ -586,6 +589,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           board=compact, menu={n["need_id"]: n["options"] for n in menu["needs"]},
                           rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"],
                           land_rejections=menu.get("land_rejections"), choice=choice,
+                          no_legal_build=not any(o["family"] != "wait" for o in menu["options"]),
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
             emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
@@ -612,7 +616,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "decisions": summary["decisions"], "failures": summary["failures"],
                                         "site_plan": site_plan,
                                         "measured_per_s": record.get("measured_per_s")})
+            no_legal_build = not any(o["family"] != "wait" for o in menu["options"])
             training = {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase["phase_id"],
+                        "no_legal_build": no_legal_build,
                         "authority": policy.authority, "state": state, "options": [_option_record(o) for o in menu["options"]],
                         "blocked": menu["blocked"], "land_rejections": menu.get("land_rejections"),
                         "distribution": distribution, "choice": choice}

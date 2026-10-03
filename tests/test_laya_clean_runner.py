@@ -248,3 +248,22 @@ def test_coverage_that_serves_no_need_does_not_count_as_progress(tmp_path):
     summary = run(world_without_ore, GuidedPolicy(1, epsilon=1.0), journal=tmp_path / "j.jsonl", decisions=60,
                   measure_ticks=300, seed=0, run_id="t")
     assert summary["stop"] == "stalled"
+
+
+def test_records_mark_waits_with_no_legal_build_and_coverage_reach(tmp_path):
+    from training.laya_guided_policy import GuidedPolicy
+
+    class WaitOnly(FakeAdapter):
+        def query(self, candidates=None):
+            if candidates is not None:
+                return {"validations": {c["option_id"]: {"reason": "collision"} for c in candidates}}
+            return copy.deepcopy(self.world)
+
+    run(WaitOnly(), GuidedPolicy(0), journal=tmp_path / "j.jsonl", decisions=3, measure_ticks=300, seed=0, run_id="t")
+    rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
+    assert [r.get("no_legal_build") for r in rows[1:]] == [True, True]
+    world = facts()
+    world["resources"].append({"item": "copper-ore", "position": {"x": 50, "y": 0}})
+    menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validator(), seed=3)
+    hops = [o for o in menu["options"] if o["family"] == "expand" and o["need_id"] == "item:copper-ore"]
+    assert hops and all(set(h["coverage_reach"]) == {"reaches", "approaches"} for h in hops)

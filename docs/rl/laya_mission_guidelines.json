@@ -213,6 +213,17 @@
             "deepest_bottleneck": true
           },
           "weight": 2.0
+        },
+        {
+          "when": {
+            "family": [
+              "mine",
+              "smelt",
+              "assemble"
+            ],
+            "deepest_bottleneck": true
+          },
+          "weight": 2.0
         }
       ]
     },
