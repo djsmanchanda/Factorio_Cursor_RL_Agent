@@ -178,6 +178,8 @@ def test_live_world_observes_with_the_shared_helper_minus_only_the_pause_asserti
     from training.laya_clean_runner import PAUSED_ASSERTION
     source = Path("training/laya_saved_world.lua").read_text()
     assert source.count(PAUSED_ASSERTION) == 1  # Live mode fails closed if this changes.
+    from training.laya_clean_runner import COLLISION_RETURN, RECIPE_LINE, RECIPE_LIST_END
+    assert source.count(RECIPE_LINE) == source.count(COLLISION_RETURN) == source.count(RECIPE_LIST_END) == 1
 
 
 def test_loop_stops_as_stalled_when_only_waiting_without_progress(tmp_path):

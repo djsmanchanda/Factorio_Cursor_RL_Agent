@@ -59,6 +59,27 @@ def _clear(point: tuple[float, float], size: float, build: Sequence[Mapping]) ->
     return not any(boxes_overlap(point, size, _xy(a), _size(a["entity"])) for a in build)
 
 
+NUDGES = sorted(((dx, dy) for dx in range(-2, 3) for dy in range(-2, 3) if (dx, dy) != (0, 0)),
+                key=lambda d: abs(d[0]) + abs(d[1]))
+
+
+def _place(point: tuple[float, float], size: float, blocked: Sequence[Mapping]) -> tuple[float, float] | None:
+    """The point, or the nearest spot within 2 tiles that clears ``blocked``."""
+    for dx, dy in [(0, 0), *NUDGES]:
+        spot = (point[0] + dx, point[1] + dy)
+        if _clear(spot, size, blocked):
+            return spot
+    return None
+
+
+def world_obstacles(facts: Mapping) -> list[dict]:
+    """Known placed entities (poles, roboports, machines) as footprints relays must avoid."""
+    found = [{"entity": p["name"], "position": p["position"]} for p in facts.get("poles", [])]
+    found += [{"entity": "roboport", "position": p["position"]} for p in facts.get("ports", [])]
+    found += [{"entity": m["name"], "position": m["position"]} for m in facts.get("machines", [])]
+    return found
+
+
 def _toward(a: tuple[float, float], b: tuple[float, float], distance: float) -> tuple[float, float]:
     span = math.dist(a, b)
     if span <= distance:
@@ -66,7 +87,8 @@ def _toward(a: tuple[float, float], b: tuple[float, float], distance: float) -> 
     return a[0] + (b[0] - a[0]) * distance / span, a[1] + (b[1] - a[1]) * distance / span
 
 
-def medium_cover(build: Sequence[Mapping], anchor: tuple[float, float]) -> list[tuple[float, float]] | None:
+def medium_cover(build: Sequence[Mapping], anchor: tuple[float, float],
+                 blocked: Sequence[Mapping] = ()) -> list[tuple[float, float]] | None:
     """Greedy medium-pole positions so every powered entity overlaps a supply area."""
     targets = [a for a in build if a["entity"] in POWERED]
     if not targets:
@@ -75,7 +97,7 @@ def medium_cover(build: Sequence[Mapping], anchor: tuple[float, float]) -> list[
     ys = [_xy(a)[1] for a in targets]
     spots = [(x + .5, y + .5) for x in range(math.floor(min(xs)) - 4, math.ceil(max(xs)) + 4)
              for y in range(math.floor(min(ys)) - 4, math.ceil(max(ys)) + 4)]
-    spots = [s for s in spots if _clear(s, 1, build)]
+    spots = [s for s in spots if _clear(s, 1, [*build, *blocked])]
     supply = POLES["medium-electric-pole"][0]
     uncovered, chosen = list(targets), []
     while uncovered and len(chosen) < MAX_COVER_POLES:
@@ -88,16 +110,18 @@ def medium_cover(build: Sequence[Mapping], anchor: tuple[float, float]) -> list[
 
 
 def _link(network: list[tuple[float, float]], target: tuple[float, float], build: Sequence[Mapping]) -> list:
-    """Medium hops from the nearest network pole to ``target``, avoiding the build."""
+    """Medium hops from the nearest network pole to ``target``, nudged around the build and world entities."""
     start = min(network, key=lambda p: math.dist(p, target))
-    return [(x + .5, y + .5) for x, y in step_points(start, target, 7)[:-1] if _clear((x + .5, y + .5), 1, build)]
+    hops = (_place((x + .5, y + .5), 1, build) for x, y in step_points(start, target, 7)[:-1])
+    return [h for h in hops if h is not None]
 
 
 def _big_relay(anchor: tuple[float, float], target: tuple[float, float], build: Sequence[Mapping]) -> list:
     """Big poles from beside the anchor to beside the target (medium wire limits both ends)."""
     start, end = _toward(anchor, target, 6), _toward(target, anchor, 6)
     points = [(round(start[0]), round(start[1]))] + step_points(start, end, 26)
-    return [p for p in dict.fromkeys(points) if _clear(p, 2, build)]
+    placed = (_place(p, 2, build) for p in dict.fromkeys(points))
+    return [p for p in placed if p is not None]
 
 
 def _chain_ok(poles: Sequence[tuple[str, tuple[float, float]]], anchor: tuple[tuple[float, float], float]) -> bool:
@@ -146,25 +170,28 @@ def power_variants(candidate: Mapping, facts: Mapping) -> list[dict]:
     anchor = ((anchor_pole["position"]["x"], anchor_pole["position"]["y"]), float(anchor_pole["wire"]))
     variants = []
 
-    cover = medium_cover(build, anchor[0])
+    blocked = [*build, *world_obstacles(facts)]  # Relays avoid the build and placed entities alike.
+    cover = medium_cover(build, anchor[0], world_obstacles(facts))
     if cover:
         first = min(cover, key=lambda p: math.dist(p, anchor[0]))
         # Cover poles linked to each other with medium hops, starting from the pole nearest the grid.
         chain, network = [("medium-electric-pole", first)], [first]
         for point in sorted(cover, key=lambda p: math.dist(p, first))[1:]:
-            chain += [("medium-electric-pole", h) for h in _link(network, point, build)] + [("medium-electric-pole", point)]
+            chain += [("medium-electric-pole", h) for h in _link(network, point, blocked)] + [("medium-electric-pole", point)]
             network.append(point)
-        relay = [("medium-electric-pole", h) for h in _link([anchor[0]], first, build)]
+        relay = [("medium-electric-pole", h) for h in _link([anchor[0]], first, blocked)]
         variants.append(_variant(candidate, build, relay + chain, anchor, "m", "medium poles"))
         if math.dist(anchor[0], first) > LONG_DISTANCE:
-            big = [("big-electric-pole", p) for p in _big_relay(anchor[0], first, build)]
+            big = [("big-electric-pole", p) for p in _big_relay(anchor[0], first, blocked)]
             variants.append(_variant(candidate, build, big + chain, anchor, "b", "big-pole relay + medium poles"))
 
     end = next((a for a in reversed(power) if a["entity"] == "substation"), None)
     if candidate["family"] in SUBSTATION_FAMILIES and end is not None:
-        target = _xy(end)
-        hops = [("medium-electric-pole", h) for h in _link([anchor[0]], target, build)]
+        target = _place(_xy(end), 2, blocked)
+        if target is None:
+            return [v for v in variants if v]
+        hops = [("medium-electric-pole", h) for h in _link([anchor[0]], target, blocked)]
         if math.dist(anchor[0], target) > LONG_DISTANCE:
-            hops = [("big-electric-pole", p) for p in _big_relay(anchor[0], target, build)]
+            hops = [("big-electric-pole", p) for p in _big_relay(anchor[0], target, blocked)]
         variants.append(_variant(candidate, build, hops + [("substation", target)], anchor, "s", "shared substation"))
     return [v for v in variants if v]

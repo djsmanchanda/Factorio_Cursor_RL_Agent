@@ -73,3 +73,14 @@ def test_long_distance_offers_a_big_pole_relay_and_poles_never_overlap_the_build
     assert roboport
     for variant in roboport:
         check_powered_and_wired(variant, facts)
+
+
+def test_relays_avoid_placed_world_entities():
+    facts = world()
+    facts["poles"].append({"name": "substation", "generated": True, "position": {"x": 7, "y": 7}, "wire": 18,
+                           "supply": 9, "grid": "1"})  # Sits where a straight relay would put a hop.
+    facts["ports"] = [{"position": {"x": 20, "y": 15}, "energy": 1}]
+    for variant in power_variants(candidate("smelt", SMELT, relay=[(12, 9), (23, 16), (34, 23), (40, 34)]), facts):
+        for name, (x, y) in poles_of(variant):
+            assert not any(abs(x - ox) < (POLES[name][2] + os) / 2 and abs(y - oy) < (POLES[name][2] + os) / 2
+                           for ox, oy, os in [(7, 7, 2), (20, 15, 4)])

@@ -56,6 +56,7 @@ RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.rec
 RECIPE_LINE_LIVE = ('if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name; '
                     'if not m.recipe and e.type=="furnace" then local ok,prev=pcall(function() return e.previous_recipe end); '
                     'if ok and prev then local n=prev.name; if type(n)~="string" then n=n and n.name end; m.recipe=n end end end')
+COLLISION_RETURN = 'then return "collision" end'
 PAUSED_ASSERTION = 'assert(game.tick_paused and game.ticks_to_run == 0, "saved-world clock must be paused")'
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
@@ -87,6 +88,10 @@ class LiveWorld(SavedWorldAdapter):
         if RECIPE_LINE not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; machine recipe line not found")
         self.lua_source = self.lua_source.replace(RECIPE_LINE, RECIPE_LINE_LIVE)
+        # Name the colliding entity so journals separate relay-pole from machine collisions.
+        if COLLISION_RETURN not in self.lua_source:
+            raise SavedWorldError("saved-world helper changed; collision check not found")
+        self.lua_source = self.lua_source.replace(COLLISION_RETURN, 'then return "collision:"..a.entity end')
 
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
