@@ -60,7 +60,7 @@ def test_state_carries_board_mission_guidelines_and_need_tags():
     menu = compile_menu(facts(), board, validator(), seed=2)
     state = build_state(facts(), menu, board, phase("C1"), "test", ExplorationPolicy.model_ref, [], None)
     ids = {g["rule_id"] for g in state["guidelines"]}
-    assert {"mission.starter-mall", "mission.bot-supply", "mission.belt-transfer"} <= ids
+    assert {"mission.starter-mall", "mission.serve-bottleneck", "mission.purposeful-coverage"} <= ids
     assert all(o["summary"].startswith("[") for o in state["options"])
     assert state["observation_digest"]["factory_status"]["needs"][0]["item"] == "copper-cable"
 

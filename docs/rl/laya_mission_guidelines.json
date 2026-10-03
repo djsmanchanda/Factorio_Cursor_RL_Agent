@@ -282,6 +282,23 @@
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Medium poles, big poles and assembling machine 2 need steel; start steel smelting before pole stock runs low."
+    },
+    {
+      "rule_id": "mission.purposeful-coverage",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Extend robot coverage toward resources and sites a current need requires; coverage that serves no need spends poles and roboports for nothing.",
+      "prefer": [
+        {
+          "when": {
+            "need": "coverage"
+          },
+          "weight": 0.4
+        }
+      ]
     }
   ]
 }

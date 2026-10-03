@@ -30,6 +30,8 @@ Make missing construction items before their stock runs out; a build blocked by 
 
 Wait only when nothing useful can be built, or while construction and deliveries are still arriving.
 
+Extend robot coverage toward resources and sites a current need requires; coverage that serves no need spends poles and roboports for nothing.
+
 These come from the deterministic runner's history: of 184 runs since 2026-09-05, 74 ended with no progress on a construction item (steel, drills, splitters, furnaces, fast inserters, poles) whose inputs had no reliable producer, and its furthest run toward plastic stopped when gear and iron-stick stock drained with no permanent producer.
 
 ## Planning
