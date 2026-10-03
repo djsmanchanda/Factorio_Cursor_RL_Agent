@@ -11,7 +11,11 @@
 .plan-panel th, .plan-panel td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; }
 .plan-panel .research-help { padding: 12px 20px 0; }
 .decision-panel { grid-column: 1 / -1; grid-row: 7; min-width: 0; }
-.laya-helper-panel { grid-column: 1 / -1; grid-row: 8; min-width: 0; }
+.ledger-panel { grid-column: 1 / -1; grid-row: 8; min-width: 0; }
+.ledger-panel table { width: 100%; border-collapse: collapse; font: .72rem/1.35 ui-monospace, monospace; }
+.ledger-panel th, .ledger-panel td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.ledger-panel th { color: var(--muted); font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; }
+.laya-helper-panel { grid-column: 1 / -1; grid-row: 9; min-width: 0; }
 .laya-helper-panel .research-help { padding: 12px 20px 0; }
 .laya-helper-panel pre { margin: 12px 20px 20px; max-height: 640px; }
 .mission-panel .research-help, .board-panel .research-help, .decision-panel .research-help,
@@ -43,7 +47,7 @@
 .status.warning::before { background: var(--yellow); }
 
 @media (max-width: 1200px) {
-  .mission-panel, .board-panel, .controls, .console-panel, .logistic-inventory-panel, .guideline-panel, .plan-panel, .decision-panel, .laya-helper-panel {
+  .mission-panel, .board-panel, .controls, .console-panel, .logistic-inventory-panel, .guideline-panel, .plan-panel, .decision-panel, .ledger-panel, .laya-helper-panel {
     grid-column: 1; grid-row: auto;
   }
 }

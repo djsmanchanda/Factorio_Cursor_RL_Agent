@@ -24,7 +24,6 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +31,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.laya_helper_agent import RUN_INDEX, launch as launch_helper
+from core.ist_time import ist_stamp
 from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
 from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
@@ -84,7 +84,7 @@ def main(argv=None) -> int:
     run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
     mode = "stepped" if args.stepped else "live"
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    started = datetime.now().astimezone().isoformat(timespec="seconds")
+    started = ist_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
     with runner_pid_record(paths["pid"]):
@@ -110,7 +110,7 @@ def main(argv=None) -> int:
     # Index the run for later comparisons, then start the read-only post-run review.
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
-             "ended": datetime.now().astimezone().isoformat(timespec="seconds"), "summary": summary}
+             "ended": ist_stamp(), "summary": summary}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:

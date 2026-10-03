@@ -4,6 +4,8 @@
 
 """Run ledger shared by the deterministic runner and the clean Laya runner.
 
+Times are IST (Asia/Kolkata, UTC+05:30); ``run_length`` is human-readable.
+
 Each finished run appends one JSON line to ``run-ledger.jsonl`` and the CSV
 view ``run-ledger.csv`` is regenerated from it.  Entries are keyed by
 (system, run_id); recording a run twice replaces its row.
@@ -27,17 +29,18 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from core.ist_time import run_length, to_ist
 from tools.run_log_format import parse_timed_run_log_line
 
 LEDGER = Path(os.environ.get("FACTORIO_RL_RUN_LEDGER", Path.home() / ".local/share/factorio-rl/run-ledger.jsonl"))
-CSV_COLUMNS = ("system", "run_id", "started", "ended", "duration_s", "commit", "target", "highest_milestone",
+CSV_COLUMNS = ("system", "run_id", "started", "ended", "run_length", "duration_s", "commit", "target", "highest_milestone",
                "milestones", "outcome", "failure_code", "failure_cause", "limiting_factor", "decisions",
                "log_file", "root")
 # Ordered deterministic markers: (milestone, pattern).  Order is the mission order.
@@ -74,8 +77,13 @@ def _read(path: Path) -> list[dict]:
 
 
 def record(entry: dict, ledger: Path | None = None) -> dict:
-    """Insert or replace one run (keyed by system and run_id) and regenerate the CSV."""
+    """Insert or replace one run (keyed by system and run_id) and regenerate the CSV.
+
+    All times are stored in IST (Asia/Kolkata, +05:30) with a readable run length.
+    """
     ledger = ledger or LEDGER
+    entry = {**entry, "started": to_ist(entry.get("started")), "ended": to_ist(entry.get("ended")),
+             "run_length": run_length(entry.get("duration_s"))}
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with (ledger.with_suffix(".lock")).open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -153,10 +161,32 @@ def record_deterministic_run(log: Path, *, run_id: str | None = None, commit: st
 
 
 # -- laya -------------------------------------------------------------------
+def _laya_log_seconds(log: Path, run_id: str) -> int | None:
+    """Elapsed seconds of one run from its own log (last '+Ns' line up to RUN END)."""
+    if not log.is_file():
+        return None
+    inside, last = False, None
+    for line in log.read_text(errors="replace").splitlines():
+        if line.startswith("RUN START:"):
+            if inside:
+                break
+            inside = f"run_id={run_id}" in line
+            continue
+        if inside and (match := re.match(r"^\+(\d+)s ", line)):
+            last = int(match.group(1))
+            if line.rstrip().endswith("RUN END"):
+                break
+    return last
+
+
 def laya_entry(index: dict) -> dict:
     root = Path(index["root"])
     rows = [r for r in _read(root / "evidence/clean-decisions.jsonl") if r.get("run_id") == index["run_id"]]
-    started = datetime.fromisoformat(index["started"]) if index.get("started") else None
+    # Run ids end in the Unix start time; it is the fallback when the index lacks one.
+    epoch = re.search(r"-(\d{10})$", index["run_id"])
+    started_text = to_ist(index.get("started")) or (to_ist(datetime.fromtimestamp(int(epoch.group(1)), tz=timezone.utc))
+                                                    if epoch else None)
+    started = datetime.fromisoformat(started_text) if started_text else None
     milestones = []
     for row in rows:
         if row.get("event") == "phase_reached":
@@ -169,12 +199,15 @@ def laya_entry(index: dict) -> dict:
                "safe_stop_after_repeated_failures": "safe_stop", "runner_error": "error"}.get(stop, stop)
     last = done[-1] if done else {}
     bottleneck = " | ".join((last.get("board") or {}).get("bottleneck") or []) or None
-    ended = index.get("ended")
-    try:
-        duration = int((datetime.fromisoformat(ended) - started).total_seconds()) if started and ended else None
-    except (TypeError, ValueError):  # Backfilled rows may lack a timezone or an end time.
-        duration = None
-    return {"system": "laya", "run_id": index["run_id"], "started": index.get("started"), "ended": ended,
+    # The run's own log is exact; index end times are a fallback (backfilled ones may be guesses).
+    duration = _laya_log_seconds(root / "logs/laya-runner.log", index["run_id"])
+    if duration is None and started and index.get("ended") and not index.get("backfilled"):
+        try:
+            duration = int((datetime.fromisoformat(to_ist(index["ended"])) - started).total_seconds())
+        except (TypeError, ValueError):
+            duration = None
+    ended = (started + timedelta(seconds=duration)).isoformat() if started and duration is not None else None
+    return {"system": "laya", "run_id": index["run_id"], "started": started_text, "ended": ended,
             "duration_s": duration, "commit": index.get("commit", "unknown"), "target": "mod-playground-mining-productivity-4",
             "highest_milestone": milestones[-1]["id"] if milestones else None, "milestones": milestones,
             "milestone_source": "measured_phases", "outcome": outcome,

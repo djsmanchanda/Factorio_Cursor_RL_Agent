@@ -123,12 +123,14 @@ safe stop (3 consecutive failures) or SIGTERM after the current decision.
 `logs/laya-runner.log` (deterministic `RUN START`/`+Ns`/`RUN END` format),
 `laya-runner.pid.json`, `laya-runner.heartbeat.json`,
 `evidence/clean-decisions.jsonl`, `evidence/latest-status.json`, transaction
-receipts. Checkpoint save/resume is not implemented.
+receipts. Checkpoint save/resume is not implemented. All human-facing times
+(run logs, heartbeats, run index, ledger, console, helper) are IST
+(Asia/Kolkata, UTC+05:30) via `core/ist_time.py`, independent of the process TZ.
 
 After every run: the run is appended to the shared LLM-free run ledger
 (`tools/run_ledger.py` → `~/.local/share/factorio-rl/run-ledger.jsonl` and
-`.csv`: milestones, outcome, failure cause, limiting factor, log file,
-commit; deterministic runs are recorded the same way) and the read-only
+`.csv`: start/end in IST, run length, milestones, outcome, failure cause,
+limiting factor, log file, commit; deterministic runs are recorded the same way) and the read-only
 OpenCode Laya Helper (`tools/laya_helper_agent.py`, config
 `docs/rl/laya_helper.json`) compares it with the latest Laya run from an
 earlier commit and the deterministic reference, writing

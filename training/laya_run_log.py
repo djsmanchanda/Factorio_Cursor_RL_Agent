@@ -14,9 +14,9 @@ import json
 import os
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
+from core.ist_time import ist_stamp
 
 
 class RunLog:
@@ -37,7 +37,7 @@ class RunLog:
 
     def start(self, **fields: Any) -> None:
         self.started = time.monotonic()
-        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        stamp = ist_stamp()
         self._write("RUN START: ts=" + stamp + "".join(f" {k}={v}" for k, v in fields.items()))
         self._thread = threading.Thread(target=self._beat, daemon=True)
         self._thread.start()
@@ -53,7 +53,7 @@ class RunLog:
 
     def _beat(self) -> None:
         while not self._stop.is_set():
-            payload = {"pid": os.getpid(), "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
+            payload = {"pid": os.getpid(), "ts": ist_stamp(),
                        "elapsed_s": int(time.monotonic() - self.started), **self.fields}
             tmp = self.heartbeat.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
