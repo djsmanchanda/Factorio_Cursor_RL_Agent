@@ -155,8 +155,15 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
     return "short" if measured is not None else "unmeasured"
 
 
-def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Mapping | None = None) -> dict:
-    """Build the full status board for ``targets`` (items/s) from saved-world facts."""
+def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Mapping | None = None,
+                   built: Mapping[str, int] | None = None) -> dict:
+    """Build the full status board for ``targets`` (items/s) from saved-world facts.
+
+    ``built`` counts machines the runner itself built per product (from its
+    receipts); machines that never ran report no recipe, so this separates
+    "built but idle" from "unbuilt".
+    """
+    built = built or {}
     recipes = facts.get("recipes") or {}
     demand = goal_demand(targets, recipes)
     stock = accessible_stock(facts)
@@ -187,15 +194,18 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             per_machine = machine_rate(tier, item, recipe)
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
+        condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured)
+        if condition == "unbuilt" and built.get(item, 0) > 0:
+            condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({
-            "need_id": f"item:{item}", "item": item, "depth": info["depth"], "consumers": info["consumers"],
+            "need_id": f"item:{item}", "item": item, "built": int(built.get(item, 0)), "depth": info["depth"], "consumers": info["consumers"],
             "required_per_s": required, "measured_per_s": measured,
             "consumed_per_s": _measured(measurement, "consumption", item),
             "gap_per_s": None if measured is None else max(0.0, required - measured),
             "capacity_per_s": capacity, "machines": dict(tiers), "status_counts": dict(statuses),
             "machines_needed": machines_needed, "stock": int(stock.get(item, 0)),
             "upgrade": None if recipe is None else _upgrade_fact(machines, item, recipe, recipes, stock),
-            "condition": _diagnose(item, recipe, buckets, len(machines), required, capacity, measured),
+            "condition": condition,
         })
     conditions = {n["item"]: n["condition"] for n in needs}
     for need in needs:

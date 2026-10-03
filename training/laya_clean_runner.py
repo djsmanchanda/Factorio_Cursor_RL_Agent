@@ -19,6 +19,7 @@ says so.
 from __future__ import annotations
 
 import json
+import math
 import random
 import time
 import traceback
@@ -31,9 +32,9 @@ from orchestrator.laya_knowledge import load_guideline_context
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
-from training.laya_power import power_variants
-from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason, save_plan,
-                                    zone_smelt_candidates)
+from training.laya_power import POLES, power_variants
+from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
+                                    ring_expand_candidates, save_plan, zone_smelt_candidates)
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,12 @@ PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt"
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
 EXTRA_RECIPES = ("big-electric-pole", "iron-stick")
+# Idle furnaces return no current recipe; report the previous one so built-but-starved
+# furnaces stay attributed to their product.
+RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end'
+RECIPE_LINE_LIVE = ('if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name; '
+                    'if not m.recipe and e.type=="furnace" then local ok,prev=pcall(function() return e.previous_recipe end); '
+                    'if ok and prev then local n=prev.name; if type(n)~="string" then n=n and n.name end; m.recipe=n end end end')
 PAUSED_ASSERTION = 'assert(game.tick_paused and game.ticks_to_run == 0, "saved-world clock must be paused")'
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
@@ -75,6 +82,9 @@ class LiveWorld(SavedWorldAdapter):
             raise SavedWorldError("saved-world helper changed; recipe list end not found")
         extra = "".join(f',"{name}"' for name in EXTRA_RECIPES)
         self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
+        if RECIPE_LINE not in self.lua_source:
+            raise SavedWorldError("saved-world helper changed; machine recipe line not found")
+        self.lua_source = self.lua_source.replace(RECIPE_LINE, RECIPE_LINE_LIVE)
 
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
@@ -159,6 +169,21 @@ def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     return picked
 
 
+def _build_only(candidate: Mapping) -> dict:
+    """The candidate's plan without the generator's power relay (substations/poles)."""
+    phase = candidate["plan"]["phases"][0]
+    actions = [a for a in phase["actions"] if a["entity"] not in POLES]
+    return {**candidate["plan"], "phases": [{**phase, "actions": actions}]}
+
+
+def _need_key(facts: Mapping, candidate: Mapping, unmet: set[str]) -> str:
+    need = need_of(candidate)
+    if need == "coverage":
+        ores = (newly_reached(facts, candidate) & unmet) or approaches(facts, candidate, unmet)
+        return f"item:{sorted(ores)[0]}" if ores else "coverage"
+    return f"item:{need}"
+
+
 def _compile(facts: Mapping, products: set[str], seed: int) -> list[dict]:
     """Generator candidates for only the products a need can use (speed, not a choice)."""
     recipes = {k: v for k, v in facts["recipes"].items() if k in products}
@@ -179,19 +204,36 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed = _compile(facts, unmet, seed)
     if site_plan:
         proposed += zone_smelt_candidates(facts, site_plan, unmet)
+    proposed += ring_expand_candidates(facts, site_plan)
+    pre_rejected: dict[str, Counter] = defaultdict(Counter)
+    land_examples: dict[str, list] = defaultdict(list)
+    if site_plan:
+        # Land check on the build itself before sampling (the generator's own relays are replaced later).
+        kept = []
+        for candidate in proposed:
+            detail: list = []
+            reason = reservation_reason(site_plan, {**candidate, "plan": _build_only(candidate)}, detail)
+            if reason:
+                key = _need_key(facts, candidate, unmet)
+                pre_rejected[key][reason] += 1
+                if len(land_examples[key]) < 3:  # Exact rejected entities for the journal.
+                    land_examples[key].append(detail[0])
+            else:
+                kept.append(candidate)
+        proposed = kept
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
         need = need_of(candidate)
-        if need == "coverage":
-            ores = (newly_reached(facts, candidate) & unmet) or approaches(facts, candidate, unmet)
-            # A coverage hop that reaches (or closes on) an unmet resource serves it.
-            by_need[f"item:{sorted(ores)[0]}" if ores else "coverage"].append(candidate)
-        elif need in unmet:
-            by_need[f"item:{need}"].append(candidate)
+        # A coverage hop that reaches (or closes on) an unmet resource serves it.
+        if need == "coverage" or need in unmet:
+            by_need[_need_key(facts, candidate, unmet)].append(candidate)
 
     rejected: Counter = Counter()
     shortfalls: Counter = Counter()
     reasons: dict[str, Counter] = defaultdict(Counter)
+    for need, counts in pre_rejected.items():
+        reasons[need].update(counts)
+        rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
 
     def check(groups):
         expanded = {}
@@ -255,7 +297,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         if f"item:{item}" not in by_need:
             blocked[f"item:{item}"] = {"no_candidate": 1}
     return {"needs": needs, "options": options, "proposed": len(proposed), "blocked": blocked,
-            "rejected": dict(rejected), "shortfalls": dict(shortfalls)}
+            "rejected": dict(rejected), "shortfalls": dict(shortfalls),
+            "land_rejections": {k: v for k, v in land_examples.items() if k in blocked}}
 
 
 class Policy(Protocol):
@@ -330,6 +373,33 @@ def _status_line(board: Mapping) -> str:
                       for n in board["needs"])
 
 
+STALL_DECISIONS = 12
+
+
+def _goal_gap(board: Mapping) -> float:
+    """Remaining goal rate across phase targets; unmeasured counts as the whole target."""
+    needs = {n["item"]: n for n in board["needs"]}
+    return sum(needs[item]["gap_per_s"] if needs[item]["gap_per_s"] is not None else needs[item]["required_per_s"]
+               for item in board["targets"])
+
+
+def _built_counts(adapter: Any) -> dict[str, int]:
+    """Machines the runner itself built per product, from its observed receipts."""
+    root = getattr(adapter, "root", None)
+    counts: Counter = Counter()
+    if root is None:
+        return {}
+    for path in Path(root, "evidence").glob("transaction-*.json"):
+        try:
+            receipt = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        candidate = receipt.get("candidate") or {}
+        if receipt.get("status") == "observed" and candidate.get("family") in ("smelt", "assemble") and candidate.get("product"):
+            counts[candidate["product"]] += 1
+    return dict(counts)
+
+
 def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> None:
     """Outline reserved zones in game for spectators; drawing failures never stop the run."""
     bridge = getattr(adapter, "bridge", None)
@@ -383,6 +453,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     if site_plan:
         _draw_zones(adapter, site_plan, emit)
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
+    stall = {"since": 0, "best_gap": math.inf}
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -394,13 +465,15 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             adapter.reconcile()
             facts = adapter.query()
             phase = current_phase(reached)
-            board = compile_status(facts, phase["targets"], measurement) if phase else None
+            built = _built_counts(adapter)
+            board = compile_status(facts, phase["targets"], measurement, built) if phase else None
             while phase and phase_reached(board):
+                stall.update(since=0, best_gap=math.inf)
                 reached.append(phase["phase_id"])
                 _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
                 emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
                 phase = current_phase(reached)
-                board = compile_status(facts, phase["targets"], measurement) if phase else None
+                board = compile_status(facts, phase["targets"], measurement, built) if phase else None
             if phase is None:
                 summary["stop"] = "mission_complete"
                 break
@@ -419,7 +492,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             compact = compact_status(board)
             record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="pending",
                           board=compact, menu={n["need_id"]: n["options"] for n in menu["needs"]},
-                          rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"], choice=choice,
+                          rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"],
+                          land_rejections=menu.get("land_rejections"), choice=choice,
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
             emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
@@ -456,6 +530,16 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                             "outcome": "completed" if receipt["status"] == "observed" else "pending"})
             summary["decisions"] += 1
             failures = 0
+            # Stall: no new build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
+            gap = _goal_gap(compile_status(facts, phase["targets"], measurement, built))
+            progressed = (chosen["family"] != "wait" and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
+            stall["best_gap"] = min(stall["best_gap"], gap)
+            stall["since"] = 0 if progressed else stall["since"] + 1
+            if stall["since"] >= STALL_DECISIONS:
+                summary["stop"] = "stalled"
+                emit(f"STALLED: {STALL_DECISIONS} decisions without a new build or goal progress; "
+                     f"bottleneck {' | '.join(compact['bottleneck']) or 'none'}; blocked {blocked or 'none'}")
+                break
         except Exception as error:  # Never-crash contract: failures are evidence.
             failures += 1
             summary["failures"] += 1

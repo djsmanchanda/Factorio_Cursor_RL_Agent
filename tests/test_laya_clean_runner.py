@@ -129,7 +129,9 @@ def test_coverage_hop_that_reaches_an_unmet_resource_serves_that_need():
     copper = next(n for n in menu["needs"] if n["need_id"] == "item:copper-ore")
     # The same hop, relayed over substations or medium poles.
     assert {by_id[o]["family"] for o in copper["options"]} == {"expand"}
-    assert all("Extend bot coverage to (32,0)" in by_id[o]["summary"] for o in copper["options"])
+    from training.laya_clean_runner import approaches, newly_reached
+    assert all("copper-ore" in newly_reached(world, by_id[o]) | approaches(world, by_id[o], {"copper-ore"})
+               for o in copper["options"])
     assert any(n["need_id"] == "coverage" for n in menu["needs"])
 
 
@@ -144,7 +146,7 @@ def test_already_built_options_are_pruned_and_blocked_needs_say_why():
     world = facts()
     menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validate, seed=4)
     assert "coverage" not in {n["need_id"] for n in menu["needs"]}
-    assert menu["blocked"]["coverage"] == {"no_op": menu["rejected"]["no_op"]}
+    assert set(menu["blocked"]["coverage"]) == {"no_op"}
     assert set(menu["blocked"]["item:iron-gear-wheel"]) == {"item_shortfall:requester-chest"}
     assert menu["blocked"]["item:stone"] == {"no_candidate": 1}
 
@@ -176,3 +178,17 @@ def test_live_world_observes_with_the_shared_helper_minus_only_the_pause_asserti
     from training.laya_clean_runner import PAUSED_ASSERTION
     source = Path("training/laya_saved_world.lua").read_text()
     assert source.count(PAUSED_ASSERTION) == 1  # Live mode fails closed if this changes.
+
+
+def test_loop_stops_as_stalled_when_only_waiting_without_progress(tmp_path):
+    class WaitOnly(FakeAdapter):
+        def query(self, candidates=None):
+            if candidates is not None:  # Nothing is buildable: every check fails.
+                return {"validations": {c["option_id"]: {"reason": "collision"} for c in candidates}}
+            return copy.deepcopy(self.world)
+
+    from training.laya_clean_runner import STALL_DECISIONS
+    summary = run(WaitOnly(), ExplorationPolicy(0), journal=tmp_path / "j.jsonl", decisions=None,
+                  measure_ticks=300, seed=0, run_id="t")
+    # Plan, one first measurement (gap unknown -> known counts as progress), then the stalled waits.
+    assert summary["stop"] == "stalled" and summary["decisions"] == STALL_DECISIONS + 2

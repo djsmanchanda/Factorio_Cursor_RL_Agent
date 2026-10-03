@@ -164,35 +164,92 @@ def zone_smelt_candidates(facts: Mapping, plan: Mapping, plates: set[str]) -> li
     return candidates
 
 
+RING_ANGLES = range(0, 360, 45)
+RING_RADII = (24, 32, 40)
+
+
+def ring_expand_candidates(facts: Mapping, plan: Mapping | None) -> list[dict]:
+    """Roboport hops in eight directions and three distances around each powered port.
+
+    The generator only offers four fixed hops, which can all land on reserved
+    land; this enumerates the ring so coverage can grow toward any patch.
+    Power is added by laya_power; reservations still apply.
+    """
+    ports = [p for p in facts["ports"] if p["energy"] > 0]
+    existing = [(p["position"]["x"], p["position"]["y"]) for p in facts["ports"]]
+    seen, candidates = set(), []
+    for port in ports:
+        px, py = port["position"]["x"], port["position"]["y"]
+        anchor = min((p["position"] for p in ports if p["network"] == port["network"]), key=lambda q: (q["x"], q["y"]))
+        for angle in RING_ANGLES:
+            for radius in RING_RADII:
+                x = round(px + radius * math.cos(math.radians(angle)))
+                y = round(py + radius * math.sin(math.radians(angle)))
+                if (x, y) in seen or any(max(abs(x - ex), abs(y - ey)) < 12 for ex, ey in existing):
+                    continue
+                seen.add((x, y))
+                build = {"surface": "nauvis", "force": "player", "atomic": True,
+                         "phases": [{"name": "saved-world-expand", "actions": [ghost("roboport", x, y)]}]}
+                candidate = {"family": "expand", "product": None, "summary": f"Extend bot coverage to ({x},{y})",
+                             "plan": build, "network": port["network"], "network_anchor": anchor}
+                if plan and reservation_reason(plan, candidate):
+                    continue
+                digest = sha256_hash({"plan": build, "network_anchor": anchor})
+                candidates.append({**candidate, "option_id": f"expand.r{digest[7:19]}"})
+    return candidates
+
+
 def _size(entity: str) -> float:
     return POLES[entity][2] if entity in POLES else ENTITY_FOOTPRINTS.get(entity, 1)
 
 
-def reservation_reason(plan: Mapping, candidate: Mapping) -> str | None:
-    """Why a build would take land reserved for another purpose; ``None`` if it may build."""
+# Wire relays are cheap and relocatable; they may cross ore and smelting land (not the mall).
+RELAY_POLES = frozenset({"medium-electric-pole", "big-electric-pole"})
+
+
+def reservation_reason(plan: Mapping, candidate: Mapping, detail: list | None = None) -> str | None:
+    """Why a build would take land reserved for another purpose; ``None`` if it may build.
+
+    ``detail`` (optional) receives ``{reason, entity, position}`` for the
+    offending entity so journals can show exactly what was rejected.
+    """
+    return _reservation(plan, candidate, detail)
+
+
+def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str | None:
     family, product = candidate["family"], candidate.get("product")
     zones = [(z, _rect(z["rect"])) for z in plan["zones"]]
+
+    def reject(reason: str, action: Mapping) -> str:
+        if detail is not None:
+            detail.append({"reason": reason, "entity": action["entity"], "position": action["position"]})
+        return reason
+
     has_mall = any(z["purpose"] == "mall" for z in plan["zones"])
     in_mall = False
     for action in candidate["plan"]["phases"][0]["actions"]:
         x, y = action["position"]["x"], action["position"]["y"]
         half = _size(action["entity"]) / 2
         box = Rect(x - half, y - half, x + half, y + half)
-        for zone, rect in zones:
-            if not box.overlaps(rect):
-                continue
+        overlapping = [(zone, rect) for zone, rect in zones if box.overlaps(rect)]
+        # Patch boxes are survey approximations and can overlap; a mine standing in its own
+        # resource's zone is mining that resource even where another patch's box reaches.
+        own_ore = family == "mine" and any(z["purpose"] == f"ore:{product}" for z, _ in overlapping)
+        for zone, rect in overlapping:
             kind, _, subject = zone["purpose"].partition(":")
-            if kind == "ore" and not (family == "mine" and product == subject):
-                return f"reserved:{zone['purpose']}"
+            if action["entity"] in RELAY_POLES and kind in ("ore", "smelt"):
+                continue
+            if kind == "ore" and not (family == "mine" and (product == subject or own_ore)):
+                return reject(f"reserved:{zone['purpose']}", action)
             if kind == "smelt" and not ((family == "smelt" and product == subject)
                                         or (family == "mine" and SMELTED.get(product) == subject)):
-                return f"reserved:{zone['purpose']}"
+                return reject(f"reserved:{zone['purpose']}", action)
             if kind == "mall":
                 if family != "assemble":
-                    return "reserved:mall"
+                    return reject("reserved:mall", action)
                 in_mall = True
     if family == "assemble" and has_mall and not in_mall:
-        return "outside_mall_zone"
+        return reject("outside_mall_zone", candidate["plan"]["phases"][0]["actions"][0])
     return None
 
 

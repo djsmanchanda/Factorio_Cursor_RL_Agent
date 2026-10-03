@@ -102,3 +102,10 @@ def test_board_fills_a_valid_decision_state_without_inventing_rates():
     assert measured["acceptance_gap"]["remaining"] == pytest.approx(1.5)
     assert measured["state_digest"]["production"]["bottleneck_hint"].startswith("iron-gear-wheel:under_capacity")
     assert measured["observation_digest"]["factory_status"]["needs"][0]["item"] == "iron-gear-wheel"
+
+
+def test_runner_built_machines_that_never_ran_are_idle_not_unbuilt():
+    board = compile_status(world([]), {"iron-gear-wheel": 1.0}, built={"iron-gear-wheel": 2})
+    gear = board["needs"][0]
+    assert gear["condition"] == "built_idle" and gear["built"] == 2
+    assert compile_status(world([]), {"iron-gear-wheel": 1.0})["needs"][0]["condition"] == "unbuilt"
