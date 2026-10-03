@@ -392,6 +392,27 @@ def _status_line(board: Mapping) -> str:
 
 
 STALL_DECISIONS = 12
+RATE_WINDOW_TICKS = 7200  # Board rates span at least 2 game minutes; bot deliveries are bursty.
+
+
+def rolling_measurement(samples: list[tuple[int, Mapping, Mapping]], window: int = RATE_WINDOW_TICKS) -> dict | None:
+    """Rates from cumulative engine counters over the newest span of at least ``window`` ticks.
+
+    Uses the newest sample at or before ``now - window``, else the oldest one;
+    ``None`` until two samples exist.
+    """
+    if len(samples) < 2:
+        return None
+    now_tick, production, consumption = samples[-1]
+    base = next((s for s in reversed(samples[:-1]) if s[0] <= now_tick - window), samples[0])
+    span = now_tick - base[0]
+    if span <= 0:
+        return None
+
+    def rates(now: Mapping, then: Mapping) -> dict:
+        return {k: {"count": now[k] - then.get(k, 0), "per_second": (now[k] - then.get(k, 0)) * 60 / span} for k in now}
+
+    return {"window_ticks": span, "production": rates(production, base[1]), "consumption": rates(consumption, base[2])}
 
 
 def _goal_gap(board: Mapping) -> float:
@@ -479,6 +500,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
         _draw_zones(adapter, site_plan, emit)
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf}
+    samples: list[tuple[int, Mapping, Mapping]] = []
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -489,6 +511,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
         try:
             adapter.reconcile()
             facts = adapter.query()
+            samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
+            measurement = rolling_measurement(samples) or measurement
             phase = current_phase(reached)
             built = _built_counts(adapter)
             board = compile_status(facts, phase["targets"], measurement, built) if phase else None
@@ -556,14 +580,18 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 _training_record(records, **training, outcome={"status": "failed", "error_type": type(error).__name__,
                                                                "error": str(error)[:500]})
                 raise
-            measurement = receipt["measurement"]
+            window = receipt["measurement"]  # This decision's own window; the board uses rolling rates.
+            after = receipt.get("after")
+            if after:
+                samples.append((after["tick"], dict(after["production"]), dict(after["consumption"])))
+                measurement = rolling_measurement(samples) or measurement
             record.update(status=receipt["status"], measured_per_s={
-                k: round(v["per_second"], 3) for k, v in measurement["production"].items() if v["per_second"]})
+                k: round(v["per_second"], 3) for k, v in window["production"].items() if v["per_second"]})
             _append(journal, record)
             _training_record(records, **training, outcome={
-                "status": receipt["status"], "window_ticks": measurement["window_ticks"],
+                "status": receipt["status"], "window_ticks": window["window_ticks"],
                 "measured_per_s": record["measured_per_s"], "construction": receipt.get("construction")})
-            emit(f"  OUTCOME: {receipt['status']} over {measurement['window_ticks']} ticks; produced "
+            emit(f"  OUTCOME: {receipt['status']} over {window['window_ticks']} ticks; produced "
                  + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],
                             "summary": record["summary"][:120],

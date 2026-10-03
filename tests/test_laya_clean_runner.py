@@ -204,3 +204,13 @@ def test_every_decision_is_recorded_for_fine_tuning(tmp_path):
     assert built["state"]["options"] and built["distribution"] and built["choice"]["option_id"]
     assert all({"family", "need_id", "plan_hash"} <= set(o) for o in built["options"])
     assert built["state"]["observation_digest"]["mission_phase"] == "C0" and built["recorded_at"]
+
+
+def test_board_rates_use_a_rolling_window_not_one_bursty_sample():
+    from training.laya_clean_runner import rolling_measurement
+    samples = [(0, {"iron-plate": 0}, {}), (1800, {"iron-plate": 60}, {}), (3600, {"iron-plate": 60}, {}),
+               (5400, {"iron-plate": 120}, {}), (7200, {"iron-plate": 120}, {}), (9000, {"iron-plate": 180}, {})]
+    rolled = rolling_measurement(samples)
+    assert rolled["window_ticks"] == 7200 and rolled["production"]["iron-plate"]["per_second"] == 1.0
+    assert rolling_measurement(samples[:1]) is None
+    assert rolling_measurement(samples[:2])["window_ticks"] == 1800  # Shorter history uses what exists.
