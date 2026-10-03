@@ -2,8 +2,8 @@
 
 # Laya clean runner
 
-Status: adopted direction 2026-10-03 (user). Implementation not started beyond
-`training/laya_factory_status.py`. The deterministic workflow stays usable
+Status: adopted direction 2026-10-03 (user). First runner slice implemented
+and run live on disposable `mod_playground` copies (see Current state). The deterministic workflow stays usable
 and unchanged until Laya matches and exceeds its milestones.
 
 ## Why
@@ -105,11 +105,37 @@ research, measured by the same milestone predicates, with zero safety
 violations, before it replaces anything. Mall-simulation scores are separate
 evidence.
 
+## Current state
+
+Run: `tools/run_laya_clean.py prepare|run|stop --root data/laya-saved-world/<name>`
+(default ports 34230/27130). Core: `training/laya_clean_runner.py`; mission
+data: `training/laya_mission.py`; journal: `<root>/evidence/clean-decisions.jsonl`.
+
+- World interface: the saved-world adapter (live legality/funding checks,
+  mod layout executor, exact tick stepping, receipts).
+- Options are tagged with the need they serve; construction items that checks
+  report missing become `stock:<item>` needs; already-built options are pruned
+  as `no_op`; needs without legal options are journaled with reasons.
+- Power relays come in two variants (substation chain, or medium-pole hops
+  ending on one substation); the policy chooses.
+- Policy: seeded exploration (`authority: exploration`) until a compatible
+  Laya checkpoint exists. Its decisions are training data, not learned play.
+
+Live evidence 2026-10-03 (worlds `clean-20261003-a/b/c`, 219 decisions, 0
+failures): from the starter kit the runner built iron/copper mines, plate
+furnaces, cable/gear/long-inserter mall slots and coverage; world C satisfied
+5 of 7 C1 needs. Blockers it reported: substations exhausted by relays
+(substations need steel and advanced circuits), stone mines outside logistic
+reach, iron gear blocked by the substation shortfall. No phase reached yet.
+
 ## Delivery slices
 
 1. Status board — done (`0b4b4d2`).
 2. Strategy guidelines as data — done; goal ladder as data next.
-3. Adapters for C0–C3 operations (mine, smelt, mall slot, power/coverage,
+3. Done in part: mine, smelt, mall slot, coverage and wait via the
+   saved-world adapter. Next: an all-medium-pole power realizer, upgrade
+   (`execute_upgrade_plan`), retire, belt-fed line variants from the
+   deterministic planners. Adapters for C0–C3 operations (mine, smelt, mall slot, power/coverage,
    upgrade, retire, wait) over the existing tooling, each with focused tests.
 4. Never-crash run loop on a fresh `mod_playground` copy, journaling every
    decision; reach C1–C2 with exploration/guideline priors.
