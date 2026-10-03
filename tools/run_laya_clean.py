@@ -35,6 +35,7 @@ from core.local_time import local_stamp
 from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
 from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
+from training.laya_guided_policy import GuidedPolicy
 from training.laya_run_log import RunLog
 from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
 
@@ -64,6 +65,8 @@ def main(argv=None) -> int:
     p.add_argument("--stepped", action="store_true", help="Paused fixed-tick stepping instead of live play")
     p.add_argument("--speed", type=float, default=1.0, help="Live game speed")
     p.add_argument("--no-helper", action="store_true", help="Skip the post-run Laya Helper review")
+    p.add_argument("--policy", choices=["guided", "exploration"], default="guided",
+                   help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     args = p.parse_args(argv)
     root = owned_root(args.root)
     if args.action == "prepare":
@@ -91,13 +94,14 @@ def main(argv=None) -> int:
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, args.speed)
         manifest = json.loads((root / "manifest.json").read_text())
         log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=args.speed,
-                  decisions=args.decisions or "unlimited", policy="exploration", seed=args.seed,
+                  decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         try:
             if not args.stepped:
                 adapter.go_live()
                 log(f"LIVE: game unpaused at speed {args.speed:g}; decisions are taken while the factory runs")
-            summary = run(adapter, ExplorationPolicy(args.seed), journal=paths["journal"],
+            policy = GuidedPolicy(args.seed) if args.policy == "guided" else ExplorationPolicy(args.seed)
+            summary = run(adapter, policy, journal=paths["journal"],
                           decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
                           run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"])
             if stop.is_set():

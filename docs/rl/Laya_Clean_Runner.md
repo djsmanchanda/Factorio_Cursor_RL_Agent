@@ -150,8 +150,20 @@ earlier commit and the deterministic reference, writing
   that take another purpose's land are rejected (`reserved:*`).
 - Mission order starts with C0 (iron and copper starter plates) before the
   starter mall, so mall builds are not offered until C0 is measured.
-- Policy: seeded exploration (`authority: exploration`) until a compatible
-  Laya checkpoint exists. Its decisions are training data, not learned play.
+- Policy: the doc-guided policy (`training/laya_guided_policy.py`,
+  `authority: guided_exploration`) until a compatible Laya checkpoint exists.
+  It weights each option by the `prefer` entries of the rules present in that
+  decision's state (`docs/rl/laya_mission_guidelines.json`, quoting
+  `Laya_Strategy_Guidelines.md`), keeps a 15% uniform exploration floor, and
+  samples. Behavior changes by editing the doc and its preferences, not code.
+  `--policy exploration` keeps the uniform baseline.
+- Training data: `evidence/decision-states.jsonl` records every decision
+  (including planning and failed executions) with the exact model-input state,
+  every option's features, the policy's full distribution and matched rules,
+  the choice and the measured outcome. Nothing is filtered at write time;
+  sifting useful from useless records is a later, explicit step.
+- Stall rule: a run ends as `stalled` after 12 decisions with no new build,
+  no phase and no goal-gap improvement, so unattended loops keep moving.
 
 Live evidence 2026-10-03 (worlds `clean-20261003-a/b/c`, 219 decisions, 0
 failures): from the starter kit the runner built iron/copper mines, plate

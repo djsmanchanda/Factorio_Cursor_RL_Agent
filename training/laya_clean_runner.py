@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from orchestrator.laya_knowledge import load_guideline_context
+from core.local_time import local_stamp
+from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
@@ -336,6 +338,7 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
         f"{item} {rate:g}/s" for item, rate in sorted(phase["targets"].items()))
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
     apply_to_state(state, board)
+    state["observation_digest"]["mission_phase"] = phase["phase_id"]
     guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=15)  # +1 adapter rule <= 16
     state["guidelines"] = state["guidelines"] + [
         {"rule_id": rule["rule_id"], "kind": rule["kind"], "statement": rule["statement"]}
@@ -346,6 +349,21 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
         option["summary"] = f"[{need_index.get(option['option_id'], 'none')}] {option['summary']}"
     validate_state(state)
     return state
+
+
+def _option_record(option: Mapping) -> dict:
+    """Option facts kept for fine-tuning (the plan itself is identified by hash)."""
+    plan = option.get("plan")
+    return {"option_id": option["option_id"], "family": option["family"], "need_id": option.get("need_id"),
+            "product": option.get("product"), "power": option.get("power"), "summary": option.get("summary"),
+            "bill": option.get("bill"), "wait_ticks": option.get("wait_ticks"),
+            "plan_hash": sha256_hash(plan) if plan else None,
+            "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
+
+
+def _training_record(path: Path, **fields: Any) -> None:
+    """One self-contained line per decision: model input, options, policy distribution, outcome."""
+    _append(path, {"version": "laya-decision-record-v1", "recorded_at": local_stamp(), **fields})
 
 
 def _append(path: Path, record: Mapping) -> None:
@@ -423,6 +441,12 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
     state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, None)
     choice = policy.choose(state, menu)
     chosen = next(o for o in options if o["option_id"] == choice["option_id"])
+    distribution = choice.pop("distribution", None)
+    _training_record(journal.parent / "decision-states.jsonl", run_id=run_id, index=record["index"], tick=facts["tick"],
+                     phase=phase["phase_id"], authority=policy.authority, state=state,
+                     options=[{"option_id": o["option_id"], "family": "plan", "summary": o["summary"],
+                               "site_plan": o["site_plan"]} for o in options],
+                     distribution=distribution, choice=choice, outcome={"status": "planned"})
     record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="planned", choice=choice,
                   summary=chosen["summary"], menu={"plan:site": [o["option_id"] for o in options]},
                   site_plan=chosen["site_plan"])
@@ -449,6 +473,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     failures = 0
     last_status = last_blocked = None
     plan_path = journal.parent / "site-plan.json"
+    records = journal.parent / "decision-states.jsonl"
     site_plan = load_plan(plan_path)
     if site_plan:
         _draw_zones(adapter, site_plan, emit)
@@ -488,6 +513,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 site_plan=site_plan)
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
             choice = policy.choose(state, menu)
+            distribution = choice.pop("distribution", None)
             chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
             compact = compact_status(board)
             record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="pending",
@@ -497,7 +523,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
             emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
-                 f"p={choice['probability']:.3f} authority={policy.authority}: {chosen['summary']}")
+                 f"p={choice['probability']:.3f} authority={policy.authority}"
+                 + (f" rules={','.join(sorted(set(choice['rules'])))}" if choice.get("rules") else "")
+                 + f": {chosen['summary']}")
             status = _status_line(compact)
             if status != last_status:
                 emit(f"  STATUS: {status}")
@@ -518,11 +546,23 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "decisions": summary["decisions"], "failures": summary["failures"],
                                         "site_plan": site_plan,
                                         "measured_per_s": record.get("measured_per_s")})
-            receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
+            training = {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase["phase_id"],
+                        "authority": policy.authority, "state": state, "options": [_option_record(o) for o in menu["options"]],
+                        "blocked": menu["blocked"], "land_rejections": menu.get("land_rejections"),
+                        "distribution": distribution, "choice": choice}
+            try:
+                receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
+            except Exception as error:
+                _training_record(records, **training, outcome={"status": "failed", "error_type": type(error).__name__,
+                                                               "error": str(error)[:500]})
+                raise
             measurement = receipt["measurement"]
             record.update(status=receipt["status"], measured_per_s={
                 k: round(v["per_second"], 3) for k, v in measurement["production"].items() if v["per_second"]})
             _append(journal, record)
+            _training_record(records, **training, outcome={
+                "status": receipt["status"], "window_ticks": measurement["window_ticks"],
+                "measured_per_s": record["measured_per_s"], "construction": receipt.get("construction")})
             emit(f"  OUTCOME: {receipt['status']} over {measurement['window_ticks']} ticks; produced "
                  + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],

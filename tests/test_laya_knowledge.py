@@ -47,7 +47,7 @@ def test_mission_catalog_is_separate_and_scopes_the_users_transport_rule():
     mission = "docs/rl/laya_mission_guidelines.json"
     context = load_guideline_context(ROOT, ["mission.transport"], catalog=mission)
     ids = [rule["rule_id"] for rule in context["guidelines"]]
-    assert ids[4:] == ["mission.bot-supply", "mission.belt-transfer"]
+    assert ids == ["rule.plan-legality", "mission.bot-supply", "mission.belt-transfer"]
     # Every quoted passage still matches the strategy document.
     total = len(json.loads((ROOT / mission).read_text())["rules"])
     assert len(load_guideline_context(ROOT, ["*"], catalog=mission, max_rules=16)["guidelines"]) == min(16, total)

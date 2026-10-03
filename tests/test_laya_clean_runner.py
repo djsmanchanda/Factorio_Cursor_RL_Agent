@@ -192,3 +192,15 @@ def test_loop_stops_as_stalled_when_only_waiting_without_progress(tmp_path):
                   measure_ticks=300, seed=0, run_id="t")
     # Plan, one first measurement (gap unknown -> known counts as progress), then the stalled waits.
     assert summary["stop"] == "stalled" and summary["decisions"] == STALL_DECISIONS + 2
+
+
+def test_every_decision_is_recorded_for_fine_tuning(tmp_path):
+    from training.laya_guided_policy import GuidedPolicy
+    journal = tmp_path / "j.jsonl"
+    run(FakeAdapter(fail={2}), GuidedPolicy(0), journal=journal, decisions=3, measure_ticks=300, seed=0, run_id="t")
+    rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
+    assert [r["outcome"]["status"] for r in rows] == ["planned", "observed", "failed"]
+    built = rows[1]
+    assert built["state"]["options"] and built["distribution"] and built["choice"]["option_id"]
+    assert all({"family", "need_id", "plan_hash"} <= set(o) for o in built["options"])
+    assert built["state"]["observation_digest"]["mission_phase"] == "C0" and built["recorded_at"]

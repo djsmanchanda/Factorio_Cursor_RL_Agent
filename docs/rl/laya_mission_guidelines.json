@@ -1,16 +1,7 @@
 {
   "version": "1.0.0",
-  "purpose": "Clean Laya runner mission catalog: hard invariants plus the user's mod_playground strategy (docs/rl/Laya_Strategy_Guidelines.md). Scopes are mission.* so other runners never select these rules.",
+  "purpose": "Clean Laya runner mission catalog: the hard plan-legality rule plus the user's mod_playground strategy (docs/rl/Laya_Strategy_Guidelines.md). Scopes are mission.* so other runners never select these rules. 'prefer' entries weight the guided policy: when a decision feature matches, multiply the option weight.",
   "rules": [
-    {
-      "rule_id": "rule.runtime-isolation",
-      "kind": "hard",
-      "scopes": [
-        "*"
-      ],
-      "source": "docs/system_invariants.md",
-      "quote": "Training may not mutate the real save, consume its command channel, or silently replace its planner."
-    },
     {
       "rule_id": "rule.plan-legality",
       "kind": "hard",
@@ -21,28 +12,11 @@
       "quote": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
     },
     {
-      "rule_id": "rule.production-promotion",
-      "kind": "hard",
-      "scopes": [
-        "*"
-      ],
-      "source": "docs/system_invariants.md",
-      "quote": "Real-base authority requires an explicitly promoted policy, bounded action scope, observable results, and rollback. Training success alone grants no production authority."
-    },
-    {
-      "rule_id": "rule.measured-completion",
-      "kind": "hard",
-      "scopes": [
-        "*"
-      ],
-      "source": "docs/system_invariants.md",
-      "quote": "A running episode is not successful until its measured outcome is recorded."
-    },
-    {
       "rule_id": "mission.goal",
       "kind": "soft",
       "scopes": [
-        "mission.goal"
+        "mission.build",
+        "mission.research"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Start from the mod_playground starter kit and reach advanced circuits, then self-expand and meet all item needs."
@@ -74,7 +48,21 @@
         "mission.mine"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "First priority: iron and copper starter mines and furnaces; stone and the mall follow."
+      "quote": "First priority: iron and copper starter mines and furnaces; stone and the mall follow.",
+      "prefer": [
+        {
+          "when": {
+            "need": "item:iron-*"
+          },
+          "weight": 1.5
+        },
+        {
+          "when": {
+            "need": "item:copper-*"
+          },
+          "weight": 1.5
+        }
+      ]
     },
     {
       "rule_id": "mission.starter-mall",
@@ -146,7 +134,21 @@
         "mission.mall"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Use substations only in mine and mall areas, where one substation powers many machines and there is space for it."
+      "quote": "Use substations only in mine and mall areas, where one substation powers many machines and there is space for it.",
+      "prefer": [
+        {
+          "when": {
+            "power": "e"
+          },
+          "weight": 2.0
+        },
+        {
+          "when": {
+            "power": "s"
+          },
+          "weight": 0.6
+        }
+      ]
     },
     {
       "rule_id": "mission.medium-poles",
@@ -155,7 +157,15 @@
         "mission.power"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Elsewhere use medium electric poles: one costs about 12 iron plates and 1 copper plate, while a substation costs about 60 iron plates, 28 copper plates and 10 plastic."
+      "quote": "Elsewhere use medium electric poles: one costs about 12 iron plates and 1 copper plate, while a substation costs about 60 iron plates, 28 copper plates and 10 plastic.",
+      "prefer": [
+        {
+          "when": {
+            "power": "m"
+          },
+          "weight": 1.3
+        }
+      ]
     },
     {
       "rule_id": "mission.big-pole-relay",
@@ -164,7 +174,15 @@
         "mission.power"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables."
+      "quote": "For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables.",
+      "prefer": [
+        {
+          "when": {
+            "power": "b"
+          },
+          "weight": 1.5
+        }
+      ]
     },
     {
       "rule_id": "mission.land-plan",
@@ -174,6 +192,96 @@
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone."
+    },
+    {
+      "rule_id": "mission.serve-bottleneck",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Serve the bottleneck: prefer actions on items in the current bottleneck chain, deepest unmet input first.",
+      "prefer": [
+        {
+          "when": {
+            "in_bottleneck": true
+          },
+          "weight": 2.0
+        },
+        {
+          "when": {
+            "deepest_bottleneck": true
+          },
+          "weight": 2.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.make-construction-items",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.",
+      "prefer": [
+        {
+          "when": {
+            "need": "stock:*"
+          },
+          "weight": 2.5
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.wait-rule",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Wait only when nothing useful can be built, or while construction and deliveries are still arriving.",
+      "prefer": [
+        {
+          "when": {
+            "family": "wait",
+            "others_available": true
+          },
+          "weight": 0.25
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.permanent-intermediates",
+      "kind": "soft",
+      "scopes": [
+        "mission.mall"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Keep permanent producers for heavily used intermediates: iron gear wheels, iron sticks, copper cable and electronic circuits.",
+      "prefer": [
+        {
+          "when": {
+            "family": "assemble",
+            "product": [
+              "iron-gear-wheel",
+              "iron-stick",
+              "copper-cable",
+              "electronic-circuit"
+            ]
+          },
+          "weight": 1.5
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.steel-for-poles",
+      "kind": "soft",
+      "scopes": [
+        "mission.steel"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Medium poles, big poles and assembling machine 2 need steel; start steel smelting before pole stock runs low."
     }
   ]
 }
