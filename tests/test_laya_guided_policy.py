@@ -70,3 +70,12 @@ def test_context_keeps_rules_relevant_to_this_menu_when_too_many_apply(monkeypat
              {"rule_id": "r.match", "kind": "soft"}, {"rule_id": "rule.hard", "kind": "hard"}]
     kept, omitted = runner.select_guidelines(rules, state([]), menu(), limit=3)
     assert [r["rule_id"] for r in kept] == ["rule.hard", "r.match", "r.text"] and omitted == ["r.nomatch"]
+
+
+def test_phase_goal_items_outweigh_stock_chain_items():
+    s = state(["mission.phase-goals-first"])
+    s["observation_digest"]["factory_status"]["needs"] = [
+        {"item": "copper-ore", "required": 0.5}, {"item": "requester-chest", "required": 0.01, "goal": 0.0}]
+    rows = {r["option_id"]: r for r in GuidedPolicy(0, preferences=load_preferences()).distribution(s, menu())}
+    assert rows["mine.a"]["features"]["goal_need"] and rows["mine.a"]["weight"] == 3.0
+    assert not rows["asm.c"]["features"]["goal_need"]

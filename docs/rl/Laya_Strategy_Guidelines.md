@@ -24,6 +24,8 @@ Use only the starter kit and items the factory manufactures; never borrow player
 
 ## Deciding
 
+Serve the current phase's goals first: actions on items its goals need come before stock and other needs.
+
 Serve the bottleneck: prefer actions on items in the current bottleneck chain, deepest unmet input first.
 
 Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.

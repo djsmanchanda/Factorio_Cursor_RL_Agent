@@ -194,6 +194,23 @@
       "quote": "Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone."
     },
     {
+      "rule_id": "mission.phase-goals-first",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Serve the current phase's goals first: actions on items its goals need come before stock and other needs.",
+      "prefer": [
+        {
+          "when": {
+            "goal_need": true
+          },
+          "weight": 3.0
+        }
+      ]
+    },
+    {
       "rule_id": "mission.serve-bottleneck",
       "kind": "soft",
       "scopes": [

@@ -40,6 +40,8 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     chains = [chain.split(" <- ") for chain in status.get("bottleneck") or []]
     in_chain = {link.split(":")[0] for chain in chains for link in chain}
     deepest = {chain[-1].split(":")[0] for chain in chains if chain}
+    # Items the phase goals need (goal rate > 0), as opposed to stock-chain-only items.
+    goal_items = {row["item"] for row in status.get("needs") or [] if row.get("goal", row.get("required") or 0) > 0}
     phase = (state.get("observation_digest") or {}).get("mission_phase")
     conditions = {n["need_id"]: n.get("condition") for n in menu["needs"]}
     others = any(o["family"] != "wait" for o in menu["options"])
@@ -55,6 +57,7 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "need": need, "family": option["family"], "power": option.get("power"), "product": option.get("product"),
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
             "deepest_bottleneck": item in deepest, "others_available": others,
+            "goal_need": item in goal_items,
             # A bill that would use more than half of what is left of any item spends scarce stock.
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),
             "bill_items": sum((option.get("bill") or {}).values())}

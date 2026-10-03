@@ -397,7 +397,8 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
     apply_to_state(state, board)
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
-    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=16)
+    # Fetch every rule in scope; select_guidelines keeps the 15 most relevant to this decision.
+    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=32)
     rules, omitted = select_guidelines(guidance["guidelines"], state, menu, limit=15)  # +1 adapter rule <= 16
     state["guidelines"] = state["guidelines"] + [
         {"rule_id": rule["rule_id"], "kind": rule["kind"], "statement": rule["statement"]} for rule in rules]

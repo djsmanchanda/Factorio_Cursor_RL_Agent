@@ -44,8 +44,8 @@ def load_guideline_context(
         raise LayaKnowledgeError(f"cannot read guideline catalog: {error}") from error
     if catalog.get("version") != "1.0.0" or not isinstance(catalog.get("rules"), list):
         raise LayaKnowledgeError("unsupported guideline catalog")
-    if not 1 <= max_rules <= 16:
-        raise LayaKnowledgeError("max_rules must be between 1 and 16")
+    if not 1 <= max_rules <= 32:
+        raise LayaKnowledgeError("max_rules must be between 1 and 32")
     requested = set(scopes)
     hard, soft, sources, seen = [], [], {}, set()
     for raw in catalog["rules"]:
