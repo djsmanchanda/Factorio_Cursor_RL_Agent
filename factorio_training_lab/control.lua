@@ -5,10 +5,12 @@ local shared = require("training_shared")
 local world = require("episode_world")
 local measurement = require("episode_measurement")
 local plan_execution = require("plan_execution")
+local smelting_fixture = require("smelting_fixture")
 
 world.register_commands()
 measurement.register_commands()
 plan_execution.register_commands()
+smelting_fixture.register()
 
 script.on_init(function()
   shared.ensure_storage()
@@ -21,6 +23,7 @@ end)
 -- Each episode owns its 60-tick cadence; global clock phase must not change
 -- the measured window or reward an initial wait that shifts later polling.
 script.on_event(defines.events.on_tick, function(event)
+  smelting_fixture.tick()
   measurement.sample_all(event.tick)
   if event.tick % 600 == 0 then
     world.cleanup_orphan_surfaces(event.tick)

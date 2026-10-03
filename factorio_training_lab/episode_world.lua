@@ -373,6 +373,9 @@ end
 
 local function owned_training_surfaces(state, tick)
   local owned = {}
+  local fixture = storage.smelting_fixture
+  if fixture and fixture.owner == "factorio_training_lab.smelting_fixture"
+      and game.surfaces[fixture.surface] then owned[fixture.surface] = true end
   for _, episode in pairs(state.episodes) do
     -- Terminal records remain in storage for evidence, but no longer own a
     -- live surface. Keep only states that can still receive worker commands.
@@ -391,6 +394,9 @@ end
 
 local function owned_training_forces(state, tick)
   local owned = {}
+  local fixture = storage.smelting_fixture
+  if fixture and fixture.owner == "factorio_training_lab.smelting_fixture"
+      and game.surfaces[fixture.surface] then owned[fixture.force] = true end
   for _, episode in pairs(state.episodes) do
     local active = episode.status == "ready"
         or episode.status == "running"
