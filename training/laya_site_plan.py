@@ -21,9 +21,11 @@ import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from planners.plan_validation import ENTITY_FOOTPRINTS
+from orchestrator.laya_operations import sha256_hash
+from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from planners.zoning_geometry import Rect
 from training.laya_power import POLES
+from training.laya_saved_world import ghost
 
 VERSION = "laya-site-plan-v1"
 SAMPLE_SPACING = 4.0  # saved-world resource survey grid
@@ -117,6 +119,49 @@ def plan_options(facts: Mapping) -> list[dict]:
                                    f"ore patches and {sum(z['purpose'].startswith('smelt:') for z in zones)} smelting strips",
                         "site_plan": plan, "need_id": "plan:site"})
     return options
+
+
+# Same furnace cell as the saved-world generator: requester -> inserter -> furnace -> inserter -> provider.
+SMELT_INPUTS = {"iron-plate": ("iron-ore", 20), "copper-plate": ("copper-ore", 20), "stone-brick": ("stone", 40)}
+
+
+def zone_smelt_candidates(facts: Mapping, plan: Mapping, plates: set[str]) -> list[dict]:
+    """Furnace cells placed inside each needed plate's smelting strip.
+
+    The plan decides where smelting goes; this enumerates every site in the
+    strip that a powered roboport can build.  Power is added by laya_power.
+    """
+    ports = [p for p in facts["ports"] if p["energy"] > 0]
+    candidates = []
+    for zone in plan["zones"]:
+        kind, _, plate = zone["purpose"].partition(":")
+        if kind != "smelt" or plate not in plates or plate not in SMELT_INPUTS:
+            continue
+        x1, y1, x2, y2 = zone["rect"]
+        ore, count = SMELT_INPUTS[plate]
+        for cx in range(math.ceil(x1 + 3.5), math.floor(x2 - 3.5) + 1, 8):
+            for cy in range(math.ceil(y1 + 1.5), math.floor(y2 - 1.5) + 1, 4):
+                x, y = cx + .5, cy + .5
+                port = next((p for p in ports if max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"]))
+                             <= p["construction_radius"] - 6), None)
+                if port is None:
+                    continue
+                chest = ghost("requester-chest", x - 3, y)
+                chest["logistic_requests"] = [{"name": ore, "count": count}]
+                actions = [chest, ghost("inserter", x - 2, y, "west"), ghost("electric-furnace", x, y),
+                           ghost("inserter", x + 2, y, "west"), ghost("passive-provider-chest", x + 3, y)]
+                build = {"surface": "nauvis", "force": "player", "atomic": True,
+                         "phases": [{"name": "saved-world-smelt", "actions": actions}]}
+                try:
+                    validate_build_plan(build)
+                except ValueError:
+                    continue
+                anchor = min((p["position"] for p in ports if p["network"] == port["network"]), key=lambda q: (q["x"], q["y"]))
+                digest = sha256_hash({"plan": build, "network_anchor": anchor})
+                candidates.append({"option_id": f"smelt.z{digest[7:19]}", "family": "smelt", "product": plate,
+                                   "summary": f"Make {plate} ({x},{y}) in {zone['zone_id']}", "plan": build,
+                                   "network": port["network"], "network_anchor": anchor})
+    return candidates
 
 
 def _size(entity: str) -> float:

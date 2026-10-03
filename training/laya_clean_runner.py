@@ -32,7 +32,8 @@ from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_power import power_variants
-from training.laya_site_plan import base_zones, draw_command, load_plan, plan_options, reservation_reason, save_plan
+from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason, save_plan,
+                                    zone_smelt_candidates)
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -176,6 +177,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rng = random.Random(seed)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     proposed = _compile(facts, unmet, seed)
+    if site_plan:
+        proposed += zone_smelt_candidates(facts, site_plan, unmet)
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
         need = need_of(candidate)

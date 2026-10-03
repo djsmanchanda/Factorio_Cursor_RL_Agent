@@ -42,3 +42,15 @@ def test_mall_site_is_a_choice_and_reservations_protect_land():
     assert reservation_reason(plan, build("assemble", "iron-gear-wheel", [("assembling-machine-1", mx, my)])) is None
     assert reservation_reason(plan, build("assemble", "iron-gear-wheel", [("assembling-machine-1", mx + 40, my + 40)])) == "outside_mall_zone"
     assert reservation_reason(plan, build("smelt", "iron-plate", [("electric-furnace", mx, my)])) == "reserved:mall"
+
+
+def test_furnace_sites_come_from_the_plates_smelting_strip():
+    from training.laya_site_plan import zone_smelt_candidates
+    world = {**facts(), "ports": [{"position": {"x": 0, "y": 0}, "energy": 1, "network": "1", "construction_radius": 55}]}
+    plan = plan_options(world)[0]["site_plan"]
+    candidates = zone_smelt_candidates(world, plan, {"iron-plate"})
+    assert candidates and {c["product"] for c in candidates} == {"iron-plate"}
+    for c in candidates:
+        assert reservation_reason(plan, c) is None  # Every generated cell sits inside its own strip.
+        assert c["plan"]["phases"][0]["actions"][0]["logistic_requests"] == [{"name": "iron-ore", "count": 20}]
+    assert zone_smelt_candidates(world, plan, set()) == []  # Only plates a need asks for get cells.
