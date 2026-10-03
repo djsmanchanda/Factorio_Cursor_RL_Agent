@@ -209,20 +209,25 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed += ring_expand_candidates(facts, site_plan)
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
-    if site_plan:
-        # Land check on the build itself before sampling (the generator's own relays are replaced later).
+
+    def on_free_land(candidates: list[dict], key_of: Callable[[dict], str]) -> list[dict]:
+        """Land check on the build itself before sampling (the generator's relays are replaced later)."""
+        if not site_plan:
+            return candidates
         kept = []
-        for candidate in proposed:
+        for candidate in candidates:
             detail: list = []
             reason = reservation_reason(site_plan, {**candidate, "plan": _build_only(candidate)}, detail)
             if reason:
-                key = _need_key(facts, candidate, unmet)
+                key = key_of(candidate)
                 pre_rejected[key][reason] += 1
                 if len(land_examples[key]) < 3:  # Exact rejected entities for the journal.
                     land_examples[key].append(detail[0])
             else:
                 kept.append(candidate)
-        proposed = kept
+        return kept
+
+    proposed = on_free_land(proposed, lambda c: _need_key(facts, c, unmet))
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
         need = need_of(candidate)
@@ -233,9 +238,6 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rejected: Counter = Counter()
     shortfalls: Counter = Counter()
     reasons: dict[str, Counter] = defaultdict(Counter)
-    for need, counts in pre_rejected.items():
-        reasons[need].update(counts)
-        rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
 
     def check(groups):
         expanded = {}
@@ -277,11 +279,15 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     stock_groups: dict[str, list] = defaultdict(list)
-    for candidate in _compile(facts, set(shortfalls), seed) if shortfalls else ():
-        if candidate["family"] == "assemble" and candidate.get("product") in shortfalls:
-            stock_groups[f"stock:{candidate['product']}"].append(candidate)
+    stock = [c for c in (_compile(facts, set(shortfalls), seed) if shortfalls else ())
+             if c["family"] == "assemble" and c.get("product") in shortfalls]
+    for candidate in on_free_land(stock, lambda c: f"stock:{c['product']}"):
+        stock_groups[f"stock:{candidate['product']}"].append(candidate)
     legal.update(check(stock_groups))
 
+    for need, counts in pre_rejected.items():
+        reasons[need].update(counts)
+        rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
     conditions = {f"item:{n['item']}": n["condition"] for n in board["needs"]}
     needs, options = [], []
     for need in sorted(legal):
@@ -294,7 +300,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     options.extend(waits)
     needs.append({"need_id": "wait", "condition": "available", "options": [w["option_id"] for w in waits]})
     # Needs with no legal option, and why: observation, not a remedy.
-    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups)) if need not in legal}
+    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected))
+               if need not in legal}
     for item in sorted(unmet):
         if f"item:{item}" not in by_need:
             blocked[f"item:{item}"] = {"no_candidate": 1}

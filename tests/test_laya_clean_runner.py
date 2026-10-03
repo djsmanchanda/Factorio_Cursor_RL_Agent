@@ -214,3 +214,18 @@ def test_board_rates_use_a_rolling_window_not_one_bursty_sample():
     assert rolled["window_ticks"] == 7200 and rolled["production"]["iron-plate"]["per_second"] == 1.0
     assert rolling_measurement(samples[:1]) is None
     assert rolling_measurement(samples[:2])["window_ticks"] == 1800  # Shorter history uses what exists.
+
+
+def test_stock_items_are_sampled_from_the_mall_zone_only():
+    from training.laya_site_plan import plan_options, reservation_reason
+    world = facts()
+    plan = plan_options(world)[0]["site_plan"]
+    def validate(candidates):  # Gear builds lack requesters, so requester chests become a stock need.
+        return {c["option_id"]: ({"reason": "item_shortfall:requester-chest"} if c.get("product") == "iron-gear-wheel"
+                                 else {"reason": None, "bill": {"assembling-machine-1": 1, "electric-furnace": 1,
+                                                                "electric-mining-drill": 1, "roboport": 1}})
+                for c in candidates}
+    menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validate, seed=5, site_plan=plan)
+    by_id = {o["option_id"]: o for o in menu["options"]}
+    stock = next(n for n in menu["needs"] if n["need_id"] == "stock:requester-chest")
+    assert stock["options"] and all(reservation_reason(plan, by_id[o]) is None for o in stock["options"])
