@@ -299,6 +299,23 @@
           "weight": 0.4
         }
       ]
+    },
+    {
+      "rule_id": "mission.conserve-scarce",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Conserve scarce starter items: prefer builds that leave enough poles, chests and inserters for the next builds; a build that spends most of what is left of an item needs a strong reason.",
+      "prefer": [
+        {
+          "when": {
+            "scarce": true
+          },
+          "weight": 0.35
+        }
+      ]
     }
   ]
 }

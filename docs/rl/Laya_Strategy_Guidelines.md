@@ -28,6 +28,8 @@ Serve the bottleneck: prefer actions on items in the current bottleneck chain, d
 
 Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.
 
+Conserve scarce starter items: prefer builds that leave enough poles, chests and inserters for the next builds; a build that spends most of what is left of an item needs a strong reason.
+
 Wait only when nothing useful can be built, or while construction and deliveries are still arriving.
 
 Extend robot coverage toward resources and sites a current need requires; coverage that serves no need spends poles and roboports for nothing.
@@ -83,3 +85,8 @@ trained Laya checkpoint exists, the guided policy multiplies the weights of
 every rule Laya sees for that decision, keeps an exploration floor, and
 samples. Edit the sentence and its preferences to change behavior; no code
 change is needed. Every decision records which rules matched each option.
+
+When a phase has more rules than fit in one decision (15 plus the adapter's
+rule), Laya is shown hard rules first, then rules whose preferences match a
+current option, then text-only rules; rules that match nothing on this menu
+are left out and listed in `observation_digest.guidelines_omitted`.

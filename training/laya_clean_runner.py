@@ -34,6 +34,7 @@ from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
+from training.laya_guided_policy import load_preferences, matches, option_features
 from training.laya_power import POLES, power_variants
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan, zone_smelt_candidates)
@@ -343,6 +344,30 @@ class ExplorationPolicy:
                 "probability": 1.0 / len(groups) / len(need["options"])}
 
 
+def select_guidelines(rules: list[dict], state: Mapping, menu: Mapping, limit: int) -> tuple[list[dict], list[str]]:
+    """Keep the rules most relevant to this decision when the phase has more than fit.
+
+    Order: hard rules, rules whose preferences match a current option, text-only
+    rules, then rules that match nothing on this menu.  Ties keep catalog order.
+    """
+    if len(rules) <= limit:
+        return rules, []
+    preferences = load_preferences()
+    features = list(option_features(state, menu).values())
+
+    def rank(item: tuple[int, dict]) -> tuple[int, int]:
+        index, rule = item
+        if rule["kind"] == "hard":
+            return 0, index
+        prefs = preferences.get(rule["rule_id"])
+        if not prefs:
+            return 2, index
+        return (1 if any(matches(p["when"], f) for p in prefs for f in features) else 3), index
+
+    ranked = [rule for _, rule in sorted(enumerate(rules), key=rank)]
+    return ranked[:limit], [rule["rule_id"] for rule in ranked[limit:]]
+
+
 def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, run_id: str,
                 model_ref: Mapping, history: Sequence[Mapping], measurement: Mapping | None) -> dict:
     """Laya decision state: saved-world facts plus status board and mission guidelines."""
@@ -351,10 +376,11 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
     apply_to_state(state, board)
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
-    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=15)  # +1 adapter rule <= 16
+    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=16)
+    rules, omitted = select_guidelines(guidance["guidelines"], state, menu, limit=15)  # +1 adapter rule <= 16
     state["guidelines"] = state["guidelines"] + [
-        {"rule_id": rule["rule_id"], "kind": rule["kind"], "statement": rule["statement"]}
-        for rule in guidance["guidelines"]]
+        {"rule_id": rule["rule_id"], "kind": rule["kind"], "statement": rule["statement"]} for rule in rules]
+    state["observation_digest"]["guidelines_omitted"] = omitted
     # Need tags travel with each option so a model can learn need -> action.
     need_index = {option_id: n["need_id"] for n in menu["needs"] for option_id in n["options"]}
     for option in state["options"]:

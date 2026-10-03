@@ -43,6 +43,10 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     phase = (state.get("observation_digest") or {}).get("mission_phase")
     conditions = {n["need_id"]: n.get("condition") for n in menu["needs"]}
     others = any(o["family"] != "wait" for o in menu["options"])
+    stock: dict[str, int] = {}
+    for network in ((state.get("observation_digest") or {}).get("saved_world") or {}).get("provider_stock", {}).values():
+        for name, count in network.items():
+            stock[name] = stock.get(name, 0) + int(count)
     features = {}
     for option in menu["options"]:
         need = option.get("need_id", "wait")
@@ -50,7 +54,10 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
         features[option["option_id"]] = {
             "need": need, "family": option["family"], "power": option.get("power"), "product": option.get("product"),
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
-            "deepest_bottleneck": item in deepest, "others_available": others}
+            "deepest_bottleneck": item in deepest, "others_available": others,
+            # A bill that would use more than half of what is left of any item spends scarce stock.
+            "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in (option.get("bill") or {}).items()),
+            "bill_items": sum((option.get("bill") or {}).values())}
     return features
 
 

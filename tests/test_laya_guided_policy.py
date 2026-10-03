@@ -49,3 +49,24 @@ def test_matcher_and_the_mission_catalog_preferences():
     assert not matches({"others_available": True}, {"others_available": False})
     prefs = load_preferences()
     assert {"mission.serve-bottleneck", "mission.wait-rule", "mission.make-construction-items"} <= set(prefs)
+
+
+def test_scarce_flags_bills_that_spend_most_of_what_is_left():
+    from training.laya_guided_policy import option_features
+    m = menu()
+    m["options"][1]["bill"] = {"medium-electric-pole": 8}
+    m["options"][2]["bill"] = {"medium-electric-pole": 2}
+    s = state([])
+    s["observation_digest"]["saved_world"] = {"provider_stock": {"1": {"medium-electric-pole": 10}}}
+    f = option_features(s, m)
+    assert f["mine.a"]["scarce"] and not f["smelt.b"]["scarce"] and f["mine.a"]["bill_items"] == 8
+
+
+def test_context_keeps_rules_relevant_to_this_menu_when_too_many_apply(monkeypatch):
+    import training.laya_clean_runner as runner
+    monkeypatch.setattr(runner, "load_preferences", lambda: {"r.match": [{"when": {"need": "stock:*"}, "weight": 2}],
+                                                             "r.nomatch": [{"when": {"need": "plan:*"}, "weight": 2}]})
+    rules = [{"rule_id": "r.nomatch", "kind": "soft"}, {"rule_id": "r.text", "kind": "soft"},
+             {"rule_id": "r.match", "kind": "soft"}, {"rule_id": "rule.hard", "kind": "hard"}]
+    kept, omitted = runner.select_guidelines(rules, state([]), menu(), limit=3)
+    assert [r["rule_id"] for r in kept] == ["rule.hard", "r.match", "r.text"] and omitted == ["r.nomatch"]
