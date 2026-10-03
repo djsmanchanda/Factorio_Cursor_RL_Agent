@@ -46,7 +46,10 @@ def test_menu_tags_unmet_needs_and_turns_item_shortfalls_into_stock_needs():
     board = compile_status(facts(), phase("C1")["targets"])
     menu = compile_menu(facts(), board, validator(shortfall_for={"iron-gear-wheel"}), seed=1)
     needs = {n["need_id"]: n for n in menu["needs"]}
-    assert {"item:iron-ore", "item:iron-plate", "item:copper-cable", "coverage", "wait"} <= set(needs)
+    assert {"item:copper-cable", "coverage", "wait"} <= set(needs)
+    # Iron comes from a direct starter, which needs a site plan; generic drill-to-chest and
+    # requester-fed furnaces are not offered, so without a plan iron is honestly blocked.
+    assert "item:iron-plate" not in needs and menu["blocked"]["item:iron-plate"] == {"no_candidate": 1}
     assert "item:iron-gear-wheel" not in needs  # every gear site lacked a funded requester
     assert needs["stock:requester-chest"]["options"] and menu["shortfalls"] == {"requester-chest": menu["rejected"]["item_shortfall"]}
     assert all(len(n["options"]) <= 2 for n in menu["needs"])
@@ -148,7 +151,7 @@ def test_already_built_options_are_pruned_and_blocked_needs_say_why():
     assert "coverage" not in {n["need_id"] for n in menu["needs"]}
     assert set(menu["blocked"]["coverage"]) == {"no_op"}
     assert set(menu["blocked"]["item:iron-gear-wheel"]) == {"item_shortfall:requester-chest"}
-    assert menu["blocked"]["item:stone"] == {"no_candidate": 1}
+    assert menu["blocked"]["item:stone-brick"] == {"no_candidate": 1}
 
 
 def test_live_world_waits_on_the_running_clock_without_pausing():

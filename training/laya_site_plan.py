@@ -23,6 +23,7 @@ from pathlib import Path
 
 from orchestrator.laya_operations import sha256_hash
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
+from orchestrator.resource_patches import MINIMUM_NEW_PATCH_RESOURCE
 from planners.zoning_geometry import Rect
 from training.laya_power import POLES
 from training.laya_saved_world import ghost
@@ -30,19 +31,31 @@ from training.laya_saved_world import ghost
 VERSION = "laya-site-plan-v1"
 SAMPLE_SPACING = 4.0  # saved-world resource survey grid
 SMELTED = {"iron-ore": "iron-plate", "copper-ore": "copper-plate", "stone": "stone-brick"}
-STRIP_WIDTH = 12.0
+# A basic six-furnace module (planners/smelter_block, variant "basic") is 15 tiles wide;
+# strips hold two module columns (2*12+3) where space allows, else one column.
+STRIP_WIDTHS = (27.0, 15.0)
+CORRIDOR_WIDTH = 5.0  # reserved for future belts on both sides of a strip
+SMALL_PATCH_RADIUS = 250.0
+SMALL_PATCH_SAMPLES = 16  # survey cells (~256 tiles); smaller patches cannot host module-fed mine lines  # small patches are used only if no larger one lies within this of the base
+CORRIDOR_ENTITIES = frozenset({"transport-belt", "underground-belt", "splitter", "fast-transport-belt",
+                               "medium-electric-pole", "big-electric-pole"})
 MALL_SITE_OFFSETS = ((10, 10), (10, -10), (-10, 10), (-10, -10))  # the generator's module sites per port
 MALL_EXTENT = (-7.0, -6.0, 10.0, 16.0)  # three quad modules around a site
 
 
 def survey_patches(facts: Mapping) -> list[dict]:
-    """Cluster the survey samples of each resource into patches (8-neighbour on the sample grid)."""
-    by_resource: dict[str, list[tuple[float, float]]] = {}
+    """Cluster the survey samples of each resource into patches (8-neighbour on the sample grid).
+
+    ``amount`` estimates the patch total: each sample stands for a 4x4 area.
+    """
+    by_resource: dict[str, list[tuple[float, float, float]]] = {}
     for site in facts["resources"]:
-        by_resource.setdefault(site["item"], []).append((site["position"]["x"], site["position"]["y"]))
+        by_resource.setdefault(site["item"], []).append(
+            (site["position"]["x"], site["position"]["y"], float(site.get("remaining", 0))))
     patches = []
     for resource in sorted(by_resource):
-        remaining = set(by_resource[resource])
+        amounts = {(x, y): a for x, y, a in by_resource[resource]}
+        remaining = set(amounts)
         while remaining:
             seed = min(remaining, key=lambda p: (p[1], p[0]))
             remaining.remove(seed)
@@ -56,22 +69,59 @@ def survey_patches(facts: Mapping) -> list[dict]:
             xs, ys = [p[0] for p in members], [p[1] for p in members]
             half = SAMPLE_SPACING / 2
             patches.append({"resource": resource, "samples": len(members),
+                            "amount": round(sum(amounts[m] for m in members) * SAMPLE_SPACING ** 2),
                             "rect": [min(xs) - half, min(ys) - half, max(xs) + half, max(ys) + half]})
     return patches
+
+
+def _distance_to(rect: Rect, point: tuple[float, float]) -> float:
+    dx = max(rect.min_x - point[0], 0, point[0] - rect.max_x)
+    dy = max(rect.min_y - point[1], 0, point[1] - rect.max_y)
+    return math.hypot(dx, dy)
+
+
+def _large(patch: Mapping) -> bool:
+    """The deterministic new-site amount floor and room for mine lines."""
+    return patch["amount"] >= MINIMUM_NEW_PATCH_RESOURCE and patch["samples"] >= SMALL_PATCH_SAMPLES
+
+
+def usable_patches(patches: list[dict], base: tuple[float, float]) -> list[dict]:
+    """Patches worth planning: at least the deterministic new-site minimum, unless a resource
+    has no such patch within SMALL_PATCH_RADIUS of the base (then its small patches stay)."""
+    kept = []
+    for patch in patches:
+        if _large(patch):
+            kept.append(patch)
+            continue
+        larger_near = any(p["resource"] == patch["resource"] and _large(p)
+                          and _distance_to(_rect(p["rect"]), base) <= SMALL_PATCH_RADIUS for p in patches)
+        if not larger_near:
+            kept.append(patch)
+    return kept
 
 
 def _rect(values: Sequence[float]) -> Rect:
     return Rect(*values)
 
 
-def _strips(patch_rect: Rect, base: tuple[float, float]) -> list[Rect]:
-    """Strips along each patch side, the side facing the base first."""
-    r, w = patch_rect, STRIP_WIDTH
-    sides = {"west": Rect(r.min_x - 1 - w, r.min_y, r.min_x - 1, r.max_y),
-             "east": Rect(r.max_x + 1, r.min_y, r.max_x + 1 + w, r.max_y),
-             "north": Rect(r.min_x, r.min_y - 1 - w, r.max_x, r.min_y - 1),
-             "south": Rect(r.min_x, r.max_y + 1, r.max_x, r.max_y + 1 + w)}
-    return sorted(sides.values(), key=lambda strip: math.dist(strip.centre, base))
+def _strip_and_corridors(patch: Rect, side: str, width: float) -> tuple[Rect, list[Rect]]:
+    """A smelting strip on one patch side, with belt corridors between it and the patch and beyond it."""
+    c = CORRIDOR_WIDTH
+    if side == "west":
+        return (Rect(patch.min_x - c - width, patch.min_y, patch.min_x - c, patch.max_y),
+                [Rect(patch.min_x - c, patch.min_y, patch.min_x, patch.max_y),
+                 Rect(patch.min_x - 2 * c - width, patch.min_y, patch.min_x - c - width, patch.max_y)])
+    if side == "east":
+        return (Rect(patch.max_x + c, patch.min_y, patch.max_x + c + width, patch.max_y),
+                [Rect(patch.max_x, patch.min_y, patch.max_x + c, patch.max_y),
+                 Rect(patch.max_x + c + width, patch.min_y, patch.max_x + 2 * c + width, patch.max_y)])
+    if side == "north":
+        return (Rect(patch.min_x, patch.min_y - c - width, patch.max_x, patch.min_y - c),
+                [Rect(patch.min_x, patch.min_y - c, patch.max_x, patch.min_y),
+                 Rect(patch.min_x, patch.min_y - 2 * c - width, patch.max_x, patch.min_y - c - width)])
+    return (Rect(patch.min_x, patch.max_y + c, patch.max_x, patch.max_y + c + width),
+            [Rect(patch.min_x, patch.max_y, patch.max_x, patch.max_y + c),
+             Rect(patch.min_x, patch.max_y + c + width, patch.max_x, patch.max_y + 2 * c + width)])
 
 
 def _base(facts: Mapping) -> tuple[float, float]:
@@ -79,44 +129,54 @@ def _base(facts: Mapping) -> tuple[float, float]:
     return port["position"]["x"], port["position"]["y"]
 
 
-def base_zones(facts: Mapping) -> list[dict]:
-    """Ore zones for every patch, smelting strips beside the nearest iron/copper/stone patch."""
+def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
+    """Ore zones for usable patches; a module-wide smelting strip with belt corridors beside the
+    nearest iron, copper and stone patch, on the side facing the base where it fits."""
     base = _base(facts)
     zones = []
-    patches = survey_patches(facts)
+    patches = usable_patches(survey_patches(facts), base)
     for index, patch in enumerate(patches):
-        zones.append({"zone_id": f"ore-{index}", "purpose": f"ore:{patch['resource']}", "rect": patch["rect"]})
-    ore_rects = [_rect(z["rect"]) for z in zones]
+        zones.append({"zone_id": f"ore-{index}", "purpose": f"ore:{patch['resource']}", "rect": patch["rect"],
+                      "amount": patch["amount"]})
     for resource, plate in SMELTED.items():
         own = [p for p in patches if p["resource"] == resource]
         if not own:
             continue
-        nearest = min(own, key=lambda p: math.dist(_rect(p["rect"]).centre, base))
-        taken = ore_rects + [_rect(z["rect"]) for z in zones if z["purpose"].startswith("smelt:")]
-        strip = next((s for s in _strips(_rect(nearest["rect"]), base) if not any(s.overlaps(r) for r in taken)), None)
-        if strip is None:
-            continue  # Every side is taken; that line must be planned elsewhere.
+        nearest = _rect(min(own, key=lambda p: _distance_to(_rect(p["rect"]), base))["rect"])
+        taken = [_rect(z["rect"]) for z in zones] + list(avoid)
+        sides = sorted(("west", "east", "north", "south"),
+                       key=lambda side: math.dist(_strip_and_corridors(nearest, side, STRIP_WIDTHS[0])[0].centre, base))
+        choice = next(((strip, corridors) for width in STRIP_WIDTHS for side in sides
+                       for strip, corridors in [_strip_and_corridors(nearest, side, width)]
+                       if not any(r.overlaps(t) for r in (strip, *corridors) for t in taken)), None)
+        if choice is None:
+            continue  # No side fits a module column; that line must be planned elsewhere.
+        strip, corridors = choice
         zones.append({"zone_id": f"smelt-{plate}", "purpose": f"smelt:{plate}",
                       "rect": [strip.min_x, strip.min_y, strip.max_x, strip.max_y]})
+        for number, corridor in enumerate(corridors):
+            zones.append({"zone_id": f"corridor-{plate}-{number}", "purpose": "corridor",
+                          "rect": [corridor.min_x, corridor.min_y, corridor.max_x, corridor.max_y]})
     return zones
 
 
 def plan_options(facts: Mapping) -> list[dict]:
-    """Mall-site alternatives around the starter roboport that clear every other zone."""
-    zones = base_zones(facts)
-    rects = [_rect(z["rect"]) for z in zones]
+    """Mall-site alternatives around the starter roboport; each plan's strips avoid its mall."""
+    ore_rects = [_rect(z["rect"]) for z in base_zones(facts) if z["purpose"].startswith("ore:")]
     bx, by = _base(facts)
     options = []
     for dx, dy in MALL_SITE_OFFSETS:
         sx, sy = math.floor(bx + dx) + .5, math.floor(by + dy) + .5
         mall = Rect(sx + MALL_EXTENT[0], sy + MALL_EXTENT[1], sx + MALL_EXTENT[2], sy + MALL_EXTENT[3])
-        if any(mall.overlaps(r) for r in rects):
+        if any(mall.overlaps(r) for r in ore_rects):
             continue
+        zones = base_zones(facts, avoid=[mall])
         plan = {"version": VERSION, "mall_site": [sx, sy], "zones": zones + [
             {"zone_id": "mall", "purpose": "mall", "rect": [mall.min_x, mall.min_y, mall.max_x, mall.max_y]}]}
+        strips = sum(z["purpose"].startswith("smelt:") for z in zones)
         options.append({"option_id": f"plan.mall.{int(sx)}.{int(sy)}", "family": "plan",
                         "summary": f"Reserve the mall at ({sx},{sy}); protect {sum(z['purpose'].startswith('ore:') for z in zones)} "
-                                   f"ore patches and {sum(z['purpose'].startswith('smelt:') for z in zones)} smelting strips",
+                                   f"ore patches, {strips} smelting strips and their belt corridors",
                         "site_plan": plan, "need_id": "plan:site"})
     return options
 
@@ -239,9 +299,14 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
             kind, _, subject = zone["purpose"].partition(":")
             if action["entity"] in RELAY_POLES and kind in ("ore", "smelt"):
                 continue
-            if kind == "ore" and not (family == "mine" and (product == subject or own_ore)):
+            if kind == "corridor":
+                if action["entity"] in CORRIDOR_ENTITIES:
+                    continue
+                return reject("reserved:corridor", action)
+            starter_ore = family == "starter" and SMELTED.get(subject) == product  # The starter's own patch.
+            if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore):
                 return reject(f"reserved:{zone['purpose']}", action)
-            if kind == "smelt" and not ((family == "smelt" and product == subject)
+            if kind == "smelt" and not ((family in ("smelt", "starter") and product == subject)
                                         or (family == "mine" and SMELTED.get(product) == subject)):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "mall":
@@ -268,7 +333,8 @@ def save_plan(path: Path, plan: Mapping) -> None:
 
 def draw_command(plan: Mapping) -> str:
     """Lua that outlines every zone on the ground for spectators (rendering only, no game state)."""
-    colours = {"ore": "{r=0.9,g=0.6,b=0.1}", "smelt": "{r=0.9,g=0.2,b=0.2}", "mall": "{r=0.2,g=0.6,b=1}"}
+    colours = {"ore": "{r=0.9,g=0.6,b=0.1}", "smelt": "{r=0.9,g=0.2,b=0.2}", "mall": "{r=0.2,g=0.6,b=1}",
+               "corridor": "{r=0.6,g=0.6,b=0.6}"}
     parts = ["storage.laya_zone_ids=storage.laya_zone_ids or {}",
              "for _,id in pairs(storage.laya_zone_ids) do local o=rendering.get_object_by_id(id) if o then o.destroy() end end",
              "storage.laya_zone_ids={}"]

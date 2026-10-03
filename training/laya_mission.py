@@ -25,7 +25,7 @@ PHASES: tuple[dict, ...] = (
      "targets": {"iron-plate": 0.5, "copper-plate": 0.5},
      "scopes": ("mission.goal", "mission.decide", "mission.power", "mission.plan", "mission.mine", "mission.smelt")},
     {"phase_id": "C1", "name": "starter_mall",
-     "targets": {"iron-gear-wheel": 0.25, "copper-cable": 0.5, "stone": 0.25},
+     "targets": {"iron-gear-wheel": 0.25, "copper-cable": 0.5, "stone-brick": 0.25},
      "scopes": ("mission.goal", "mission.decide", "mission.power", "mission.opening", "mission.mine", "mission.mall")},
     {"phase_id": "C2", "name": "iron_copper_rollout",
      "targets": {"iron-plate": 3.0, "copper-plate": 3.0},

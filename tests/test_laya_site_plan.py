@@ -28,7 +28,10 @@ def test_mall_site_is_a_choice_and_reservations_protect_land():
     purposes = {z["purpose"] for z in plan["zones"]}
     assert {"ore:iron-ore", "ore:copper-ore", "smelt:iron-plate", "smelt:copper-plate", "mall"} <= purposes
     strip = next(z for z in plan["zones"] if z["purpose"] == "smelt:iron-plate")
-    assert strip["rect"][2] <= 37  # Iron's strip faces the base (west of the patch).
+    mall_rect = next(z["rect"] for z in plan["zones"] if z["purpose"] == "mall")
+    from planners.zoning_geometry import Rect
+    assert not Rect(*strip["rect"]).overlaps(Rect(*mall_rect))  # Strips are planned around the chosen mall.
+    assert any(z["purpose"] == "corridor" for z in plan["zones"])
     mx, my = plan["mall_site"]
     # Ore is for mining that ore only; poles and other builds may not take it.
     assert reservation_reason(plan, build("mine", "iron-ore", [("electric-mining-drill", 44.5, 4.5)])) is None
@@ -37,9 +40,13 @@ def test_mall_site_is_a_choice_and_reservations_protect_land():
     assert reservation_reason(plan, build("smelt", "iron-plate", [("substation", 44, 4)])) == "reserved:ore:iron-ore"
     assert reservation_reason(plan, build("expand", None, [("roboport", 44, 4)])) == "reserved:ore:iron-ore"
     # The smelting strip is kept for that plate's line (and its mine's output side).
-    sx = (strip["rect"][0] + strip["rect"][2]) / 2
-    assert reservation_reason(plan, build("smelt", "iron-plate", [("electric-furnace", sx, 4)])) is None
-    assert reservation_reason(plan, build("smelt", "copper-plate", [("electric-furnace", sx, 4)])) == "reserved:smelt:iron-plate"
+    sx, sy = (strip["rect"][0] + strip["rect"][2]) / 2, (strip["rect"][1] + strip["rect"][3]) / 2
+    assert reservation_reason(plan, build("smelt", "iron-plate", [("electric-furnace", sx, sy)])) is None
+    assert reservation_reason(plan, build("smelt", "copper-plate", [("electric-furnace", sx, sy)])) == "reserved:smelt:iron-plate"
+    corridor = next(z["rect"] for z in plan["zones"] if z["purpose"] == "corridor")
+    cx, cy = (corridor[0] + corridor[2]) / 2, (corridor[1] + corridor[3]) / 2
+    assert reservation_reason(plan, build("smelt", "iron-plate", [("transport-belt", cx, cy)])) is None
+    assert reservation_reason(plan, build("smelt", "iron-plate", [("electric-furnace", cx, cy)])) == "reserved:corridor"
     # Mall builds go in the mall zone; nothing else may.
     assert reservation_reason(plan, build("assemble", "iron-gear-wheel", [("assembling-machine-1", mx, my)])) is None
     assert reservation_reason(plan, build("assemble", "iron-gear-wheel", [("assembling-machine-1", mx + 40, my + 40)])) == "outside_mall_zone"
@@ -79,3 +86,28 @@ def test_mine_in_its_own_patch_is_allowed_where_another_patch_box_overlaps():
     assert reservation_reason(plan, wrong, detail) == "reserved:ore:iron-ore"
     assert detail == [{"reason": "reserved:ore:iron-ore", "entity": "electric-mining-drill",
                        "position": {"x": 30.5, "y": 0.5}}]
+
+
+def test_small_patches_are_ignored_when_a_large_one_is_near():
+    from training.laya_site_plan import usable_patches
+    big = {"resource": "copper-ore", "samples": 40, "amount": 5_000_000, "rect": [80, 0, 100, 20]}
+    small = {"resource": "copper-ore", "samples": 4, "amount": 900_000, "rect": [20, 0, 28, 8]}
+    lonely = {"resource": "stone", "samples": 3, "amount": 50_000, "rect": [-40, 0, -36, 4]}
+    kept = usable_patches([big, small, lonely], base=(0, 0))
+    assert big in kept and small not in kept and lonely in kept  # No larger stone patch, so the small one stays.
+
+
+def test_starters_follow_the_deterministic_geometry_and_only_once():
+    from training.laya_starters import starter_candidates
+    # Real survey samples sit on tile centres (x.5), where 3x3 drills can be placed.
+    ore = [{"item": "iron-ore", "position": {"x": 40.5 + 4 * i, "y": 0.5 + 4 * j}} for i in range(6) for j in range(6)]
+    world = {"resources": ore, "ports": [{"position": {"x": 30, "y": 0}, "energy": 1, "network": "1",
+                                          "construction_radius": 55, "logistic_radius": 25}]}
+    plan = {"zones": [{"zone_id": "o", "purpose": "ore:iron-ore", "rect": [38, -2, 62, 22]}]}
+    starters = starter_candidates(world, plan, {"iron-plate"}, set())
+    assert starters and all(c["family"] == "starter" and c["product"] == "iron-plate" for c in starters)
+    from collections import Counter
+    counts = Counter(a["entity"] for a in starters[0]["plan"]["phases"][0]["actions"])
+    assert counts["electric-mining-drill"] == 2 and counts["electric-furnace"] == 2 and counts["passive-provider-chest"] == 1
+    assert reservation_reason(plan, starters[0]) is None  # A starter may stand on its own patch.
+    assert starter_candidates(world, plan, {"iron-plate"}, {"iron-plate"}) == []  # Only the first build is a starter.

@@ -42,11 +42,19 @@ These come from the deterministic runner's history: of 184 runs since 2026-09-05
 
 Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone.
 
-The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode.
+Ignore small ore patches unless no larger patch of that resource lies within 250 tiles of the base; small patches get no reservation. A patch is small below the deterministic new-site minimum of 200,000 ore or about 256 tiles of ore.
+
+A smelting strip is at least one six-furnace module wide (three furnaces, 9 tiles, plus 2 for the belt and 1 spare on each side; the basic module is 15 tiles) and two module columns where space allows, with 5-tile belt corridors kept free on both sides for future belts.
+
+The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
 
 ## Opening
 
 First priority: iron and copper starter mines and furnaces; stone and the mall follow.
+
+The first mine of each resource is a direct starter, as in the deterministic runner: iron is two drills feeding two furnaces, copper one drill feeding one furnace, stone two drills feeding one furnace (two stone per brick); drills output straight into the furnace and one inserter moves the output to a provider chest.
+
+Later plate capacity comes from the approved stackable six-furnace modules (`planners/smelter_block.py`, regular-belt "basic" variant), fed by six-drill mine lines over belts, stacked in parallel or in series as demand grows.
 
 Start the mall with four assembling machines: two permanent slots for copper cable and iron gear wheels, the rest rotating to whatever item is in demand.
 

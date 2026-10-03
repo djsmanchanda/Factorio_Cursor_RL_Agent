@@ -37,7 +37,8 @@ from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
 from training.laya_power import POLES, power_variants
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
-                                    ring_expand_candidates, save_plan, zone_smelt_candidates)
+                                    ring_expand_candidates, save_plan)
+from training.laya_starters import STARTER_ORE, starter_candidates
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,7 @@ EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" 
 MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
+                  "starter": "electric-mining-drill",
                   "assemble": "assembling-machine-1"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
@@ -203,7 +205,8 @@ def _compile(facts: Mapping, products: set[str], seed: int) -> list[dict]:
 
 
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
-                 site_plan: Mapping | None = None, per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
+                 site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
+                 per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -214,8 +217,12 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rng = random.Random(seed)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     proposed = _compile(facts, unmet, seed)
-    if site_plan:
-        proposed += zone_smelt_candidates(facts, site_plan, unmet)
+    # Iron, copper and stone start with direct starters (drills feeding furnaces); the
+    # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
+    proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in STARTER_ORE)
+                                            or (c["family"] == "mine" and c.get("product") in STARTER_ORE.values()))]
+    plates = {plate for plate, ore in STARTER_ORE.items() if plate in unmet or ore in unmet}
+    proposed += starter_candidates(facts, site_plan, plates, set(starters))
     proposed += ring_expand_candidates(facts, site_plan)
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
@@ -499,9 +506,27 @@ def _built_counts(adapter: Any) -> dict[str, int]:
         except (OSError, ValueError):
             continue
         candidate = receipt.get("candidate") or {}
-        if receipt.get("status") == "observed" and candidate.get("family") in ("smelt", "assemble") and candidate.get("product"):
-            counts[candidate["product"]] += 1
+        if receipt.get("status") == "observed" and candidate.get("family") in ("smelt", "assemble", "starter") \
+                and candidate.get("product"):
+            machines = [a for a in candidate["plan"]["phases"][0]["actions"]
+                        if a["entity"] in ("electric-furnace", "assembling-machine-1", "assembling-machine-2")]
+            counts[candidate["product"]] += max(1, len(machines))
     return dict(counts)
+
+
+def _starters_submitted(adapter: Any) -> set[str]:
+    """Plates whose direct starter was submitted (built or still under construction)."""
+    root = getattr(adapter, "root", None)
+    started: set[str] = set()
+    for path in Path(root, "evidence").glob("transaction-*.json") if root else ():
+        try:
+            receipt = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        candidate = receipt.get("candidate") or {}
+        if candidate.get("family") == "starter" and (receipt.get("submission") or {}).get("ok"):
+            started.add(candidate["product"])
+    return started
 
 
 def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> None:
@@ -600,7 +625,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 summary["decisions"] += 1
                 continue
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
-                                site_plan=site_plan)
+                                site_plan=site_plan, starters=_starters_submitted(adapter))
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: STOCK_RATE for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
