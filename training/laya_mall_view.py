@@ -1,8 +1,11 @@
 # Path: training/laya_mall_view.py | Purpose: Run a bounded spectator-only mall session at visible engine speed without policy decisions.
 
+from copy import deepcopy
 import json
+import uuid
 import time
 from training.laya_saved_world import SavedWorldError
+from training.laya_mall_supply import accrue_supply, record_delivery
 
 
 def watch(world, *, seconds=600, observer=None, connect_timeout=300):
@@ -14,9 +17,7 @@ def watch(world, *, seconds=600, observer=None, connect_timeout=300):
         raise SavedWorldError('named observer must be 1..128 characters')
     world.require_clear_mutations()
     initial=world.query()
-    remaining=world.scenario['max_episode_ticks']-initial['elapsed_ticks']
-    budget=min(seconds*60,remaining)
-    if budget<=0:raise SavedWorldError('mall episode budget exhausted; inspect the paused world')
+    budget=seconds*60
     path=world.root/'live-view.json'
     state={'authority':'spectator_view','comparison_eligible':False,'policy_running':False,
            'surface':world.surface,'force':world.force,'requested_seconds':seconds,
@@ -24,6 +25,7 @@ def watch(world, *, seconds=600, observer=None, connect_timeout=300):
     def record(status):
         state['status']=status;path.write_text(json.dumps(state,indent=2)+'\n')
     record('waiting_for_observer');deadline=time.monotonic()+connect_timeout;focused=False
+    view_id=None;revision=None
     try:
         while state['advanced_ticks']<budget:
             players=world.rpc('view_status')['players']
@@ -43,13 +45,30 @@ def watch(world, *, seconds=600, observer=None, connect_timeout=300):
                 if view['surface']!=world.surface or view['force']!=world.force or not view['spectator']:
                     raise SavedWorldError('spectator focus failed')
                 focused=True;state['view']=view
+            break
+        world.mark_viewing_only()
+        receipt=world.stream_rpc('live_start',nonce=uuid.uuid4().hex,revision=initial['revision'],ticks=budget,observer=observer)
+        view_id=receipt['view']['id'];revision=receipt['revision'];ledger=deepcopy(initial['ledger'])
+        while not receipt['view']['closed']:
             record('live')
-            quantum=min(60,budget-state['advanced_ticks'])
-            world.advance(quantum,speed=1)
-            state['advanced_ticks']+=quantum;state['latest_tick']=world.query()['tick']
-        record('paused_episode_budget' if budget==remaining else 'paused_view_complete')
+            time.sleep(.1)
+            receipt=world.stream_rpc('live_pump',nonce=uuid.uuid4().hex,revision=revision,view_id=view_id)
+            revision=receipt['revision']
+            expected=deepcopy(ledger);accrue_supply(expected,receipt['tick']);record_delivery(expected,receipt['inserted'])
+            actual=receipt['ledger']
+            if actual.get('consumption_receipts')=={}:actual['consumption_receipts']=[]
+            if actual!=expected:raise SavedWorldError('live engine/Python supply ledger mismatch')
+            ledger=actual;revision=receipt['revision']
+            state['advanced_ticks']=receipt['tick']-initial['tick'];state['latest_tick']=receipt['tick']
+        reason=receipt['view']['reason']
+        record('observer_disconnected' if reason=='observer_disconnected' else 'paused_view_complete')
         return state
     except (Exception,KeyboardInterrupt) as error:
         state['error']=str(error)
+        if view_id is not None:
+            try:
+                stopped=world.stream_rpc('live_finish',nonce=uuid.uuid4().hex,revision=revision,view_id=view_id)
+                state['latest_tick']=stopped['tick'];state['advanced_ticks']=stopped['tick']-initial['tick']
+            except Exception as cleanup_error:state['cleanup_error']=str(cleanup_error)
         record('stopped_interrupted' if isinstance(error,KeyboardInterrupt) else 'stopped_error')
         raise

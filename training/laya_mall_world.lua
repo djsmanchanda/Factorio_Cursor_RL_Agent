@@ -69,6 +69,7 @@ local facts={version=cfg.version,tick=game.tick,elapsed_ticks=game.tick-s.start_
              production={},consumption={},recipes={},construction_committed={},pending_ghosts=0,
              ledger=s.ledger,served=s.served,completed_at=s.completed_at or {},customer_removed=s.customer_removed,queue=s.queue,
              robots={construction=network.all_construction_robots,logistic=network.all_logistic_robots}}
+if s.viewing_only then facts.viewing_only=true end
 local providers={}
 local statuses={}; for name,id in pairs(defines.entity_status) do statuses[id]=name end
 local function read_inventory(e,index)
@@ -206,6 +207,7 @@ if request.op=="view" then
   return {observer=player.name,surface=player.surface.name,force=player.force.name,spectator=player.controller_type==defines.controllers.spectator}
 end
 assert(request.nonce and request.operation_hash,"mutation identity required")
+assert(not s.viewing_only,"spectator copy cannot execute training decisions")
 local previous=s.receipts[request.nonce]
 if previous then assert(previous.operation_hash==request.operation_hash,"nonce reused for another intent"); return previous end
 assert(not s.pending_operation,"interrupted mall mutation needs review")

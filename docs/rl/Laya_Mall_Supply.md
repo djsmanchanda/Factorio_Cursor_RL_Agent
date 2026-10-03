@@ -154,14 +154,25 @@ A connected GUI client can watch an owned mall at normal engine speed:
 The server must already be running. Connect in Factorio to its manifest game
 endpoint (default `127.0.0.1:34196`) using the exact frozen server mod set.
 `watch` waits for the named observer, moves that player to the isolated mall
-force/surface in spectator mode, and advances exact 60-tick supply quanta at
-speed 1. Omitting `--observer` selects only a single unambiguous connected player.
-No model or build decisions run. Disconnecting pauses further steps while the
-viewer waits, with a bounded connection timeout. The requested duration is
-clamped to the existing episode tick budget; expiry leaves the world paused and
-the server available for inspection. `live-view.json` records the actual view
-state, observer, scope and advanced ticks. Stop the server with the usual `stop`
-action when finished.
+force/surface in spectator mode, then starts **one continuous speed-1 clock
+window**. A lightweight protected helper updates integer tick-earned supply
+while the clock is running. Each observed insertion/ledger is independently
+checked in Python; no full-world scan or deliberate pause occurs between pumps.
+No mod event/callback is installed. Omitting `--observer` selects only a single
+unambiguous connected player. Initial connection waiting is bounded; a live
+observer disconnect closes and pauses the window after reconciling its supply.
+
+Viewing has its own explicit 1–600 game-second window, independent of the
+completed training episode's cutoff. The copy is permanently marked
+`viewing_only` in its manifest and engine storage before live operation.
+Training steps/decisions are refused on that copy; original training budgets
+are unchanged. The viewer has no model/build decisions and is never eligible
+for policy comparison or learning labels. Its engine clock automatically stops
+at the window endpoint even if the Python consumer fails. Normal interruption
+reconciles supply and closes the owned window; ambiguous RPCs still require
+review. Expiry leaves the server/GUI paused and available for inspection.
+`live-view.json` records actual state, observer, scope and advanced ticks. Stop
+the server with the usual `stop` action when finished.
 
 On October 3, `mall-view-20261003-a` was started from an immutable copy of the
 verified completed-mall prefix. A separate GUI profile under that root's
@@ -169,10 +180,18 @@ verified completed-mall prefix. A separate GUI profile under that root's
 Factorio 2.1.20 joined as `LeonidasUIP`, and the engine confirmed the player on
 `laya-mall/0-9f99e638` / `laya-mall-0-9f99e638` with spectator control. Two normal-speed
 seconds delivered exactly five iron and two copper plates, with zero pending
-ghosts. Four focused viewer tests cover scope selection, bounded duration,
-disconnected/ambiguous observers and speed validation. This is live mechanics
+ghosts. The first one-second stepped viewer visibly stuttered: each full
+observation RPC cost about 0.95 seconds while paused, repeated between steps.
+The continuous replacement was verified with twelve consecutive live samples:
+**60.34 mean UPS, 59.95 minimum sampled UPS**, with every interval advancing.
+The complete ten-minute window ended at exactly 36,000 ticks and delivered
+1,500 iron/600 copper plates; the final ledger matched independent Python
+accounting. Engine-owned cached receipt snapshots remained unchanged after later
+supply pumps. Six focused viewer tests cover scope selection, a single bounded window,
+disconnected/ambiguous observers, interruption, speed validation and permanent
+training refusal on viewing copies. This is live mechanics
 viewing of the completed mall, separate from training or policy evaluation.
 
 Lifecycle: the private mall server and isolated GUI client are intentionally
-left available for the user; normal-speed viewing pauses at the remaining
-episode budget. No mod deployment or real-base lifecycle action is required.
+left available for the user; normal-speed viewing pauses at its declared
+viewing-window endpoint. No mod deployment or real-base lifecycle action is required.

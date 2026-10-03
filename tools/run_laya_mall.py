@@ -63,6 +63,8 @@ def main(argv=None):
         require_input_profile(config,{'observation_digest':{'mall':{'version':MALL_PROFILE}}})
     world=MallWorld(root);history=[];measurement=None;director=None
     try:
+        if args.action in {'run','replay'} and getattr(world,'manifest',{}).get('viewing_only'):
+            raise SavedWorldError('spectator copy cannot execute training decisions')
         if args.action=='watch':
             from training.laya_mall_view import watch
             print(json.dumps(watch(world,seconds=args.watch_seconds,observer=args.observer,connect_timeout=args.connect_timeout)),flush=True)

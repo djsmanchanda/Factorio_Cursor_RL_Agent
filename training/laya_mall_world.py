@@ -32,11 +32,13 @@ class MallWorld(SavedWorldAdapter):
         if not self.surface.startswith('laya-mall/') or not self.force.startswith('laya-mall-'):
             raise SavedWorldError('mall requires its own training surface/force')
         self.lua_source = Path(__file__).with_suffix('.lua').read_text()
+        self.stream_source=Path(__file__).with_name('laya_mall_stream.lua').read_text()
         repo=Path(__file__).resolve().parents[1]
         paths = [Path(__file__), Path(__file__).with_suffix('.lua'), Path(__file__).with_name('laya_mall.py'),
                  Path(__file__).with_name('laya_mall_supply.py'), Path(__file__).with_name('laya_saved_world.py'),
                  Path(__file__).with_name('laya_input_profile.py'),repo/'schemas/laya_mall_world.schema.json',
                  Path(__file__).with_name('laya_mall_view.py'),
+                 Path(__file__).with_name('laya_mall_stream.lua'),
                  repo/'tools/run_laya_mall.py',repo/'tools/run_laya_saved_world.py',repo/'planners/laya_quad_cell.py',
                  repo/'planners/quad_mall_layout.py',repo/'planners/mall_layout.py']
         self.code_hashes = {str(p): file_hash(p) for p in paths}
@@ -50,6 +52,17 @@ class MallWorld(SavedWorldAdapter):
                 raise SavedWorldError('interrupted mall RPC needs review: '+path.name)
 
     def rpc(self, op, **fields):
+        return self._rpc(op,self.lua_source,**fields)
+
+    def stream_rpc(self, op, **fields):
+        return self._rpc(op,self.stream_source,**fields)
+
+    def mark_viewing_only(self):
+        self.manifest=verify_instance(self.root,runtime=self.runtime)
+        self.manifest['viewing_only']=True
+        (self.root/'manifest.json').write_text(json.dumps(self.manifest,indent=2)+'\n')
+
+    def _rpc(self, op, lua_source, **fields):
         verify_instance(self.root, runtime=self.runtime)
         request = {'op':op, 'scenario':self.scenario, **fields}
         nonce = request.get('nonce')
@@ -65,7 +78,7 @@ class MallWorld(SavedWorldAdapter):
         serialized=json.dumps(request,separators=(',',':'))
         delim='='
         while f']{delim}]' in serialized:delim+='='
-        source=' '.join(line.split('--',1)[0] for line in self.lua_source.splitlines())
+        source=' '.join(line.split('--',1)[0] for line in lua_source.splitlines())
         body=f'local request=helpers.json_to_table([{delim}[{serialized}]{delim}]); '+source
         name=f'laya_mall/{uuid.uuid4().hex}.json'
         self.bridge.command(f'/sc local ok,v=pcall(function() {body} end); helpers.write_file("{name}",helpers.table_to_json({{ok=ok,value=ok and v or nil,error=not ok and tostring(v) or nil,pending_operation=storage.laya_mall and storage.laya_mall.pending_operation}}),false); rcon.print("mall-report")')
@@ -93,6 +106,7 @@ class MallWorld(SavedWorldAdapter):
             raise SavedWorldError('mall facts identity mismatch')
         errors=list(FACTS_VALIDATOR.iter_errors(facts))
         if errors:raise SavedWorldError('mall facts contract: '+errors[0].message)
+        if facts.get('viewing_only') and not self.manifest.get('viewing_only'):self.mark_viewing_only()
         return facts
 
     def options(self, facts, seed=0, *, full=False):
@@ -108,8 +122,10 @@ class MallWorld(SavedWorldAdapter):
     def advance(self, ticks, *, speed=16):
         if type(ticks) is not int or not 1<=ticks<=18000:raise SavedWorldError('mall step must be 1..18000 ticks')
         if type(speed) is not int or speed not in (1,16):raise SavedWorldError('mall speed must be 1 for viewing or 16 for training')
+        if getattr(self,'manifest',{}).get('viewing_only'):raise SavedWorldError('spectator copy cannot advance training steps')
         self.require_clear_mutations()
         before=self.query()
+        if getattr(self,'manifest',{}).get('viewing_only'):raise SavedWorldError('spectator copy cannot advance training steps')
         if before['elapsed_ticks']+ticks>self.scenario['max_episode_ticks']:raise SavedWorldError('mall episode tick budget exhausted')
         for offset in range(0,ticks,60):
             quantum=min(60,ticks-offset)
@@ -131,12 +147,14 @@ class MallWorld(SavedWorldAdapter):
             if predicted!=after['ledger']:raise SavedWorldError('engine/Python supply ledger mismatch')
 
     def execute(self, selected, presented, measure_ticks=600):
+        if getattr(self,'manifest',{}).get('viewing_only'):raise SavedWorldError('spectator copy cannot execute training decisions')
         self.require_clear_mutations()
         if type(measure_ticks) is not int or not 1<=measure_ticks<=18000:
             raise SavedWorldError('mall measurement must be 1..18000 ticks')
         choices=[c for c in presented if c['option_id']==selected]
         if len(choices)!=1:raise SavedWorldError('mall choice must match one presented option')
         c=choices[0]; before=self.query()
+        if getattr(self,'manifest',{}).get('viewing_only'):raise SavedWorldError('spectator copy cannot execute training decisions')
         if c['at_revision']!=before['revision'] or c['at_tick']!=before['tick']:
             raise SavedWorldError('stale mall selection')
         registered={k:v for k,v in c.items() if k!='bill'}
