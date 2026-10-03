@@ -131,3 +131,12 @@ def test_stock_demand_never_raises_the_phase_goal():
     iron = next(n for n in board["needs"] if n["item"] == "iron-plate")
     assert iron["required_per_s"] > 1.0 and iron["goal_required_per_s"] == 0.5
     assert phase_reached(board)  # 0.6/s meets the 0.5/s goal even though stock wants more iron.
+
+
+def test_compact_rows_mark_stock_chain_items_with_a_zero_goal():
+    from training.laya_factory_status import compact_status
+    recipes = {**RECIPES, "medium-electric-pole": recipe([("steel-plate", 2), ("iron-plate", 2)], 30),
+               "steel-plate": recipe([("iron-plate", 5)], 960)}
+    board = compile_status({**world([]), "recipes": recipes}, {"iron-plate": 0.5}, stock={"medium-electric-pole": 0.5})
+    rows = {r["item"]: r for r in compact_status(board, limit=20)["needs"]}
+    assert rows["steel-plate"]["goal"] == 0.0 and rows["iron-plate"]["goal"] == 0.5

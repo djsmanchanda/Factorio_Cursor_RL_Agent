@@ -269,7 +269,7 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
                "measured": None if need["measured_per_s"] is None else round(need["measured_per_s"], 3),
                "capacity": None if need["capacity_per_s"] is None else round(need["capacity_per_s"], 3),
                "machines": sum(need["machines"].values()), "stock": need["stock"]}
-        if need.get("goal_required_per_s") and abs(need["goal_required_per_s"] - need["required_per_s"]) > 1e-9:
+        if "goal_required_per_s" in need and abs(need["goal_required_per_s"] - need["required_per_s"]) > 1e-9:
             row["goal"] = round(need["goal_required_per_s"], 3)  # Phase goal; 'required' also counts stock demand.
         if need["short_inputs"]:
             row["short_inputs"] = need["short_inputs"]
