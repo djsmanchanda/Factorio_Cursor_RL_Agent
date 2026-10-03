@@ -23,6 +23,7 @@ def _text(value: str) -> str:
 
 def load_guideline_context(
     repo_root: str | Path, scopes: Iterable[str], *, max_rules: int = 8,
+    catalog: str = "docs/rl/laya_guidelines.json",
 ) -> dict:
     """Select applicable reviewed passages; never turn historical code into rules.
 
@@ -31,7 +32,11 @@ def load_guideline_context(
     source hashes stay in evidence; the model sees only the selected passages.
     """
     root = Path(repo_root).resolve()
-    catalog_path = root / "docs/rl/laya_guidelines.json"
+    # Separate runners keep separate catalogs so one runner's rules never
+    # change another runner's inputs or provenance.
+    catalog_path = (root / catalog).resolve()
+    if not catalog_path.is_relative_to(root / "docs/rl"):
+        raise LayaKnowledgeError(f"guideline catalog must be under docs/rl: {catalog}")
     try:
         catalog_bytes = catalog_path.read_bytes()
         catalog = json.loads(catalog_bytes)

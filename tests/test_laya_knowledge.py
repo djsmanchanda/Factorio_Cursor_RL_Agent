@@ -41,3 +41,16 @@ def test_document_edits_change_provenance_and_stale_passages_are_rejected(tmp_pa
     source.write_text("The old instruction was removed.\n")
     with pytest.raises(LayaKnowledgeError, match="source passage changed"):
         load_guideline_context(tmp_path, [])
+
+
+def test_mission_catalog_is_separate_and_scopes_the_users_transport_rule():
+    mission = "docs/rl/laya_mission_guidelines.json"
+    context = load_guideline_context(ROOT, ["mission.transport"], catalog=mission)
+    ids = [rule["rule_id"] for rule in context["guidelines"]]
+    assert ids[4:] == ["mission.bot-supply", "mission.belt-transfer"]
+    # Every quoted passage still matches the strategy document.
+    assert len(load_guideline_context(ROOT, ["*"], catalog=mission, max_rules=16)["guidelines"]) == 14
+    # Existing runners' default catalog never sees mission rules.
+    assert not any(r["rule_id"].startswith("mission.") for r in load_guideline_context(ROOT, ["*"])["guidelines"])
+    with pytest.raises(LayaKnowledgeError, match="under docs/rl"):
+        load_guideline_context(ROOT, ["*"], catalog="docs/system_invariants.md")
