@@ -321,7 +321,9 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
                     continue
                 return reject("reserved:corridor", action)
             starter_ore = family in ("starter", "line") and SMELTED.get(subject) == product  # Its own patch.
-            if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore):
+            # Roboports may stand on ore: coverage must cross a patch to reach the ones beyond it.
+            if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore
+                                      or family == "expand"):
                 return reject(f"reserved:{zone['purpose']}", action)
             # Roboports may stand in a smelting strip: its lines' provider taps need logistic coverage.
             if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject) or family == "expand"

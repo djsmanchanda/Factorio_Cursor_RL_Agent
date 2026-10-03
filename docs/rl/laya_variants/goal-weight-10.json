@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "variant_id": "goal-weight-10",
+  "description": "Stronger goal focus: goal options x10 (baseline x3), non-goal options x0.1 (baseline x0.2) while goal options exist.",
+  "catalog_patch": {
+    "mission.phase-goals-first": {"prefer": [{"when": {"goal_need": true}, "weight": 10.0},
+                                              {"when": {"goal_need": false, "goal_options_available": true}, "weight": 0.1}]}
+  }
+}

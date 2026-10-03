@@ -281,3 +281,15 @@ def test_menu_fits_the_state_limit_with_unique_options_and_journals_what_did_not
     ids = [o["option_id"] for o in menu["options"]]
     assert len(ids) <= MAX_MENU and len(ids) == len(set(ids)) and menu["omitted_needs"]
     assert all(len(n["options"]) == 1 for n in menu["needs"] if n["need_id"] != "wait")
+
+
+def test_coverage_approaches_only_planned_ore_sites():
+    from training.laya_clean_runner import _need_key, planned_sites
+    facts = {"ports": [{"position": {"x": 0, "y": 0}, "energy": 1, "logistic_radius": 25, "construction_radius": 55}],
+             "resources": [{"item": "copper-ore", "position": {"x": -60, "y": 0}},   # small patch west, unplanned
+                           {"item": "copper-ore", "position": {"x": 80, "y": 0}}]}   # planned zone east
+    plan = {"zones": [{"purpose": "ore:copper-ore", "rect": [70, -10, 90, 10]}]}
+    hop = lambda x: {"family": "expand", "plan": {"phases": [{"actions": [{"entity": "roboport", "position": {"x": x, "y": 0}}]}]}}
+    reach = planned_sites(facts, plan)
+    assert _need_key(reach, hop(30), {"copper-ore"}) == "item:copper-ore"
+    assert _need_key(reach, hop(-30), {"copper-ore"}) == "coverage"

@@ -42,7 +42,7 @@ from tools.run_log_format import parse_timed_run_log_line
 LEDGER = Path(os.environ.get("FACTORIO_RL_RUN_LEDGER", Path.home() / ".local/share/factorio-rl/run-ledger.jsonl"))
 CSV_COLUMNS = ("system", "run_id", "started", "ended", "run_length", "duration_s", "commit", "target", "highest_milestone",
                "milestones", "outcome", "failure_code", "failure_cause", "limiting_factor", "decisions",
-               "log_file", "root")
+               "log_file", "root", "variant_id", "experiment", "seed")
 # Ordered deterministic markers: (milestone, pattern).  Order is the mission order.
 DETERMINISTIC_MARKERS = (
     ("iron_starter", r"PLATE STARTER: iron-plate"),
@@ -215,7 +215,10 @@ def laya_entry(index: dict) -> dict:
             "failure_cause": (failures[-1].get("error") if failures and outcome == "safe_stop"
                               else f"run {outcome}; phase {last.get('phase')} unmet" if last else outcome),
             "limiting_factor": bottleneck, "decisions": len(done),
-            "log_file": str(root / "logs/laya-runner.log"), "root": str(root)}
+            "log_file": str(root / "logs/laya-runner.log"), "root": str(root),
+            "variant_id": index.get("variant_id", "baseline"), "variant_hash": index.get("variant_hash"),
+            "experiment": index.get("experiment"), "seed": index.get("seed"),
+            "phase_ticks": summary.get("phase_ticks", {}), "stop": stop}
 
 
 def record_laya_run(index: dict) -> dict:

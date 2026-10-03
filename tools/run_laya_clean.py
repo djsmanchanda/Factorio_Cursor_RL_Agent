@@ -18,6 +18,7 @@ and evidence/latest-status.json.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import signal
 import subprocess
@@ -35,7 +36,8 @@ from core.local_time import local_stamp
 from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
 from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
-from training.laya_guided_policy import GuidedPolicy
+from training.laya_guided_policy import GuidedPolicy, load_preferences
+from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
 from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
 
@@ -67,6 +69,10 @@ def main(argv=None) -> int:
     p.add_argument("--no-helper", action="store_true", help="Skip the post-run Laya Helper review")
     p.add_argument("--policy", choices=["guided", "exploration"], default="guided",
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
+    p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
+    p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
+    p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
+    p.add_argument("--experiment", help="Experiment id recorded with the run")
     args = p.parse_args(argv)
     root = owned_root(args.root)
     if args.action == "prepare":
@@ -78,6 +84,12 @@ def main(argv=None) -> int:
         return 0
     if args.decisions < 0 or not 300 <= args.measure_ticks <= 18000:
         p.error("decisions must be >= 0 (0 = no limit) and measure ticks 300..18000")
+    variant = load_variant(args.variant)
+    settings, policy_options, runtime = apply_variant(variant)
+    settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
+                                   max_game_ticks=args.max_game_ticks or settings.max_game_ticks)
+    speed = float(runtime.get("speed", args.speed))
+    tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
     paths["journal"].parent.mkdir(exist_ok=True)
     stop = threading.Event()
@@ -91,21 +103,25 @@ def main(argv=None) -> int:
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
     with runner_pid_record(paths["pid"]):
-        adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, args.speed)
+        adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
         manifest = json.loads((root / "manifest.json").read_text())
-        log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=args.speed,
+        log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
+                  variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
+                  window=f"until={settings.until_phase or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
             if not args.stepped:
                 adapter.go_live()
-                log(f"LIVE: game unpaused at speed {args.speed:g}; decisions are taken while the factory runs")
-            policy = GuidedPolicy(args.seed) if args.policy == "guided" else ExplorationPolicy(args.seed)
+                log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
+            policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
+                      if args.policy == "guided" else ExplorationPolicy(args.seed))
             summary = run(adapter, policy, journal=paths["journal"],
                           decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
-                          run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"])
+                          run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
+                          settings=settings)
             if stop.is_set():
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
         finally:
@@ -116,7 +132,8 @@ def main(argv=None) -> int:
     # Index the run for later comparisons, then start the read-only post-run review.
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
-             "ended": local_stamp(), "summary": summary}
+             "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
+             "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:

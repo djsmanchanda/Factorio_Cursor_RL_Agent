@@ -52,3 +52,4 @@ data/rl-gpu-venv/
 
 # Local runtime and training logs
 logs/
+docs/rl/laya_variants/generated/

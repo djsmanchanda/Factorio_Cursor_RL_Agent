@@ -65,7 +65,9 @@ def run_index() -> list[dict]:
 
 def previous_run(current: dict, runs: list[dict]) -> dict | None:
     """Latest earlier Laya run from a different commit, else the latest earlier run."""
-    earlier = [r for r in runs if r["run_id"] != current["run_id"] and r.get("ended", "") <= current.get("ended", "")]
+    # Windowed experiment runs (tools/laya_experiment.py) are not full runs to compare against.
+    earlier = [r for r in runs if r["run_id"] != current["run_id"] and r.get("ended", "") <= current.get("ended", "")
+               and not r.get("experiment")]
     other_commit = [r for r in earlier if r.get("commit") != current.get("commit")]
     pool = other_commit or earlier
     return pool[-1] if pool else None

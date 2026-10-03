@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import random
+from dataclasses import dataclass
 import time
 import traceback
 from collections import Counter, defaultdict
@@ -44,6 +45,25 @@ from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compil
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Tunable runner settings; variants (training/laya_variants.py) override these.
+
+    Defaults are the current workflow. ``until_phase`` / ``max_game_ticks`` bound
+    experiment windows; a normal run leaves them unset.
+    """
+
+    catalog: str = MISSION_CATALOG
+    guideline_limit: int = 15
+    per_need_checked: int = 6
+    per_need_shown: int = 2
+    stall_decisions: int = 12
+    stock_rate: float = 0.01
+    rate_window_ticks: int = 7200
+    until_phase: str | None = None
+    max_game_ticks: int | None = None
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -191,6 +211,23 @@ def _build_only(candidate: Mapping) -> dict:
     return {**candidate["plan"], "phases": [{**phase, "actions": actions}]}
 
 
+def planned_sites(facts: Mapping, plan: Mapping | None) -> Mapping:
+    """Facts whose resources are only the planned ore zones' sites, for ores that have one.
+
+    Builds go on planned zones, so coverage reaches or approaches an ore only
+    toward those sites, not toward the small patches the plan ignores.
+    """
+    if not plan:
+        return facts
+    zones: dict[str, list] = defaultdict(list)
+    for zone in plan["zones"]:
+        if zone["purpose"].startswith("ore:"):
+            zones[zone["purpose"][4:]].append(zone["rect"])
+    kept = [site for site in facts["resources"] if site["item"] not in zones or any(
+        r[0] <= site["position"]["x"] <= r[2] and r[1] <= site["position"]["y"] <= r[3] for r in zones[site["item"]])]
+    return {**facts, "resources": kept}
+
+
 def _need_key(facts: Mapping, candidate: dict, unmet: set[str]) -> str:
     need = need_of(candidate)
     if need == "coverage":
@@ -250,13 +287,14 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 kept.append(candidate)
         return kept
 
-    proposed = on_free_land(proposed, lambda c: _need_key(facts, c, unmet))
+    reach_facts = planned_sites(facts, site_plan)
+    proposed = on_free_land(proposed, lambda c: _need_key(reach_facts, c, unmet))
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
         need = need_of(candidate)
         # A coverage hop that reaches (or closes on) an unmet resource serves it.
         if need == "coverage" or need in unmet:
-            by_need[_need_key(facts, candidate, unmet)].append(candidate)
+            by_need[_need_key(reach_facts, candidate, unmet)].append(candidate)
 
     rejected: Counter = Counter()
     shortfalls: Counter = Counter()
@@ -378,7 +416,8 @@ class ExplorationPolicy:
                 "probability": 1.0 / len(groups) / len(need["options"])}
 
 
-def select_guidelines(rules: list[dict], state: Mapping, menu: Mapping, limit: int) -> tuple[list[dict], list[str]]:
+def select_guidelines(rules: list[dict], state: Mapping, menu: Mapping, limit: int,
+                      preferences: Mapping | None = None) -> tuple[list[dict], list[str]]:
     """Keep the rules most relevant to this decision when the phase has more than fit.
 
     Order: hard rules, rules whose preferences match a current option, text-only
@@ -386,7 +425,7 @@ def select_guidelines(rules: list[dict], state: Mapping, menu: Mapping, limit: i
     """
     if len(rules) <= limit:
         return rules, []
-    preferences = load_preferences()
+    preferences = preferences if preferences is not None else load_preferences()
     features = list(option_features(state, menu).values())
 
     def rank(item: tuple[int, dict]) -> tuple[int, int]:
@@ -403,7 +442,8 @@ def select_guidelines(rules: list[dict], state: Mapping, menu: Mapping, limit: i
 
 
 def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, run_id: str,
-                model_ref: Mapping, history: Sequence[Mapping], measurement: Mapping | None) -> dict:
+                model_ref: Mapping, history: Sequence[Mapping], measurement: Mapping | None,
+                settings: Settings = Settings()) -> dict:
     """Laya decision state: saved-world facts plus status board and mission guidelines."""
     objective = f"{MISSION_ID} phase {phase['phase_id']} ({phase['name']}): " + ", ".join(
         f"{item} {rate:g}/s" for item, rate in sorted(phase["targets"].items()))
@@ -411,8 +451,9 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     apply_to_state(state, board)
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
     # Fetch every rule in scope; select_guidelines keeps the 15 most relevant to this decision.
-    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=MISSION_CATALOG, max_rules=32)
-    rules, omitted = select_guidelines(guidance["guidelines"], state, menu, limit=15)  # +1 adapter rule <= 16
+    guidance = load_guideline_context(ROOT, phase["scopes"], catalog=settings.catalog, max_rules=32)
+    rules, omitted = select_guidelines(guidance["guidelines"], state, menu, limit=settings.guideline_limit,
+                                       preferences=load_preferences(ROOT / settings.catalog))
     state["guidelines"] = state["guidelines"] + [
         {"rule_id": rule["rule_id"], "kind": rule["kind"], "statement": rule["statement"]} for rule in rules]
     state["observation_digest"]["guidelines_omitted"] = omitted
@@ -547,7 +588,7 @@ def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> Non
 
 
 def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Policy", record: dict, journal: Path,
-                   run_id: str, history: list, emit: Callable[[str], None]) -> dict:
+                   run_id: str, history: list, emit: Callable[[str], None], settings: Settings = Settings()) -> dict:
     """One planning decision: the policy chooses the mall site; ore and smelting land is reserved."""
     options = plan_options(facts)
     if not options:
@@ -555,7 +596,7 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
         return {"version": "laya-site-plan-v1", "mall_site": None, "zones": base_zones(facts)}
     menu = {"needs": [{"need_id": "plan:site", "condition": "unplanned", "options": [o["option_id"] for o in options]}],
             "options": options, "blocked": {}, "rejected": {}, "shortfalls": {}}
-    state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, None)
+    state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, None, settings)
     choice = policy.choose(state, menu)
     chosen = next(o for o in options if o["option_id"] == choice["option_id"])
     distribution = choice.pop("distribution", None)
@@ -576,7 +617,8 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
 
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
-        should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None) -> dict:
+        should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
+        settings: Settings = Settings()) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -609,7 +651,11 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             adapter.reconcile()
             facts = adapter.query()
             samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
-            measurement = rolling_measurement(samples) or measurement
+            measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
+            if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
+                summary["stop"] = "window_timeout"
+                emit(f"WINDOW END: {settings.max_game_ticks} game ticks elapsed")
+                break
             phase = current_phase(reached)
             built = _built_counts(adapter)
             board = compile_status(facts, phase["targets"], measurement, built, stock_demand) if phase else None
@@ -618,23 +664,29 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 reached.append(phase["phase_id"])
                 _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
                 emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
+                summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
                 phase = current_phase(reached)
                 board = compile_status(facts, phase["targets"], measurement, built, stock_demand) if phase else None
             if phase is None:
                 summary["stop"] = "mission_complete"
                 break
+            if settings.until_phase and settings.until_phase in reached:
+                summary["stop"] = "window_reached"
+                emit(f"WINDOW END: reached {settings.until_phase}")
+                break
             if site_plan is None:
                 # Planning comes first: reserve land before anything is built.
-                site_plan = _plan_decision(facts, board, phase, policy, record, journal, run_id, history, emit)
+                site_plan = _plan_decision(facts, board, phase, policy, record, journal, run_id, history, emit, settings)
                 save_plan(plan_path, site_plan)
                 _draw_zones(adapter, site_plan, emit)
                 summary["decisions"] += 1
                 continue
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
-                                site_plan=site_plan, starters=_starters_submitted(adapter))
+                                site_plan=site_plan, starters=_starters_submitted(adapter),
+                                per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown)
             # Items the checks found short become small demand targets on the next board.
-            stock_demand = {item: STOCK_RATE for item in menu["shortfalls"]}
-            state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement)
+            stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
+            state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
             choice = policy.choose(state, menu)
             distribution = choice.pop("distribution", None)
             chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
@@ -687,7 +739,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             after = receipt.get("after")
             if after:
                 samples.append((after["tick"], dict(after["production"]), dict(after["consumption"])))
-                measurement = rolling_measurement(samples) or measurement
+                measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
             record.update(status=receipt["status"], measured_per_s={
                 k: round(v["per_second"], 3) for k, v in window["production"].items() if v["per_second"]})
             _append(journal, record)
@@ -708,9 +760,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             progressed = (served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
             stall["best_gap"] = min(stall["best_gap"], gap)
             stall["since"] = 0 if progressed else stall["since"] + 1
-            if stall["since"] >= STALL_DECISIONS:
+            if stall["since"] >= settings.stall_decisions:
                 summary["stop"] = "stalled"
-                emit(f"STALLED: {STALL_DECISIONS} decisions without a new build or goal progress; "
+                emit(f"STALLED: {settings.stall_decisions} decisions without a new build or goal progress; "
                      f"bottleneck {' | '.join(compact['bottleneck']) or 'none'}; blocked {blocked or 'none'}")
                 break
         except Exception as error:  # Never-crash contract: failures are evidence.

@@ -38,7 +38,8 @@ def test_mall_site_is_a_choice_and_reservations_protect_land():
     # Cheap relay poles may cross ore (they are relocatable); substations and machines may not.
     assert reservation_reason(plan, build("smelt", "iron-plate", [("medium-electric-pole", 44.5, 4.5)])) is None
     assert reservation_reason(plan, build("smelt", "iron-plate", [("substation", 44, 4)])) == "reserved:ore:iron-ore"
-    assert reservation_reason(plan, build("expand", None, [("roboport", 44, 4)])) == "reserved:ore:iron-ore"
+    # Coverage roboports may stand on ore: coverage has to cross a patch to reach the next one.
+    assert reservation_reason(plan, build("expand", None, [("roboport", 44, 4)])) is None
     # The smelting strip is kept for that plate's line (and its mine's output side).
     sx, sy = (strip["rect"][0] + strip["rect"][2]) / 2, (strip["rect"][1] + strip["rect"][3]) / 2
     assert reservation_reason(plan, build("smelt", "iron-plate", [("electric-furnace", sx, sy)])) is None

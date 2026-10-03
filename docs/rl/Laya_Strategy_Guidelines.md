@@ -48,7 +48,7 @@ Ignore small ore patches unless no larger patch of that resource lies within 250
 
 A smelting strip is at least one six-furnace module wide (three furnaces, 9 tiles, plus 2 for the belt and 1 spare on each side; the basic module is 15 tiles) and 34 tiles where space allows (two parallel lines, or one 18-furnace line of Start-Middle-Middle-End), with 5-tile belt corridors kept free on both sides for future belts.
 
-The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. Roboports may stand inside a smelting strip, because its lines' provider taps need logistic coverage. Strips keep clear of the starter area (24x24 around the starter roboport). The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
+The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. Roboports may stand inside a smelting strip, because its lines' provider taps need logistic coverage, and on an ore zone, because coverage must cross a patch to reach the ones beyond it. Strips keep clear of the starter area (24x24 around the starter roboport). The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
 
 ## Opening
 
