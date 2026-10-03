@@ -250,6 +250,19 @@ def _run_slice_since(log: Path, run_id: str, offset_lines: int) -> tuple[list[st
     return lines[offset_lines:], len(lines)
 
 
+END_POLL_S = 15
+
+
+def _wait_for_checkpoint_or_end(log: Path, run_id: str, seen: int, pid_record: Path, interval: int) -> None:
+    """Sleep until the next checkpoint, waking early when the run ends or the runner disappears."""
+    deadline = time.monotonic() + interval
+    while time.monotonic() < deadline:
+        time.sleep(min(END_POLL_S, max(0.0, deadline - time.monotonic())))
+        new, _ = _run_slice_since(log, run_id, seen)
+        if any(line.rstrip().endswith("RUN END") for line in new) or not pid_record.exists():
+            return
+
+
 def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL_S, max_hours: float = 12) -> Path:
     """Live observer: checkpoint notes every ``interval`` seconds, then the final review in the same session."""
     config = load_config()
@@ -285,7 +298,7 @@ steer the guided policy). Remain read-only: only write {report}; no code edits, 
             seen = seen_now
         if ended or not runner_alive:
             break
-        time.sleep(interval)
+        _wait_for_checkpoint_or_end(log, run_id, seen, pid_record, interval)
     for _ in range(60):  # The runner indexes the run right after RUN END.
         if any(r["run_id"] == run_id for r in run_index()):
             break
