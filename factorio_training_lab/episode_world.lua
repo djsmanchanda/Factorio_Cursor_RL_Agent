@@ -373,6 +373,9 @@ end
 
 local function owned_training_surfaces(state, tick)
   local owned = {}
+  for _, fixture in pairs(state.owned_fixtures or {}) do
+    if fixture.last_tick and tick-fixture.last_tick<=ORPHAN_GRACE_TICKS and game.surfaces[fixture.surface] then owned[fixture.surface]=true end
+  end
   local fixture = storage.smelting_fixture
   if fixture and fixture.owner == "factorio_training_lab.smelting_fixture"
       and game.surfaces[fixture.surface] then owned[fixture.surface] = true end
@@ -394,6 +397,9 @@ end
 
 local function owned_training_forces(state, tick)
   local owned = {}
+  for _, fixture in pairs(state.owned_fixtures or {}) do
+    if fixture.last_tick and tick-fixture.last_tick<=ORPHAN_GRACE_TICKS and game.surfaces[fixture.surface] then owned[fixture.force]=true end
+  end
   local fixture = storage.smelting_fixture
   if fixture and fixture.owner == "factorio_training_lab.smelting_fixture"
       and game.surfaces[fixture.surface] then owned[fixture.force] = true end

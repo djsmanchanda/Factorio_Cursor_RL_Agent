@@ -73,11 +73,14 @@ def main(argv=None) -> int:
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
+    p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
+    p.add_argument("--mods-source", type=Path)
     args = p.parse_args(argv)
     root = owned_root(args.root)
     if args.action == "prepare":
-        print(saved_world("prepare", root, "--source-save", str(SOURCE_SAVE),
-                          "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port)))
+        extra = ["--mods-source", str(args.mods_source)] if args.mods_source else []
+        print(saved_world("prepare", root, "--source-save", str(args.source_save),
+                          "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port), *extra))
         return 0
     if args.action == "stop":
         print(saved_world("stop", root))

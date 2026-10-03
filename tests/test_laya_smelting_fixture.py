@@ -47,3 +47,18 @@ def test_fixture_is_inert_without_setup_and_supplies_separately_from_sink():
     assert(supplied==6 and storage.smelting_fixture.supplied[1]==6)
     assert(storage.smelting_fixture.delivered[1]==16 and removed==64)
     ''')
+
+
+def test_generic_active_fixture_ownership_expires_without_a_heartbeat():
+    run_lua('''
+    local owned={name='training/mechanics-test',valid=true}
+    local deleted={}
+    storage={training_lab={version='1.1.0',report_sequence=0,episodes={},pending_force_merges={},orphan_surfaces={},
+      owned_fixtures={fixture={owner='factorio_training_lab.production_fixture',surface=owned.name,force='training-mechanics-test',last_tick=9000}}}}
+    log=function() end
+    game={surfaces={['training/mechanics-test']=owned},forces={neutral={name='neutral'}},connected_players={},
+      delete_surface=function(s) deleted[s.name]=true;return true end,merge_forces=function() end}
+    local world=require('episode_world')
+    world.cleanup_orphan_surfaces(10000,true);assert(not deleted[owned.name])
+    world.cleanup_orphan_surfaces(14000,true);assert(deleted[owned.name])
+    ''')

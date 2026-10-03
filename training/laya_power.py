@@ -29,7 +29,8 @@ POLES = {  # supply radius, wire reach, footprint
     "substation": (9.0, 18.0, 2),
 }
 POWERED = frozenset({"electric-mining-drill", "electric-furnace", "assembling-machine-1", "assembling-machine-2",
-                     "assembling-machine-3", "inserter", "long-handed-inserter", "fast-inserter", "roboport", "lab"})
+                     "assembling-machine-3", "inserter", "long-handed-inserter", "fast-inserter", "roboport", "lab",
+                     "oil-refinery", "chemical-plant", "pump", "pumpjack"})
 # User rule 2026-10-03: substations only where one powers many machines.
 SUBSTATION_FAMILIES = frozenset({"mine", "assemble"})
 MAX_COVER_POLES = 6
@@ -77,6 +78,7 @@ def world_obstacles(facts: Mapping) -> list[dict]:
     found = [{"entity": p["name"], "position": p["position"]} for p in facts.get("poles", [])]
     found += [{"entity": "roboport", "position": p["position"]} for p in facts.get("ports", [])]
     found += [{"entity": m["name"], "position": m["position"]} for m in facts.get("machines", [])]
+    found += list(facts.get('layout_obstacles') or [])
     return found
 
 

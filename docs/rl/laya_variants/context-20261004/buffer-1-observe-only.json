@@ -1,0 +1,9 @@
+{
+  "version": "1.0.0",
+  "variant_id": "buffer-1-observe-only",
+  "description": "Controlled context and request-horizon experiment; baseline unchanged.",
+  "settings": {
+    "request_multiplier": 1,
+    "dependency_context": true
+  }
+}

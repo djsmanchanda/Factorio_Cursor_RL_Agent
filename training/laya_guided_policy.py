@@ -97,6 +97,12 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "inputs_missing": any(stock.get(name, 0) == 0 and name not in made for name in (option.get("draws") or {})),
             "scarce": any(count > 0.5 * stock.get(name, 0) for name, count in spend(option).items()),
             "bill_items": sum((option.get("bill") or {}).values())}
+        dependency = (state.get('observation_digest', {}).get('dependency_context') or {}).get(option['option_id'])
+        if dependency is not None:
+            features[option['option_id']].update(
+                blocks_other_builds=dependency['blocks_other_builds'] > 0,
+                unbacked_inputs=bool(dependency['unbacked_inputs']),
+                available_input_crafts=dependency['available_input_crafts'])
     return features
 
 

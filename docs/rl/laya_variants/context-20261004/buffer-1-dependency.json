@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "variant_id": "buffer-1-dependency",
+  "description": "Controlled context and request-horizon experiment; baseline unchanged.",
+  "settings": {
+    "request_multiplier": 1,
+    "dependency_context": true
+  },
+  "catalog_patch": {
+    "mission.conserve-scarce": {
+      "prefer": [
+        {
+          "when": {
+            "scarce": true
+          },
+          "weight": 0.35
+        },
+        {
+          "when": {
+            "blocks_other_builds": true
+          },
+          "weight": 0.35
+        }
+      ]
+    }
+  }
+}

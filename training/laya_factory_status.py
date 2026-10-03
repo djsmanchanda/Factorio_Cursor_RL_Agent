@@ -66,7 +66,7 @@ def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) ->
         recipe = recipes.get(item)
         if recipe is None or item in RAW_ITEMS:
             return
-        crafts = rate / float(recipe["product_amount"])
+        crafts = rate / (float(recipe["product_amount"]) * (1 + float(recipe.get('productivity_bonus',0))))
         for part in recipe["ingredients"]:
             consumers[part["name"]].add(item)
             visit(part["name"], crafts * float(part["amount"]), level + 1, path + (item,))
@@ -87,7 +87,7 @@ def machine_rate(machine: str, item: str, recipe: Mapping | None) -> float | Non
     speed = speed if speed is not None else MACHINE_SPEEDS.get(machine)
     if not speed:
         return None
-    return speed * float(recipe["product_amount"]) * 60.0 / float(recipe["energy_ticks"])
+    return speed * float(recipe["product_amount"]) * (1 + float(recipe.get('productivity_bonus',0))) * 60.0 / float(recipe["energy_ticks"])
 
 
 def accessible_stock(facts: Mapping) -> dict[str, int]:

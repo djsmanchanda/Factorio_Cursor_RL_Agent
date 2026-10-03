@@ -46,9 +46,11 @@ def _job(experiment: str, variant: Path | None, seed: int, slot: int, args: argp
     root = ROOT / f"data/laya-saved-world/exp-{experiment}/{vid}-s{seed}"
     out = root.parent / f"{vid}-s{seed}.out"
     root.parent.mkdir(parents=True, exist_ok=True)
-    ports = ["--game-port", str(GAME_PORT + slot), "--rcon-port", str(RCON_PORT + slot)]
+    ports = ["--game-port", str(getattr(args,'game_base',GAME_PORT) + slot), "--rcon-port", str(getattr(args,'rcon_base',RCON_PORT) + slot)]
+    inputs = (["--source-save",str(args.source_save)] if getattr(args,'source_save',None) else [])
+    inputs += (["--mods-source",str(args.mods_source)] if getattr(args,'mods_source',None) else [])
     with out.open("w") as log:
-        prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports], stdout=log, stderr=subprocess.STDOUT)
+        prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs], stdout=log, stderr=subprocess.STDOUT)
         if prepared.returncode:
             return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
         try:
@@ -142,6 +144,10 @@ def main(argv=None) -> int:
     p.add_argument("--speed", type=float, default=4.0, help="Live game speed for every run")
     p.add_argument("--parallel", type=int, default=4)
     p.add_argument("--timeout", type=int, default=4 * 3600, help="Wall-clock seconds per run")
+    p.add_argument("--game-base", type=int, default=GAME_PORT)
+    p.add_argument("--rcon-base", type=int, default=RCON_PORT)
+    p.add_argument("--source-save", type=Path)
+    p.add_argument("--mods-source", type=Path)
     args = p.parse_args(argv)
     if args.action == "run" and not (args.until_phase or args.max_game_ticks):
         p.error("an experiment needs a window: --until-phase and/or --max-game-ticks")

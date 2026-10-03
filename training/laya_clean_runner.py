@@ -64,6 +64,8 @@ class Settings:
     rate_window_ticks: int = 7200
     until_phase: str | None = None
     max_game_ticks: int | None = None
+    request_multiplier: int | None = None
+    dependency_context: bool = False
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -252,15 +254,20 @@ def _need_key(facts: Mapping, candidate: dict, unmet: set[str]) -> str:
     return f"item:{need}"
 
 
-def _compile(facts: Mapping, products: set[str], seed: int) -> list[dict]:
+def _compile(facts: Mapping, products: set[str], seed: int, request_multiplier: int | None = None) -> list[dict]:
     """Generator candidates for only the products a need can use (speed, not a choice)."""
     recipes = {k: v for k, v in facts["recipes"].items() if k in products}
-    return compile_candidates({**facts, "recipes": recipes}, seed)
+    candidates = compile_candidates({**facts, "recipes": recipes}, seed)
+    if request_multiplier is not None:
+        from training.laya_experiment_context import with_request_multiplier
+        candidates = [with_request_multiplier(c, request_multiplier) for c in candidates]
+    return candidates
 
 
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
                  site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
-                 per_need_checked: int = 6, per_need_shown: int = 2) -> dict:
+                 per_need_checked: int = 6, per_need_shown: int = 2,
+                 request_multiplier: int | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -270,7 +277,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     """
     rng = random.Random(seed)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
-    proposed = _compile(facts, unmet, seed)
+    proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
     proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in STARTER_ORE)
@@ -354,7 +361,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     stock_groups: dict[str, list] = defaultdict(list)
-    stock = [c for c in (_compile(facts, set(shortfalls), seed) if shortfalls else ())
+    stock = [c for c in (_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ())
              if c["family"] == "assemble" and c.get("product") in shortfalls]
     for candidate in on_free_land(stock, lambda c: f"stock:{c['product']}"):
         if f"item:{candidate['product']}" in legal:
@@ -470,6 +477,9 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
         f"{item} {rate:g}/s" for item, rate in sorted(phase["targets"].items()))
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
     apply_to_state(state, board)
+    if settings.dependency_context:
+        from training.laya_experiment_context import dependency_context
+        state['observation_digest']['dependency_context'] = dependency_context(facts, menu['options'], board)
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
     # Fetch every rule in scope; select_guidelines keeps the 15 most relevant to this decision.
     guidance = load_guideline_context(ROOT, phase["scopes"], catalog=settings.catalog, max_rules=32)
@@ -704,7 +714,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 continue
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
                                 site_plan=site_plan, starters=_starters_submitted(adapter),
-                                per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown)
+                                per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown,
+                                request_multiplier=settings.request_multiplier)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)

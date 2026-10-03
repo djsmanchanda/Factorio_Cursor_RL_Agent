@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "variant_id": "buffer-1-menu-wide",
+  "description": "Controlled context and request-horizon experiment; baseline unchanged.",
+  "settings": {
+    "request_multiplier": 1,
+    "per_need_shown": 3,
+    "per_need_checked": 10
+  }
+}
