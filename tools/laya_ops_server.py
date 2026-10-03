@@ -41,6 +41,7 @@ WORLDS = REPO_ROOT / "data/laya-saved-world"
 POINTER = WORLDS / "laya-ops-current.json"
 ACTIONS_LOG = WORLDS / "laya-ops-actions.log"
 GUI_MODS = Path.home() / ".factorio/mods"
+HELPER_REPORTS = REPO_ROOT / "docs/rl/laya_helper_runs"
 PROJECT_MODS = ("factorio_cursor_rl_agent", "factorio_training_lab")
 DEFAULT_PORT = 9140
 LOG_CHUNK = 200_000
@@ -157,6 +158,16 @@ class Operations:
             elif event in ("failure", "phase_reached", "summary"):
                 rows[(record.get("run_id"), event, len(rows))] = record
         return list(rows.values())[-limit:]
+
+    def helper(self) -> dict:
+        """Newest Laya Helper findings (docs/rl/laya_helper_runs/<run_id>/findings.md)."""
+        reports = sorted(HELPER_REPORTS.glob("*/findings.md"), key=lambda p: p.stat().st_mtime)
+        if not reports:
+            return {"run_id": None, "path": None, "text": "No Laya Helper review yet; one starts after every run ends."}
+        latest = reports[-1]
+        text = latest.read_text(errors="replace")
+        return {"run_id": latest.parent.name, "path": str(latest.relative_to(REPO_ROOT)), "text": text[-60000:],
+                "in_progress": "_Review in progress._" in text}
 
     def read_log(self, name: str, offset: int) -> dict:
         root = self.root()
@@ -322,6 +333,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, self.ops.status())
         elif request.path == "/api/latest":
             self._json(200, self.ops.latest())
+        elif request.path == "/api/helper":
+            self._json(200, self.ops.helper())
         elif request.path == "/api/decisions":
             self._json(200, self.ops.decisions(min(200, int(query.get("limit", ["40"])[0]))))
         elif request.path == "/api/logs":

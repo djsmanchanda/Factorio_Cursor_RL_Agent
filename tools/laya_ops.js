@@ -145,6 +145,12 @@ async function refreshDecisions() {
   }), 8, "No decisions yet.");
 }
 
+async function refreshHelper() {
+  const helper = await getJSON("/api/helper");
+  $("helper-status").textContent = helper.run_id ? `${helper.in_progress ? "Reviewing" : "Reviewed"} · ${helper.run_id}` : "No review";
+  $("helper-text").textContent = helper.text;
+}
+
 async function refreshLog() {
   const data = await getJSON(`/api/logs?name=${encodeURIComponent(logName)}&offset=${logOffset}`);
   const out = $("log-output");
@@ -162,6 +168,7 @@ async function tick() {
     renderLadder(status.phases, latest);
     renderLatest(latest);
     await refreshDecisions();
+    await refreshHelper();
   } catch (error) {
     $("action-message").textContent = `Console update failed: ${error.message}`;
   }
