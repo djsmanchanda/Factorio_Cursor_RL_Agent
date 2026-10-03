@@ -32,7 +32,8 @@ from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from orchestrator.laya_operations import sha256_hash
-from planners.infrastructure_geometry import step_points
+from planners.infrastructure_geometry import boxes_overlap, step_points
+from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
 from training.laya_saved_world import compile_candidates, decision_state, ghost
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,7 @@ MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
 WAIT_TICKS = (300, 1800)
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
 MAX_CONSECUTIVE_FAILURES = 3
+MEDIUM_POLE_WIRE = 9.0
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
 
@@ -97,9 +99,22 @@ def pole_relay_variant(candidate: Mapping, facts: Mapping) -> dict | None:
     target = (end["x"], end["y"])
     anchor = min(poles, key=lambda p: math.dist((p["position"]["x"], p["position"]["y"]), target))
     # Spacing 7 keeps rounded hops inside the medium pole's 9-tile wire reach.
-    hops = step_points((anchor["position"]["x"], anchor["position"]["y"]), target, 7)[:-1]
-    new_actions = [ghost("medium-electric-pole", x + .5, y + .5) for x, y in hops] + list(actions[relay - 1:])
+    start = (anchor["position"]["x"], anchor["position"]["y"])
+    kept = list(actions[relay - 1:])
+    # Drop hops that would overlap the build itself, then require every gap
+    # (anchor -> hops -> final substation) to stay within wire reach.
+    hops = [(x + .5, y + .5) for x, y in step_points(start, target, 7)[:-1]
+            if not any(boxes_overlap((x + .5, y + .5), 1, (a["position"]["x"], a["position"]["y"]),
+                                     ENTITY_FOOTPRINTS.get(a["entity"], 1)) for a in kept)]
+    chain = [start, *hops, target]
+    if any(math.dist(a, b) > MEDIUM_POLE_WIRE for a, b in zip(chain, chain[1:])):
+        return None
+    new_actions = [ghost("medium-electric-pole", x, y) for x, y in hops] + kept
     plan = {**candidate["plan"], "phases": [{**candidate["plan"]["phases"][0], "actions": new_actions}]}
+    try:
+        validate_build_plan(plan)  # Same self-overlap check the generator applies.
+    except ValueError:
+        return None
     digest = sha256_hash({"plan": plan, "network_anchor": candidate["network_anchor"]})
     return {**candidate, "option_id": f"{candidate['family']}.p{digest[7:18]}", "plan": plan,
             "summary": candidate["summary"] + " via medium-pole relay"}

@@ -156,3 +156,19 @@ def test_medium_pole_relay_variant_keeps_the_build_and_one_substation():
                          if a["entity"] in ("substation", "medium-electric-pole")]
     assert all(math.dist(a, b) <= 9 for a, b in zip(points, points[1:]))
     assert variant["option_id"] != mine["option_id"] and variant["option_id"].startswith("mine.p")
+
+
+def test_pole_variant_that_overlaps_its_own_build_is_not_offered():
+    # Live failure 2026-10-03: a relay hop landed on the plan's own roboport.
+    from training.laya_clean_runner import pole_relay_variant
+    from training.laya_saved_world import ghost
+    world = facts()
+    plan_actions = [ghost("substation", 12, -10), ghost("substation", 24, -21), ghost("substation", 35, -32),
+                    ghost("roboport", 35, -33)]
+    candidate = {"family": "expand", "option_id": "expand.x", "summary": "Extend", "network_anchor": {"x": 0, "y": 0},
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
+                          "phases": [{"name": "saved-world-expand", "actions": plan_actions}]}}
+    variant = pole_relay_variant(candidate, world)
+    if variant is not None:
+        from planners.plan_validation import validate_build_plan
+        validate_build_plan(variant["plan"])  # Offered variants never overlap their own build.
