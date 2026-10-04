@@ -3095,3 +3095,5 @@ that consumed it was not.
 - Lifecycle: exact remaining-window systemd caps own only the suite actor/observer cgroups. Existing console, installed mods, real saves and unrelated runtimes untouched. Controls and ownership are in docs/rl/Laya_Context_Experiment_Block_2026-10-04.md.
 
 - 2026-10-04: Recovered the context-growth experiment Muse observer: exclusive leases prevent duplicate observers, failed reviews retain transcripts and pending requests, and retries respect cooldowns. Six focused tests plus a live exact-model recovery review passed. Only the owned observer was restarted; actor fleet/frozen code and the 12:57 IST deadline are unchanged.
+
+- 2026-10-04: Implemented the six-family Laya mechanics/context matrix: 554 matched trials, earned-checkpoint search, legal repair/cleanup choices, physical transport/plastic perturbations and read-only Muse review with bounded sessions. 54 focused tests/native Lua checks passed; circuit repair and plastic outage/recovery were observed live. Raw checkpoint probe stalled at C0 and correctly exported nothing. Private workers only; existing runtimes and concurrent mall-slot changes remain isolated.

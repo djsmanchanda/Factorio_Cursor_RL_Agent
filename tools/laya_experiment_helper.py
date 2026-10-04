@@ -2,6 +2,7 @@
 # Path: tools/laya_experiment_helper.py | Purpose: Read-only Muse observer for an entire disposable experiment suite, with saved checkpoint findings.
 from __future__ import annotations
 import argparse
+from collections import defaultdict,Counter
 from contextlib import contextmanager
 import fcntl
 import json
@@ -25,6 +26,7 @@ Separate guided exploration results, actual neural-model results, fixture-funded
 Report rates only from engine production/consumption windows, not inventory deltas. Do not turn untried alternatives or all-failed episodes into positive training labels.
 Explain correlations as associations unless a matched controlled intervention supports a causal conclusion. Report denominators, interrupted runs, unknowns and infrastructure failures.
 For every important failure trace observation -> available options -> choice -> plan/execution -> measured outcome; name competing explanations and a falsifiable next test.
+Maintain a compact case/seed/variant/evidence index, cluster duplicate failures, and track hypotheses as supported, refuted or unresolved. Planned jobs are never observed results.
 Return: outcome table; changes since previous checkpoint; cross-system interactions; context/option/reward gaps; evidence-backed hypotheses; recommendations for the next two-hour review.
 The baseline and defaults remain unchanged unless a separately reviewed held-out comparison supports adoption. Never suggest silently promoting a script or fixture success to production.'''
 
@@ -43,7 +45,25 @@ def packet(root):
     sections=[f'# Experiment checkpoint — {local_stamp()}\n',PERSONA]
     for name in ['suite.json','progress.json','report.json','analysis.json']:
         p=root/name
-        if p.is_file():sections.append(f'## {name}\n```json\n{p.read_text()[:22000]}\n```')
+        if p.is_file():
+            if name in {'analysis.json','report.json'}:
+                value=json.loads(p.read_text());cases=defaultdict(Counter)
+                for row in value.get('variants',[]):
+                    c=cases[str((row['kind'],row.get('phase'),row.get('case')))]
+                    for key in ['attempts','usable','reached','errors']:c[key]+=row.get(key,0)
+                pairs=value.get('matched_pairs',[])
+                summary={'source':str(p),'adoption':value.get('adoption'),'scope':value.get('scope'),
+                         'all_cases':dict(cases),'baseline_rows':[r for r in value.get('variants',[]) if r['variant']=='baseline'],
+                         'matched_pairs_total':len(pairs),'matched_pairs_usable':sum(bool(r['usable']) for r in pairs),
+                         'latest_variant_rows':value.get('variants',[])[-24:],
+                         'largest_completion_differences':sorted([r for r in pairs if r.get('usable')],key=lambda r:abs(r.get('completion_delta') or 0),reverse=True)[:12]}
+                sections.append(f'## {name} bounded summary (full evidence at source)\n```json\n{json.dumps(summary,indent=2)}\n```')
+            else:sections.append(f'## {name}\n```json\n{p.read_text()[:22000]}\n```')
+    queue=root/'queue.json'
+    if queue.exists():
+        jobs=json.loads(queue.read_text())
+        sections.append('## Planned queue, not observed outcomes\n'+json.dumps({'jobs':len(jobs),'categories':dict(Counter(j.get('category') for j in jobs)),
+            'configurations':len({j['variant'] for j in jobs}),'queue':str(queue)}))
     jobs=root/'jobs.jsonl'
     if jobs.exists():
         rows=[json.loads(s) for s in jobs.read_text().splitlines() if s.strip()]
@@ -94,6 +114,8 @@ def _review(root,label,timeout,fresh_session):
     root=root.resolve();work=root/'helper';work.mkdir(exist_ok=True)
     state_path=work/'state.json';state=json.loads(state_path.read_text()) if state_path.exists() else {}
     num=int(state.get('checkpoints',0))+1
+    rotate=bool(state.get('session_id')) and num-int(state.get('session_start_checkpoint',0))>8
+    fresh_session=fresh_session or rotate
     existing=[int(p.stem.split('-')[-1]) for p in work.glob('opencode-*.jsonl') if p.stem.split('-')[-1].isdigit()]
     attempt=max([int(state.get('attempts',0)),*existing])+1
     evidence=work/f'packet-{attempt:03d}.md';evidence.write_text(packet(root))
@@ -107,7 +129,7 @@ def _review(root,label,timeout,fresh_session):
     config={'$schema':'https://opencode.ai/config.json','agent':{'rl-experiment-observer':{'description':'Read-only experiment evidence reviewer','mode':'primary',
              'model':MODEL,'prompt':PERSONA,'permission':permission}},'permission':permission}
     env={**os.environ,'OPENCODE_CONFIG_CONTENT':json.dumps(config)}
-    message=f'Review checkpoint {num} ({label}) of the same eight-hour experiment. Read {evidence}. Return a complete, concise Markdown findings report with precise evidence paths. Reassess earlier hypotheses using new evidence.'
+    message=f'Review checkpoint {num} ({label}) of this {suite.get("planned_hours",8)}-hour experiment block. Read {evidence}. Return a complete, concise Markdown findings report with precise evidence paths. Reassess earlier hypotheses using new evidence.'
     cmd=['opencode','run','--pure','--dir',str(directory),'--format','json','--agent','rl-experiment-observer','--model',MODEL,'--variant','xhigh']
     retained=state.get('session_id') if not fresh_session else None
     cmd += ['--session',retained] if retained else ['--title',f'RL experiments {root.name}']
@@ -125,7 +147,9 @@ def _review(root,label,timeout,fresh_session):
     report=work/f'findings-{num:03d}-{label}.md';report.write_text(f'<!-- Path: {report} | Purpose: Read-only Muse experiment findings. -->\n\n'+findings+'\n')
     (work/'findings.md').write_text(report.read_text())
     if fresh_session and state.get('session_id') and session!=state['session_id']:
-        state.setdefault('previous_sessions',[]).append({'session_id':state['session_id'],'replaced_at':local_stamp(),'reason':'explicit fresh-session recovery'})
+        state.setdefault('previous_sessions',[]).append({'session_id':state['session_id'],'replaced_at':local_stamp(),
+            'checkpoints':state.get('checkpoints',0),'reason':'bounded eight-review session rotation' if rotate else 'explicit fresh-session recovery'})
+    if not retained:state['session_start_checkpoint']=num-1
     state.pop('last_failure',None)
     state.update(session_id=session,checkpoints=num,last_report=str(report),last_review=local_stamp(),model=MODEL,variant='xhigh')
     state_path.write_text(json.dumps(state,indent=2)+'\n');return report

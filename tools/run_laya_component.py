@@ -20,7 +20,7 @@ from training.laya_component_lab import ComponentWorld, component_spec
 from training.laya_clean_runner import Settings, build_state, rolling_measurement, _training_record, _option_record
 from training.laya_factory_status import compile_status
 from training.laya_guided_policy import GuidedPolicy, load_preferences
-from training.laya_power import internal_power_variant, POWERED
+from training.laya_power import power_variants, POWERED, POLES
 from training.laya_saved_world import owned_root,file_hash
 from training.laya_variants import apply,load_variant
 from tools.run_laya_saved_world import prepare,manager
@@ -30,7 +30,8 @@ from tools.run_ledger import record
 def run(a):
     root=owned_root(a.root);started=local_stamp();start=time.monotonic();w=None;summary={'status':'error','fixture_funded':True};history=[];samples=[]
     spec=component_spec(a.family,transport=a.transport,producers=a.producers,consumers=a.consumers,input_share=a.input_share,delay_ticks=a.delay_ticks,
-                        request_multiplier=a.request_multiplier)
+                        request_multiplier=a.request_multiplier,supply_distance=a.supply_distance,spacing=a.spacing,logistic_robots=a.logistic_robots,
+                        interruption_ticks=a.interruption_ticks,interruption_source=a.interruption_source,sink_pause_ticks=a.sink_pause_ticks,fault=a.fault)
     if root.exists():raise ValueError('fresh component root required')
     staging=root.parent/(root.name+'-mods');staging.mkdir(parents=True,exist_ok=False)
     shutil.copytree(a.mods_source/'factorio_cursor_rl_agent',staging/'factorio_cursor_rl_agent')
@@ -41,7 +42,7 @@ def run(a):
     prepare(argparse.Namespace(root=root,source_save=a.source_save,mods_source=staging,game_port=a.game_port,rcon_port=a.rcon_port))
     evidence=root/'evidence';evidence.mkdir(exist_ok=True);journal=evidence/'decision-states.jsonl'
     settings,policy_opts,_=apply(load_variant(a.variant));policy=GuidedPolicy(a.seed,preferences=load_preferences(ROOT/settings.catalog),**policy_opts)
-    done=set();receipts=[];pending=None
+    done=set();receipts=[];pending=None;fault_event=None;repair_completed_tick=None
     try:
         w=ComponentWorld(root,spec);fixture=w.rpc('snapshot');initial_tick=fixture['tick']
         (evidence/'fixture.json').write_text(json.dumps(spec,indent=2)+'\n')
@@ -53,29 +54,46 @@ def run(a):
                'scopes':('mission.goal','mission.decide','mission.assemble','mission.build','mission.transport','mission.power')}
         for index in range(50):
             w.reconcile();facts=w.query();samples.append((facts['tick'],facts['production'],facts['consumption']))
+            for p in evidence.glob('transaction-*.json'):
+                receipt=json.loads(p.read_text());group=receipt.get('candidate',{}).get('group')
+                if group in spec['groups'] and receipt['status']=='observed':
+                    # Reconciliation finishes only a previously selected funded build.
+                    if group=='repair' and repair_completed_tick is None:repair_completed_tick=receipt.get('configured_tick',facts['tick'])
+                    done.add(group)
             measured=rolling_measurement(samples,7200)
-            if len(done)==len(spec['groups']):break
+            if fault_event and 'repair' in done:break
+            if len(done)==len(spec['groups']):
+                if spec['fault_action'] and fault_event is None:
+                    w.advance(7200);fault_event=w.rpc('perturb')
+                    spec['groups']={'repair':[spec['fault_action']],'extra-capacity':[spec['recovery_alternative']]};done=set()
+                    continue
+                break
             board=compile_status(facts,phase['targets'],measured)
             cs=[]
             for group,acts in spec['groups'].items():
                 if group in done:continue
                 plan={'surface':w.surface,'force':w.force,'atomic':True,'phases':[{'name':group,'actions':acts}]}
-                c={'option_id':f'component.{group}','family':'assemble','product':spec['recipe'] if group=='transport' else group,
-                   'summary':f'Build {group} stage ({len(acts)} funded entities)','plan':plan,'internal_power':True,'need_id':'item:'+group,'group':group,
+                product=acts[0].get('recipe',spec['recipe']) if group=='repair' else spec['recipe'] if group in {'transport','extra-capacity'} else group
+                c={'option_id':f'component.{group}','family':'assemble','product':product,
+                   'summary':f'Build {group} stage ({len(acts)} funded entities)','plan':plan,'internal_power':any(a['entity'] in POLES for a in acts),'need_id':'item:'+product,'group':group,
                    'network':facts['ports'][0]['network'],'network_anchor':facts['ports'][0]['position']}
-                if any(v['entity'] in POWERED for v in acts):c=internal_power_variant(c,facts)
-                if c:cs.append(c)
+                if any(v['entity'] in POWERED for v in acts):cs.extend(power_variants(c,facts))
+                else:cs.append(c)
             checked=w.query(cs)['validations'] if cs else {}
             (evidence/f'menu-{index}.json').write_text(json.dumps({'proposed':cs,'validations':checked},indent=2)+'\n')
             legal=[{**c,'bill':checked[c['option_id']]['bill']} for c in cs if not checked[c['option_id']].get('reason')]
-            if not legal and facts['pending_ghosts']==0:
-                raise RuntimeError('no legal component build: '+json.dumps(checked))
+            if fault_event and any(e['type']=='item-entity' for e in facts['fixture'].get('fault_site_entities',[])):
+                legal.append({'option_id':'component.clear-ground','family':'clear-ground','product':spec['fault_action'].get('recipe',spec['recipe']),
+                              'need_id':'item:'+spec['fault_action'].get('recipe',spec['recipe']),
+                              'summary':'Ask construction bots to clear dropped items at the declared damaged site; no grants','bill':{}})
             legal.append({'option_id':'wait.300','family':'wait','summary':'Wait five game seconds','wait_ticks':300,'need_id':'wait'})
             menu={'options':legal,'needs':[{'need_id':c['need_id'],'options':[c['option_id']]} for c in legal],
                   'blocked':{c['option_id']:checked[c['option_id']].get('reason') for c in cs if checked[c['option_id']].get('reason')},'shortfalls':{},'goal_reserve':{}}
             state=deepcopy(build_state(facts,menu,board,phase,root.name,policy.model_ref,history,measured,settings))
             state['run'].update(surface=w.surface,force=w.force,bootstrap_profile='declared-component-fixture')
-            for o in state['options']:o['scope'].update(surface=w.surface,force=w.force)
+            for o in state['options']:
+                o['scope'].update(surface=w.surface,force=w.force)
+                if o['option_id']=='component.clear-ground':o['risk_tier']='reversible_mutation'
             state['observation_digest']['fixture_funded']=True;validate_state(state)
             choice=policy.choose(state,menu);distribution=choice.pop('distribution')
             selected=next(c for c in legal if c['option_id']==choice['option_id'])
@@ -86,9 +104,14 @@ def run(a):
             receipt=w.execute(choice['option_id'],legal,300);receipts.append(receipt)
             _training_record(journal,**pending,outcome={'status':receipt['status'],'measurement':receipt['measurement']})
             if selected.get('group') and receipt['status']=='observed':done.add(selected['group'])
-            pending=None;history.append({'decision_id':str(index),'tick':facts['tick'],'summary':selected['summary'],'outcome':'completed'})
-        if len(done)!=len(spec['groups']):raise RuntimeError(f'component not commissioned; built {sorted(done)}')
-        w.advance(18000);before=w.query();w.advance(7200);after=w.query()
+            if selected.get('group')=='repair' and receipt['status']=='observed':repair_completed_tick=w.rpc('snapshot')['tick']
+            pending=None;history.append({'decision_id':str(index),'tick':facts['tick'],'summary':selected['summary'],'outcome':'completed',
+              'experiment_outcome':{'family':selected['family'],'product':selected.get('product'),'status':receipt['status'],
+                 'produced':{n:v['per_second'] for n,v in receipt['measurement']['production'].items()}}})
+        if not (fault_event and 'repair' in done) and len(done)!=len(spec['groups']):raise RuntimeError(f'component not commissioned; built {sorted(done)}')
+        w.advance(18000)
+        if a.interruption_ticks or a.sink_pause_ticks:w.rpc('arm')
+        before=w.query();w.advance(7200);after=w.query()
         rate=(after['production'][spec['recipe']]-before['production'][spec['recipe']])/120
         delivered=(after['fixture']['delivered']-before['fixture']['delivered'])/120
         summary={'status':'measured','fixture_funded':True,'family':a.family,'transport':a.transport,'producers':a.producers,'consumers':a.consumers,
@@ -103,6 +126,15 @@ def run(a):
                  'engine_consumption_delta':{n:after['consumption'][n]-before['consumption'].get(n,0) for n in after['consumption']},
                  'ghosts':after['pending_ghosts'],'before':before,'after':after,
                  'infrastructure_error':bool(after['pending_ghosts']) or any(m['status']=='no_power' for m in after['machines'])}
+        summary.update(supply_distance=a.supply_distance,spacing=a.spacing,logistic_robots=a.logistic_robots,
+                       interruption_ticks=a.interruption_ticks,interruption_source=a.interruption_source,sink_pause_ticks=a.sink_pause_ticks,
+                       fault=a.fault,fault_event=fault_event,extra_capacity_built='extra-capacity' in done,
+                       repair_ticks=repair_completed_tick-fault_event['tick'] if repair_completed_tick and fault_event else None)
+        if a.interruption_ticks or a.sink_pause_ticks:
+            w.advance(7200);recovered=w.query()
+            summary.update(recovery_production_per_s=(recovered['production'][spec['recipe']]-after['production'][spec['recipe']])/120,
+                           recovery_delivered_per_s=(recovered['fixture']['delivered']-after['fixture']['delivered'])/120,
+                           recovery_window_ticks=7200)
         print(json.dumps({k:v for k,v in summary.items() if k not in {'before','after'}}),flush=True)
     except Exception as e:
         if pending:_training_record(journal,**pending,outcome={'status':'failed','error':str(e)})
@@ -125,6 +157,9 @@ if __name__=='__main__':
     p.add_argument('--transport',choices=['belt','bots'],default='belt');p.add_argument('--producers',type=int,default=3);p.add_argument('--consumers',type=int,default=2)
     p.add_argument('--input-share',type=float,default=1);p.add_argument('--delay-ticks',type=int,default=0);p.add_argument('--variant',type=Path);p.add_argument('--seed',type=int,default=1)
     p.add_argument('--request-multiplier',type=int,default=1)
+    p.add_argument('--supply-distance',type=int,default=20);p.add_argument('--spacing',type=int,default=0);p.add_argument('--logistic-robots',type=int,default=1100)
+    p.add_argument('--interruption-ticks',type=int,default=0);p.add_argument('--interruption-source',choices=['all','coal','iron-plate','copper-plate','crude-oil'],default='all')
+    p.add_argument('--sink-pause-ticks',type=int,default=0);p.add_argument('--fault',choices=['none','belt','machine','pole'],default='none')
     p.add_argument('--experiment',default='component-pilot');p.add_argument('--game-port',type=int,default=34320);p.add_argument('--rcon-port',type=int,default=27220)
     p.add_argument('--source-save',type=Path,default=ROOT/'saves/mod_playground.zip');p.add_argument('--mods-source',type=Path,default=Path.home()/'.local/share/factorio-rl/deterministic/mods')
     p.add_argument('--current-lab',action='store_true');a=p.parse_args();sys.exit(run(a))

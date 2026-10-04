@@ -19,7 +19,7 @@ def test_observer_lease_excludes_duplicate_processes_and_releases(tmp_path):
 
 def test_failed_reviews_keep_transcripts_and_fresh_session_keeps_provenance(tmp_path, monkeypatch):
     work=tmp_path/'helper';work.mkdir()
-    (work/'state.json').write_text(json.dumps({'session_id':'ses_old','checkpoints':37}))
+    (work/'state.json').write_text(json.dumps({'session_id':'ses_old','checkpoints':37,'session_start_checkpoint':37}))
     (work/'opencode-038.jsonl').write_text('original failure')
     monkeypatch.setattr(helper,'packet',lambda root:'cumulative evidence')
     results=iter([SimpleNamespace(returncode=1,stdout='new failure',stderr=''),
@@ -66,3 +66,19 @@ def test_timeout_preserves_partial_provider_output(tmp_path, monkeypatch):
     state=json.loads((tmp_path/'helper/state.json').read_text())
     assert state['last_failure']['reason']=='timeout'
     assert (tmp_path/'helper/opencode-001.jsonl').read_text()=='partial evidencetimed out'
+
+
+def test_long_campaign_rotates_session_without_losing_cumulative_findings(tmp_path,monkeypatch):
+    work=tmp_path/'helper';work.mkdir()
+    (work/'state.json').write_text(json.dumps({'session_id':'ses_old','checkpoints':8,'session_start_checkpoint':0}))
+    (work/'findings.md').write_text('previous cumulative findings')
+    seen=[]
+    def run(cmd,**kwargs):
+        seen.append(cmd)
+        return SimpleNamespace(returncode=0,stdout=json.dumps({'type':'text','sessionID':'ses_rotated','part':{'text':'continued review'}}),stderr='')
+    monkeypatch.setattr(helper.subprocess,'run',run)
+    helper.review(tmp_path)
+    state=json.loads((work/'state.json').read_text())
+    assert '--session' not in seen[0] and state['session_start_checkpoint']==8
+    assert state['previous_sessions'][0]['reason']=='bounded eight-review session rotation'
+    assert 'previous cumulative findings' in (work/'packet-001.md').read_text()

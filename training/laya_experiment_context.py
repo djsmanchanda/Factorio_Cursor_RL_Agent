@@ -22,7 +22,7 @@ def with_request_multiplier(candidate, multiplier):
 def dependency_context(facts, options, board):
     from training.laya_clean_runner import requested_items
     stock=accessible_stock(facts)
-    made={n['item'] for n in board['needs'] if (n.get('measured_per_s') or 0)>0}
+    made={n['item'] for n in board['needs'] if (n.get('measured_per_s',n.get('measured')) or 0)>0}
     rows={}
     for option in options:
         draws=requested_items(option);bill=option.get('bill') or {}
@@ -38,3 +38,29 @@ def dependency_context(facts, options, board):
           'blocks_other_builds':len(blocked),'blocked_option_ids':blocked[:4], 'available_input_crafts':ready,
           'request_horizon_crafts':max((draws.get(p['name'],0)/p['amount'] for p in ingredients),default=0)}
     return rows
+
+
+def apply_view(state, facts, options, board, history, mode):
+    """Experimental policy views; execution validators always keep the full facts."""
+    if mode=='full':return
+    if mode not in {'inventory','bottleneck','dependency','history','combined'}:
+        raise ValueError('unknown experimental context view')
+    digest=state['observation_digest']
+    digest['experiment_context_view']=mode
+    if mode=='inventory':digest.pop('factory_status',None)
+    if mode=='bottleneck':digest['factory_status']={'bottleneck':digest.get('factory_status',{}).get('bottleneck',[])}
+    if mode in {'dependency','combined'}:
+        digest['dependency_context']=dependency_context(facts,options,board)
+        graph={n:sorted(p['name'] for p in r.get('ingredients',[])) for n,r in facts.get('recipes',{}).items()}
+        digest['dependency_graph']=graph
+    if mode in {'history','combined'}:
+        digest['action_outcomes']=[h['experiment_outcome'] for h in history[-8:] if 'experiment_outcome' in h]
+
+
+def reservation_view(plan, mode):
+    if mode=='strict' or not plan:return plan
+    if mode not in {'mall-open','corridor-open','soft-zones'}:raise ValueError('unknown reservation experiment')
+    result=deepcopy(plan)
+    result['zones']=[z for z in result['zones'] if not (mode=='soft-zones' or
+                    mode=='mall-open' and z['purpose']=='mall' or mode=='corridor-open' and z['purpose']=='corridor')]
+    return result

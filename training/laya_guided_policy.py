@@ -103,6 +103,10 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
                 blocks_other_builds=dependency['blocks_other_builds'] > 0,
                 unbacked_inputs=bool(dependency['unbacked_inputs']),
                 available_input_crafts=dependency['available_input_crafts'])
+        outcomes=state.get('observation_digest',{}).get('action_outcomes')
+        if outcomes is not None:
+            previous=[h for h in outcomes if h.get('product')==option.get('product') and h.get('family')==option['family']]
+            features[option['option_id']]['repeat_without_output']=bool(previous and not previous[-1].get('produced',{}).get(option.get('product'),0))
     return features
 
 

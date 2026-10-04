@@ -18,14 +18,22 @@ local function init(p)
   local s={owner='factorio_training_lab.production_fixture',surface=p.surface,force=p.force,spec=p.spec,started_tick=game.tick,
     fixture_units={},providers={},sources={},supplied={},denied={},delivered=0,credit={}}
   storage.production_fixture=s
+  assert((p.spec.logistic_robots or 1100)>=11 and (p.spec.logistic_robots or 1100)<=2200,'invalid robot budget')
+  local port_index=0
+  local function robots(port)
+    port_index=port_index+1
+    local total=p.spec.logistic_robots or 1100
+    local count=math.floor(total/11)+(port_index<=total%11 and 1 or 0)
+    port.get_inventory(defines.inventory.roboport_robot).insert{name='construction-robot',count=200}
+    port.get_inventory(defines.inventory.roboport_robot).insert{name='logistic-robot',count=count}
+  end
   local function create(name,pos)
     assert(surface.can_place_entity{name=name,position=pos,force=force},'fixture collision '..name)
     local e=assert(surface.create_entity{name=name,position=pos,force=force});e.minable_flag=false;e.destructible=false;s.fixture_units[e.unit_number]=true;return e
   end
   for _,y in ipairs({-32,64}) do for _,x in ipairs({-32,16,64}) do
     local port=create('roboport',{x,y});port.energy=100000000
-    port.get_inventory(defines.inventory.roboport_robot).insert{name='construction-robot',count=200}
-    port.get_inventory(defines.inventory.roboport_robot).insert{name='logistic-robot',count=100}
+    robots(port)
     local gen=create('electric-energy-interface',{x+4,y-2});gen.electric_buffer_size=1000000000;gen.power_production=1000000000;gen.energy=1000000000
     create('medium-electric-pole',{x+3.5,y+.5})
     s.providers[#s.providers+1]=create('passive-provider-chest',{x+5.5,y+.5})
@@ -34,13 +42,13 @@ local function init(p)
   for _,pos in ipairs({{-48,16},{112,16},{16,-20},{16,40},{-24,16}}) do
     local x,y=pos[1],pos[2]
     local port=create('roboport',{x,y});port.energy=100000000
-    port.get_inventory(defines.inventory.roboport_robot).insert{name='construction-robot',count=200}
-    port.get_inventory(defines.inventory.roboport_robot).insert{name='logistic-robot',count=100}
+    robots(port)
     local gen=create('electric-energy-interface',{x+4,y-2});gen.electric_buffer_size=1000000000;gen.power_production=1000000000;gen.energy=1000000000
     create('medium-electric-pole',{x+3.5,y+.5})
   end
   for x=-24.5,95.5,8 do create('medium-electric-pole',{x,-12.5}) end
   for y=-28.5,-12.5,8 do create('medium-electric-pole',{19.5,y}) end
+  if p.spec.fault_action then create('storage-chest',{10.5,-30.5}) end -- Destination for bot-cleared ground items.
   for name,count in pairs(p.spec.budget) do
     local left=count
     assert(prototypes.item[name] and type(count)=='number' and count>0 and count<=10000 and count==math.floor(count),'invalid construction budget')
@@ -65,8 +73,18 @@ function M.tick()
       and force.get_item_production_statistics(surface).get_input_count(s.spec.recipe)>0 then
     s.first_output_observed_tick=game.tick
   end
+  local elapsed=s.armed_tick and game.tick-s.armed_tick or -1
+  local outage=elapsed>=3600 and elapsed<3600+(s.spec.interruption_ticks or 0)
   for i,source in ipairs(s.spec.sources) do
-    if source.kind~='fluid' and game.tick-s.started_tick>=(source.delay_ticks or 0) then
+    local selector=s.spec.interruption_source or 'all'
+    local interrupted=outage and (selector=='all' or selector==source.item or selector==source.fluid)
+    if source.kind=='fluid' then
+      local e=s.sources[i]
+      if interrupted~=s.fluid_interrupted then
+        e.set_infinity_pipe_filter{name=source.fluid,percentage=interrupted and 0 or 1,mode=interrupted and 'exactly' or 'at-least'}
+        s.fluid_interrupted=interrupted
+      end
+    elseif not interrupted and game.tick-s.started_tick>=(source.delay_ticks or 0) then
       local e=s.sources[i] or surface.find_entity(source.entity,source.position)
       if e then
         local lanes=source.kind=='belt' and 2 or 1
@@ -82,6 +100,7 @@ function M.tick()
       end
     end
   end
+  if elapsed>=3600 and elapsed<3600+(s.spec.sink_pause_ticks or 0) then return end
   for _,sink in ipairs(s.spec.sinks) do
     local e=surface.find_entity(sink.entity,sink.position)
     if e then
@@ -95,7 +114,8 @@ local function snapshot()
   local r={tick=game.tick,surface=s.surface,force=s.force,fixture_funded=true,supplied=s.supplied,denied=s.denied,delivered=s.delivered,
     fluid_production={},fluid_consumption={},pending_bill={},stock={},ghosts=0,built={},fluid_contents={},
     inserter_capacity_bonus=force.inserter_stack_size_bonus,protected_entities={},recipe_productivity={},
-    first_output_observed_tick=s.first_output_observed_tick,first_output_sampling_ticks=60}
+    first_output_observed_tick=s.first_output_observed_tick,first_output_sampling_ticks=60,
+    armed_tick=s.armed_tick,perturbations=s.perturbations or {},logistic_robots=s.spec.logistic_robots or 1100}
   for _,name in ipairs({'copper-cable','electronic-circuit','plastic-bar','basic-oil-processing'}) do
     r.recipe_productivity[name]=force.recipes[name].productivity_bonus
   end
@@ -111,6 +131,12 @@ local function snapshot()
     end
   end
   for _,provider in ipairs(s.providers) do for _,v in pairs(provider.get_inventory(defines.inventory.chest).get_contents()) do r.stock[v.name]=(r.stock[v.name] or 0)+v.count end end
+  if s.perturbations then
+    local p=s.perturbations[1].position;r.fault_site_entities={}
+    for _,e in pairs(surface.find_entities_filtered{area={{p.x-4,p.y-4},{p.x+4,p.y+4}}}) do
+      r.fault_site_entities[#r.fault_site_entities+1]={name=e.name,type=e.type,position=e.position}
+    end
+  end
   return r
 end
 function M.register()
@@ -120,6 +146,27 @@ function M.register()
       assert(not command.player_index and game.tick_paused and game.ticks_to_run==0,'paused RCON-only fixture')
       if p.op=='init' then return init(p) end
       if p.op=='snapshot' then return snapshot() end
+      if p.op=='arm' then
+        local s=scope();assert(not s.armed_tick,'already armed');s.armed_tick=game.tick
+        return {armed_tick=game.tick,interruption_ticks=s.spec.interruption_ticks or 0,sink_pause_ticks=s.spec.sink_pause_ticks or 0}
+      end
+      if p.op=='perturb' then
+        local s,surface=scope();local a=assert(s.spec.fault_action,'no declared fault')
+        assert(not s.perturbations,'fault already applied')
+        local e=assert(surface.find_entity(a.entity,a.position),'fault target absent')
+        assert(e.force.name==s.force and not s.fixture_units[e.unit_number] and e.type~='entity-ghost','protected fault target')
+        s.perturbations={{tick=game.tick,entity=e.name,position=e.position,kind='declared-removal',refund=0}}
+        assert(e.destroy(),'fault removal failed');return s.perturbations[1]
+      end
+      if p.op=='clear-ground' then
+        local s,surface,force=scope();assert(s.perturbations,'no declared damaged site')
+        local a=s.spec.fault_action.position;local count=0
+        for _,e in pairs(surface.find_entities_filtered{type='item-entity',area={{a.x-2,a.y-2},{a.x+2,a.y+2}}}) do
+          if e.order_deconstruction(force) then count=count+1 end
+        end
+        s.cleanup_orders=s.cleanup_orders or {};s.cleanup_orders[#s.cleanup_orders+1]={tick=game.tick,count=count}
+        return {tick=game.tick,count=count,method='construction-bot-deconstruction',extra_items_granted=0}
+      end
       error('unknown production fixture operation')
     end)
     assert(type(p.report)=='string' and string.match(p.report,'^production%-fixture/[a-z0-9%-]+%.json$'))

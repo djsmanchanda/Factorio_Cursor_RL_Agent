@@ -53,6 +53,9 @@ def analyze(rows):
           'errors':len([j for j in jobs if j.get('infrastructure_error')]),
           'median_target_ticks':__import__('statistics').median([j['target_ticks'] for j in reached if j.get('target_ticks') is not None]) if any(j.get('target_ticks') is not None for j in reached) else None,
           'mean_production_per_s':sum(j.get('production_per_s',0) for j in usable)/len(usable) if usable and kind=='component' else None})
+        for metric in ['repair_ticks','recovery_production_per_s']:
+            values=[j[metric] for j in usable if j.get(metric) is not None]
+            table[-1]['mean_'+metric]=sum(values)/len(values) if values else None
     paired=[]
     for kind in {'raw','component'}:
         by=defaultdict(dict)
@@ -67,8 +70,11 @@ def analyze(rows):
                 paired.append({'kind':kind,'phase':key[0],'case':key[1],'seed':key[2],'variant':variant,'usable':clean,
                       'completion_delta':int(bool(r.get('target_met')))-int(bool(baseline.get('target_met'))) if clean else None,
                       'target_ticks_delta':r['target_ticks']-baseline['target_ticks'] if clean and r.get('target_met') and baseline.get('target_met') and r.get('target_ticks') is not None and baseline.get('target_ticks') is not None else None})
+                for metric in ['production_per_s','delivered_per_s','repair_ticks','recovery_production_per_s']:
+                    paired[-1][metric+'_delta']=r[metric]-baseline[metric] if clean and r.get(metric) is not None and baseline.get(metric) is not None else None
     return {'recorded_at':local_stamp(),'variants':table,'matched_pairs':paired,'adoption':'none; defaults and production authority unchanged',
-      'scope':'Raw worlds share one immutable base; fresh RNG seeds test policy repeatability, not unseen-terrain generalization. Fixture components are a separate domain.'}
+      'scope':('Raw starts share one immutable base; continuations are grouped by their recorded earned checkpoint. ' if any(r.get('resume_bundle') for r in rows) else 'Raw worlds share one immutable base; ')+
+              'Fresh RNG seeds test policy repeatability, not unseen-terrain generalization. Fixture components are a separate domain.'}
 
 
 class Supervisor:
@@ -78,7 +84,7 @@ class Supervisor:
     def event(self,row):
         with self.lock:
             with (self.root/'jobs.jsonl').open('a') as out:out.write(json.dumps(row,sort_keys=True)+'\n')
-    def variant(self,name):return self.code/f'docs/rl/laya_variants/context-20261004/{name}.json' if name!='baseline' else None
+    def variant(self,name):return Path(self.cfg.get('variant_directory',self.code/'docs/rl/laya_variants/context-20261004'))/f'{name}.json' if name!='baseline' else None
     def terminate(self,p):
         if p.poll() is None:
             p.terminate()
@@ -111,16 +117,20 @@ class Supervisor:
         log=self.root/'logs'/f'{name}.log';log.parent.mkdir(exist_ok=True)
         row={**j,'root':str(world),'log':str(log),'started':local_stamp(),'event':'started','slot':slot}
         self.event(row)
-        ports=['--game-port',str(34300+slot),'--rcon-port',str(27200+slot)]
+        ports=['--game-port',str(self.cfg.get('game_port_base',34300)+slot),'--rcon-port',str(self.cfg.get('rcon_port_base',27200)+slot)]
         inputs=['--source-save',self.cfg['source_save'],'--mods-source',self.cfg['mods_source']]
         result={'status':'finished','infrastructure_error':False,'target_met':False,'target_ticks':None}
         try:
             if j['kind']=='raw':
-                prep=self.process([self.python,str(self.code/'tools/run_laya_clean.py'),'prepare','--root',str(world),*ports,*inputs],log,120,slot)
+                resume=['--resume-bundle',j['resume_bundle']] if j.get('resume_bundle') else []
+                prep=self.process([self.python,str(self.code/'tools/run_laya_clean.py'),'prepare','--root',str(world),*ports,*inputs,*resume],log,120,slot)
                 if prep['exit'] or prep['interrupted']:raise RuntimeError('world preparation failed or interrupted')
                 cmd=[self.python,str(self.code/'tools/run_laya_clean.py'),'run','--root',str(world),'--seed',str(j['seed']),'--no-helper',
                      '--speed',str(j.get('speed',4)),'--until-phase',j['phase'],'--max-game-ticks',str(j.get('max_ticks',216000)),'--experiment',self.root.name]
                 if self.variant(j['variant']):cmd+=['--variant',str(self.variant(j['variant']))]
+                cmd+=resume
+                if j.get('export_checkpoint'):cmd+=['--export-checkpoint',j['export_checkpoint']]
+                if j.get('measure_ticks'):cmd+=['--measure-ticks',str(j['measure_ticks'])]
                 status=self.process(cmd,log,j.get('timeout',1500),slot)
                 index=self.code/'data/laya-saved-world/laya-runs.jsonl'
                 records=[json.loads(x) for x in index.read_text().splitlines()] if index.exists() else []
@@ -130,7 +140,7 @@ class Supervisor:
                   summary=summary,run_id=r['run_id'],interrupted=status['interrupted'],infrastructure_error=bool(status['exit']) or summary.get('stop')=='runner_error' or summary.get('failures',0)>0)
                 if status['interrupted']:result['status']='interrupted'
             else:
-                case=COMPONENTS[j['case']]
+                case=j.get('component') or COMPONENTS[j['case']]
                 cmd=[self.python,str(self.code/'tools/run_laya_component.py'),'--root',str(world),'--seed',str(j['seed']),*ports,*inputs,'--experiment',self.root.name]
                 for key,v in case.items():cmd += ['--'+key.replace('_','-'),str(v)]
                 if self.variant(j['variant']):cmd+=['--variant',str(self.variant(j['variant']))]
@@ -139,6 +149,7 @@ class Supervisor:
                 r=json.loads(path.read_text()) if path.exists() else {'status':'missing'}
                 result.update(target_met=r.get('target_met',False),target_ticks=r.get('target_verified_ticks'),
                   first_output_observed_ticks=r.get('first_output_observed_ticks'),commissioning_ticks=r.get('construction_ticks'),production_per_s=r.get('production_per_s'),
+                  repair_ticks=r.get('repair_ticks'),recovery_production_per_s=r.get('recovery_production_per_s'),
                   delivered_per_s=r.get('delivered_per_s'),summary={k:v for k,v in r.items() if k not in {'before','after'}},
                   infrastructure_error=bool(status['exit']) or r.get('status')=='missing' or r.get('infrastructure_error',False),interrupted=status['interrupted'])
                 if status['interrupted']:result['status']='interrupted'

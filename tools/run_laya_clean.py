@@ -40,6 +40,7 @@ from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
 from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
+from training.laya_checkpoint import load_bundle, export_bundle, restore_context
 
 SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
@@ -75,12 +76,17 @@ def main(argv=None) -> int:
     p.add_argument("--experiment", help="Experiment id recorded with the run")
     p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
     p.add_argument("--mods-source", type=Path)
+    p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
+    p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     args = p.parse_args(argv)
     root = owned_root(args.root)
+    resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
         extra = ["--mods-source", str(args.mods_source)] if args.mods_source else []
-        print(saved_world("prepare", root, "--source-save", str(args.source_save),
+        source=args.resume_bundle/'source.zip' if resume else args.source_save
+        print(saved_world("prepare", root, "--source-save", str(source),
                           "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port), *extra))
+        if resume:restore_context(args.resume_bundle,root)
         return 0
     if args.action == "stop":
         print(saved_world("stop", root))
@@ -124,7 +130,9 @@ def main(argv=None) -> int:
             summary = run(adapter, policy, journal=paths["journal"],
                           decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
                           run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
-                          settings=settings)
+                          settings=settings,initial_reached=resume['phases_reached'] if resume else ())
+            if args.export_checkpoint:
+                export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
         finally:
@@ -137,6 +145,7 @@ def main(argv=None) -> int:
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
              "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
              "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
+    if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:
