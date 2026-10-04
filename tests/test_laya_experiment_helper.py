@@ -83,3 +83,23 @@ def test_long_campaign_rotates_session_without_losing_cumulative_findings(tmp_pa
     assert '--session' not in seen[0] and state['session_start_checkpoint']==8
     assert state['previous_sessions'][0]['reason']=='bounded eight-review session rotation'
     assert 'previous cumulative findings' in (work/'packet-001.md').read_text()
+
+
+def test_model_switch_starts_fresh_and_records_both_models(tmp_path,monkeypatch):
+    work=tmp_path/'helper';work.mkdir()
+    (work/'state.json').write_text(json.dumps({'session_id':'ses_old','model':helper.MODEL,'variant':'xhigh','checkpoints':1}))
+    (tmp_path/'suite.json').write_text(json.dumps({'model':'opencode/space-bunny-free','variant':'xhigh'}))
+    seen=[]
+    def run(cmd,**kwargs):
+        seen.append((cmd,json.loads(kwargs['env']['OPENCODE_CONFIG_CONTENT'])))
+        return SimpleNamespace(returncode=0,stdout=json.dumps({'type':'text','sessionID':'ses_new','part':{'text':'New model findings'}}),stderr='')
+    monkeypatch.setattr(helper.subprocess,'run',run)
+    helper.review(tmp_path)
+    cmd,config=seen[0]
+    assert '--session' not in cmd and cmd[cmd.index('--model')+1]=='opencode/space-bunny-free'
+    assert cmd[cmd.index('--variant')+1]=='xhigh'
+    assert config['agent']['rl-experiment-observer']['model']=='opencode/space-bunny-free'
+    state=json.loads((work/'state.json').read_text())
+    assert state['model']=='opencode/space-bunny-free' and state['variant']=='xhigh'
+    assert state['previous_sessions'][0]['model']==helper.MODEL
+    assert state['previous_sessions'][0]['reason']=='observer model/variant change'

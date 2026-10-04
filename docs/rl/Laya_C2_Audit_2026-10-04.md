@@ -127,3 +127,14 @@ uses a300-second default bound (current campaigns180seconds), with the existing
 120-second wait after each attempt. Five observer tests pass, including automatic
 failure recovery. Only observer processes require restarting; worker snapshots,
 mods and experiment comparisons remain unchanged.
+
+## Observer model replacement
+
+The user reported the Muse usage limit and authorized OpenCode Zen Space Bunny
+Free at xhigh. The installed OpenCode model catalog lists
+`opencode/space-bunny-free`; both active experiment suites select that exact ID.
+The helper reads model/variant from suite configuration, starts a fresh session
+when either changes, and preserves earlier model/session provenance. Six focused
+observer tests pass, including the model transition and unchanged read-only
+permissions. Existing Muse findings stay intact. Cadence, runtime cutoff and
+frozen worker code remain unchanged; only observer services restart.

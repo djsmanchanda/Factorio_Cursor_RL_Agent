@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Path: tools/laya_experiment_helper.py | Purpose: Read-only Muse observer for an entire disposable experiment suite, with saved checkpoint findings.
+# Path: tools/laya_experiment_helper.py | Purpose: Read-only OpenCode observer for an entire disposable experiment suite, with saved checkpoint findings.
 from __future__ import annotations
 import argparse
 from collections import defaultdict,Counter
@@ -119,25 +119,27 @@ def review(root,label='checkpoint',timeout=900,fresh_session=False):
 def _review(root,label,timeout,fresh_session):
     root=root.resolve();work=root/'helper';work.mkdir(exist_ok=True)
     state_path=work/'state.json';state=json.loads(state_path.read_text()) if state_path.exists() else {}
+    suite=json.loads((root/'suite.json').read_text()) if (root/'suite.json').exists() else {}
+    model=suite.get('model',MODEL);variant=suite.get('variant','xhigh')
+    model_changed=bool(state.get('session_id')) and (state.get('model',MODEL)!=model or state.get('variant','xhigh')!=variant)
     num=int(state.get('checkpoints',0))+1
     rotate=bool(state.get('session_id')) and num-int(state.get('session_start_checkpoint',0))>8
     failed=bool(state.get('last_failure'))
-    fresh_session=fresh_session or rotate or failed
+    fresh_session=fresh_session or rotate or failed or model_changed
     existing=[int(p.stem.split('-')[-1]) for p in work.glob('opencode-*.jsonl') if p.stem.split('-')[-1].isdigit()]
     attempt=max([int(state.get('attempts',0)),*existing])+1
     evidence=work/f'packet-{attempt:03d}.md';evidence.write_text(packet(root))
     transcript=work/f'opencode-{attempt:03d}.jsonl'
     state.update(attempts=attempt)
     state_path.write_text(json.dumps(state,indent=2)+'\n')
-    suite=json.loads((root/'suite.json').read_text()) if (root/'suite.json').exists() else {}
     directory=Path(suite.get('repository_root',ROOT))
     permission={'*':'deny','read':{'*':'allow','**/rcon-password':'deny','**/.env*':'deny','**/auth.json':'deny'},'glob':'allow','grep':'allow','list':'allow',
                 'edit':'deny','bash':'deny','task':'deny','external_directory':'deny','webfetch':'deny','websearch':'deny','question':'deny'}
     config={'$schema':'https://opencode.ai/config.json','agent':{'rl-experiment-observer':{'description':'Read-only experiment evidence reviewer','mode':'primary',
-             'model':MODEL,'prompt':PERSONA,'permission':permission}},'permission':permission}
+             'model':model,'prompt':PERSONA,'permission':permission}},'permission':permission}
     env={**os.environ,'OPENCODE_CONFIG_CONTENT':json.dumps(config)}
     message=f'Review checkpoint {num} ({label}) of this {suite.get("planned_hours",8)}-hour experiment block. Read {evidence}. Return a complete, concise Markdown findings report with precise evidence paths. Reassess earlier hypotheses using new evidence.'
-    cmd=['opencode','run','--pure','--dir',str(directory),'--format','json','--agent','rl-experiment-observer','--model',MODEL,'--variant','xhigh']
+    cmd=['opencode','run','--pure','--dir',str(directory),'--format','json','--agent','rl-experiment-observer','--model',model,'--variant',variant]
     retained=state.get('session_id') if not fresh_session else None
     cmd += ['--session',retained] if retained else ['--title',f'RL experiments {root.name}']
     try:result=subprocess.run(cmd+[message],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
@@ -150,15 +152,16 @@ def _review(root,label,timeout,fresh_session):
     session=_session_id(raw) or retained;findings=text_output(raw)
     if result.returncode or not session or not findings:
         state.update(last_failure={'at':local_stamp(),'returncode':result.returncode,'transcript':str(transcript)})
-        state_path.write_text(json.dumps(state,indent=2)+'\n');raise RuntimeError('Muse review incomplete; see saved transcript')
-    report=work/f'findings-{num:03d}-{label}.md';report.write_text(f'<!-- Path: {report} | Purpose: Read-only Muse experiment findings. -->\n\n'+findings+'\n')
+        state_path.write_text(json.dumps(state,indent=2)+'\n');raise RuntimeError('Observer review incomplete; see saved transcript')
+    report=work/f'findings-{num:03d}-{label}.md';report.write_text(f'<!-- Path: {report} | Purpose: Read-only OpenCode experiment findings. -->\n\n'+findings+'\n')
     (work/'findings.md').write_text(report.read_text())
     if fresh_session and state.get('session_id') and session!=state['session_id']:
         state.setdefault('previous_sessions',[]).append({'session_id':state['session_id'],'replaced_at':local_stamp(),
-            'checkpoints':state.get('checkpoints',0),'reason':'failed review recovery' if failed else 'bounded eight-review session rotation' if rotate else 'explicit fresh-session recovery'})
+            'checkpoints':state.get('checkpoints',0),'model':state.get('model',MODEL),'variant':state.get('variant','xhigh'),
+            'reason':'observer model/variant change' if model_changed else 'failed review recovery' if failed else 'bounded eight-review session rotation' if rotate else 'explicit fresh-session recovery'})
     if not retained:state['session_start_checkpoint']=num-1
     state.pop('last_failure',None)
-    state.update(session_id=session,checkpoints=num,last_report=str(report),last_review=local_stamp(),model=MODEL,variant='xhigh')
+    state.update(session_id=session,checkpoints=num,last_report=str(report),last_review=local_stamp(),model=model,variant=variant)
     state_path.write_text(json.dumps(state,indent=2)+'\n');return report
 
 

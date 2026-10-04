@@ -3113,3 +3113,5 @@ that consumed it was not.
 - 2026-10-04: Started18 paired C2 rechecks (b22ebfa vs7c31722), two private workers and Muse xhigh observer, same23:54IST cutoff. First patched episode is producing construction stock; C2 reliability unproven. Existing450-trial snapshot unchanged and deploy guard waits for all3 campaigns.
 
 - 2026-10-04 20:28IST: C2 matched rechecks improved to3/6 updated vs0/6 control, zero execution errors; checkpoint1 remains unresolved. Fixed repeated Muse-session timeout recovery (5checks), preserving transcripts and120s cadence; observer restart only, experiments remain frozen.
+
+- 2026-10-04: User-authorized observer replacement selects opencode/space-bunny-free xhigh after Muse limit. Configurable model/variant starts fresh sessions and preserves provenance;6observer checks pass. Only observer restart, no worker/mod changes; existing23:54IST deadline retained.
