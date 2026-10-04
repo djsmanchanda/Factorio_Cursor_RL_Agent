@@ -92,8 +92,10 @@ raw attempts are in the standard Laya index/ledger.
 
 `tools/laya_experiment_helper.py` adapts the deterministic and Laya helper's
 session/provenance approach to the **whole experiment suite**. It uses exactly
-**OpenCode Go Muse Spark 1.3 Contributor, xhigh**, one retained session, bounded
-packets and new checkpoint findings. Permissions explicitly deny edits, shell,
+**OpenCode Go Muse Spark 1.3 Contributor, xhigh**, a retained session, bounded
+packets and new checkpoint findings. Explicit fresh-session recovery preserves
+the old session ID, all transcripts, cumulative evidence and previous findings.
+Permissions explicitly deny edits, shell,
 RCON/lifecycle, delegation and other unapproved tools. The script saves final
 text; the model cannot write repository files or mutate worlds.
 
@@ -101,7 +103,8 @@ It observes during the block and reviews selected complete trajectories,
 matched comparisons, dependency failures and context effects. Findings live in
 `<run>/helper/findings-*.md`, with the newest in `helper/findings.md` and raw
 transcripts retained. Two-hour check-ins are `checkin-{2,4,6,8}h.json`; review
-requests are processed in the same observer session. Recommendations remain
+requests are processed by a single leased observer. Failed reviews remain pending,
+retry after a cooldown and retain separate attempt transcripts. Recommendations remain
 advisory and separate from execution.
 
 Operational failures, interrupted comparisons and missing terminal evidence are
@@ -165,4 +168,23 @@ interfaces. Live execution reads the frozen worktree, not later edits here.
 
 Stop control: `systemctl --user stop laya-context-growth-20261004.service`
 stops only this suite's actor cgroup. Stop its observer separately with
-`systemctl --user stop laya-context-muse-20261004.service`. Evidence is retained.
+`systemctl --user stop laya-context-muse-recovered-20261004.service`. Evidence is retained.
+
+## Observer recovery, 11:49 IST
+
+The original observer unit failed at its two-hour request acknowledgement while
+an earlier, directly launched observer was still running. That surviving observer
+saved 37 successful reviews, then the provider began returning HTTP 400
+"invalid parameters". The provider did not identify the underlying cause.
+
+Stopped only the exact suite-owned observer, added exclusive observer/review leases,
+preserved failed and timed-out transcripts, and prevented acknowledgement of failed
+reviews or immediate repeated retries. Six focused tests pass. A live recovery
+review succeeded on the same requested model/effort, saved as
+`helper/findings-038-recovery.md`; the old session and transcripts remain available.
+The new session is `ses_efa702e35ffeu6ulYLVP2bchLI`.
+
+Observation resumed under `laya-context-muse-recovered-20261004.service`, capped
+inside the original 12:57:15 IST deadline. The actor service and frozen experiment
+code remain unchanged. Lifecycle performed: restart only this suite's observer;
+no worker restart or mod deployment is required.

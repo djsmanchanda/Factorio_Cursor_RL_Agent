@@ -2,6 +2,8 @@
 # Path: tools/laya_experiment_helper.py | Purpose: Read-only Muse observer for an entire disposable experiment suite, with saved checkpoint findings.
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -25,6 +27,16 @@ Explain correlations as associations unless a matched controlled intervention su
 For every important failure trace observation -> available options -> choice -> plan/execution -> measured outcome; name competing explanations and a falsifiable next test.
 Return: outcome table; changes since previous checkpoint; cross-system interactions; context/option/reward gaps; evidence-backed hypotheses; recommendations for the next two-hour review.
 The baseline and defaults remain unchanged unless a separately reviewed held-out comparison supports adoption. Never suggest silently promoting a script or fixture success to production.'''
+
+
+@contextmanager
+def exclusive(root, name):
+    work=root/'helper';work.mkdir(exist_ok=True)
+    with (work/f'{name}.lock').open('a') as lock:
+        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError:raise RuntimeError(f'Another {name} owns this experiment') from None
+        try:yield
+        finally:fcntl.flock(lock,fcntl.LOCK_UN)
 
 
 def packet(root):
@@ -59,6 +71,8 @@ def packet(root):
             path=world/'evidence/latest-status.json'
             if path.exists():sections.append('Latest status\n'+path.read_text()[:8000])
     if (root/'initial-evidence.md').exists():sections.append((root/'initial-evidence.md').read_text()[:14000])
+    previous=root/'helper/findings.md'
+    if previous.exists():sections.append('## Previous saved findings (advisory evidence)\n'+previous.read_text()[:10000])
     return '\n\n'.join(sections)
 
 
@@ -71,11 +85,21 @@ def text_output(raw):
     return '\n'.join(parts).strip()
 
 
-def review(root,label='checkpoint',timeout=900):
+def review(root,label='checkpoint',timeout=900,fresh_session=False):
+    with exclusive(root.resolve(),'review'):
+        return _review(root,label,timeout,fresh_session)
+
+
+def _review(root,label,timeout,fresh_session):
     root=root.resolve();work=root/'helper';work.mkdir(exist_ok=True)
     state_path=work/'state.json';state=json.loads(state_path.read_text()) if state_path.exists() else {}
     num=int(state.get('checkpoints',0))+1
-    evidence=work/f'packet-{num:03d}.md';evidence.write_text(packet(root))
+    existing=[int(p.stem.split('-')[-1]) for p in work.glob('opencode-*.jsonl') if p.stem.split('-')[-1].isdigit()]
+    attempt=max([int(state.get('attempts',0)),*existing])+1
+    evidence=work/f'packet-{attempt:03d}.md';evidence.write_text(packet(root))
+    transcript=work/f'opencode-{attempt:03d}.jsonl'
+    state.update(attempts=attempt)
+    state_path.write_text(json.dumps(state,indent=2)+'\n')
     suite=json.loads((root/'suite.json').read_text()) if (root/'suite.json').exists() else {}
     directory=Path(suite.get('repository_root',ROOT))
     permission={'*':'deny','read':{'*':'allow','**/rcon-password':'deny','**/.env*':'deny','**/auth.json':'deny'},'glob':'allow','grep':'allow','list':'allow',
@@ -85,34 +109,60 @@ def review(root,label='checkpoint',timeout=900):
     env={**os.environ,'OPENCODE_CONFIG_CONTENT':json.dumps(config)}
     message=f'Review checkpoint {num} ({label}) of the same eight-hour experiment. Read {evidence}. Return a complete, concise Markdown findings report with precise evidence paths. Reassess earlier hypotheses using new evidence.'
     cmd=['opencode','run','--pure','--dir',str(directory),'--format','json','--agent','rl-experiment-observer','--model',MODEL,'--variant','xhigh']
-    cmd += ['--session',state['session_id']] if state.get('session_id') else ['--title',f'RL experiments {root.name}']
-    result=subprocess.run(cmd+[message],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
-    raw=result.stdout+result.stderr;(work/f'opencode-{num:03d}.jsonl').write_text(raw)
-    session=state.get('session_id') or _session_id(raw);findings=text_output(raw)
+    retained=state.get('session_id') if not fresh_session else None
+    cmd += ['--session',retained] if retained else ['--title',f'RL experiments {root.name}']
+    try:result=subprocess.run(cmd+[message],cwd=ROOT,env=env,text=True,capture_output=True,timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        def decoded(value):return value.decode(errors='replace') if isinstance(value,bytes) else value or ''
+        transcript.write_text(decoded(error.stdout)+decoded(error.stderr))
+        state.update(last_failure={'at':local_stamp(),'reason':'timeout','transcript':str(transcript)})
+        state_path.write_text(json.dumps(state,indent=2)+'\n');raise
+    raw=result.stdout+result.stderr;transcript.write_text(raw)
+    session=_session_id(raw) or retained;findings=text_output(raw)
     if result.returncode or not session or not findings:
-        state.update(last_failure={'at':local_stamp(),'returncode':result.returncode,'transcript':str(work/f'opencode-{num:03d}.jsonl')})
+        state.update(last_failure={'at':local_stamp(),'returncode':result.returncode,'transcript':str(transcript)})
         state_path.write_text(json.dumps(state,indent=2)+'\n');raise RuntimeError('Muse review incomplete; see saved transcript')
     report=work/f'findings-{num:03d}-{label}.md';report.write_text(f'<!-- Path: {report} | Purpose: Read-only Muse experiment findings. -->\n\n'+findings+'\n')
     (work/'findings.md').write_text(report.read_text())
+    if fresh_session and state.get('session_id') and session!=state['session_id']:
+        state.setdefault('previous_sessions',[]).append({'session_id':state['session_id'],'replaced_at':local_stamp(),'reason':'explicit fresh-session recovery'})
+    state.pop('last_failure',None)
     state.update(session_id=session,checkpoints=num,last_report=str(report),last_review=local_stamp(),model=MODEL,variant='xhigh')
     state_path.write_text(json.dumps(state,indent=2)+'\n');return report
 
 
 def observe(root,interval=600):
+    with exclusive(root.resolve(),'observer'):
+        _observe(root.resolve(),interval)
+
+
+def _observe(root,interval):
     while True:
         suite=json.loads((root/'suite.json').read_text());deadline=suite['deadline_epoch']
         requests=sorted((root/'helper').glob('review-request-*'))
         label=requests[0].name.removeprefix('review-request-') if requests else 'live'
         if (root/'DONE').exists():label='final'
         if time.time()>=deadline:break
-        try:print(review(root,label,timeout=min(900,max(1,int(deadline-time.time())))),flush=True)
+        succeeded=False
+        try:
+            print(review(root,label,timeout=min(900,max(1,int(deadline-time.time())))),flush=True)
+            succeeded=True
         except Exception as error:print(local_stamp(),type(error).__name__,str(error),flush=True)
-        if requests:requests[0].rename(requests[0].with_name('reviewed-'+label))
+        if requests and succeeded:
+            try:requests[0].rename(requests[0].with_name('reviewed-'+label))
+            except FileNotFoundError:pass
         if label=='final':break
         next_review=min(time.time()+interval,deadline)
-        while time.time()<next_review and not (root/'DONE').exists() and not list((root/'helper').glob('review-request-*')):
+        while time.time()<next_review and not (root/'DONE').exists() and (not succeeded or not list((root/'helper').glob('review-request-*'))):
             time.sleep(min(10,max(.1,next_review-time.time())))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True);p.add_argument('--observe',action='store_true');p.add_argument('--label',default='initial');p.add_argument('--interval',type=int,default=600)
-    a=p.parse_args();observe(a.root,a.interval) if a.observe else print(review(a.root,a.label))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True);p.add_argument('--observe',action='store_true');p.add_argument('--label',default='initial');p.add_argument('--interval',type=int,default=600);p.add_argument('--fresh-session',action='store_true')
+    a=p.parse_args()
+    if a.observe and a.fresh_session:p.error('--fresh-session is a single recovery review; resume observation after it succeeds')
+    if a.observe:observe(a.root,a.interval)
+    else:
+        suite=json.loads((a.root/'suite.json').read_text())
+        remaining=int(suite['deadline_epoch']-time.time())
+        if remaining<=0:p.error('The experiment deadline has passed')
+        print(review(a.root,a.label,timeout=min(900,remaining),fresh_session=a.fresh_session))
