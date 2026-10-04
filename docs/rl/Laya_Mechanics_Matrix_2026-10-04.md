@@ -14,7 +14,7 @@ finishes or reaches its cap. It does not automatically promote a variant.
 | C1 to C2 transition | 108 | Up to three independently earned C1 worlds; mall/corridor/all soft zoning, requester horizons 1/3/6, stall patience 24/48, double time window, combined context and a selected interaction |
 | Context | 51 | Inventory-only policy-board ablation, bottleneck-only board, dependency graph, eight recent outcomes, combined view, guideline budgets 8/10/12, exploration 5%/30%, feedback weights 0.35/0.7/1.5 |
 | Planning | 33 | Goal and upstream preference strength, construction-stock demand rates, dependency/stock-lock lookahead |
-| Transport | 90 | Belt and bot controls; supply distance 6/15/30/45 tiles, robots 22/55/110/220/550, requester horizons 1/2/3/6/10, separation, machine ratios, input shares and selected distance/buffer/robot interactions |
+| Transport | 90 | Belt and bot controls; horizontal supply setback 6/15/30/45 tiles, robots 22/55/110/220/550, requester horizons 1/2/3/6/10, separation, machine ratios, input shares and selected distance/buffer/robot interactions |
 | Plastic integration | 72 | Refinery and plant counts, coal shares, route separation, coal/crude interruptions and downstream sink backpressure of 10/30/60 game seconds, selected interactions |
 | Recovery and sequencing | 192 | Declared missing belt/machine/pole, circuit belts/bots and plastic, context and exploration variants; repair versus wait versus additional unconnected capacity |
 
@@ -107,7 +107,8 @@ deployment or restart of another runtime is required.
 
 ## Verification and probe failures
 
-54 focused Python tests and native Lua parsing cover matched controls, all physical
+54 focused tests passed in the shared workspace, and **53 passed again on the
+frozen experiment code**. Native Lua parsing and those tests cover matched controls, all physical
 layouts, default behavior, context views, checkpoint integrity, timed source/sink
 interruptions, scoped bot cleanup, observer locking and session rotation.
 
@@ -132,3 +133,21 @@ The raw checkpoint smoke run reached C0, then stalled at 39 decisions with zero
 execution failures and an input-starved gear chain. It exported no checkpoint,
 as required. Checkpoint hash/continuation handling is unit-verified; a live earned
 C1 export/continuation remains to be demonstrated by the queued measured runs.
+
+## Verified launch
+
+The queue launched **2026-10-04 13:01:44 IST** on frozen commit **814be8d**,
+after the prior campaign completed **1,194 jobs** and released its actor unit.
+The new deadline is **2026-10-05 13:00:51 IST** (preparation is inside that cap).
+The first eight checkpoint attempts are active. Each copied source and exact
+starter kit passed launch verification in `launch-verification.json`.
+
+Actor: `laya-mechanics-matrix-20261004.service`.
+Observer: `laya-mechanics-muse-20261004.service`, explicitly `--interval 120`.
+The first exact-model, xhigh Muse review was saved at **13:02:32 IST** in
+`helper/findings-001-live.md`; subsequent reviews are underway.
+Two-hour check-ins begin around **15:00 IST** and remain file-backed reports.
+
+Stop only this campaign with `systemctl --user stop
+laya-mechanics-matrix-20261004.service laya-mechanics-muse-20261004.service`.
+Its evidence remains available. No other runtime requires a lifecycle action.
