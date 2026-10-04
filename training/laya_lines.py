@@ -161,7 +161,7 @@ def _samples(facts: Mapping, ore: str, rect: list[float]) -> list[tuple[float, f
 
 
 def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_plate: int = 40,
-                    obstacles: list[Mapping] = ()) -> list[dict]:
+                    obstacles: list[Mapping] = (), diagnostics: dict | None = None) -> list[dict]:
     """Mine + haul + line options for each needed plate's smelting strip; the policy chooses which and where."""
     if plan is None:
         return []
@@ -170,9 +170,13 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
     for plate, ore in STARTER_ORE.items():
         if plate not in plates:
             continue
+        counts={}
+        if diagnostics is not None:diagnostics[plate]=counts
+        def count(stage):counts[stage]=counts.get(stage,0)+1
         strip = next((z["rect"] for z in plan["zones"] if z["purpose"] == f"smelt:{plate}"), None)
         ores = [z["rect"] for z in plan["zones"] if z["purpose"] == f"ore:{ore}"]
         if strip is None or not ores:
+            count('missing_zone')
             continue
         samples = [p for rect in ores for p in _samples(facts, ore, rect)]
         found = 0
@@ -181,9 +185,11 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
             per_row = FURNACES_PER_ROW * rows // 2  # Drills on each side of the collector, matched to furnaces.
             for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, LINE_PITCH):
                 for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth) + 1, 8):
+                    count('line_sites_considered')
                     port = next((p for p in ports if max(abs(lx + 7 - p["position"]["x"]), abs(ly + depth / 2 - p["position"]["y"]))
                                  <= p["construction_radius"] - 6), None)
                     if port is None:
+                        count('outside_construction')
                         continue
                     sites = sorted(samples, key=lambda s: abs(s[1] - (ly + 1.5)) + abs(s[0] - lx))
                     for (sx, sy), flow in ((site, flow) for site in sites for flow in ("east", "west")):
@@ -191,18 +197,25 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         mine, end = mine_unit(ox, oy, per_row, flow)
                         drills = [(a["position"]["x"], a["position"]["y"]) for a in mine if a["entity"] == "electric-mining-drill"]
                         if not all(any(max(abs(d[0] - x), abs(d[1] - y)) <= SAMPLE_HALF for x, y in samples) for d in drills):
+                            count('mine_samples_uncovered')
                             continue
                         route = haul(end, flow, lx, ly)
                         if route is None:
+                            count('haul_unavailable')
                             continue
                         actions = mine + route + line_units(plate, rows, lx, ly) + output_taps(rows, lx, ly)
-                        if not _reachable(actions, ports, port["network"]) or not clear_of(actions, obstacles):
+                        if not _reachable(actions, ports, port["network"]):
+                            count('outside_network_reach')
+                            continue
+                        if not clear_of(actions, obstacles):
+                            count('placed_collision')
                             continue
                         built = {"surface": "nauvis", "force": "player", "atomic": True,
                                  "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
                         try:
                             validate_build_plan(built)
                         except ValueError:
+                            count('internal_plan_invalid')
                             continue
                         anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
                                      key=lambda q: (q["x"], q["y"]))
@@ -214,6 +227,7 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                             "plan": built, "network": port["network"], "network_anchor": anchor,
                             "internal_power": True, "furnaces": FURNACES_PER_ROW * rows})
                         found += 1
+                        count('candidates')
                         break  # One mine site per line site keeps the menu varied across sites.
                     if found >= per_plate:
                         break

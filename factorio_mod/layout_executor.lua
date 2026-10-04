@@ -429,8 +429,8 @@ end
 local function return_feeding_inserter_hands(entity)
   -- Changing an assembler recipe while its input inserter is holding an old
   -- ingredient leaves that inserter permanently waiting for destination
-  -- space. Return the held stack to the pickup chest first, conserving every
-  -- item. This is deliberately part of the same executor action as set_recipe
+  -- space. Return it to the pickup chest, spilling any remainder for bots
+  -- when the source is a belt or the chest is full. This is part of set_recipe
   -- so the simulation cannot refill the hand between recovery and the switch.
   local box = entity.bounding_box
   local search = {
@@ -450,26 +450,29 @@ local function return_feeding_inserter_hands(entity)
         force = entity.force,
         limit = 1
       })[1]
-      if not source then
-        return "recipe_switch_held_stack_source_missing"
-      end
       local original_count = held.count
       local stack = { name = held.name, count = original_count }
       local quality_ok, quality = pcall(function() return held.quality end)
       if quality_ok and quality then stack.quality = quality.name end
-      local insert_ok, inserted = pcall(function() return source.insert(stack) end)
-      if not insert_ok then
-        return "recipe_switch_held_stack_return_failed"
+      local inserted = 0
+      if source then
+        local insert_ok, count = pcall(function() return source.insert(stack) end)
+        if not insert_ok then return "recipe_switch_held_stack_return_failed" end
+        inserted = tonumber(count) or 0
       end
-      inserted = tonumber(inserted) or 0
       if inserted >= original_count then
         held.clear()
       elseif inserted > 0 then
         held.count = original_count - inserted
       end
       if inserted < original_count then
-        return "recipe_switch_held_stack_return_incomplete:inserted="
-          .. inserted .. ",required=" .. original_count
+        local remaining = { name = stack.name, count = original_count - inserted, quality = stack.quality }
+        local spill_ok = pcall(function()
+          entity.surface.spill_item_stack({ position = inserter.pickup_position, stack = remaining,
+            enable_looted = true, force = entity.force, allow_belts = false })
+        end)
+        if not spill_ok then return "recipe_switch_held_stack_spill_failed" end
+        held.clear()
       end
     end
   end

@@ -60,6 +60,11 @@ def packet(root):
                 sections.append(f'## {name} bounded summary (full evidence at source)\n```json\n{json.dumps(summary,indent=2)}\n```')
             else:sections.append(f'## {name}\n```json\n{p.read_text()[:22000]}\n```')
     queue=root/'queue.json'
+    suite=json.loads((root/'suite.json').read_text()) if (root/'suite.json').exists() else {}
+    if suite.get('previous_root'):
+        previous=Path(suite['previous_root'])
+        p=previous/'progress.json'
+        if p.exists():sections.append('## Separate predecessor progress (never combine outcomes)\n'+p.read_text()[:4000]+'\nFull analysis: '+str(previous/'analysis.json'))
     if queue.exists():
         jobs=json.loads(queue.read_text())
         sections.append('## Planned queue, not observed outcomes\n'+json.dumps({'jobs':len(jobs),'categories':dict(Counter(j.get('category') for j in jobs)),
@@ -85,6 +90,7 @@ def packet(root):
                     compact.append({'index':d.get('index'),'tick':d.get('tick'),'phase':d.get('phase'),'choice':d.get('choice'),
                        'no_legal_build':d.get('no_legal_build'),'blocked':d.get('blocked'),
                        'factory_status':digest.get('factory_status'),'dependency_context':digest.get('dependency_context'),
+                       'line_site_diagnostics':digest.get('line_site_diagnostics'),
                        'selected_features':next((v for v in d.get('distribution') or [] if isinstance(v,dict) and v.get('option_id')==(d.get('choice') or {}).get('option_id')),None),
                        'outcome':d.get('outcome')})
                 sections.append(json.dumps(compact,indent=2)[:14000])

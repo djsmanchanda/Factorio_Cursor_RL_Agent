@@ -50,7 +50,12 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
                                           "construction_radius": 55, "logistic_radius": 25}],
              "poles": [{"name": "substation", "generated": True, "position": {"x": 24, "y": 24}, "wire": 18,
                         "supply": 9, "grid": "1"}], "machines": []}
-    lines = line_candidates(facts, plan, {"iron-plate"})
+    diagnostics={}
+    lines = line_candidates(facts, plan, {"iron-plate"},diagnostics=diagnostics)
+    assert diagnostics['iron-plate']['candidates']==len(lines)
+    remote={**facts,'ports':[{**facts['ports'][0],'position':{'x':500,'y':500}}]}
+    rejected={};assert not line_candidates(remote,plan,{'iron-plate'},diagnostics=rejected)
+    assert rejected['iron-plate']['outside_construction']>0
     assert lines and {c["furnaces"] for c in lines} <= {6, 18}
     for line in lines:
         validate_build_plan(line["plan"])

@@ -36,13 +36,12 @@ def verify_snapshot(snapshot, files):
 
 def run(root):
     cfg=json.loads((root/'request.json').read_text());snapshot=Path(cfg['snapshot']);server=Path(cfg['server_root'])
-    actor=json.loads((Path(cfg['campaign'])/'suite.json').read_text())['actor_unit']
+    campaigns=[Path(p) for p in cfg.get('campaigns',[cfg['campaign']])]
     def report(status,**fields):
         (root/'status.json').write_text(json.dumps({'status':status,'recorded_epoch':time.time(),'commit':cfg['commit'],**fields},indent=2)+'\n')
     while time.time()<cfg['deadline_epoch']:
-        state=subprocess.run(['systemctl','--user','is-active',actor],capture_output=True,text=True).stdout.strip()
-        ended=(Path(cfg['campaign'])/'DONE').exists() and state in {'inactive','failed','unknown'}
-        if not ended:report('waiting_campaign',actor_unit=actor)
+        pending=pending_campaigns(campaigns)
+        if pending:report('waiting_campaign',pending_campaigns=pending)
         elif consumers_present(server):report('waiting_shared_consumers',server_root=str(server))
         else:
             verify_snapshot(snapshot,cfg['files'])
@@ -64,6 +63,16 @@ def run(root):
             return 0
         time.sleep(30)
     report('expired_without_deployment');return 0
+
+
+def pending_campaigns(campaigns):
+    pending=[]
+    for campaign in campaigns:
+        actor=json.loads((campaign/'suite.json').read_text())['actor_unit']
+        state=subprocess.run(['systemctl','--user','is-active',actor],capture_output=True,text=True).stdout.strip()
+        if not (campaign/'DONE').exists() or state not in {'inactive','failed','unknown'}:
+            pending.append({'root':str(campaign),'actor_unit':actor,'unit_state':state})
+    return pending
 
 
 if __name__=='__main__':

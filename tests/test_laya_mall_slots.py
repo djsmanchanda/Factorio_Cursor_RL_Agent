@@ -82,6 +82,21 @@ def test_gates_follow_the_phase_and_are_applied_once(tmp_path):
     assert cache == {}  # A failed apply is retried next decision.
 
 
+def test_experimental_gate_and_request_sizes_preserve_defaults_and_refresh_cache(tmp_path):
+    from training.laya_mall_slots import sync
+    cell_receipt(tmp_path,'a',2.5,'iron-gear-wheel')
+    facts=world((2.5,'iron-gear-wheel','working'));live=FakeLive(tmp_path);cache={}
+    board={'needs':[{'item':'electric-mining-drill','goal_required_per_s':0,'condition':'unbuilt'}]}
+    base=sync(live,facts,board,{},cache)
+    assert live.configured[-1][0]['logistic_condition']['constant']==100
+    assert base[0]['draws']['iron-plate']==50
+    small=sync(live,facts,board,{},cache,gate_scale=.5,buildable_multiplier=1)
+    assert live.configured[-1][0]['logistic_condition']['constant']==50
+    assert small[0]['draws']['iron-plate']==10 and small[0]['option_id']!=base[0]['option_id']
+    n=len(live.configured);sync(live,facts,board,{},cache,gate_scale=.5,buildable_multiplier=1)
+    assert len(live.configured)==n
+
+
 def test_craftable_excludes_furnace_and_fluid_recipes():
     assert craftable(RECIPES, "electric-mining-drill") and not craftable(RECIPES, "iron-plate")
     assert not craftable(RECIPES, "plastic-bar") and not craftable(RECIPES, "nonexistent")

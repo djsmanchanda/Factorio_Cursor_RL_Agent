@@ -68,6 +68,8 @@ class Settings:
     request_multiplier: int | None = None
     dependency_context: bool = False
     mall_slots: bool = False  # Gated, rotating mall slots (training/laya_mall_slots.py).
+    mall_gate_scale: float = 1.0
+    mall_buildable_multiplier: int = 5
     context_view: str = 'full'
     reservation_mode: str = 'strict'
 WAIT_TICKS = (300, 1800)
@@ -312,7 +314,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     obstacles = world_obstacles(facts) + list(placed)
     proposed += starter_candidates(facts, site_plan, plates, set(starters), obstacles=obstacles)
     # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.
-    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles)
+    line_diagnostics = {}
+    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles,diagnostics=line_diagnostics)
     proposed += ring_expand_candidates(facts, site_plan)
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
@@ -449,6 +452,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     return {"needs": needs, "options": options, "proposed": len(proposed), "blocked": blocked,
             "rejected": dict(rejected), "shortfalls": dict(shortfalls), "goal_reserve": goal_reserve,
             "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
+            "line_site_diagnostics": line_diagnostics,
             "omitted_needs": omitted_needs}
 
 
@@ -514,6 +518,7 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     visible_history = [{k:v for k,v in h.items() if k!='experiment_outcome'} for h in history]
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, visible_history, measurement)
     apply_to_state(state, board)
+    if menu.get('line_site_diagnostics'):state['observation_digest']['line_site_diagnostics']=menu['line_site_diagnostics']
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
         state['observation_digest']['dependency_context'] = dependency_context(facts, menu['options'], board)
@@ -775,7 +780,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 _draw_zones(adapter, site_plan, emit)
                 summary["decisions"] += 1
                 continue
-            retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit)
+            retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit,
+                                        gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier)
                          if settings.mall_slots and hasattr(adapter, "configure") else [])
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
                                 site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,

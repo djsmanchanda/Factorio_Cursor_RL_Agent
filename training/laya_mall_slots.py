@@ -23,6 +23,7 @@ option carries (``slot``) are what the doc rules condition on.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -49,8 +50,9 @@ IDLE_STATUSES = {"disabled_by_control_behavior", "full_output", "no_recipe"}
 RECENT_TICKS = 7200  # A retargeted slot gets one rate window to fill before it is "recent" no more.
 
 
-def gate_target(item: str) -> int:
-    return GATE_STOCK.get(item, DEFAULT_GATE)
+def gate_target(item: str, scale: float = 1.0) -> int:
+    if not 0 < scale <= 4:raise ValueError('gate scale must be in (0,4]')
+    return max(1,math.ceil(GATE_STOCK.get(item, DEFAULT_GATE)*scale))
 
 
 def craftable(recipes: Mapping, item: str) -> bool:
@@ -104,29 +106,31 @@ def _configure(entity: str, position: Mapping, **fields) -> dict:
     return {"action_type": "configure_entity", "entity": entity, "position": dict(position), **fields}
 
 
-def gate_action(cell: Mapping, product: str, gated: bool) -> dict:
-    fields = {"logistic_condition": stock_gate(product, gate_target(product))} if gated else {"clear_logistic_condition": True}
+def gate_action(cell: Mapping, product: str, gated: bool, gate_scale: float = 1.0) -> dict:
+    fields = {"logistic_condition": stock_gate(product, gate_target(product,gate_scale))} if gated else {"clear_logistic_condition": True}
     return _configure(cell["entity"], cell["position"], recipe=product, **fields)
 
 
-def retarget_plan(cell: Mapping, item: str, recipes: Mapping, gated: bool) -> dict:
+def retarget_plan(cell: Mapping, item: str, recipes: Mapping, gated: bool, gate_scale: float = 1.0,
+                  buildable_multiplier: int = BUILDABLE_MULTIPLIER) -> dict:
+    if type(buildable_multiplier) is not int or not 1<=buildable_multiplier<=15:raise ValueError('buildable request horizon must be 1..15')
     requests = [{"name": i["name"], "count": int(i["amount"])} for i in recipes[item]["ingredients"]]
     # Intermediates keep the cell's buffer (throughput); buildables are bought a few at a time.
-    multiplier = cell["multiplier"] if item in INTERMEDIATES else min(cell["multiplier"], BUILDABLE_MULTIPLIER)
+    multiplier = cell["multiplier"] if item in INTERMEDIATES else min(cell["multiplier"], buildable_multiplier)
     section = {"group": cell["group"], "requests": requests, "multiplier": multiplier}
     return {"surface": "nauvis", "force": "player", "atomic": True, "phases": [{
         "name": f"laya-retarget-{item}",
         # Requests first: if the machine step then fails, the slot still runs its old recipe and stays offerable.
         "actions": [_configure("requester-chest", cell["requester"], logistic_sections=[section]),
-                    gate_action(cell, item, gated)]}]}
+                    gate_action(cell, item, gated,gate_scale)]}]}
 
 
 def slot_facts(cell: Mapping, cells: Iterable[Mapping], stock: Mapping[str, int], goal_items: set[str],
-               tick: int | None = None) -> dict:
+               tick: int | None = None, gate_scale: float = 1.0) -> dict:
     """What a rule needs to judge giving this slot away."""
     product = cell["product"]
     same = sum(1 for c in cells if c["product"] == product)
-    stocked = bool(product) and stock.get(product, 0) >= gate_target(product) // 2
+    stocked = bool(product) and stock.get(product, 0) >= gate_target(product,gate_scale) // 2
     since = cell.get("retargeted_tick")
     return {"from": product,
             "idle": cell["status"] in IDLE_STATUSES,
@@ -137,7 +141,8 @@ def slot_facts(cell: Mapping, cells: Iterable[Mapping], stock: Mapping[str, int]
 
 
 def retarget_candidates(facts: Mapping, cells: list[dict], items: Iterable[str], stock: Mapping[str, int],
-                        goal_items: set[str], ungated: set[str] | None = None) -> list[dict]:
+                        goal_items: set[str], ungated: set[str] | None = None, *, gate_scale: float = 1.0,
+                        buildable_multiplier: int = BUILDABLE_MULTIPLIER) -> list[dict]:
     """One option per (cell, needed item) the cell does not already make."""
     recipes = facts.get("recipes") or {}
     candidates = []
@@ -145,7 +150,8 @@ def retarget_candidates(facts: Mapping, cells: list[dict], items: Iterable[str],
         for cell in cells:
             if cell["product"] == item:
                 continue
-            plan = retarget_plan(cell, item, recipes, gated=item not in (goal_items if ungated is None else ungated))
+            plan = retarget_plan(cell, item, recipes, gated=item not in (goal_items if ungated is None else ungated),
+                                 gate_scale=gate_scale,buildable_multiplier=buildable_multiplier)
             section = plan["phases"][0]["actions"][0]["logistic_sections"][0]
             draws = {r["name"]: r["count"] * section["multiplier"] for r in section["requests"]}
             candidates.append({
@@ -153,11 +159,11 @@ def retarget_candidates(facts: Mapping, cells: list[dict], items: Iterable[str],
                 "summary": f"Retarget the {cell['product'] or 'idle'} slot at ({cell['position']['x']:g},"
                            f"{cell['position']['y']:g}) to {item}",
                 "plan": plan, "network": cell["network"], "network_anchor": cell["network_anchor"],
-                "bill": {}, "draws": draws, "slot": slot_facts(cell, cells, stock, goal_items, facts.get("tick"))})
+                "bill": {}, "draws": draws, "slot": slot_facts(cell, cells, stock, goal_items, facts.get("tick"),gate_scale)})
     return candidates
 
 
-def gate_updates(cells: list[dict], goal_items: set[str], applied: dict) -> list[dict]:
+def gate_updates(cells: list[dict], goal_items: set[str], applied: dict, gate_scale: float = 1.0) -> list[dict]:
     """Configure actions that bring every cell's gate in line: goals ungated, everything else gated.
 
     ``applied`` maps cell position to the (product, gated) last applied; unchanged cells are skipped.
@@ -166,15 +172,16 @@ def gate_updates(cells: list[dict], goal_items: set[str], applied: dict) -> list
     for cell in cells:
         if not cell["product"]:
             continue
-        want = (cell["product"], cell["product"] not in goal_items)
+        gated=cell['product'] not in goal_items
+        want = (cell["product"], gated,gate_target(cell['product'],gate_scale) if gated else None)
         key = (cell["position"]["x"], cell["position"]["y"])
         if applied.get(key) != want:
-            actions.append(gate_action(cell, *want))
+            actions.append(gate_action(cell,want[0],want[1],gate_scale))
     return actions
 
 
 def sync(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, float], applied: dict,
-         emit=lambda _: None) -> list[dict]:
+         emit=lambda _: None, *, gate_scale: float = 1.0, buildable_multiplier: int = BUILDABLE_MULTIPLIER) -> list[dict]:
     """Bring gates in line with the phase, then return retarget options for what is short.
 
     Goal products of the current phase stay ungated (their rate is measured); every
@@ -185,7 +192,7 @@ def sync(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, flo
     goal_items = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     # Items whose shortage blocks builds run ungated too: a gate below a build's bill stalls it.
     ungated = goal_items | set(stock_demand)
-    updates = gate_updates(cells, ungated, applied)
+    updates = gate_updates(cells, ungated, applied,gate_scale)
     if updates:
         report = adapter.configure(updates)  # Raises on bridge errors: the cache stays untouched, so it retries.
         failed = report.get("failed_entities", 0) + report.get("failed_placements", 0)
@@ -195,13 +202,14 @@ def sync(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, flo
         if report.get("ok") and not failed:  # Remember only what certainly applied.
             for action in updates:
                 applied[(action["position"]["x"], action["position"]["y"])] = (
-                    action["recipe"], "logistic_condition" in action)
+                    action["recipe"], "logistic_condition" in action,(action.get('logistic_condition') or {}).get('constant'))
     stock: dict[str, int] = {}
     for network in (facts.get("networks") or {}).values():
         for name, count in (network.get("items") or {}).items():
             stock[name] = stock.get(name, 0) + int(count)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
-    return retarget_candidates(facts, cells, unmet | set(stock_demand), stock, goal_items, ungated)
+    return retarget_candidates(facts, cells, unmet | set(stock_demand), stock, goal_items, ungated,
+                               gate_scale=gate_scale,buildable_multiplier=buildable_multiplier)
 
 
 def execute_retarget(adapter, candidate: Mapping, measure_ticks: int) -> dict:

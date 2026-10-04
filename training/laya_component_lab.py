@@ -121,6 +121,9 @@ class ComponentWorld(SavedWorldAdapter):
     """Exact paused mechanics; fixture RPC owns only its paired training scope."""
     def __init__(self,root,spec):
         super().__init__(root);self.spec=spec
+        # The fixture declares the complete production path before policy sequencing.
+        # Power relays must not occupy a later stage's funded footprint.
+        self.layout_reservations=[{'entity':a['entity'],'position':dict(a['position'])} for group in spec['groups'].values() for a in group]
         for required in ['game.surfaces.nauvis','game.forces.player','surface="nauvis", force="player"','if solid then']:
             if required not in self.lua_source:raise RuntimeError('shared observation helper changed; component scope adaptation requires review')
         self.surface='training/mechanics-'+root.name;self.force='training-mechanics-'+root.name
@@ -164,7 +167,7 @@ class ComponentWorld(SavedWorldAdapter):
                 if value.get(k)=={}:value[k]=[]
             self.validator.validate(value)
             value['fixture']=fixture
-            value['layout_obstacles']=fixture['protected_entities']
+            value['layout_obstacles']=fixture['protected_entities']+self.layout_reservations
         return value
     def advance(self,ticks):return self.lab.advance(ticks)
     def execute(self,selected,presented,measure_ticks=300):
