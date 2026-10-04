@@ -138,3 +138,12 @@ when either changes, and preserves earlier model/session provenance. Six focused
 observer tests pass, including the model transition and unchanged read-only
 permissions. Existing Muse findings stay intact. Cadence, runtime cutoff and
 frozen worker code remain unchanged; only observer services restart.
+
+Space Bunny's native catalog advertises `xhigh` as `reasoningEffort:xhigh`, and a
+minimal CLI connectivity check returned `OK`. Its first full reviews emitted
+15–17 steps and20–29 read/glob/grep calls before the180-second cap. These were
+active reviews, unlike the empty Muse-limit timeouts. Free-model review attempts
+now have a600-second bound, still capped by the original deadline, followed by
+120seconds between attempts. Proof: `space-bunny-observer-20261004/model-proof.json`
+and `connectivity.jsonl` under `data/laya-experiments/`. Full findings remain
+asynchronous; prior successful Muse reports retain their original provenance.
