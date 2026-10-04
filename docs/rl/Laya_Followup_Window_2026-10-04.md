@@ -49,3 +49,20 @@ hour after this window if conditions remain false.
 Lifecycle: existing workers continue unchanged. New disposable workers load
 private updated mods on start. Shared mod redeployment remains conditional;
 a running GUI must reload after that future deployment.
+
+## Verified launch
+
+The follow-up and Muse units are active, with the actor correctly queued behind
+the still-running predecessor. Muse saved its first xhigh review at 16:26:23 IST.
+**69 focused tests pass**, and all 22 frozen variant catalogs load and verify.
+A separate two-game-minute earned-C1 mall-slot continuation completed with two
+recorded decisions, zero failures, and line-site counts present in both states;
+its server stopped afterwards. It did not reach C2 in that short smoke window.
+This checks the continuation path, not the long-window hypothesis.
+
+Launch proof: `data/laya-experiments/mall-slot-followup-20261004/launch-proof.json`.
+Frozen follow-up commit: **7c31722**. The existing systemd version rejected an
+in-place RuntimeMaxSec update, so an owned-services-only cutoff timer enforces
+the window, leaving 30 seconds for shutdown. New units also have runtime caps.
+The old actor caches its original deadline, so its progress countdown may show
+the older cap; the cutoff timer is authoritative for this supervision window.
