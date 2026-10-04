@@ -121,7 +121,8 @@ def _review(root,label,timeout,fresh_session):
     state_path=work/'state.json';state=json.loads(state_path.read_text()) if state_path.exists() else {}
     num=int(state.get('checkpoints',0))+1
     rotate=bool(state.get('session_id')) and num-int(state.get('session_start_checkpoint',0))>8
-    fresh_session=fresh_session or rotate
+    failed=bool(state.get('last_failure'))
+    fresh_session=fresh_session or rotate or failed
     existing=[int(p.stem.split('-')[-1]) for p in work.glob('opencode-*.jsonl') if p.stem.split('-')[-1].isdigit()]
     attempt=max([int(state.get('attempts',0)),*existing])+1
     evidence=work/f'packet-{attempt:03d}.md';evidence.write_text(packet(root))
@@ -154,7 +155,7 @@ def _review(root,label,timeout,fresh_session):
     (work/'findings.md').write_text(report.read_text())
     if fresh_session and state.get('session_id') and session!=state['session_id']:
         state.setdefault('previous_sessions',[]).append({'session_id':state['session_id'],'replaced_at':local_stamp(),
-            'checkpoints':state.get('checkpoints',0),'reason':'bounded eight-review session rotation' if rotate else 'explicit fresh-session recovery'})
+            'checkpoints':state.get('checkpoints',0),'reason':'failed review recovery' if failed else 'bounded eight-review session rotation' if rotate else 'explicit fresh-session recovery'})
     if not retained:state['session_start_checkpoint']=num-1
     state.pop('last_failure',None)
     state.update(session_id=session,checkpoints=num,last_report=str(report),last_review=local_stamp(),model=MODEL,variant='xhigh')
@@ -175,7 +176,7 @@ def _observe(root,interval):
         if time.time()>=deadline:break
         succeeded=False
         try:
-            print(review(root,label,timeout=min(900,max(1,int(deadline-time.time())))),flush=True)
+            print(review(root,label,timeout=min(suite.get('observer_timeout_seconds',300),max(1,int(deadline-time.time())))),flush=True)
             succeeded=True
         except Exception as error:print(local_stamp(),type(error).__name__,str(error),flush=True)
         if requests and succeeded:

@@ -102,3 +102,28 @@ original deadline; the existing450-trial campaign keeps its own frozen code.
 The shared-mod guard now waits for all three campaigns before its previously
 authorized conditional deployment. No new mod deployment is required by this
 Python compiler fix.
+
+## 20:28 IST interim result
+
+Twelve of eighteen matched rechecks are complete, all without execution errors.
+The updated compiler reached C2 in **3/6**; frozen controls reached C2 in **0/6**.
+Checkpoint0 has2/2 updated successes, checkpoint1 has0/2, checkpoint2 has1/2.
+Successful runs took about19–35 game minutes (4.7–9.1wall minutes at speed4,
+including actual runner overhead). Actual recorded terminal action windows show
+iron about4.9–5.0/s and copper about4.35–4.40/s. The phase marker confirms the
+runner's rolling measurement acceptance; stale latest-status boards can precede
+the final outcome and must not override terminal logs and the run index.
+
+This is a measurable improvement, **not reliable success across all three
+checkpoints**. Both unresolved checkpoint1 rechecks still failed; remaining
+matched trials continue. The separate main screen has73 completed trials,
+zero execution errors, and no C2 completions (its6 target completions are repair
+component tests, a distinct domain).
+
+Muse stopped producing findings near18:00 despite active observer processes:
+repeated resumed-session calls hit900-second timeouts. The observer now starts
+a fresh session after a failed review, preserves provenance/transcripts, and
+uses a300-second default bound (current campaigns180seconds), with the existing
+120-second wait after each attempt. Five observer tests pass, including automatic
+failure recovery. Only observer processes require restarting; worker snapshots,
+mods and experiment comparisons remain unchanged.

@@ -33,10 +33,11 @@ def test_failed_reviews_keep_transcripts_and_fresh_session_keeps_provenance(tmp_
         helper.review(tmp_path)
     assert (work/'opencode-038.jsonl').read_text()=='original failure'
     assert (work/'opencode-039.jsonl').read_text()=='new failure'
-    helper.review(tmp_path,'recovery',fresh_session=True)
+    helper.review(tmp_path,'recovery')
     state=json.loads((work/'state.json').read_text())
     assert state['checkpoints']==38 and state['attempts']==40
     assert state['session_id']=='ses_new' and state['previous_sessions'][0]['session_id']=='ses_old'
+    assert state['previous_sessions'][0]['reason']=='failed review recovery'
     assert '--session' in commands[0] and '--session' not in commands[1]
     assert 'last_failure' not in state
 
