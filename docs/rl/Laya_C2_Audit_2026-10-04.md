@@ -73,3 +73,32 @@ Lifecycle: new disposable runner starts load the Python change. **No mod
 redeployment or restart of existing campaigns is needed.** Shared installed
 mods remain unchanged; their separate guarded deployment must await all owned
 campaigns and stopped shared consumers.
+
+## Launch and early live observations
+
+Matched actor and Muse services started at **17:27:09 IST**. Fixed compiler is
+**b22ebfa**; control is frozen **7c31722**. Both private worlds prepared normally,
+and Muse saved its first xhigh findings at17:28:38. Launch proof is in
+`data/laya-experiments/c2-rechecks-20261004/launch-proof.json`.
+
+The first patched world initially had zero drills and belts. Its recorded
+sequence built drill production; by decision9 it had19 drills,77 inserters and
+16 medium poles. Decision15 had22 belts; a later observed transaction had98.
+Iron-line checks therefore changed from drill shortage to belt shortage. This
+is supply progress, not proof of a stalled geometry or completed C2.
+Copper checks still include a mix of engine collisions and funding failures.
+
+Source: patched world `raw-recheck-001-tap-options-s65000`, its decision journal
+and engine validation report
+`server/script-output/laya_saved_world/70547bb8459a4f7089946b4f014cefb2.json`
+at tick364853. `collision:transport-belt` names the proposed entity, not its
+blocker; initial infrastructure counts show zero existing transport belts.
+Existing inserters/chests or neutral obstacles may still matter, but the
+reports do not yet establish the actual blocker. If collisions remain terminal,
+the next observation improvement is exact rejected-action/blocker evidence.
+
+**C2 reliability remains unproven.** The18 matched tests continue under the
+original deadline; the existing450-trial campaign keeps its own frozen code.
+The shared-mod guard now waits for all three campaigns before its previously
+authorized conditional deployment. No new mod deployment is required by this
+Python compiler fix.

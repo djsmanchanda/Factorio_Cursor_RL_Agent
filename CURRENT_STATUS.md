@@ -3109,3 +3109,5 @@ that consumed it was not.
 - 2026-10-04: Launched frozen 450-trial follow-up behind the active matrix, Muse xhigh every 120s after review, eight-hour cutoff 23:54 IST and two-hour saved check-ins. 69 checks plus private repair/earned-C1 smoke runs verified; guarded redeploy waits for both actors. Launch proof in data/laya-experiments/mall-slot-followup-20261004/launch-proof.json.
 
 - 2026-10-04: C2 subagent audit found absent legal line actions and provider-chest budget deadlocks; added shifted legal origins and reduced/full output alternatives. 46 focused checks and live-fact geometry replays pass; full C2 reliability remains under isolated matched recheck. See docs/rl/Laya_C2_Audit_2026-10-04.md.
+
+- 2026-10-04: Started18 paired C2 rechecks (b22ebfa vs7c31722), two private workers and Muse xhigh observer, same23:54IST cutoff. First patched episode is producing construction stock; C2 reliability unproven. Existing450-trial snapshot unchanged and deploy guard waits for all3 campaigns.
