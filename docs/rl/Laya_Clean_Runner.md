@@ -159,6 +159,19 @@ deterministic reference, writing `docs/rl/laya_helper_runs/<run_id>/findings.md`
   (`data/laya-saved-world/line-mechanics-20261004a`, fixture items, not Laya
   evidence): a 6-furnace iron line was built by bots (171 entities, 0 failed) and
   ran at 3.9 ore/s and 3.75 plates/s with all six furnaces working.
+- Mall slots (`training/laya_mall_slots.py`, setting `mall_slots`, variant
+  `docs/rl/laya_variants/mall-slots.json`): every Laya mall cell is stock-gated
+  (`planners/stock_gating.stock_gate`; products the current phase measures run
+  ungated, gates re-synced each decision), and a `retarget` option reconfigures an
+  existing cell (recipe, requester section, gate) through the mod's
+  `configure_entity`: nothing is placed, so it works with no spare assemblers.
+  Why: in the RL context suite 38 of 45 C2-window runs past C1 ended on
+  `item_shortfall:assembling-machine-1`, with plates drained into ungated
+  intermediates. Doc rules: `mission.rotating-mall`, `mission.stock-gates`,
+  `mission.slot-settle`. A retarget does not count as stall progress.
+- Line sites must clear placed entities (machines, poles, ports and Laya's own
+  submitted builds), and coverage that brings a line's tap area into logistic
+  reach serves that plate's need.
 - Policy: the doc-guided policy (`training/laya_guided_policy.py`,
   `authority: guided_exploration`) until a compatible Laya checkpoint exists.
   It weights each option by the `prefer` entries of the rules present in that

@@ -56,3 +56,12 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
         validate_build_plan(line["plan"])
         assert reservation_reason(plan, line) is None
         assert power_variants(line, facts)
+
+
+def test_line_sites_must_clear_entities_already_placed():
+    from training.laya_lines import clear_of
+    acts = line_units("iron-plate", 1, 10, 20)
+    furnace = next(a for a in acts if a["entity"] == "electric-furnace")
+    assert clear_of(acts, [])
+    assert not clear_of(acts, [{"entity": "roboport", "position": dict(furnace["position"])}])
+    assert clear_of(acts, [{"entity": "roboport", "position": {"x": 500, "y": 500}}])

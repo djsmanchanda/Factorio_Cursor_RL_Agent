@@ -90,6 +90,12 @@ The substation restriction is enforced when power layouts are generated (`traini
 
 Reserve the top and bottom quad slots until long-handed inserters are manufactured; regular inserters cannot replace them.
 
+Gear and cable slots are permanent; other mall slots rotate to the current shortage, so repurpose an idle or stocked slot before building a new cell.
+
+Every mall slot stops at a stock target, so finished intermediates stop consuming plates; products the current phase measures run ungated.
+
+Let a retargeted slot fill its stock target before switching it again; a slot waiting for its new ingredients is busy, not idle.
+
 ## How rules steer decisions
 
 Each soft rule above is quoted verbatim in `docs/rl/laya_mission_guidelines.json`.

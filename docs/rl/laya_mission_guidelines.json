@@ -302,6 +302,66 @@
       "prefer": []
     },
     {
+      "rule_id": "mission.rotating-mall",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Gear and cable slots are permanent; other mall slots rotate to the current shortage, so repurpose an idle or stocked slot before building a new cell.",
+      "prefer": [
+        {
+          "when": {
+            "family": "retarget",
+            "slot_free": true
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "family": "retarget",
+            "slot_permanent": true
+          },
+          "weight": 0.1
+        },
+        {
+          "when": {
+            "family": "retarget",
+            "slot_from_goal": true
+          },
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.stock-gates",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Every mall slot stops at a stock target, so finished intermediates stop consuming plates; products the current phase measures run ungated.",
+      "prefer": []
+    },
+    {
+      "rule_id": "mission.slot-settle",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Let a retargeted slot fill its stock target before switching it again; a slot waiting for its new ingredients is busy, not idle.",
+      "prefer": [
+        {
+          "when": {
+            "family": "retarget",
+            "slot_recent": true
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
       "rule_id": "mission.wait-rule",
       "kind": "soft",
       "scopes": [

@@ -38,7 +38,7 @@ def _on_ore(position: tuple[float, float], samples: list[tuple[float, float]]) -
 
 
 def starter_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], built: set[str],
-                       per_plate: int = 80) -> list[dict]:
+                       per_plate: int = 80, obstacles: list = ()) -> list[dict]:
     """Starter builds for plates that still need one, sited on planned ore zones in robot reach."""
     if plan is None:
         return []
@@ -63,6 +63,9 @@ def starter_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], b
                     actions = built_plan["phases"][0]["actions"]
                     drills = [(a["position"]["x"], a["position"]["y"]) for a in actions if a["entity"] == "electric-mining-drill"]
                     if not all(_on_ore(d, samples) for d in drills):
+                        continue
+                    from training.laya_lines import clear_of
+                    if not clear_of(actions, obstacles):
                         continue
                     plan_dict = {"surface": "nauvis", "force": "player", "atomic": True,
                                  "phases": [{"name": f"saved-world-starter-{plate}", "actions": actions}]}

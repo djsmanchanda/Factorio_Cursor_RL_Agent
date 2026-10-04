@@ -300,3 +300,13 @@ def test_requested_items_count_sections_with_their_multiplier():
     chest = {"entity": "requester-chest", "logistic_sections": [
         {"group": "g", "requests": [{"name": "inserter", "count": 1}, {"name": "iron-plate", "count": 2}], "multiplier": 15}]}
     assert requested_items({"plan": {"phases": [{"actions": [chest]}]}}) == {"inserter": 15, "iron-plate": 30}
+
+
+def test_a_need_never_presents_the_same_option_twice(monkeypatch):
+    import training.laya_clean_runner as runner
+    # Two builds that differ only in relay poles become one option once re-powered.
+    monkeypatch.setattr(runner, "power_variants", lambda c, facts: [{**c, "option_id": "same." + c["family"]}] * 2)
+    world = facts()
+    menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validator(), seed=1)
+    ids = [o["option_id"] for o in menu["options"]]
+    assert len(ids) == len(set(ids))

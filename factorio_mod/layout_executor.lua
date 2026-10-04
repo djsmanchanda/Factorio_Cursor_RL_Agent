@@ -476,6 +476,49 @@ local function return_feeding_inserter_hands(entity)
   return nil
 end
 
+local function return_removed_items(entity, removed)
+  -- set_recipe removes the machine's ingredients, output and work in progress
+  -- and returns them; discarding that return deletes items. Put them in the
+  -- feeding chest (as held stacks are), and spill any rest for robots.
+  if type(removed) ~= "table" then return nil end
+  local source = nil
+  local box = entity.bounding_box
+  for _, inserter in pairs(entity.surface.find_entities_filtered({
+    area = { { box.left_top.x - 3, box.left_top.y - 3 }, { box.right_bottom.x + 3, box.right_bottom.y + 3 } },
+    type = "inserter", force = entity.force
+  })) do
+    if inserter.drop_position and position_inside_box(inserter.drop_position, box) then
+      source = entity.surface.find_entities_filtered({
+        position = inserter.pickup_position, type = { "container", "logistic-container" },
+        force = entity.force, limit = 1
+      })[1]
+      if source then break end
+    end
+  end
+  for key, value in pairs(removed) do
+    -- 2.0 returns {name, count, quality} records; 1.x returned name -> count.
+    local stack = type(value) == "table" and { name = value.name, count = value.count, quality = value.quality }
+      or { name = key, count = value }
+    local count = tonumber(stack.count) or 0
+    if count > 0 then
+      local inserted = 0
+      if source then
+        local ok, n = pcall(function() return source.insert(stack) end)
+        inserted = ok and (tonumber(n) or 0) or 0
+      end
+      if inserted < count then
+        local rest = { name = stack.name, count = count - inserted, quality = stack.quality }
+        local ok = pcall(function()
+          entity.surface.spill_item_stack({ position = entity.position, stack = rest,
+            enable_looted = true, force = entity.force, allow_belts = false })
+        end)
+        if not ok then return "recipe_switch_removed_items_lost" end
+      end
+    end
+  end
+  return nil
+end
+
 local function configure_created_entity(entity, action)
   if action.recipe then
     local actual, read_error = recipe_name(entity)
@@ -483,8 +526,11 @@ local function configure_created_entity(entity, action)
     if actual ~= action.recipe then
       local recovery_error = return_feeding_inserter_hands(entity)
       if recovery_error then return recovery_error end
-      local ok = pcall(function() entity.set_recipe(action.recipe) end)
+      local removed
+      local ok = pcall(function() removed = entity.set_recipe(action.recipe) end)
       if not ok then return "recipe_set_failed" end
+      local return_error = return_removed_items(entity, removed)
+      if return_error then return return_error end
     end
   end
   if action.input_priority then

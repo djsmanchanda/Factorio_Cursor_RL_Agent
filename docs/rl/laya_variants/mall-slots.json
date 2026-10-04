@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "variant_id": "mall-slots",
+  "description": "Gated, rotating mall slots: every Laya mall cell stops at a stock target (phase goals ungated) and existing cells can be retargeted to the current shortage.",
+  "settings": {"mall_slots": true}
+}

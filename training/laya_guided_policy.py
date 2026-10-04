@@ -88,6 +88,11 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "deepest_bottleneck": item in deepest, "others_available": others,
             "goal_need": item in goal_items, "goal_options_available": goal_options,
             "starves_goal": starves_goal(option),
+            # Retargets of an existing mall slot (training/laya_mall_slots.py): what giving the slot away costs.
+            "slot_free": bool(option.get("slot")) and (option["slot"]["idle"] or option["slot"]["stocked"]),
+            "slot_permanent": bool(option.get("slot")) and option["slot"]["permanent"],
+            "slot_from_goal": bool(option.get("slot")) and option["slot"]["from_goal"],
+            "slot_recent": bool(option.get("slot")) and option["slot"].get("recent", False),
             # A side build that would leave less than the unbuilt goal starters need (menu["goal_reserve"]).
             "dips_goal_reserve": not is_goal(option) and any(
                 stock.get(name, 0) - count < (menu.get("goal_reserve") or {}).get(name, 0)
@@ -103,10 +108,6 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
                 blocks_other_builds=dependency['blocks_other_builds'] > 0,
                 unbacked_inputs=bool(dependency['unbacked_inputs']),
                 available_input_crafts=dependency['available_input_crafts'])
-        outcomes=state.get('observation_digest',{}).get('action_outcomes')
-        if outcomes is not None:
-            previous=[h for h in outcomes if h.get('product')==option.get('product') and h.get('family')==option['family']]
-            features[option['option_id']]['repeat_without_output']=bool(previous and not previous[-1].get('produced',{}).get(option.get('product'),0))
     return features
 
 

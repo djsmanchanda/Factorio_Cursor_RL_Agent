@@ -36,12 +36,13 @@ from orchestrator.laya_state import validate_state
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
-from training.laya_power import POLES, power_variants
+from training.laya_power import POLES, power_variants, world_obstacles
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
+from training import laya_mall_slots as mall_slots
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
@@ -66,8 +67,7 @@ class Settings:
     max_game_ticks: int | None = None
     request_multiplier: int | None = None
     dependency_context: bool = False
-    context_view: str = 'full'
-    reservation_mode: str = 'strict'
+    mall_slots: bool = False  # Gated, rotating mall slots (training/laya_mall_slots.py).
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -121,6 +121,19 @@ class LiveWorld(SavedWorldAdapter):
         if COLLISION_RETURN not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; collision check not found")
         self.lua_source = self.lua_source.replace(COLLISION_RETURN, 'then return "collision:"..a.entity end')
+
+    def configure(self, actions: list[dict]) -> dict:
+        """Reconfigure existing entities through the mod's configure_entity (no placement, no items)."""
+        from training.laya_saved_world import build_layout_authorization, load_json
+        plan = {"surface": self.surface, "force": self.force, "atomic": True,
+                "phases": [{"name": "laya-configure", "actions": actions}]}
+        return load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
+
+    def execute(self, selected, presented, measure_ticks=1800):
+        candidate = next((c for c in presented if c["option_id"] == selected), None)
+        if candidate and candidate.get("family") == "retarget":
+            return mall_slots.execute_retarget(self, candidate, measure_ticks)
+        return super().execute(selected, presented, measure_ticks)
 
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
@@ -228,7 +241,7 @@ def requested_items(candidate: Mapping) -> dict[str, int]:
     return draws
 
 
-def planned_sites(facts: Mapping, plan: Mapping | None) -> Mapping:
+def planned_sites(facts: Mapping, plan: Mapping | None, starters: frozenset | set = frozenset()) -> Mapping:
     """Facts whose resources are only the planned ore zones' sites, for ores that have one.
 
     Builds go on planned zones, so coverage reaches or approaches an ore only
@@ -242,6 +255,11 @@ def planned_sites(facts: Mapping, plan: Mapping | None) -> Mapping:
             zones[zone["purpose"][4:]].append(zone["rect"])
     kept = [site for site in facts["resources"] if site["item"] not in zones or any(
         r[0] <= site["position"]["x"] <= r[2] and r[1] <= site["position"]["y"] <= r[3] for r in zones[site["item"]])]
+    # After a plate's starter, its next capacity is a smelting line whose taps need logistic
+    # coverage: those tap sites count as the plate's sites for coverage credit.
+    from training.laya_lines import tap_sites
+    kept += [{"item": plate, "position": {"x": x, "y": y}} for plate in sorted(starters)
+             for x, y in tap_sites(plan, plate)]
     return {**facts, "resources": kept}
 
 
@@ -269,7 +287,8 @@ def _compile(facts: Mapping, products: set[str], seed: int, request_multiplier: 
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
                  site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
                  per_need_checked: int = 6, per_need_shown: int = 2,
-                 request_multiplier: int | None = None, reservation_mode: str = 'strict') -> dict:
+                 retargets: Sequence[Mapping] = (), placed: Sequence[Mapping] = (),
+                 request_multiplier: int | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -278,8 +297,6 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     need is seeded exploration of sites; it never ranks needs or options.
     """
     rng = random.Random(seed)
-    from training.laya_experiment_context import reservation_view
-    land_plan = reservation_view(site_plan, reservation_mode)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
@@ -287,9 +304,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in STARTER_ORE)
                                             or (c["family"] == "mine" and c.get("product") in STARTER_ORE.values()))]
     plates = {plate for plate, ore in STARTER_ORE.items() if plate in unmet or ore in unmet}
-    proposed += starter_candidates(facts, site_plan, plates, set(starters))
+    # Sites must clear what is already placed: machines, poles, ports, and Laya's own submitted builds.
+    obstacles = world_obstacles(facts) + list(placed)
+    proposed += starter_candidates(facts, site_plan, plates, set(starters), obstacles=obstacles)
     # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.
-    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters})
+    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles)
     proposed += ring_expand_candidates(facts, site_plan)
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
@@ -301,7 +320,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         kept = []
         for candidate in candidates:
             detail: list = []
-            reason = reservation_reason(land_plan, {**candidate, "plan": _build_only(candidate)}, detail)
+            reason = reservation_reason(site_plan, {**candidate, "plan": _build_only(candidate)}, detail)
             if reason:
                 key = key_of(candidate)
                 pre_rejected[key][reason] += 1
@@ -311,7 +330,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 kept.append(candidate)
         return kept
 
-    reach_facts = planned_sites(facts, site_plan)
+    reach_facts = planned_sites(facts, site_plan, starters)
     proposed = on_free_land(proposed, lambda c: _need_key(reach_facts, c, unmet))
     by_need: dict[str, list] = defaultdict(list)
     for candidate in proposed:
@@ -335,7 +354,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             expanded[need] = []
             for variant in variants:
                 # Land reservation is a hard rule: reject builds on another purpose's land.
-                reason = reservation_reason(land_plan, variant) if site_plan else None
+                reason = reservation_reason(site_plan, variant) if site_plan else None
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -372,6 +391,13 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             continue  # Already a board need with its own options; one need per product.
         stock_groups[f"stock:{candidate['product']}"].append(candidate)
     legal.update(check(stock_groups))
+    # Retargeting an existing mall slot serves the same needs without placing anything.
+    for candidate in retargets:
+        product = candidate["product"]
+        need = f"item:{product}" if product in unmet else f"stock:{product}" if product in shortfalls else None
+        if need:
+            legal[need].append({**candidate, "need_id": need})
+
     for need, counts in pre_rejected.items():
         reasons[need].update(counts)
         rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
@@ -407,7 +433,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected))
                if need not in legal}
     for item in sorted(unmet):
-        if f"item:{item}" not in by_need:
+        if f"item:{item}" not in by_need and f"item:{item}" not in legal:
             blocked[f"item:{item}"] = {"no_candidate": 1}
     # Kit items the phase's still-unbuilt starters will need, so side builds can see what they would take.
     goal_reserve: dict[str, int] = {}
@@ -481,15 +507,11 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     """Laya decision state: saved-world facts plus status board and mission guidelines."""
     objective = f"{MISSION_ID} phase {phase['phase_id']} ({phase['name']}): " + ", ".join(
         f"{item} {rate:g}/s" for item, rate in sorted(phase["targets"].items()))
-    visible_history = [{k:v for k,v in h.items() if k!='experiment_outcome'} for h in history]
-    state = decision_state(facts, menu["options"], run_id, model_ref, objective, visible_history, measurement)
+    state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
     apply_to_state(state, board)
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
         state['observation_digest']['dependency_context'] = dependency_context(facts, menu['options'], board)
-    from training.laya_experiment_context import apply_view
-    apply_view(state,facts,menu['options'],board,history,settings.context_view)
-    if settings.reservation_mode!='strict':state['observation_digest']['reservation_experiment']=settings.reservation_mode
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
     # Fetch every rule in scope; select_guidelines keeps the 15 most relevant to this decision.
     guidance = load_guideline_context(ROOT, phase["scopes"], catalog=settings.catalog, max_rules=32)
@@ -513,6 +535,7 @@ def _option_record(option: Mapping) -> dict:
             "product": option.get("product"), "power": option.get("power"), "summary": option.get("summary"),
             "bill": option.get("bill"), "draws": option.get("draws"), "wait_ticks": option.get("wait_ticks"),
             "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
+            "slot": option.get("slot"),
             "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
 
 
@@ -588,7 +611,8 @@ def _built_counts(adapter: Any) -> dict[str, int]:
     counts: Counter = Counter()
     if root is None:
         return {}
-    for path in Path(root, "evidence").glob("transaction-*.json"):
+    # Oldest first: a retarget moves a slot only after the build that made it.
+    for path in sorted(Path(root, "evidence").glob("transaction-*.json"), key=lambda p: p.stat().st_mtime):
         try:
             receipt = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -599,7 +623,27 @@ def _built_counts(adapter: Any) -> dict[str, int]:
             machines = [a for a in candidate["plan"]["phases"][0]["actions"]
                         if a["entity"] in ("electric-furnace", "assembling-machine-1", "assembling-machine-2")]
             counts[candidate["product"]] += max(1, len(machines))
+        elif receipt.get("status") in ("observed", "applied") and candidate.get("family") == "retarget":
+            counts[candidate["product"]] += 1  # The slot now makes this product, not its old one.
+            old = (candidate.get("slot") or {}).get("from")
+            if old and counts[old] > 0:
+                counts[old] -= 1
     return dict(counts)
+
+
+def _submitted_entities(adapter: Any) -> list[dict]:
+    """Entities of every build Laya submitted (belts, inserters, chests are not in the facts)."""
+    root = getattr(adapter, "root", None)
+    placed: list[dict] = []
+    for path in Path(root, "evidence").glob("transaction-*.json") if root else ():
+        try:
+            receipt = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if (receipt.get("submission") or {}).get("ok"):
+            placed += [{"entity": a["entity"], "position": a["position"]}
+                       for phase in receipt["candidate"]["plan"]["phases"] for a in phase["actions"]]
+    return placed
 
 
 def _starters_submitted(adapter: Any) -> set[str]:
@@ -659,7 +703,7 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
-        settings: Settings = Settings(), initial_reached: Sequence[str] = ()) -> dict:
+        settings: Settings = Settings()) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -667,7 +711,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     loop continues; it stops safely after ``MAX_CONSECUTIVE_FAILURES`` in a
     row.  It never falls back to another decision maker.
     """
-    reached: list[str] = list(initial_reached)
+    reached: list[str] = []
     history: list[dict] = []
     measurement = None
     failures = 0
@@ -681,6 +725,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     stall = {"since": 0, "best_gap": math.inf}
     samples: list[tuple[int, Mapping, Mapping]] = []
     stock_demand: dict[str, float] = {}
+    gates: dict = {}  # Mall slot gates applied this run: position -> (product, gated).
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -722,10 +767,13 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 _draw_zones(adapter, site_plan, emit)
                 summary["decisions"] += 1
                 continue
+            retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit)
+                         if settings.mall_slots and hasattr(adapter, "configure") else [])
             menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
-                                site_plan=site_plan, starters=_starters_submitted(adapter),
+                                site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,
+                                placed=_submitted_entities(adapter),
                                 per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown,
-                                request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode)
+                                request_multiplier=settings.request_multiplier)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
@@ -792,15 +840,14 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                  + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],
                             "summary": record["summary"][:120],
-                            "outcome": "completed" if receipt["status"] == "observed" else "pending",
-                            "experiment_outcome": {"family":chosen['family'],'product':chosen.get('product'),
-                                "status":receipt['status'],'produced':record['measured_per_s']}})
+                            "outcome": "completed" if receipt["status"] == "observed" else "pending"})
             summary["decisions"] += 1
             failures = 0
             # Stall: no need-serving build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
             gap = _goal_gap(compile_status(facts, phase["targets"], measurement, built))
             # Untagged coverage serves no current need, so it does not count as progress.
-            served = chosen["family"] != "wait" and chosen.get("need_id") != "coverage"
+            # A retarget only re-plans an existing slot; it counts once the goal gap moves.
+            served = chosen["family"] not in ("wait", "retarget") and chosen.get("need_id") != "coverage"
             progressed = (served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
             stall["best_gap"] = min(stall["best_gap"], gap)
             stall["since"] = 0 if progressed else stall["since"] + 1

@@ -117,6 +117,32 @@ def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float) ->
     return belts if len(belts) <= MAX_HAUL else None
 
 
+def tap_sites(plan: Mapping | None, plate: str) -> list[tuple[float, float]]:
+    """Where a 6-furnace line's provider taps would sit in the plate's strip (they need logistic coverage)."""
+    strip = next((z["rect"] for z in (plan or {}).get("zones", []) if z["purpose"] == f"smelt:{plate}"), None)
+    if strip is None:
+        return []
+    sites = []
+    for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, LINE_PITCH):
+        for ly in range(math.ceil(strip[1]), math.floor(strip[3] - line_depth(1)) + 1, 8):
+            x, y = line_output(1, lx, ly)
+            sites.append((x + 3, y + 2))  # Middle of the tap row.
+    return sites
+
+
+def clear_of(actions: list[dict], obstacles: list[Mapping]) -> bool:
+    """No action's footprint overlaps an already placed entity (bounding-box prefilter first)."""
+    from planners.infrastructure_geometry import boxes_overlap
+    from training.laya_power import _size
+    xs = [a["position"]["x"] for a in actions]
+    ys = [a["position"]["y"] for a in actions]
+    near = [o for o in obstacles if min(xs) - 3 <= o["position"]["x"] <= max(xs) + 3
+            and min(ys) - 3 <= o["position"]["y"] <= max(ys) + 3]
+    return not any(boxes_overlap((a["position"]["x"], a["position"]["y"]), _size(a["entity"]),
+                                 (o["position"]["x"], o["position"]["y"]), _size(o["entity"]))
+                   for a in actions for o in near)
+
+
 def _reachable(actions: list[dict], ports: list[Mapping], network: str) -> bool:
     """Every entity inside construction range, provider chests inside logistic range, of one network."""
     own = [p for p in ports if p["network"] == network]
@@ -134,7 +160,8 @@ def _samples(facts: Mapping, ore: str, rect: list[float]) -> list[tuple[float, f
             and rect[0] <= s["position"]["x"] <= rect[2] and rect[1] <= s["position"]["y"] <= rect[3]]
 
 
-def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_plate: int = 40) -> list[dict]:
+def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_plate: int = 40,
+                    obstacles: list[Mapping] = ()) -> list[dict]:
     """Mine + haul + line options for each needed plate's smelting strip; the policy chooses which and where."""
     if plan is None:
         return []
@@ -169,7 +196,7 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         if route is None:
                             continue
                         actions = mine + route + line_units(plate, rows, lx, ly) + output_taps(rows, lx, ly)
-                        if not _reachable(actions, ports, port["network"]):
+                        if not _reachable(actions, ports, port["network"]) or not clear_of(actions, obstacles):
                             continue
                         built = {"surface": "nauvis", "force": "player", "atomic": True,
                                  "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
