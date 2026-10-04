@@ -3107,3 +3107,5 @@ that consumed it was not.
 - 2026-10-04: Verified isolated eight-hour follow-up screens, mall gate/request knobs and line-site observations; private belt-repair replication sustained 3 circuits/s after 1200-tick repair, zero ghosts. Existing comparisons stay frozen; shared redeploy waits for both campaigns and stopped consumers. See docs/rl/Laya_Followup_Window_2026-10-04.md.
 
 - 2026-10-04: Launched frozen 450-trial follow-up behind the active matrix, Muse xhigh every 120s after review, eight-hour cutoff 23:54 IST and two-hour saved check-ins. 69 checks plus private repair/earned-C1 smoke runs verified; guarded redeploy waits for both actors. Launch proof in data/laya-experiments/mall-slot-followup-20261004/launch-proof.json.
+
+- 2026-10-04: C2 subagent audit found absent legal line actions and provider-chest budget deadlocks; added shifted legal origins and reduced/full output alternatives. 46 focused checks and live-fact geometry replays pass; full C2 reliability remains under isolated matched recheck. See docs/rl/Laya_C2_Audit_2026-10-04.md.

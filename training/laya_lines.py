@@ -35,7 +35,8 @@ from training.laya_starters import SAMPLE_HALF, STARTER_ORE
 
 FURNACES_PER_ROW = 6
 LINE_ROWS = (1, 3)  # Start+End (6 furnaces); Start-Middle-Middle-End (18 furnaces)
-LINE_PITCH = 16  # parallel lines: 15-tile column plus one spare tile
+LINE_PITCH = 16  # nominal parallel pitch, also used by the lab's fixed array layout
+SITE_STEP = 4  # Shifted column origins remain inside the strip and pass collision checks.
 PLATE_RATE = 0.625  # electric furnace plates/s for iron, copper (stone brick likewise)
 TAP_RATE = 0.83  # regular inserter, chest to belt, items/s (planners/recipe_data feeder ceilings are higher)
 MAX_HAUL = 90  # belt tiles from mine to line
@@ -61,10 +62,14 @@ def line_output(rows: int, ox: float, oy: float) -> tuple[float, float]:
     return ox + COLUMN_PITCH + 2.5, oy + START_DEPTH + (rows - 1) * MIDDLE_PITCH + 9.5
 
 
-def output_taps(rows: int, ox: float, oy: float) -> list[dict]:
+def output_taps(rows: int, ox: float, oy: float, *, taps: int | None = None) -> list[dict]:
     """East-running output belt with inserter -> provider taps on its south side (deterministic tap pattern)."""
     x, y = line_output(rows, ox, oy)
-    taps = math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATE)
+    full = math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATE)
+    if taps is None:
+        taps = full
+    if type(taps) is not int or not 1 <= taps <= full:
+        raise ValueError(f"output tap count must be an integer in 1..{full}")
     actions = [ghost("transport-belt", x, y, "east")]
     for i in range(1, taps + 1):
         actions += [ghost("transport-belt", x + i, y, "east"), ghost("inserter", x + i, y + 1, "north"),
@@ -181,10 +186,22 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
         samples = [p for rect in ores for p in _samples(facts, ore, rect)]
         found = 0
         for rows in LINE_ROWS:
+            if found >= per_plate:
+                break
             depth = line_depth(rows)
             per_row = FURNACES_PER_ROW * rows // 2  # Drills on each side of the collector, matched to furnaces.
-            for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, LINE_PITCH):
-                for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth) + 1, 8):
+            mines = {}
+            for sx, sy in samples:
+                ox, oy = math.floor(sx) - 1, math.floor(sy) + 1
+                for flow in ("east", "west"):
+                    mine, end = mine_unit(ox, oy, per_row, flow)
+                    covered = all(any(max(abs(a["position"]["x"] - x), abs(a["position"]["y"] - y)) <= SAMPLE_HALF
+                                      for x, y in samples)
+                                  for a in mine if a["entity"] == "electric-mining-drill")
+                    mines[(sx, sy, flow)] = (ox, oy, mine, end, covered,
+                                            covered and clear_of(mine, obstacles))
+            for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, SITE_STEP):
+                for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth) + 1, SITE_STEP):
                     count('line_sites_considered')
                     port = next((p for p in ports if max(abs(lx + 7 - p["position"]["x"]), abs(ly + depth / 2 - p["position"]["y"]))
                                  <= p["construction_radius"] - 6), None)
@@ -192,43 +209,59 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         count('outside_construction')
                         continue
                     sites = sorted(samples, key=lambda s: abs(s[1] - (ly + 1.5)) + abs(s[0] - lx))
+                    furnaces = line_units(plate, rows, lx, ly)
+                    if not clear_of(furnaces, obstacles):
+                        count('line_body_collision')
+                        continue
                     for (sx, sy), flow in ((site, flow) for site in sites for flow in ("east", "west")):
-                        ox, oy = math.floor(sx) - 1, math.floor(sy) + 1  # drill row origin near the sample
-                        mine, end = mine_unit(ox, oy, per_row, flow)
-                        drills = [(a["position"]["x"], a["position"]["y"]) for a in mine if a["entity"] == "electric-mining-drill"]
-                        if not all(any(max(abs(d[0] - x), abs(d[1] - y)) <= SAMPLE_HALF for x, y in samples) for d in drills):
+                        ox, oy, mine, end, covered, mine_clear = mines[(sx, sy, flow)]
+                        if not covered:
                             count('mine_samples_uncovered')
+                            continue
+                        if not mine_clear:
+                            count('mine_collision')
                             continue
                         route = haul(end, flow, lx, ly)
                         if route is None:
                             count('haul_unavailable')
                             continue
-                        actions = mine + route + line_units(plate, rows, lx, ly) + output_taps(rows, lx, ly)
-                        if not _reachable(actions, ports, port["network"]):
-                            count('outside_network_reach')
-                            continue
-                        if not clear_of(actions, obstacles):
-                            count('placed_collision')
-                            continue
-                        built = {"surface": "nauvis", "force": "player", "atomic": True,
-                                 "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
-                        try:
-                            validate_build_plan(built)
-                        except ValueError:
-                            count('internal_plan_invalid')
-                            continue
-                        anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
-                                     key=lambda q: (q["x"], q["y"]))
-                        digest = sha256_hash({"plan": built, "network_anchor": anchor})
-                        candidates.append({
-                            "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
-                            "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
-                                       f"{2 * per_row} drills at ({ox},{oy})",
-                            "plan": built, "network": port["network"], "network_anchor": anchor,
-                            "internal_power": True, "furnaces": FURNACES_PER_ROW * rows})
-                        found += 1
-                        count('candidates')
-                        break  # One mine site per line site keeps the menu varied across sites.
+                        # Output capacity is an explicit resource/throughput choice;
+                        # fewer taps reduce the bill without changing furnace geometry.
+                        full_taps = math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATE)
+                        valid_site = False
+                        for taps in sorted({math.ceil(full_taps / 2), full_taps}):
+                            actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps)
+                            if not _reachable(actions, ports, port["network"]):
+                                count('outside_network_reach')
+                                continue
+                            if not clear_of(actions, obstacles):
+                                count('placed_collision')
+                                continue
+                            built = {"surface": "nauvis", "force": "player", "atomic": True,
+                                     "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
+                            try:
+                                validate_build_plan(built)
+                            except ValueError:
+                                count('internal_plan_invalid')
+                                continue
+                            anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
+                                         key=lambda q: (q["x"], q["y"]))
+                            digest = sha256_hash({"plan": built, "network_anchor": anchor})
+                            rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATE), 3)
+                            candidates.append({
+                                "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
+                                "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
+                                           f"{2 * per_row} drills at ({ox},{oy}); {taps} output taps, estimated {rate:g}/s",
+                                "plan": built, "network": port["network"], "network_anchor": anchor,
+                                "internal_power": True, "furnaces": FURNACES_PER_ROW * rows,
+                                "output_taps": taps, "estimated_output_per_s": rate})
+                            found += 1
+                            count('candidates')
+                            valid_site = True
+                            if found >= per_plate:
+                                break
+                        if valid_site:
+                            break  # One mine per line site; both funded output topologies remain choices.
                     if found >= per_plate:
                         break
                 if found >= per_plate:

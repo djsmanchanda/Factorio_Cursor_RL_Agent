@@ -41,6 +41,20 @@ def test_long_mines_get_substations_along_the_row():
     assert entities(mine)["electric-mining-drill"] == 18 and entities(mine)["substation"] == 2
 
 
+def test_reduced_output_is_a_throughput_cost_choice_with_the_same_furnace_shape():
+    full = output_taps(1, 10, 20)
+    reduced = output_taps(1, 10, 20, taps=3)
+    assert entities(full)["passive-provider-chest"] == 5
+    assert entities(reduced)["passive-provider-chest"] == 3
+    assert entities(reduced)["inserter"] == 3
+    validate_build_plan({"surface": "nauvis", "force": "player", "atomic": True,
+                         "phases": [{"name": "reduced", "actions": line_units("copper-plate", 1, 10, 20) + reduced}]})
+    with pytest.raises(ValueError):
+        output_taps(1, 10, 20, taps=0)
+    with pytest.raises(ValueError):
+        output_taps(1, 10, 20, taps=6)
+
+
 def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
     from training.laya_site_plan import reservation_reason
     ore = [{"item": "iron-ore", "position": {"x": 0.5 + 4 * i, "y": 0.5 + 4 * j}} for i in range(12) for j in range(4)]
@@ -52,15 +66,39 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
                         "supply": 9, "grid": "1"}], "machines": []}
     diagnostics={}
     lines = line_candidates(facts, plan, {"iron-plate"},diagnostics=diagnostics)
+    assert len(line_candidates(facts, plan, {"iron-plate"}, per_plate=1)) == 1
     assert diagnostics['iron-plate']['candidates']==len(lines)
     remote={**facts,'ports':[{**facts['ports'][0],'position':{'x':500,'y':500}}]}
     rejected={};assert not line_candidates(remote,plan,{'iron-plate'},diagnostics=rejected)
     assert rejected['iron-plate']['outside_construction']>0
     assert lines and {c["furnaces"] for c in lines} <= {6, 18}
+    short = [c for c in lines if c["furnaces"] == 6]
+    assert {c["output_taps"] for c in short} == {3, 5}
+    assert {c["estimated_output_per_s"] for c in short} == {2.49, 3.75}
     for line in lines:
         validate_build_plan(line["plan"])
         assert reservation_reason(plan, line) is None
         assert power_variants(line, facts)
+
+
+def test_line_origins_can_shift_around_poles_without_moving_reserved_land():
+    ore = [{"item": "copper-ore", "position": {"x": .5 + 4*i, "y": .5 + 4*j}}
+           for i in range(12) for j in range(4)]
+    plan = {"zones": [{"purpose": "ore:copper-ore", "rect": [-2, -2, 48, 16]},
+                      {"purpose": "smelt:copper-plate", "rect": [0, 21, 48, 55]}]}
+    facts = {"resources": ore, "ports": [{"position": {"x": 24, "y": 20}, "energy": 1, "network": "1",
+                                          "construction_radius": 55, "logistic_radius": 25}]}
+    # Each coarse column's furnace sites are occupied, as in the copper checkpoint.
+    obstacles = [{"entity": "medium-electric-pole", "position": {"x": x, "y": y}}
+                 for x in (4.5, 20.5, 36.5) for y in (25.5, 33.5, 41.5)]
+    lines = line_candidates(facts, plan, {"copper-plate"}, obstacles=obstacles)
+    assert lines
+    for line in lines:
+        xs = [a["position"]["x"] for a in line["plan"]["phases"][0]["actions"]
+              if a["entity"] == "electric-furnace"]
+        assert (min(xs) - 4.5) % 16 != 0
+        assert entities(line["plan"]["phases"][0]["actions"])["electric-furnace"] == line["furnaces"]
+        validate_build_plan(line["plan"])
 
 
 def test_line_sites_must_clear_entities_already_placed():
