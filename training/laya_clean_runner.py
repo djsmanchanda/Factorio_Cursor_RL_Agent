@@ -68,6 +68,8 @@ class Settings:
     request_multiplier: int | None = None
     dependency_context: bool = False
     mall_slots: bool = False  # Gated, rotating mall slots (training/laya_mall_slots.py).
+    context_view: str = 'full'
+    reservation_mode: str = 'strict'
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -288,7 +290,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
                  per_need_checked: int = 6, per_need_shown: int = 2,
                  retargets: Sequence[Mapping] = (), placed: Sequence[Mapping] = (),
-                 request_multiplier: int | None = None) -> dict:
+                 request_multiplier: int | None = None, reservation_mode: str = 'strict') -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -297,6 +299,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     need is seeded exploration of sites; it never ranks needs or options.
     """
     rng = random.Random(seed)
+    from training.laya_experiment_context import reservation_view
+    land_plan = reservation_view(site_plan, reservation_mode)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
@@ -320,7 +324,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         kept = []
         for candidate in candidates:
             detail: list = []
-            reason = reservation_reason(site_plan, {**candidate, "plan": _build_only(candidate)}, detail)
+            reason = reservation_reason(land_plan, {**candidate, "plan": _build_only(candidate)}, detail)
             if reason:
                 key = key_of(candidate)
                 pre_rejected[key][reason] += 1
@@ -354,7 +358,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             expanded[need] = []
             for variant in variants:
                 # Land reservation is a hard rule: reject builds on another purpose's land.
-                reason = reservation_reason(site_plan, variant) if site_plan else None
+                reason = reservation_reason(land_plan, variant) if site_plan else None
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -507,11 +511,15 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     """Laya decision state: saved-world facts plus status board and mission guidelines."""
     objective = f"{MISSION_ID} phase {phase['phase_id']} ({phase['name']}): " + ", ".join(
         f"{item} {rate:g}/s" for item, rate in sorted(phase["targets"].items()))
-    state = decision_state(facts, menu["options"], run_id, model_ref, objective, history, measurement)
+    visible_history = [{k:v for k,v in h.items() if k!='experiment_outcome'} for h in history]
+    state = decision_state(facts, menu["options"], run_id, model_ref, objective, visible_history, measurement)
     apply_to_state(state, board)
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
         state['observation_digest']['dependency_context'] = dependency_context(facts, menu['options'], board)
+    from training.laya_experiment_context import apply_view
+    apply_view(state,facts,menu['options'],board,history,settings.context_view)
+    if settings.reservation_mode!='strict':state['observation_digest']['reservation_experiment']=settings.reservation_mode
     state["observation_digest"]["mission_phase"] = phase["phase_id"]
     # Fetch every rule in scope; select_guidelines keeps the 15 most relevant to this decision.
     guidance = load_guideline_context(ROOT, phase["scopes"], catalog=settings.catalog, max_rules=32)
@@ -703,7 +711,7 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
-        settings: Settings = Settings()) -> dict:
+        settings: Settings = Settings(), initial_reached: Sequence[str] = ()) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -711,7 +719,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     loop continues; it stops safely after ``MAX_CONSECUTIVE_FAILURES`` in a
     row.  It never falls back to another decision maker.
     """
-    reached: list[str] = []
+    reached: list[str] = list(initial_reached)
     history: list[dict] = []
     measurement = None
     failures = 0
@@ -773,7 +781,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,
                                 placed=_submitted_entities(adapter),
                                 per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown,
-                                request_multiplier=settings.request_multiplier)
+                                request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
@@ -840,7 +848,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                  + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],
                             "summary": record["summary"][:120],
-                            "outcome": "completed" if receipt["status"] == "observed" else "pending"})
+                            "outcome": "completed" if receipt["status"] == "observed" else "pending",
+                            "experiment_outcome": {"family":chosen['family'],'product':chosen.get('product'),
+                                "status":receipt['status'],'produced':record['measured_per_s']}})
             summary["decisions"] += 1
             failures = 0
             # Stall: no need-serving build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
