@@ -230,31 +230,57 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
     return zones
 
 
+MALL_BLOCK = 40.0  # one large mall block beside the starter area; cells fill it from the covered edge
+MALL_SLIDE = range(0, 33, 8)  # tiles a block may slide along the reserve edge to clear other zones
+
+
+def mall_blocks(facts: Mapping, blocked: Sequence[Rect]) -> list[tuple[str, Rect]]:
+    """Square mall blocks touching the starter reserve (west, south, north, east), clear of ``blocked``
+    and inside the build-validation box."""
+    reserve = starter_reserve(facts)
+    size, gap = MALL_BLOCK, 2.0
+    cx, cy = (reserve.min_x + reserve.max_x) / 2, (reserve.min_y + reserve.max_y) / 2
+    found = []
+    for side in ("west", "south", "north", "east"):
+        for slide in (d * sign for d in MALL_SLIDE for sign in ((1,) if d == 0 else (1, -1))):
+            if side == "west":
+                rect = Rect(reserve.min_x - gap - size, cy - size / 2 + slide, reserve.min_x - gap, cy + size / 2 + slide)
+            elif side == "east":
+                rect = Rect(reserve.max_x + gap, cy - size / 2 + slide, reserve.max_x + gap + size, cy + size / 2 + slide)
+            elif side == "north":
+                rect = Rect(cx - size / 2 + slide, reserve.min_y - gap - size, cx + size / 2 + slide, reserve.min_y - gap)
+            else:
+                rect = Rect(cx - size / 2 + slide, reserve.max_y + gap, cx + size / 2 + slide, reserve.max_y + gap + size)
+            inside = _in_action_box(rect)
+            if inside == rect and not any(rect.overlaps(b) for b in blocked):
+                found.append((side, rect))
+                break
+    return found
+
+
 def plan_options(facts: Mapping) -> list[dict]:
-    """Mall-site alternatives around the starter roboport; each plan's strips avoid its mall."""
-    ore_rects = [_rect(z["rect"]) for z in base_zones(facts) if z["purpose"].startswith("ore:")]
-    bx, by = _base(facts)
+    """Mall-block alternatives beside the starter area; each plan's item blocks avoid its mall."""
+    first = base_zones(facts)
+    blocked = [_rect(z["rect"]) for z in first if z["purpose"].startswith("ore:")] + [starter_reserve(facts)]
     options = []
-    for dx, dy in MALL_SITE_OFFSETS:
-        sx, sy = math.floor(bx + dx) + .5, math.floor(by + dy) + .5
-        # The mall zone is the usable quad slots only: clear of ore and of the starter reserve.
-        slots = mall_slots_clear((sx, sy), ore_rects + [starter_reserve(facts)])
-        if len(slots) < MIN_MALL_SLOTS:
+    from training.laya_mall_block import block_centres
+    ports = [p for p in facts["ports"] if p["energy"] > 0]
+    for side, mall in mall_blocks(facts, blocked):
+        # The mall must be able to start now: some module centre inside a powered port's logistic area.
+        centres = block_centres([mall.min_x, mall.min_y, mall.max_x, mall.max_y])
+        if not any(max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"])) <= p.get("logistic_radius", 25) - 1
+                   for x, y in centres for p in ports):
             continue
-        mall = Rect(min(r.min_x for r in slots), min(r.min_y for r in slots),
-                    max(r.max_x for r in slots), max(r.max_y for r in slots))
-        # Every clear slot around the starter roboport is mall land too; the chosen site is the primary.
-        others = [r for ox, oy in MALL_SITE_OFFSETS if (math.floor(bx + ox) + .5, math.floor(by + oy) + .5) != (sx, sy)
-                  for r in mall_slots_clear((math.floor(bx + ox) + .5, math.floor(by + oy) + .5),
-                                            ore_rects + [starter_reserve(facts)])]
-        zones = base_zones(facts, avoid=[mall, *others])
-        plan = {"version": VERSION, "mall_site": [sx, sy], "zones": zones + [
-            {"zone_id": f"mall-{n}" if n else "mall", "purpose": "mall", "rect": [r.min_x, r.min_y, r.max_x, r.max_y]}
-            for n, r in enumerate([mall, *others])]}
+        zones = base_zones(facts, avoid=[mall])
+        plan = {"version": VERSION, "mall_site": [(mall.min_x + mall.max_x) / 2, (mall.min_y + mall.max_y) / 2],
+                "zones": zones + [{"zone_id": "mall", "purpose": "mall",
+                                   "rect": [mall.min_x, mall.min_y, mall.max_x, mall.max_y]}]}
         strips = sum(z["purpose"].startswith("smelt:") for z in zones)
-        options.append({"option_id": f"plan.mall.{int(sx)}.{int(sy)}", "family": "plan",
-                        "summary": f"Reserve the mall at ({sx},{sy}); protect {sum(z['purpose'].startswith('ore:') for z in zones)} "
-                                   f"ore patches, {strips} smelting strips and their belt corridors",
+        options.append({"option_id": f"plan.mall.{side}.{int(mall.min_x)}.{int(mall.min_y)}", "family": "plan",
+                        "summary": f"Reserve a {MALL_BLOCK:g}x{MALL_BLOCK:g} mall block {side} of the starter area at "
+                                   f"({mall.min_x:g},{mall.min_y:g}); protect "
+                                   f"{sum(z['purpose'].startswith('ore:') for z in zones)} ore patches, {strips} item blocks "
+                                   f"and their belt corridors",
                         "site_plan": plan, "need_id": "plan:site"})
     return options
 

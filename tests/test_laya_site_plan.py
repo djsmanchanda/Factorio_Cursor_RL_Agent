@@ -121,20 +121,38 @@ def test_base_is_the_starter_roboport_however_ports_are_ordered():
     assert _base(facts) == (3, -1)
 
 
-def test_starter_area_is_reserved_and_the_mall_uses_only_clear_slots():
+def test_starter_area_is_reserved_and_the_mall_block_keeps_clear_of_it():
     import json
     from pathlib import Path
     from training.laya_site_plan import plan_options, reservation_reason
-    start = Path("data/laya-saved-world/clean-20261006-004408/initial-state.json")
+    start = Path("data/laya-saved-world/clean-20261006-005113/initial-state.json")
     if not start.exists():
         import pytest
         pytest.skip("needs a prepared mod_playground start")
-    facts = json.loads(start.read_text())
-    plan = plan_options(facts)[0]["site_plan"]
+    plan = plan_options(json.loads(start.read_text()))[0]["site_plan"]
     reserve = next(z for z in plan["zones"] if z["zone_id"] == "starter-reserve")
     assert reserve["purpose"] == "corridor" and reserve["rect"] == [-12, -10, 10, 12]  # user-set on mod_playground
-    malls = [z["rect"] for z in plan["zones"] if z["purpose"] == "mall"]
-    assert malls and not any(m[0] < 10 and m[2] > -12 and m[1] < 12 and m[3] > -10 for m in malls)
-    furnace = {"family": "smelt", "product": "iron-plate", "plan": {"phases": [{"actions": [
+    mall = next(z["rect"] for z in plan["zones"] if z["purpose"] == "mall")
+    assert not (mall[0] < 10 and mall[2] > -12 and mall[1] < 12 and mall[3] > -10)
+    machine = {"family": "smelt", "product": "iron-plate", "plan": {"phases": [{"actions": [
         {"entity": "assembling-machine-1", "position": {"x": 0.5, "y": 0.5}}]}]}}
-    assert reservation_reason(plan, furnace) == "reserved:corridor"
+    assert reservation_reason(plan, machine) == "reserved:corridor"
+
+
+def test_the_mall_is_one_large_block_beside_the_starter_area_with_cells_across_it():
+    import json
+    from pathlib import Path
+    import pytest
+    from training.laya_mall_block import mall_cell_candidates
+    from training.laya_site_plan import MALL_BLOCK, plan_options, reservation_reason
+    start = Path("data/laya-saved-world/clean-20261006-005113/initial-state.json")
+    if not start.exists():
+        pytest.skip("needs a prepared mod_playground start")
+    facts = json.loads(start.read_text())
+    options = plan_options(facts)
+    assert options
+    for option in options:
+        malls = [z["rect"] for z in option["site_plan"]["zones"] if z["purpose"] == "mall"]
+        assert len(malls) == 1 and malls[0][2] - malls[0][0] == MALL_BLOCK == malls[0][3] - malls[0][1]
+        cells = mall_cell_candidates(facts, option["site_plan"], {"iron-gear-wheel", "copper-cable"})
+        assert cells and all(reservation_reason(option["site_plan"], c) is None for c in cells)

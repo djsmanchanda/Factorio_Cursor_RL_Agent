@@ -43,6 +43,7 @@ from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 from training import laya_mall_slots as mall_slots
+from training.laya_mall_block import mall_cell_candidates
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
@@ -342,6 +343,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     # Sites must clear what is already placed: machines, poles, ports, and Laya's own submitted builds.
     obstacles = world_obstacles(facts) + list(placed)
     proposed += starter_candidates(facts, site_plan, plates, set(starters), obstacles=obstacles)
+    # Mall cells anywhere in the mall block (the shared generator only offers fixed sites per roboport).
+    proposed += mall_cell_candidates(facts, site_plan, unmet, obstacles=obstacles)
     # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.
     line_diagnostics = {}
     proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles,diagnostics=line_diagnostics)
@@ -420,7 +423,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     stock_groups: dict[str, list] = defaultdict(list)
-    stock = [c for c in (_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ())
+    stock = [c for c in [*(_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ()),
+                         *mall_cell_candidates(facts, site_plan, set(shortfalls), obstacles=obstacles)]
              if c["family"] == "assemble" and c.get("product") in shortfalls]
     for candidate in on_free_land(stock, lambda c: f"stock:{c['product']}"):
         if f"item:{candidate['product']}" in legal:
