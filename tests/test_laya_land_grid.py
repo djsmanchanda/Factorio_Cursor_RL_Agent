@@ -70,3 +70,10 @@ def test_wide_survey_merges_chunked_results_and_plans_oil_parcels():
     assert found["-4:-1"]["crude-oil"] == {"tiles": 12, "amount": 3600}
     assert survey_ore_parcels(found, (0, 0)) == {(-4, -1): "crude-oil", (1, 0): "iron-ore"}  # 160 iron tiles
     assert survey_ore_parcels({"9:9": {"iron-ore": {"tiles": 500, "amount": 1}}}, (0, 0)) == {}  # beyond PLAN_RADIUS
+
+
+def test_built_parcels_stay_inside_the_action_area():
+    from training.laya_land_grid import actionable
+    plan = grid_plan_options(facts())[0]["site_plan"]
+    assert all(actionable(z["rect"]) for z in plan["zones"] if z["purpose"].startswith("smelt:"))
+    assert not actionable([105, -27, 163, 31])  # crosses x = 126

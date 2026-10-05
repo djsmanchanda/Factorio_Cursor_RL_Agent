@@ -24,6 +24,18 @@ PITCH = 64
 CORRIDOR = 6
 ORE_MIN_SAMPLES = 4  # survey samples (4x4 tiles each) a parcel needs to be an ore parcel
 SMELT_SEARCH = 4  # parcels from an ore parcel searched for its smelting parcel
+SCOPE_MARGIN = 2  # the saved-world validator rejects positions within 2 tiles of its bounds
+
+
+def actionable(rect: list[float]) -> bool:
+    """Inside the area where builds are validated today (training/laya_saved_world.BOUNDS).
+
+    The survey sees much further; parcels outside stay planned but unbuilt until the action
+    area grows (docs/rl/Laya_Land_Grid.md).
+    """
+    from training.laya_saved_world import BOUNDS
+    return (rect[0] >= BOUNDS["x_min"] + SCOPE_MARGIN and rect[1] >= BOUNDS["y_min"] + SCOPE_MARGIN
+            and rect[2] <= BOUNDS["x_max_exclusive"] - SCOPE_MARGIN and rect[3] <= BOUNDS["y_max_exclusive"] - SCOPE_MARGIN)
 
 
 def grid_origin(base: tuple[float, float]) -> tuple[int, int]:
@@ -112,7 +124,7 @@ def allocate(plan: dict, purpose: str, near: Iterable[tuple[int, int]], taken: s
         for di in range(-SMELT_SEARCH, SMELT_SEARCH + 1):
             for dj in range(-SMELT_SEARCH, SMELT_SEARCH + 1):
                 parcel = (ni + di, nj + dj)
-                if parcel in used:
+                if parcel in used or not actionable(interior(origin, parcel)):
                     continue
                 # Manhattan: an edge neighbour is reached through one corridor; a diagonal one would
                 # route its belts across a third parcel.
@@ -144,7 +156,9 @@ def grid_plan(facts: Mapping, mall: list[float] | None = None, surveyed: Mapping
                       for parcel, resource in sorted(ore.items())]
                      + _base_ore(facts, origin)}
     for resource, plate in SMELTED.items():
-        sources = [p for p, r in ore.items() if r == resource]
+        # Smelt beside ore Laya can mine today: parcels inside the action area first.
+        sources = [p for p, r in ore.items() if r == resource and actionable(interior(origin, p))] or \
+                  [p for p, r in ore.items() if r == resource]
         allocate(plan, f"smelt:{plate}", sorted(sources, key=lambda p: abs(p[0] - base_parcel[0]) + abs(p[1] - base_parcel[1]))[:1])
     if mall:
         plan["zones"].append({"zone_id": "mall", "purpose": "mall", "rect": mall})

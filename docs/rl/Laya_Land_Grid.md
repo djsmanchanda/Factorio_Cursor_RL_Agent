@@ -56,5 +56,20 @@ power, and a purpose expands into the adjacent parcel before a distant one.
 
 ## Status
 
+Matched runs (raw start, C3 window, 8 seeds each):
+
+- Seeds 101-108, local scan: grid C2 4/8, C3 3/8; patch C2 3/8, C3 3/8.
+- Held-out seeds 201-208, with the wide survey: grid C2 0/8; patch C2 5/8, C3 2/8.
+  Copper failed with `scope`: the survey moved copper's plan to parcels straddling
+  the saved-world action box (+-128 around the map origin, `training/laya_saved_world.BOUNDS`),
+  which holds only about 4 x 4 parcels. Built parcels are now kept inside it
+  (`actionable`), but no in-box parcel touches the copper parcels, so their hauls fail.
+
+**Blocker for the grid default: the action area.** Build validation, the resource
+scan and the build authorization all use that fixed box in the shared adapter. The
+grid needs it to grow with the planned parcels (per-request bounds covering the
+parcels a candidate touches). That change belongs to the shared adapter and is
+coordinated with its owner; until then `land_model` stays `patch`.
+
 `land_model: grid` is a runner setting (variant `docs/rl/laya_variants/grid-land.json`),
 compared against the patch-rectangle plan before it becomes the default.
