@@ -119,3 +119,22 @@ def test_base_is_the_starter_roboport_however_ports_are_ordered():
     facts = {"ports": [{"position": {"x": 40, "y": 40}, "energy": 1}, {"position": {"x": 3, "y": -1}, "energy": 1}],
              "poles": [{"generated": True, "position": {"x": 0, "y": 0}}, {"generated": True, "position": {"x": 6, "y": -4}}]}
     assert _base(facts) == (3, -1)
+
+
+def test_starter_area_is_reserved_and_the_mall_uses_only_clear_slots():
+    import json
+    from pathlib import Path
+    from training.laya_site_plan import plan_options, reservation_reason
+    start = Path("data/laya-saved-world/clean-20261006-004408/initial-state.json")
+    if not start.exists():
+        import pytest
+        pytest.skip("needs a prepared mod_playground start")
+    facts = json.loads(start.read_text())
+    plan = plan_options(facts)[0]["site_plan"]
+    reserve = next(z for z in plan["zones"] if z["zone_id"] == "starter-reserve")
+    assert reserve["purpose"] == "corridor" and reserve["rect"] == [-12, -10, 10, 12]  # user-set on mod_playground
+    malls = [z["rect"] for z in plan["zones"] if z["purpose"] == "mall"]
+    assert malls and not any(m[0] < 10 and m[2] > -12 and m[1] < 12 and m[3] > -10 for m in malls)
+    furnace = {"family": "smelt", "product": "iron-plate", "plan": {"phases": [{"actions": [
+        {"entity": "assembling-machine-1", "position": {"x": 0.5, "y": 0.5}}]}]}}
+    assert reservation_reason(plan, furnace) == "reserved:corridor"

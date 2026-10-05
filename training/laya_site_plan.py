@@ -47,6 +47,11 @@ CORRIDOR_ENTITIES = frozenset({"transport-belt", "underground-belt", "splitter",
                                "medium-electric-pole", "big-electric-pole", "pipe", "pipe-to-ground"})
 MALL_SITE_OFFSETS = ((10, 10), (10, -10), (-10, 10), (-10, -10))  # the generator's module sites per port
 MALL_EXTENT = (-7.0, -6.0, 10.0, 16.0)  # three quad modules around a site
+# The starter area around the starter roboport (kit chest, substations, roboport): kept clear like a
+# corridor. User-set on mod_playground as (-12,-10)-(10,12); the roboport stands at (3,-1).
+STARTER_RESERVE = (-15.0, -9.0, 7.0, 13.0)
+QUAD_SIDES = ("north", "south", "west", "east")
+MIN_MALL_SLOTS = 2
 
 
 def survey_patches(facts: Mapping) -> list[dict]:
@@ -162,6 +167,28 @@ def _base(facts: Mapping) -> tuple[float, float]:
     return port["position"]["x"], port["position"]["y"]
 
 
+def starter_reserve(facts: Mapping) -> Rect:
+    bx, by = _base(facts)
+    return Rect(bx + STARTER_RESERVE[0], by + STARTER_RESERVE[1], bx + STARTER_RESERVE[2], by + STARTER_RESERVE[3])
+
+
+def mall_slots_clear(centre: tuple[float, float], blocked: Sequence[Rect]) -> list[Rect]:
+    """Footprints of the quad slots at ``centre`` that clear every blocked rectangle."""
+    from planners.laya_quad_cell import generate_quad_slot
+    spec = {"ingredients": [{"name": "iron-plate", "amount": 2}], "product_amount": 1, "energy_ticks": 30}
+    clear = []
+    for side in QUAD_SIDES:
+        actions = [a for a in generate_quad_slot("iron-gear-wheel", spec, centre, side)
+                   if isinstance(a, dict) and "position" in a]
+        boxes = [Rect(a["position"]["x"] - _size(a["entity"]) / 2, a["position"]["y"] - _size(a["entity"]) / 2,
+                      a["position"]["x"] + _size(a["entity"]) / 2, a["position"]["y"] + _size(a["entity"]) / 2)
+                 for a in actions]
+        if not any(b.overlaps(r) for b in boxes for r in blocked):
+            clear.append(Rect(min(b.min_x for b in boxes), min(b.min_y for b in boxes),
+                              max(b.max_x for b in boxes), max(b.max_y for b in boxes)))
+    return clear
+
+
 def _base_core(facts: Mapping) -> Rect:
     """Starter area kept free of smelting strips (roboport, kit chest, starter power)."""
     bx, by = _base(facts)
@@ -182,7 +209,7 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
         if not own:
             continue
         nearest = _span(_rect(min(own, key=lambda p: _distance_to(_rect(p["rect"]), base))["rect"]), BLOCK_SPAN)
-        taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts)]
+        taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts), starter_reserve(facts)]
         sides = sorted(("west", "east", "north", "south"),
                        key=lambda side: math.dist(_strip_and_corridors(nearest, side, STRIP_WIDTHS[0])[0].centre, base))
         choice = next(((block, corridors) for width in STRIP_WIDTHS for side in sides
@@ -197,6 +224,9 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
         for number, corridor in enumerate(corridors):
             zones.append({"zone_id": f"corridor-{plate}-{number}", "purpose": "corridor",
                           "rect": [corridor.min_x, corridor.min_y, corridor.max_x, corridor.max_y]})
+    reserve = starter_reserve(facts)
+    zones.append({"zone_id": "starter-reserve", "purpose": "corridor",
+                  "rect": [reserve.min_x, reserve.min_y, reserve.max_x, reserve.max_y]})
     return zones
 
 
@@ -207,12 +237,20 @@ def plan_options(facts: Mapping) -> list[dict]:
     options = []
     for dx, dy in MALL_SITE_OFFSETS:
         sx, sy = math.floor(bx + dx) + .5, math.floor(by + dy) + .5
-        mall = Rect(sx + MALL_EXTENT[0], sy + MALL_EXTENT[1], sx + MALL_EXTENT[2], sy + MALL_EXTENT[3])
-        if any(mall.overlaps(r) for r in ore_rects):
+        # The mall zone is the usable quad slots only: clear of ore and of the starter reserve.
+        slots = mall_slots_clear((sx, sy), ore_rects + [starter_reserve(facts)])
+        if len(slots) < MIN_MALL_SLOTS:
             continue
-        zones = base_zones(facts, avoid=[mall])
+        mall = Rect(min(r.min_x for r in slots), min(r.min_y for r in slots),
+                    max(r.max_x for r in slots), max(r.max_y for r in slots))
+        # Every clear slot around the starter roboport is mall land too; the chosen site is the primary.
+        others = [r for ox, oy in MALL_SITE_OFFSETS if (math.floor(bx + ox) + .5, math.floor(by + oy) + .5) != (sx, sy)
+                  for r in mall_slots_clear((math.floor(bx + ox) + .5, math.floor(by + oy) + .5),
+                                            ore_rects + [starter_reserve(facts)])]
+        zones = base_zones(facts, avoid=[mall, *others])
         plan = {"version": VERSION, "mall_site": [sx, sy], "zones": zones + [
-            {"zone_id": "mall", "purpose": "mall", "rect": [mall.min_x, mall.min_y, mall.max_x, mall.max_y]}]}
+            {"zone_id": f"mall-{n}" if n else "mall", "purpose": "mall", "rect": [r.min_x, r.min_y, r.max_x, r.max_y]}
+            for n, r in enumerate([mall, *others])]}
         strips = sum(z["purpose"].startswith("smelt:") for z in zones)
         options.append({"option_id": f"plan.mall.{int(sx)}.{int(sy)}", "family": "plan",
                         "summary": f"Reserve the mall at ({sx},{sy}); protect {sum(z['purpose'].startswith('ore:') for z in zones)} "

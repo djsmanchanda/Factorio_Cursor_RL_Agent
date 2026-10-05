@@ -58,6 +58,8 @@ Land is a grid of 64-tile parcels; every build stays inside one parcel, and the 
 A purpose grows into the parcel next to its own before a distant one, so production stays in contiguous blocks near its inputs. See `docs/rl/Laya_Land_Grid.md`.
 
 Reserve a block of land for each item beside its inputs, sized for its future lines; grow each new line next to the existing ones from the block's near edge, so the rest of the block stays free.
+
+The starter area around the starter roboport, (-12,-10) to (10,12) on mod_playground, is kept clear like a corridor; the mall uses only the quad slots outside it.
 ## Opening
 
 First priority: iron and copper starter mines and furnaces; stone and the mall follow.
