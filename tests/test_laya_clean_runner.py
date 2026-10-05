@@ -310,3 +310,19 @@ def test_a_need_never_presents_the_same_option_twice(monkeypatch):
     menu = compile_menu(world, compile_status(world, phase("C1")["targets"]), validator(), seed=1)
     ids = [o["option_id"] for o in menu["options"]]
     assert len(ids) == len(set(ids))
+
+
+def test_a_failed_atomic_submission_is_closed_and_its_footprint_avoided(tmp_path):
+    import json
+    from training.laya_clean_runner import LiveWorld, _submitted_entities
+    (tmp_path / "evidence").mkdir()
+    receipt = {"status": "pending", "candidate": {"family": "line"}, "submission": {
+        "ok": False, "error": "atomic_footprint_blocked",
+        "placement_failures": [{"entity": "electric-mining-drill", "position": {"x": 60.5, "y": 5.5}}]}}
+    (tmp_path / "evidence" / "transaction-x.json").write_text(json.dumps(receipt))
+    world = LiveWorld.__new__(LiveWorld)  # Only the evidence directory is needed.
+    world.root = tmp_path
+    world._close_failed_submissions()
+    assert json.loads((tmp_path / "evidence" / "transaction-x.json").read_text())["status"] == "rejected"
+    adapter = type("A", (), {"root": tmp_path})()
+    assert {"entity": "electric-mining-drill", "position": {"x": 60.5, "y": 5.5}} in _submitted_entities(adapter)

@@ -140,7 +140,28 @@ class LiveWorld(SavedWorldAdapter):
         candidate = next((c for c in presented if c["option_id"] == selected), None)
         if candidate and candidate.get("family") == "retarget":
             return mall_slots.execute_retarget(self, candidate, measure_ticks)
-        return super().execute(selected, presented, measure_ticks)
+        try:
+            return super().execute(selected, presented, measure_ticks)
+        except SavedWorldError as error:
+            if "ghost submission failed" in str(error):
+                self._close_failed_submissions()
+            raise
+
+    def _close_failed_submissions(self) -> None:
+        """An atomic submission that failed placed nothing: close its receipt as rejected (instead of
+        ``pending``, which stops every later decision) and remember the blocked footprints."""
+        blocked_path = self.root / "evidence" / BLOCKED_FOOTPRINTS
+        blocked = json.loads(blocked_path.read_text()) if blocked_path.exists() else []
+        for path in (self.root / "evidence").glob("transaction-*.json"):
+            receipt = json.loads(path.read_text())
+            submission = receipt.get("submission") or {}
+            if receipt.get("status") != "pending" or submission.get("ok") is not False:
+                continue
+            receipt.update(status="rejected", reason=f"submission_failed:{submission.get('error')}")
+            path.write_text(json.dumps(receipt, indent=2) + "\n")
+            blocked += [{"entity": f["entity"], "position": f["position"]}
+                        for f in submission.get("placement_failures") or [] if f.get("position")]
+        blocked_path.write_text(json.dumps(blocked) + "\n")
 
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
@@ -652,10 +673,17 @@ def _built_counts(adapter: Any) -> dict[str, int]:
     return dict(counts)
 
 
+BLOCKED_FOOTPRINTS = "blocked-footprints.json"  # where the game refused an atomic build
+
+
 def _submitted_entities(adapter: Any) -> list[dict]:
-    """Entities of every build Laya submitted (belts, inserters, chests are not in the facts)."""
+    """Entities of every build Laya submitted (belts, inserters, chests are not in the facts), plus
+    footprints the game refused at submission, so those sites are not offered again."""
     root = getattr(adapter, "root", None)
     placed: list[dict] = []
+    blocked = Path(root, "evidence", BLOCKED_FOOTPRINTS) if root else None
+    if blocked and blocked.exists():
+        placed += json.loads(blocked.read_text())
     for path in Path(root, "evidence").glob("transaction-*.json") if root else ():
         try:
             receipt = json.loads(path.read_text())
