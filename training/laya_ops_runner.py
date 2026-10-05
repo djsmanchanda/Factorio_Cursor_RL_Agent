@@ -172,7 +172,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf, "tick": None}
+    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf}
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -245,8 +245,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "authority": policy.authority})
         summary["decisions"] = index + 1
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
-        progressed = ((result.get("ok") or result.get("code") in IN_PROGRESS) and chosen["family"] != "wait") \
-            or gap < stall["best_gap"] * 0.95
+        # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
+        # 2 hours): more machines, fewer missing materials, or a closer goal.
+        machines = len(after.get("machines") or [])
+        missing = sum(shortages(results).values())
+        progressed = machines > stall["machines"] or missing < stall["missing"] or gap < stall["best_gap"] * 0.95
+        stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:
             stall["tick"] = after["tick"]
