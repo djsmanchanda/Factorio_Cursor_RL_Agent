@@ -175,6 +175,15 @@ def off_corridors(actions: list[dict], plan: Mapping | None) -> bool:
     return True
 
 
+def _site_distance(strip: list[float], lx: float, ly: float, ores: list[list[float]]) -> float:
+    """Distance of a line site from its block's anchor: the block point nearest the closest ore zone."""
+    sx, sy = (strip[0] + strip[2]) / 2, (strip[1] + strip[3]) / 2
+    ore = min(ores, key=lambda r: math.dist(((r[0] + r[2]) / 2, (r[1] + r[3]) / 2), (sx, sy)))
+    cx, cy = (ore[0] + ore[2]) / 2, (ore[1] + ore[3]) / 2
+    anchor = (min(max(cx, strip[0]), strip[2]), min(max(cy, strip[1]), strip[3]))
+    return math.dist((lx + COLUMN_PITCH / 2, ly), anchor)
+
+
 def _reachable(actions: list[dict], ports: list[Mapping], network: str) -> bool:
     """Every entity inside construction range, provider chests inside logistic range, of one network."""
     own = [p for p in ports if p["network"] == network]
@@ -212,9 +221,11 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
             count('missing_zone')
             continue
         samples = [p for rect in ores for p in _samples(facts, ore, rect)]
-        found = 0
+        # Both line sizes get a share of the offers, so a block can grow with full 18-furnace lines.
+        per_rows, total = max(1, per_plate // len(LINE_ROWS)), 0
         for rows in LINE_ROWS:
-            if found >= per_plate:
+            found = 0
+            if total >= per_plate:
                 break
             depth = line_depth(rows)
             per_row = FURNACES_PER_ROW * rows // 2  # Drills on each side of the collector, matched to furnaces.
@@ -228,78 +239,88 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                                   for a in mine if a["entity"] == "electric-mining-drill")
                     mines[(sx, sy, flow)] = (ox, oy, mine, end, covered,
                                             covered and clear_of(mine, obstacles) and off_corridors(mine, plan))
-            for strip, lx in ((s, lx) for s in strips
-                              for lx in range(math.ceil(s[0] + 1), math.floor(s[2] - COLUMN_PITCH - 3) + 1, SITE_STEP)):
-                for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth - TAP_DEPTH) + 1, SITE_STEP):
-                    count('line_sites_considered')
-                    port = next((p for p in ports if max(abs(lx + 7 - p["position"]["x"]), abs(ly + depth / 2 - p["position"]["y"]))
-                                 <= p["construction_radius"] - 6), None)
-                    if port is None:
-                        count('outside_construction')
+            # Grow from the block's near edge: sites nearest its anchor first, so lines pack
+            # together and the rest of the block stays free for later lines.
+            ordered = sorted(((s, lx, ly) for s in strips
+                              for lx in range(math.ceil(s[0] + 1), math.floor(s[2] - COLUMN_PITCH - 3) + 1, SITE_STEP)
+                              for ly in range(math.ceil(s[1]), math.floor(s[3] - depth - TAP_DEPTH) + 1, SITE_STEP)),
+                             key=lambda t: _site_distance(t[0], t[1], t[2], ores))
+            for strip, lx, ly in ordered:
+                count('line_sites_considered')
+                port = next((p for p in ports if max(abs(lx + 7 - p["position"]["x"]), abs(ly + depth / 2 - p["position"]["y"]))
+                             <= p["construction_radius"] - 6), None)
+                if port is None:
+                    count('outside_construction')
+                    continue
+                sites = sorted(samples, key=lambda s: abs(s[1] - (ly + 1.5)) + abs(s[0] - lx))
+                furnaces = line_units(plate, rows, lx, ly)
+                if not clear_of(furnaces, obstacles):
+                    count('line_body_collision')
+                    continue
+                for (sx, sy), flow in ((site, flow) for site in sites for flow in ("east", "west")):
+                    ox, oy, mine, end, covered, mine_clear = mines[(sx, sy, flow)]
+                    if not covered:
+                        count('mine_samples_uncovered')
                         continue
-                    sites = sorted(samples, key=lambda s: abs(s[1] - (ly + 1.5)) + abs(s[0] - lx))
-                    furnaces = line_units(plate, rows, lx, ly)
-                    if not clear_of(furnaces, obstacles):
-                        count('line_body_collision')
+                    if not mine_clear:
+                        count('mine_collision')
                         continue
-                    for (sx, sy), flow in ((site, flow) for site in sites for flow in ("east", "west")):
-                        ox, oy, mine, end, covered, mine_clear = mines[(sx, sy, flow)]
-                        if not covered:
-                            count('mine_samples_uncovered')
+                    route = haul(end, flow, lx, ly)
+                    if route is None:
+                        count('haul_unavailable')
+                        continue
+                    # Output capacity is an explicit resource/throughput choice;
+                    # fewer taps reduce the bill without changing furnace geometry.
+                    # Fast taps (one or two chests) first; the cheapest regular row is the fallback.
+                    valid_site = False
+                    tap_options = [("fast-inserter", n) for n in sorted({1, full_taps(rows, "fast-inserter")})]
+                    regular = math.ceil(full_taps(rows) / 2)
+                    if chests >= regular + CHEST_SPARE:  # Chests are finite before plastic; keep some for later lines.
+                        tap_options.append(("inserter", regular))
+                    for inserter, taps in tap_options:
+                        actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
+                        if not _reachable(actions, ports, port["network"]):
+                            count('outside_network_reach')
                             continue
-                        if not mine_clear:
-                            count('mine_collision')
+                        if not clear_of(actions, obstacles):
+                            count('placed_collision')
                             continue
-                        route = haul(end, flow, lx, ly)
-                        if route is None:
-                            count('haul_unavailable')
+                        if not off_corridors(actions, plan):
+                            count('grid_corridor')
                             continue
-                        # Output capacity is an explicit resource/throughput choice;
-                        # fewer taps reduce the bill without changing furnace geometry.
-                        # Fast taps (one or two chests) first; the cheapest regular row is the fallback.
-                        valid_site = False
-                        tap_options = [("fast-inserter", n) for n in sorted({1, full_taps(rows, "fast-inserter")})]
-                        regular = math.ceil(full_taps(rows) / 2)
-                        if chests >= regular + CHEST_SPARE:  # Chests are finite before plastic; keep some for later lines.
-                            tap_options.append(("inserter", regular))
-                        for inserter, taps in tap_options:
-                            actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
-                            if not _reachable(actions, ports, port["network"]):
-                                count('outside_network_reach')
-                                continue
-                            if not clear_of(actions, obstacles):
-                                count('placed_collision')
-                                continue
-                            if not off_corridors(actions, plan):
-                                count('grid_corridor')
-                                continue
-                            built = {"surface": "nauvis", "force": "player", "atomic": True,
-                                     "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
-                            try:
-                                validate_build_plan(built)
-                            except ValueError:
-                                count('internal_plan_invalid')
-                                continue
-                            anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
-                                         key=lambda q: (q["x"], q["y"]))
-                            digest = sha256_hash({"plan": built, "network_anchor": anchor})
-                            rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATES[inserter]), 3)
-                            candidates.append({
-                                "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
-                                "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
-                                           f"{2 * per_row} drills at ({ox},{oy}); {taps} {inserter} output taps, estimated {rate:g}/s",
-                                "plan": built, "network": port["network"], "network_anchor": anchor,
-                                "internal_power": True, "furnaces": FURNACES_PER_ROW * rows,
-                                "output_taps": taps, "tap_inserter": inserter, "estimated_output_per_s": rate})
-                            found += 1
-                            count('candidates')
-                            valid_site = True
-                            if found >= per_plate:
-                                break
-                        if valid_site:
-                            break  # One mine per line site; both funded output topologies remain choices.
-                    if found >= per_plate:
-                        break
-                if found >= per_plate:
+                        built = {"surface": "nauvis", "force": "player", "atomic": True,
+                                 "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}
+                        try:
+                            validate_build_plan(built)
+                        except ValueError:
+                            count('internal_plan_invalid')
+                            continue
+                        anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
+                                     key=lambda q: (q["x"], q["y"]))
+                        digest = sha256_hash({"plan": built, "network_anchor": anchor})
+                        rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATES[inserter]), 3)
+                        candidates.append({
+                            "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
+                            "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
+                                       f"{2 * per_row} drills at ({ox},{oy}); {taps} {inserter} output taps, estimated {rate:g}/s",
+                            "plan": built, "network": port["network"], "network_anchor": anchor,
+                            "internal_power": True, "furnaces": FURNACES_PER_ROW * rows,
+                            "output_taps": taps, "tap_inserter": inserter, "estimated_output_per_s": rate,
+                            "site_distance": round(_site_distance(strip, lx, ly, ores), 1)})
+                        found += 1
+                        total += 1
+                        count('candidates')
+                        valid_site = True
+                        if found >= per_rows or total >= per_plate:
+                            break
+                    if valid_site:
+                        break  # One mine per line site; both funded output topologies remain choices.
+                if found >= per_rows or total >= per_plate:
                     break
+    # The block's next free slot(s): the nearest legal site(s) to each plate's anchor.
+    for plate in {c["product"] for c in candidates}:
+        own = [c for c in candidates if c["product"] == plate]
+        nearest = min(c["site_distance"] for c in own)
+        for c in own:
+            c["next_slot"] = c["site_distance"] <= nearest + SITE_STEP
     return candidates

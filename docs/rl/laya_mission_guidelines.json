@@ -32,6 +32,24 @@
       "prefer": []
     },
     {
+      "rule_id": "mission.item-blocks",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Reserve a block of land for each item beside its inputs, sized for its future lines; grow each new line next to the existing ones from the block's near edge, so the rest of the block stays free.",
+      "prefer": [
+        {
+          "when": {
+            "family": "line",
+            "next_slot": false
+          },
+          "weight": 0.2
+        }
+      ]
+    },
+    {
       "rule_id": "mission.goal",
       "kind": "soft",
       "scopes": [

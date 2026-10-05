@@ -577,7 +577,7 @@ def _option_record(option: Mapping) -> dict:
             "product": option.get("product"), "power": option.get("power"), "summary": option.get("summary"),
             "bill": option.get("bill"), "draws": option.get("draws"), "wait_ticks": option.get("wait_ticks"),
             "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
-            "slot": option.get("slot"),
+            "slot": option.get("slot"), "next_slot": option.get("next_slot"),
             "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
 
 

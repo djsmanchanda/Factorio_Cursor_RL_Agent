@@ -116,3 +116,18 @@ def test_line_sites_must_clear_entities_already_placed():
     assert clear_of(acts, [])
     assert not clear_of(acts, [{"entity": "roboport", "position": dict(furnace["position"])}])
     assert clear_of(acts, [{"entity": "roboport", "position": {"x": 500, "y": 500}}])
+
+
+def test_lines_grow_from_the_block_edge_nearest_the_ore():
+    ore = [{"item": "iron-ore", "position": {"x": 0.5 + 4 * i, "y": 0.5 + 4 * j}} for i in range(12) for j in range(4)]
+    plan = {"zones": [{"zone_id": "o", "purpose": "ore:iron-ore", "rect": [-2, -2, 48, 16]},
+                      {"zone_id": "s", "purpose": "smelt:iron-plate", "rect": [0, 21, 48, 70]}]}
+    facts = {"resources": ore, "ports": [{"position": {"x": 24, "y": 30}, "energy": 1, "network": "1",
+                                          "construction_radius": 55, "logistic_radius": 40}],
+             "poles": [], "machines": []}
+    lines = line_candidates(facts, plan, {"iron-plate"})
+    assert {c["furnaces"] for c in lines} == {6, 18}  # both sizes offered
+    nearest = min(c["site_distance"] for c in lines)
+    assert all(c["next_slot"] == (c["site_distance"] <= nearest + 4) for c in lines)
+    first = min(lines, key=lambda c: c["site_distance"])
+    assert "(1,21)" in first["summary"] or first["site_distance"] < 10  # the strip edge facing the ore

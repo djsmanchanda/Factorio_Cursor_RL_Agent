@@ -34,7 +34,11 @@ SMELTED = {"iron-ore": "iron-plate", "copper-ore": "copper-plate", "stone": "sto
 # A basic six-furnace module (planners/smelter_block, variant "basic") is 15 tiles wide and an
 # 18-furnace line (Start-Middle-Middle-End) is 32 deep: 34 fits two parallel lines across an
 # east/west strip or one long line down a north/south strip; 15 is the one-module fallback.
-STRIP_WIDTHS = (34.0, 15.0)
+# Item blocks: depth beside the patch, largest first. 50 holds an 18-furnace line (36 deep with
+# taps) facing the patch, or three parallel line columns along it; lines grow inside the block.
+STRIP_WIDTHS = (50.0, 34.0, 15.0)
+MIN_BLOCK = (16.0, 19.0)
+BLOCK_SPAN = 50.0  # a block runs at least this long beside its patch, whatever the patch's size  # a block must still hold one 6-furnace line (column + margin, depth + taps)
 CORRIDOR_WIDTH = 5.0  # reserved for future belts on both sides of a strip
 SMALL_PATCH_RADIUS = 250.0
 BASE_CORE = 12.0  # half-size of the starter area strips must avoid
@@ -126,6 +130,24 @@ def _strip_and_corridors(patch: Rect, side: str, width: float) -> tuple[Rect, li
              Rect(patch.min_x, patch.max_y + c + width, patch.max_x, patch.max_y + 2 * c + width)])
 
 
+def _span(rect: Rect, size: float) -> Rect:
+    """The patch box grown about its centre to at least ``size`` each way: blocks beside it get room to grow."""
+    gx, gy = max(0.0, size - (rect.max_x - rect.min_x)) / 2, max(0.0, size - (rect.max_y - rect.min_y)) / 2
+    return Rect(rect.min_x - gx, rect.min_y - gy, rect.max_x + gx, rect.max_y + gy)
+
+
+def _in_action_box(rect: Rect) -> Rect | None:
+    """The block clipped to where builds are validated today, or None if no line would fit."""
+    from training.laya_saved_world import BOUNDS
+    margin = 2
+    clipped = Rect(max(rect.min_x, BOUNDS["x_min"] + margin), max(rect.min_y, BOUNDS["y_min"] + margin),
+                   min(rect.max_x, BOUNDS["x_max_exclusive"] - margin), min(rect.max_y, BOUNDS["y_max_exclusive"] - margin))
+    width, depth = clipped.max_x - clipped.min_x, clipped.max_y - clipped.min_y
+    if min(width, depth) < MIN_BLOCK[0] or max(width, depth) < MIN_BLOCK[1]:
+        return None
+    return clipped
+
+
 def _base(facts: Mapping) -> tuple[float, float]:
     """The starter roboport: the powered port nearest the centre of the generated power grid.
 
@@ -159,13 +181,14 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
         own = [p for p in patches if p["resource"] == resource]
         if not own:
             continue
-        nearest = _rect(min(own, key=lambda p: _distance_to(_rect(p["rect"]), base))["rect"])
+        nearest = _span(_rect(min(own, key=lambda p: _distance_to(_rect(p["rect"]), base))["rect"]), BLOCK_SPAN)
         taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts)]
         sides = sorted(("west", "east", "north", "south"),
                        key=lambda side: math.dist(_strip_and_corridors(nearest, side, STRIP_WIDTHS[0])[0].centre, base))
-        choice = next(((strip, corridors) for width in STRIP_WIDTHS for side in sides
+        choice = next(((block, corridors) for width in STRIP_WIDTHS for side in sides
                        for strip, corridors in [_strip_and_corridors(nearest, side, width)]
-                       if not any(r.overlaps(t) for r in (strip, *corridors) for t in taken)), None)
+                       if not any(r.overlaps(t) for r in (strip, *corridors) for t in taken)
+                       for block in [_in_action_box(strip)] if block is not None), None)
         if choice is None:
             continue  # No side fits a module column; that line must be planned elsewhere.
         strip, corridors = choice

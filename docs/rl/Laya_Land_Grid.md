@@ -1,6 +1,22 @@
 <!-- Path: docs/rl/Laya_Land_Grid.md | Purpose: Design of Laya's grid land model: fixed parcels per purpose with a corridor lattice, built to scale to a 5k x 5k map. -->
 # Laya land grid
 
+## Item blocks (current model)
+
+Each item gets one reserved **block** beside its inputs, sized for its future lines,
+and grows inside it before needing new land (`training/laya_site_plan.base_zones`,
+`training/laya_lines.line_candidates`):
+
+- Plate blocks are 50 deep where they fit (one 18-furnace line facing the patch, or
+  three line columns along it), then 34, then 15, run at least 50 along the patch
+  (`BLOCK_SPAN`), and are clipped to the build-validation box.
+- Lines are enumerated nearest the block's anchor first (the block point nearest its
+  ore); the nearest legal site(s) carry `next_slot`, and the doc rule
+  `mission.item-blocks` weights other sites x0.2, so lines pack from the near edge.
+- Both line sizes (6 and 18 furnaces) are offered.
+
+The 64-tile parcel lattice below is an optional, larger-scale layout (`land_model: grid`).
+
 Laya will eventually oversee a map of up to 5,000 x 5,000 tiles. Land is planned
 as a **grid of parcels** rather than rectangles drawn around nearby patches, so
 that every later build has a predictable place and a predictable route.

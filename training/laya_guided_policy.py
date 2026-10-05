@@ -93,6 +93,8 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "slot_permanent": bool(option.get("slot")) and option["slot"]["permanent"],
             "slot_from_goal": bool(option.get("slot")) and option["slot"]["from_goal"],
             "slot_recent": bool(option.get("slot")) and option["slot"].get("recent", False),
+            # Lines: the nearest free site to the item block's anchor (training/laya_lines.next_slot).
+            "next_slot": bool(option.get("next_slot")),
             # A side build that would leave less than the unbuilt goal starters need (menu["goal_reserve"]).
             "dips_goal_reserve": not is_goal(option) and any(
                 stock.get(name, 0) - count < (menu.get("goal_reserve") or {}).get(name, 0)
