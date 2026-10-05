@@ -33,7 +33,10 @@ from training.laya_factory_status import compact_status, compile_status
 from training.laya_mission import current_phase, phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
-IN_PROGRESS = {"temporary_mall_batch"}
+# The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
+IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
+               "rotating_mall_prerequisite_handoff"}
+STALL_TICKS = 10800  # three game minutes without a built operation, work in progress or goal progress
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
 
@@ -72,8 +75,8 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
     """Items the latest material shortage of each operation still asks for (``sources``: item -> plates blocked)."""
     latest: dict[tuple, dict] = {}
     for r in results:
-        key = (r["operation"], (r.get("params") or {}).get("recipe"))
-        latest[key] = r
+        params = r.get("params") or {}
+        latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
     short: Counter = Counter()
     for r in latest.values():
         if not r.get("ok") and r.get("code") == "material_shortage":
@@ -84,7 +87,8 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
                 if missing > 0:
                     short[item] = max(short[item], missing)
                     if sources is not None:
-                        sources.setdefault(item, set()).add((r.get("params") or {}).get("recipe"))
+                        params = r.get("params") or {}
+                        sources.setdefault(item, set()).add(params.get("recipe") or params.get("item"))
     return dict(short)
 
 
@@ -168,7 +172,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf}
+    stall = {"since": 0, "best_gap": math.inf, "tick": None}
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -244,10 +248,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         progressed = ((result.get("ok") or result.get("code") in IN_PROGRESS) and chosen["family"] != "wait") \
             or gap < stall["best_gap"] * 0.95
         stall["best_gap"] = min(stall["best_gap"], gap)
-        stall["since"] = 0 if progressed else stall["since"] + 1
-        if stall["since"] >= settings.stall_decisions:
+        if progressed or stall["tick"] is None:
+            stall["tick"] = after["tick"]
+        # Operations decide in seconds of game time, so the stall limit is game time, not a decision count.
+        if after["tick"] - stall["tick"] >= STALL_TICKS:
             summary["stop"] = "stalled"
-            emit(f"STALLED: {settings.stall_decisions} decisions without a built operation or goal progress")
+            emit(f"STALLED: {STALL_TICKS} ticks without a built operation, work in progress or goal progress")
             break
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"

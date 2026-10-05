@@ -100,3 +100,13 @@ def test_no_produce_for_items_whose_plate_has_no_starter_yet():
                {"ok": True, "operation": "mall_slot", "params": {"item": "transport-belt"}}]
     ids = {o["option_id"] for o in compile_options(BOARD, results, recipes=recipes)["options"]}
     assert "op.produce.transport-belt" in ids and "op.produce.splitter" not in ids  # splitter needs copper
+
+
+def test_mall_side_shortages_are_kept_per_item_and_loans_count_as_progress():
+    from training.laya_ops_runner import in_progress
+    results = [{"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"}, "code": "material_shortage",
+                "details": {"required": {"assembling-machine-1": 2}, "available": {}}},
+               {"ok": False, "operation": "produce", "params": {"item": "inserter"}, "code": "material_shortage",
+                "details": {"required": {"iron-gear-wheel": 5}, "available": {}}}]
+    assert shortages(results) == {"assembling-machine-1": 2, "iron-gear-wheel": 5}
+    assert in_progress("production_prerequisite_deferred") and not in_progress("material_shortage")
