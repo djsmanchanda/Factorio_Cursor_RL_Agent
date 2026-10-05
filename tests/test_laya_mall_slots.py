@@ -13,6 +13,9 @@ RECIPES = {"iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 
                                                      {"name": "iron-gear-wheel", "amount": 5},
                                                      {"name": "iron-plate", "amount": 10}], "product_amount": 1},
            "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}], "product_amount": 1},
+           "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}], "product_amount": 1},
+           "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1},
+                                                  {"name": "copper-cable", "amount": 3}], "product_amount": 1},
            "plastic-bar": {"ingredients": [{"name": "petroleum-gas", "amount": 20}, {"name": "coal", "amount": 1}],
                            "product_amount": 2}}
 
@@ -185,3 +188,17 @@ def test_coverage_toward_a_line_site_serves_the_plate():
     reach = planned_sites(facts, plan, {"iron-plate"})
     assert _need_key(reach, hop(30, 40), {"iron-plate"}) == "item:iron-plate"
     assert _need_key(planned_sites(facts, plan), hop(30, 40), {"iron-plate"}) == "coverage"  # no starter yet
+
+
+def test_no_retarget_to_an_item_whose_inputs_nothing_can_make(tmp_path):
+    from training.laya_mall_slots import obtainable
+    recipes = {**RECIPES, "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "passive-provider-chest": {"ingredients": [{"name": "electronic-circuit", "amount": 3},
+                                                                     {"name": "advanced-circuit", "amount": 1}]},
+               "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1},
+                                                      {"name": "copper-cable", "amount": 3}]}}
+    assert obtainable(recipes, "electronic-circuit", {}) and not obtainable(recipes, "passive-provider-chest", {})
+    assert obtainable(recipes, "passive-provider-chest", {"advanced-circuit": 2})
+    cell_receipt(tmp_path, "a", 2.5, "iron-gear-wheel")
+    facts = {**world((2.5, "iron-gear-wheel", "working")), "recipes": recipes}
+    assert retarget_candidates(facts, mall_cells(tmp_path, facts), {"passive-provider-chest"}, {}, set()) == []

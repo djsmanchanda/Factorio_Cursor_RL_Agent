@@ -62,6 +62,23 @@ def craftable(recipes: Mapping, item: str) -> bool:
         i["name"] in FLUIDS for i in recipe.get("ingredients", []))
 
 
+RAW = {"iron-ore", "copper-ore", "stone", "coal", "wood"}
+
+
+def obtainable(recipes: Mapping, item: str, stock: Mapping[str, int], seen: frozenset = frozenset()) -> bool:
+    """In stock, a raw resource, or craftable from obtainable ingredients.
+
+    Before plastic, logistic chests need an advanced circuit that no recipe can make yet;
+    a slot retargeted to one would wait forever.
+    """
+    if stock.get(item, 0) > 0 or item in RAW:
+        return True
+    recipe = recipes.get(item)
+    if not recipe or item in seen:
+        return False
+    return all(obtainable(recipes, i["name"], stock, seen | {item}) for i in recipe.get("ingredients", []))
+
+
 def mall_cells(root: Path, facts: Mapping) -> list[dict]:
     """Laya-built assembler cells, with their current recipe and status from the live facts.
 
@@ -146,7 +163,7 @@ def retarget_candidates(facts: Mapping, cells: list[dict], items: Iterable[str],
     """One option per (cell, needed item) the cell does not already make."""
     recipes = facts.get("recipes") or {}
     candidates = []
-    for item in sorted(i for i in set(items) if craftable(recipes, i)):
+    for item in sorted(i for i in set(items) if craftable(recipes, i) and obtainable(recipes, i, stock)):
         for cell in cells:
             if cell["product"] == item:
                 continue
