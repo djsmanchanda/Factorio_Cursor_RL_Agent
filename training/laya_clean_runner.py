@@ -70,6 +70,7 @@ class Settings:
     # Gated, rotating mall slots (training/laya_mall_slots.py). Default since 2026-10-05: C2 was
     # 0/141 and 0/186 without them, 40/173 with them (data/laya-experiments/variety-20261005).
     mall_slots: bool = True
+    land_model: str = "patch"  # "grid": 64-tile parcels on a corridor lattice (training/laya_land_grid.py)
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
@@ -690,7 +691,14 @@ def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> Non
 def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Policy", record: dict, journal: Path,
                    run_id: str, history: list, emit: Callable[[str], None], settings: Settings = Settings()) -> dict:
     """One planning decision: the policy chooses the mall site; ore and smelting land is reserved."""
-    options = plan_options(facts)
+    if settings.land_model == "grid":
+        from training.laya_land_grid import grid_plan, grid_plan_options
+        options = grid_plan_options(facts)
+        if not options:
+            emit("PLAN: no mall site clears the grid corridors; parcels assigned, mall unzoned")
+            return grid_plan(facts)
+    else:
+        options = plan_options(facts)
     if not options:
         emit("PLAN: no mall site clears the reserved land; ore and smelting zones reserved, mall unzoned")
         return {"version": "laya-site-plan-v1", "mall_site": None, "zones": base_zones(facts)}

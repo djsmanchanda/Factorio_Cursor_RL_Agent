@@ -38,6 +38,8 @@ LINE_ROWS = (1, 3)  # Start+End (6 furnaces); Start-Middle-Middle-End (18 furnac
 LINE_PITCH = 16  # nominal parallel pitch, also used by the lab's fixed array layout
 SITE_STEP = 4  # Shifted column origins remain inside the strip and pass collision checks.
 PLATE_RATE = 0.625  # electric furnace plates/s for iron, copper (stone brick likewise)
+CHEST_SPARE = 4  # provider chests kept for later lines before a regular (3-chest) tap row is offered
+TAP_DEPTH = 4  # output taps sit below the line: inserter, chest, pole rows
 TAP_RATE = 0.83  # regular inserter, chest to belt, items/s (planners/recipe_data feeder ceilings are higher)
 # Belt-to-chest items/s per tap. Before plastic, provider chests cannot be crafted (they need an
 # advanced circuit), so fast taps that empty a line into one or two chests save the kit's chests.
@@ -131,12 +133,12 @@ def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float) ->
 
 def tap_sites(plan: Mapping | None, plate: str) -> list[tuple[float, float]]:
     """Where a 6-furnace line's provider taps would sit in the plate's strip (they need logistic coverage)."""
-    strip = next((z["rect"] for z in (plan or {}).get("zones", []) if z["purpose"] == f"smelt:{plate}"), None)
-    if strip is None:
-        return []
+    # Every smelting zone of the plate: grid land grows a plate into more parcels.
+    strips = [z["rect"] for z in (plan or {}).get("zones", []) if z["purpose"] == f"smelt:{plate}"]
     sites = []
-    for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, LINE_PITCH):
-        for ly in range(math.ceil(strip[1]), math.floor(strip[3] - line_depth(1)) + 1, 8):
+    for strip, lx in ((s, lx) for s in strips
+                      for lx in range(math.ceil(s[0] + 1), math.floor(s[2] - COLUMN_PITCH - 3) + 1, LINE_PITCH)):
+        for ly in range(math.ceil(strip[1]), math.floor(strip[3] - line_depth(1) - TAP_DEPTH) + 1, 8):
             x, y = line_output(1, lx, ly)
             sites.append((x + 3, y + 2))  # Middle of the tap row.
     return sites
@@ -153,6 +155,24 @@ def clear_of(actions: list[dict], obstacles: list[Mapping]) -> bool:
     return not any(boxes_overlap((a["position"]["x"], a["position"]["y"]), _size(a["entity"]),
                                  (o["position"]["x"], o["position"]["y"]), _size(o["entity"]))
                    for a in actions for o in near)
+
+
+def off_corridors(actions: list[dict], plan: Mapping | None) -> bool:
+    """On grid land, only corridor entities (belts, pipes, poles) may cross the corridor lattice."""
+    grid = (plan or {}).get("grid")
+    if not grid:
+        return True
+    from training.laya_land_grid import in_corridor
+    from training.laya_power import _size
+    from training.laya_site_plan import CORRIDOR_ENTITIES
+    for a in actions:
+        if a["entity"] in CORRIDOR_ENTITIES:
+            continue
+        half = _size(a["entity"]) / 2
+        x, y = a["position"]["x"], a["position"]["y"]
+        if in_corridor(grid, (x - half, y - half, x + half, y + half)):
+            return False
+    return True
 
 
 def _reachable(actions: list[dict], ports: list[Mapping], network: str) -> bool:
@@ -178,6 +198,7 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
     if plan is None:
         return []
     ports = [p for p in facts["ports"] if p["energy"] > 0]
+    chests = sum(int((n.get("items") or {}).get("passive-provider-chest", 0)) for n in (facts.get("networks") or {}).values())
     candidates = []
     for plate, ore in STARTER_ORE.items():
         if plate not in plates:
@@ -185,9 +206,9 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
         counts={}
         if diagnostics is not None:diagnostics[plate]=counts
         def count(stage):counts[stage]=counts.get(stage,0)+1
-        strip = next((z["rect"] for z in plan["zones"] if z["purpose"] == f"smelt:{plate}"), None)
+        strips = [z["rect"] for z in plan["zones"] if z["purpose"] == f"smelt:{plate}"]
         ores = [z["rect"] for z in plan["zones"] if z["purpose"] == f"ore:{ore}"]
-        if strip is None or not ores:
+        if not strips or not ores:
             count('missing_zone')
             continue
         samples = [p for rect in ores for p in _samples(facts, ore, rect)]
@@ -206,9 +227,10 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                                       for x, y in samples)
                                   for a in mine if a["entity"] == "electric-mining-drill")
                     mines[(sx, sy, flow)] = (ox, oy, mine, end, covered,
-                                            covered and clear_of(mine, obstacles))
-            for lx in range(math.ceil(strip[0] + 1), math.floor(strip[2] - COLUMN_PITCH - 3) + 1, SITE_STEP):
-                for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth) + 1, SITE_STEP):
+                                            covered and clear_of(mine, obstacles) and off_corridors(mine, plan))
+            for strip, lx in ((s, lx) for s in strips
+                              for lx in range(math.ceil(s[0] + 1), math.floor(s[2] - COLUMN_PITCH - 3) + 1, SITE_STEP)):
+                for ly in range(math.ceil(strip[1]), math.floor(strip[3] - depth - TAP_DEPTH) + 1, SITE_STEP):
                     count('line_sites_considered')
                     port = next((p for p in ports if max(abs(lx + 7 - p["position"]["x"]), abs(ly + depth / 2 - p["position"]["y"]))
                                  <= p["construction_radius"] - 6), None)
@@ -237,7 +259,9 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         # Fast taps (one or two chests) first; the cheapest regular row is the fallback.
                         valid_site = False
                         tap_options = [("fast-inserter", n) for n in sorted({1, full_taps(rows, "fast-inserter")})]
-                        tap_options.append(("inserter", math.ceil(full_taps(rows) / 2)))
+                        regular = math.ceil(full_taps(rows) / 2)
+                        if chests >= regular + CHEST_SPARE:  # Chests are finite before plastic; keep some for later lines.
+                            tap_options.append(("inserter", regular))
                         for inserter, taps in tap_options:
                             actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
                             if not _reachable(actions, ports, port["network"]):
@@ -245,6 +269,9 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                                 continue
                             if not clear_of(actions, obstacles):
                                 count('placed_collision')
+                                continue
+                            if not off_corridors(actions, plan):
+                                count('grid_corridor')
                                 continue
                             built = {"surface": "nauvis", "force": "player", "atomic": True,
                                      "phases": [{"name": f"saved-world-line-{plate}", "actions": actions}]}

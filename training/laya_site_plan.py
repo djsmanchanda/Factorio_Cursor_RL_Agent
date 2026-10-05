@@ -40,7 +40,7 @@ SMALL_PATCH_RADIUS = 250.0
 BASE_CORE = 12.0  # half-size of the starter area strips must avoid
 SMALL_PATCH_SAMPLES = 16  # survey cells (~256 tiles); smaller patches cannot host module-fed mine lines  # small patches are used only if no larger one lies within this of the base
 CORRIDOR_ENTITIES = frozenset({"transport-belt", "underground-belt", "splitter", "fast-transport-belt",
-                               "medium-electric-pole", "big-electric-pole"})
+                               "medium-electric-pole", "big-electric-pole", "pipe", "pipe-to-ground"})
 MALL_SITE_OFFSETS = ((10, 10), (10, -10), (-10, 10), (-10, -10))  # the generator's module sites per port
 MALL_EXTENT = (-7.0, -6.0, 10.0, 16.0)  # three quad modules around a site
 
@@ -304,10 +304,16 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
 
     has_mall = any(z["purpose"] == "mall" for z in plan["zones"])
     in_mall = False
+    grid = plan.get("grid")
     for action in candidate["plan"]["phases"][0]["actions"]:
         x, y = action["position"]["x"], action["position"]["y"]
         half = _size(action["entity"]) / 2
         box = Rect(x - half, y - half, x + half, y + half)
+        # Grid land (training/laya_land_grid.py): the corridor lattice carries only transport and power.
+        if grid and action["entity"] not in CORRIDOR_ENTITIES:
+            from training.laya_land_grid import in_corridor
+            if in_corridor(grid, (box.min_x, box.min_y, box.max_x, box.max_y)):
+                return reject("reserved:grid-corridor", action)
         overlapping = [(zone, rect) for zone, rect in zones if box.overlaps(rect)]
         # Patch boxes are survey approximations and can overlap; a mine standing in its own
         # resource's zone is mining that resource even where another patch's box reaches.

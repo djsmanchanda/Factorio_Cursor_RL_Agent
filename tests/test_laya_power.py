@@ -84,3 +84,16 @@ def test_relays_avoid_placed_world_entities():
         for name, (x, y) in poles_of(variant):
             assert not any(abs(x - ox) < (POLES[name][2] + os) / 2 and abs(y - oy) < (POLES[name][2] + os) / 2
                            for ox, oy, os in [(7, 7, 2), (20, 15, 4)])
+
+
+def test_internal_power_is_rejected_when_a_link_hop_cannot_be_placed(monkeypatch):
+    import training.laya_power as power
+    facts = {"poles": [{"name": "substation", "generated": True, "position": {"x": 0, "y": 0}, "wire": 18,
+                        "supply": 9, "grid": "1"}], "ports": [], "machines": []}
+    line = {"family": "line", "summary": "s", "plan": {"surface": "nauvis", "force": "player", "atomic": True, "phases": [
+        {"name": "p", "actions": [{"action_type": "place_ghost", "entity": "substation", "position": {"x": 40, "y": 0}},
+                                  {"action_type": "place_ghost", "entity": "electric-mining-drill",
+                                   "position": {"x": 43.5, "y": 0.5}, "direction": "north"}]}]}}
+    assert power.internal_power_variant(line, facts) is not None
+    monkeypatch.setattr(power, "_place", lambda point, size, build: None)  # every hop blocked
+    assert power.internal_power_variant(line, facts) is None

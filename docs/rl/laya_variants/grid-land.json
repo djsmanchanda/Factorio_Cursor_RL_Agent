@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "variant_id": "grid-land",
+  "description": "Grid land model: 64-tile parcels per purpose on a 6-tile corridor lattice (docs/rl/Laya_Land_Grid.md) instead of patch-side strips.",
+  "settings": {"land_model": "grid"}
+}

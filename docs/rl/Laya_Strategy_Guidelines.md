@@ -52,6 +52,10 @@ A smelting strip is at least one six-furnace module wide (three furnaces, 9 tile
 
 The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. Roboports may stand inside a smelting strip, because its lines' provider taps need logistic coverage, and on an ore zone, because coverage must cross a patch to reach the ones beyond it. Strips keep clear of the starter area (24x24 around the starter roboport). The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
 
+
+Land is a grid of 64-tile parcels; every build stays inside one parcel, and the corridor lattice between parcels carries only belts, pipes and poles.
+
+A purpose grows into the parcel next to its own before a distant one, so production stays in contiguous blocks near its inputs. See `docs/rl/Laya_Land_Grid.md`.
 ## Opening
 
 First priority: iron and copper starter mines and furnaces; stone and the mall follow.

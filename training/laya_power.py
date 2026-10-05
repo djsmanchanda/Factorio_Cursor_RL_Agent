@@ -175,6 +175,11 @@ def internal_power_variant(candidate: Mapping, facts: Mapping) -> dict | None:
         if not any(math.dist(xy, p) <= min(reach, wire) for p, wire in network):
             start = min(network, key=lambda item: math.dist(item[0], xy))[0]
             hops = _link([start], xy, blocked)
+            # A hop that could not be placed leaves a gap: reject rather than build a line with
+            # unpowered drills (raw-pipeline-c3-20261005b seed 106: 4 of 6 stone drills no_power).
+            chain = [start, *hops, xy]
+            if any(math.dist(a, b) > POLES["medium-electric-pole"][1] for a, b in zip(chain, chain[1:])):
+                return None
             links += [("medium-electric-pole", h) for h in hops]
             network += [(h, POLES["medium-electric-pole"][1]) for h in hops]
             blocked += [{"entity": "medium-electric-pole", "position": {"x": h[0], "y": h[1]}} for h in hops]

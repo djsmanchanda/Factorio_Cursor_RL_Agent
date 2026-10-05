@@ -12,6 +12,26 @@
       "quote": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
     },
     {
+      "rule_id": "mission.grid-parcels",
+      "kind": "soft",
+      "scopes": [
+        "mission.plan"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Land is a grid of 64-tile parcels; every build stays inside one parcel, and the corridor lattice between parcels carries only belts, pipes and poles.",
+      "prefer": []
+    },
+    {
+      "rule_id": "mission.grid-growth",
+      "kind": "soft",
+      "scopes": [
+        "mission.plan"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "A purpose grows into the parcel next to its own before a distant one, so production stays in contiguous blocks near its inputs.",
+      "prefer": []
+    },
+    {
       "rule_id": "mission.goal",
       "kind": "soft",
       "scopes": [

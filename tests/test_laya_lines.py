@@ -73,7 +73,10 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
     assert rejected['iron-plate']['outside_construction']>0
     assert lines and {c["furnaces"] for c in lines} <= {6, 18}
     short = [c for c in lines if c["furnaces"] == 6]
-    # Fast taps empty a 6-furnace line into one or two chests; a 3-chest regular row is the fallback.
+    # Fast taps empty a 6-furnace line into one or two chests; with chests to spare, a 3-chest regular row too.
+    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1), ("fast-inserter", 2)}
+    stocked = {**facts, "networks": {"1": {"items": {"passive-provider-chest": 7}}}}
+    short = [c for c in line_candidates(stocked, plan, {"iron-plate"}) if c["furnaces"] == 6]
     assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1), ("fast-inserter", 2),
                                                                      ("inserter", 3)}
     assert {c["estimated_output_per_s"] for c in short} == {2.31, 3.75, 2.49}
