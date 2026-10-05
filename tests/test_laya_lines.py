@@ -73,8 +73,13 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
     assert rejected['iron-plate']['outside_construction']>0
     assert lines and {c["furnaces"] for c in lines} <= {6, 18}
     short = [c for c in lines if c["furnaces"] == 6]
-    assert {c["output_taps"] for c in short} == {3, 5}
-    assert {c["estimated_output_per_s"] for c in short} == {2.49, 3.75}
+    # Fast taps empty a 6-furnace line into one or two chests; a 3-chest regular row is the fallback.
+    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1), ("fast-inserter", 2),
+                                                                     ("inserter", 3)}
+    assert {c["estimated_output_per_s"] for c in short} == {2.31, 3.75, 2.49}
+    for c in short:
+        chests = sum(a["entity"] == "passive-provider-chest" for a in c["plan"]["phases"][0]["actions"])
+        assert chests == c["output_taps"]
     for line in lines:
         validate_build_plan(line["plan"])
         assert reservation_reason(plan, line) is None

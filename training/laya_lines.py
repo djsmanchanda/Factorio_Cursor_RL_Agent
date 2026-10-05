@@ -39,6 +39,9 @@ LINE_PITCH = 16  # nominal parallel pitch, also used by the lab's fixed array la
 SITE_STEP = 4  # Shifted column origins remain inside the strip and pass collision checks.
 PLATE_RATE = 0.625  # electric furnace plates/s for iron, copper (stone brick likewise)
 TAP_RATE = 0.83  # regular inserter, chest to belt, items/s (planners/recipe_data feeder ceilings are higher)
+# Belt-to-chest items/s per tap. Before plastic, provider chests cannot be crafted (they need an
+# advanced circuit), so fast taps that empty a line into one or two chests save the kit's chests.
+TAP_RATES = {"inserter": TAP_RATE, "fast-inserter": 2.31}
 MAX_HAUL = 90  # belt tiles from mine to line
 
 
@@ -62,17 +65,21 @@ def line_output(rows: int, ox: float, oy: float) -> tuple[float, float]:
     return ox + COLUMN_PITCH + 2.5, oy + START_DEPTH + (rows - 1) * MIDDLE_PITCH + 9.5
 
 
-def output_taps(rows: int, ox: float, oy: float, *, taps: int | None = None) -> list[dict]:
+def full_taps(rows: int, inserter: str = "inserter") -> int:
+    return math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATES[inserter])
+
+
+def output_taps(rows: int, ox: float, oy: float, *, taps: int | None = None, inserter: str = "inserter") -> list[dict]:
     """East-running output belt with inserter -> provider taps on its south side (deterministic tap pattern)."""
     x, y = line_output(rows, ox, oy)
-    full = math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATE)
+    full = full_taps(rows, inserter)
     if taps is None:
         taps = full
     if type(taps) is not int or not 1 <= taps <= full:
         raise ValueError(f"output tap count must be an integer in 1..{full}")
     actions = [ghost("transport-belt", x, y, "east")]
     for i in range(1, taps + 1):
-        actions += [ghost("transport-belt", x + i, y, "east"), ghost("inserter", x + i, y + 1, "north"),
+        actions += [ghost("transport-belt", x + i, y, "east"), ghost(inserter, x + i, y + 1, "north"),
                     ghost("passive-provider-chest", x + i, y + 2)]
     # Medium poles under the chests power the tap inserters (supply reaches 3.5 tiles each way).
     actions += [ghost("medium-electric-pole", x + i, y + 3) for i in range(3, taps + 3, 6)]  # each covers taps i-2..i+3
@@ -227,10 +234,12 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                             continue
                         # Output capacity is an explicit resource/throughput choice;
                         # fewer taps reduce the bill without changing furnace geometry.
-                        full_taps = math.ceil(FURNACES_PER_ROW * rows * PLATE_RATE / TAP_RATE)
+                        # Fast taps (one or two chests) first; the cheapest regular row is the fallback.
                         valid_site = False
-                        for taps in sorted({math.ceil(full_taps / 2), full_taps}):
-                            actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps)
+                        tap_options = [("fast-inserter", n) for n in sorted({1, full_taps(rows, "fast-inserter")})]
+                        tap_options.append(("inserter", math.ceil(full_taps(rows) / 2)))
+                        for inserter, taps in tap_options:
+                            actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
                             if not _reachable(actions, ports, port["network"]):
                                 count('outside_network_reach')
                                 continue
@@ -247,14 +256,14 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                             anchor = min((p["position"] for p in ports if p["network"] == port["network"]),
                                          key=lambda q: (q["x"], q["y"]))
                             digest = sha256_hash({"plan": built, "network_anchor": anchor})
-                            rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATE), 3)
+                            rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATES[inserter]), 3)
                             candidates.append({
                                 "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
                                 "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
-                                           f"{2 * per_row} drills at ({ox},{oy}); {taps} output taps, estimated {rate:g}/s",
+                                           f"{2 * per_row} drills at ({ox},{oy}); {taps} {inserter} output taps, estimated {rate:g}/s",
                                 "plan": built, "network": port["network"], "network_anchor": anchor,
                                 "internal_power": True, "furnaces": FURNACES_PER_ROW * rows,
-                                "output_taps": taps, "estimated_output_per_s": rate})
+                                "output_taps": taps, "tap_inserter": inserter, "estimated_output_per_s": rate})
                             found += 1
                             count('candidates')
                             valid_site = True
