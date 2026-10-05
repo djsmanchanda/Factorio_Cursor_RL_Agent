@@ -67,7 +67,9 @@ class Settings:
     max_game_ticks: int | None = None
     request_multiplier: int | None = None
     dependency_context: bool = False
-    mall_slots: bool = False  # Gated, rotating mall slots (training/laya_mall_slots.py).
+    # Gated, rotating mall slots (training/laya_mall_slots.py). Default since 2026-10-05: C2 was
+    # 0/141 and 0/186 without them, 40/173 with them (data/laya-experiments/variety-20261005).
+    mall_slots: bool = True
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'

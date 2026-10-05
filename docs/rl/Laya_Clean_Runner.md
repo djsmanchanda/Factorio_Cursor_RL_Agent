@@ -159,7 +159,9 @@ deterministic reference, writing `docs/rl/laya_helper_runs/<run_id>/findings.md`
   (`data/laya-saved-world/line-mechanics-20261004a`, fixture items, not Laya
   evidence): a 6-furnace iron line was built by bots (171 entities, 0 failed) and
   ran at 3.9 ore/s and 3.75 plates/s with all six furnaces working.
-- Mall slots (`training/laya_mall_slots.py`, setting `mall_slots`, variant
+- Mall slots (`training/laya_mall_slots.py`, setting `mall_slots`, **default on since
+  2026-10-05**: C2 reached 0/141 and 0/186 without, 40/173 with them from earned C1
+  checkpoints, `data/laya-experiments/variety-20261005/report.json`; variant
   `docs/rl/laya_variants/mall-slots.json`): every Laya mall cell is stock-gated
   (`planners/stock_gating.stock_gate`; products the current phase measures run
   ungated, gates re-synced each decision), and a `retarget` option reconfigures an
