@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "variant_id": "patience48",
+  "description": "Stall rule waits 48 decisions (baseline 12): C2 runs one line short were stopped while still building (raw-pipeline-c3-20261005b).",
+  "settings": {"stall_decisions": 48}
+}
