@@ -54,3 +54,19 @@ def test_a_purpose_grows_into_the_parcel_next_to_its_own():
     first = next(tuple(z["parcel"]) for z in plan["zones"] if z["purpose"] == "smelt:iron-plate")
     second = allocate(plan, "smelt:iron-plate", [(1, 0)])
     assert abs(second["parcel"][0] - first[0]) + abs(second["parcel"][1] - first[1]) == 1
+
+
+def test_wide_survey_merges_chunked_results_and_plans_oil_parcels():
+    import json
+    from training.laya_land_grid import survey, survey_ore_parcels
+    calls = []
+
+    def command(lua):  # Two survey boxes see parts of the same parcel.
+        calls.append(lua)
+        return json.dumps({"-4:-1": {"crude-oil": {"tiles": 3, "amount": 900}},
+                           "1:0": {"iron-ore": {"tiles": 40, "amount": 4000}}})
+    found = survey(command, (-29, -33), 256)
+    assert len(calls) == 4 and "find_entities_filtered" in calls[0]
+    assert found["-4:-1"]["crude-oil"] == {"tiles": 12, "amount": 3600}
+    assert survey_ore_parcels(found, (0, 0)) == {(-4, -1): "crude-oil", (1, 0): "iron-ore"}  # 160 iron tiles
+    assert survey_ore_parcels({"9:9": {"iron-ore": {"tiles": 500, "amount": 1}}}, (0, 0)) == {}  # beyond PLAN_RADIUS

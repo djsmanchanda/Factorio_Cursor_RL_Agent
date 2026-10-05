@@ -320,7 +320,7 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
         own_ore = family == "mine" and any(z["purpose"] == f"ore:{product}" for z, _ in overlapping)
         for zone, rect in overlapping:
             kind, _, subject = zone["purpose"].partition(":")
-            if action["entity"] in RELAY_POLES and kind in ("ore", "smelt"):
+            if action["entity"] in RELAY_POLES and kind in ("ore", "smelt", "oil"):
                 continue
             if kind == "corridor":
                 if action["entity"] in CORRIDOR_ENTITIES:
@@ -328,6 +328,9 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
                 return reject("reserved:corridor", action)
             starter_ore = family in ("starter", "line") and SMELTED.get(subject) == product  # Its own patch.
             # Roboports may stand on ore: coverage must cross a patch to reach the ones beyond it.
+            # Oil parcels are kept for pumpjacks and their pipes (the oil family); coverage may cross.
+            if kind == "oil" and family not in ("oil", "expand"):
+                return reject(f"reserved:{zone['purpose']}", action)
             if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore
                                       or family == "expand"):
                 return reject(f"reserved:{zone['purpose']}", action)
@@ -359,7 +362,7 @@ def save_plan(path: Path, plan: Mapping) -> None:
 
 def draw_command(plan: Mapping) -> str:
     """Lua that outlines every zone on the ground for spectators (rendering only, no game state)."""
-    colours = {"ore": "{r=0.9,g=0.6,b=0.1}", "smelt": "{r=0.9,g=0.2,b=0.2}", "mall": "{r=0.2,g=0.6,b=1}",
+    colours = {"oil": "{r=0.3,g=0.3,b=0.3}", "ore": "{r=0.9,g=0.6,b=0.1}", "smelt": "{r=0.9,g=0.2,b=0.2}", "mall": "{r=0.2,g=0.6,b=1}",
                "corridor": "{r=0.6,g=0.6,b=0.6}"}
     parts = ["storage.laya_zone_ids=storage.laya_zone_ids or {}",
              "for _,id in pairs(storage.laya_zone_ids) do local o=rendering.get_object_by_id(id) if o then o.destroy() end end",

@@ -145,6 +145,11 @@ class LiveWorld(SavedWorldAdapter):
     def tick(self) -> int:
         return int(json.loads(self.bridge.command("/sc rcon.print(game.tick)")))
 
+    def survey(self, origin: tuple[int, int], radius: int) -> dict:
+        """Resources per land-grid parcel over a wide square (read-only, a few chunked commands)."""
+        from training.laya_land_grid import survey
+        return survey(self.bridge.command, origin, radius)
+
     def go_live(self) -> None:
         self.bridge.command(f'/sc game.tick_paused=false; game.ticks_to_run=0; game.speed={self.speed}; rcon.print("live")')
 
@@ -689,14 +694,15 @@ def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> Non
 
 
 def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Policy", record: dict, journal: Path,
-                   run_id: str, history: list, emit: Callable[[str], None], settings: Settings = Settings()) -> dict:
+                   run_id: str, history: list, emit: Callable[[str], None], settings: Settings = Settings(),
+                   surveyed: Mapping | None = None) -> dict:
     """One planning decision: the policy chooses the mall site; ore and smelting land is reserved."""
     if settings.land_model == "grid":
         from training.laya_land_grid import grid_plan, grid_plan_options
-        options = grid_plan_options(facts)
+        options = grid_plan_options(facts, surveyed)
         if not options:
             emit("PLAN: no mall site clears the grid corridors; parcels assigned, mall unzoned")
-            return grid_plan(facts)
+            return grid_plan(facts, surveyed=surveyed)
     else:
         options = plan_options(facts)
     if not options:
@@ -785,7 +791,19 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 break
             if site_plan is None:
                 # Planning comes first: reserve land before anything is built.
-                site_plan = _plan_decision(facts, board, phase, policy, record, journal, run_id, history, emit, settings)
+                surveyed = None
+                if settings.land_model == "grid" and hasattr(adapter, "survey"):
+                    from training.laya_land_grid import PITCH, PLAN_RADIUS, grid_origin
+                    from training.laya_site_plan import _base
+                    try:  # One wide survey per run; planning falls back to the local scan without it.
+                        surveyed = adapter.survey(grid_origin(_base(facts)), (PLAN_RADIUS + 1) * PITCH)
+                        (journal.parent / "land-survey.json").write_text(json.dumps(surveyed) + "\n")
+                        emit(f"LAND SURVEY: {len(surveyed)} parcels with resources within "
+                             f"{(PLAN_RADIUS + 1) * PITCH} tiles")
+                    except Exception as error:
+                        emit(f"LAND SURVEY FAILED: {type(error).__name__}: {str(error)[:160]}")
+                site_plan = _plan_decision(facts, board, phase, policy, record, journal, run_id, history, emit, settings,
+                                           surveyed)
                 save_plan(plan_path, site_plan)
                 _draw_zones(adapter, site_plan, emit)
                 summary["decisions"] += 1

@@ -128,15 +128,20 @@ def allocate(plan: dict, purpose: str, near: Iterable[tuple[int, int]], taken: s
     return zone
 
 
-def grid_plan(facts: Mapping, mall: list[float] | None = None) -> dict:
-    """Ore parcels for usable patches, one smelting parcel per plate beside its ore, the mall zone."""
+def grid_plan(facts: Mapping, mall: list[float] | None = None, surveyed: Mapping | None = None) -> dict:
+    """Ore parcels for usable patches, one smelting parcel per plate beside its ore, the mall zone.
+
+    With a wide ``surveyed`` map (``survey``), ore and oil parcels come from it within PLAN_RADIUS;
+    the local sample scan still decides parcels it covers.
+    """
     origin = grid_origin(_base(facts))
     base_parcel = parcel_of(origin, *_base(facts))
-    ore = _ore_parcels(facts, origin)
+    ore = {**(survey_ore_parcels(surveyed, base_parcel) if surveyed else {}), **_ore_parcels(facts, origin)}
     plan = {"version": VERSION, "land_model": "grid", "mall_site": None,
             "grid": {"origin": list(origin), "pitch": PITCH, "corridor": CORRIDOR, "base_parcel": list(base_parcel),
                      "blocked": [list(base_parcel)]},
-            "zones": [_zone(origin, parcel, f"ore:{resource}") for parcel, resource in sorted(ore.items())]
+            "zones": [_zone(origin, parcel, f"{'oil' if resource == 'crude-oil' else 'ore'}:{resource}")
+                      for parcel, resource in sorted(ore.items())]
                      + _base_ore(facts, origin)}
     for resource, plate in SMELTED.items():
         sources = [p for p, r in ore.items() if r == resource]
@@ -146,7 +151,7 @@ def grid_plan(facts: Mapping, mall: list[float] | None = None) -> dict:
     return plan
 
 
-def grid_plan_options(facts: Mapping) -> list[dict]:
+def grid_plan_options(facts: Mapping, surveyed: Mapping | None = None) -> list[dict]:
     """Mall-site alternatives in the base parcel; each carries the same grid plan."""
     bx, by = _base(facts)
     origin = grid_origin((bx, by))
@@ -158,7 +163,7 @@ def grid_plan_options(facts: Mapping) -> list[dict]:
                 mall[0] < z["rect"][2] and mall[2] > z["rect"][0] and mall[1] < z["rect"][3] and mall[3] > z["rect"][1]
                 for z in _base_ore(facts, origin)):
             continue  # The mall keeps clear of the corridors and of the ore under the base.
-        plan = grid_plan(facts, mall)
+        plan = grid_plan(facts, mall, surveyed)
         plan["mall_site"] = [sx, sy]
         kinds = Counter(z["purpose"].split(":")[0] for z in plan["zones"])
         options.append({"option_id": f"plan.grid.mall.{int(sx)}.{int(sy)}", "family": "plan", "need_id": "plan:site",
@@ -166,3 +171,53 @@ def grid_plan_options(facts: Mapping) -> list[dict]:
                                    f"parcels, 64-tile parcels on a 6-tile corridor lattice",
                         "site_plan": plan})
     return options
+
+
+# --- Wide survey: resources summarised per parcel, once, so planning scales past the local scan. ---
+
+SURVEY_BOX = 256  # tiles per Lua call (one find_entities_filtered over 256 x 256)
+PLAN_RADIUS = 6  # parcels from the base that get planned zones; farther survey parcels wait for expansion
+SURVEY_MIN_TILES = 64  # resource tiles a parcel needs to be an ore parcel (a crude well counts as one)
+
+
+def survey_lua(origin: tuple[int, int], box: tuple[int, int, int, int]) -> str:
+    """Lua that sums resource tiles and amounts per parcel inside ``box`` and prints JSON."""
+    ox, oy = origin
+    x1, y1, x2, y2 = box
+    return ("/sc local s=game.surfaces.nauvis; local out={}; "
+            f"for _,e in pairs(s.find_entities_filtered{{type='resource', area={{{{{x1},{y1}}},{{{x2},{y2}}}}}}}) do "
+            f"local p=math.floor((e.position.x-({ox}))/{PITCH})..':'..math.floor((e.position.y-({oy}))/{PITCH}); "
+            "local r=out[p] or {}; out[p]=r; local t=r[e.name] or {tiles=0, amount=0}; r[e.name]=t; "
+            "t.tiles=t.tiles+1; t.amount=t.amount+e.amount end; rcon.print(helpers.table_to_json(out))")
+
+
+def survey(command, origin: tuple[int, int], radius: int) -> dict[str, dict[str, dict]]:
+    """Parcel -> resource -> {tiles, amount} for the square of half-size ``radius`` tiles around the origin.
+
+    ``command`` runs one Lua command and returns its printed output (an RCON bridge).
+    """
+    import json
+    merged: dict[str, dict[str, dict]] = {}
+    cx, cy = origin[0] + PITCH // 2, origin[1] + PITCH // 2
+    for x in range(cx - radius, cx + radius, SURVEY_BOX):
+        for y in range(cy - radius, cy + radius, SURVEY_BOX):
+            part = json.loads(command(survey_lua(origin, (x, y, x + SURVEY_BOX, y + SURVEY_BOX))) or "{}")
+            for parcel, resources in (part if isinstance(part, dict) else {}).items():
+                for name, totals in resources.items():
+                    into = merged.setdefault(parcel, {}).setdefault(name, {"tiles": 0, "amount": 0})
+                    into["tiles"] += totals["tiles"]
+                    into["amount"] += totals["amount"]
+    return merged
+
+
+def survey_ore_parcels(found: Mapping, base_parcel: tuple[int, int]) -> dict[tuple[int, int], str]:
+    """Planned ore parcels from a survey: dominant resource, enough tiles, within PLAN_RADIUS of the base."""
+    parcels = {}
+    for key, resources in found.items():
+        parcel = tuple(int(v) for v in key.split(":"))
+        if parcel == base_parcel or max(abs(parcel[0] - base_parcel[0]), abs(parcel[1] - base_parcel[1])) > PLAN_RADIUS:
+            continue
+        name, totals = max(resources.items(), key=lambda kv: kv[1]["amount"])
+        if totals["tiles"] >= SURVEY_MIN_TILES or name == "crude-oil":
+            parcels[parcel] = name
+    return parcels

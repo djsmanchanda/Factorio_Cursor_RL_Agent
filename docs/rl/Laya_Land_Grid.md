@@ -42,6 +42,12 @@ per parcel, refreshed rarely, replaces the +-128-tile sample scan when the map
 grows. The nearest crude field in `mod_playground` is about 288 tiles away, so
 plastic is the first purpose that needs it.
 
+Implemented: `LiveWorld.survey` runs chunked read-only Lua (`training/laya_land_grid.survey`,
+256 x 256 per call) summing resource tiles and amounts per parcel; the grid plan uses it
+within `PLAN_RADIUS` (6 parcels) and saves it as `evidence/land-survey.json`. Live check
+on `mod_playground`: 0.3 s for +-448 tiles, 72 parcels with resources, and the western
+crude field (~288 tiles out) planned as four `oil:crude-oil` parcels.
+
 ## Rules Laya reads
 
 The strategy guidelines quote the grid rules (`Laya_Strategy_Guidelines.md`,
