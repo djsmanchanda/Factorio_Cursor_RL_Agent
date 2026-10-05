@@ -110,6 +110,24 @@ Every mall slot stops at a stock target, so finished intermediates stop consumin
 
 Let a retargeted slot fill its stock target before switching it again; a slot waiting for its new ingredients is busy, not idle.
 
+## Operations
+
+Laya's actions are the deterministic runtime's operations (training/laya_ops.py); these rules decide when each is worth running.
+
+Each plate begins with its direct starter; build a plate's starter before any other work for that plate.
+
+Once a plate's starter runs, open its mine and six-furnace refinery joined by one belt; a plate without a starter does not get a refinery yet.
+
+Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.
+
+The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.
+
+When an operation reports a material shortage, produce the missing items before retrying it.
+
+While bots build or coverage grows, wait for it rather than starting more work.
+
+An operation the tooling reports as waiting on bots or coverage is retried after a wait, not immediately.
+
 ## How rules steer decisions
 
 Each soft rule above is quoted verbatim in `docs/rl/laya_mission_guidelines.json`.

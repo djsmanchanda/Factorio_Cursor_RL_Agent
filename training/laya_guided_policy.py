@@ -114,6 +114,9 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
         if outcomes is not None:
             previous=[h for h in outcomes if h.get('product')==option.get('product') and h.get('family')==option['family']]
             features[option['option_id']]['repeat_without_output']=bool(previous and not previous[-1].get('produced',{}).get(option.get('product'),0))
+    # Options may carry their own facts (deterministic operations: plate_stage, last_code, constructing).
+    for option in menu["options"]:
+        features[option["option_id"]].update(option.get("features") or {})
     return features
 
 

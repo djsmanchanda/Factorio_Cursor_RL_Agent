@@ -482,6 +482,186 @@
           "weight": 0.35
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-starter",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Each plate begins with its direct starter; build a plate's starter before any other work for that plate.",
+      "prefer": [
+        {
+          "when": {
+            "family": "starter",
+            "plate_stage": "none"
+          },
+          "weight": 5.0
+        },
+        {
+          "when": {
+            "family": "starter",
+            "plate_stage": [
+              "starter",
+              "foundation"
+            ]
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-foundation",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Once a plate's starter runs, open its mine and six-furnace refinery joined by one belt; a plate without a starter does not get a refinery yet.",
+      "prefer": [
+        {
+          "when": {
+            "family": "foundation",
+            "plate_stage": "starter"
+          },
+          "weight": 5.0
+        },
+        {
+          "when": {
+            "family": "foundation",
+            "plate_stage": [
+              "none",
+              "foundation"
+            ]
+          },
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-extend",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.",
+      "prefer": [
+        {
+          "when": {
+            "family": "extend",
+            "plate_stage": "foundation"
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "family": "extend",
+            "plate_stage": [
+              "none",
+              "starter"
+            ]
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-shortage",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "When an operation reports a material shortage, produce the missing items before retrying it.",
+      "prefer": [
+        {
+          "when": {
+            "family": "produce"
+          },
+          "weight": 4.0
+        },
+        {
+          "when": {
+            "family": [
+              "foundation",
+              "extend"
+            ],
+            "last_code": "material_shortage"
+          },
+          "weight": 0.3
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-wait",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "While bots build or coverage grows, wait for it rather than starting more work.",
+      "prefer": [
+        {
+          "when": {
+            "family": "wait",
+            "constructing": true
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "family": "wait",
+            "constructing": false
+          },
+          "weight": 0.2
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-retry-after-wait",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "An operation the tooling reports as waiting on bots or coverage is retried after a wait, not immediately.",
+      "prefer": [
+        {
+          "when": {
+            "waiting": true
+          },
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-mall-slots",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.",
+      "prefer": [
+        {
+          "when": {
+            "family": "mall_slot",
+            "product": [
+              "iron-gear-wheel",
+              "copper-cable"
+            ]
+          },
+          "weight": 4.0
+        },
+        {
+          "when": {
+            "family": "mall_slot"
+          },
+          "weight": 2.0
+        }
+      ]
     }
   ]
 }

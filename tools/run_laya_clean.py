@@ -68,6 +68,9 @@ def main(argv=None) -> int:
     p.add_argument("--stepped", action="store_true", help="Paused fixed-tick stepping instead of live play")
     p.add_argument("--speed", type=float, default=1.0, help="Live game speed")
     p.add_argument("--no-helper", action="store_true", help="Skip the post-run Laya Helper review")
+    p.add_argument("--actions", choices=["geometry", "deterministic"], default="geometry",
+                   help="deterministic: Laya chooses among the deterministic runtime's operations "
+                        "(training/laya_ops_runner.py); geometry: Laya's own build generators")
     p.add_argument("--policy", choices=["guided", "exploration"], default="guided",
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
@@ -127,10 +130,16 @@ def main(argv=None) -> int:
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
-            summary = run(adapter, policy, journal=paths["journal"],
-                          decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
-                          run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
-                          settings=settings,initial_reached=resume['phases_reached'] if resume else ())
+            if args.actions == "deterministic":
+                from training.laya_ops_runner import run as run_ops
+                summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
+                                  measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
+                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings)
+            else:
+                summary = run(adapter, policy, journal=paths["journal"],
+                              decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
+                              run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
+                              settings=settings, initial_reached=resume['phases_reached'] if resume else ())
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():
