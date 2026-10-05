@@ -96,6 +96,12 @@ The substation restriction is enforced when power layouts are generated (`traini
 
 ## Mall expansion
 
+Before advanced circuits are produced, the mall rotates: a few cells are borrowed from their baseline recipe to make whatever blocks the next build, then restored.
+
+After advanced circuits are produced, the mall moves to dedicated slots, one item per slot, with no rotation unless it is extremely necessary.
+
+A large order that would take a dedicated slot too long (for example a thousand express belts) schedules a dedicated assembly line; until that line runs, a rotated mall slot makes the first batch at priority.
+
 Reserve the top and bottom quad slots until long-handed inserters are manufactured; regular inserters cannot replace them.
 
 Gear and cable slots are permanent; other mall slots rotate to the current shortage, so repurpose an idle or stocked slot before building a new cell.
