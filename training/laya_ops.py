@@ -72,9 +72,14 @@ class DeterministicSession:
             # Direct starter: drills feeding a furnace, no belts or bots (iron, copper, stone).
             "starter": lambda recipe: ab._bootstrap_direct_plate_line(c, b, SURFACE, FORCE, recipe, ref, emit),
             # Opening mine + six-furnace refinery + haul belt, sited by the full transport bill.
-            "foundation": lambda recipe: ab.build_mining_stage(c, b, SURFACE, FORCE, recipe, ref, emit, expand=False),
+            # earmark_unfunded: place the ghosts even while items are missing; the persisted bill reserves
+            # them and steers the mall, and the submitted refinery is what lets the steel seed break the
+            # pole cycle (poles need steel, steel waits for the iron refinery).
+            "foundation": lambda recipe: ab.build_mining_stage(c, b, SURFACE, FORCE, recipe, ref, emit, expand=False,
+                                                               earmark_unfunded=True),
             # One more six-furnace module with its mine growth, in place.
-            "extend": lambda recipe: ab.build_mining_stage(c, b, SURFACE, FORCE, recipe, ref, emit, expand=True),
+            "extend": lambda recipe: ab.build_mining_stage(c, b, SURFACE, FORCE, recipe, ref, emit, expand=True,
+                                                           earmark_unfunded=True),
             # Build one missing stage toward stocking ``item`` (deepest unmet ingredient first). Before the
             # independent mall, pre-core items are rotational mall batches (upgrade_bootstrap=False), not lines.
             "produce": lambda item, stock_target=1: ab.ensure_produced(c, b, SURFACE, FORCE, item, ref, emit,
