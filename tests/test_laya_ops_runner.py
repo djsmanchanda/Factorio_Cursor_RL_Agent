@@ -12,12 +12,15 @@ SHORT = {"ok": False, "operation": "foundation", "params": {"recipe": "iron-plat
 def test_results_become_plate_stages_and_shortages():
     results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}, SHORT]
     assert plate_stages(results) == {"iron-plate": "starter"}
+    # No foundation while the copper starter is missing (a placed foundation would reserve its drills).
+    assert "op.foundation.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, results)["options"]}
+    results.append({"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}})
     assert shortages(results) == {"transport-belt": 126}  # inserters are in stock
     menu = compile_options(BOARD, results + [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}])
     ids = {o["option_id"] for o in menu["options"]}
-    assert {"op.foundation.iron-plate", "op.starter.copper-plate", "op.produce.transport-belt", "wait.300"} <= ids
-    # The tooling's lifecycle is a hard order: no foundation before a starter, no starter twice.
-    assert "op.starter.iron-plate" not in ids and "op.foundation.copper-plate" not in ids
+    assert {"op.foundation.iron-plate", "op.foundation.copper-plate", "op.produce.transport-belt", "wait.300"} <= ids
+    # The tooling's lifecycle is a hard order: no starter twice.
+    assert "op.starter.iron-plate" not in ids
 
 
 def test_the_docs_order_fence_starter_foundation_then_shortage():
@@ -85,7 +88,7 @@ def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():
                "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
                "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
                "transport-belt": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1}, {"name": "iron-plate", "amount": 1}]}}
-    iron = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}, SHORT]
+    iron = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}, SHORT]  # copper not yet
     ids = {o["option_id"] for o in compile_options(BOARD, iron, recipes=recipes)["options"]}
     assert {"op.mall_slot.iron-gear-wheel", "op.mall_slot.transport-belt"} <= ids
     assert "op.mall_slot.copper-cable" not in ids and "op.mall_slot.electronic-circuit" not in ids  # no copper yet
@@ -119,8 +122,8 @@ def test_mall_side_shortages_are_kept_per_item_and_loans_count_as_progress():
 
 
 def test_retire_starter_is_offered_after_the_foundation_until_released():
-    base = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
-            {"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}]
+    base = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    base.append({"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}})
     ids = {o["option_id"] for o in compile_options(BOARD, base)["options"]}
     assert {"op.extend.iron-plate", "op.retire_starter.iron-plate"} <= ids
     released = base + [{"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},

@@ -144,12 +144,16 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
     batch_active = any(in_progress(code) for (operation, _), code in codes.items() if operation in ("produce", "mall_slot"))
     options = []
+    # A foundation reserves its whole bill when placed (earmarked), including the drills a starter needs, so
+    # foundations wait until the iron and copper starters stand (docs/deterministic/planning.md: startup builds
+    # the starters before any mine-to-refinery foundation).
+    starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
     for plate in PLATES:
         if plate not in unmet and PLATES[plate] not in unmet:
             continue
         # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
         # and retiring the starter once the foundation stands.
-        legal = {"none": ("starter",), "starter": ("foundation",),
+        legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
                  "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
         for operation in legal:
             options.append({

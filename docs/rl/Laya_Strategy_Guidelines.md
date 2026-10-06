@@ -116,6 +116,8 @@ Laya's actions are the deterministic runtime's operations (training/laya_ops.py)
 
 Each plate begins with its direct starter; build a plate's starter before any other work for that plate.
 
+Startup builds the iron, copper, then stone starter before any mine-to-refinery foundation; a placed foundation reserves the drills a missing starter would need.
+
 Once a plate's starter runs, open its mine and six-furnace refinery joined by one belt; a plate without a starter does not get a refinery yet. The refinery is placed as soon as it is chosen, even before every item is in stock: its placed ghosts reserve their bill, steer the mall, and let the steel seed start.
 
 Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.

@@ -758,6 +758,25 @@
           "weight": 3.0
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-starters-before-foundations",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Startup builds the iron, copper, then stone starter before any mine-to-refinery foundation; a placed foundation reserves the drills a missing starter would need.",
+      "prefer": [
+        {
+          "when": {
+            "family": "starter",
+            "product": "stone-brick",
+            "plate_stage": "none"
+          },
+          "weight": 2.0
+        }
+      ]
     }
   ]
 }
