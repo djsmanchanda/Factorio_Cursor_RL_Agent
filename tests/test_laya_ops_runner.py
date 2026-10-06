@@ -79,7 +79,9 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
 
 
 def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():
-    recipes = {"iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}]},
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}]},
                "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
                "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
                "transport-belt": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1}, {"name": "iron-plate", "amount": 1}]}}
@@ -93,7 +95,9 @@ def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():
 
 
 def test_no_produce_for_items_whose_plate_has_no_starter_yet():
-    recipes = {"splitter": {"ingredients": [{"name": "electronic-circuit", "amount": 5}, {"name": "iron-plate", "amount": 5}]},
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "splitter": {"ingredients": [{"name": "electronic-circuit", "amount": 5}, {"name": "iron-plate", "amount": 5}]},
                "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
                "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
                "transport-belt": {"ingredients": [{"name": "iron-plate", "amount": 1}]}}
@@ -122,3 +126,19 @@ def test_retire_starter_is_offered_after_the_foundation_until_released():
     released = base + [{"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
                         "result": {"lifecycle": "released"}}]
     assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, released)["options"]}
+
+
+def test_no_produce_for_items_nothing_can_make_yet():
+    recipes = {"requester-chest": {"ingredients": [{"name": "electronic-circuit", "amount": 3},
+                                                   {"name": "advanced-circuit", "amount": 1}]},
+               "advanced-circuit": {"ingredients": [{"name": "plastic-bar", "amount": 2}, {"name": "copper-cable", "amount": 4}]},
+               "plastic-bar": {"ingredients": [{"name": "petroleum-gas", "amount": 20}, {"name": "coal", "amount": 1}]},
+               "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
+               "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
+               "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]}}
+    short = dict(SHORT, details={"required": {"requester-chest": 2, "electronic-circuit": 5}, "available": {}})
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    results += [short, {"ok": True, "operation": "mall_slot", "params": {"item": "copper-cable"}}]
+    ids = {o["option_id"] for o in compile_options(BOARD, results, recipes=recipes)["options"]}
+    assert "op.produce.electronic-circuit" in ids and "op.produce.requester-chest" not in ids

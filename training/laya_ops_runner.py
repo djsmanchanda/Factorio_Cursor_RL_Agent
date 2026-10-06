@@ -30,6 +30,7 @@ from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import compact_status, compile_status
+from training.laya_mall_slots import obtainable
 from training.laya_mission import current_phase, phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
@@ -111,7 +112,8 @@ def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set
     return set().union(*(plates_in(i["name"], recipes, seen | {item}) for i in recipe.get("ingredients", [])))
 
 
-def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None) -> dict:
+def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
+                    stock: Mapping[str, int] | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -153,7 +155,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     goal_blocked = any(src & goal for src in sources.values())
     for item in baseline_build_order():
         chain = plates_in(item, recipes or {})
-        if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started:
+        if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started and (
+                not recipes or obtainable(recipes, item, stock or {})):
             options.append({
                 "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
                 "summary": f"mall slot for {item}", "params": {"item": item},
@@ -165,7 +168,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")
     # Producing an item whose chain needs an unstarted plate would make the tooling open that plate's
     # foundation ahead of its starter (bootstrap_lifecycle_conflict): not legal yet.
-    producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started} if recipes else short
+    # Nor an item whose chain needs something nothing can make yet (requester chests need advanced circuits,
+    # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
+    producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
+                  and obtainable(recipes, i, stock or {})} if recipes else short
     for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
@@ -224,7 +230,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
-        menu = compile_options(board, results, facts["tick"], facts.get("recipes"))
+        stock: dict[str, int] = {}
+        for network in (facts.get("networks") or {}).values():
+            for name, count in (network.get("items") or {}).items():
+                stock[name] = stock.get(name, 0) + int(count)
+        menu = compile_options(board, results, facts["tick"], facts.get("recipes"), stock)
         compact = compact_status(board)
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
