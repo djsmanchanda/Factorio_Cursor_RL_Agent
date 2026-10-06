@@ -36,7 +36,7 @@ PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick":
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
                "rotating_mall_prerequisite_handoff"}
-STALL_TICKS = 10800  # three game minutes without a built operation, work in progress or goal progress
+STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
 
@@ -195,7 +195,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf}
+    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -272,8 +272,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
         # 2 hours): more machines, fewer missing materials, or a closer goal.
         machines = len(after.get("machines") or [])
-        missing = sum(shortages(results).values())
-        progressed = machines > stall["machines"] or missing < stall["missing"] or gap < stall["best_gap"] * 0.95
+        short = shortages(results)
+        missing = sum(short.values())
+        # Crafting a short item is progress even before the blocked operation is retried.
+        made = {item: int((after.get("production") or {}).get(item, 0)) for item in short}
+        crafted = any(count > stall["made"].get(item, count) for item, count in made.items())
+        stall["made"] = {**stall["made"], **made}
+        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted
+                      or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:
