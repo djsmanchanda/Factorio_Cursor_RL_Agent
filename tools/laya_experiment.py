@@ -55,7 +55,7 @@ def _job(experiment: str, variant: Path | None, seed: int, slot: int, args: argp
             return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
         try:
             command = RUNNER + ["run", "--root", str(root), "--seed", str(seed), "--no-helper", "--experiment", experiment,
-                               "--speed", str(args.speed)]
+                               "--speed", str(args.speed), "--actions", args.actions]
             command += ["--variant", str(variant)] if variant else []
             command += ["--until-phase", args.until_phase] if args.until_phase else []
             command += ["--max-game-ticks", str(args.max_game_ticks)] if args.max_game_ticks else []
@@ -143,6 +143,8 @@ def main(argv=None) -> int:
     p.add_argument("--max-game-ticks", type=int)
     p.add_argument("--speed", type=float, default=4.0, help="Live game speed for every run")
     p.add_argument("--parallel", type=int, default=4)
+    p.add_argument("--actions", choices=["geometry", "deterministic"], default="geometry",
+                   help="Action set for every run (tools/run_laya_clean.py --actions)")
     p.add_argument("--timeout", type=int, default=4 * 3600, help="Wall-clock seconds per run")
     p.add_argument("--game-base", type=int, default=GAME_PORT)
     p.add_argument("--rcon-base", type=int, default=RCON_PORT)
