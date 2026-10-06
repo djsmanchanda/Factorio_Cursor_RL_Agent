@@ -142,3 +142,10 @@ def test_no_produce_for_items_nothing_can_make_yet():
     results += [short, {"ok": True, "operation": "mall_slot", "params": {"item": "copper-cable"}}]
     ids = {o["option_id"] for o in compile_options(BOARD, results, recipes=recipes)["options"]}
     assert "op.produce.electronic-circuit" in ids and "op.produce.requester-chest" not in ids
+
+
+def test_failed_operations_are_not_retried_until_their_materials_change():
+    from training.laya_ops_runner import unchanged_failures
+    failed = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18})
+    assert unchanged_failures([failed], {"transport-belt": 4, "inserter": 18}) == {("foundation", "iron-plate")}
+    assert unchanged_failures([failed], {"transport-belt": 30, "inserter": 18}) == set()  # belts were made

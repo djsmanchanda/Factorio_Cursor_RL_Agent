@@ -427,6 +427,23 @@
           "weight": 2.0
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-no-blind-retry",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Do not retry an operation that failed for missing materials until those materials have changed; a blind retry only adds another power bridge to another abandoned slot.",
+      "prefer": [
+        {
+          "when": {
+            "unchanged_failure": true
+          },
+          "weight": 0.05
+        }
+      ]
     }
   ]
 }

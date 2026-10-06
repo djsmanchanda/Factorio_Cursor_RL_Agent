@@ -69,6 +69,26 @@ def retired(results: list[dict], plate: str) -> bool:
                and (r.get("result") or {}).get("lifecycle") == "released" for r in results)
 
 
+def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tuple]:
+    """(operation, parameter) whose latest attempt was short of materials none of which has since increased.
+
+    Retrying such an operation changes nothing in the world except, in the tooling's mall path, another
+    power bridge to another abandoned slot.
+    """
+    latest: dict[tuple, dict] = {}
+    for r in results:
+        params = r.get("params") or {}
+        latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
+    stuck = set()
+    for key, r in latest.items():
+        if not r.get("ok") and r.get("code") == "material_shortage":
+            seen = r.get("stock_at") or {}
+            required = (r.get("details") or {}).get("required") or {}
+            if required and all(int(stock.get(item, 0)) <= int(seen.get(item, 0)) for item in required):
+                stuck.add(key)
+    return stuck
+
+
 def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]:
     """The latest outcome code per (operation, main parameter); a waiting code expires after WAIT_EXPIRY ticks."""
     codes = {}
@@ -117,6 +137,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+    stuck = unchanged_failures(results, stock or {})
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
     waiting = any(in_progress(c) for c in codes.values())
@@ -135,7 +156,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
                              "goal_need": plate in goal,
                              # The tooling said it waits on bots or coverage: retry after a wait, not at once.
-                             "waiting": in_progress(codes.get((operation, plate)))}})
+                             "waiting": in_progress(codes.get((operation, plate))),
+                             "unchanged_failure": (operation, plate) in stuck}})
     # Steel: the poles every foundation and power bridge needs are made from it. Fence the seed's poles first,
     # then build the seed once the iron foundation stands (the tooling's own order).
     steel_made = any(r.get("ok") and r["operation"] == "steel" for r in results)
@@ -162,6 +184,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "summary": f"mall slot for {item}", "params": {"item": item},
                 "features": {"last_code": codes.get(("mall_slot", item), "new"),
                              "waiting": in_progress(codes.get(("mall_slot", item))),
+                             "unchanged_failure": ("mall_slot", item) in stuck,
                              "shortage": short.get(item, 0),
                              "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
@@ -179,6 +202,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),
+                         "unchanged_failure": ("produce", item) in stuck,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,
@@ -262,6 +286,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
+        if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
+            result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
         after = adapter.query()
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
