@@ -59,8 +59,10 @@ class DeterministicSession:
         stage_services.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()
-        ab._open_the_run(self.client, self.bridge, SURFACE, FORCE, goal_item, (), self.script_output, emit,
-                         bootstrap_profile_name=PROFILE, reference_point=reference_point)
+        # Construction targets of the run (what the mission will build): the steel fence reads them.
+        self.mall_targets, _, _ = ab._open_the_run(self.client, self.bridge, SURFACE, FORCE, goal_item, (),
+                                                   self.script_output, emit, bootstrap_profile_name=PROFILE,
+                                                   reference_point=reference_point)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
 
@@ -81,10 +83,26 @@ class DeterministicSession:
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
             "mall_slot": lambda item: ab.ensure_produced(c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=False,
                                                          stock_target=1, minimum_machines=1, allow_promotion=False),
+            # Fence the steel starter's poles in the material ledger before other work spends them
+            # (poles need steel: without the fence the foundation/steel cycle cannot start).
+            "reserve_steel_seed": lambda: ab._reserve_steel_starter_power_seed(c, SURFACE, FORCE, self.mall_targets, emit),
+            # The compact steel seed beside the iron line (gated by the tooling on the iron foundation).
+            "steel": lambda stock_target=10: ab.ensure_produced(c, b, SURFACE, FORCE, "steel-plate", ref, emit,
+                                                                stock_target=max(1, int(stock_target))),
+            # Finish a submitted refinery and retire its plate's starter once the refinery delivers.
+            "retire_starter": self._retire_starter,
             # Roboport chain toward a position (construction or logistic reach).
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
         }
+
+    def _retire_starter(self, recipe: str) -> dict:
+        """The tooling retires the starter only after the refinery's measured output and chest evidence."""
+        state = ab._bootstrap_state(recipe)
+        if state is None or state.replacement_origin is None:
+            return {"lifecycle": getattr(state, "lifecycle_state", None), "submitted": False}
+        ab._reconcile_submitted_bootstrap_replacement(self.client, self.bridge, SURFACE, FORCE, state, self.emit)
+        return {"lifecycle": ab._bootstrap_state(recipe).lifecycle_state, "submitted": True}
 
     def run(self, operation: str, **params) -> dict:
         """Run one operation; the tooling's own signals become a typed result."""

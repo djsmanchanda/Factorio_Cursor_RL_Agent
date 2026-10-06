@@ -662,6 +662,57 @@
           "weight": 2.0
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-steel-fence",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Poles are made from steel, so before any work spends poles, fence the steel starter's poles; without them neither the refinery nor steel can start.",
+      "prefer": [
+        {
+          "when": {
+            "family": "reserve_steel_seed"
+          },
+          "weight": 8.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-steel",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Build the compact steel seed as soon as the iron refinery stands; it is what replenishes poles.",
+      "prefer": [
+        {
+          "when": {
+            "family": "steel"
+          },
+          "weight": 5.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-retire-starter",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Once a plate's refinery delivers plates, retire its starter; until then the starter keeps producing.",
+      "prefer": [
+        {
+          "when": {
+            "family": "retire_starter"
+          },
+          "weight": 2.0
+        }
+      ]
     }
   ]
 }

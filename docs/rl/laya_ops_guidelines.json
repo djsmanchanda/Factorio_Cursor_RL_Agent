@@ -1,0 +1,432 @@
+{
+  "version": "1.0.0",
+  "purpose": "Clean Laya runner mission catalog: the hard plan-legality rule plus the user's mod_playground strategy (docs/rl/Laya_Strategy_Guidelines.md). Scopes are mission.* so other runners never select these rules. 'prefer' entries weight the guided policy: when a decision feature matches, multiply the option weight.",
+  "rules": [
+    {
+      "rule_id": "rule.plan-legality",
+      "kind": "hard",
+      "scopes": [
+        "*"
+      ],
+      "source": "docs/system_invariants.md",
+      "quote": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
+    },
+    {
+      "rule_id": "mission.goal",
+      "kind": "soft",
+      "scopes": [
+        "mission.build",
+        "mission.research"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Start from the mod_playground starter kit and reach advanced circuits, then self-expand and meet all item needs."
+    },
+    {
+      "rule_id": "mission.science",
+      "kind": "soft",
+      "scopes": [
+        "mission.research"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "After advanced circuits, research mining productivity 4 by building assembly lines for automation, logistic, chemical and production science packs and their precursors, feeding the packs to labs, then moving to the next science item."
+    },
+    {
+      "rule_id": "mission.no-gifts",
+      "kind": "soft",
+      "scopes": [
+        "mission.goal",
+        "mission.build"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items."
+    },
+    {
+      "rule_id": "mission.starter-mines",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mine"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "First priority: iron and copper starter mines and furnaces; stone and the mall follow.",
+      "prefer": [
+        {
+          "when": {
+            "need": "item:iron-*"
+          },
+          "weight": 1.5
+        },
+        {
+          "when": {
+            "need": "item:copper-*"
+          },
+          "weight": 1.5
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.starter-mall",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mall"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Start the mall with four assembling machines: two permanent slots for copper cable and iron gear wheels, the rest rotating to whatever item is in demand."
+    },
+    {
+      "rule_id": "mission.plate-lines",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mine",
+        "mission.smelt"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Then build six-drill mine and furnace lines for iron and copper, and expand them as demand grows."
+    },
+    {
+      "rule_id": "mission.bot-supply",
+      "kind": "soft",
+      "scopes": [
+        "mission.transport",
+        "mission.mall",
+        "mission.assemble"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Use logistic bots to supply one or two machines and mall machines."
+    },
+    {
+      "rule_id": "mission.belt-transfer",
+      "kind": "soft",
+      "scopes": [
+        "mission.transport",
+        "mission.assemble",
+        "mission.smelt"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers."
+    },
+    {
+      "rule_id": "mission.phase-goals-first",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Serve the current phase's goals first: actions on items its goals need come before stock and other needs, which wait while a goal action is possible.",
+      "prefer": [
+        {
+          "when": {
+            "goal_need": true
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "goal_need": false,
+            "goal_options_available": true
+          },
+          "weight": 0.2
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.serve-bottleneck",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Serve the bottleneck: prefer actions on items in the current bottleneck chain, deepest unmet input first.",
+      "prefer": [
+        {
+          "when": {
+            "in_bottleneck": true
+          },
+          "weight": 2.0
+        },
+        {
+          "when": {
+            "deepest_bottleneck": true
+          },
+          "weight": 2.0
+        },
+        {
+          "when": {
+            "family": [
+              "mine",
+              "smelt",
+              "assemble"
+            ],
+            "deepest_bottleneck": true
+          },
+          "weight": 2.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.make-construction-items",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.",
+      "prefer": [
+        {
+          "when": {
+            "need": "stock:*"
+          },
+          "weight": 2.5
+        },
+        {
+          "when": {
+            "stock_target": true
+          },
+          "weight": 2.5
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.steel-for-poles",
+      "kind": "soft",
+      "scopes": [
+        "mission.steel"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Medium poles, big poles and assembling machine 2 need steel; start steel smelting before pole stock runs low."
+    },
+    {
+      "rule_id": "mission.ops-starter",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Each plate begins with its direct starter; build a plate's starter before any other work for that plate.",
+      "prefer": [
+        {
+          "when": {
+            "family": "starter",
+            "plate_stage": "none"
+          },
+          "weight": 5.0
+        },
+        {
+          "when": {
+            "family": "starter",
+            "plate_stage": [
+              "starter",
+              "foundation"
+            ]
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-foundation",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Once a plate's starter runs, open its mine and six-furnace refinery joined by one belt; a plate without a starter does not get a refinery yet.",
+      "prefer": [
+        {
+          "when": {
+            "family": "foundation",
+            "plate_stage": "starter"
+          },
+          "weight": 5.0
+        },
+        {
+          "when": {
+            "family": "foundation",
+            "plate_stage": [
+              "none",
+              "foundation"
+            ]
+          },
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-extend",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.",
+      "prefer": [
+        {
+          "when": {
+            "family": "extend",
+            "plate_stage": "foundation"
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "family": "extend",
+            "plate_stage": [
+              "none",
+              "starter"
+            ]
+          },
+          "weight": 0.05
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-shortage",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "When an operation reports a material shortage, produce the missing items before retrying it.",
+      "prefer": [
+        {
+          "when": {
+            "family": "produce"
+          },
+          "weight": 4.0
+        },
+        {
+          "when": {
+            "family": [
+              "foundation",
+              "extend"
+            ],
+            "last_code": "material_shortage"
+          },
+          "weight": 0.3
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-wait",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "While bots build or coverage grows, wait for it rather than starting more work.",
+      "prefer": [
+        {
+          "when": {
+            "family": "wait",
+            "constructing": true
+          },
+          "weight": 3.0
+        },
+        {
+          "when": {
+            "family": "wait",
+            "constructing": false
+          },
+          "weight": 0.2
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-retry-after-wait",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "An operation the tooling reports as waiting on bots or coverage is retried after a wait, not immediately.",
+      "prefer": [
+        {
+          "when": {
+            "waiting": true
+          },
+          "weight": 0.1
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-mall-slots",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.",
+      "prefer": [
+        {
+          "when": {
+            "family": "mall_slot",
+            "product": [
+              "iron-gear-wheel",
+              "copper-cable"
+            ]
+          },
+          "weight": 4.0
+        },
+        {
+          "when": {
+            "family": "mall_slot"
+          },
+          "weight": 2.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-steel-fence",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Poles are made from steel, so before any work spends poles, fence the steel starter's poles; without them neither the refinery nor steel can start.",
+      "prefer": [
+        {
+          "when": {
+            "family": "reserve_steel_seed"
+          },
+          "weight": 8.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-steel",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Build the compact steel seed as soon as the iron refinery stands; it is what replenishes poles.",
+      "prefer": [
+        {
+          "when": {
+            "family": "steel"
+          },
+          "weight": 5.0
+        }
+      ]
+    },
+    {
+      "rule_id": "mission.ops-retire-starter",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Once a plate's refinery delivers plates, retire its starter; until then the starter keeps producing.",
+      "prefer": [
+        {
+          "when": {
+            "family": "retire_starter"
+          },
+          "weight": 2.0
+        }
+      ]
+    }
+  ]
+}

@@ -43,6 +43,9 @@ WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying 
 def in_progress(code: str | None) -> bool:
     return bool(code) and (code.endswith("_wait") or code in IN_PROGRESS)
 WAIT_TICKS = (300, 1800)
+# Rules for operations: the general mission rules plus mission.ops-*, quoting the same strategy doc
+# (the full catalog's geometry rules -- power variants, line sites, quad slots -- do not apply here).
+OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
 MAX_PRODUCE = 4  # produce options per decision (largest shortages first)
 
 
@@ -57,6 +60,12 @@ def plate_stages(results: list[dict]) -> dict[str, str]:
             elif r["operation"] in ("foundation", "extend"):
                 stage[plate] = "foundation"
     return stage
+
+
+def retired(results: list[dict], plate: str) -> bool:
+    """The tooling reported the plate's starter retired (its district released)."""
+    return any(r.get("ok") and r["operation"] == "retire_starter" and (r.get("params") or {}).get("recipe") == plate
+               and (r.get("result") or {}).get("lifecycle") == "released" for r in results)
 
 
 def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]:
@@ -113,8 +122,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     for plate in PLATES:
         if plate not in unmet and PLATES[plate] not in unmet:
             continue
-        # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend.
-        legal = {"none": ("starter",), "starter": ("foundation",), "foundation": ("extend",)}[stages.get(plate, "none")]
+        # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
+        # and retiring the starter once the foundation stands.
+        legal = {"none": ("starter",), "starter": ("foundation",),
+                 "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
         for operation in legal:
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
@@ -123,6 +134,18 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "goal_need": plate in goal,
                              # The tooling said it waits on bots or coverage: retry after a wait, not at once.
                              "waiting": in_progress(codes.get((operation, plate)))}})
+    # Steel: the poles every foundation and power bridge needs are made from it. Fence the seed's poles first,
+    # then build the seed once the iron foundation stands (the tooling's own order).
+    steel_made = any(r.get("ok") and r["operation"] == "steel" for r in results)
+    if not steel_made and codes.get(("reserve_steel_seed", None)) != "ok":
+        options.append({"option_id": "op.reserve_steel_seed", "family": "reserve_steel_seed", "product": "steel-plate",
+                        "need_id": "stock:steel-plate", "summary": "fence the steel starter's poles",
+                        "params": {}, "features": {"goal_need": True}})
+    if not steel_made and stages.get("iron-plate") == "foundation":
+        options.append({"option_id": "op.steel", "family": "steel", "product": "steel-plate",
+                        "need_id": "stock:steel-plate", "summary": "build the compact steel seed", "params": {},
+                        "features": {"goal_need": True, "last_code": codes.get(("steel", None), "new"),
+                                     "waiting": in_progress(codes.get(("steel", None)))}})
     # Standing bootstrap-mall slots (gear, cable, circuit, belt): which first is Laya's choice. Legal once the
     # starters for every plate in the item's chain exist; while a goal plate is short of materials they serve it.
     from orchestrator.baseline_production import baseline_build_order
@@ -203,7 +226,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             break
         menu = compile_options(board, results, facts["tick"], facts.get("recipes"))
         compact = compact_status(board)
-        guidance = load_guideline_context(ROOT, phase["scopes"], catalog=settings.catalog, max_rules=32)
+        catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
+        guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         state = {"observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
                                         "saved_world": {"provider_stock": {}}},
                  "guidelines": guidance["guidelines"]}

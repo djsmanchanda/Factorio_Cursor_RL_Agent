@@ -120,7 +120,13 @@ Once a plate's starter runs, open its mine and six-furnace refinery joined by on
 
 Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.
 
+Once a plate's refinery delivers plates, retire its starter; until then the starter keeps producing.
+
 The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.
+
+Poles are made from steel, so before any work spends poles, fence the steel starter's poles; without them neither the refinery nor steel can start.
+
+Build the compact steel seed as soon as the iron refinery stands; it is what replenishes poles.
 
 When an operation reports a material shortage, produce the missing items before retrying it.
 

@@ -20,23 +20,25 @@ def test_results_become_plate_stages_and_shortages():
     assert "op.starter.iron-plate" not in ids and "op.foundation.copper-plate" not in ids
 
 
-def test_the_docs_order_starter_then_foundation_then_shortage():
+def test_the_docs_order_fence_starter_foundation_then_shortage():
     from orchestrator.laya_knowledge import load_guideline_context
-    from training.laya_clean_runner import ROOT, MISSION_CATALOG
+    from training.laya_clean_runner import ROOT
     from training.laya_mission import PHASES
+    from training.laya_ops_runner import OPS_CATALOG
     state = {"observation_digest": {"factory_status": {"needs": [{"item": "iron-plate", "required": 0.5}]}},
-             "guidelines": load_guideline_context(ROOT, PHASES[0]["scopes"], catalog=MISSION_CATALOG, max_rules=32)["guidelines"]}
+             "guidelines": load_guideline_context(ROOT, PHASES[0]["scopes"], catalog=OPS_CATALOG, max_rules=32)["guidelines"]}
     policy = GuidedPolicy(1)
 
     def best(results):
         rows = policy.distribution(state, compile_options(BOARD, results))
         return max(rows, key=lambda r: r["probability"])["option_id"]
-    assert best([]).startswith("op.starter.")
-    started = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    assert best([]) == "op.reserve_steel_seed"  # poles first: nothing can make them before steel
+    fenced = [{"ok": True, "operation": "reserve_steel_seed", "params": {}}]
+    assert best(fenced).startswith("op.starter.")
+    started = fenced + [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
     assert best(started).startswith("op.foundation.")
     slot = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}]
     assert best(started + [SHORT] + slot) == "op.produce.transport-belt"
-
 
 class FakeWorld:
     root = None
@@ -110,3 +112,13 @@ def test_mall_side_shortages_are_kept_per_item_and_loans_count_as_progress():
                 "details": {"required": {"iron-gear-wheel": 5}, "available": {}}}]
     assert shortages(results) == {"assembling-machine-1": 2, "iron-gear-wheel": 5}
     assert in_progress("production_prerequisite_deferred") and not in_progress("material_shortage")
+
+
+def test_retire_starter_is_offered_after_the_foundation_until_released():
+    base = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
+            {"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}]
+    ids = {o["option_id"] for o in compile_options(BOARD, base)["options"]}
+    assert {"op.extend.iron-plate", "op.retire_starter.iron-plate"} <= ids
+    released = base + [{"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
+                        "result": {"lifecycle": "released"}}]
+    assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, released)["options"]}
