@@ -528,6 +528,44 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
     return reserved
 
 
+PLANNED_CELL_SITES = 8  # future paired-cell sites kept clear of power and coverage routing
+
+
+def _cell_footprint_tiles(origin: tuple[int, int]) -> set[tuple[int, int]]:
+    """A paired cell's real footprint: both halves (machines, inserters, chests) and its own substation.
+
+    Generated like the cell itself, so the gaps between cells stay free for the poles that power them.
+    """
+    spec = LINE_RECIPES["iron-gear-wheel"]
+    tiles: set[tuple[int, int]] = set()
+    for side in ("left", "right"):
+        plan = generate_paired_mall_layout(
+            "iron-gear-wheel", spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
+            craft_time=spec["craft_time"], set_recipe=False, include_substation=side == "left",
+            substation_position=(origin[0] + 4.0, origin[1] + 5.0), shared_provider=False,
+        )
+        tiles |= planned_footprint_tiles(plan)
+    return tiles
+
+
+def planned_cell_reserved_tiles(
+    reference_point: Point, current: tuple[int, int] | None = None, count: int = PLANNED_CELL_SITES,
+) -> set[tuple[int, int]]:
+    """Reserve the next ``count`` paired-cell sites after ``current`` before routing power.
+
+    Reserving only the cell being built let its pole chain cross the sites of
+    the cells that follow it, so later cells found poles on their land (and a
+    failed cell left its bridge there). The district geometry is fixed and
+    relative to the mall reference, so the coming sites are cheap to describe.
+    """
+    origins = _cell_origins(reference_point)
+    start = origins.index(current) + 1 if current in origins else 0
+    reserved: set[tuple[int, int]] = set()
+    for origin in origins[start:start + count]:
+        reserved |= _cell_footprint_tiles(origin)
+    return reserved
+
+
 def _slot_position(origin: tuple[int, int], side: str) -> Point:
     return (origin[0] + (1.5 if side == "left" else 7.5), origin[1] + 1.5)
 
@@ -859,7 +897,7 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
-    reserved_tiles = planned_footprint_tiles(plan)
+    reserved_tiles = planned_footprint_tiles(plan) | planned_cell_reserved_tiles(reference_point, origin)
     if seed_cell_uses_shared_substation(reference_point, origin):
         reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
     if callable(getattr(client, "command", None)):
@@ -996,6 +1034,7 @@ def build_quad_mall_stage(
     reserved_tiles = (
         planned_footprint_tiles(plan)
         | seed_expansion_reserved_tiles(reference_point)
+        | planned_cell_reserved_tiles(reference_point)
     )
     substation = (
         seed_shared_substation(reference_point)
