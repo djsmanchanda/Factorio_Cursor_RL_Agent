@@ -130,6 +130,8 @@ Build the compact steel seed as soon as the iron refinery stands; it is what rep
 
 When an operation reports a material shortage, produce the missing items before retrying it.
 
+While the mall is making a batch, let it finish before asking for another item; switching items makes its loans restore and preempt each other, so nothing completes.
+
 Do not retry an operation that failed for missing materials until those materials have changed; a blind retry only adds another power bridge to another abandoned slot.
 
 While bots build or coverage grows, wait for it rather than starting more work.

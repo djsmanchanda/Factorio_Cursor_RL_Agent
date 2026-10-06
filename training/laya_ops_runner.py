@@ -141,6 +141,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
     waiting = any(in_progress(c) for c in codes.values())
+    # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
+    batch_active = any(in_progress(code) for (operation, _), code in codes.items() if operation in ("produce", "mall_slot"))
     options = []
     for plate in PLATES:
         if plate not in unmet and PLATES[plate] not in unmet:
@@ -184,7 +186,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "summary": f"mall slot for {item}", "params": {"item": item},
                 "features": {"last_code": codes.get(("mall_slot", item), "new"),
                              "waiting": in_progress(codes.get(("mall_slot", item))),
-                             "unchanged_failure": ("mall_slot", item) in stuck,
+                             "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
                              "shortage": short.get(item, 0),
                              "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
@@ -202,7 +204,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),
-                         "unchanged_failure": ("produce", item) in stuck,
+                         "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,

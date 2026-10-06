@@ -149,3 +149,12 @@ def test_failed_operations_are_not_retried_until_their_materials_change():
     failed = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18})
     assert unchanged_failures([failed], {"transport-belt": 4, "inserter": 18}) == {("foundation", "iron-plate")}
     assert unchanged_failures([failed], {"transport-belt": 30, "inserter": 18}) == set()  # belts were made
+
+
+def test_a_running_mall_batch_is_left_to_finish():
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}, SHORT,
+               {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}},
+               {"ok": False, "operation": "produce", "params": {"item": "transport-belt"}, "code": "temporary_mall_batch"}]
+    options = compile_options(BOARD, results)["options"]
+    assert all(o["features"].get("batch_active") for o in options if o["family"] in ("produce", "mall_slot"))
+    assert next(o for o in options if o["option_id"] == "wait.1800")["features"]["constructing"]

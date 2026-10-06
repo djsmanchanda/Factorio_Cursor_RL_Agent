@@ -444,6 +444,34 @@
           "weight": 0.05
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-one-batch",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "While the mall is making a batch, let it finish before asking for another item; switching items makes its loans restore and preempt each other, so nothing completes.",
+      "prefer": [
+        {
+          "when": {
+            "family": [
+              "produce",
+              "mall_slot"
+            ],
+            "batch_active": true
+          },
+          "weight": 0.05
+        },
+        {
+          "when": {
+            "family": "wait",
+            "constructing": true
+          },
+          "weight": 3.0
+        }
+      ]
     }
   ]
 }
