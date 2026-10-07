@@ -149,6 +149,8 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
         "RECENT": ("mission.ops-history-no-repeat", "mission.ops-history-follow-through", "mission.ops-one-batch",
                    "mission.ops-retry-after-wait"),
         "TRIED": ("mission.ops-no-blind-retry", "mission.ops-no-idle-loans"),
+        "MALL": ("mission.ops-no-idle-loans", "mission.ops-one-batch"),
+        "RESERVED": ("mission.ops-shortage",),
         "SINCE LAST BUILD": ("mission.ops-history-unstick",)}
 
 
@@ -167,7 +169,8 @@ def _outcome(r: Mapping) -> str:
 
 
 def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
-          start_tick: int, rules: set[str] = frozenset(), limit: int = BRIEF_CHARS) -> str:
+          start_tick: int, rules: set[str] = frozenset(), limit: int = BRIEF_CHARS,
+          economics: Mapping | None = None) -> str:
     """Laya's own run, layered and compact: goal, now, next, major changes, recent moves, older attempts.
 
     Older decisions survive only in TRIED (attempts and last outcome per operation). Each line is tagged with
@@ -209,6 +212,14 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             attempts = tried.pop(name, [0])[0] + 1
             tried[name] = [attempts, r.get("code") or ("ok" if r.get("ok") else "error")]
     sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
+    if economics is not None:
+        loans = economics.get("loans")
+        sections["MALL"] = (["loans unknown (survey failed)"] if loans is None else
+                            [f"{loan['lender']} cell lent to make {loan['making']} (to {loan['target']})" for loan in loans]
+                            or ["no loans"])
+        sections["RESERVED"] = [f"{pid} {project['state']} missing "
+                                + ", ".join(f"{i} {n}" for i, n in project["missing"].items())
+                                for pid, project in (economics.get("projects") or {}).items() if project["missing"]]
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
     def render() -> str:
@@ -218,9 +229,37 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             lines.append(f"{name}{' [' + ', '.join(tags) + ']' if tags else ''}: {' | '.join(entries) or 'none yet'}")
         return "\n".join(lines)
     # Over budget: drop the least recent attempts summary first, then the oldest major change and recent move.
-    while len(text := render()) > limit and any(sections[k] for k in ("TRIED", "MAJOR", "RECENT")):
-        next(sections[k] for k in ("TRIED", "MAJOR", "RECENT") if sections[k]).pop(0)
+    trim = ("TRIED", "RESERVED", "MAJOR", "RECENT")
+    while len(text := render()) > limit and any(sections.get(k) for k in trim):
+        next(sections[k] for k in trim if sections.get(k)).pop(0)
     return text
+
+
+def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -> dict:
+    """Attach what each option is known to cost and displace (audit finding 3).
+
+    ``bill`` is the item bill the operation last reported short of; without one, ``bill_known`` is False, so a
+    missing bill never reads as "costs nothing" (the policy's scarce/starves_goal facts come from the bill).
+    ``cell_lent``: the item's own mall cell is lent to make something else, so producing it waits on that loan.
+    """
+    bills = {}
+    for r in results:
+        required = (r.get("details") or {}).get("required")
+        if r.get("code") == "material_shortage" and isinstance(required, Mapping):
+            bills[_key(r)] = {i: int(n) for i, n in required.items()}
+    loans = (economics or {}).get("loans")
+    lent = {loan["lender"] for loan in loans or ()}
+    for option in menu["options"]:
+        if option["family"] == "wait":
+            continue
+        params = option["params"]
+        bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
+        if bill:
+            option["bill"] = bill
+        option["features"]["bill_known"] = bill is not None
+        if option["family"] in ("produce", "mall_slot"):
+            option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
+    return menu
 
 
 def fit_rules(guidelines: list[dict], brief_text: str, limit: int = CONTEXT_CHARS) -> list[dict]:
@@ -417,20 +456,27 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
-        menu = compile_options(board, results, facts["tick"], facts.get("recipes"), stock)
+        economics = session.economics() if hasattr(session, "economics") else None
+        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock),
+                              results, economics)
+        reserved: Counter = Counter()
+        for project in ((economics or {}).get("projects") or {}).values():
+            reserved.update(project["reserved"])
         compact = compact_status(board)
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         # The brief comes first and has its room reserved; the doc rules fill what is left.
         shown = {g["rule_id"] for g in guidance["guidelines"]}
-        told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0], shown)
+        told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0], shown,
+                     economics=economics)
         rules = fit_rules(guidance["guidelines"], told)
         if len(rules) < len(shown):  # Tag only the rules that made it in.
             told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0],
-                         {g["rule_id"] for g in rules})
+                         {g["rule_id"] for g in rules}, economics=economics)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
-                                        "saved_world": {"provider_stock": {}}},
+                                        "saved_world": {"provider_stock": {"network": stock},
+                                                        "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])

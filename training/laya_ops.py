@@ -141,5 +141,25 @@ class DeterministicSession:
                     "message": str(signal)[:500]}
         return receipt(operation, params, result)
 
+    def economics(self) -> dict:
+        """What the tooling has committed: active material projects (reserved and still missing per item) and
+        live mall loans (which cell is lent to make what). ``loans`` is None when the survey fails: unknown,
+        not empty."""
+        from orchestrator.mall_bootstrap import active_bootstrap_loans
+        ledger = ab._MATERIAL_RESERVATION_LEDGER
+        projects = {}
+        for project in ledger.projects.values():
+            if ledger._active(project):
+                missing = {i: n - project.reserved.get(i, 0) for i, n in project.required.items()
+                           if project.reserved.get(i, 0) < n}
+                projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
+                                                "missing": missing}
+        try:
+            loans = [{"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count}
+                     for loan in active_bootstrap_loans(self.client, SURFACE, FORCE)]
+        except Exception:  # A failed survey is an unknown, never "no loans".
+            loans = None
+        return {"projects": projects, "loans": loans}
+
     def close(self) -> None:
         set_active_material_ledger(None)

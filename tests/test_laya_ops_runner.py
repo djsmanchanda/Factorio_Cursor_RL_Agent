@@ -261,3 +261,26 @@ def test_mall_slot_weights_are_exclusive():
                 w *= pref["weight"]
         return w
     assert weight("electronic-circuit") == 180.0 and weight("transport-belt") == 6.0
+
+
+def test_options_carry_known_bills_and_lent_cells():
+    from training.laya_ops_runner import brief, with_economics
+    starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}, "code": "submitted"}
+                for p in ("iron-plate", "copper-plate")]
+    gear = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}, "code": "producing"}
+    results = starters + [gear, SHORT]
+    economics = {"projects": {"paired_mall_inserter": {"state": "supply_wait", "reserved": {"inserter": 1},
+                                                       "missing": {"electronic-circuit": 1, "inserter": 6}}},
+                 "loans": [{"lender": "transport-belt", "making": "electric-mining-drill", "target": 2}]}
+    menu = with_economics(compile_options(BOARD, results), results, economics)
+    options = {o["option_id"]: o for o in menu["options"]}
+    # The iron foundation reported its bill when short; the copper one has never said: unknown, not free.
+    assert options["op.foundation.iron-plate"]["bill"] == {"transport-belt": 126, "inserter": 4}
+    assert options["op.foundation.iron-plate"]["features"]["bill_known"]
+    assert not options["op.foundation.copper-plate"]["features"]["bill_known"]
+    assert options["op.produce.transport-belt"]["features"]["cell_lent"]  # its cell is making drills
+    unknown = with_economics(compile_options(BOARD, results), results, {"projects": {}, "loans": None})
+    assert next(o for o in unknown["options"] if o["family"] == "produce")["features"]["cell_lent"] is None
+    text = brief(results, None, None, {}, 0, economics=economics)
+    assert "MALL: transport-belt cell lent to make electric-mining-drill (to 2)" in text
+    assert "RESERVED: paired_mall_inserter supply_wait missing electronic-circuit 1, inserter 6" in text
