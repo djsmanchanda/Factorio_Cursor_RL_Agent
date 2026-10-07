@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "work_diagnosis_bundle.schema.json",
+  "description": "Version 1 explicit offline evidence envelope; source attribution is declared by the collector.",
+  "type": "object",
+  "required": ["version", "identity", "objective", "focus", "as_of_tick", "artifacts"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "identity": {
+      "type": "object", "required": ["episode_id", "surface", "force", "source_id"], "additionalProperties": false,
+      "properties": {
+        "episode_id": {"$ref": "#/$defs/name"}, "surface": {"$ref": "#/$defs/name"},
+        "force": {"$ref": "#/$defs/name"}, "source_id": {"$ref": "#/$defs/name"}
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "run_id": {"$ref": "#/$defs/name"}, "code_revision": {"$ref": "#/$defs/name"},
+        "mod_revision": {"$ref": "#/$defs/name"}, "save_sha256": {"$ref": "#/$defs/name"}
+      }
+    },
+    "objective": {"$ref": "#/$defs/name"},
+    "focus": {"$ref": "#/$defs/work_id"},
+    "as_of_tick": {"type": ["integer", "null"], "minimum": 0},
+    "max_age_ticks": {"type": "integer", "minimum": 0, "default": 600},
+    "artifacts": {
+      "type": "array", "maxItems": 24,
+      "items": {
+        "type": "object", "required": ["ref", "kind", "source_id", "observation_tick"], "additionalProperties": false,
+        "oneOf": [{"required": ["path"], "not": {"required": ["payload"]}}, {"required": ["payload"], "not": {"required": ["path"]}}],
+        "properties": {
+          "ref": {"$ref": "#/$defs/name"}, "kind": {"enum": ["work", "materials", "district", "loans", "measurements"]},
+          "source_id": {"$ref": "#/$defs/name"}, "observation_tick": {"type": ["integer", "null"], "minimum": 0},
+          "path": {"type": "string", "minLength": 1}, "payload": {"type": "object"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "\\S"},
+    "work_id": {"allOf": [{"$ref": "#/$defs/name"}, {"pattern": "^(item|project|district|loan):.+$"}]}
+  }
+}

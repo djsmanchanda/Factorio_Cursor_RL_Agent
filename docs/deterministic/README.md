@@ -159,6 +159,10 @@ same ledger. `python tools/run_ledger.py backfill` indexes archived logs.
 
 For compact handoffs and cross-run lookup, use the [run context workflow](run_context.md).
 
+For an offline causal view of explicitly supplied work, material, district and
+loan evidence, use [work diagnosis](work_diagnosis.md). It is advisory and has
+no automatic runner hook or recovery authority.
+
 For repeated plastic acceptance and reviewed automatic fixes, use the [reliability workflow](reliability_workflow.md).
 
 For concurrent commit-by-checkpoint deterministic regression runs, immutable

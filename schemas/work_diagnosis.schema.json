@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "work_diagnosis.schema.json",
+  "description": "Version 1 bounded advisory diagnosis; no execution or scheduling authority.",
+  "type": "object",
+  "required": ["version", "identity", "provenance", "objective", "focus", "as_of_tick", "status", "authority", "next_observation", "inputs", "edges", "cycles", "findings", "progress", "unknowns", "omitted"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "identity": {"$ref": "work_diagnosis_bundle.schema.json#/properties/identity"},
+    "provenance": {"$ref": "work_diagnosis_bundle.schema.json#/properties/provenance"},
+    "objective": {"type": "string"}, "focus": {"type": "string"},
+    "as_of_tick": {"type": ["integer", "null"], "minimum": 0},
+    "authority": {"const": "advisory_only"},
+    "status": {"enum": ["progressing", "recorded_dependency_cycle", "producer_displaced", "material_wait", "recorded_wait", "unknown"]},
+    "next_observation": {"type": "string"},
+    "inputs": {"type": "array", "items": {"type": "object", "required": ["ref", "kind", "status", "tick"]}},
+    "edges": {"type": "array", "maxItems": 96, "items": {"type": "object", "required": ["parent", "child", "reason", "evidence", "freshness"]}},
+    "cycles": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+    "findings": {"type": "array", "items": {"type": "object", "required": ["work_id", "code", "message", "evidence", "freshness", "candidate", "preconditions", "next_observation"]}},
+    "progress": {"type": "array", "items": {"type": "object", "required": ["work_id", "metric", "counter_id", "state", "from_tick", "to_tick", "delta", "evidence"]}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "omitted": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}}
+  }
+}
