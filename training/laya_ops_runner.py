@@ -153,8 +153,13 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
 def _outcome(r: Mapping) -> str:
     if r.get("ok"):
         return "ok"
-    missing = {i: n - int(((r.get("details") or {}).get("available") or {}).get(i, 0))
-               for i, n in ((r.get("details") or {}).get("required") or {}).items()}
+    details = r.get("details") or {}
+    required, available = details.get("required"), details.get("available")
+    # Only a material shortage carries item maps; other codes may report a bare count here.
+    if not isinstance(required, Mapping):
+        required = {}
+    available = available if isinstance(available, Mapping) else {}
+    missing = {i: int(n) - int(available.get(i, 0)) for i, n in required.items()}
     short = ", ".join(f"{i} {n}" for i, n in missing.items() if n > 0)
     return (r.get("code") or "error") + (f" ({short})" if short else "")
 

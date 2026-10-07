@@ -211,6 +211,11 @@ def test_brief_layers_goal_next_major_and_recent_within_budget():
     assert "NEXT: C2 iron_copper_rollout" in text and "stone-brick 0.00/0.25/s short" in text
     assert "+0.2min starter iron-plate | +2.2min C0 reached | +2.2min starter stone-brick -> material_shortage (inserter 6)" in text
     assert "produce electric-mining-drill -> rationed_mall_borrow_deferred x3" in text  # repeats collapse
+    # Other codes may carry a bare count in details.required (rotating_mall_prerequisite_handoff).
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "electric-mining-drill"}, "tick": 9200,
+               "code": "rotating_mall_prerequisite_handoff",
+               "details": {"target": "electric-mining-drill", "prerequisite": "electronic-circuit", "required": 6}}
+    assert "electric-mining-drill -> rotating_mall_prerequisite_handoff" in brief([handoff], board, PHASES[1], {}, 1000)
     many = [dict(drill, params={"item": f"item-{i}"}) for i in range(200)]
     assert len(brief([starter] * 300 + many, board, PHASES[1], {"C0": 8000}, 1000, limit=600)) <= 600
     # The doc rules get what is left after the brief; hard rules always stay.
