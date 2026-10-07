@@ -12,7 +12,7 @@ FROZEN="${FROZEN:?frozen code copy}"
 DEADLINE="${DEADLINE:?epoch seconds}"
 PY="${PY:-/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/.venv/bin/python}"
 EXPERIMENT="${EXPERIMENT:-ops-history-c2-20261007}"
-PARALLEL="${PARALLEL:-12}"
+PARALLEL="${PARALLEL:-12}"  # GAME_BASE/RCON_BASE move the port range so two campaigns can run side by side
 SEEDS="${SEEDS:-4}"
 ROUND_SECONDS="${ROUND_SECONDS:-4500}"  # a round's worst case: two waves under the per-run timeout
 # ARMS overrides the variant list (space-separated paths); the baseline always runs too.
@@ -26,7 +26,8 @@ while (( $(date +%s) + ROUND_SECONDS < DEADLINE )); do
   log "round seeds $seed..$((seed + SEEDS - 1))"
   "$PY" tools/laya_experiment.py run --experiment "$EXPERIMENT" --actions deterministic \
     --variants "${VARIANTS[@]}" --seeds "$SEEDS" --seed-base "$seed" --until-phase C2 --max-game-ticks 216000 \
-    --speed 2 --parallel "$PARALLEL" --timeout 2100 | tail -9
+    --speed 2 --parallel "$PARALLEL" --timeout 2100 \
+    --game-base "${GAME_BASE:-34240}" --rcon-base "${RCON_BASE:-27140}" | tail -9
   seed=$((seed + SEEDS))
 done
 "$PY" tools/laya_experiment.py report --experiment "$EXPERIMENT"
