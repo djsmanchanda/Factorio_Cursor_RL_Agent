@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Path: scripts/laya_ops_history_campaign.sh
-# Purpose: Window-filling A/B of Laya's decision-history rules over the deterministic operations, toward C2.
+# Purpose: Window-filling A/B of Laya rule variants over the deterministic operations, toward C2.
 
 # Runs from a frozen code copy (FROZEN). Rounds of SEEDS seeds x every arm repeat until less than
 # ROUND_SECONDS remain before DEADLINE (epoch seconds), so the window is used even when runs stall early.
@@ -15,14 +15,13 @@ EXPERIMENT="${EXPERIMENT:-ops-history-c2-20261007}"
 PARALLEL="${PARALLEL:-12}"
 SEEDS="${SEEDS:-4}"
 ROUND_SECONDS="${ROUND_SECONDS:-4500}"  # a round's worst case: two waves under the per-run timeout
-VARIANTS=(docs/rl/laya_variants/ops-mall-first-30.json docs/rl/laya_variants/ops-mf30-no-repeat.json
-          docs/rl/laya_variants/ops-mf30-follow.json docs/rl/laya_variants/ops-mf30-unstick.json
-          docs/rl/laya_variants/ops-mf30-history.json)
+# ARMS overrides the variant list (space-separated paths); the baseline always runs too.
+read -r -a VARIANTS <<< "${ARMS:-docs/rl/laya_variants/ops-mf30-no-repeat.json docs/rl/laya_variants/ops-mf30-follow.json docs/rl/laya_variants/ops-mf30-unstick.json docs/rl/laya_variants/ops-mf30-history.json}"
 
 cd "$FROZEN"
 log() { echo "$(date --iso-8601=seconds) $*"; }
 
-seed=201
+seed="${SEED_BASE:-201}"
 while (( $(date +%s) + ROUND_SECONDS < DEADLINE )); do
   log "round seeds $seed..$((seed + SEEDS - 1))"
   "$PY" tools/laya_experiment.py run --experiment "$EXPERIMENT" --actions deterministic \

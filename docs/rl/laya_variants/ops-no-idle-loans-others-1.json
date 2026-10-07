@@ -1,0 +1,41 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-no-idle-loans-others-1",
+  "description": "Both: other mall slots x1 and idle-loan mall slots x0.1. mf30 runs stalled while belt slots lent the circuit cell (ops-history-c2-20261007).",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-mall-slots": {
+      "prefer": [
+        {
+          "when": {
+            "family": "mall_slot",
+            "product": [
+              "iron-gear-wheel",
+              "copper-cable",
+              "electronic-circuit"
+            ]
+          },
+          "weight": 30.0
+        },
+        {
+          "when": {
+            "family": "mall_slot"
+          },
+          "weight": 1.0
+        }
+      ]
+    },
+    "mission.ops-no-idle-loans": {
+      "prefer": [
+        {
+          "when": {
+            "family": "mall_slot",
+            "borrows": true,
+            "shortage": 0
+          },
+          "weight": 0.1
+        }
+      ]
+    }
+  }
+}

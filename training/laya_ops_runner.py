@@ -41,6 +41,10 @@ STALL_TICKS = 18000  # five game minutes without measurable progress (loan batch
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
 
+# The tooling made the item by lending another mall cell, not by standing a slot (the lent cell stops its own item).
+BORROW_CODES = {"temporary_mall_batch", "rationed_mall_borrow_deferred"}
+
+
 def in_progress(code: str | None) -> bool:
     return bool(code) and (code.endswith("_wait") or code in IN_PROGRESS)
 WAIT_TICKS = (300, 1800)
@@ -142,7 +146,7 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
                   "mission.ops-starters-before-foundations"),
         "RECENT": ("mission.ops-history-no-repeat", "mission.ops-history-follow-through", "mission.ops-one-batch",
                    "mission.ops-retry-after-wait"),
-        "TRIED": ("mission.ops-no-blind-retry",),
+        "TRIED": ("mission.ops-no-blind-retry", "mission.ops-no-idle-loans"),
         "SINCE LAST BUILD": ("mission.ops-history-unstick",)}
 
 
@@ -326,6 +330,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "waiting": in_progress(codes.get(("mall_slot", item))),
                              "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
                              "shortage": short.get(item, 0),
+                             "borrows": next((r.get("code") for r in reversed(results)
+                                              if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
                              "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")

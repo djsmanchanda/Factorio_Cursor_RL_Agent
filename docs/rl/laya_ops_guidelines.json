@@ -239,7 +239,7 @@
             "family": "foundation",
             "plate_stage": "starter"
           },
-          "weight": 5.0
+          "weight": 1.0
         },
         {
           "when": {
@@ -357,23 +357,24 @@
         "mission.decide"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.",
+      "quote": "The bootstrap mall starts with standing slots for gear, cable and circuits, then belts, before any foundation: a foundation's ghosts take the inserters a circuit slot needs, and without circuits no inserter or drill can be made. Borrow a slot for other items only once standing slots exist.",
       "prefer": [
         {
           "when": {
             "family": "mall_slot",
             "product": [
               "iron-gear-wheel",
-              "copper-cable"
+              "copper-cable",
+              "electronic-circuit"
             ]
           },
-          "weight": 4.0
+          "weight": 30.0
         },
         {
           "when": {
             "family": "mall_slot"
           },
-          "weight": 2.0
+          "weight": 6.0
         }
       ]
     },
@@ -518,6 +519,15 @@
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
       "quote": "After several decisions without building anything, try an operation not yet attempted in this run."
+    },
+    {
+      "rule_id": "mission.ops-no-idle-loans",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "A mall slot the tooling could only serve by lending another cell is a batch, not a standing slot; ask for it again only when an operation is short of that item, because the lent cell stops making its own item."
     }
   ]
 }

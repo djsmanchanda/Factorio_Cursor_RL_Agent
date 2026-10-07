@@ -124,7 +124,9 @@ Extend an open refinery in place by one six-furnace module, with its mine, while
 
 Once a plate's refinery delivers plates, retire its starter; until then the starter keeps producing.
 
-The bootstrap mall starts with standing slots (gear and cable first, then circuits and belts); borrow a slot for other items only once standing slots exist.
+The bootstrap mall starts with standing slots for gear, cable and circuits, then belts, before any foundation: a foundation's ghosts take the inserters a circuit slot needs, and without circuits no inserter or drill can be made. Borrow a slot for other items only once standing slots exist.
+
+A mall slot the tooling could only serve by lending another cell is a batch, not a standing slot; ask for it again only when an operation is short of that item, because the lent cell stops making its own item.
 
 Poles are made from steel, so before any work spends poles, fence the steel starter's poles; without them neither the refinery nor steel can start.
 

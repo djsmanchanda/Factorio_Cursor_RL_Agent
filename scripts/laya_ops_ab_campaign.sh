@@ -12,7 +12,7 @@ FROZEN="${FROZEN:?frozen code copy}"
 PY="${PY:-/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/.venv/bin/python}"
 STAMP="${STAMP:-20261007}"
 PARALLEL="${PARALLEL:-12}"
-VARIANTS=(docs/rl/laya_variants/ops-mall-first-10.json docs/rl/laya_variants/ops-mall-first-30.json)
+VARIANTS=(docs/rl/laya_variants/archive/ops-mall-first-10.json docs/rl/laya_variants/archive/ops-mall-first-30.json)
 
 cd "$FROZEN"
 log() { echo "$(date --iso-8601=seconds) $*"; }

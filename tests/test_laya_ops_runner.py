@@ -177,6 +177,9 @@ def test_laya_sees_its_recent_decisions():
     features = {o["option_id"]: o["features"] for o in compile_options(BOARD, results, recipes=recipes)["options"]}
     # The same deferral twice in a row (waits between do not break the streak), and six decisions without a build.
     assert features["op.mall_slot.electronic-circuit"]["repeat_fails"] == 2
+    # Its last attempt only borrowed another cell; a slot never asked for has borrowed nothing.
+    assert features["op.mall_slot.electronic-circuit"]["borrows"]
+    assert not features["op.mall_slot.copper-cable"]["borrows"]
     assert not features["op.foundation.iron-plate"]["tried"]
     assert features["op.foundation.iron-plate"]["stuck"] and features["wait.300"]["stuck"]
     assert not features["op.foundation.iron-plate"]["after_success_same_family"]
