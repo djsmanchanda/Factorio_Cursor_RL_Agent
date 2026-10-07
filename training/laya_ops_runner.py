@@ -424,6 +424,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
+    accept = getattr(session, "acceptance", None)
+
+    def check_acceptance(event: str) -> None:
+        """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
+        if accept is None:
+            return
+        try:
+            statuses = accept()
+        except Exception as error:  # Observation must never stop the run.
+            statuses = {"error": f"{type(error).__name__}: {error}"[:200]}
+        summary["acceptance"] = statuses
+        passed = [c for c, status in statuses.items() if status == "passed"]
+        summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
+        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
+    check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -442,7 +457,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             reached.append(phase["phase_id"])
             summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
             _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
-            emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
+            emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']} (rate proxy)")
+            check_acceptance(f"proxy {phase['phase_id']}")
+            emit(f"ACCEPTANCE: {summary.get('acceptance')}")
             stall.update(since=0, best_gap=math.inf)
             phase = current_phase(reached)
             board = compile_status(facts, phase["targets"], measurement) if phase else None
@@ -518,6 +535,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
         summary["decisions"] = index + 1
+        if summary["decisions"] % 10 == 0:
+            check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
         # 2 hours): more machines, fewer missing materials, or a closer goal.
@@ -542,9 +561,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"
             break
+    check_acceptance("end")
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
-         f"phases={','.join(reached) or 'none'}")
+         f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'}")
     return summary

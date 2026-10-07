@@ -132,6 +132,9 @@ def score(rows: list[dict], target: str | None) -> dict:
             "mean_highest_phase": round(statistics.mean(highest), 2) if highest else None,
             "failures": sum(r["summary"].get("failures", 0) for r in rows),
             "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
+            # The deterministic predicate for the target, not the rate proxy (runs without it: not checked).
+            "accepted": sum(bool(target) and target in r["summary"].get("accepted", []) for r in rows),
+            "acceptance_checked": sum("acceptance" in r["summary"] for r in rows),
             "stops": dict(sorted({s: sum(r["summary"].get("stop") == s for r in rows)
                                   for s in {r["summary"].get("stop") for r in rows}}.items()))}
 
@@ -151,10 +154,12 @@ def report(args: argparse.Namespace) -> int:
     path = ROOT / f"data/laya-saved-world/exp-{args.experiment}/report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"| variant | runs | reached {target} | median ticks | mean highest phase | failures | untyped stuck | stops |")
-    print("|---|---|---|---|---|---|---|---|")
+    print(f"| variant | runs | reached {target} (proxy) | accepted {target} (deterministic) | median ticks | "
+          f"mean highest phase | failures | untyped stuck | stops |")
+    print("|---|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
-        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | {s['median_ticks']} | "
+        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | "
+              f"{s['accepted']}/{s['acceptance_checked']} | {s['median_ticks']} | "
               f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0

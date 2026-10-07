@@ -244,10 +244,14 @@ class LiveCheckpointObservationAdapter:
             "local f=game.forces['" + force + "'];local names={};"
             "for k,v in pairs(defines.entity_status) do names[v]=k end;local out={};"
             "for _,e in pairs(s.find_entities_filtered{name='electric-furnace',force=f}) do "
-            "local ore='';local si=e.get_inventory(defines.inventory.furnace_source);"
-            "if si then for n,_ in pairs(si.get_contents()) do ore=n break end end;"
-            "local item='';local ri=e.get_inventory(defines.inventory.furnace_result);"
-            "if ri then for n,_ in pairs(ri.get_contents()) do item=n break end end;"
+            # Factorio 2.1 names furnace inventories crafter_input/crafter_output (2.0: furnace_source/result);
+            # get_contents() returns {name, count, quality} records, not a name -> count map.
+            "local input=defines.inventory.crafter_input or defines.inventory.furnace_source;"
+            "local output=defines.inventory.crafter_output or defines.inventory.furnace_result;"
+            "local ore='';local si=e.get_inventory(input);"
+            "if si then for _,c in pairs(si.get_contents()) do ore=c.name break end end;"
+            "local item='';local ri=e.get_inventory(output);"
+            "if ri then for _,c in pairs(ri.get_contents()) do item=c.name break end end;"
             "local made=0;local ok,p=pcall(function() return e.products_finished end);"
             "if ok and type(p)=='number' then made=p end;"
             "out[#out+1]=ore..'|'..item..'|'..(names[e.status] or 'unknown')..'|'..made end;"

@@ -13,7 +13,8 @@ def test_unfinished_runs_are_indexed_once_and_reported(tmp_path, monkeypatch):
     # The run indexed itself: nothing is added.
     index.write_text(json.dumps({"root": str(root.resolve()), "experiment": "exp", "variant_id": "baseline",
                                  "summary": {"stop": "stalled", "phases_reached": ["C0", "C1"],
-                                             "codes": {"untyped_stuck": 2}}}) + "\n")
+                                             "codes": {"untyped_stuck": 2},
+                                             "acceptance": {"C1": "failed"}, "accepted": ["C0"]}}) + "\n")
     experiment._finalize("exp", None, 1, root, args, "unindexed", 0)
     # A crash and a failed preparation are recorded with their cause.
     experiment._finalize("exp", None, 2, tmp_path / "baseline-s2", args, "crash", 1)
@@ -22,4 +23,6 @@ def test_unfinished_runs_are_indexed_once_and_reported(tmp_path, monkeypatch):
     assert len(rows) == 3 and rows[1]["returncode"] == 1
     score = experiment.score(rows, "C1")
     assert score["runs"] == 3 and score["reached"] == 1 and score["untyped_stuck"] == 2
+    # The rate proxy reached C1; the deterministic C1 predicate did not pass.
+    assert score["accepted"] == 0 and score["acceptance_checked"] == 1
     assert score["stops"] == {"crash": 1, "prepare_failed": 1, "stalled": 1}

@@ -161,5 +161,25 @@ class DeterministicSession:
             loans = None
         return {"projects": projects, "loans": loans}
 
+    def acceptance(self) -> dict:
+        """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
+        live world: passed / failed / unknown per C0..C6, monotonic once passed. The runner's C phases are rate
+        proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
+        from orchestrator.checkpoint_milestones import CheckpointEvaluator
+        from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
+        if not hasattr(self, "_evaluator"):
+            self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
+        try:
+            snapshot = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
+                                                        reference_point=self.reference_point,
+                                                        bootstrap_profile=PROFILE).observe().snapshot
+        except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
+            return {"error": str(error)[:200]}
+        self._baseline = self._baseline or snapshot
+        self._history = (self._history + [snapshot])[-20:]
+        return {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
+                                                          history=self._history).status.value
+                for m in self._evaluator.milestones}
+
     def close(self) -> None:
         set_active_material_ledger(None)
