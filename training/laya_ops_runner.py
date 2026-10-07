@@ -122,6 +122,57 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
     return dict(short)
 
 
+RECENT = 8  # decisions kept verbatim in the history; older ones survive only in the per-operation summary
+STUCK_DECISIONS = 6  # decisions without a built operation after which Laya counts itself stuck
+
+
+def _key(r: Mapping) -> tuple:
+    params = r.get("params") or {}
+    return (r["operation"], params.get("recipe") or params.get("item"))
+
+
+def history(results: list[dict]) -> dict:
+    """Laya's own past, compacted: the last RECENT decisions verbatim, older ones folded into per-operation counts."""
+    per_operation: dict[str, dict] = {}
+    for r in results:
+        if r["operation"] == "wait":
+            continue
+        entry = per_operation.setdefault(" ".join(str(k) for k in _key(r) if k), {"attempts": 0})
+        entry["attempts"] += 1
+        entry["last_code"] = "ok" if r.get("ok") else (r.get("code") or "error")
+    recent = [f"{' '.join(str(k) for k in _key(r) if k)} -> {'ok' if r.get('ok') else r.get('code') or 'error'}"
+              for r in results[-RECENT:]]
+    return {"recent": recent, "per_operation": per_operation, "decisions_since_build": since_build(results)}
+
+
+def since_build(results: list[dict]) -> int:
+    """Decisions since the last operation (not a wait) that succeeded."""
+    for back, r in enumerate(reversed(results)):
+        if r.get("ok") and r["operation"] != "wait":
+            return back
+    return len(results)
+
+
+def repeat_fails(results: list[dict], key: tuple) -> int:
+    """How many of this option's latest attempts, in a row, failed with the same code (capped at 3)."""
+    codes = [r.get("code") or "error" for r in results if r["operation"] != "wait" and _key(r) == key]
+    count = 0
+    for code in reversed(codes):
+        if code in ("ok", None) or code != codes[-1]:
+            break
+        count += 1
+    return min(count, 3) if codes and codes[-1] != "ok" else 0
+
+
+def history_features(results: list[dict], key: tuple, family: str) -> dict:
+    """What Laya's recent decisions say about one option (rules in docs/rl/laya_ops_guidelines.json weigh them)."""
+    last = next((r for r in reversed(results) if r["operation"] != "wait"), None)
+    return {"repeat_fails": repeat_fails(results, key),
+            "after_success_same_family": bool(last and last.get("ok") and last["operation"] == family),
+            "tried": any(r["operation"] != "wait" and _key(r) == key for r in results),
+            "stuck": since_build(results) >= STUCK_DECISIONS}
+
+
 def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set[str]:
     """Plates an item's recipe chain consumes (iron gear -> iron plate; circuit -> iron and copper plate)."""
     if item in PLATES:
@@ -210,9 +261,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
+    for option in options:  # Laya's own recent decisions, per option
+        params = option["params"]
+        option["features"].update(history_features(results, (option["family"], params.get("recipe") or params.get("item")),
+                                                   option["family"]))
+    stuck = since_build(results) >= STUCK_DECISIONS
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,
-                        "summary": f"Wait {ticks / 60:g} game seconds", "features": {"constructing": waiting}})
+                        "summary": f"Wait {ticks / 60:g} game seconds", "features": {"constructing": waiting, "stuck": stuck}})
     needs = sorted({o["need_id"] for o in options})
     return {"needs": [{"need_id": n, "condition": "available", "options": [o["option_id"] for o in options
                                                                           if o["need_id"] == n]} for n in needs],
@@ -269,7 +325,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         state = {"observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
-                                        "saved_world": {"provider_stock": {}}},
+                                        "saved_world": {"provider_stock": {}}, "history": history(results)},
                  "guidelines": guidance["guidelines"]}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])

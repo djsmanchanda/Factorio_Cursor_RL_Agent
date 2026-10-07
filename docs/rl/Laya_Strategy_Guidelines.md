@@ -140,6 +140,14 @@ While bots build or coverage grows, wait for it rather than starting more work.
 
 An operation the tooling reports as waiting on bots or coverage is retried after a wait, not immediately.
 
+Laya sees its own recent decisions and their outcomes (training/laya_ops_runner.history). These rules use that history. They carry no weights by default; variants weigh them:
+
+An operation that failed the same way twice in a row will not succeed a third time unless something changes; do something else first.
+
+After an operation succeeds, carry that line of work on (the next mall slot after a mall slot) before switching to another.
+
+After several decisions without building anything, try an operation not yet attempted in this run.
+
 ## How rules steer decisions
 
 Each soft rule above is quoted verbatim in `docs/rl/laya_mission_guidelines.json`.

@@ -161,3 +161,30 @@ def test_a_running_mall_batch_is_left_to_finish():
     options = compile_options(BOARD, results)["options"]
     assert all(o["features"].get("batch_active") for o in options if o["family"] in ("produce", "mall_slot"))
     assert next(o for o in options if o["option_id"] == "wait.1800")["features"]["constructing"]
+
+
+def test_laya_sees_its_recent_decisions():
+    from training.laya_ops_runner import history
+    deferred = {"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"},
+                "code": "rationed_mall_borrow_deferred"}
+    starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    gear = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore"}]}, "copper-plate": {"ingredients": [{"name": "copper-ore"}]},
+               "iron-gear-wheel": {"ingredients": [{"name": "iron-plate"}]},
+               "copper-cable": {"ingredients": [{"name": "copper-plate"}]},
+               "electronic-circuit": {"ingredients": [{"name": "copper-cable"}, {"name": "iron-plate"}]}}
+    results = starters + [gear, deferred, wait, deferred, wait, wait, wait]
+    features = {o["option_id"]: o["features"] for o in compile_options(BOARD, results, recipes=recipes)["options"]}
+    # The same deferral twice in a row (waits between do not break the streak), and six decisions without a build.
+    assert features["op.mall_slot.electronic-circuit"]["repeat_fails"] == 2
+    assert not features["op.foundation.iron-plate"]["tried"]
+    assert features["op.foundation.iron-plate"]["stuck"] and features["wait.300"]["stuck"]
+    assert not features["op.foundation.iron-plate"]["after_success_same_family"]
+    # Right after a successful mall slot, another mall slot follows through.
+    follow = {o["option_id"]: o["features"] for o in compile_options(BOARD, starters + [gear], recipes=recipes)["options"]}
+    assert follow["op.mall_slot.copper-cable"]["after_success_same_family"]
+    # Compacted history: the last decisions verbatim, every operation's attempts summarized.
+    h = history(results)
+    assert h["recent"][-1] == "wait -> ok" and h["decisions_since_build"] == 6
+    assert h["per_operation"]["mall_slot electronic-circuit"] == {"attempts": 2, "last_code": "rationed_mall_borrow_deferred"}

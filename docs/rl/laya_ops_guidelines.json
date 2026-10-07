@@ -491,6 +491,33 @@
           "weight": 2.0
         }
       ]
+    },
+    {
+      "rule_id": "mission.ops-history-no-repeat",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "An operation that failed the same way twice in a row will not succeed a third time unless something changes; do something else first."
+    },
+    {
+      "rule_id": "mission.ops-history-follow-through",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "After an operation succeeds, carry that line of work on (the next mall slot after a mall slot) before switching to another."
+    },
+    {
+      "rule_id": "mission.ops-history-unstick",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "After several decisions without building anything, try an operation not yet attempted in this run."
     }
   ]
 }
