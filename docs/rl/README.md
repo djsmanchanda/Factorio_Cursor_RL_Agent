@@ -16,6 +16,12 @@ and deterministic controller are migration baselines.  The training runtime,
 reward/evidence store, held-out evaluation, and promotion gates remain the
 learning system around Laya.
 
+For the factory runner, start with [current evidence](Laya_Current_Handoff.md),
+[the runner contract](Laya_Clean_Runner.md) and [strategy](Laya_Strategy_Guidelines.md).
+The ops path is currently a guided sampler over partly strategic wrappers;
+lab-model results do not establish a learned ops policy. Read `training.md`
+for dataset/training work and mechanics references for the selected adapter.
+
 ## What RL may learn
 
 Inside disposable training environments, the policy may decide:

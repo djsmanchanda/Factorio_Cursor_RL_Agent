@@ -49,6 +49,7 @@ Before implementing: identify the subsystem, read its listed documents, and igno
 | Work | Read first |
 |---|---|
 | Architecture, shared contracts, boundaries | `docs/architecture.md`, `docs/system_invariants.md` |
+| Laya factory runner, strategy, resumption | `docs/rl/Laya_Current_Handoff.md`, `docs/rl/Laya_Clean_Runner.md`, `docs/rl/Laya_Strategy_Guidelines.md` |
 | RL, curriculum, rewards, autoresearch | `docs/rl/README.md`, `docs/rl/training.md` |
 | Deterministic runtime and planners | `docs/deterministic/README.md`, `docs/deterministic/planning.md` |
 | Live Factorio, RCON, deploy/restart | `docs/factorio_operations.md` |

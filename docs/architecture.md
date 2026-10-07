@@ -17,6 +17,12 @@ During migration, this document distinguishes the **current runtime** from the
 replacement contract is implemented and verified; adopting the direction does
 not silently grant a model live-base authority.
 
+Current factory-runner choices and gaps are in the
+[runner contract](rl/Laya_Clean_Runner.md). Its guided ops prototype still calls
+wrappers that choose prerequisites, lenders and geometry; those choices are
+explicit migration debt, not the target ownership split. Separate lab training
+does not establish a learned policy for that ops path.
+
 ## Two cooperating systems
 
 The repository deliberately keeps two runtimes:
@@ -51,7 +57,11 @@ Laya director                            frozen deterministic baseline
                   isolated execution + measurement
 ```
 
-Shared contracts describe facts and actions. They must not force the learned policy to reproduce a deterministic layout recipe. The mechanics reused inside the Laya Guided Runner carry no competing strategy. The independent deterministic workflow keeps its own authority until a separately approved replacement.
+Shared contracts describe facts and actions. They must not force the learned
+policy to reproduce a deterministic layout recipe. The target mechanics
+interface carries no competing strategy; remaining choosing wrappers must
+expose alternatives as they migrate. The independent deterministic workflow
+keeps its own authority until a separately approved replacement.
 
 The operation compiler may remove options that are unavailable, illegal, or
 outside authorization.  It may not rank the remaining options or silently

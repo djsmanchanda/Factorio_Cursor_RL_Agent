@@ -143,8 +143,13 @@ These names describe intended responsibilities, not permission to build speculat
   The provider is a construction-storage side tap, not the main output path.
   It retains a fast inserter as the refinery grows; sizing that tap for all
   furnace output must not force a bulk-inserter/advanced-circuit dependency.
-- Steel begins only after the opening iron district is verified and its pioneer
-  retired. One compact furnace takes plates directly from an existing iron
+- Steel normally begins after the opening iron district is verified and its
+  pioneer retired. The existing cycle-break path also admits the fully funded
+  seed before retirement when the exact replacement is marked submitted and
+  the pioneer provider has verified iron output. Planning a foundation or
+  placing only its mine ghosts does not establish that submission state; the
+  observed partial-submission/pole cycle remains an unresolved adapter issue.
+  One compact furnace takes plates directly from an existing iron
   belt through an inserter and outputs to a provider; it has no feed belt or
   requester. Siting checks its complete footprint and the iron district's
   expansion reservations. If no belt-side site fits, a free ore patch may host

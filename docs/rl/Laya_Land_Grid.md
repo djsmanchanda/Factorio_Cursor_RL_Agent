@@ -17,9 +17,24 @@ and grows inside it before needing new land (`training/laya_site_plan.base_zones
 
 The 64-tile parcel lattice below is an optional, larger-scale layout (`land_model: grid`).
 
-Laya will eventually oversee a map of up to 5,000 x 5,000 tiles. Land is planned
-as a **grid of parcels** rather than rectangles drawn around nearby patches, so
-that every later build has a predictable place and a predictable route.
+Current patch-profile geometry: eligible ore patches normally contain at least
+200,000 ore or about 256 resource tiles; smaller patches are a fallback when no
+larger patch of that resource is within 250 tiles. A basic six-furnace module is
+15 tiles wide; a 34-tile strip admits two parallel modules or one long line,
+with 5-tile belt corridors on both sides where space allows. Corridors admit
+belts, splitters and poles. Roboports may cross ore zones and smelting strips
+for coverage. Keep the 24x24 starter area clear; on mod_playground its bounds
+are (-12,-10) to (10,12), beside the 40x40 mall block. Fill the mall from its
+covered edge. These are the selected profile's geometry and reservation
+contracts, not universal Factorio legality or a fixed learned-policy sequence.
+
+The direct-starter templates use iron 2 drills/2 furnaces, copper 1/1 and stone
+2/1 (two stone per brick), with drills feeding furnaces directly and inserters
+moving output to providers. Later Start/Middle/End lines offer 6 or 18 furnaces;
+their approved footprints are retained while the policy chooses site and scale.
+
+The optional grid targets maps up to 5,000 x 5,000 tiles. It gives later builds
+predictable parcels and routes; it has not replaced the patch-profile default.
 
 ## Grid
 
@@ -66,9 +81,9 @@ crude field (~288 tiles out) planned as four `oil:crude-oil` parcels.
 
 ## Rules Laya reads
 
-The strategy guidelines quote the grid rules (`Laya_Strategy_Guidelines.md`,
-Planning): builds stay inside one parcel, corridors carry only transport and
-power, and a purpose expands into the adjacent parcel before a distant one.
+The strategy guidelines explicitly condition the grid rules on `land_model=grid`:
+builds stay inside one parcel, corridors carry only transport and power, and a
+purpose prefers adjacent growth. Patch runs use item-block reservations instead.
 
 ## Status
 

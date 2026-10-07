@@ -1,174 +1,146 @@
-<!-- Path: docs/rl/Laya_Strategy_Guidelines.md | Purpose: The user's factory strategy as reviewed soft guidelines that Laya reads; editing this doc changes strategy, not code. -->
+<!-- Path: docs/rl/Laya_Strategy_Guidelines.md | Purpose: Scoped mission requirements and compact strategy priors shared by Laya's mission and ops catalogs. -->
 
 # Laya strategy guidelines
 
-These are the user's strategy rules for the `mod_playground` mission. They are
-**soft guidelines**: Laya follows them by default. Rules marked with
-preferences in `docs/rl/laya_mission_guidelines.json` also weight the current
-guided policy's choices (see "How rules steer decisions" below). A deviation is allowed only
-when measured outcomes in disposable runs show it is better, and every
-deviation is journaled. Hard safety and legality rules stay in
-`docs/system_invariants.md`.
+Laya chooses factory work; deterministic tools observe, validate and execute it.
+The mission uses actual starter stock and manufactured items, bot-funded
+construction and isolated disposable worlds. Hard boundaries remain in
+[system invariants](../system_invariants.md).
 
-`docs/rl/laya_guidelines.json` quotes these passages exactly; the loader
-rejects a rule whose quote no longer appears here. To change strategy, edit
-the sentence here and its quote there.
+The strategy rules below are initial preferences. Explore legal alternatives
+in disposable runs, preserve their outcomes, and adopt persistent policy changes
+through measured evaluation. A preferred sequence is not a Factorio legality
+rule. Explicit scenario constraints and selected toolkit geometry still apply.
+
+Stable rule IDs bind these passages to `laya_mission_guidelines.json` (geometry)
+and `laya_ops_guidelines.json` (ops). Edit a passage and its quotes together.
+Scopes, numeric preferences and supported facts live in those catalogs and the
+[runner contract](Laya_Clean_Runner.md); changing prose alone does not change
+the current guided sampler's weights.
 
 ## Mission
 
-Start from the mod_playground starter kit and reach advanced circuits, then self-expand and meet all item needs.
-
-After advanced circuits, research mining productivity 4 by building assembly lines for automation, logistic, chemical and production science packs and their precursors, feeding the packs to labs, then moving to the next science item.
-
-Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items.
-
-## Deciding
-
-Serve the current phase's goals first: actions on items its goals need come before stock and other needs, which wait while a goal action is possible.
-
-Serve the bottleneck: prefer actions on items in the current bottleneck chain, deepest unmet input first.
-
-Make missing construction items before their stock runs out; a build blocked by a missing item is a reason to make that item.
-
-Never spend construction items the current phase goals' builds still need; a side build that would leave no goal build affordable waits.
-
-Build a machine after its inputs are made or stocked; a machine whose input nobody makes locks its other inputs in its requester, so build the missing input first.
-
-Conserve scarce starter items: prefer builds that leave enough poles, chests and inserters for the next builds; a build that spends most of what is left of an item needs a strong reason.
-
-Wait only when nothing useful can be built, or while construction and deliveries are still arriving.
-
-Extend robot coverage toward resources and sites a current need requires; coverage that serves no need spends poles and roboports for nothing.
-
-These come from the deterministic runner's history: of 184 runs since 2026-09-05, 74 ended with no progress on a construction item (steel, drills, splitters, furnaces, fast inserters, poles) whose inputs had no reliable producer, and its furthest run toward plastic stopped when gear and iron-stick stock drained with no permanent producer.
-
-## Planning
-
-Plan land before building: protect ore patches for mining, keep a smelting strip beside each plate's patch for its mine and furnace line, and keep the mall together in one reserved zone.
-
-Ignore small ore patches unless no larger patch of that resource lies within 250 tiles of the base; small patches get no reservation. A patch is small below the deterministic new-site minimum of 200,000 ore or about 256 tiles of ore.
-
-A smelting strip is at least one six-furnace module wide (three furnaces, 9 tiles, plus 2 for the belt and 1 spare on each side; the basic module is 15 tiles) and 34 tiles where space allows (two parallel lines, or one 18-furnace line of Start-Middle-Middle-End), with 5-tile belt corridors kept free on both sides for future belts.
-
-The reservations are enforced when options are generated (`training/laya_site_plan.py`); the mall site is Laya's first decision of an episode. Belt corridors accept only belts, splitters and poles. Roboports may stand inside a smelting strip, because its lines' provider taps need logistic coverage, and on an ore zone, because coverage must cross a patch to reach the ones beyond it. Strips keep clear of the starter area (24x24 around the starter roboport). The starter rule replaces requester-fed single furnaces and single drills into chests for iron, copper and stone (`training/laya_starters.py`).
-
-
-Land is a grid of 64-tile parcels; every build stays inside one parcel, and the corridor lattice between parcels carries only belts, pipes and poles.
-
-A purpose grows into the parcel next to its own before a distant one, so production stays in contiguous blocks near its inputs. See `docs/rl/Laya_Land_Grid.md`.
-
-Reserve a block of land for each item beside its inputs, sized for its future lines; grow each new line next to the existing ones from the block's near edge, so the rest of the block stays free.
-
-The starter area around the starter roboport, (-12,-10) to (10,12) on mod_playground, is kept clear like a corridor. The mall is one large 40x40 block beside it, filled with quad cells from the edge its roboport covers.
-## Opening
-
-First priority: iron and copper starter mines and furnaces; stone and the mall follow.
-
-The first mine of each resource is a direct starter, as in the deterministic runner: iron is two drills feeding two furnaces, copper one drill feeding one furnace, stone two drills feeding one furnace (two stone per brick); drills output straight into the furnace and one inserter moves the output to a provider chest.
-
-Later plate capacity comes from the approved stackable six-furnace modules (`planners/smelter_block.py`, regular-belt "basic" variant), fed by six-drill mine lines over belts, stacked in parallel or in series as demand grows.
-
-Start the mall with four assembling machines: two permanent slots for copper cable and iron gear wheels, the rest rotating to whatever item is in demand.
-
-Keep permanent producers for heavily used intermediates: iron gear wheels, iron sticks, copper cable and electronic circuits.
-
-Medium poles, big poles and assembling machine 2 need steel; start steel smelting before pole stock runs low.
-
-Then build six-drill mine and furnace lines for iron and copper, and expand them as demand grows.
-
-Treat 12 iron, 12 copper and 6 stone furnaces as a reference allocation; measure whether ore supply and demand justify it.
-
-## Transport
-
-Use logistic bots to supply one or two machines and mall machines.
-
-Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers.
-
-## Power
-
-Use substations only in mine and mall areas, where one substation powers many machines and there is space for it.
-
-Elsewhere use medium electric poles: one costs about 12 iron plates and 1 copper plate, while a substation costs about 60 iron plates, 28 copper plates and 10 plastic.
-
-For long-distance connections use big electric poles, which reach much farther for about 29 iron plates and 2 copper cables.
-
-The substation restriction is enforced when power layouts are generated (`training/laya_power.py`): substations are offered only for mine and mall builds and never as relay chains. Builds already inside existing coverage are offered with no new poles.
-
-## Mall expansion
-
-Before advanced circuits are produced, the mall rotates: a few cells are borrowed from their baseline recipe to make whatever blocks the next build, then restored.
-
-After advanced circuits are produced, the mall moves to dedicated slots, one item per slot, with no rotation unless it is extremely necessary.
-
-A large order that would take a dedicated slot too long (for example a thousand express belts) schedules a dedicated assembly line; until that line runs, a rotated mall slot makes the first batch at priority.
-
-Reserve the top and bottom quad slots until long-handed inserters are manufactured; regular inserters cannot replace them.
-
-Gear and cable slots are permanent; other mall slots rotate to the current shortage, so repurpose an idle or stocked slot before building a new cell.
-
-Every mall slot stops at a stock target, so finished intermediates stop consuming plates; products the current phase measures run ungated.
-
-Let a retargeted slot fill its stock target before switching it again; a slot waiting for its new ingredients is busy, not idle.
-
-## Operations
-
-Laya's actions are the deterministic runtime's operations (training/laya_ops.py); these rules decide when each is worth running.
-
-Each plate begins with its direct starter; build a plate's starter before any other work for that plate.
-
-Startup builds the iron, copper, then stone starter before any mine-to-refinery foundation; a placed foundation reserves the drills a missing starter would need.
-
-Once a plate's starter runs, open its mine and six-furnace refinery joined by one belt; a plate without a starter does not get a refinery yet. The refinery is placed as soon as it is chosen, even before every item is in stock: its placed ghosts reserve their bill, steer the mall, and let the steel seed start.
-
-Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short.
-
-Once a plate's refinery delivers plates, retire its starter; until then the starter keeps producing.
-
-The bootstrap mall starts with standing slots for gear, cable and circuits, then belts, before any foundation: a foundation's ghosts take the inserters a circuit slot needs, and without circuits no inserter or drill can be made. Borrow a slot for other items only once standing slots exist.
-
-A mall slot the tooling could only serve by lending another cell is a batch, not a standing slot; ask for it again only when an operation is short of that item, because the lent cell stops making its own item.
-
-Poles are made from steel, so before any work spends poles, fence the steel starter's poles; without them neither the refinery nor steel can start.
-
-Build the compact steel seed as soon as the iron refinery stands; it is what replenishes poles.
-
-When an operation reports a material shortage, produce the missing items before retrying it.
-
-While the mall is making a batch, let it finish before asking for another item; switching items makes its loans restore and preempt each other, so nothing completes.
-
-Do not retry an operation that failed for missing materials until those materials have changed; a blind retry only adds another power bridge to another abandoned slot.
-
-While bots build or coverage grows, wait for it rather than starting more work.
-
-An operation the tooling reports as waiting on bots or coverage is retried after a wait, not immediately.
-
-Laya sees its own recent decisions and their outcomes (training/laya_ops_runner.history). These rules use that history. They carry no weights by default; variants weigh them:
-
-An operation that failed the same way twice in a row will not succeed a third time unless something changes; do something else first.
-
-After an operation succeeds, carry that line of work on (the next mall slot after a mall slot) before switching to another.
-
-After several decisions without building anything, try an operation not yet attempted in this run.
-
-## How rules steer decisions
-
-Each decision begins with Laya's brief: GOAL, NOW (the current phase's
-targets and measured rates), NEXT, MAJOR (phases reached and structural
-operations), RECENT (latest moves, repeats collapsed), TRIED (attempts and last
-outcome per operation) and SINCE LAST BUILD. The brief is facts; these rules
-are strategy, and neither restates the other. A brief line names in brackets
-the rules shown with it that act on it (`training/laya_ops_runner.USES`). The
-brief gets its room first (about 2k tokens); the rules fill what is left.
-
-Each soft rule above is quoted verbatim in `docs/rl/laya_mission_guidelines.json`.
-A rule may carry `prefer` entries: a condition on the decision (need, family,
-power type, need condition, phase, bottleneck position) and a weight. Until a
-trained Laya checkpoint exists, the guided policy multiplies the weights of
-every rule Laya sees for that decision, keeps an exploration floor, and
-samples. Edit the sentence and its preferences to change behavior; no code
-change is needed. Every decision records which rules matched each option.
-
-When a phase has more rules than fit in one decision (15 plus the adapter's
-rule), Laya is shown hard rules first, then rules whose preferences match a
-current option, then text-only rules; rules that match nothing on this menu
-are left out and listed in `observation_digest.guidelines_omitted`.
+| Rule | Requirement |
+| --- | --- |
+| `mission.goal` | Start from the mod_playground starter kit and reach advanced circuits, then self-expand and meet all item needs. |
+| `mission.science` | After advanced circuits, manufacture and deliver the required science packs to labs and complete mining-productivity-4 research. |
+| `mission.no-gifts` | Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items. |
+
+Science production alone is not mission completion. Recipe, technology and rate
+facts come from the world and the versioned objective, not historical handoffs.
+
+## Decision preferences
+
+Apply these to the current objective, measured bottleneck, accessible stock,
+outstanding bills and relevant work already advancing. Missing facts stay
+unknown; a rule's presence does not prove the runner can observe its inputs.
+
+| Rule | Preference |
+| --- | --- |
+| `mission.phase-goals-first` | Prefer actions that close current goal gaps or unblock them; preserve useful parallel progress. |
+| `mission.serve-bottleneck` | Prefer the deepest unmet input in the measured bottleneck chain. |
+| `mission.make-construction-items` | Make construction items that outstanding useful builds are short of. |
+| `mission.protect-goal-stock` | Defer a side build that would make every current goal build unaffordable. |
+| `mission.inputs-first` | Prefer builds with stocked inputs or working input supply; establish missing inputs first. |
+| `mission.conserve-scarce` | Prefer actions that preserve scarce construction stock for upcoming useful builds. |
+| `mission.wait-rule` | Wait for relevant work already advancing, or when no useful legal action is available. |
+| `mission.purposeful-coverage` | Extend robot coverage toward resources and sites required by current demand. |
+| `mission.item-blocks` | Reserve expansion space beside each item's inputs and grow from the nearest free edge. |
+
+## Geometry profile
+
+These rules apply to geometry choices where the adapter offers alternatives.
+The default land model is `patch`; grid rules apply only when `land_model=grid`.
+The current ops adapter does not expose these site, scale and power choices.
+Exact module footprints and reservation dimensions are documented in
+[land planning](Laya_Land_Grid.md).
+
+| Rule | Preference or selected-template constraint |
+| --- | --- |
+| `mission.land-plan` | Protect usable ore for mining, reserve nearby smelting and transport space, and keep the mall together. |
+| `mission.grid-parcels` | When land_model=grid, keep each build within one 64-tile parcel and reserve lattice corridors for belts, pipes and poles. |
+| `mission.grid-growth` | When land_model=grid, prefer growth into adjacent parcels near the purpose's inputs. |
+| `mission.furnace-reference` | Treat 12 iron, 12 copper and 6 stone furnaces as a reference allocation; measure whether ore supply and demand justify it. |
+| `mission.bot-supply` | Use logistic bots to supply one or two machines and mall machines. |
+| `mission.belt-transfer` | Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers. |
+| `mission.substation-areas` | Use substations only in mine and mall areas, where one substation powers many machines and there is space for it. |
+| `mission.medium-poles` | Prefer medium poles outside mine and mall areas; price their full bill from live recipes. |
+| `mission.big-pole-relay` | Prefer big poles for long-distance connections; compare the full route bill with alternatives. |
+| `mission.quad-long-arms` | Build vertical quad slots only when their long-handed inserters are funded; regular inserters cannot substitute. |
+
+## Bootstrap and mall
+
+A **protected anchor** keeps its baseline recipe; bootstrap gear and cable have
+this role. A **standing rotating cell** is physically built but may lend its
+assembler. A **batch** is finite output from a loan, not a new standing cell.
+Reliable intermediate supply does not require every bootstrap recipe to own an
+unborrowable assembler. A lender choice must account for displaced production.
+
+| Rule | Preference |
+| --- | --- |
+| `mission.starter-mines` | Prefer iron and copper starters first, then stone and mall capacity. |
+| `mission.starter-mall` | Bootstrap with four assemblers: protected gear and cable anchors plus two rotating cells. |
+| `mission.plate-lines` | Use approved six-drill mine and smelting modules for later plate capacity; expand against measured demand. |
+| `mission.permanent-intermediates` | Maintain reliable gear, stick, cable and circuit supply; dedicate cells when sustained demand justifies them. |
+| `mission.steel-for-poles` | Establish steel before steel-dependent pole and assembler stock is exhausted. |
+| `mission.rotating-mall` | During bootstrap, keep gear and cable anchors; retarget an idle or stocked rotating cell before adding capacity. |
+| `mission.stock-gates` | Gate mall stock at useful targets; products being measured for the current phase run ungated. |
+| `mission.slot-settle` | Let a feasible retargeted batch reach its target; reconsider if blocked or if its displaced output is urgently needed. |
+
+Before advanced circuits, prefer finite batches and rotating cells for occasional
+needs. After advanced circuits, prefer dedicated slots for sustained needs and
+dedicated lines for orders too large for a slot. Retain useful production while
+the replacement builds. Reconsider a batch when its inputs cannot arrive;
+waiting for deliveries and waiting on an impossible dependency are different.
+
+## Current ops adapter
+
+These are priors for `--actions deterministic`, using the adapter's present
+transactions and lifecycle limits. They do not define the final director's
+action space or grant the toolkit strategic authority. The [runner contract](Laya_Clean_Runner.md)
+identifies inherited decisions and missing observations.
+
+| Rule | Preference |
+| --- | --- |
+| `mission.ops-starter` | In the current ops adapter, establish a plate's direct starter before its foundation. |
+| `mission.ops-starters-before-foundations` | Prefer finishing iron, copper and stone starters before foundations consume their reserved drills. |
+| `mission.ops-foundation` | Prefer a mine and six-furnace foundation after its plate starter produces; reconcile the same transaction on retries. |
+| `mission.ops-extend` | Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short. |
+| `mission.ops-retire-starter` | Retire a starter only after its replacement delivers plates; recover entities and contents with bots. |
+| `mission.ops-mall-slots` | Prefer gear, cable and circuit producers, then belt capacity, before foundations; preserve their construction budget. |
+| `mission.ops-no-idle-loans` | A borrowed cell is a finite batch, not a standing producer; request it for a current shortfall and account for displaced output. |
+| `mission.ops-steel-fence` | Reserve the funded steel seed's poles before competing builds consume them. |
+| `mission.ops-steel` | Start the funded steel seed when iron supply is verified and lifecycle admission permits it, including the pioneer-output cycle break. |
+| `mission.ops-shortage` | Reconcile current material shortfalls and produce missing items before retrying the blocked transaction. |
+| `mission.ops-one-batch` | Let a feasible mall batch finish; interrupt when its inputs cannot arrive or its lender blocks a more urgent dependency. |
+| `mission.ops-no-blind-retry` | Retry a material-blocked transaction after its required stock or allocation changes; reuse its existing plan. |
+| `mission.ops-wait` | While relevant bots or coverage are advancing, wait or serve independent work. |
+| `mission.ops-retry-after-wait` | Retry a construction or coverage wait after observation shows progress or its retry horizon expires. |
+
+History priors and `mission.ops-no-idle-loans` have no numeric weights by default;
+variants test them. A returned `ok` is not by itself evidence of useful output.
+
+| Rule | Experimental preference |
+| --- | --- |
+| `mission.ops-history-no-repeat` | After repeated same-cause failures, prefer a different action until relevant facts change. |
+| `mission.ops-history-follow-through` | After useful output, prefer continuing related work when it still serves current demand. |
+| `mission.ops-history-unstick` | After several decisions without useful progress, explore an untried feasible operation. |
+
+## Context and numeric behavior
+
+Keep goal/gap, accessible versus reserved stock, relevant outstanding work,
+blocked inputs, displaced production and recent causal outcomes in the decision.
+Keep full history, rule rationale and rule-to-fact mappings in external evidence.
+The ops brief currently repeats some history and rule IDs; context compaction is
+an implementation task, not a reason to remove causal facts.
+
+The guided policy multiplies every matching `prefer` entry of shown rules and
+keeps an exploration floor. Current core-slot factors are 30 and 6, giving **180**
+before other rules; other slots get 6. An other-slots-1 variant also reduces core
+slots to 30. These factors are preserved pending an isolated comparison. Prose
+exceptions are intended strategy; numeric features do not yet encode all of them.
+
+Geometry selects relevant rules before its count limit. Ops uses catalog order
+and a character budget after its brief; neither is a tokenizer guarantee.
+Changing scopes, weights, rule visibility or representation requires its own
+recorded comparison. See [variant adoption](laya_variants/README.md).

@@ -2,6 +2,10 @@
 
 # Training and autoresearch
 
+This is a subsystem reference. Factory-runner resumption starts at
+[current evidence](Laya_Current_Handoff.md) and [the runner contract](Laya_Clean_Runner.md);
+their ops, geometry, lab and supplied-input mall results have separate scopes.
+
 ## Adopted director migration
 
 The target policy is the Laya autonomous director in
@@ -10,8 +14,8 @@ selector and hand-written production cascade are baselines to beat and retire,
 not policy architectures to extend.  Training continues to own disposable
 worlds, measured outcomes, lineage, held-out evaluation, and promotion.
 
-During M1, while the runtime operation compiler and telemetry are not yet
-integrated, the current loop remains active for evidence collection.  New
+Migration status is recorded per runtime in the runner contract and dated
+evidence; the existence of compiler/telemetry seams is not full integration. New
 deterministic work is limited to observations, operation compilation, hard
 validation, execution, measurement, or a blocker in those mechanics; new
 strategic behavior belongs in the learned director and its curriculum.

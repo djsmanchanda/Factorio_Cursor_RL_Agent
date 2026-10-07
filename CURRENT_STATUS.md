@@ -3117,3 +3117,8 @@ that consumed it was not.
 - 2026-10-04: User-authorized observer replacement selects opencode/space-bunny-free xhigh after Muse limit. Configurable model/variant starts fresh sessions and preserves provenance;6observer checks pass. Only observer restart, no worker/mod changes; existing23:54IST deadline retained.
 
 - 2026-10-04: Both observers launched on Space Bunny Free xhigh; native variant and CLI response verified. Larger reviews actively read evidence; attempt cap increased600s with120s pause andoriginalcutoff. Model proof under data/laya-experiments/space-bunny-observer-20261004/.
+
+## [2026-10-08] Laya active documentation reconciled and trimmed
+- What: scoped soft strategy priors for legal exploration, conditional grid rules, explicit anchor/rotating-cell/batch roles and blocked-batch exceptions; synchronized shorter mission/ops quotes. Replaced stale current handoff with a runtime evidence index, preserving its September 21 body in the archive. Runner contract now separates actual capabilities, migration debt, proxy milestones and research acceptance; steel lifecycle and provisional adoption docs agree. Numeric weights/scopes and frozen experiments are unchanged.
+- Evidence: 52 focused tests pass; all catalog quotes/phase loads and relative links verified. Exact guided distributions and rule visibility preserved on 32 recorded decisions; serialized decision state shrank 9.8% with identical facts/options. The three active guides are 31% shorter by word count; unrelated dirty files preserved.
+- Lifecycle: documentation/catalog prose only; no runner/mod/Factorio restart or deployment required. Newly built guideline packs have new source hashes; retain frozen sources and representation compatibility for historical training/replay.

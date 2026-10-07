@@ -93,11 +93,11 @@ test completion does not count as those milestones being achieved.
 
 ## Integration and lifecycle
 
-Sol owns the common sequence boundary and independent director runner. Luna
-owns causal training data and durable shadow evidence. The main agent owns
-source-backed guidelines, matched evaluation, documentation, integration and
-the scoped commit. No agent changes running services, installed mods, real
-saves or GPU jobs as part of this implementation.
+Current task ownership and runtime evidence are linked from
+`Laya_Current_Handoff.md`; historical agent assignments do not reserve a new
+session's work. Keep sequence/data contracts, causal evidence, guidelines and
+matched evaluation coherent. Deployment, service, save and GPU lifecycle actions
+require their own existing session authority; this plan grants none.
 
 Python changes take effect in newly started Laya processes. The deterministic
 runner and Factorio need no restart for this tranche. Any later Lua or

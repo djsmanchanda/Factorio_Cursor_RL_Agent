@@ -1,7 +1,7 @@
 {
   "version": "1.0.0",
   "variant_id": "ops-slots-others-1",
-  "description": "Other mall slots x1 (default x6, adopted from ops-mall-first-30); gear/cable/circuit stay x30. mf30 runs stalled while belt slots lent the circuit cell (ops-history-c2-20261007).",
+  "description": "All-slot factor x1 instead of x6: other slots become x1 and core gear/cable/circuit become x30 instead of x180 before other rules. This also reduces core priority, so it does not isolate other-slot loans. Original ops-history-c2-20261007 hypothesis preserved; numeric patch unchanged.",
   "catalog": "docs/rl/laya_ops_guidelines.json",
   "catalog_patch": {
     "mission.ops-mall-slots": {
