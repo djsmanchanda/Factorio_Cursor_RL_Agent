@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-other-slots-1",
+  "description": "Other (non-core) mall slots x1 instead of x6; core gear/cable/circuit stay x180. Isolates the intervention ops-slots-others-1 confounded with a core cut to x30.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-mall-slots": {
+      "prefer": [
+        {
+          "when": {
+            "family": "mall_slot",
+            "product": [
+              "iron-gear-wheel",
+              "copper-cable",
+              "electronic-circuit"
+            ]
+          },
+          "weight": 180.0
+        },
+        {
+          "when": {
+            "family": "mall_slot",
+            "product": {
+              "not": [
+                "iron-gear-wheel",
+                "copper-cable",
+                "electronic-circuit"
+              ]
+            }
+          },
+          "weight": 1.0
+        }
+      ]
+    }
+  }
+}

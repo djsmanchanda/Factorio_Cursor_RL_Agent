@@ -36,7 +36,9 @@ from training.laya_mission import current_phase, phase_reached
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
-               "rotating_mall_prerequisite_handoff"}
+               "rotating_mall_prerequisite_handoff", "prerequisite_advanced"}
+# Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
+BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
@@ -152,7 +154,7 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
 
 def _outcome(r: Mapping) -> str:
     if r.get("ok"):
-        return "ok"
+        return r.get("code") or "ok"
     details = r.get("details") or {}
     required, available = details.get("required"), details.get("available")
     # Only a material shortage carries item maps; other codes may report a bare count here.
@@ -205,7 +207,7 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
         if r["operation"] != "wait":
             name = " ".join(str(k) for k in _key(r) if k)
             attempts = tried.pop(name, [0])[0] + 1
-            tried[name] = [attempts, "ok" if r.get("ok") else (r.get("code") or "error")]
+            tried[name] = [attempts, r.get("code") or ("ok" if r.get("ok") else "error")]
     sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
@@ -238,22 +240,23 @@ def _last_of(results: list[dict], r: Mapping) -> bool:
 
 
 def since_build(results: list[dict]) -> int:
-    """Decisions since the last operation (not a wait) that succeeded."""
+    """Decisions since the last operation that put something into the world (a BUILT receipt)."""
     for back, r in enumerate(reversed(results)):
-        if r.get("ok") and r["operation"] != "wait":
+        if r.get("code") in BUILT:
             return back
     return len(results)
 
 
 def repeat_fails(results: list[dict], key: tuple) -> int:
     """How many of this option's latest attempts, in a row, failed with the same code (capped at 3)."""
-    codes = [r.get("code") or "error" for r in results if r["operation"] != "wait" and _key(r) == key]
+    attempts = [r for r in results if r["operation"] != "wait" and _key(r) == key]
     count = 0
-    for code in reversed(codes):
-        if code in ("ok", None) or code != codes[-1]:
+    for r in reversed(attempts):
+        # A success or a built stage ends the streak; so does a different failure.
+        if r.get("ok") or r.get("code") in BUILT or r.get("code") != attempts[-1].get("code"):
             break
         count += 1
-    return min(count, 3) if codes and codes[-1] != "ok" else 0
+    return min(count, 3)
 
 
 def history_features(results: list[dict], key: tuple, family: str) -> dict:
@@ -460,7 +463,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
                                                                       "params", "features")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
-                         outcome={**{k: result.get(k) for k in ("ok", "code", "state", "details", "message")},
+                         outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
+                                                                 "message", "result")},
                                   "ticks": after["tick"] - facts["tick"]})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
@@ -493,6 +497,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["stop"] = "safe_stop_after_repeated_failures"
             break
     session.close()
+    # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
+    summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'}")
     return summary

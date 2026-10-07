@@ -127,6 +127,9 @@ def matches(when: Mapping, features: Mapping) -> bool:
             patterns = expected if isinstance(expected, list) else [expected]
             if not any(fnmatch(value or "", p) for p in patterns):
                 return False
+        elif isinstance(expected, dict) and "not" in expected:  # {"not": [...]}: any value except these
+            if value in expected["not"]:
+                return False
         elif isinstance(expected, list):
             if value not in expected:
                 return False

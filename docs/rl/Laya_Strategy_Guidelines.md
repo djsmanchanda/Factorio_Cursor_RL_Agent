@@ -135,9 +135,11 @@ The ops brief currently repeats some history and rule IDs; context compaction is
 an implementation task, not a reason to remove causal facts.
 
 The guided policy multiplies every matching `prefer` entry of shown rules and
-keeps an exploration floor. Current core-slot factors are 30 and 6, giving **180**
-before other rules; other slots get 6. An other-slots-1 variant also reduces core
-slots to 30. These factors are preserved pending an isolated comparison. Prose
+keeps an exploration floor. Mall-slot factors are mutually exclusive: core
+gear/cable/circuit slots x180 and other slots x6 (`{"not": [...]}` excludes the core
+products), the same effective weights as the earlier stacked 30 x 6. The
+other-slots-1 variants of `ops-loans-c2-20261008b` also cut core slots to x30; the
+isolated variant `ops-other-slots-1` changes only other slots. Prose
 exceptions are intended strategy; numeric features do not yet encode all of them.
 
 Geometry selects relevant rules before its count limit. Ops uses catalog order

@@ -52,19 +52,46 @@ def _job(experiment: str, variant: Path | None, seed: int, slot: int, args: argp
     with out.open("w") as log:
         prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs], stdout=log, stderr=subprocess.STDOUT)
         if prepared.returncode:
+            _finalize(experiment, variant, seed, root, args, "prepare_failed", prepared.returncode)
             return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
+        stop, code = None, None
         try:
             command = RUNNER + ["run", "--root", str(root), "--seed", str(seed), "--no-helper", "--experiment", experiment,
                                "--speed", str(args.speed), "--actions", args.actions]
             command += ["--variant", str(variant)] if variant else []
             command += ["--until-phase", args.until_phase] if args.until_phase else []
             command += ["--max-game-ticks", str(args.max_game_ticks)] if args.max_game_ticks else []
-            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout)
+            code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout).returncode
+            stop = "crash" if code else None
         except subprocess.TimeoutExpired:
             log.write("EXPERIMENT: wall-clock timeout\n")
+            stop = "wall_timeout"
+        except BaseException:
+            stop = "interrupted"
+            raise
         finally:
             subprocess.run(RUNNER + ["stop", "--root", str(root)], stdout=log, stderr=subprocess.STDOUT)
-    return {"variant": vid, "seed": seed, "root": str(root)}
+            _finalize(experiment, variant, seed, root, args, stop or "unindexed", code)
+    return {"variant": vid, "seed": seed, "root": str(root), "returncode": code}
+
+
+def _finalize(experiment: str, variant: Path | None, seed: int, root: Path, args: argparse.Namespace,
+              stop: str, returncode: int | None) -> None:
+    """Every planned run ends up in the index exactly once: a run that indexed itself is left alone; a
+    crash, wall-clock timeout, interruption or failed preparation is recorded so no arm loses it from its
+    denominator."""
+    resolved = str(root.resolve())
+    rows = RUN_INDEX.read_text().splitlines() if RUN_INDEX.is_file() else []
+    if any(json.loads(line).get("root") == resolved for line in rows if line.strip()):
+        return
+    loaded = load_variant(variant)
+    RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
+    with RUN_INDEX.open("a") as index:
+        index.write(json.dumps({
+            "run_id": f"{root.name}-unfinished", "root": resolved, "seed": seed, "experiment": experiment,
+            "variant_id": loaded["variant_id"], "returncode": returncode,
+            "window": {"until_phase": args.until_phase, "max_game_ticks": args.max_game_ticks},
+            "summary": {"decisions": 0, "failures": 1, "phases_reached": [], "stop": stop}}) + "\n")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -104,6 +131,7 @@ def score(rows: list[dict], target: str | None) -> dict:
             "median_ticks": statistics.median(ticks) if ticks else None,
             "mean_highest_phase": round(statistics.mean(highest), 2) if highest else None,
             "failures": sum(r["summary"].get("failures", 0) for r in rows),
+            "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
             "stops": dict(sorted({s: sum(r["summary"].get("stop") == s for r in rows)
                                   for s in {r["summary"].get("stop") for r in rows}}.items()))}
 
@@ -123,11 +151,11 @@ def report(args: argparse.Namespace) -> int:
     path = ROOT / f"data/laya-saved-world/exp-{args.experiment}/report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"| variant | runs | reached {target} | median ticks | mean highest phase | failures | stops |")
-    print("|---|---|---|---|---|---|---|")
+    print(f"| variant | runs | reached {target} | median ticks | mean highest phase | failures | untyped stuck | stops |")
+    print("|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
         print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | {s['median_ticks']} | "
-              f"{s['mean_highest_phase']} | {s['failures']} | {s['stops']} |")
+              f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0
 

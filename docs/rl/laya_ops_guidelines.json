@@ -368,11 +368,18 @@
               "electronic-circuit"
             ]
           },
-          "weight": 30.0
+          "weight": 180.0
         },
         {
           "when": {
-            "family": "mall_slot"
+            "family": "mall_slot",
+            "product": {
+              "not": [
+                "iron-gear-wheel",
+                "copper-cable",
+                "electronic-circuit"
+              ]
+            }
           },
           "weight": 6.0
         }

@@ -166,8 +166,9 @@ def test_a_running_mall_batch_is_left_to_finish():
 def test_laya_sees_its_recent_decisions():
     deferred = {"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"},
                 "code": "rationed_mall_borrow_deferred"}
-    starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
-    gear = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}, "code": "submitted"}
+                for p in ("iron-plate", "copper-plate")]
+    gear = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}, "code": "producing"}
     wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
     recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore"}]}, "copper-plate": {"ingredients": [{"name": "copper-ore"}]},
                "iron-gear-wheel": {"ingredients": [{"name": "iron-plate"}]},
@@ -224,3 +225,39 @@ def test_brief_layers_goal_next_major_and_recent_within_budget():
         {"rule_id": f"soft{i}", "kind": "soft", "statement": "y" * 100} for i in range(10)]
     kept = fit_rules(rules, "b" * 300, limit=700)
     assert kept[0]["rule_id"] == "hard" and 1 < len(kept) < len(rules)
+
+
+def test_receipts_say_whether_the_operation_finished():
+    from training.laya_ops import receipt
+    from training.laya_ops_runner import repeat_fails, since_build
+    # ensure_produced returns None after building one missing stage: progress, not a standing producer.
+    step = receipt("mall_slot", {"item": "electronic-circuit"}, None)
+    assert (step["ok"], step["code"]) == (False, "prerequisite_advanced")
+    assert receipt("mall_slot", {"item": "electronic-circuit"}, (45.5, 38.5))["code"] == "producing"
+    assert receipt("foundation", {"recipe": "iron-plate"}, (1, 2))["code"] == "submitted"
+    fence = receipt("reserve_steel_seed", {}, None)
+    assert fence["ok"] and fence["code"] == "reserved"
+    # A stage built toward the slot keeps the slot on the menu, retried after a wait.
+    starters = [receipt("starter", {"recipe": p}, (0, 0)) for p in ("iron-plate", "copper-plate")]
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore"}]}, "copper-plate": {"ingredients": [{"name": "copper-ore"}]},
+               "copper-cable": {"ingredients": [{"name": "copper-plate"}]},
+               "electronic-circuit": {"ingredients": [{"name": "copper-cable"}, {"name": "iron-plate"}]}}
+    options = {o["option_id"]: o for o in compile_options(BOARD, starters + [step], tick=0, recipes=recipes)["options"]}
+    assert options["op.mall_slot.electronic-circuit"]["features"]["waiting"]
+    # Successes are not a failure streak; a reservation is not a build.
+    produced = receipt("produce", {"item": "x"}, (0, 0))
+    assert repeat_fails([produced, produced], ("produce", "x")) == 0
+    assert since_build(starters + [fence]) == 1 and since_build(starters + [step]) == 0
+
+
+def test_mall_slot_weights_are_exclusive():
+    import json
+    from training.laya_guided_policy import matches
+    rule = next(r for r in json.load(open("docs/rl/laya_ops_guidelines.json"))["rules"] if r["rule_id"] == "mission.ops-mall-slots")
+    def weight(product):
+        w = 1.0
+        for pref in rule["prefer"]:
+            if matches(pref["when"], {"family": "mall_slot", "product": product}):
+                w *= pref["weight"]
+        return w
+    assert weight("electronic-circuit") == 180.0 and weight("transport-belt") == 6.0

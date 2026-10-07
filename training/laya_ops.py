@@ -34,6 +34,27 @@ SURFACE, FORCE = "nauvis", "player"
 PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in the world
 
 
+# What each operation promises when it returns normally (training/laya_ops_runner reads ``code``):
+# produce/mall_slot/steel promise a producing output; ensure_produced returns None after building only ONE
+# missing stage, which is progress but not the requested postcondition.
+PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel"}
+SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
+
+
+def receipt(operation: str, params: dict, result: object) -> dict:
+    """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
+    if operation in PRODUCING_OPERATIONS:
+        code = "producing" if result is not None else "prerequisite_advanced"
+    elif operation in SUBMITTING_OPERATIONS:
+        code = "submitted"
+    elif operation == "reserve_steel_seed":
+        code = "reserved"
+    else:
+        code = "done"
+    return {"ok": code != "prerequisite_advanced", "operation": operation, "params": params, "code": code,
+            "result": None if result is None else str(result)[:200]}
+
+
 class DeterministicSession:
     """One Laya world with the deterministic runtime's per-run state."""
 
@@ -118,7 +139,7 @@ class DeterministicSession:
                     "classification": getattr(signal, "classification", None),
                     "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
                     "message": str(signal)[:500]}
-        return {"ok": True, "operation": operation, "params": params, "result": result}
+        return receipt(operation, params, result)
 
     def close(self) -> None:
         set_active_material_ledger(None)
