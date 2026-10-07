@@ -131,22 +131,19 @@ def _key(r: Mapping) -> tuple:
     return (r["operation"], params.get("recipe") or params.get("item"))
 
 
-def history(results: list[dict]) -> dict:
-    """Laya's own past, compacted: the last RECENT decisions verbatim, older ones folded into per-operation counts."""
-    per_operation: dict[str, dict] = {}
-    for r in results:
-        if r["operation"] == "wait":
-            continue
-        entry = per_operation.setdefault(" ".join(str(k) for k in _key(r) if k), {"attempts": 0})
-        entry["attempts"] += 1
-        entry["last_code"] = "ok" if r.get("ok") else (r.get("code") or "error")
-    recent = [f"{' '.join(str(k) for k in _key(r) if k)} -> {'ok' if r.get('ok') else r.get('code') or 'error'}"
-              for r in results[-RECENT:]]
-    return {"recent": recent, "per_operation": per_operation, "decisions_since_build": since_build(results)}
-
-
 MAJOR = {"starter", "foundation", "extend", "steel", "retire_starter"}  # operations that change the factory's shape
-BRIEF_CHARS = 8000  # ~2k tokens
+BRIEF_CHARS = 8000  # ~2k tokens: the brief's room, reserved before the doc rules
+CONTEXT_CHARS = 16000  # brief + doc rules; rules past what fits are left out, lowest priority first
+# Doc rules that act on each brief line: the brief carries the values, the rules the strategy, so neither repeats
+# the other. A line names only the rules shown in the same decision.
+USES = {"GOAL": ("mission.goal", "mission.science"),
+        "NOW": ("mission.phase-goals-first", "mission.serve-bottleneck"),
+        "MAJOR": ("mission.ops-foundation", "mission.ops-extend", "mission.ops-retire-starter",
+                  "mission.ops-starters-before-foundations"),
+        "RECENT": ("mission.ops-history-no-repeat", "mission.ops-history-follow-through", "mission.ops-one-batch",
+                   "mission.ops-retry-after-wait"),
+        "TRIED": ("mission.ops-no-blind-retry",),
+        "SINCE LAST BUILD": ("mission.ops-history-unstick",)}
 
 
 def _outcome(r: Mapping) -> str:
@@ -159,29 +156,32 @@ def _outcome(r: Mapping) -> str:
 
 
 def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
-          start_tick: int, limit: int = BRIEF_CHARS) -> str:
-    """Where Laya is headed and what it did, layered and compact: goal, now, next, major changes, recent moves."""
+          start_tick: int, rules: set[str] = frozenset(), limit: int = BRIEF_CHARS) -> str:
+    """Laya's own run, layered and compact: goal, now, next, major changes, recent moves, older attempts.
+
+    Older decisions survive only in TRIED (attempts and last outcome per operation). Each line is tagged with
+    the shown doc rules (``rules``) that act on it.
+    """
     from training.laya_mission import MISSION_ID, PHASES
     ids = [p["phase_id"] for p in PHASES]
-    lines = [f"GOAL: {MISSION_ID} (ladder {' > '.join(ids)})"]
+    sections = {"GOAL": [f"{MISSION_ID.removeprefix('mod-playground-')} via {' > '.join(ids)}"]}
     if phase and board:
         needs = {n["item"]: n for n in board["needs"]}
-        rows = [f"{item} {(needs.get(item) or {}).get('measured_per_s') or 0:.2f}/{rate}/s"
-                + ("" if (needs.get(item) or {}).get("condition") == "satisfied" else " short")
-                for item, rate in phase["targets"].items()]
-        lines.append(f"NOW: {phase['phase_id']} {phase['name']}: " + "; ".join(rows))
+        sections["NOW"] = [f"{phase['phase_id']} {phase['name']}: " + "; ".join(
+            f"{item} {(needs.get(item) or {}).get('measured_per_s') or 0:.2f}/{rate}/s"
+            + ("" if (needs.get(item) or {}).get("condition") == "satisfied" else " short")
+            for item, rate in phase["targets"].items())]
         later = ids.index(phase["phase_id"]) + 1
         if later < len(PHASES):
             step = PHASES[later]
-            lines.append(f"NEXT: {step['phase_id']} {step['name']}: "
-                         + ", ".join(f"{i} {r}/s" for i, r in step["targets"].items()))
+            sections["NEXT"] = [f"{step['phase_id']} {step['name']}: "
+                                + ", ".join(f"{i} {r}/s" for i, r in step["targets"].items())]
     minutes = lambda tick: f"+{(tick - start_tick) / 3600:.1f}min"
-    major = [(t, f"{pid} reached") for pid, t in phase_ticks.items()]
-    major = [(start_tick + t, text) for t, text in major]
+    major = [(start_tick + t, f"{pid} reached") for pid, t in phase_ticks.items()]
     major += [(r.get("tick", start_tick), f"{r['operation']} {(r.get('params') or {}).get('recipe') or ''}".strip()
                + ("" if r.get("ok") else f" -> {_outcome(r)}"))
               for r in results if r["operation"] in MAJOR and (r.get("ok") or _last_of(results, r))]
-    major = [f"{minutes(t)} {text}" for t, text in sorted(major)]
+    sections["MAJOR"] = [f"{minutes(t)} {text}" for t, text in sorted(major)]
     # Recent moves, oldest first; identical consecutive moves collapse into one with a count.
     recent: list[list] = []
     for r in results[-3 * RECENT:]:
@@ -190,13 +190,37 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             recent[-1][1] += 1
         else:
             recent.append([text, 1])
-    recent = [t + (f" x{n}" if n > 1 else "") for t, n in recent][-RECENT:]
-    while True:  # Over budget: drop the oldest major change, then the oldest recent move.
-        text = "\n".join(lines + [f"MAJOR: {' | '.join(major) or 'none yet'}", f"RECENT: {' | '.join(recent) or 'none yet'}",
-                                    f"SINCE LAST BUILD: {since_build(results)} decisions"])
-        if len(text) <= limit or not (major or recent):
-            return text
-        (major if major else recent).pop(0)
+    sections["RECENT"] = [t + (f" x{n}" if n > 1 else "") for t, n in recent][-RECENT:]
+    tried: dict[str, list] = {}  # operation -> [attempts, last code], in order of last attempt
+    for r in results:
+        if r["operation"] != "wait":
+            name = " ".join(str(k) for k in _key(r) if k)
+            attempts = tried.pop(name, [0])[0] + 1
+            tried[name] = [attempts, "ok" if r.get("ok") else (r.get("code") or "error")]
+    sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
+    sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
+
+    def render() -> str:
+        lines = []
+        for name, entries in sections.items():
+            tags = [rule for rule in USES.get(name, ()) if rule in rules]
+            lines.append(f"{name}{' [' + ', '.join(tags) + ']' if tags else ''}: {' | '.join(entries) or 'none yet'}")
+        return "\n".join(lines)
+    # Over budget: drop the least recent attempts summary first, then the oldest major change and recent move.
+    while len(text := render()) > limit and any(sections[k] for k in ("TRIED", "MAJOR", "RECENT")):
+        next(sections[k] for k in ("TRIED", "MAJOR", "RECENT") if sections[k]).pop(0)
+    return text
+
+
+def fit_rules(guidelines: list[dict], brief_text: str, limit: int = CONTEXT_CHARS) -> list[dict]:
+    """The doc rules that fit after the brief: hard rules always, soft ones in the loader's priority order."""
+    import json
+    room = limit - len(brief_text)
+    kept = [g for g in guidelines if g.get("kind") == "hard"]
+    for rule in (g for g in guidelines if g.get("kind") != "hard"):
+        if len(json.dumps(kept + [rule])) <= room:
+            kept.append(rule)
+    return [g for g in guidelines if g in kept]
 
 
 def _last_of(results: list[dict], r: Mapping) -> bool:
@@ -383,11 +407,17 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         compact = compact_status(board)
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
-        state = {"observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
-                                        "saved_world": {"provider_stock": {}}, "history": history(results),
-                                        "brief": brief(results, board, phase, summary.get("phase_ticks", {}),
-                                                       samples[0][0])},
-                 "guidelines": guidance["guidelines"]}
+        # The brief comes first and has its room reserved; the doc rules fill what is left.
+        shown = {g["rule_id"] for g in guidance["guidelines"]}
+        told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0], shown)
+        rules = fit_rules(guidance["guidelines"], told)
+        if len(rules) < len(shown):  # Tag only the rules that made it in.
+            told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0],
+                         {g["rule_id"] for g in rules})
+        state = {"brief": told,
+                 "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
+                                        "saved_world": {"provider_stock": {}}},
+                 "guidelines": rules}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
@@ -422,7 +452,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          outcome={**{k: result.get(k) for k in ("ok", "code", "state", "details", "message")},
                                   "ticks": after["tick"] - facts["tick"]})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
-                                    "reached": reached, "board": compact, "brief": state["observation_digest"]["brief"], "choice": {**choice, "summary": chosen["summary"]},
+                                    "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})

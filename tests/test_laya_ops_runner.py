@@ -164,7 +164,6 @@ def test_a_running_mall_batch_is_left_to_finish():
 
 
 def test_laya_sees_its_recent_decisions():
-    from training.laya_ops_runner import history
     deferred = {"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"},
                 "code": "rationed_mall_borrow_deferred"}
     starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
@@ -184,10 +183,11 @@ def test_laya_sees_its_recent_decisions():
     # Right after a successful mall slot, another mall slot follows through.
     follow = {o["option_id"]: o["features"] for o in compile_options(BOARD, starters + [gear], recipes=recipes)["options"]}
     assert follow["op.mall_slot.copper-cable"]["after_success_same_family"]
-    # Compacted history: the last decisions verbatim, every operation's attempts summarized.
-    h = history(results)
-    assert h["recent"][-1] == "wait -> ok" and h["decisions_since_build"] == 6
-    assert h["per_operation"]["mall_slot electronic-circuit"] == {"attempts": 2, "last_code": "rationed_mall_borrow_deferred"}
+    # Older decisions survive in the brief's TRIED line: attempts and last outcome per operation.
+    from training.laya_ops_runner import brief
+    told = brief(results, None, None, {}, 0)
+    assert "mall_slot electronic-circuit 2x last rationed_mall_borrow_deferred" in told
+    assert "RECENT: " in told and "SINCE LAST BUILD: 6 decisions" in told
 
 
 def test_brief_layers_goal_next_major_and_recent_within_budget():
@@ -199,9 +199,20 @@ def test_brief_layers_goal_next_major_and_recent_within_budget():
     drill = {"ok": False, "operation": "produce", "params": {"item": "electric-mining-drill"}, "tick": 9100,
              "code": "rationed_mall_borrow_deferred"}
     board = {"needs": [{"item": "stone-brick", "measured_per_s": 0.0, "condition": "unbuilt"}]}
-    text = brief([starter, stone, drill, drill, drill], board, PHASES[1], {"C0": 8000}, 1000)
+    text = brief([starter, stone, drill, drill, drill], board, PHASES[1], {"C0": 8000}, 1000,
+                 {"mission.phase-goals-first", "mission.ops-history-no-repeat"})
+    assert text.startswith("GOAL: mining-productivity-4 via C0 > C1")
+    # Lines name the shown doc rules that act on them; rules not shown are not named.
+    assert "NOW [mission.phase-goals-first]: C1" in text and "RECENT [mission.ops-history-no-repeat]: " in text
+    assert "mission.serve-bottleneck" not in text
     assert "NEXT: C2 iron_copper_rollout" in text and "stone-brick 0.00/0.25/s short" in text
     assert "+0.2min starter iron-plate | +2.2min C0 reached | +2.2min starter stone-brick -> material_shortage (inserter 6)" in text
     assert "produce electric-mining-drill -> rationed_mall_borrow_deferred x3" in text  # repeats collapse
     many = [dict(drill, params={"item": f"item-{i}"}) for i in range(200)]
     assert len(brief([starter] * 300 + many, board, PHASES[1], {"C0": 8000}, 1000, limit=600)) <= 600
+    # The doc rules get what is left after the brief; hard rules always stay.
+    from training.laya_ops_runner import fit_rules
+    rules = [{"rule_id": "hard", "kind": "hard", "statement": "x" * 50}] + [
+        {"rule_id": f"soft{i}", "kind": "soft", "statement": "y" * 100} for i in range(10)]
+    kept = fit_rules(rules, "b" * 300, limit=700)
+    assert kept[0]["rule_id"] == "hard" and 1 < len(kept) < len(rules)

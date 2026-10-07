@@ -150,6 +150,14 @@ After several decisions without building anything, try an operation not yet atte
 
 ## How rules steer decisions
 
+Each decision begins with Laya's brief: GOAL, NOW (the current phase's
+targets and measured rates), NEXT, MAJOR (phases reached and structural
+operations), RECENT (latest moves, repeats collapsed), TRIED (attempts and last
+outcome per operation) and SINCE LAST BUILD. The brief is facts; these rules
+are strategy, and neither restates the other. A brief line names in brackets
+the rules shown with it that act on it (`training/laya_ops_runner.USES`). The
+brief gets its room first (about 2k tokens); the rules fill what is left.
+
 Each soft rule above is quoted verbatim in `docs/rl/laya_mission_guidelines.json`.
 A rule may carry `prefer` entries: a condition on the decision (need, family,
 power type, need condition, phase, bottleneck position) and a weight. Until a
