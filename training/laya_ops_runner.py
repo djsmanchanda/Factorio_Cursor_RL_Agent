@@ -145,6 +145,65 @@ def history(results: list[dict]) -> dict:
     return {"recent": recent, "per_operation": per_operation, "decisions_since_build": since_build(results)}
 
 
+MAJOR = {"starter", "foundation", "extend", "steel", "retire_starter"}  # operations that change the factory's shape
+BRIEF_CHARS = 8000  # ~2k tokens
+
+
+def _outcome(r: Mapping) -> str:
+    if r.get("ok"):
+        return "ok"
+    missing = {i: n - int(((r.get("details") or {}).get("available") or {}).get(i, 0))
+               for i, n in ((r.get("details") or {}).get("required") or {}).items()}
+    short = ", ".join(f"{i} {n}" for i, n in missing.items() if n > 0)
+    return (r.get("code") or "error") + (f" ({short})" if short else "")
+
+
+def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
+          start_tick: int, limit: int = BRIEF_CHARS) -> str:
+    """Where Laya is headed and what it did, layered and compact: goal, now, next, major changes, recent moves."""
+    from training.laya_mission import MISSION_ID, PHASES
+    ids = [p["phase_id"] for p in PHASES]
+    lines = [f"GOAL: {MISSION_ID} (ladder {' > '.join(ids)})"]
+    if phase and board:
+        needs = {n["item"]: n for n in board["needs"]}
+        rows = [f"{item} {(needs.get(item) or {}).get('measured_per_s') or 0:.2f}/{rate}/s"
+                + ("" if (needs.get(item) or {}).get("condition") == "satisfied" else " short")
+                for item, rate in phase["targets"].items()]
+        lines.append(f"NOW: {phase['phase_id']} {phase['name']}: " + "; ".join(rows))
+        later = ids.index(phase["phase_id"]) + 1
+        if later < len(PHASES):
+            step = PHASES[later]
+            lines.append(f"NEXT: {step['phase_id']} {step['name']}: "
+                         + ", ".join(f"{i} {r}/s" for i, r in step["targets"].items()))
+    minutes = lambda tick: f"+{(tick - start_tick) / 3600:.1f}min"
+    major = [(t, f"{pid} reached") for pid, t in phase_ticks.items()]
+    major = [(start_tick + t, text) for t, text in major]
+    major += [(r.get("tick", start_tick), f"{r['operation']} {(r.get('params') or {}).get('recipe') or ''}".strip()
+               + ("" if r.get("ok") else f" -> {_outcome(r)}"))
+              for r in results if r["operation"] in MAJOR and (r.get("ok") or _last_of(results, r))]
+    major = [f"{minutes(t)} {text}" for t, text in sorted(major)]
+    # Recent moves, oldest first; identical consecutive moves collapse into one with a count.
+    recent: list[list] = []
+    for r in results[-3 * RECENT:]:
+        text = "wait" if r["operation"] == "wait" else f"{' '.join(str(k) for k in _key(r) if k)} -> {_outcome(r)}"
+        if recent and recent[-1][0] == text:
+            recent[-1][1] += 1
+        else:
+            recent.append([text, 1])
+    recent = [t + (f" x{n}" if n > 1 else "") for t, n in recent][-RECENT:]
+    while True:  # Over budget: drop the oldest major change, then the oldest recent move.
+        text = "\n".join(lines + [f"MAJOR: {' | '.join(major) or 'none yet'}", f"RECENT: {' | '.join(recent) or 'none yet'}",
+                                    f"SINCE LAST BUILD: {since_build(results)} decisions"])
+        if len(text) <= limit or not (major or recent):
+            return text
+        (major if major else recent).pop(0)
+
+
+def _last_of(results: list[dict], r: Mapping) -> bool:
+    """r is the latest attempt of its operation (a failed major operation stays visible until retried)."""
+    return next(x for x in reversed(results) if _key(x) == _key(r)) is r
+
+
 def since_build(results: list[dict]) -> int:
     """Decisions since the last operation (not a wait) that succeeded."""
     for back, r in enumerate(reversed(results)):
@@ -325,7 +384,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         state = {"observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
-                                        "saved_world": {"provider_stock": {}}, "history": history(results)},
+                                        "saved_world": {"provider_stock": {}}, "history": history(results),
+                                        "brief": brief(results, board, phase, summary.get("phase_ticks", {}),
+                                                       samples[0][0])},
                  "guidelines": guidance["guidelines"]}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
@@ -361,7 +422,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          outcome={**{k: result.get(k) for k in ("ok", "code", "state", "details", "message")},
                                   "ticks": after["tick"] - facts["tick"]})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
-                                    "reached": reached, "board": compact, "choice": {**choice, "summary": chosen["summary"]},
+                                    "reached": reached, "board": compact, "brief": state["observation_digest"]["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
