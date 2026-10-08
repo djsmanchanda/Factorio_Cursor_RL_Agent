@@ -72,7 +72,7 @@ def plate_stages(results: list[dict]) -> dict[str, str]:
 def retired(results: list[dict], plate: str) -> bool:
     """The tooling reported the plate's starter retired (its district released)."""
     return any(r.get("ok") and r["operation"] == "retire_starter" and (r.get("params") or {}).get("recipe") == plate
-               and (r.get("result") or {}).get("lifecycle") == "released" for r in results)
+               and isinstance(r.get("result"), Mapping) and r["result"].get("lifecycle") == "released" for r in results)
 
 
 def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tuple]:

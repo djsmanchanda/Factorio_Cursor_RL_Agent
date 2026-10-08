@@ -160,6 +160,23 @@ def test_retire_starter_is_offered_after_the_foundation_until_released():
     assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, released)["options"]}
 
 
+def test_real_receipt_preserves_retirement_mapping_and_compiles_next_menu():
+    from training.laya_ops import receipt
+    from training.laya_ops_runner import retired
+    result = receipt("retire_starter", {"recipe": "iron-plate"}, {"lifecycle": "released", "recipe": "iron-plate"})
+    assert isinstance(result["result"], dict)
+    assert retired([result], "iron-plate")
+    base = [{"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}, result]
+    assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, base)["options"]}
+
+
+def test_legacy_string_receipt_is_unverified_retirement_without_crashing():
+    from training.laya_ops_runner import retired
+    legacy = {"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
+              "result": "{'lifecycle': 'released'}"}
+    assert retired([legacy], "iron-plate") is False
+
+
 def test_no_produce_for_items_nothing_can_make_yet():
     recipes = {"requester-chest": {"ingredients": [{"name": "electronic-circuit", "amount": 3},
                                                    {"name": "advanced-circuit", "amount": 1}]},

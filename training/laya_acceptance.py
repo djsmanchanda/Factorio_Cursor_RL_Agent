@@ -20,6 +20,8 @@ def acceptance_packet(observation, evaluator, *, baseline, history, scope):
         statuses[definition.checkpoint_id] = latched.status.value
         results[definition.checkpoint_id] = {**current.as_mapping(), "latched_status": latched.status.value}
     return {"version": VERSION, "scope": dict(scope), "observation": copy.deepcopy(observation.as_mapping()),
+            "machine_counter_units": {"kind": "scaled_machine_progress", "completed_craft_scale": 1000,
+                                      "note": "machine_health combines completed crafts * 1000 with fractional progress; these are not item delivery counts"},
             "statuses": statuses, "results": results}
 
 

@@ -5,6 +5,7 @@
   "required": ["version", "scope", "observation", "statuses", "results"],
   "properties": {
     "version": {"const": "laya-acceptance-v1"},
+    "machine_counter_units": {"type": "object", "properties": {"kind": {"const": "scaled_machine_progress"}, "completed_craft_scale": {"const": 1000}, "note": {"type": "string"}}},
     "run_id": {"type": "string"}, "at": {"type": "string"},
     "scope": {"type": "object", "required": ["episode_id"], "properties": {"episode_id": {"type": "string"}, "surface": {"type": "string"}, "force": {"type": "string"}, "server_root": {"type": "string"}, "bootstrap_profile": {"type": "string"}}},
     "observation": {"type": "object", "required": ["observed_at", "source", "snapshot"], "properties": {"observed_at": {"type": "string"}, "source": {"type": "string"}, "snapshot": {"type": "object"}}},

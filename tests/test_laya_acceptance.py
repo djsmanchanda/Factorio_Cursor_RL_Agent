@@ -69,7 +69,7 @@ def session(tmp_path):
     s.script_output = tmp_path / "script-output"
     s.reference_point = (0, 0)
     s.mall_targets = {"transport-belt": 10}
-    s.tooling = lambda: {"loans": [], "projects": {}}
+    s.economics = lambda: {"loans": [], "projects": {}}
     return s
 
 
@@ -96,7 +96,7 @@ def test_tooling_failure_keeps_valid_predicate_evidence(monkeypatch, tmp_path):
     def unavailable():
         raise RuntimeError("loan survey unavailable")
 
-    s.tooling = unavailable
+    s.economics = unavailable
     assert s.acceptance()["C1"] == "passed"
     assert "unavailable" in s.acceptance_details["tooling"]["error"]
 
@@ -117,3 +117,24 @@ def test_report_keeps_missing_samples_and_unknown_checks_distinct():
     assert reported["acceptance_checked"] == 1
     assert reported["c1_observed"]["conditions"]["stone_starter_ready"] == {
         "passed": 0, "failed": 0, "unknown": 1, "not_sampled": 2}
+
+
+def test_failed_loan_observation_keeps_its_cause(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from orchestrator import autonomous_builder as builder
+    from orchestrator import mall_bootstrap
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(projects={}))
+
+    def failed(*args):
+        raise ValueError("malformed loan group")
+
+    monkeypatch.setattr(mall_bootstrap, "active_bootstrap_loans", failed)
+    s = session(tmp_path)
+    del s.economics  # Exercise the production observer, rather than the fixture's stub.
+    result = s.economics()
+    assert result["loans"] is None
+    assert result["loan_error"] == "ValueError: malformed loan group"
+    from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
+    monkeypatch.setattr(LiveCheckpointObservationAdapter, "observe", lambda *_: observation())
+    assert s.acceptance()["C1"] == "passed"
+    assert s.acceptance_details["tooling"] == result

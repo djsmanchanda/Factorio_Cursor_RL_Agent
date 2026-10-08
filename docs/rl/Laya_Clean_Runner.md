@@ -101,6 +101,10 @@ delivery or turn missing telemetry into failure. Machine surveys still cover
 recognized baseline recipes/layouts, so inspect raw saved-world evidence when
 their coverage is disputed. Detailed sampling adds read-only survey work in
 live game time.
+`machine_health` counters combine completed crafts scaled by 1000 with fractional
+craft/mining progress; the packet declares this unit. They are not delivered
+item counts or an unscaled production rate. Structured operation results,
+including retirement lifecycle evidence, remain mappings in receipts.
 
 Replacement requires the same starting save/kit/research, mods, objective and
 budgets as the incumbent, shared milestone predicates, sustained service,

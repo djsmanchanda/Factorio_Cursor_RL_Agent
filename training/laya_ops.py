@@ -18,7 +18,7 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
@@ -52,7 +52,7 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     else:
         code = "done"
     return {"ok": code != "prerequisite_advanced", "operation": operation, "params": params, "code": code,
-            "result": None if result is None else str(result)[:200]}
+            "result": dict(result) if isinstance(result, Mapping) else None if result is None else str(result)[:200]}
 
 
 class DeterministicSession:
@@ -154,12 +154,14 @@ class DeterministicSession:
                            if project.reserved.get(i, 0) < n}
                 projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
                                                 "missing": missing}
+        loan_error = None
         try:
             loans = [{"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count}
                      for loan in active_bootstrap_loans(self.client, SURFACE, FORCE)]
-        except Exception:  # A failed survey is an unknown, never "no loans".
+        except Exception as error:  # A failed survey is an unknown, never "no loans".
             loans = None
-        return {"projects": projects, "loans": loans}
+            loan_error = f"{type(error).__name__}: {error}"[:200]
+        return {"projects": projects, "loans": loans, "loan_error": loan_error}
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
@@ -184,7 +186,7 @@ class DeterministicSession:
                                    scope={"episode_id": self.episode_id, "surface": SURFACE, "force": FORCE,
                                           "server_root": str(self.script_output.parent), "bootstrap_profile": PROFILE})
         try:
-            packet["tooling"] = self.tooling()
+            packet["tooling"] = self.economics()
         except Exception as error:
             packet["tooling"] = {"error": f"{type(error).__name__}: {error}"[:200]}
         packet["mall_targets"] = dict(getattr(self, "mall_targets", {}))
