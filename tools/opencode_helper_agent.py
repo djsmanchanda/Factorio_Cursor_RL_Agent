@@ -170,11 +170,19 @@ def _ask(config: Config, message: str, state: State) -> None:
     """Ask once, then resume the same helper session up to three times."""
     current_message = message
     for attempt in range(4):
-        result = _run(_opencode_command(config, current_message, state.session_id), timeout=900)
+        command = _opencode_command(config, current_message, state.session_id)
+        try:
+            result = _run(command, timeout=900)
+        except subprocess.TimeoutExpired as error:
+            def decoded(value):
+                return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else (value or "")
+            result = subprocess.CompletedProcess(command, 124, decoded(error.stdout),
+                                                 decoded(error.stderr) + "\nOpenCode request timed out after 900 seconds.\n")
         output = result.stdout + result.stderr
         transcript = _attempt_transcript_path(config, state.checkpoints, attempt)
         _atomic_write(transcript, output)
         state.session_id = state.session_id or _session_id(output)
+        _save_state(_state_path(config), state)
         if result.returncode == 0:
             if state.session_id is None:
                 raise RuntimeError("OpenCode did not return a session ID; refusing an untracked helper")
@@ -184,12 +192,13 @@ def _ask(config: Config, message: str, state: State) -> None:
                 f"OpenCode failed after three continue retries; inspect {transcript}"
             )
         if state.session_id is None:
-            current_message = message
+            raise RuntimeError(f"OpenCode failed without a session ID; refusing a replacement session; inspect {transcript}")
         else:
             current_message = (
                 "Continue the same read-only helper run. The preceding request failed or timed out; "
                 "do not restart observation or create another report. Resume from the existing findings "
                 "document and process the newest supplied evidence. Never use a sleep command longer than 90 seconds."
+                " Write this one checkpoint and return now; do not poll or wait for future evidence."
             )
 
 
@@ -209,7 +218,7 @@ Continuously compare this run to the previous helper findings document when pres
 ```text
 {_recent_commits()}
 ```
-Do not issue a sleep command longer than 90 seconds.
+This request is one checkpoint review. Inspect the current evidence, write only its changed findings, and return now. Do not poll, sleep or wait for future evidence: the helper process schedules subsequent requests. Keep each checkpoint to at most ten new lines.
 
 Run identity: {_manifest(config.manifest_path)}
 
@@ -217,7 +226,7 @@ At RUN END you will receive the final evidence packet path and must wrap this do
 
 
 def _checkpoint_prompt(config: Config, report: Path, checkpoint: int, context: Path) -> str:
-    return f"""Checkpoint {checkpoint} for run {config.run_id}. Read the current bounded evidence packet at {context} (it is replaced each checkpoint), then append only meaningful changes to {report}; remain read-only. Do not paste the packet or raw log into findings. Cite source lines for claims, distinguish stock from throughput and transferable supply, and state one falsifiable next signal. Follow cited source lines only when needed to resolve a specific uncertainty. Do not issue a sleep command longer than 90 seconds.
+    return f"""Checkpoint {checkpoint} for run {config.run_id}. Read the current bounded evidence packet at {context} (it is replaced each checkpoint), then append only meaningful changes to {report}; remain read-only. Do not paste the packet or raw log into findings. Cite source lines for claims, distinguish stock from throughput and transferable supply, and state one falsifiable next signal. Follow cited source lines only when needed to resolve a specific uncertainty. This is one review: append at most ten changed lines and return now. Do not poll, sleep or wait for changes; the helper process schedules the next request.
 
 Manifest: {_manifest(config.manifest_path)}"""
 
@@ -312,6 +321,7 @@ def launch_helper(
 
 
 def main(argv: list[str] | None = None) -> int:
+    global REPO_ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--log-path", type=Path, required=True)
@@ -323,7 +333,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--variant", default="xhigh")
     parser.add_argument("--opencode-bin", default=shutil.which("opencode") or "opencode")
+    parser.add_argument("--repo-root", type=Path, help="Pinned subject checkout when helper implementation runs separately")
     args = parser.parse_args(argv)
+    if args.repo_root is not None:
+        subject = args.repo_root.resolve()
+        if not (subject / ".git").exists():
+            parser.error("--repo-root must be a Git checkout")
+        REPO_ROOT = subject
     config = Config(
         run_id=args.run_id, log_path=args.log_path.resolve(), manifest_path=args.episode_manifest.resolve() if args.episode_manifest else None,
         data_root=args.data_root.expanduser().resolve(), report_root=args.report_root.resolve(), dashboard_url=args.dashboard_url,

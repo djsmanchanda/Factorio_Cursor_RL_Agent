@@ -375,3 +375,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Added a pure advisory dependency report and offline CLI on `codex/deterministic-offline-diagnostics`, based on `f4f204c`; scope/freshness checks, material and loan blockers, district lifecycle evidence, recorded cycles, relevant counter progress, bounded JSON/Markdown and recovery preconditions. No scheduler or automatic runner hook changed.
 - Evidence: 126 focused diagnosis/ledger/context tests pass; latest diagnostic-only check passes 24/24. Offline replay of the preserved October 5 episode identifies copper's recorded unsubmitted replacement without inferring a live cause.
 - Isolation/lifecycle: Separate `/tmp/factorio-deterministic-diagnostics` worktree; active Laya checkout/tests, installed mods and services unchanged. Standalone capability needs no restart or deployment; live performance improvement remains unproven.
+
+## [2026-10-08] Muse helper timeout recovery isolated from running actors
+- What: Preserve partial timeout transcripts and session identity before continuing; stop rather than create an untracked replacement session. Requests review one bounded checkpoint and return. Separate helper code can inspect an explicitly pinned actor checkout.
+- Evidence: 13 focused helper tests pass, including binary/string timeout output, retry exhaustion and identity-less failure. Existing live helper session/report identified for recovery; no actor or mod change.
+- Lifecycle: Only the failed private Muse observer needs restart from this worktree; running deterministic/Laya actors remain pinned to their original commits.

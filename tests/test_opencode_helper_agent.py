@@ -115,6 +115,80 @@ def test_helper_retries_by_resuming_the_same_session(monkeypatch, tmp_path: Path
     assert "Continue the same read-only helper run" in commands[1][-1]
 
 
+def test_timeout_preserves_partial_output_and_resumes_same_session(monkeypatch, tmp_path):
+    import subprocess
+    config = _config(tmp_path, tmp_path / "run.log")
+    state = helper.State(checkpoints=2)
+    commands = []
+
+    def request(command, **kwargs):
+        commands.append(command)
+        if len(commands) == 1:
+            raise subprocess.TimeoutExpired(command, 900, output=b'{"sessionID":"partial-session"}\n', stderr=b'partial stderr')
+        assert helper._load_state(helper._state_path(config)).session_id == "partial-session"
+        return SimpleNamespace(returncode=0, stdout="continued", stderr="")
+
+    monkeypatch.setattr(helper, "_run", request)
+    helper._ask(config, "evidence", state)
+    assert commands[1][commands[1].index("--session") + 1] == "partial-session"
+    transcript = helper._attempt_transcript_path(config, 2, 0).read_text()
+    assert "partial stderr" in transcript and "timed out" in transcript
+    assert state.session_id == "partial-session"
+
+
+def test_timeout_without_session_id_cannot_create_duplicate(monkeypatch, tmp_path):
+    import pytest
+    import subprocess
+    config = _config(tmp_path, tmp_path / "run.log")
+    commands = []
+
+    def request(command, **kwargs):
+        commands.append(command)
+        raise subprocess.TimeoutExpired(command, 900, output=b'no session identity')
+
+    monkeypatch.setattr(helper, "_run", request)
+    with pytest.raises(RuntimeError, match="refusing a replacement session"):
+        helper._ask(config, "evidence", helper.State())
+    assert len(commands) == 1
+
+
+def test_timeout_exhaustion_retains_original_session_and_all_attempts(monkeypatch, tmp_path):
+    import pytest
+    import subprocess
+    config = _config(tmp_path, tmp_path / "run.log")
+    commands = []
+
+    def request(command, **kwargs):
+        commands.append(command)
+        raise subprocess.TimeoutExpired(command, 900, output='{"sessionID":"original"}\n')
+
+    monkeypatch.setattr(helper, "_run", request)
+    with pytest.raises(RuntimeError, match="three continue retries"):
+        helper._ask(config, "evidence", helper.State(session_id="original", checkpoints=1))
+    assert len(commands) == 4
+    assert all(c[c.index("--session") + 1] == "original" for c in commands)
+    assert len(list((config.data_root / "runs" / config.run_id).glob("opencode-*.jsonl"))) == 4
+
+
+def test_cli_pins_subject_without_changing_helper_implementation(monkeypatch, tmp_path):
+    original = helper.REPO_ROOT
+    subject = tmp_path / "actor-code"
+    subject.mkdir()
+    (subject / ".git").write_text("gitdir: fixture")
+    captured = []
+
+    def run(config):
+        captured.append(helper._opencode_command(config, "one review", "session-original"))
+        return 0
+
+    monkeypatch.setattr(helper, "REPO_ROOT", original)
+    monkeypatch.setattr(helper, "run_helper", run)
+    assert helper.main(["--run-id", "test", "--log-path", str(tmp_path / "run.log"),
+                        "--repo-root", str(subject)]) == 0
+    assert captured[0][captured[0].index("--dir") + 1] == str(subject)
+    assert captured[0][captured[0].index("--session") + 1] == "session-original"
+
+
 def test_completion_detection_survives_verbose_output_and_ignores_quoted_marker(tmp_path: Path) -> None:
     log = tmp_path / "run.log"
     log.write_text('+1s HELPER: wait for RUN END before wrapping findings\n')

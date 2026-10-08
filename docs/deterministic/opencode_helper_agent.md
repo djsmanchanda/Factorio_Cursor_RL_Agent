@@ -46,6 +46,12 @@ transcripts live under `~/.local/share/factorio-rl/opencode_helper/runs/`.
 - A failed or timed-out OpenCode request is resumed with a `continue` prompt up
   to three times. After the third retry the helper stops and appends that
   explicit failure to the runner log; it never starts a replacement session.
+- Timeout output and any returned session ID are persisted before retrying.
+  A failure without a recoverable session ID stops explicitly; it cannot
+  silently create a second session. Each model request writes one bounded
+  checkpoint and returns; polling belongs to the helper process.
+- `--repo-root` can pin the inspected actor checkout when helper recovery code
+  runs from a separate worktree. It does not change the actor's code or session.
 - Helper prompts prohibit sleep commands longer than 90 seconds.
 
 ## Operations
