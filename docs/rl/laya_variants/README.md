@@ -22,6 +22,15 @@ Windows:
 
 - **Local:** `--until-phase C0` or `C1` with a tick cap; fast, many seeds.
 - **Long:** a later phase and a larger cap; fewer seeds.
+- **Shared acceptance:** `--actions deterministic --until-accepted C2` with
+  a larger tick cap continues through proxy C2 until the unchanged shared
+  predicate passes or another bounded stop occurs. Keep these results
+  separate from earlier proxy-terminated windows.
+
+The harness supports up to 40 isolated worlds with explicit disjoint game/RCON
+port ranges. Capacity is not proof of sustained throughput: check runtime
+health before increasing a live fleet. Generated catalogs are atomically
+replaced so simultaneous episode startup cannot read a partial file.
 
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended

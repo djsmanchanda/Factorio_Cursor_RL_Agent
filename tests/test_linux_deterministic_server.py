@@ -22,7 +22,7 @@ def test_linux_deterministic_server_uses_an_isolated_root_and_copied_save() -> N
     assert 'if [[ ! -f "$SAVE_PATH" ]]; then' in source
     assert 'cp -p "$SOURCE_SAVE" "$SAVE_PATH"' in source
     assert 'rm -f "$SOURCE_SAVE"' not in source
-    assert 'write-data=$DATA_ROOT' in source
+    assert 'write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"' in source
 
 
 def test_linux_deterministic_server_snapshots_the_save_before_start() -> None:

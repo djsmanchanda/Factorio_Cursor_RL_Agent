@@ -75,6 +75,8 @@ def main(argv=None) -> int:
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
+    p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
+                   help="Ops only: stop after the shared checkpoint predicate passes")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
     p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
@@ -82,6 +84,8 @@ def main(argv=None) -> int:
     p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     args = p.parse_args(argv)
+    if args.until_accepted and (args.actions != "deterministic" or args.until_phase):
+        p.error("until-accepted requires deterministic actions and cannot be combined with until-phase")
     root = owned_root(args.root)
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
@@ -120,7 +124,7 @@ def main(argv=None) -> int:
         log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
-                  window=f"until={settings.until_phase or '-'} max_ticks={settings.max_game_ticks or '-'}",
+                  window=f"proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
@@ -134,7 +138,8 @@ def main(argv=None) -> int:
                 from training.laya_ops_runner import run as run_ops
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
-                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings)
+                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings,
+                                  until_accepted=args.until_accepted)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
@@ -153,7 +158,8 @@ def main(argv=None) -> int:
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
              "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
-             "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
+             "window": {"until_phase": settings.until_phase, "until_accepted": args.until_accepted,
+                        "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")

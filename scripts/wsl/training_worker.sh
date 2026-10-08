@@ -3,6 +3,7 @@
 # Purpose: Provision and manage one indexed, unprivileged WSL-native Factorio training worker.
 
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/../factorio_runtime_config.sh"
 
 configure_worker() {
   local index="$1"
@@ -11,7 +12,9 @@ configure_worker() {
   (( numeric >= 1 && numeric <= 50 )) || die "worker index must be between 01 and 50"
   WORKER_INDEX="$index"
   WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"
-  RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio"
+  RUNTIME_VERSION="${FACTORIO_RUNTIME_VERSION:-2.1.21}"
+  [[ "$RUNTIME_VERSION" =~ ^2[.]1[.][0-9]+$ ]] || die "runtime version must be a Factorio 2.1 patch version"
+  RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio-$RUNTIME_VERSION"
   DATA_ROOT="$WORKER_ROOT/worker"
   SECRET_PATH="$WORKER_ROOT/rcon-password"
   PID_PATH="$WORKER_ROOT/factorio.pid"
@@ -38,12 +41,9 @@ assert_stopped() {
 }
 
 write_worker_config() {
-  cat > "$DATA_ROOT/config.ini" <<EOF
-[path]
-read-data=$RUNTIME_ROOT/data
-write-data=$DATA_ROOT
-EOF
-  cat > "$DATA_ROOT/server-settings.json" <<EOF
+  write_factorio_runtime_config "$DATA_ROOT/config.ini" "$RUNTIME_ROOT/data" "$DATA_ROOT"
+  if [[ ! -f "$DATA_ROOT/server-settings.json" ]]; then
+    cat > "$DATA_ROOT/server-settings.json" <<EOF
 {
   "name": "Factorio RL WSL Training Worker $WORKER_INDEX",
   "description": "Private isolated Factorio RL training worker",
@@ -54,11 +54,13 @@ EOF
   "auto_pause_when_players_connect": false
 }
 EOF
+  fi
   cat > "$DATA_ROOT/mods/mod-list.json" <<'EOF'
 {"mods":[
   {"name":"base","enabled":true},
   {"name":"elevated-rails","enabled":true},
   {"name":"quality","enabled":true},
+  {"name":"recycler","enabled":true},
   {"name":"space-age","enabled":true},
   {"name":"factorio_cursor_rl_agent","enabled":true},
   {"name":"factorio_training_lab","enabled":true}
@@ -103,7 +105,7 @@ bootstrap() {
   require_file "$source_save"
   mkdir -p "$WORKER_ROOT" "$DATA_ROOT/mods" "$DATA_ROOT/saves" "$DATA_ROOT/logs"
   if [[ ! -x "$RUNTIME_ROOT/bin/x64/factorio" ]]; then
-    local seed_runtime="$HOME/factorio-training-01/runtime/factorio"
+    local seed_runtime="$HOME/factorio-training-01/runtime/factorio-$RUNTIME_VERSION"
     mkdir -p "$(dirname "$RUNTIME_ROOT")"
     if [[ -x "$seed_runtime/bin/x64/factorio" ]]; then
       cp -a "$seed_runtime" "$RUNTIME_ROOT"
@@ -131,6 +133,8 @@ start_worker() {
   require_file "$RUNTIME_ROOT/bin/x64/factorio"
   require_file "$DATA_ROOT/saves/training-01.zip"
   require_file "$SECRET_PATH"
+  require_file "$DATA_ROOT/config.ini"
+  write_factorio_runtime_config "$DATA_ROOT/config.ini" "$RUNTIME_ROOT/data" "$DATA_ROOT"
   mkdir -p "$DATA_ROOT/logs"
   setsid "$RUNTIME_ROOT/bin/x64/factorio" \
     --config "$DATA_ROOT/config.ini" \

@@ -5,7 +5,7 @@
   "author": "Factorio_Cursor_RL_Agent",
   "factorio_version": "2.1",
   "dependencies": [
-    "base >= 2.0"
+    "base >= 2.1.0"
   ],
   "description": "Isolated training-surface lifecycle and instrumentation for approved deterministic plans."
 }

@@ -25,6 +25,29 @@ def test_catalog_patch_changes_only_weights_and_still_verifies():
     load_guideline_context(ROOT, PHASES[0]["scopes"], catalog=settings.catalog, max_rules=32)  # quotes verified
 
 
+def test_catalog_replacement_keeps_the_previous_file_readable(tmp_path, monkeypatch):
+    from training import laya_variants as variants
+    monkeypatch.setattr(variants, "ROOT", tmp_path)
+    monkeypatch.setattr(variants, "GENERATED", tmp_path / "generated")
+    base = tmp_path / "base.json"
+    base.write_text(json.dumps({"rules": [{"rule_id": "rule", "note": "old"}]}))
+    variant = {"variant_id": "test", "catalog": "base.json", "catalog_patch": {"rule": {"weight": 2}}}
+    target = tmp_path / variants._catalog(variant)
+    old = target.read_text()
+    base.write_text(json.dumps({"rules": [{"rule_id": "rule", "note": "new"}]}))
+    replace = variants.os.replace
+
+    def checked_replace(source, destination):
+        assert target.read_text() == old
+        assert json.loads(source.read_text())["rules"][0]["note"] == "new"
+        replace(source, destination)
+
+    monkeypatch.setattr(variants.os, "replace", checked_replace)
+    variants._catalog(variant)
+    assert json.loads(target.read_text())["rules"][0]["note"] == "new"
+    assert list((tmp_path / "generated").iterdir()) == [target]
+
+
 @pytest.mark.parametrize("bad", [{"settings": {"no_such_knob": 1}}, {"catalog_patch": {"mission.nope": {}}}, {"extra": 1}])
 def test_bad_variants_fail_closed(tmp_path, bad):
     path = tmp_path / "v.json"

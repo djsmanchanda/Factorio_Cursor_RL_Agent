@@ -16,7 +16,9 @@ def test_wsl_worker_keeps_runtime_native_and_isolated_by_index() -> None:
     source = SHELL.read_text(encoding="utf-8")
 
     assert 'WORKER_ROOT="$HOME/factorio-training-$WORKER_INDEX"' in source
-    assert 'seed_runtime="$HOME/factorio-training-01/runtime/factorio"' in source
+    assert 'RUNTIME_VERSION="${FACTORIO_RUNTIME_VERSION:-2.1.21}"' in source
+    assert 'RUNTIME_ROOT="$WORKER_ROOT/runtime/factorio-$RUNTIME_VERSION"' in source
+    assert 'seed_runtime="$HOME/factorio-training-01/runtime/factorio-$RUNTIME_VERSION"' in source
     assert 'cp -a "$seed_runtime" "$RUNTIME_ROOT"' in source
     assert 'worker index must be between 01 and 50' in source
     assert 'GAME_PORT=$((35000 + numeric))' in source

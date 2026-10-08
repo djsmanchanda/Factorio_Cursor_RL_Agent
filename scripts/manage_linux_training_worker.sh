@@ -82,6 +82,7 @@ require_positive_integer "slots per worker" "$SLOTS_PER_WORKER" 80
 [[ "$STAGGER_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "stagger seconds must be non-negative"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/factorio_runtime_config.sh"
 CONFIG_OUTPUT="$REPO_ROOT/training-workers-linux.json"
 
 worker_suffix() { printf '%02d' "$1"; }
@@ -155,12 +156,9 @@ assert_stopped() {
 
 write_worker_files() {
   mkdir -p "$MODS_PATH" "$DATA_ROOT/saves" "$DATA_ROOT/logs" "$DATA_ROOT/script-output"
-  cat > "$CONFIG_PATH" <<EOF
-[path]
-read-data=$READ_DATA
-write-data=$DATA_ROOT
-EOF
-  cat > "$SERVER_SETTINGS" <<EOF
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
+  if [[ ! -f "$SERVER_SETTINGS" ]]; then
+    cat > "$SERVER_SETTINGS" <<EOF
 {
   "name": "Factorio RL Linux Training Worker $(basename "$(dirname "$WORKER_ROOT")")",
   "description": "Private isolated native Linux Factorio RL training worker",
@@ -171,11 +169,13 @@ EOF
   "auto_pause_when_players_connect": false
 }
 EOF
+  fi
   cat > "$MODS_PATH/mod-list.json" <<'EOF'
 {"mods":[
   {"name":"base","enabled":true},
   {"name":"elevated-rails","enabled":true},
   {"name":"quality","enabled":true},
+  {"name":"recycler","enabled":true},
   {"name":"space-age","enabled":true},
   {"name":"factorio_cursor_rl_agent","enabled":true},
   {"name":"factorio_training_lab","enabled":true}
@@ -242,6 +242,7 @@ start_worker() {
   [[ -x "$FACTORIO_BIN" ]] || die "Factorio executable is missing: $FACTORIO_BIN"
   [[ -f "$SAVE_PATH" ]] || die "worker is not bootstrapped; run bootstrap first"
   [[ -f "$SECRET_PATH" ]] || die "worker RCON secret is missing; run bootstrap first"
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
   port_available "$(game_port "$1")" || die "game port $(game_port "$1") is already in use"
   port_available "$(rcon_port "$1")" || die "RCON port $(rcon_port "$1") is already in use"
   mkdir -p "$DATA_ROOT/logs"

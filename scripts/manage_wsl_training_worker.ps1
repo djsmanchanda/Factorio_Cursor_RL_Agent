@@ -7,7 +7,9 @@ param(
     [ValidateSet("bootstrap", "configure", "deploy", "start", "stop", "status")]
     [string]$Action,
     [string]$Distro = "Ubuntu",
-    [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.0.77.tar.xz",
+    [ValidatePattern("^2[.]1[.][0-9]+$")]
+    [string]$FactorioVersion = "2.1.21",
+    [string]$Archive = "C:\Users\djsma\Downloads\factorio-headless_linux_2.1.21.tar.xz",
     [string]$SourceSave = "C:\Users\djsma\AppData\Local\Factorio-training-01\saves\training-01.zip",
     [string]$BridgeRootBase = "$env:LOCALAPPDATA\Factorio-training-wsl",
     [ValidateRange(1, 50)]
@@ -49,7 +51,7 @@ function Assert-TrainingPortsAvailable {
 function Invoke-Worker {
     param([Parameter(Mandatory)][int]$Index, [Parameter(Mandatory)][string]$WorkerAction, [string[]]$Arguments = @())
     $workerScriptWsl = ConvertTo-WslPath $workerScript
-    & wsl.exe -d $Distro -- bash $workerScriptWsl $WorkerAction (WorkerSuffix $Index) @Arguments
+    & wsl.exe -d $Distro -- env "FACTORIO_RUNTIME_VERSION=$FactorioVersion" bash $workerScriptWsl $WorkerAction (WorkerSuffix $Index) @Arguments
     if ($LASTEXITCODE -ne 0) { throw "WSL worker $(WorkerSuffix $Index) action failed: $WorkerAction" }
 }
 

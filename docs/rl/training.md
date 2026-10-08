@@ -575,6 +575,12 @@ For an unattended overnight curriculum, `scripts/queue_overnight_training.ps1` w
 
 The preferred local worker uses the Linux headless build under WSL2:
 
+The WSL manager defaults to `-FactorioVersion 2.1.21` and its matching headless
+archive. Bootstrap it before starting after an upgrade: versioned runtime
+directories preserve the previous executable instead of silently reusing it.
+For an older 2.1 replay, supply both the intended `-FactorioVersion` and matching
+`-Archive`; do not mix the archive and runtime label.
+
 ```powershell
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action bootstrap -WorkerCount 20 -SlotsPerWorker 16 -StaggerSeconds 2
 powershell -File scripts\manage_wsl_training_worker.ps1 -Action start -WorkerCount 20 -SlotsPerWorker 16 -StaggerSeconds 2

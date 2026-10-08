@@ -880,6 +880,9 @@ class OperationManager:
             "--game-port", str(self.config.game_port),
             "--rcon-port", str(self.config.rcon_port),
         ]
+        runtime_root = getattr(self.config, "runtime_root", None)
+        if runtime_root is not None:
+            command.extend(["--runtime-root", str(runtime_root)])
         gui_mods = getattr(self.config, "gui_mods", None)
         if action == "deploy" and gui_mods is not None:
             command.extend(["--gui-mods", str(gui_mods)])

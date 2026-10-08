@@ -81,6 +81,36 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
 
 
+def test_accepted_window_does_not_stop_at_a_rate_proxy(tmp_path, monkeypatch):
+    from training import laya_ops_runner as ops
+    checks = iter([True, True, True, False])
+    monkeypatch.setattr(ops, "phase_reached", lambda _: next(checks, False))
+
+    class UnacceptedSession(FakeSession):
+        def acceptance(self):
+            return {"C2": "failed"}
+
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=1,
+                  measure_ticks=600, seed=3, run_id="t", session=UnacceptedSession(), until_accepted="C2")
+    assert "C2" in summary["phases_reached"]
+    assert summary["decisions"] == 1 and summary["stop"] == "decision_budget"
+    assert "C2" not in summary["accepted"]
+
+
+def test_accepted_window_stops_after_a_verified_checkpoint(tmp_path):
+    class AcceptedSession(FakeSession):
+        checks = 0
+
+        def acceptance(self):
+            self.checks += 1
+            return {"C2": "passed" if self.checks > 1 else "failed"}
+
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=12,
+                  measure_ticks=600, seed=3, run_id="t", session=AcceptedSession(), until_accepted="C2")
+    assert summary["decisions"] == 10
+    assert summary["stop"] == "accepted_window_reached" and summary["accepted"] == ["C2"]
+
+
 def test_acceptance_details_are_indexed_without_changing_operation_choices(tmp_path):
     import json
     from pathlib import Path

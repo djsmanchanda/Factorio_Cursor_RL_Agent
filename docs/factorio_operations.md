@@ -18,6 +18,12 @@ Current paths:
 
 Never infer the server or port from a default. Confirm the process, listening game/RCON ports, save, loaded mod version, surface, force, and server-owned `script-output` path.
 
+The current runtime target is **Factorio 2.1.21**, with the executable and all
+bundled mods from that same release. Upgrade verification and rollback are in
+the [2.1.21 handoff](Factorio_2.1.21_Upgrade.md). Historical 2.1.20 experiments
+retain their runtime identity; do not rewrite their manifests or pool them with
+new-version results.
+
 ## Interface choice
 
 - Use `tools/rcon_client.py` for direct commands and connectivity checks.
@@ -68,6 +74,9 @@ below `~/.local/share/factorio-rl/training/<index>/worker`. It uses a separate
 Factorio `write-data` root plus the private headless runtime at
 `~/.local/share/factorio-rl/runtime/factorio-2.1.21`, local RCON port,
 worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
+On a stopped worker's next `start`, the manager refreshes only its managed
+`read-data`/`write-data` paths; other configuration and server settings survive.
+Use explicit `--runtime-root` for a historical-version replay.
 Its default ports are game
 `35000 + index` and RCON `28000 + index`; RCON remains loopback-only.
 
@@ -79,6 +88,9 @@ root at `~/.local/share/factorio-rl/deterministic`, using the private
 save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
+The same path refresh occurs on server start, so a new executable cannot
+silently retain the previous default read-data directory. A dashboard-selected
+runtime is passed through to individual server lifecycle actions and campaigns.
 
 Every `start` also snapshots the selected save into the tracked repository
 artifact `saves/mod_playground.zip`. When `--source-save` is supplied, that

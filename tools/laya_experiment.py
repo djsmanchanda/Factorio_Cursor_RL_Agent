@@ -37,7 +37,7 @@ from training.laya_mission import PHASES  # noqa: E402
 from training.laya_variants import load_variant  # noqa: E402
 from training.laya_acceptance import condition_counts  # noqa: E402
 
-GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 20
+GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 40
 RUNNER = [sys.executable, str(ROOT / "tools/run_laya_clean.py")]
 ORDER = [p["phase_id"] for p in PHASES]
 
@@ -51,16 +51,19 @@ def _job(experiment: str, variant: Path | None, seed: int, slot: int, args: argp
     inputs = (["--source-save",str(args.source_save)] if getattr(args,'source_save',None) else [])
     inputs += (["--mods-source",str(args.mods_source)] if getattr(args,'mods_source',None) else [])
     with out.open("w") as log:
-        prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs], stdout=log, stderr=subprocess.STDOUT)
-        if prepared.returncode:
-            _finalize(experiment, variant, seed, root, args, "prepare_failed", prepared.returncode)
-            return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
         stop, code = None, None
         try:
+            prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs],
+                                      stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout)
+            if prepared.returncode:
+                stop, code = "prepare_failed", prepared.returncode
+                return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
             command = RUNNER + ["run", "--root", str(root), "--seed", str(seed), "--no-helper", "--experiment", experiment,
                                "--speed", str(args.speed), "--actions", args.actions]
             command += ["--variant", str(variant)] if variant else []
             command += ["--until-phase", args.until_phase] if args.until_phase else []
+            target = getattr(args, "until_accepted", None)
+            command += ["--until-accepted", target] if target else []
             command += ["--max-game-ticks", str(args.max_game_ticks)] if args.max_game_ticks else []
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout).returncode
             stop = "crash" if code else None
@@ -91,11 +94,20 @@ def _finalize(experiment: str, variant: Path | None, seed: int, root: Path, args
         index.write(json.dumps({
             "run_id": f"{root.name}-unfinished", "root": resolved, "seed": seed, "experiment": experiment,
             "variant_id": loaded["variant_id"], "returncode": returncode,
-            "window": {"until_phase": args.until_phase, "max_game_ticks": args.max_game_ticks},
+            "window": {"until_phase": args.until_phase, "until_accepted": getattr(args, "until_accepted", None),
+                       "max_game_ticks": args.max_game_ticks},
             "summary": {"decisions": 0, "failures": 1, "phases_reached": [], "stop": stop}}) + "\n")
 
 
 def run(args: argparse.Namespace) -> int:
+    if not 1 <= args.parallel <= SLOTS or args.seeds < 1:
+        raise SystemExit(f"parallel must be 1..{SLOTS} and seeds must be positive")
+    games = range(args.game_base, args.game_base + args.parallel)
+    rcons = range(args.rcon_base, args.rcon_base + args.parallel)
+    if min(games.start, rcons.start) < 1 or max(games.stop, rcons.stop) > 65536:
+        raise SystemExit("port ranges must fit 1..65535")
+    if set(games) & set(rcons):
+        raise SystemExit("game and RCON port ranges must be disjoint")
     variants = [None] + [Path(v) for v in args.variants]  # None = baseline
     ids = [load_variant(v)["variant_id"] for v in variants]
     if len(set(ids)) != len(ids):
@@ -148,7 +160,9 @@ def report(args: argparse.Namespace) -> int:
     if not rows:
         print(f"no runs recorded for experiment {args.experiment}")
         return 1
-    target = args.until_phase or next((r["window"]["until_phase"] for r in rows if r.get("window", {}).get("until_phase")), None)
+    target = getattr(args, "until_accepted", None) or args.until_phase or next(
+        (r["window"].get("until_accepted") or r["window"].get("until_phase")
+         for r in rows if r.get("window", {}).get("until_accepted") or r.get("window", {}).get("until_phase")), None)
     by_variant: dict[str, list[dict]] = {}
     for row in rows:
         by_variant.setdefault(row.get("variant_id", "baseline"), []).append(row)
@@ -162,7 +176,7 @@ def report(args: argparse.Namespace) -> int:
     print("|---|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
         print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | "
-              f"{s['accepted']}/{s['acceptance_checked']} | {s['median_ticks']} | "
+              f"{s['accepted']}/{s['runs']} (checked {s['acceptance_checked']}) | {s['median_ticks']} | "
               f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0
@@ -176,6 +190,8 @@ def main(argv=None) -> int:
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--seed-base", type=int, default=1)
     p.add_argument("--until-phase", choices=ORDER)
+    p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
+                   help="Ops only: shared checkpoint target instead of a production-rate proxy")
     p.add_argument("--max-game-ticks", type=int)
     p.add_argument("--speed", type=float, default=4.0, help="Live game speed for every run")
     p.add_argument("--parallel", type=int, default=4)
@@ -187,8 +203,10 @@ def main(argv=None) -> int:
     p.add_argument("--source-save", type=Path)
     p.add_argument("--mods-source", type=Path)
     args = p.parse_args(argv)
-    if args.action == "run" and not (args.until_phase or args.max_game_ticks):
-        p.error("an experiment needs a window: --until-phase and/or --max-game-ticks")
+    if args.until_accepted and (args.actions != "deterministic" or args.until_phase):
+        p.error("until-accepted requires deterministic actions and cannot be combined with until-phase")
+    if args.action == "run" and not (args.until_phase or args.until_accepted or args.max_game_ticks):
+        p.error("an experiment needs a proxy/accepted target and/or max-game-ticks")
     return run(args) if args.action == "run" else report(args)
 
 

@@ -45,7 +45,8 @@ def prepare(args):
     shutil.copy2(source, root / "baseline.zip")
     frozen = root / "frozen"
     (frozen / "scripts").mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts/manage_linux_deterministic_server.sh", frozen / "scripts")
+    for script in ("manage_linux_deterministic_server.sh", "factorio_runtime_config.sh"):
+        shutil.copy2(ROOT / "scripts" / script, frozen / "scripts")
     for name, folder in [("factorio_cursor_rl_agent", "factorio_mod"), ("factorio_training_lab", "factorio_training_lab")]:
         shutil.copytree(args.mods_source / name, frozen / folder)
     manifest = {"version": PROFILE, "runtime": runtime, "production_authority": False,

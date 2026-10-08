@@ -98,6 +98,7 @@ require_port "RCON port" "$RCON_PORT"
 FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"
 READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/factorio_runtime_config.sh"
 DATA_ROOT="$STATE_ROOT"
 MODS_PATH="$DATA_ROOT/mods"
 SAVE_PATH="$DATA_ROOT/saves/mod_playground.zip"
@@ -153,12 +154,9 @@ assert_stopped() {
 
 write_server_files() {
   mkdir -p "$MODS_PATH" "$DATA_ROOT/saves" "$DATA_ROOT/logs" "$DATA_ROOT/script-output"
-  cat > "$CONFIG_PATH" <<EOF
-[path]
-read-data=$READ_DATA
-write-data=$DATA_ROOT
-EOF
-  cat > "$SERVER_SETTINGS" <<'EOF'
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
+  if [[ ! -f "$SERVER_SETTINGS" ]]; then
+    cat > "$SERVER_SETTINGS" <<'EOF'
 {
   "name": "Factorio RL Linux Deterministic Server",
   "description": "Private isolated native Linux deterministic Factorio server",
@@ -169,6 +167,7 @@ EOF
   "auto_pause_when_players_connect": false
 }
 EOF
+  fi
   cat > "$MODS_PATH/mod-list.json" <<'EOF'
 {"mods":[
   {"name":"base","enabled":true},
@@ -358,6 +357,9 @@ start_server() {
     write_server_files
   fi
   [[ -f "$CONFIG_PATH" && -f "$SERVER_SETTINGS" ]] || die "server configuration is missing; run bootstrap first"
+  # A runtime upgrade must move read-data with the executable, including worlds
+  # configured by an older manager. Keep every other server setting intact.
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
   port_available "$GAME_PORT" || die "game port $GAME_PORT is already in use"
   port_available "$RCON_PORT" || die "RCON port $RCON_PORT is already in use"
   if (( ! FLEET_MODE )); then

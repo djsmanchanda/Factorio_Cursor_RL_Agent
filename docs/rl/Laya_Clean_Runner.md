@@ -44,9 +44,10 @@ ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
 Current geometry transactions preserve submitted plans and pre/post facts.
-Current ops wraps ordinary returns, including `None`, as `ok=True` and records
-only part of the result. Its history/lifecycle features and error containment do
-not yet satisfy the complete contract. See the [audit](Laya_System_Audit_2026-10-08.md)
+Ops receipts distinguish producing output from prerequisite progress and
+preserve mapping results; legacy retirement strings remain unverified.
+History/lifecycle features and error containment do not yet satisfy the
+complete contract. See the [audit](Laya_System_Audit_2026-10-08.md)
 for reproductions; documentation cleanup does not repair these implementation gaps.
 
 ## Decision facts and rules
@@ -87,6 +88,12 @@ It also includes C5 and advanced-circuit consumption. Reports must name the
 predicate version, starting state and sustain window, and separate production,
 delivery and consumption. Do not compare proxy flags with deterministic
 checkpoint flags as though they were identical.
+
+Ops experiments can use `--until-accepted C2` to stop when that unchanged
+shared predicate passes. This option is separate from `--until-phase C2`,
+which stops at the rate proxy; the two cannot be combined. Game/wall/stall
+budgets still apply, and periodic samples do not prove an unsampled condition
+was never met. Reports retain both proxy and accepted outcomes.
 
 The ops runner saves versioned acceptance samples under
 `evidence/acceptance/<run-id>/` at startup, proxy transitions, every ten

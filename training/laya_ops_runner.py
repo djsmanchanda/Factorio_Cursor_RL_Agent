@@ -413,7 +413,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
 
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
-        status_path: Path | None = None, settings: Settings = Settings(), session: Any = None) -> dict:
+        status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
+        until_accepted: str | None = None) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls."""
     from training.laya_ops import DeterministicSession
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
@@ -466,6 +467,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
+        if until_accepted and until_accepted in summary.get("accepted", []):
+            summary["stop"] = "accepted_window_reached"
+            break
         if should_stop():
             summary["stop"] = "stopped"
             break
@@ -487,8 +491,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             stall.update(since=0, best_gap=math.inf)
             phase = current_phase(reached)
             board = compile_status(facts, phase["targets"], measurement) if phase else None
+        if until_accepted and until_accepted in summary.get("accepted", []):
+            summary["stop"] = "accepted_window_reached"
+            break
         if phase is None:
-            summary["stop"] = "mission_complete"
+            summary["stop"] = "proxy_mission_complete_without_acceptance" if until_accepted else "mission_complete"
             break
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
@@ -586,6 +593,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["stop"] = "safe_stop_after_repeated_failures"
             break
     check_acceptance("end")
+    if until_accepted and until_accepted in summary.get("accepted", []):
+        summary["stop"] = "accepted_window_reached"
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))

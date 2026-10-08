@@ -70,11 +70,39 @@ function Ensure-Directories {
     }
 }
 
+function Write-RuntimeConfig {
+    $p = Paths
+    $lines = @()
+    if (Test-Path -LiteralPath $p.Config -PathType Leaf) {
+        $lines = @(Get-Content -LiteralPath $p.Config)
+    }
+    $updated = [Collections.Generic.List[string]]::new()
+    $inPath = $false
+    $foundPath = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*\[path\]\s*$') {
+            $updated.Add($line)
+            $updated.Add("read-data=$ReadData")
+            $updated.Add("write-data=$ServerData")
+            $inPath = $true
+            $foundPath = $true
+            continue
+        }
+        if ($line -match '^\s*\[') { $inPath = $false }
+        if ($inPath -and $line -match '^\s*(read-data|write-data)\s*=') { continue }
+        $updated.Add($line)
+    }
+    if (-not $foundPath) {
+        $updated.Add('[path]')
+        $updated.Add("read-data=$ReadData")
+        $updated.Add("write-data=$ServerData")
+    }
+    Write-Utf8NoBom $p.Config (($updated -join "`n") + "`n")
+}
+
 function Write-ServerFiles {
     $p = Paths
-    if (-not (Test-Path -LiteralPath $p.Config -PathType Leaf)) {
-        Write-Utf8NoBom $p.Config "[path]`nread-data=$ReadData`nwrite-data=$ServerData`n"
-    }
+    Write-RuntimeConfig
     if (-not (Test-Path -LiteralPath $p.Settings -PathType Leaf)) {
         $settings = [ordered]@{
             name = "Factorio RL Windows Training Worker"
@@ -91,6 +119,7 @@ function Write-ServerFiles {
         [ordered]@{ name = "base"; enabled = $true },
         [ordered]@{ name = "elevated-rails"; enabled = $true },
         [ordered]@{ name = "quality"; enabled = $true },
+        [ordered]@{ name = "recycler"; enabled = $true },
         [ordered]@{ name = "space-age"; enabled = $true },
         [ordered]@{ name = "factorio_cursor_rl_agent"; enabled = $true },
         [ordered]@{ name = "factorio_training_lab"; enabled = $true }
@@ -149,6 +178,7 @@ function Start-Worker {
     if (Get-NetTCPConnection -State Listen -LocalPort $GamePort -ErrorAction SilentlyContinue) { throw "Training game port $GamePort is already in use." }
     if (Get-NetTCPConnection -State Listen -LocalPort $RconPort -ErrorAction SilentlyContinue) { throw "Training RCON port $RconPort is already in use." }
     Assert-Stopped
+    Write-RuntimeConfig
     $arguments = @(
         "--config", $p.Config, "--mod-directory", $p.Mods,
         "--start-server", $p.Save, "--server-settings", $p.Settings,

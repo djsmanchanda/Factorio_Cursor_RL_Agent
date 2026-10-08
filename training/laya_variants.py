@@ -22,7 +22,9 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from training.laya_clean_runner import MISSION_CATALOG, ROOT, Settings
 
@@ -69,7 +71,16 @@ def _catalog(variant: dict) -> str:
         rule.update(patch.get(rule["rule_id"], {}))
     GENERATED.mkdir(parents=True, exist_ok=True)
     target = GENERATED / f"{variant['variant_id']}-{variant_hash(variant)[7:19]}.json"
-    target.write_text(json.dumps(catalog, indent=2) + "\n")
+    # Multiple episode processes materialize the same variant at startup.
+    # Readers must see a complete old or new catalog, never a truncated file.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=GENERATED, delete=False) as out:
+        temporary = Path(out.name)
+        try:
+            out.write(json.dumps(catalog, indent=2) + "\n")
+            out.close()
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
     return str(target.relative_to(ROOT))
 
 

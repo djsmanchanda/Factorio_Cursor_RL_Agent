@@ -14,6 +14,7 @@ def test_training_mods_declare_the_installed_factorio_major_version() -> None:
     for directory in ("factorio_mod", "factorio_training_lab"):
         payload = json.loads((ROOT / directory / "info.json").read_text(encoding="utf-8"))
         assert payload["factorio_version"] == "2.1"
+        assert "base >= 2.1.0" in payload["dependencies"]
 
 
 def test_training_fixtures_use_the_factorio_21_minable_guard() -> None:
@@ -30,7 +31,7 @@ def test_linux_worker_uses_isolated_direct_paths_without_windows_bridge() -> Non
     assert 'RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.21"' in source
     assert 'FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"' in source
     assert 'READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"' in source
-    assert 'write-data=$DATA_ROOT' in source
+    assert 'write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"' in source
     assert '"script_output": "$root/script-output"' in source
     assert 'wsl.exe' not in source
     assert '\\\\wsl$' not in source

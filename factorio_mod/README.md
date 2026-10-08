@@ -10,7 +10,7 @@ For the complete 19-command inventory, RCON/GameBridge usage, output directories
 - `control.lua`: Loads the modules that register the mod's console-command surface.
 
 ## Assumptions / Constraints
-- Targets **Factorio 2.0** (`factorio_version: 2.0`); uses the 2.0 API (`storage`, `helpers.*`, `event.entity`).
+- Targets **Factorio 2.1** (`factorio_version: 2.1`, `base >= 2.1.0`); the current runtime is **2.1.21**. Uses the 2.1 API (`storage`, `helpers.*`, `event.entity`, `minable_flag`).
 - Lua remains "dumb" and only exports raw state.
 - All persistent state lives in the engine-provided `storage` table.
 - Snapshot output is written via `helpers.write_file` to Factorio's `script-output` directory.
