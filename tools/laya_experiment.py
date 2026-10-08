@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT))
 from tools.run_laya_clean import RUN_INDEX  # noqa: E402
 from training.laya_mission import PHASES  # noqa: E402
 from training.laya_variants import load_variant  # noqa: E402
+from training.laya_acceptance import condition_counts  # noqa: E402
 
 GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 20
 RUNNER = [sys.executable, str(ROOT / "tools/run_laya_clean.py")]
@@ -134,7 +135,9 @@ def score(rows: list[dict], target: str | None) -> dict:
             "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
             # The deterministic predicate for the target, not the rate proxy (runs without it: not checked).
             "accepted": sum(bool(target) and target in r["summary"].get("accepted", []) for r in rows),
-            "acceptance_checked": sum("acceptance" in r["summary"] for r in rows),
+            "acceptance_checked": sum(r["summary"].get("acceptance", {}).get(target) in {"passed", "failed", "unknown"}
+                                      for r in rows),
+            "c1_observed": condition_counts(rows),
             "stops": dict(sorted({s: sum(r["summary"].get("stop") == s for r in rows)
                                   for s in {r["summary"].get("stop") for r in rows}}.items()))}
 

@@ -425,9 +425,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
     accept = getattr(session, "acceptance", None)
+    acceptance_samples = 0
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
+        nonlocal acceptance_samples
         if accept is None:
             return
         try:
@@ -437,7 +439,29 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["acceptance"] = statuses
         passed = [c for c, status in statuses.items() if status == "passed"]
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
-        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
+        details = getattr(session, "acceptance_details", None)
+        reference = None
+        if details is not None:
+            from training.laya_acceptance import summary_details
+            directory = journal.parent / "acceptance" / run_id
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{acceptance_samples:04d}.json"
+            acceptance_samples += 1
+            import json
+            with path.open("x", encoding="utf-8") as out:
+                json.dump({**details, "run_id": run_id, "at": event}, out, sort_keys=True)
+                out.write("\n")
+            reference = str(path.resolve())
+            summary["acceptance_details"] = summary_details(details, reference)
+            c1 = details["results"]["C1"]
+            checks = c1["evidence"]["checks"]
+            failed = [name for name, value in checks.items() if value is False]
+            unknown = [name for name, value in checks.items() if value is None]
+            emit(f"C1 CHECK [{event}]: current={c1['status']} failed={failed} unknown={unknown} evidence={reference}")
+        else:
+            summary.pop("acceptance_details", None)
+        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
+                          "details_path": reference})
     check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:

@@ -81,6 +81,35 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
 
 
+def test_acceptance_details_are_indexed_without_changing_operation_choices(tmp_path):
+    import json
+    from pathlib import Path
+    from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
+    from orchestrator.checkpoint_observer import StructuredObservation
+    from training.laya_acceptance import acceptance_packet
+    raw = {"tick": 120, "tick_end": 122, "base_valid": True}
+    obs = StructuredObservation(FactorySnapshot.from_mapping(raw), "fixture", "fixture", raw)
+
+    class DiagnosticSession(FakeSession):
+        def acceptance(self):
+            self.acceptance_details = acceptance_packet(obs, CheckpointEvaluator(), baseline=obs.snapshot,
+                                                       history=[], scope={"episode_id": "test"})
+            return self.acceptance_details["statuses"]
+
+    plain, diagnostic = FakeSession(), DiagnosticSession()
+    for name, s in (("plain", plain), ("diagnostic", diagnostic)):
+        (tmp_path / name).mkdir()
+        summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / name / "journal.jsonl", decisions=6,
+                      measure_ticks=600, seed=3, run_id=name, session=s)
+    assert plain.calls == diagnostic.calls
+    path = Path(summary["acceptance_details"]["path"])
+    saved = json.loads(path.read_text())
+    assert saved["at"] == "end" and saved["results"]["C1"]["status"] == "unknown"
+    assert summary["acceptance_details"]["results"]["C1"]["checks"]["stone_starter_ready"] is None
+    rows = [json.loads(line) for line in (tmp_path / "diagnostic/journal.jsonl").read_text().splitlines()]
+    assert all(Path(r["details_path"]).is_file() for r in rows if r.get("event") == "acceptance")
+
+
 def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():
     recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
                "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},

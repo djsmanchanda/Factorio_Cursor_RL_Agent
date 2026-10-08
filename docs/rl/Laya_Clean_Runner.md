@@ -88,6 +88,20 @@ predicate version, starting state and sustain window, and separate production,
 delivery and consumption. Do not compare proxy flags with deterministic
 checkpoint flags as though they were identical.
 
+The ops runner saves versioned acceptance samples under
+`evidence/acceptance/<run-id>/` at startup, proxy transitions, every ten
+decisions and termination. Each sample retains predicate versions, individual
+true/false/unknown checks, raw observed machine status/position/counters,
+starter evidence, the survey's start/end ticks, scope, mall targets and loan/
+reservation observations. Run summaries index the latest checks and sample
+path. Current checks remain separate from monotonic reached status: healthy
+stocked cells can idle after an earlier pass. These diagnostics preserve the
+existing pass criteria and policy weights; they do not establish sustained
+delivery or turn missing telemetry into failure. Machine surveys still cover
+recognized baseline recipes/layouts, so inspect raw saved-world evidence when
+their coverage is disputed. Detailed sampling adds read-only survey work in
+live game time.
+
 Replacement requires the same starting save/kit/research, mods, objective and
 budgets as the incumbent, shared milestone predicates, sustained service,
 completed `mining-productivity-4`, zero safety violations and held-out

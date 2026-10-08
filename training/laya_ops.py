@@ -167,19 +167,29 @@ class DeterministicSession:
         proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
         from orchestrator.checkpoint_milestones import CheckpointEvaluator
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
+        from training.laya_acceptance import acceptance_packet
+        self.acceptance_details = None  # A failed survey must not reuse an earlier snapshot.
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
         try:
-            snapshot = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
+            observed = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
                                                         reference_point=self.reference_point,
-                                                        bootstrap_profile=PROFILE).observe().snapshot
+                                                        bootstrap_profile=PROFILE).observe()
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
             return {"error": str(error)[:200]}
+        snapshot = observed.snapshot
         self._baseline = self._baseline or snapshot
         self._history = (self._history + [snapshot])[-20:]
-        return {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
-                                                          history=self._history).status.value
-                for m in self._evaluator.milestones}
+        packet = acceptance_packet(observed, self._evaluator, baseline=self._baseline, history=self._history,
+                                   scope={"episode_id": self.episode_id, "surface": SURFACE, "force": FORCE,
+                                          "server_root": str(self.script_output.parent), "bootstrap_profile": PROFILE})
+        try:
+            packet["tooling"] = self.tooling()
+        except Exception as error:
+            packet["tooling"] = {"error": f"{type(error).__name__}: {error}"[:200]}
+        packet["mall_targets"] = dict(getattr(self, "mall_targets", {}))
+        self.acceptance_details = packet
+        return packet["statuses"]
 
     def close(self) -> None:
         set_active_material_ledger(None)

@@ -382,6 +382,9 @@ class LiveCheckpointObservationAdapter:
                 "healthy": all(self._status_healthy(status) is True for status in status_values),
                 "producing": any(status == "working" for status in status_values),
                 "output_count": int(sum(counters.get(position, 0.0) for position in furnace_positions)),
+                "machines": [{"position": {"x": position[0], "y": position[1]},
+                              "status": statuses.get(position), "craft_count": counters.get(position)}
+                             for position in furnace_positions],
             }
 
         mall: list[dict[str, Any]] = []
@@ -408,6 +411,8 @@ class LiveCheckpointObservationAdapter:
                 status = statuses.get(position)
                 mall.append({
                     "recipe": recipe,
+                    "position": {"x": position[0], "y": position[1]},
+                    "status": status,
                     "working": None if status is None else status == "working",
                     "healthy": self._status_healthy(status),
                     "producing": None if status is None else status == "working",
@@ -481,6 +486,11 @@ class LiveCheckpointObservationAdapter:
             "providers": providers,
             "recipes": recipes,
         }
+        try:
+            snapshot["tick_end"] = live_base.game_tick(client)
+        except Exception as error:
+            raise ObservationUnsupported(f"checkpoint ending tick unavailable: {error}",
+                                         evidence={"survey": "game_tick_end"}) from error
         return _normalize(snapshot, source="live-rcon-structured")
 
 
