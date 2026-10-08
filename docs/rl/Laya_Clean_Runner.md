@@ -134,6 +134,14 @@ index is `data/laya-saved-world/laya-runs.jsonl`; the shared ledger is maintaine
 by `tools/run_ledger.py`. The helper is optional (`--no-helper` disables it).
 Read terminal evidence before a cached status board or experiment report.
 
+New disposable-world preparation optionally reads
+`data/laya-saved-world/admission-control.json` (`laya-admission-v1`, integer
+`limit` 0–40, and explicit experiment-directory `scopes`). A shared locked
+FIFO counts live worlds and in-flight startup reservations. Lowering its cap
+lets existing worlds finish and holds replacement preparations until capacity
+is available. It does not signal a server, change policy choices, or extend
+the campaign deadline. Record concurrency changes with the experiment evidence.
+
 Geometry supports hash-verified earned-C1 export/resume with
 `--export-checkpoint`/`--resume-bundle` and `training/laya_checkpoint.py`.
 This is not general restart recovery: the ops runner does not restore its

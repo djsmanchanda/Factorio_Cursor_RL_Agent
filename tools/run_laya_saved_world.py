@@ -41,6 +41,8 @@ def prepare(args):
         raise SavedWorldError("prepare requires a fresh root; existing test worlds are preserved")
     if source.is_relative_to(root):
         raise SavedWorldError("source save must be outside the disposable root")
+    from tools.laya_admission import wait_for_admission
+    wait_for_admission(root, ROOT / "data/laya-saved-world/admission-control.json")
     root.mkdir(parents=True)
     shutil.copy2(source, root / "baseline.zip")
     frozen = root / "frozen"

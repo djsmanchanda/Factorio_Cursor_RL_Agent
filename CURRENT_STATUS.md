@@ -332,3 +332,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: combined verified receipt/acceptance diagnostics with 2.1.21 compatibility in an isolated branch. Added an ops-only shared-checkpoint stopping window, validated 1–40 disjoint launch slots, stopped partially prepared worlds on failure, and atomically published generated variant catalogs. Policy weights and checkpoint definitions are unchanged.
 - Evidence: 95 focused runner/harness/variant/acceptance/runtime/observer checks pass. A private 2.1.21 three-decision smoke retained real C1/C2 conditions and ended on its decision budget with zero crashes. New accepted windows remain separate from earlier proxy-terminated cohorts.
 - Lifecycle: only new disposable runners use this source; no main checkout, real-server mod or production-runner change. The 30-to-40 campaign's immutable inputs and planned jobs will live under data/laya-experiments/next-20261008/.
+
+## [2026-10-08] Finish-first Laya concurrency admission
+- What: added an optional scoped FIFO admission gate to new disposable-world preparation. Live worlds and startup reservations share a configurable cap; active runs receive no signals. Waiting-process and parent identities release stale reservations, preserving queued work and existing policy/checkpoint behavior.
+- Evidence: 31 focused admission/saved-world/harness tests pass, including 40 -> 25 -> 24 draining, concurrent startup reservations, FIFO order, stale PID generations and ended preparation parents.
+- Lifecycle: no Factorio or controller restart; freshly spawned preparations load the gate. User-authorized live limit change is recorded separately under data/laya-experiments/next-20261008/.
