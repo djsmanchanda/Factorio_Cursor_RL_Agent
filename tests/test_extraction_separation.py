@@ -6,8 +6,8 @@ from __future__ import annotations
 import pytest
 
 from orchestrator import (
-    autonomous_builder, extraction_capacity, extraction_state, live_base,
-    resource_patches, stage_extraction,
+    autonomous_builder, demand_siting, extraction_capacity, extraction_state,
+    live_base, resource_patches, stage_extraction,
 )
 from orchestrator.extraction_state import (
     ExtractionEntity,
@@ -37,6 +37,16 @@ from planners.zoning_geometry import Rect
 def _disable_live_retirement(monkeypatch) -> None:
     monkeypatch.setattr(
         autonomous_builder, "retire_depleted_mines", lambda *_args, **_kwargs: 0,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_requesters(monkeypatch) -> None:
+    # These planner fakes pass no RCON client. With no requester asking for
+    # the item, demand falls back to the reference point, as it did before.
+    monkeypatch.setattr(
+        demand_siting, "demand_point",
+        lambda _client, _surface, _force, _item, fallback: fallback,
     )
 
 def _entities(plan: dict) -> list[str]:

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from orchestrator import extraction_capacity, extraction_state, live_base, resource_patches
+from orchestrator import demand_siting, extraction_capacity, extraction_state, live_base, resource_patches
 from orchestrator.work_state import WorkStateSignal
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.smelter_block import (
@@ -788,23 +788,27 @@ def smelter_search_anchors(
 
 def _refinery_site_score(
     ore_output: Point,
-    reference_point: Point,
+    demand_point: Point,
     feed: Point,
     output: Point,
 ) -> tuple[bool, bool, float, float, float]:
-    """Rank legal refinery interfaces by total belt cost, then demand access."""
+    """Rank legal refinery interfaces by total belt cost, then demand access.
+
+    ``demand_point`` is where the item is consumed on the live base (see
+    ``demand_siting.demand_point``), or the reference point when nothing asks.
+    """
     input_tiles = abs(feed[0] - ore_output[0]) + abs(feed[1] - ore_output[1])
     output_tiles = (
-        abs(output[0] - reference_point[0])
-        + abs(output[1] - reference_point[1])
+        abs(output[0] - demand_point[0])
+        + abs(output[1] - demand_point[1])
     )
     mine_to_output = (
         abs(output[0] - ore_output[0])
         + abs(output[1] - ore_output[1])
     )
     target_to_feed = (
-        abs(feed[0] - reference_point[0])
-        + abs(feed[1] - reference_point[1])
+        abs(feed[0] - demand_point[0])
+        + abs(feed[1] - demand_point[1])
     )
     return (
         input_tiles > mine_to_output,
@@ -1137,6 +1141,9 @@ def plan_local_extraction(
         default_bounds.max_x - default_bounds.min_x,
         default_bounds.max_y - default_bounds.min_y,
     )
+    demand = demand_siting.demand_point(
+        client, surface, force, recipe, reference_point,
+    )
     smelter_origin = owned_smelter_origin
     smelter_flow_direction = "east"
     smelter_vertical_mirror = owned_smelter_vertical_mirror
@@ -1220,7 +1227,7 @@ def plan_local_extraction(
                 candidate[1] + output_offset[1],
             )
             site_score = _refinery_site_score(
-                ore_output, reference_point, feed, output,
+                ore_output, demand, feed, output,
             )
             candidate_route_failure = route_failure(ore_output, feed)
             if candidate_route_failure is not None:
@@ -1251,6 +1258,18 @@ def plan_local_extraction(
         raise ValueError(
             f"No off-ore {recipe} site is available {route_description}; "
             f"last route rejection: {last_route_failure or 'no candidate was surveyed'}"
+        )
+    if observe is not None:
+        sited_output = (
+            smelter_origin[0] + geometries[smelter_vertical_mirror][2][0],
+            smelter_origin[1] + geometries[smelter_vertical_mirror][2][1],
+        )
+        observe(
+            f"DEMAND: {recipe} refinery output {sited_output} is "
+            f"{demand_siting.consumer_distance(sited_output, demand):.1f} "
+            f"tiles from demand {demand}"
+            + (f" (demand read failed, used reference point: {demand_siting.last_error})"
+               if demand_siting.last_error else "")
         )
     return LocalExtractionPlan(
         ore=ore,
