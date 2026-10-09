@@ -368,13 +368,36 @@ def _mine_entities(*, pending_drill: bool = False, pending_belt: bool = False):
 def test_direct_mine_classifier_requires_every_drill_and_belt_built() -> None:
     assert _classify_direct_mine(
         _mine_entities(), (0.0, 0.0)
-    ) == ResourceMine((18.5, 20.5), 2)
+    ) == ResourceMine((18.5, 20.5), 2, active_ghost_count=0)
     assert _classify_direct_mine(
         _mine_entities(pending_drill=True), (0.0, 0.0)
-    ) == ResourceMine((18.5, 20.5), 2, pending=True)
+    ) == ResourceMine(
+        (18.5, 20.5), 2, pending=True,
+        missing_components=("electric-mining-drill=1",),
+        ghost_components=("electric-mining-drill=1",), active_ghost_count=1,
+    )
     assert _classify_direct_mine(
         _mine_entities(pending_belt=True), (0.0, 0.0)
-    ) == ResourceMine((18.5, 20.5), 2, pending=True)
+    ) == ResourceMine(
+        (18.5, 20.5), 2, pending=True,
+        missing_components=("transport-belt=1",),
+        ghost_components=("transport-belt=1",), active_ghost_count=1,
+    )
+
+
+def test_direct_mine_classifier_reports_absent_belt_as_gap_not_ghost() -> None:
+    entities = [
+        entity for entity in _mine_entities()
+        if entity.kind != "belt" or entity.position != (13.5, 20.5)
+    ]
+
+    mine = _classify_direct_mine(entities, (0.0, 0.0))
+
+    assert mine is not None
+    assert mine.pending
+    assert mine.missing_components == ("transport-belt=1",)
+    assert mine.ghost_components == ()
+    assert mine.active_ghost_count == 0
 
 
 def test_direct_mine_classifier_recognizes_side_tapped_output() -> None:
@@ -387,7 +410,8 @@ def test_direct_mine_classifier_recognizes_side_tapped_output() -> None:
     ]
 
     assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
-        (7.5, 18.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
+        (7.5, 18.5), 2, active_ghost_count=0,
+        expansion_step=1, row_capacity=12, belt_y=20.5,
     )
 
 def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
@@ -398,7 +422,8 @@ def test_direct_mine_classifier_recognizes_belt_only_output() -> None:
     ]
 
     assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
-        (7.5, 20.5), 2, expansion_step=1, row_capacity=12, belt_y=20.5,
+        (7.5, 20.5), 2, active_ghost_count=0,
+        expansion_step=1, row_capacity=12, belt_y=20.5,
         first_column_x=11.5, haul_head=(16.5, 20.5), growth_direction=-1,
     )
 
@@ -443,7 +468,9 @@ def test_direct_mine_classifier_fails_closed_on_orphan_drill_ghost() -> None:
     entities = [ExtractionEntity("drill", (11.5, 18.5), False)]
 
     assert _classify_direct_mine(entities, (0.0, 0.0)) == ResourceMine(
-        (15.5, 20.5), 1, pending=True
+        (15.5, 20.5), 1, pending=True,
+        missing_components=("electric-mining-drill=1",),
+        ghost_components=("electric-mining-drill=1",), active_ghost_count=1,
     )
 
 
@@ -458,7 +485,7 @@ def test_extraction_state_reads_force_bonus_and_live_entity_records() -> None:
     assert extraction_state.mining_productivity_bonus(client, "player") == 0.4
     assert extraction_state.find_resource_mine(
         client, "nauvis", "player", "iron-ore", (0.0, 0.0)
-    ) == ResourceMine((18.5, 20.5), 2)
+    ) == ResourceMine((18.5, 20.5), 2, active_ghost_count=0)
     assert "mining_drill_productivity_bonus" in client.commands[0]
     assert "d.mining_target" in client.commands[1]
     assert "ghost_name=='electric-mining-drill'" in client.commands[1]
@@ -471,7 +498,11 @@ def test_extraction_state_reconciles_pending_direct_mine_records() -> None:
 
     assert extraction_state.find_resource_mine(
         client, "nauvis", "player", "iron-ore", (0.0, 0.0)
-    ) == ResourceMine((15.5, 20.5), 1, pending=True)
+    ) == ResourceMine(
+        (15.5, 20.5), 1, pending=True,
+        missing_components=("electric-mining-drill=1",),
+        ghost_components=("electric-mining-drill=1",), active_ghost_count=1,
+    )
 
 
 def test_starter_drill_is_not_classified_as_a_persistent_mine() -> None:
@@ -756,6 +787,46 @@ def test_pending_existing_coal_mine_is_a_construction_wait_not_a_stuck_run(
     assert any("still constructing" in message for message in messages)
     # The wait names why the mine's ghosts are not reviving.
     assert any("out_of_construction_range=3" in message for message in messages)
+
+
+def test_incomplete_coal_mine_without_component_ghosts_fails_with_observed_gap(
+    monkeypatch,
+) -> None:
+    from orchestrator import stage_chemical
+    from orchestrator.work_state import WorkStateSignal
+    from types import SimpleNamespace
+
+    messages = []
+    pending = SimpleNamespace(
+        output=(24.5, -49.5), drill_count=1, pending=True, expansion_step=1,
+        missing_components=("electric-mining-drill=1", "transport-belt=2"),
+        ghost_components=(),
+    )
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a: 0)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine", lambda *_a: pending,
+    )
+    monkeypatch.setattr(stage_chemical.live_base, "ghost_blockages", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        stage_chemical, "_submit",
+        lambda *_a, **_k: pytest.fail("an unowned structural gap must not be duplicated"),
+    )
+
+    with pytest.raises(WorkStateSignal) as raised:
+        stage_chemical.ensure_coal_mine(
+            object(), object(), "nauvis", "player", (-237.0, -91.0),
+            lambda *_a, **_k: None, messages.append,
+        )
+
+    assert raised.value.state == "failed"
+    assert raised.value.code == "incomplete_system_missing_ghosts"
+    assert raised.value.classification == "bug"
+    assert raised.value.details["missing_components"] == [
+        "electric-mining-drill=1", "transport-belt=2",
+    ]
+    assert raised.value.details["coverage_status"] == "unknown"
+    assert raised.value.details["material_status"] == "unknown"
+    assert any("no active component ghosts" in message for message in messages)
 
 
 def test_planner_translates_checked_bounds_to_the_exact_line_origin(

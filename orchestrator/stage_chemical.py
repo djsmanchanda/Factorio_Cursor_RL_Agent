@@ -531,16 +531,56 @@ def ensure_coal_mine(
             # Why its ghosts are not reviving (coverage, bots, material,
             # collision), so a long wait names its cause in the log.
             x, y = existing.output
+            ghost_records = None
             try:
+                ghost_records = live_base.ghost_blockages(
+                    client, surface, force, ((x - 24, y - 24), (x + 24, y + 24)),
+                )
                 reasons = Counter(
                     str(ghost.get("reason", "pending"))
-                    for ghost in live_base.ghost_blockages(
-                        client, surface, force, ((x - 24, y - 24), (x + 24, y + 24)),
-                    )
+                    for ghost in ghost_records
                 )
                 ghosts = ", ".join(f"{r}={n}" for r, n in reasons.most_common(4)) or "none"
             except Exception as error:  # Diagnostic only; never blocks the wait.
                 ghosts = f"unknown ({type(error).__name__})"
+            component_ghost_count = getattr(existing, "active_ghost_count", None)
+            if component_ghost_count is None:
+                # Compatibility for callers and tests that supply older
+                # ResourceMine records: preserve the wait if the probe failed.
+                component_ghost_count = (
+                    len(ghost_records) if ghost_records is not None else 1
+                )
+            observed_nearby_count = (
+                len(ghost_records) if ghost_records is not None else None
+            )
+            missing_components = list(
+                getattr(existing, "missing_components", ())
+            )
+            component_ghosts = list(getattr(existing, "ghost_components", ()))
+            if component_ghost_count == 0:
+                detail = ", ".join(missing_components) or "component details unavailable"
+                emit(
+                    f"  COAL DISTRICT: existing mine at {existing.output} has missing "
+                    f"postconditions ({detail}) but no active component ghosts; "
+                    "coverage and material status unknown, not an in-flight build"
+                )
+                from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+                raise ProductionPrerequisiteDeferred(
+                    f"existing coal mine at {existing.output} has missing components "
+                    "without active construction ghosts; refusing to duplicate it",
+                    code="incomplete_system_missing_ghosts",
+                    classification="bug",
+                    state="failed",
+                    details={
+                        "output": list(existing.output),
+                        "missing_components": missing_components,
+                        "component_ghosts": component_ghosts,
+                        "nearby_ghost_count": observed_nearby_count,
+                        "coverage_status": "unknown",
+                        "material_status": "unknown",
+                    },
+                )
             emit(
                 f"  COAL DISTRICT: existing coal mine at {existing.output} is still "
                 f"constructing (drills={existing.drill_count}, "
@@ -553,7 +593,12 @@ def ensure_coal_mine(
                 code="pending_system_construction",
                 classification="intended_difficulty",
                 state="constructing",
-                details={"output": list(existing.output)},
+                details={
+                    "output": list(existing.output),
+                    "missing_components": missing_components,
+                    "component_ghosts": component_ghosts,
+                    "nearby_ghost_count": observed_nearby_count,
+                },
             )
         source = _coal_belt_source(client, surface, existing)
         if prefer_nearest_patch:

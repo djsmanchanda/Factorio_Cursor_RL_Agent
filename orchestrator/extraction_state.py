@@ -34,6 +34,11 @@ class ResourceMine:
     first_column_x: float | None = None
     haul_head: Point | None = None
     growth_direction: int = 1
+    # Missing components are observed postconditions for the recognizable
+    # mine footprint; active ghosts distinguish construction from a gap.
+    missing_components: tuple[str, ...] = ()
+    ghost_components: tuple[str, ...] = ()
+    active_ghost_count: int | None = None
 
     @property
     def shared_belt_y(self) -> float:
@@ -45,6 +50,33 @@ class ExtractionEntity:
     kind: str
     position: Point
     built: bool
+
+
+_COMPONENT_NAMES = {
+    "drill": "electric-mining-drill",
+    "belt": "transport-belt",
+    "chest": "chest",
+    "inserter": "inserter",
+}
+
+
+def _component_gaps(
+    requirements: dict[str, set[Point]],
+    observed: dict[str, dict[Point, bool]],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Summarize known absent postconditions and observed component ghosts."""
+    missing: list[str] = []
+    ghosts: list[str] = []
+    for kind, positions in requirements.items():
+        states = observed.get(kind, {})
+        absent = sum(position not in states or not states[position] for position in positions)
+        ghost_count = sum(position in states and not states[position] for position in positions)
+        name = _COMPONENT_NAMES[kind]
+        if absent:
+            missing.append(f"{name}={absent}")
+        if ghost_count:
+            ghosts.append(f"{name}={ghost_count}")
+    return tuple(missing), tuple(ghosts)
 
 
 def mining_productivity_bonus(
@@ -160,12 +192,21 @@ def _classify_direct_mines(
                     and all(row.values())
                     and all(belts.get(position, False) for position in belt_positions)
                 )
+                requirements = {
+                    "chest": {chest}, "inserter": {inserter},
+                    "drill": set(row), "belt": belt_positions,
+                }
+                missing, ghosts = _component_gaps(requirements, by_kind)
                 row_capacity = (
                     expected_count + RESERVED_PAIR_COLUMNS
                     if expansion_step > 0 else 0
                 )
                 mine = ResourceMine(
                     chest, expected_count, pending=not complete,
+                    missing_components=missing, ghost_components=ghosts,
+                    active_ghost_count=sum(
+                        int(value.split("=")[1]) for value in ghosts
+                    ),
                     expansion_step=expansion_step, row_capacity=row_capacity,
                     belt_y=belt_y if side_tap else None,
                 )
@@ -210,8 +251,14 @@ def _classify_direct_mines(
                 all(row_drills.values())
                 and all(belts.get(position, False) for position in required_belts)
             )
+            requirements = {"drill": set(row_drills), "belt": set(required_belts)}
+            missing, ghosts = _component_gaps(requirements, by_kind)
             mine = ResourceMine(
                 (output_x, belt_y), len(drill_xs), pending=not complete,
+                missing_components=missing, ghost_components=ghosts,
+                active_ghost_count=sum(
+                    int(value.split("=")[1]) for value in ghosts
+                ),
                 expansion_step=1,
                 row_capacity=len(drill_xs) + RESERVED_PAIR_COLUMNS,
                 belt_y=belt_y, first_column_x=min(drill_xs),
@@ -227,7 +274,12 @@ def _classify_direct_mines(
             pending_drills,
             key=lambda p: (p[0] - near[0]) ** 2 + (p[1] - near[1]) ** 2,
         )
-        return [ResourceMine((drill[0] + 4, drill[1] + 2), 1, pending=True)]
+        missing, ghosts = _component_gaps({"drill": {drill}}, by_kind)
+        return [ResourceMine(
+            (drill[0] + 4, drill[1] + 2), 1, pending=True,
+            missing_components=missing, ghost_components=ghosts,
+            active_ghost_count=sum(int(value.split("=")[1]) for value in ghosts),
+        )]
     return []
 
 def _classify_direct_mine(
