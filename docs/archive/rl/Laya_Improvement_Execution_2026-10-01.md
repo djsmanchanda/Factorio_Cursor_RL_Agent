@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Improvement_Execution_2026-10-01.md | Purpose: Record bounded training and verified bottleneck observations without claiming model promotion. -->
+<!-- Path: docs/archive/rl/Laya_Improvement_Execution_2026-10-01.md | Purpose: Record bounded training and verified bottleneck observations without claiming model promotion. -->
 
 # Laya improvement implementation — October 1
 

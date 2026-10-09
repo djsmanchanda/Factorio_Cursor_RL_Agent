@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Regression_Repair_2026-10-01.md | Purpose: Record overnight regression evidence, verified safeguards and remaining policy work. -->
+<!-- Path: docs/archive/rl/Laya_Regression_Repair_2026-10-01.md | Purpose: Record overnight regression evidence, verified safeguards and remaining policy work. -->
 
 # Overnight regression diagnosis and safeguards
 

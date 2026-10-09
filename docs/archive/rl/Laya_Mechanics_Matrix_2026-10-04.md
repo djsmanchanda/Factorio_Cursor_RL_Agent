@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Mechanics_Matrix_2026-10-04.md | Purpose: Follow-on six-family experiment queue, explicit interventions, observer cadence and isolation. -->
+<!-- Path: docs/archive/rl/Laya_Mechanics_Matrix_2026-10-04.md | Purpose: Follow-on six-family experiment queue, explicit interventions, observer cadence and isolation. -->
 
 # Laya mechanics and context matrix
 

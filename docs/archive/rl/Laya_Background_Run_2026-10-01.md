@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Background_Run_2026-10-01.md | Purpose: Record the authorized five-hour corrected-sampler training run and shutdown boundary. -->
+<!-- Path: docs/archive/rl/Laya_Background_Run_2026-10-01.md | Purpose: Record the authorized five-hour corrected-sampler training run and shutdown boundary. -->
 
 # Corrected-sampler background run
 

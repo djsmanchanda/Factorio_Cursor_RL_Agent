@@ -1,4 +1,4 @@
-<!-- Path: docs/deterministic/layout_recovery_audit_2026-09-12.md | Purpose: Record bounded recovery changes and remaining deterministic layout assumptions. -->
+<!-- Path: docs/archive/deterministic/layout_recovery_audit_2026-09-12.md | Purpose: Record bounded recovery changes and remaining deterministic layout assumptions. -->
 
 # Recovery and layout audit
 

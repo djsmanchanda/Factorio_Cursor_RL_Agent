@@ -604,7 +604,7 @@ return to mall scheduling. Its exact plan and episode identity persist before
 submission and reconcile after restart. It retires through bots only after
 solar/storage independently satisfy the night target. This new steam workflow
 has offline geometry/restart tests, not live construction acceptance.
-Factorio 2.1.17 energy rate values are J/tick: both prototype and interface rates
+Factorio 2.1 energy rate values are J/tick: both prototype and interface rates
 convert to kW with `value * 60 / 1000`. The 10 MW seed reports 166666.67 J/tick.
 Steam uses measured consumption rather than all roboports' maximum charging draw.
 After advanced circuits are live, power expansion uses the full 1:1

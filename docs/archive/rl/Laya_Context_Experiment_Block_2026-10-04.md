@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Context_Experiment_Block_2026-10-04.md | Purpose: Frozen eight-hour context, bootstrap and connected production experiments with a dedicated Muse observer. -->
+<!-- Path: docs/archive/rl/Laya_Context_Experiment_Block_2026-10-04.md | Purpose: Frozen eight-hour context, bootstrap and connected production experiments with a dedicated Muse observer. -->
 
 # Context and connected production experiment block
 

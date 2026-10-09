@@ -1,4 +1,4 @@
-<!-- Path: docs/deterministic/campaign_review_2026-09-11.md | Purpose: Audit the twelve-hour campaign and define a more discriminating experiment cycle. -->
+<!-- Path: docs/archive/deterministic/campaign_review_2026-09-11.md | Purpose: Audit the twelve-hour campaign and define a more discriminating experiment cycle. -->
 
 # Campaign review — 2026-09-11
 

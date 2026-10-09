@@ -1,4 +1,4 @@
-<!-- Path: docs/deterministic/plastic_blocker_review_2026-09-11.md | Purpose: Explain the repeated pre-plastic dependency stall and its acceptance test. -->
+<!-- Path: docs/archive/deterministic/plastic_blocker_review_2026-09-11.md | Purpose: Explain the repeated pre-plastic dependency stall and its acceptance test. -->
 
 # Plastic progression: completed loans stranded upstream capacity
 

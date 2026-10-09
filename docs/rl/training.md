@@ -130,7 +130,7 @@ Fresh train/calibration coverage is required before fine-tuning; an old case
 window cannot substitute for corrected measurements. Standalone ETL and
 features commands accept the same optional filter. Deployment and two live
 starting-state counterfactuals are recorded in
-`Laya_Regression_Repair_2026-10-01.md`. Deploy/reload the lab on the remaining
+`../archive/rl/Laya_Regression_Repair_2026-10-01.md`. Deploy/reload the lab on the remaining
 stopped fleet before collecting the next run, and use fresh matched baselines.
 
 `LAYA_FINAL_RESERVE_SECONDS` reserves time before the driver stops collecting
@@ -184,7 +184,7 @@ steady-state interval for buffering artefacts, and retain earlier-level
 regression cohorts. Narrow or extend the demand range from those measurements.
 
 The September 30 deployment and capacity checks are recorded in
-`Laya_Level3_Live_Verification_2026-09-30.md`: the scripted rollout completed
+`../archive/rl/Laya_Level3_Live_Verification_2026-09-30.md`: the scripted rollout completed
 32/32 validation seeds, and paired 25-minute measurements confirmed that a
 second furnace roughly doubles average belt delivery across all four tier
 combinations. Individual short delivery windows remain bursty.
@@ -213,7 +213,7 @@ metadata rejects health inputs by default; explicit offline diagnosis uses
 `tools/evaluate_laya.py --allow-unrecorded-input-profile` and cannot establish
 shadow eligibility. Frozen weights/metadata remain unchanged. New training
 records only positively weighted, retained profiles and requires matching
-calibration coverage. See `Laya_Regression_Repair_2026-10-01.md` for the paired
+calibration coverage. See `../archive/rl/Laya_Regression_Repair_2026-10-01.md` for the paired
 input replay and the unresolved newer-model wait behavior.
 
 One accepted features teacher is reused across levels. New overnight drivers
@@ -243,7 +243,7 @@ observation version, so different input profiles cannot compare silently.
 The four-seed worker-05 probe completed 4/4; all 120 decisions fit the real
 2,048-token tokenizer (maximum 1,932), and two counterfactual prefixes exported
 health-bearing cases. Full evidence is in
-`Laya_Improvement_Execution_2026-10-01.md`. The first report-schema rejection
+`../archive/rl/Laya_Improvement_Execution_2026-10-01.md`. The first report-schema rejection
 is retained. Only worker 05 received this mod during verification; deploy and
 restart the stopped fleet plus its consumers before collecting the next
 health-aware training cohort. The bounded run frozen at `2db0ee6` continues
@@ -282,7 +282,7 @@ survivors and completed joint service at 7,800 ticks. This establishes a repair
 primitive; it does not establish learned repair behavior. Seeded fault events
 for counterfactual training, persistent active-layout provenance for upgrades,
 transport/configuration repairs and finite capital accounting remain required.
-See `Laya_Improvement_Execution_2026-10-01.md` for the evidence and limitations.
+See `../archive/rl/Laya_Improvement_Execution_2026-10-01.md` for the evidence and limitations.
 Python consumers need a restart to offer the new choices. The bounded experiment
 continues with its frozen earlier menu.
 

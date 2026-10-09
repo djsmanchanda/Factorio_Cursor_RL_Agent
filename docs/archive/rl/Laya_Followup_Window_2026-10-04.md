@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Followup_Window_2026-10-04.md | Purpose: Pin the authorized eight-hour continuation, isolated follow-up screens and evidence limits. -->
+<!-- Path: docs/archive/rl/Laya_Followup_Window_2026-10-04.md | Purpose: Pin the authorized eight-hour continuation, isolated follow-up screens and evidence limits. -->
 
 # Eight-hour experiment continuation
 

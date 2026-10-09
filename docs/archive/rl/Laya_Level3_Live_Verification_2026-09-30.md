@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Level3_Live_Verification_2026-09-30.md | Purpose: Record deployed L3 mechanics, paired capacity measurements, remaining limitations and next-run configuration. -->
+<!-- Path: docs/archive/rl/Laya_Level3_Live_Verification_2026-09-30.md | Purpose: Record deployed L3 mechanics, paired capacity measurements, remaining limitations and next-run configuration. -->
 
 # Level 3 live verification — 2026-09-30 → 2026-10-01
 

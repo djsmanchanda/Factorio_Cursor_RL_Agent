@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Smelting_Array_Test_2026-10-04.md | Purpose: Reproducible, isolated belt-only smelting mechanics evidence and every observed failure. -->
+<!-- Path: docs/archive/rl/Laya_Smelting_Array_Test_2026-10-04.md | Purpose: Reproducible, isolated belt-only smelting mechanics evidence and every observed failure. -->
 
 # Four express belts of ore to four express belts of plates
 

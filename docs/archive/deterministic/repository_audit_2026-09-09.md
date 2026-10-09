@@ -1,4 +1,4 @@
-<!-- Path: docs/deterministic/repository_audit_2026-09-09.md | Purpose: Evidence-led expansion and repository-maintenance audit. -->
+<!-- Path: docs/archive/deterministic/repository_audit_2026-09-09.md | Purpose: Evidence-led expansion and repository-maintenance audit. -->
 
 # Expansion and repository audit — 2026-09-09
 

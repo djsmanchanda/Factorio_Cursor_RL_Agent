@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Optimization_OC.md | Purpose: Kernel-level optimization handoff for Laya training on the RTX 4060 Laptop / i9-13900H. -->
+<!-- Path: docs/archive/rl/Laya_Optimization_OC.md | Purpose: Kernel-level optimization handoff for Laya training on the RTX 4060 Laptop / i9-13900H. -->
 # Laya Training Optimization Handoff (RTX 4060 Laptop / i9-13900H)
 
 Audience: the implementation agent that will change `training/laya_finetune.py`,

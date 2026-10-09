@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Day_Queue_2026-10-02.md | Purpose: Record the user's 14:00 extension and the bounded follow-up learning/evaluation queue. -->
+<!-- Path: docs/archive/rl/Laya_Day_Queue_2026-10-02.md | Purpose: Record the user's 14:00 extension and the bounded follow-up learning/evaluation queue. -->
 
 # Daytime learning queue, October 2
 

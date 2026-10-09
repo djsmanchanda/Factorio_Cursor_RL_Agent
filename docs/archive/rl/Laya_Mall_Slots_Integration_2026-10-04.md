@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Mall_Slots_Integration_2026-10-04.md | Purpose: Verify restored experiment hooks, record the mall-slot handoff and pin a guarded between-campaign mod deployment. -->
+<!-- Path: docs/archive/rl/Laya_Mall_Slots_Integration_2026-10-04.md | Purpose: Verify restored experiment hooks, record the mall-slot handoff and pin a guarded between-campaign mod deployment. -->
 
 # Mall-slot integration and deployment coordination
 

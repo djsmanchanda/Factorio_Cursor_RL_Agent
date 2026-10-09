@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_Background_Run_2026-10-03.md | Purpose: Record the authorized eight-hour lab training/evaluation window and shutdown boundary. -->
+<!-- Path: docs/archive/rl/Laya_Background_Run_2026-10-03.md | Purpose: Record the authorized eight-hour lab training/evaluation window and shutdown boundary. -->
 
 # Eight-hour Laya generalization run
 
@@ -102,3 +102,33 @@ ends with the job. The console and worker 14 remain independently managed.
 Lifecycle: new frozen Python consumers and the allocated disposable workers are
 active. No real-base/GUI restart or model promotion is performed. Inspect final
 artifacts after completion; do not infer success from service uptime.
+
+
+## Completed results — October 3, 09:35 IST
+
+The supervisor completed every queued stage and exited successfully at 09:35
+IST, ahead of the 11:58 maximum deadline. All twelve allocated workers are
+stopped, the GPU is idle, and no successor was launched. The source save hash
+is unchanged. Cleanup is recorded in `cleanup.json`.
+
+Ten new rounds (22–31) produced 5,246 measured labels and 4,736 usable cases.
+The final 12-round dataset contains 4,324 train / 480 calibration / 432 held-out /
+523 test cases. Two epochs completed in about 60 minutes, with 542 optimizer
+updates; offline held-out evaluation is ready. Checkpoint:
+`data/laya-checkpoints/laya-background-20261003-generalization-r31-final`.
+
+Independent seeds 65001–65032, 32 per level, preserve matched completion and
+have zero runtime errors/safety violations:
+
+| Level | Rollout / challenger completion | Rollout mean cost | Prior student mean cost | Challenger mean cost | Challenger vs rollout |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | 32/32 / 32/32 | 6,515 | 6,634.69 | 6,464.69 | -0.77% |
+| 2 | 26/32 / 26/32 | 14,360.63 | 14,908.28 | 14,789.22 | +2.98% |
+| 3 | 32/32 / 32/32 | 11,730 | 11,782.81 | 11,412.03 | -2.71% |
+
+The challenger improves mean cost over the preserved r21-final reference on
+all levels (2.56%, 0.80%, 3.15%), but level 2 remains worse than scripted rollout.
+No features teacher passed its global gate; collection stayed scripted. No
+promotion or saved-world/mall gameplay is established. Full paired reports are
+in `status.json` and `independent-compare-L*.log`. Lifecycle: do nothing; the
+owned run and workers have finished, with console/worker 14 separate.

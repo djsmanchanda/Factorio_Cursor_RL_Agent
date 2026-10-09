@@ -1,4 +1,4 @@
-<!-- Path: docs/deterministic/circuit_starvation_review_2026-09-12.md | Purpose: Preserve the causal evidence and acceptance criteria for the circuit-loan starvation fix. -->
+<!-- Path: docs/archive/deterministic/circuit_starvation_review_2026-09-12.md | Purpose: Preserve the causal evidence and acceptance criteria for the circuit-loan starvation fix. -->
 
 # Circuit-loan scheduling starvation
 

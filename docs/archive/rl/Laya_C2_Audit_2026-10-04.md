@@ -1,4 +1,4 @@
-<!-- Path: docs/rl/Laya_C2_Audit_2026-10-04.md | Purpose: Record the C2 failure audit, reusable line-action fixes and isolated matched rechecks. -->
+<!-- Path: docs/archive/rl/Laya_C2_Audit_2026-10-04.md | Purpose: Record the C2 failure audit, reusable line-action fixes and isolated matched rechecks. -->
 
 # C2 line action audit
 
