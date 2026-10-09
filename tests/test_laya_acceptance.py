@@ -51,6 +51,32 @@ def test_stocked_idle_cells_do_not_retract_reach_or_fabricate_current_pass():
     summary = summary_details(later, "/fixture/sample.json")
     assert summary["tick"] == 200 and summary["tick_end"] == 202
     assert summary["results"]["C1"]["checks"] == result["evidence"]["checks"]
+    assert summary["results"]["C1"]["working_mall_count"] == 0
+
+
+def test_retired_c1_v1_is_reported_beside_the_active_c1_v2():
+    # Two cells run, two sit idle on full output: c1-v2 counts four, c1-v1 counts two.
+    raw = {"tick": 100, "tick_end": 102, "base_valid": True,
+           "starters": {n: {"present": True, "healthy": True, "producing": True, "output_count": 8}
+                        for n in ("iron", "copper", "stone")},
+           "mall_assemblers": [
+               {"recipe": r, "working": i < 2, "healthy": True, "producing": i < 2,
+                "craft_count": 7, "status": "working" if i < 2 else "full_output", "position": {"x": i, "y": 0}}
+               for i, r in enumerate(("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt"))]}
+    obs = StructuredObservation(FactorySnapshot.from_mapping(raw), "2026-10-08T00:00:00Z", "fixture", raw)
+    exported = packet(obs)
+
+    active = exported["results"]["C1"]
+    assert active["predicate_version"] == "c1-v2" and active["status"] == "passed"
+    assert active["evidence"]["working_mall_count"] == 4
+    compact = summary_details(exported, "/fixture/sample.json")
+    assert compact["results"]["C1"]["working_mall_count"] == 4
+    legacy = exported["predicate_comparisons"]["C1"]["c1-v1"]
+    assert legacy["predicate_version"] == "c1-v1" and legacy["status"] == "failed"
+    assert legacy["evidence"]["working_mall_count"] == 2
+    assert legacy["evidence"]["checks"]["at_least_four_working_mall_assemblers"] is False
+    # The active milestone list is unchanged: only c1-v2 is registered.
+    assert all(d.predicate_version != "c1-v1" for d in CheckpointEvaluator().milestones if d.checkpoint_id == "C1")
 
 
 def test_missing_evidence_is_null_and_unknown_not_a_missing_factory():

@@ -19,6 +19,11 @@
         "missing": {"type": "array", "items": {"type": "string"}}
       }
     }},
-    "tooling": {"type": "object"}, "mall_targets": {"type": "object"}
+    "tooling": {"type": "object"}, "mall_targets": {"type": "object"},
+    "predicate_comparisons": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {
+      "type": "object", "required": ["checkpoint_id", "predicate_version", "status", "evidence", "missing"],
+      "properties": {"checkpoint_id": {"type": "string"}, "predicate_version": {"type": "string"},
+                     "status": {"enum": ["passed", "failed", "unknown"]}, "evidence": {"type": "object"},
+                     "missing": {"type": "array", "items": {"type": "string"}}}}}}
   }
 }

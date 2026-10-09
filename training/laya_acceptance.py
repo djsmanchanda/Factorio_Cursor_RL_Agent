@@ -10,7 +10,8 @@ VERSION = "laya-acceptance-v1"
 
 def acceptance_packet(observation, evaluator, *, baseline, history, scope):
     """Pure export of existing predicates; no new success or scheduling rule."""
-    statuses, results = {}, {}
+    from orchestrator.checkpoint_milestones import comparable_milestones
+    statuses, results, comparisons = {}, {}, {}
     for definition in evaluator.milestones:
         latched = evaluator.evaluate(definition.checkpoint_id, observation.snapshot,
                                      baseline=baseline, history=history)
@@ -19,10 +20,14 @@ def acceptance_packet(observation, evaluator, *, baseline, history, scope):
         current = definition.evaluate(observation.snapshot, baseline, history)
         statuses[definition.checkpoint_id] = latched.status.value
         results[definition.checkpoint_id] = {**current.as_mapping(), "latched_status": latched.status.value}
+        # Retired versions (e.g. c1-v1) are re-evaluated on the same snapshot next to the active one.
+        for alternate in comparable_milestones(definition.checkpoint_id, definition.predicate_version):
+            comparisons.setdefault(definition.checkpoint_id, {})[alternate.predicate_version] = \
+                alternate.evaluate(observation.snapshot, baseline, history).as_mapping()
     return {"version": VERSION, "scope": dict(scope), "observation": copy.deepcopy(observation.as_mapping()),
             "machine_counter_units": {"kind": "scaled_machine_progress", "completed_craft_scale": 1000,
                                       "note": "machine_health combines completed crafts * 1000 with fractional progress; these are not item delivery counts"},
-            "statuses": statuses, "results": results}
+            "statuses": statuses, "results": results, "predicate_comparisons": comparisons}
 
 
 def summary_details(packet, path):
@@ -32,8 +37,15 @@ def summary_details(packet, path):
             "tick_end": snapshot.get("tick_end"), "results": {
                 key: {"predicate_version": value["predicate_version"], "status": value["status"],
                       "latched_status": value["latched_status"], "checks": value["evidence"].get("checks", {}),
-                      "missing": value["missing"]}
-                for key, value in packet["results"].items()}}
+                      "missing": value["missing"],
+                      "working_mall_count": value["evidence"].get("working_mall_count")}
+                for key, value in packet["results"].items()},
+            "predicate_comparisons": {
+                checkpoint: {version: {"predicate_version": value["predicate_version"], "status": value["status"],
+                                       "checks": value["evidence"].get("checks", {}),
+                                       "evidence": {k: v for k, v in value["evidence"].items() if k != "checks"}}
+                             for version, value in versions.items()}
+                for checkpoint, versions in packet.get("predicate_comparisons", {}).items()}}
 
 
 def condition_counts(rows, checkpoint="C1"):

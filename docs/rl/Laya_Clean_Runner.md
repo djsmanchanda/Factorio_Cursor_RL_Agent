@@ -168,6 +168,26 @@ index is `data/laya-saved-world/laya-runs.jsonl`; the shared ledger is maintaine
 by `tools/run_ledger.py`. The helper is optional (`--no-helper` disables it).
 Read terminal evidence before a cached status board or experiment report.
 
+### Helper evidence packet
+
+`tools/laya_helper_agent.py` builds one bounded packet per run with exact
+`run_id`/revision/root identity, the versioned acceptance status vector (per
+checkpoint `predicate_version`, `current`, `latched`, `accepted`, `missing`),
+retired-predicate comparisons such as `c1-v1` beside the active `c1-v2`, and
+`wall_seconds` separated from `game_seconds`. `accepted` is the monotonic
+predicate pass; it is not a rate proxy and must not be reported as one. The
+prompt states these rules explicitly so the model cannot reinterpret an accepted
+checkpoint as a proxy or read game time as wall time.
+
+The caller may supply explicit comparator run records (the paired prior run,
+including roots outside this repository's isolated index) through the packet API
+or `--comparators <records.json>`; `previous_run` selects from those plus the
+local index, and provided roots are listed verbatim so an archived deterministic
+reference is never silently substituted for the actual prior pair. The helper
+writes `helper-state.json` (`running`/`complete`/`failed`, with report,
+comparators and error) under `~/.local/share/factorio-rl/laya_helper/<run-id>/`
+and appends one completion or failure line to the runner log.
+
 New disposable-world preparation optionally reads
 `data/laya-saved-world/admission-control.json` (`laya-admission-v1`, integer
 `limit` 0–40, and explicit experiment-directory `scopes`). A shared locked
@@ -199,3 +219,8 @@ Next reusable work: truthful receipts/economic facts, the partial-foundation
 steel cycle, explicit loan alternatives, faithful measured labels and a
 compatible learned policy; then missing goal actions and matched acceptance.
 Coordinate shared mall/adapter files through their latest ownership handoff.
+
+Campaign helpers accept explicit `--config`, `--report-root`, `--data-root`, and
+`--comparators` JSON records, so findings and state stay outside frozen code.
+Muse tool permissions deny shell and delegation and permit edits only to its
+findings path. The wrapper writes the evidence packet and lifecycle records.

@@ -419,6 +419,16 @@ def _c1_v2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history
 C1_V1 = MilestoneDefinition("C1", "starter_mall", "c1-v1", _c1_v1)
 C1_V2 = MilestoneDefinition("C1", "starter_mall", "c1-v2", _c1_v2)
 
+# Retired predicate versions kept beside the active one for historical comparison.
+# DEFAULT_MILESTONES keeps only the active version, so these never change acceptance.
+COMPARABLE_MILESTONES: tuple[MilestoneDefinition, ...] = (C1_V1,)
+
+
+def comparable_milestones(checkpoint_id: str, active_version: str) -> tuple[MilestoneDefinition, ...]:
+    """Retired definitions for one checkpoint, excluding the active predicate version."""
+    return tuple(definition for definition in COMPARABLE_MILESTONES
+                 if definition.checkpoint_id == checkpoint_id and definition.predicate_version != active_version)
+
 
 def _foundation_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
     foundation = snapshot.foundations.get(name)
