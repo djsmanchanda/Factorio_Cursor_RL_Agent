@@ -276,6 +276,8 @@ def test_muse_permissions_allow_only_its_findings_file(tmp_path, monkeypatch):
     config = {'model': 'opencode-go/muse-spark-1.3-contributor', 'variant': 'xhigh', 'report_path': str(report)}
     helper._ask(config, work, 'Read the packet and write findings', None, 'readonly', 'continue')
     permissions = json.loads(seen['env']['OPENCODE_CONFIG_CONTENT'])['permission']
+    assert permissions['*'] == 'deny'
+    assert permissions['read'] == 'allow'
     assert permissions['bash'] == 'deny' and permissions['task'] == 'deny'
     assert permissions['edit']['*'] == 'deny'
     assert permissions['edit'][str(report)] == 'allow'

@@ -379,6 +379,7 @@ def _ask(config: dict, work: Path, message: str, session: str | None, title: str
         report = str(Path(config["report_path"]).resolve())
         env = dict(os.environ)
         env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": {
+            "*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
             "bash": "deny", "task": "deny", "external_directory": "allow",
             "edit": {"*": "deny", report: "allow"},
             "write": {"*": "deny", report: "allow"},
