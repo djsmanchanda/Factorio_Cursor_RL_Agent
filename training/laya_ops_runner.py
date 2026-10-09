@@ -100,13 +100,17 @@ def pending_retirements(results: list[dict], districts: Mapping | None = None) -
     return pending
 
 
-def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tuple]:
+def unchanged_failures(results: list[dict], stock: Mapping[str, int],
+                       allocation: Mapping[str, tuple] | None = None) -> set[tuple]:
     """(operation, parameter) whose latest attempt was short of materials none of which has since increased.
 
     Retrying such an operation changes nothing in the world except, in the tooling's mall path, another
-    power bridge to another abandoned slot.
+    power bridge to another abandoned slot.  ``allocation`` is the current owner-attributed claim per
+    item (training/laya_ops_runner.reservation_allocation); when a required item's claim moved since the
+    failure was recorded, its allocation changed, so the failure is no longer unchanged.
     """
     latest: dict[tuple, dict] = {}
+    current_allocation = _canonical_claims(allocation) if allocation is not None else None
     for r in results:
         params = r.get("params") or {}
         latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
@@ -116,8 +120,109 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tup
             seen = r.get("stock_at") or {}
             required = (r.get("details") or {}).get("required") or {}
             if required and all(int(stock.get(item, 0)) <= int(seen.get(item, 0)) for item in required):
+                if current_allocation is not None:
+                    recorded = _canonical_claims(r.get("allocation_at"))
+                    if any(
+                        current_allocation.get(item, ()) != recorded.get(item, ())
+                        for item in required
+                    ):
+                        continue  # the reservation owner/claim moved: worth reconsidering
                 stuck.add(key)
     return stuck
+
+
+def _canonical_claims(claims: Mapping | None) -> dict[str, tuple[tuple[str, int], ...]]:
+    """Compare ledger claims consistently before or after a JSON round trip."""
+    canonical = {}
+    for item, entries in (claims or {}).items():
+        if entries is None:
+            continue
+        canonical[item] = tuple(sorted((str(owner), int(count)) for owner, count in entries))
+    return canonical
+
+
+# The tooling found no batch it can build next (terminal); nothing is under construction.
+NO_GEOMETRY = {"district_expansion_unbuildable"}
+
+
+def outcome_category(result: Mapping | None) -> str:
+    """One category for an operation's last result (the runner contract, not its raw code).
+
+    Distinguishes a wait on construction, a terminal no-geometry refusal, a delivery
+    (a build/producer), and a material failure.  A missing result or code stays
+    "unknown": unknown is never rendered as a failure.
+    """
+    if result is None:
+        return "unknown"
+    if result.get("ok"):
+        return "delivery"
+    code = result.get("code")
+    if not code:
+        return "unknown"
+    if in_progress(code) or result.get("state") == "constructing":
+        return "constructing"
+    if code in NO_GEOMETRY or code.endswith("_unbuildable"):
+        return "no_geometry"
+    if code == "material_shortage":
+        return "material_failure"
+    return "failed"
+
+
+def option_outcomes(results: list[dict]) -> dict[tuple, str]:
+    """Categorical last outcome per (operation, main parameter); unrelated waits are ignored."""
+    latest: dict[tuple, dict] = {}
+    for r in results:
+        if r.get("operation") == "wait":
+            continue
+        key = (r["operation"], (r.get("params") or {}).get("recipe") or (r.get("params") or {}).get("item"))
+        latest[key] = r
+    return {key: outcome_category(r) for key, r in latest.items()}
+
+
+def reservation_allocation(economics: Mapping | None) -> dict[str, tuple]:
+    """item -> sorted ``(owner, reserved count)`` claims from the active material ledger.
+
+    This is the owner-attributed allocation ``unchanged_failures`` compares: a moved
+    claim (shrank, grew, or changed owner) clears an otherwise-unchanged material failure.
+    """
+    claims: dict[str, list[tuple[str, int]]] = {}
+    for owner, project in ((economics or {}).get("projects") or {}).items():
+        for item, count in (project.get("reserved") or {}).items():
+            if int(count) > 0:
+                claims.setdefault(item, []).append((owner, int(count)))
+    return {item: tuple(sorted(values)) for item, values in claims.items()}
+
+
+def shorts_of(results: list[dict]) -> dict[tuple, dict]:
+    """Per option, preserve the bill and missing items observed at its last short attempt."""
+    bills: dict[tuple, dict] = {}
+    for r in results:
+        if r.get("ok") or r.get("code") != "material_shortage":
+            continue
+        details = r.get("details") or {}
+        required = details.get("required")
+        available = details.get("available")
+        if not isinstance(required, Mapping):
+            continue
+        bill = {name: int(count) for name, count in required.items()}
+        historical_missing = None
+        historical_available = None
+        if isinstance(available, Mapping):
+            historical_available = {
+                name: int(available.get(name, 0)) for name in bill
+            }
+            historical_missing = {
+                name: count - int(available.get(name, 0))
+                for name, count in bill.items()
+                if count > int(available.get(name, 0))
+            }
+        bills[_key(r)] = {
+            "bill": bill, "last_attempt_missing": historical_missing,
+            "last_attempt_available": historical_available,
+            "reported_owner": details.get("project_id") or details.get("claimant"),
+            "reported_stage": details.get("stage"),
+        }
+    return bills
 
 
 def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]:
@@ -264,30 +369,86 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
     return text
 
 
-def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -> dict:
+def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
+                   *, stock: Mapping[str, int] | None = None) -> dict:
     """Attach what each option is known to cost and displace (audit finding 3).
 
-    ``bill`` is the item bill the operation last reported short of; without one, ``bill_known`` is False, so a
-    missing bill never reads as "costs nothing" (the policy's scarce/starves_goal facts come from the bill).
-    ``cell_lent``: the item's own mall cell is lent to make something else, so producing it waits on that loan.
+    ``bill`` and ``last_attempt_missing_items`` preserve the last reported shortage.
+    ``missing_items``/``inputs_missing`` describe current availability only when the
+    attempt's reported project, current network stock, and active reservations make
+    that calculation knowable. Otherwise they are None. ``reservation_owner`` names
+    only the reported claimant. ``demand_point``/``demand_distance`` relay the shared
+    demand-siting fact. ``cell_lent`` means the item's own mall cell is lent elsewhere.
     """
-    bills = {}
-    for r in results:
-        required = (r.get("details") or {}).get("required")
-        if r.get("code") == "material_shortage" and isinstance(required, Mapping):
-            bills[_key(r)] = {i: int(n) for i, n in required.items()}
+    bills = shorts_of(results)
     loans = (economics or {}).get("loans")
     lent = {loan["lender"] for loan in loans or ()}
+    projects = (economics or {}).get("projects")
+    demand = (economics or {}).get("demand") or {}
     for option in menu["options"]:
         if option["family"] == "wait":
             continue
         params = option["params"]
-        bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
-        if bill:
-            option["bill"] = bill
-        option["features"]["bill_known"] = bill is not None
+        key = (option["family"], params.get("recipe") or params.get("item"))
+        short = bills.get(key)
+        option["features"]["bill_known"] = short is not None
+        if short is not None:
+            option["bill"] = dict(short["bill"])
+            option["features"]["last_attempt_missing_items"] = (
+                None if short["last_attempt_missing"] is None
+                else dict(short["last_attempt_missing"])
+            )
+            option["features"]["last_attempt_available_items"] = (
+                None if short["last_attempt_available"] is None
+                else dict(short["last_attempt_available"])
+            )
+            claim = short["reported_owner"]
+            if claim is None and isinstance(projects, Mapping):
+                stage = short["reported_stage"]
+                claim = stage if stage in projects else None
+            claim = str(claim) if claim else None
+            claim_owners = (
+                {item: [claim] for item in short["bill"]}
+                if claim else None
+            )
+            option["features"]["reservation_owner"] = claim_owners
+            current_available = None
+            current_missing = None
+            if claim and isinstance(stock, Mapping) and isinstance(projects, Mapping):
+                foreign_reserved: Counter = Counter()
+                for project_id, project in projects.items():
+                    if project_id != claim:
+                        foreign_reserved.update(project.get("reserved") or {})
+                current_available = {
+                    item: max(0, int(stock.get(item, 0)) - int(foreign_reserved.get(item, 0)))
+                    for item in short["bill"]
+                }
+                current_missing = {
+                    item: required - current_available[item]
+                    for item, required in short["bill"].items()
+                    if required > current_available[item]
+                }
+            option["features"]["available_items"] = current_available
+            option["features"]["missing_items"] = current_missing
+            option["features"]["inputs_missing"] = (
+                None if current_missing is None else bool(current_missing)
+            )
+        else:
+            option["features"]["last_attempt_available_items"] = None
+            option["features"]["last_attempt_missing_items"] = None
+            option["features"]["available_items"] = None
+            option["features"]["missing_items"] = None
+            option["features"]["inputs_missing"] = None
+            option["features"]["reservation_owner"] = None
+        fact = demand.get(option.get("product")) or demand.get(params.get("recipe") or params.get("item"))
+        point = (fact or {}).get("point")
+        option["features"]["demand_point"] = list(point) if point else None
+        option["features"]["demand_distance"] = (float(fact["distance"])
+                                                 if fact and "distance" in fact else None)
         if option["family"] in ("produce", "mall_slot"):
             option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
+    # Free mall-slot capacity, where the survey knows it (main integrates the growth operation itself).
+    menu.setdefault("facts", {})["free_slots"] = (economics or {}).get("free_slots")
     return menu
 
 
@@ -347,11 +508,18 @@ def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set
 
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
-                    stock: Mapping[str, int] | None = None, *, bootstrap_districts: Mapping | None = None) -> dict:
-    """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
+                    stock: Mapping[str, int] | None = None, *, bootstrap_districts: Mapping | None = None,
+                    allocation: Mapping[str, tuple] | None = None,
+                    measurement: Mapping | None = None) -> dict:
+    """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
+
+    ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
+    an unchanged material failure when the claim moved.  ``measurement`` supplies the window's measured
+    plate surplus vs mall consumption, where available.
+    """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
-    stuck = unchanged_failures(results, stock or {})
+    stuck = unchanged_failures(results, stock or {}, allocation)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
     pending = pending_retirements(results, bootstrap_districts)
@@ -443,18 +611,49 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
+    outcomes = option_outcomes(results)
     for option in options:  # Laya's own recent decisions, per option
         params = option["params"]
-        option["features"].update(history_features(results, (option["family"], params.get("recipe") or params.get("item")),
-                                                   option["family"]))
+        key = (option["family"], params.get("recipe") or params.get("item"))
+        option["features"].update(history_features(results, key, option["family"]))
+        category = outcomes.get(key, "unknown")
+        if category == "material_failure" and option["features"].get("unchanged_failure"):
+            category = "unchanged_material_failure"
+        option["features"]["last_outcome"] = category
     stuck = since_build(results) >= STUCK_DECISIONS
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,
                         "summary": f"Wait {ticks / 60:g} game seconds", "features": {"constructing": waiting, "stuck": stuck}})
     needs = sorted({o["need_id"] for o in options})
+    # Facts for slot-growth decisions (main integrates growth itself): measured force rates remain
+    # per-item unknown when the observation did not include that item.
+    measured = measurement or {}
+    production = measured.get("production") or {}
+    consumption = measured.get("consumption") or {}
+    def measured_rate(source: Mapping, item: str) -> float | None:
+        record = source.get(item)
+        if not isinstance(record, Mapping) or record.get("per_second") is None:
+            return None
+        return round(float(record["per_second"]), 4)
+
+    plate_net = None
+    force_consumption = None
+    if measurement is not None:
+        plate_net = {}
+        force_consumption = {}
+        for plate in PLATES:
+            produced = measured_rate(production, plate)
+            consumed = measured_rate(consumption, plate)
+            plate_net[plate] = None if produced is None or consumed is None else round(produced - consumed, 4)
+            force_consumption[plate] = consumed
+    facts = {
+        "measured_plate_net": plate_net,
+        "measured_force_consumption": force_consumption,
+        "shortfall_feasible": (None if not recipes else {item: item in producible for item in short}),
+    }
     return {"needs": [{"need_id": n, "condition": "available", "options": [o["option_id"] for o in options
                                                                           if o["need_id"] == n]} for n in needs],
-            "options": options, "shortfalls": short}
+            "options": options, "shortfalls": short, "facts": facts}
 
 
 def _live_tick(adapter, fallback: int) -> int:
@@ -564,9 +763,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 stock[name] = stock.get(name, 0) + int(count)
         economics = session.economics() if hasattr(session, "economics") else None
         districts = (economics or {}).get("bootstrap_districts")
+        allocation = reservation_allocation(economics) if economics is not None else None
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
-                                             bootstrap_districts=districts),
-                              results, economics)
+                                             bootstrap_districts=districts, allocation=allocation,
+                                             measurement=measurement),
+                              results, economics, stock=stock if economics is not None else None)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
@@ -611,8 +812,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
-        if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
-            result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
+        if result.get("code") == "material_shortage":  # Preserve known snapshots for retry comparison.
+            required = (result.get("details") or {}).get("required") or {}
+            result["stock_at"] = ({item: stock.get(item, 0) for item in required}
+                                   if economics is not None else None)
+            result["allocation_at"] = ({item: allocation.get(item, ()) for item in required}
+                                       if allocation is not None else None)
         results.append(result)
         tool_end_tick = _live_tick(adapter, tool_start_tick)
         after = adapter.query()

@@ -600,3 +600,204 @@ def test_funded_submission_reads_the_replaced_ledger_mapping(monkeypatch):
     session = DeterministicSession.__new__(DeterministicSession)
     monkeypatch.setattr(session, "_operations", lambda: {"starter": lambda **_kwargs: submit()})
     assert session.run("starter", recipe="iron-plate")["progress"] is True
+def _started_and_built():
+    starters = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    return starters + [{"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}]
+
+
+def test_known_shortage_names_missing_inputs_and_survives_unrelated_waits():
+    from training.laya_ops_runner import with_economics
+    # Live 2026-10-10: retire_starter short 1 splitter, foundation short 1 electric-mining-drill.
+    retire = {"ok": False, "operation": "retire_starter", "params": {"recipe": "iron-plate"}, "code": "material_shortage",
+              "details": {"required": {"splitter": 1}, "available": {}},
+              "stock_at": {"splitter": 0}, "allocation_at": {}}
+    copper = {"ok": False, "operation": "foundation", "params": {"recipe": "copper-plate"}, "code": "material_shortage",
+              "details": {"required": {"electric-mining-drill": 1}, "available": {}},
+              "stock_at": {"electric-mining-drill": 0}, "allocation_at": {}}
+    wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
+    results = _started_and_built() + [retire, copper, wait]
+    options = {o["option_id"]: o for o in
+               with_economics(compile_options(BOARD, results), results, {"projects": {}, "loans": []})["options"]}
+    # A known bill names exactly what was missing; the unrelated wait did not erase it.
+    for option_id, item in (("op.retire_starter.iron-plate", "splitter"),
+                            ("op.foundation.copper-plate", "electric-mining-drill")):
+        features = options[option_id]["features"]
+        assert features["bill_known"] and features["inputs_missing"] is None
+        assert features["last_attempt_missing_items"] == {item: 1}
+        assert features["missing_items"] is None
+    # A budget never reported is unknown, not "nothing missing".
+    never = options["op.extend.iron-plate"]["features"]
+    assert never["bill_known"] is False and never["inputs_missing"] is None and never["missing_items"] is None
+
+
+def test_last_outcome_distinguishes_construction_geometry_delivery_and_failure():
+    from training.laya_ops_runner import outcome_category
+    assert outcome_category(None) == "unknown"
+    assert outcome_category({"ok": True, "operation": "starter"}) == "delivery"
+    assert outcome_category({"ok": False, "code": "pending_system_construction"}) == "constructing"
+    assert outcome_category({"ok": False, "code": "district_expansion_unbuildable"}) == "no_geometry"
+    assert outcome_category({"ok": False, "code": "material_shortage"}) == "material_failure"
+    assert outcome_category({"ok": False, "code": "tool_error"}) == "failed"
+
+
+def test_last_outcome_survives_unrelated_waits_and_marks_unchanged_material_failure():
+    copper = {"ok": False, "operation": "foundation", "params": {"recipe": "copper-plate"}, "code": "material_shortage",
+              "details": {"required": {"electric-mining-drill": 1}, "available": {}}, "stock_at": {"electric-mining-drill": 0},
+              "allocation_at": {}}
+    wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
+    results = _started_and_built() + [copper, wait]
+    option = next(o for o in compile_options(BOARD, results)["options"] if o["option_id"] == "op.foundation.copper-plate")
+    assert option["features"]["last_outcome"] == "unchanged_material_failure"
+    # Restocked: the failure is real but no longer unchanged, so a retry is worth a look.
+    options = {o["option_id"]: o["features"] for o in
+               compile_options(BOARD, results, stock={"electric-mining-drill": 5})["options"]}
+    assert options["op.foundation.copper-plate"]["last_outcome"] == "material_failure"
+
+
+def test_a_changed_reservation_allocation_clears_an_unchanged_failure():
+    from training.laya_ops_runner import unchanged_failures
+    failed = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18},
+                  allocation_at={"transport-belt": (("paired_mall_inserter", 6),), "inserter": ()})
+    stock = {"transport-belt": 4, "inserter": 18}
+    same = {"transport-belt": (("paired_mall_inserter", 6),)}
+    assert unchanged_failures([failed], stock, same) == {("foundation", "iron-plate")}
+    # The claim shrank, or its owner changed: the allocation moved, so the failure is not unchanged.
+    assert unchanged_failures([failed], stock, {"transport-belt": (("paired_mall_inserter", 3),)}) == set()
+    assert unchanged_failures([failed], stock, {"transport-belt": (("paired_mall_circuit", 6),)}) == set()
+
+
+def test_json_roundtrip_of_same_reservation_keeps_material_failure_unchanged():
+    from training.laya_ops_runner import unchanged_failures
+
+    failed = dict(
+        SHORT,
+        stock_at={"transport-belt": 4},
+        allocation_at={"transport-belt": [["paired_mall_inserter", 6]]},
+    )
+    current = {"transport-belt": (("paired_mall_inserter", 6),)}
+
+    assert unchanged_failures([failed], {"transport-belt": 4}, current) == {
+        ("foundation", "iron-plate"),
+    }
+
+
+def test_reservation_owner_is_named_for_a_bill_and_unknown_stays_unknown():
+    from training.laya_ops_runner import with_economics
+    copper = {"ok": False, "operation": "foundation", "params": {"recipe": "copper-plate"}, "code": "material_shortage",
+              "details": {"stage": "paired_mall_inserter", "required": {"transport-belt": 6}, "available": {}}, "stock_at": {"transport-belt": 4},
+              "allocation_at": {}}
+    results = _started_and_built() + [copper]
+    economics = {"projects": {"paired_mall_inserter": {"state": "supply_wait", "reserved": {"transport-belt": 6}}},
+                 "loans": []}
+    option = next(o for o in with_economics(compile_options(BOARD, results), results, economics)["options"]
+                  if o["option_id"] == "op.foundation.copper-plate")
+    assert option["features"]["reservation_owner"] == {"transport-belt": ["paired_mall_inserter"]}
+    unclaimed = dict(
+        copper,
+        details={"stage": "unrelated_stage", "required": {"transport-belt": 6}, "available": {}},
+    )
+    unclaimed_menu = with_economics(
+        compile_options(BOARD, _started_and_built() + [unclaimed]),
+        _started_and_built() + [unclaimed], economics,
+        stock={"transport-belt": 6},
+    )
+    option = next(o for o in unclaimed_menu["options"]
+                  if o["option_id"] == "op.foundation.copper-plate")
+    assert option["features"]["reservation_owner"] is None
+    assert option["features"]["inputs_missing"] is None
+    no_bill = next(o for o in with_economics(compile_options(BOARD, results), results, {"projects": {}, "loans": []})["options"]
+                   if o["option_id"] == "op.extend.iron-plate")
+    assert no_bill["features"]["reservation_owner"] is None
+
+
+def test_historical_shortage_is_preserved_but_current_inputs_follow_known_stock():
+    from training.laya_ops_runner import with_economics
+
+    failed = {
+        "ok": False, "operation": "foundation", "params": {"recipe": "copper-plate"},
+        "code": "material_shortage",
+        "details": {"stage": "copper_foundation", "required": {"electric-mining-drill": 1},
+                    "available": {"electric-mining-drill": 0}},
+        "stock_at": {"electric-mining-drill": 0}, "allocation_at": {},
+    }
+    results = _started_and_built() + [failed]
+    economics = {"projects": {"copper_foundation": {
+        "state": "supply_wait", "reserved": {},
+    }}, "loans": []}
+    menu = compile_options(
+        BOARD, results, stock={"electric-mining-drill": 4},
+        allocation={"electric-mining-drill": ()},
+    )
+    options = with_economics(
+        menu, results, economics, stock={"electric-mining-drill": 4},
+    )["options"]
+    option = next(o for o in options if o["option_id"] == "op.foundation.copper-plate")
+
+    assert option["bill"] == {"electric-mining-drill": 1}
+    assert option["features"]["last_attempt_available_items"] == {"electric-mining-drill": 0}
+    assert option["features"]["last_attempt_missing_items"] == {"electric-mining-drill": 1}
+    assert option["features"]["available_items"] == {"electric-mining-drill": 4}
+    assert option["features"]["missing_items"] == {}
+    assert option["features"]["inputs_missing"] is False
+    assert option["features"]["reservation_owner"] == {
+        "electric-mining-drill": ["copper_foundation"],
+    }
+
+    foreign_reserved = {
+        "projects": {
+            "copper_foundation": {"state": "supply_wait", "reserved": {}},
+            "other_project": {"state": "supply_wait", "reserved": {"electric-mining-drill": 4}},
+        },
+        "loans": [],
+    }
+    reserved = with_economics(
+        menu, results, foreign_reserved, stock={"electric-mining-drill": 4},
+    )["options"]
+    option = next(o for o in reserved if o["option_id"] == "op.foundation.copper-plate")
+    assert option["features"]["available_items"] == {"electric-mining-drill": 0}
+    assert option["features"]["missing_items"] == {"electric-mining-drill": 1}
+    assert option["features"]["inputs_missing"] is True
+
+    unknown = with_economics(menu, results, economics)["options"]
+    option = next(o for o in unknown if o["option_id"] == "op.foundation.copper-plate")
+    assert option["features"]["available_items"] is None
+    assert option["features"]["missing_items"] is None
+    assert option["features"]["inputs_missing"] is None
+
+
+def test_option_demand_distance_comes_from_shared_facts_only():
+    from training.laya_ops_runner import with_economics
+    short = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18})
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    results = _started_and_built() + [slot, short]
+    economics = {"projects": {}, "loans": [], "demand": {"transport-belt": {"point": [20.0, 5.0], "distance": 25.0}}}
+    option = next(o for o in with_economics(compile_options(BOARD, results), results, economics)["options"]
+                  if o["option_id"] == "op.produce.transport-belt")
+    assert option["features"]["demand_point"] == [20.0, 5.0]
+    assert option["features"]["demand_distance"] == 25.0
+    # No demand fact read: unknown, never a zero-distance consumer at the anchor.
+    unknown = with_economics(compile_options(BOARD, results), results, {"projects": {}, "loans": []})
+    option = next(o for o in unknown["options"] if o["option_id"] == "op.produce.transport-belt")
+    assert option["features"]["demand_point"] is None and option["features"]["demand_distance"] is None
+
+
+def test_menu_exposes_feasible_shortfalls_and_scoped_measures_where_measured():
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "transport-belt": {"ingredients": [{"name": "iron-plate", "amount": 1}]},
+               "splitter": {"ingredients": [{"name": "electronic-circuit", "amount": 5}, {"name": "iron-plate", "amount": 5}]},
+               "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
+               "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]}}
+    short = dict(SHORT, details={"required": {"splitter": 3, "transport-belt": 10}, "available": {}})
+    results = _started_and_built() + [short, {"ok": True, "operation": "mall_slot", "params": {"item": "transport-belt"}}]
+    measurement = {"production": {"iron-plate": {"per_second": 2.0}}, "consumption": {"iron-plate": {"per_second": 0.5}}}
+    menu = compile_options(BOARD, results, recipes=recipes, measurement=measurement)
+    facts = menu["facts"]
+    assert facts["shortfall_feasible"]["splitter"] is True and facts["shortfall_feasible"]["transport-belt"] is True
+    assert facts["measured_plate_net"]["iron-plate"] == 1.5
+    assert facts["measured_plate_net"]["copper-plate"] is None
+    assert facts["measured_force_consumption"]["iron-plate"] == 0.5
+    assert facts["measured_force_consumption"]["copper-plate"] is None
+    assert "mall_consumption" not in facts
+    # Without a measurement window the rates are unknown, not zero.
+    assert compile_options(BOARD, results, recipes=recipes)["facts"]["measured_plate_net"] is None

@@ -18,10 +18,12 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
+from orchestrator import demand_siting
 from orchestrator import stage_services
 from orchestrator.bootstrap_district import BootstrapDistrictLedger
 from orchestrator.bootstrap_work import BootstrapWorkLedger
@@ -78,6 +80,16 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     return {"ok": code not in {"prerequisite_advanced", "retirement_pending"},
             "operation": operation, "params": params, "code": code,
             "result": dict(result) if isinstance(result, Mapping) else None if result is None else str(result)[:200]}
+
+
+def reservation_owners(projects: Mapping | None) -> dict[str, list[str]]:
+    """Which active projects reserve each item (the material ledger's owner facts)."""
+    owners: dict[str, set[str]] = {}
+    for project_id, project in (projects or {}).items():
+        for item, count in (project.get("reserved") or {}).items():
+            if int(count) > 0:
+                owners.setdefault(item, set()).add(project_id)
+    return {item: sorted(ids) for item, ids in owners.items()}
 
 
 class DeterministicSession:
@@ -184,6 +196,9 @@ class DeterministicSession:
 
         ``loans`` is None when the survey fails: unknown, not empty. District
         submission is a reconciliation obligation, not a live readiness claim.
+        ``reservation_owners`` names the project holding each reserved item and
+        ``demand`` is the shared demand-siting read (never training-local
+        geometry).  ``free_slots`` is left for the mall slot-growth integration.
         """
         from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
@@ -207,7 +222,34 @@ class DeterministicSession:
                                    "replacement_submitted": state.replacement_submitted}
                      for state in ab._BOOTSTRAP_DISTRICT_LEDGER.states()}
         return {"projects": projects, "loans": loans, "loan_error": loan_error,
-                "bootstrap_districts": districts}
+                "bootstrap_districts": districts, "reservation_owners": reservation_owners(projects),
+                "demand": self._demand_facts(), "free_slots": None}
+
+    # Item reads are bounded per decision; demand for an item with no built
+    # requester (or a failed read) is None -- unknown, never a zero distance.
+    DEMAND_ITEMS = ("iron-plate", "copper-plate", "stone-brick", "iron-gear-wheel",
+                    "copper-cable", "electronic-circuit", "transport-belt", "splitter")
+
+    def _demand_facts(self) -> dict[str, dict | None]:
+        """Per item, the shared demand-siting point and its distance from the base anchor.
+
+        Uses ``orchestrator.demand_siting`` (the deterministic runtime's own read);
+        training only relays it and never plans geometry.
+        """
+        fallback = (math.nan, math.nan)
+        facts: dict[str, dict | None] = {}
+        for item in self.DEMAND_ITEMS:
+            try:
+                point = demand_siting.demand_point(self.client, SURFACE, FORCE, item, fallback)
+            except Exception:  # noqa: BLE001 -- a diagnostic read must not stop the loop
+                facts[item] = None
+                continue
+            if point is None or point[0] != point[0] or point[1] != point[1]:
+                facts[item] = None  # no requester wants it, or the read failed
+                continue
+            facts[item] = {"point": [float(point[0]), float(point[1])],
+                           "distance": float(demand_siting.consumer_distance(self.reference_point, point))}
+        return facts
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the

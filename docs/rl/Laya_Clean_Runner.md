@@ -66,9 +66,27 @@ The target compact projection keeps facts needed to discriminate available choic
 | Recent relevant outcomes and facts changed since failure | Full attempt history, rationale and rule-to-fact mappings |
 
 Unknown evidence stays unknown. Ops exposes previously reported shortage bills,
-active reservations and live loan identities. Full prospective costs, requester
-draws and measured displaced production remain missing; scarcity features can
-remain false without bill evidence. Add those facts before training on their values.
+active reservations and live loan identities. Each legal option now carries the
+prospective bill it last reported (`bill`), whether that bill is known
+(`bill_known`), and items missing at that attempt
+(`last_attempt_available_items` and `last_attempt_missing_items`). Current
+`available_items`, `missing_items` and `inputs_missing` are populated only when
+the reported project, current network stock and active reservations establish
+availability; otherwise they stay `None`. `reservation_owner`
+names the reported claimant, and a changed owner claim clears an otherwise
+unchanged material failure (`unchanged_failure`), including after JSON persistence.
+`demand_point`/
+`demand_distance` relay the shared `orchestrator/demand_siting` read (never
+training-local geometry). Per option, `last_outcome` is one of `delivery`,
+`constructing`, `no_geometry`, `material_failure`, `unchanged_material_failure`,
+`failed` or `unknown`, and survives unrelated waits. The menu's `facts` block
+adds `shortfall_feasible` (whether each short item can be made),
+`measured_plate_net` and `measured_force_consumption` from the measurement
+window. Missing per-item rates stay `None`; force consumption is not attributed
+to mall consumers. `free_slots` is for the separately integrated mall slot-growth
+work. Full prospective requester draws and measured displaced production remain
+missing; scarcity features can remain false without bill evidence. Add those facts
+before training on their values.
 
 Ops exports episode-scoped bootstrap district lifecycle and submission facts
 in the brief, menu features and recorded decision state. A submitted replacement
