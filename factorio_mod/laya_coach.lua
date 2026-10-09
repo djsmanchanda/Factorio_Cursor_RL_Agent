@@ -2,6 +2,7 @@
 -- Purpose: Provide a read-only Factorio window for human Laya guidance and labels.
 
 local shared = require("sandbox_shared")
+local namespace = require("namespace")
 
 local FRAME_NAME = "laya_coach_frame"
 local TOGGLE_NAME = "laya_coach_toggle"
@@ -271,6 +272,7 @@ local function set_status(frame, message)
 end
 
 local function on_click(event)
+  if not namespace.is_active() then return end
   local element = event.element
   if not element or not element.valid then return end
   local player = game.get_player(event.player_index)
@@ -312,26 +314,31 @@ local function on_click(event)
 end
 
 local function on_init()
+  if not namespace.is_active() then return end
   coach_storage()
   for _, player in pairs(game.players) do add_toggle(player) end
 end
 
 local function on_configuration_changed()
+  if not namespace.is_active() then return end
   coach_storage()
   for _, player in pairs(game.players) do add_toggle(player) end
 end
 
 script.on_event(defines.events.on_player_created, function(event)
+  if not namespace.is_active() then return end
   add_toggle(game.get_player(event.player_index))
 end)
 
 script.on_event(defines.events.on_player_joined_game, function(event)
+  if not namespace.is_active() then return end
   add_toggle(game.get_player(event.player_index))
 end)
 
 script.on_event(defines.events.on_gui_click, on_click)
 
 script.on_event(defines.events.on_gui_closed, function(event)
+  if not namespace.is_active() then return end
   if event.element and event.element.valid and event.element.name == FRAME_NAME then
     event.element.destroy()
   end

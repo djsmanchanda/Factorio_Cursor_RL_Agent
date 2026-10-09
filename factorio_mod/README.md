@@ -5,9 +5,35 @@
 
 For the complete 19-command inventory, RCON/GameBridge usage, output directories, real-base rules, and troubleshooting, use the [authoritative interaction runbook](../docs/factorio_operations.md).
 
+## Two runtime mods from one shared source
+
+This directory is the shared Lua source for **two** distinctly named mods:
+
+- `factorio_cursor_rl_agent` (deterministic) — the original names, commands,
+  remote interface and `factorio_mod/` script-output root.
+- `factorio_laya_agent` (Laya) — built by `tools/build_runtime_mods.py` from the
+  same source with a `laya_` command prefix, its own `factorio_laya_agent`
+  remote interface and a `factorio_laya_mod/` script-output root.
+
+`namespace.lua` resolves the runtime identity; the build stamps
+`namespace_override.lua`, `settings.lua` and `info.json` for the Laya artifact.
+Every server enables **both** runtime mods (plus `factorio_training_lab`), so
+the client's enabled mod set is identical everywhere and switching servers in
+the GUI never prompts "Sync mods with server". The runtime that drives a world
+is selected by a runtime-global setting (`<mod_name>_active`), not by swapping
+mod code or checksums; the inactive mod loads but registers no side-effect
+events.
+
+Python callers select the namespace with `tools/runtime_namespace.py` and pass
+`runtime=` to `orchestrator.game_bridge.GameBridge` (`deterministic` default,
+`laya` for Laya worlds).
+
 ## Files
 - `info.json` (exception): Factorio requires strict JSON, so it cannot include comments.
-- `control.lua`: Loads the modules that register the mod's console-command surface.
+- `control.lua`: Resolves the runtime namespace, shadows the engine `commands`
+  and `helpers` globals so every module is namespaced, then loads the modules.
+- `namespace.lua` / `namespace_override.lua`: runtime identity and wrappers.
+- `settings.lua`: the runtime activation setting.
 
 ## Assumptions / Constraints
 - Targets **Factorio 2.1** (`factorio_version: 2.1`, `base >= 2.1.0`); the current runtime is **2.1.21**. Uses the 2.1 API (`storage`, `helpers.*`, `event.entity`, `minable_flag`).

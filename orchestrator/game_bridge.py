@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from tools.rcon_client import RconClient
+from tools.runtime_namespace import DETERMINISTIC_RUNTIME, resolve as resolve_runtime
 
 SNAPSHOT_SUBDIR = Path("factorio_mod") / "snapshots"
 GHOST_OBSERVATION_SUBDIR = Path("factorio_mod") / "ghost_observations"
@@ -55,11 +56,15 @@ class GameBridge:
         command_timeout: float = 300.0,
         retain_reports: int = REPORT_RETENTION,
         episode_id: str | None = None,
+        runtime: str = DETERMINISTIC_RUNTIME,
     ):
         self.script_output = Path(script_output)
         if episode_id is not None and (not isinstance(episode_id, str) or not episode_id):
             raise ValueError("episode_id must be a non-empty string when supplied")
         self.episode_id = episode_id
+        # The runtime selects the mod namespace: command prefix and script-output
+        # root. The default preserves the original deterministic wire contract.
+        self._namespace = resolve_runtime(runtime)
         if not self.script_output.is_dir():
             raise BridgeError(f"script-output directory not found: {self.script_output}")
         if retain_reports < 1:
@@ -99,6 +104,24 @@ class GameBridge:
                 f"game speed not applied: requested={requested:g} observed={observed:g}"
             )
         return observed
+
+    def _namespace_or_none(self):
+        """Return the resolved namespace, or None for `__new__` test doubles."""
+        return getattr(self, "_namespace", None)
+
+    def _mod_command(self, name: str, suffix: str = "") -> str:
+        """Console command for a mod-registered base name, runtime-prefixed."""
+        namespace = self._namespace_or_none()
+        if namespace is None or not namespace.command_prefix:
+            return f"/{name}{suffix}"
+        return f"/{namespace.command_prefix}{name}{suffix}"
+
+    def _report_subdir(self, subdir: Path) -> Path:
+        """Map a shared `factorio_mod/...` report path to this runtime's root."""
+        namespace = self._namespace_or_none()
+        if namespace is None:
+            return subdir
+        return namespace.remap_output_subdir(subdir)
 
     def _existing_files(self, subdir: Path) -> dict[str, tuple[int, int]]:
         directory = self.script_output / subdir
@@ -248,25 +271,36 @@ class GameBridge:
         return collected
 
     def request_snapshot(self, timeout: float = 300.0, surface: Optional[str] = None) -> Path:
-        command = f"/snapshot {surface}" if surface else "/snapshot"
-        return self._run_and_collect(command, SNAPSHOT_SUBDIR, timeout)
+        suffix = f" {surface}" if surface else ""
+        command = self._mod_command("snapshot", suffix)
+        return self._run_and_collect(command, self._report_subdir(SNAPSHOT_SUBDIR), timeout)
 
     def export_ghost_observation(self, timeout: float = 120.0) -> Path:
-        return self._run_and_collect("/export_ghost_observation", GHOST_OBSERVATION_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("export_ghost_observation"),
+            self._report_subdir(GHOST_OBSERVATION_SUBDIR), timeout,
+        )
 
     def execute_ghost_plan(self, authorization: dict, ghost_plan: dict, timeout: float = 120.0) -> Path:
         payload = json.dumps({"authorization": authorization, "ghost_plan": ghost_plan}, separators=(",", ":"))
-        return self._run_and_collect(f"/execute_ghost_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("execute_ghost_plan", f" {payload}"),
+            self._report_subdir(EXECUTION_REPORT_SUBDIR), timeout,
+        )
 
     def execute_construction(self, authorization: dict, execution_report: dict, timeout: float = 120.0) -> Path:
         payload = json.dumps(
             {"authorization": authorization, "execution_report": execution_report}, separators=(",", ":")
         )
-        return self._run_and_collect(f"/execute_construction {payload}", CONSTRUCTION_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("execute_construction", f" {payload}"),
+            self._report_subdir(CONSTRUCTION_REPORT_SUBDIR), timeout,
+        )
 
     def inspect_sandbox_topology(self, timeout: float = 60.0) -> Path:
         return self._run_and_collect(
-            "/inspect_sandbox_topology", TOPOLOGY_REPORT_SUBDIR, timeout
+            self._mod_command("inspect_sandbox_topology"),
+            self._report_subdir(TOPOLOGY_REPORT_SUBDIR), timeout,
         )
 
     def reconcile_sandbox_topology(
@@ -276,18 +310,20 @@ class GameBridge:
             raise ValueError("topology mode must be reset or reconcile")
         payload = json.dumps({"mode": mode, "confirm": confirm}, separators=(",", ":"))
         return self._run_and_collect(
-            f"/reconcile_sandbox_topology {payload}", TOPOLOGY_REPORT_SUBDIR, timeout
+            self._mod_command("reconcile_sandbox_topology", f" {payload}"),
+            self._report_subdir(TOPOLOGY_REPORT_SUBDIR), timeout,
         )
     def export_recipe_catalog(
         self, timeout: float = 120.0, *, force: str | None = None,
     ) -> Path:
         """Export enabled recipes for the legacy planner or one existing force."""
-        command = "/export_recipe_catalog"
+        suffix = ""
         if force is not None:
             if not force:
                 raise ValueError("force must be non-empty when supplied")
-            command += " " + force
-        return self._run_and_collect(command, RECIPE_CATALOG_SUBDIR, timeout)
+            suffix = " " + force
+        command = self._mod_command("export_recipe_catalog", suffix)
+        return self._run_and_collect(command, self._report_subdir(RECIPE_CATALOG_SUBDIR), timeout)
 
     def execute_upgrade_plan(
         self, authorization: dict, upgrade_plan: dict, *,
@@ -305,7 +341,8 @@ class GameBridge:
             "force": force,
         }, separators=(",", ":"))
         return self._run_and_collect(
-            f"/execute_upgrade_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout,
+            self._mod_command("execute_upgrade_plan", f" {payload}"),
+            self._report_subdir(EXECUTION_REPORT_SUBDIR), timeout,
         )
 
     def execute_deconstruction(
@@ -317,28 +354,42 @@ class GameBridge:
             "surface": surface, "force": force,
         }, separators=(",", ":"))
         return self._run_and_collect(
-            f"/execute_deconstruction_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout,
+            self._mod_command("execute_deconstruction_plan", f" {payload}"),
+            self._report_subdir(EXECUTION_REPORT_SUBDIR), timeout,
         )
 
     def ensure_scaffolding(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(f"/ensure_sandbox_scaffolding {body}", SCAFFOLD_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("ensure_sandbox_scaffolding", f" {body}"),
+            self._report_subdir(SCAFFOLD_REPORT_SUBDIR), timeout,
+        )
 
     def seed_ore_patches(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(f"/seed_ore_patches {body}", ORE_SEED_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("seed_ore_patches", f" {body}"),
+            self._report_subdir(ORE_SEED_REPORT_SUBDIR), timeout,
+        )
 
     def seed_water_lakes(self, payload: dict, timeout: float = 120.0) -> Path:
         body = json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(f"/seed_water_lakes {body}", WATER_SEED_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("seed_water_lakes", f" {body}"),
+            self._report_subdir(WATER_SEED_REPORT_SUBDIR), timeout,
+        )
 
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
-        return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("build_layout_plan", f" {body}"),
+            self._report_subdir(LAYOUT_REPORT_SUBDIR), timeout,
+        )
 
     def verify_electronics_execution(self, timeout: float = 120.0) -> Path:
         return self._run_and_collect(
-            "/verify_electronics_execution", LIVE_EXECUTION_REPORT_SUBDIR, timeout
+            self._mod_command("verify_electronics_execution"),
+            self._report_subdir(LIVE_EXECUTION_REPORT_SUBDIR), timeout,
         )
 
     def save_game(self) -> str:
@@ -360,7 +411,10 @@ class GameBridge:
         if force is not None:
             payload["force"] = force
         body = json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(f"/set_research {body}", RESEARCH_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("set_research", f" {body}"),
+            self._report_subdir(RESEARCH_REPORT_SUBDIR), timeout,
+        )
 
     def research_status(
         self, timeout: float = 60.0, *, force: str | None = None,
@@ -370,15 +424,16 @@ class GameBridge:
         payload = {key: value for key, value in {
             "force": force, "technology": technology,
         }.items() if value is not None}
-        command = "/research_status"
+        suffix = ""
         expected_name = None
         if payload:
             request_id = uuid.uuid4().hex
             payload["request_id"] = request_id
             expected_name = f"research_status_{request_id}.json"
-            command += " " + json.dumps(payload, separators=(",", ":"))
+            suffix = " " + json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(
-            command, RESEARCH_REPORT_SUBDIR, timeout,
+            self._mod_command("research_status", suffix),
+            self._report_subdir(RESEARCH_REPORT_SUBDIR), timeout,
             expected_name=expected_name,
         )
 
@@ -387,10 +442,11 @@ class GameBridge:
     ) -> Path:
         """List currently open research targets for an existing force."""
         payload = {"force": force} if force is not None else {}
-        command = "/research_options"
-        if payload:
-            command += " " + json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(command, RESEARCH_REPORT_SUBDIR, timeout)
+        suffix = " " + json.dumps(payload, separators=(",", ":")) if payload else ""
+        return self._run_and_collect(
+            self._mod_command("research_options", suffix),
+            self._report_subdir(RESEARCH_REPORT_SUBDIR), timeout,
+        )
 
     def science_status(self, surface: str, force: str, timeout: float = 60.0) -> Path:
         """Collect read-only research and lab telemetry for one existing target."""
@@ -399,7 +455,10 @@ class GameBridge:
         if not isinstance(force, str) or not force:
             raise ValueError("force must be a non-empty string")
         body = json.dumps({"surface": surface, "force": force}, separators=(",", ":"))
-        return self._run_and_collect(f"/science_status {body}", SCIENCE_REPORT_SUBDIR, timeout)
+        return self._run_and_collect(
+            self._mod_command("science_status", f" {body}"),
+            self._report_subdir(SCIENCE_REPORT_SUBDIR), timeout,
+        )
 
     def logistic_inventory(self, surface: str, force: str, timeout: float = 60.0) -> Path:
         """Collect the read-only contents of every live logistic network."""
@@ -409,7 +468,8 @@ class GameBridge:
             raise ValueError("force must be a non-empty string")
         body = json.dumps({"surface": surface, "force": force}, separators=(",", ":"))
         return self._run_and_collect(
-            f"/logistic_inventory {body}", LOGISTIC_INVENTORY_REPORT_SUBDIR, timeout,
+            self._mod_command("logistic_inventory", f" {body}"),
+            self._report_subdir(LOGISTIC_INVENTORY_REPORT_SUBDIR), timeout,
         )
 
 

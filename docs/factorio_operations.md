@@ -262,3 +262,21 @@ command -> important output -> conclusion
 ```
 
 Then state whether the user must restart a runner, redeploy a Lua mod, restart a Factorio runtime, or do nothing.
+
+## Shared source runtime mods (October 10, 2026)
+
+`tools/build_runtime_mods.py` emits `factorio_cursor_rl_agent` and
+`factorio_laya_agent` from `factorio_mod/`. Updated disposable and deterministic
+managers enable both plus `factorio_training_lab`. The Laya bridge uses
+`/laya_*` commands and `factorio_laya_mod/` reports; deterministic keeps its
+existing names and `factorio_mod/` reports. Runtime-global activation values
+are save data and take effect without changing mod code or startup settings.
+New fleet candidates stage both artifacts; historical candidates keep their
+recorded mod set.
+
+Client and participating servers require the same three enabled artifacts,
+versions, and content hashes for a switch without a mod-sync restart. Installing
+this set requires an initial GUI/server reload; the protected production server
+has not been redeployed by the exploratory Laya loop. Automated dual-load and
+activation tests establish protocol behavior; an actual GUI join remains a
+separate live check.

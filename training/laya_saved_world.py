@@ -305,7 +305,8 @@ class SavedWorldAdapter:
             ROOT / "planners/mall_layout.py")}
         server = self.root / "server"
         self.bridge = GameBridge(server / "script-output", host="127.0.0.1", port=self.manifest["rcon_port"],
-                                 password=(server / "rcon-password").read_text().strip(), command_timeout=30)
+                                 password=(server / "rcon-password").read_text().strip(), command_timeout=30,
+                                 runtime="laya")
 
     def observe_speed(self) -> str:
         """Read game speed back over RCON; 'unknown' on failure (never fails the run)."""

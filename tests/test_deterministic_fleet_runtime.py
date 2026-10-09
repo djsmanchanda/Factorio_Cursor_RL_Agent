@@ -152,3 +152,25 @@ def test_newer_code_replay_requires_explicit_compatible_manifest():
              "candidate_commit": "other", "checked_at": "now", "predicate_version": "v1"},
             checkpoint_id="C2", creator_commit="old", candidate_commit="new",
         )
+
+
+def test_new_namespace_candidate_stages_both_runtime_artifacts(tmp_path):
+    import shutil
+    from tools.build_runtime_mods import SHARED_SOURCE
+    repo, _ = _repo(tmp_path)
+    shutil.rmtree(repo / 'factorio_mod')
+    shutil.copytree(SHARED_SOURCE, repo / 'factorio_mod')
+    _git(repo, 'add', 'factorio_mod')
+    _git(repo, 'commit', '-q', '-m', 'namespaced candidate')
+    commit = _git(repo, 'rev-parse', 'HEAD')
+    bundle = _checkpoint(tmp_path, commit)
+    runtime = DeterministicFleetRuntime(repo_root=repo, fleet_root=tmp_path / 'fleet')
+    plan = runtime.plan_lane(suite_id='suite', attempt_id='attempt', checkpoint_id='C2',
+                            generation_id='generation', candidate_commit=commit, creator_commit=commit,
+                            helper_enabled=False, slot=0)
+    derived = runtime.prepare_lane(plan, bundle, compatibility_manifest={
+        'compatible': True, 'checkpoint_id':'C2', 'creator_commit':commit, 'candidate_commit':commit,
+        'checked_at':'2026-10-10T00:00:00Z', 'predicate_version':'metals-v1'})
+    info = json.loads((plan.lane_root / 'mods/factorio_laya_agent/info.json').read_text())
+    assert info['name'] == 'factorio_laya_agent'
+    assert len(derived['deployed_factorio_laya_agent_sha256']) == 64

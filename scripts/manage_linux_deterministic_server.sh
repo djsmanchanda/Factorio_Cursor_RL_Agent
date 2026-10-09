@@ -176,6 +176,7 @@ EOF
   {"name":"recycler","enabled":true},
   {"name":"space-age","enabled":true},
   {"name":"factorio_cursor_rl_agent","enabled":true},
+  {"name":"factorio_laya_agent","enabled":true},
   {"name":"factorio_training_lab","enabled":true}
 ]}
 EOF
@@ -187,14 +188,36 @@ sync_mod() {
   [[ -f "$REPO_ROOT/factorio_mod/info.json" ]] || die "deterministic mod metadata is missing"
   [[ -f "$REPO_ROOT/factorio_training_lab/control.lua" ]] || die "training mod is missing"
   [[ -f "$REPO_ROOT/factorio_training_lab/info.json" ]] || die "training mod metadata is missing"
+  resolve_laya_mod_source
   [[ "$(realpath -m "$GUI_MODS_PATH")" != "$(realpath -m "$MODS_PATH")" ]] \
     || die "GUI mods directory must not be the isolated server mods directory"
   sync_mod_copy "$MODS_PATH" factorio_cursor_rl_agent factorio_mod
   sync_mod_copy "$MODS_PATH" factorio_training_lab factorio_training_lab
+  sync_mod_copy_abs "$MODS_PATH" factorio_laya_agent "$LAYA_MOD_SOURCE"
   if (( ! FLEET_MODE )); then
-    "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"
+    "$REPO_ROOT/scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH" \
+      --build-dir "$DATA_ROOT/build/runtime_mods"
   fi
   write_server_files
+}
+
+# The Laya runtime mod is built from the same shared source as the deterministic
+# mod. A prepared saved-world stages it at the repo root; otherwise build it.
+resolve_laya_mod_source() {
+  if [[ -n "${LAYA_MOD_SOURCE:-}" ]]; then
+    return
+  fi
+  if [[ -f "$REPO_ROOT/factorio_laya_agent/info.json" ]]; then
+    LAYA_MOD_SOURCE="$REPO_ROOT/factorio_laya_agent"
+  elif [[ -f "$DATA_ROOT/build/runtime_mods/factorio_laya_agent/info.json" ]]; then
+    LAYA_MOD_SOURCE="$DATA_ROOT/build/runtime_mods/factorio_laya_agent"
+  elif [[ -f "$REPO_ROOT/tools/build_runtime_mods.py" ]]; then
+    python3 "$REPO_ROOT/tools/build_runtime_mods.py" --runtime laya \
+      --output "$DATA_ROOT/build/runtime_mods" >/dev/null
+    LAYA_MOD_SOURCE="$DATA_ROOT/build/runtime_mods/factorio_laya_agent"
+  fi
+  [[ -n "${LAYA_MOD_SOURCE:-}" && -f "$LAYA_MOD_SOURCE/info.json" ]] \
+    || die "Laya runtime mod source is missing"
 }
 
 sync_mod_copy() {
@@ -205,12 +228,23 @@ sync_mod_copy() {
   cp -a "$REPO_ROOT/$source_name" "$target_root/$mod_name"
 }
 
+sync_mod_copy_abs() {
+  local target_root="$1" mod_name="$2" source_path="$3"
+  [[ "$target_root" != "/" ]] || die "refusing to deploy a mod directly under /"
+  mkdir -p "$target_root"
+  rm -rf "$target_root/$mod_name"
+  cp -a "$source_path" "$target_root/$mod_name"
+}
+
 deploy_if_required() {
   assert_stopped
+  resolve_laya_mod_source
   if [[ -d "$MODS_PATH/factorio_cursor_rl_agent" ]] \
     && diff -qr "$REPO_ROOT/factorio_mod" "$MODS_PATH/factorio_cursor_rl_agent" >/dev/null 2>&1 \
     && [[ -d "$MODS_PATH/factorio_training_lab" ]] \
-    && diff -qr "$REPO_ROOT/factorio_training_lab" "$MODS_PATH/factorio_training_lab" >/dev/null 2>&1; then
+    && diff -qr "$REPO_ROOT/factorio_training_lab" "$MODS_PATH/factorio_training_lab" >/dev/null 2>&1 \
+    && [[ -d "$MODS_PATH/factorio_laya_agent" ]] \
+    && diff -qr "$LAYA_MOD_SOURCE" "$MODS_PATH/factorio_laya_agent" >/dev/null 2>&1; then
     echo "server project mod copies already match"
     sync_mod_copy_check_gui
     return
@@ -220,10 +254,13 @@ deploy_if_required() {
 }
 
 sync_mod_copy_check_gui() {
+  resolve_laya_mod_source
   if [[ (-e "$GUI_MODS_PATH/factorio_cursor_rl_agent" && ! -d "$GUI_MODS_PATH/factorio_cursor_rl_agent") \
-    || (-e "$GUI_MODS_PATH/factorio_training_lab" && ! -d "$GUI_MODS_PATH/factorio_training_lab") ]] \
+    || (-e "$GUI_MODS_PATH/factorio_training_lab" && ! -d "$GUI_MODS_PATH/factorio_training_lab") \
+    || (-e "$GUI_MODS_PATH/factorio_laya_agent" && ! -d "$GUI_MODS_PATH/factorio_laya_agent") ]] \
     || ! diff -qr "$REPO_ROOT/factorio_mod" "$GUI_MODS_PATH/factorio_cursor_rl_agent" >/dev/null 2>&1 \
-    || ! diff -qr "$REPO_ROOT/factorio_training_lab" "$GUI_MODS_PATH/factorio_training_lab" >/dev/null 2>&1; then
+    || ! diff -qr "$REPO_ROOT/factorio_training_lab" "$GUI_MODS_PATH/factorio_training_lab" >/dev/null 2>&1 \
+    || ! diff -qr "$LAYA_MOD_SOURCE" "$GUI_MODS_PATH/factorio_laya_agent" >/dev/null 2>&1; then
     sync_mod
     echo "changed GUI project mod copies deployed to $GUI_MODS_PATH"
   fi
@@ -268,10 +305,11 @@ bootstrap() {
 }
 
 write_episode_manifest() {
-  local source_hash copy_hash deterministic_hash training_hash revision dirty created temporary
+  local source_hash copy_hash deterministic_hash laya_hash training_hash revision dirty created temporary
   source_hash="$(sha256_file "$SOURCE_SAVE")"
   copy_hash="$(sha256_file "$SAVE_PATH")"
   deterministic_hash="$(tree_hash "$MODS_PATH/factorio_cursor_rl_agent")"
+  laya_hash="$(tree_hash "$MODS_PATH/factorio_laya_agent")"
   training_hash="$(tree_hash "$MODS_PATH/factorio_training_lab")"
   revision="$(repository_revision)"
   dirty="$(dirty_file_count)"
@@ -293,6 +331,7 @@ write_episode_manifest() {
   "isolated_save_sha256": "$copy_hash",
   "baseline_world_fingerprint": "sha256:$copy_hash",
   "deployed_factorio_mod_sha256": "$deterministic_hash",
+  "deployed_factorio_laya_agent_sha256": "$laya_hash",
   "deployed_factorio_training_lab_sha256": "$training_hash",
   "baseline_verified": false,
   "initial_game_tick": null,

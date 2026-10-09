@@ -113,7 +113,8 @@ class DeterministicSession:
         set_active_material_ledger(ab._MATERIAL_RESERVATION_LEDGER)
         self.client = RconClient("127.0.0.1", manifest["rcon_port"], password)
         self.bridge = GameBridge(script_output=self.script_output, host="127.0.0.1", port=manifest["rcon_port"],
-                                 password=password, command_timeout=30.0, episode_id=self.episode_id)
+                                 password=password, command_timeout=30.0, episode_id=self.episode_id,
+                                 runtime="laya")
         stage_services.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()

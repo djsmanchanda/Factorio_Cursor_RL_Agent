@@ -44,7 +44,8 @@ class MallWorld(SavedWorldAdapter):
         self.code_hashes = {str(p): file_hash(p) for p in paths}
         server = self.root/'server'
         self.bridge = GameBridge(server/'script-output', host='127.0.0.1', port=self.manifest['rcon_port'],
-                                 password=(server/'rcon-password').read_text().strip(), command_timeout=30)
+                                 password=(server/'rcon-password').read_text().strip(), command_timeout=30,
+                                 runtime='laya')
 
     def require_clear_mutations(self, retry_nonce=None):
         for path in (self.root/'rpc').glob('*.json'):

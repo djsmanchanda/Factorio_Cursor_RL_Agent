@@ -509,6 +509,11 @@ class DeterministicFleetRuntime:
                 raise FleetRuntimeError(f"candidate checkout is missing mod source: {source_name}")
             destination = lane / "mods" / name
             shutil.copytree(source, destination, symlinks=False)
+        # Historical candidates retain their original enabled set. New shared
+        # namespace sources stage the Laya artifact beside deterministic too.
+        if (checkout / "factorio_mod/namespace.lua").is_file():
+            from tools.build_runtime_mods import build_runtime_mods
+            build_runtime_mods(checkout / "factorio_mod", lane / "mods", runtimes=("laya",))
         for path in (lane / "mods").glob("*"):
             if path.name not in {"factorio_cursor_rl_agent", "factorio_training_lab"}:
                 continue
@@ -564,6 +569,8 @@ class DeterministicFleetRuntime:
             },
         })
         derived["deployed_factorio_mod_sha256"] = directory_hash(lane / "mods/factorio_cursor_rl_agent")
+        if (lane / "mods/factorio_laya_agent").is_dir():
+            derived["deployed_factorio_laya_agent_sha256"] = directory_hash(lane / "mods/factorio_laya_agent")
         derived["deployed_factorio_training_lab_sha256"] = directory_hash(lane / "mods/factorio_training_lab")
         _atomic_json(plan.manifest_path, derived)
         _atomic_json(lane / "episode/creator.json", creator_manifest)
