@@ -5387,6 +5387,22 @@ def _scarce_metal_startup(client: RconClient, surface: str, force: str) -> bool:
         return True
 
 
+# Requester multiples start at the bootstrap formula so a young factory is not
+# overloaded. Observed advanced-circuit production releases the next rung: a
+# 4-craft window (AM1 electric-mining-drill) becomes 15, enough demand to
+# justify promoting that item to a line of at least six machines. Rungs not
+# listed here (for example 1) never change.
+_RELEASED_REQUEST_MULTIPLIERS = {4: 15}
+
+
+def _released_request_multiple(
+    client: RconClient, surface: str, force: str, bootstrap: int,
+) -> int:
+    if not _independent_mall_ready(client, surface, force):
+        return bootstrap
+    return _RELEASED_REQUEST_MULTIPLIERS.get(bootstrap, bootstrap)
+
+
 def _mall_request_multiplier(
     client: RconClient, surface: str, force: str, item: str, spec: dict,
     output_target: int, *, finite_batch: bool = False,
@@ -5399,8 +5415,11 @@ def _mall_request_multiplier(
     prevents a one-item fast-inserter construction need from warehousing ten
     or more regular inserters needed by an already planned refinery.
     """
-    standard = standard_mall_request_multiplier(
+    bootstrap_standard = standard_mall_request_multiplier(
         spec["machine"], spec["craft_time"],
+    )
+    standard = _released_request_multiple(
+        client, surface, force, bootstrap_standard,
     )
     if item == "transport-belt":
         multiplier = 30
@@ -5425,6 +5444,8 @@ def _mall_request_multiplier(
         )
     if item == "transport-belt" or item in _STARTUP_MALL_REQUESTER_ITEMS:
         return multiplier
+    if standard != bootstrap_standard:
+        return standard
     return None
 
 
@@ -11385,8 +11406,11 @@ def _convert_mall_cell_to_recipe(
         "logistic_sections": [{
             "group": recipe_group_name(recipe, side),
             "requests": requests,
-            "multiplier": standard_mall_request_multiplier(
-                machine_name, spec["craft_time"],
+            "multiplier": _released_request_multiple(
+                client, surface, force,
+                standard_mall_request_multiplier(
+                    machine_name, spec["craft_time"],
+                ),
             ),
         }],
     }

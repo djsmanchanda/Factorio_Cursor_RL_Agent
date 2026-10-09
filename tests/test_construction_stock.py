@@ -446,6 +446,36 @@ def test_starter_migration_reduces_belt_component_requesters(monkeypatch) -> Non
     ) == 30
 
 
+def test_requester_multiple_rises_only_after_advanced_circuits(monkeypatch) -> None:
+    """The AM1 drill's 4-craft bootstrap window holds until advanced circuits
+    are observed, then rises to 15 (design intent 2026-10-10)."""
+    monkeypatch.setattr(
+        builder, "_is_pre_core_temporary_mall_item", lambda *_args: False,
+    )
+    spec = {"machine": "assembling-machine-1", "craft_time": 2.0}
+    client = SimpleNamespace(command=lambda *_a, **_k: None)
+
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    # None means the default formula (4) stays in force.
+    assert builder._mall_request_multiplier(
+        client, "nauvis", "player", "electric-mining-drill", spec, 50,
+    ) is None
+    assert builder._released_request_multiple(
+        client, "nauvis", "player", 4,
+    ) == 4
+
+    monkeypatch.setattr(
+        builder, "_production_started",
+        lambda _c, _s, _f, item: item == "advanced-circuit",
+    )
+    assert builder._mall_request_multiplier(
+        client, "nauvis", "player", "electric-mining-drill", spec, 50,
+    ) == 15
+    assert builder._released_request_multiple(
+        client, "nauvis", "player", 1,
+    ) == 1
+
+
 def test_pre_core_finite_requester_cannot_hoard_construction_inputs(
     monkeypatch,
 ) -> None:

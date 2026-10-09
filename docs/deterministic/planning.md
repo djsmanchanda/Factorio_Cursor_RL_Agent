@@ -49,6 +49,16 @@ These names describe intended responsibilities, not permission to build speculat
   output nearer current demand. Reserve the full expansion footprint at that
   site so later six-furnace modules can extend without relocation.
 
+## Mall requester multiples
+
+Mall requester multiples start at the bootstrap value (the standard 15-second
+supply formula, e.g. 4 for an assembling-machine-1 with a 2-second craft) so
+early bootstrap does not overload the factory. No multiple rises until
+advanced-circuit production is observed; then the 4-level multiple is released
+to 15 (electric-mining-drill and similar items), which justifies promoting them
+to full assembly lines of at least six machines. Line promotion itself is
+gated separately and is not changed by the release.
+
 ## Production lifecycle invariants
 
 - Iron and copper start with one removable direct stack: one drill outputs
