@@ -189,6 +189,21 @@ class PendingSystemDeferred(WorkStateSignal):
         )
 
 
+class DistrictExpansionUnbuildable(WorkStateSignal):
+    """An owned resource district has no batch the planner can build next.
+
+    Nothing is under construction, so waiting cannot change the outcome; the
+    state is terminal for this checkpoint and must not be treated as in progress."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            code="district_expansion_unbuildable",
+            classification="intended_difficulty",
+            state="failed",
+        )
+
+
 @dataclass(frozen=True)
 class LocalExtractionPlan:
     ore: str
@@ -1073,7 +1088,7 @@ def plan_local_extraction(
                         belt_type=belt_type, parallel_belt_y=parallel_belt_y,
                     )
                 except ValueError as error:
-                    raise PendingSystemDeferred(
+                    raise DistrictExpansionUnbuildable(
                         f"The parallel {ore} batch is surveyed but its merge "
                         f"cannot be built with {belt_type}: {error}"
                     ) from error
@@ -1084,7 +1099,7 @@ def plan_local_extraction(
                 first_column_x = min(drill_xs)
                 expansion_positions = parallel_positions
             else:
-                raise PendingSystemDeferred(
+                raise DistrictExpansionUnbuildable(
                     f"The owned {ore} resource district at {parallel_source.output} "
                     "has no buildable straight or parallel collector batch for "
                     "the next six-drill checkpoint. Expansion stays in this "

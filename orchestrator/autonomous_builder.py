@@ -2965,13 +2965,19 @@ def build_mining_stage(
                 and reserved_recipe != recipe
             ),
         )
-    except stage_extraction.PendingSystemDeferred as error:
+    except (
+        stage_extraction.PendingSystemDeferred,
+        stage_extraction.DistrictExpansionUnbuildable,
+    ) as error:
         # The system serving this demand is still being built -- bots need
         # minutes, not another system. Ending the run here is how the landfill
         # mission died: the second survey under-counted a half-built mine,
         # opened a duplicate system, and its preflight collided with the
-        # first system's own ore bridge.
-        emit(f"PLATE SYSTEM PENDING: {error}")
+        # first system's own ore bridge. An unbuildable district is terminal
+        # for this checkpoint and keeps its own code, so it is not waited on.
+        label = ("PLATE SYSTEM PENDING" if error.state == "constructing"
+                 else "DISTRICT UNBUILDABLE")
+        emit(f"{label}: {error}")
         raise ProductionPrerequisiteDeferred(
             str(error), code=error.code, classification=error.classification,
             state=error.state, details=error.details,
@@ -7697,7 +7703,16 @@ def _build_assembled_stage(
                     client, bridge, surface, force, extraction,
                     reference_point, emit, expand=True,
                 )
-            except stage_extraction.PendingSystemDeferred as error:
+            except (
+                stage_extraction.PendingSystemDeferred,
+                stage_extraction.DistrictExpansionUnbuildable,
+            ) as error:
+                if isinstance(error, stage_extraction.DistrictExpansionUnbuildable):
+                    raise ProductionPrerequisiteDeferred(
+                        str(error), code=error.code,
+                        classification=error.classification,
+                        state=error.state, details=error.details,
+                    ) from error
                 raise ProductionPrerequisiteDeferred(str(error)) from error
             return
         # Site the line beside the input it eats most of, not beside the
