@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Callable
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
@@ -523,7 +524,37 @@ def ensure_coal_mine(
     found = None
     if existing is not None:
         if existing.pending:
-            raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
+            # Construction in flight is a typed wait, not a bug: ending the run
+            # here (the old StuckError) killed a mine that bots were finishing.
+            from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+            # Why its ghosts are not reviving (coverage, bots, material,
+            # collision), so a long wait names its cause in the log.
+            x, y = existing.output
+            try:
+                reasons = Counter(
+                    str(ghost.get("reason", "pending"))
+                    for ghost in live_base.ghost_blockages(
+                        client, surface, force, ((x - 24, y - 24), (x + 24, y + 24)),
+                    )
+                )
+                ghosts = ", ".join(f"{r}={n}" for r, n in reasons.most_common(4)) or "none"
+            except Exception as error:  # Diagnostic only; never blocks the wait.
+                ghosts = f"unknown ({type(error).__name__})"
+            emit(
+                f"  COAL DISTRICT: existing coal mine at {existing.output} is still "
+                f"constructing (drills={existing.drill_count}, "
+                f"expansion_step={existing.expansion_step}; ghosts nearby: {ghosts}); "
+                "waiting, not duplicating"
+            )
+            raise ProductionPrerequisiteDeferred(
+                f"existing coal mine at {existing.output} is incomplete; "
+                "refusing to duplicate it",
+                code="pending_system_construction",
+                classification="intended_difficulty",
+                state="constructing",
+                details={"output": list(existing.output)},
+            )
         source = _coal_belt_source(client, surface, existing)
         if prefer_nearest_patch:
             found = resource_patches.nearest_viable_patch(
