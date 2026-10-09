@@ -571,6 +571,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     goal_blocked = any(src & goal for src in sources.values())
 
     def mall_slot(item: str) -> None:
+        growth = board.get("mall_growth") or {}
         options.append({
             "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
             "summary": f"mall slot for {item}", "params": {"item": item},
@@ -578,6 +579,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("mall_slot", item))),
                          "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
                          "shortage": short.get(item, 0),
+                         # Demand/capacity facts Laya weighs when choosing growth, in the
+                         # same shape the deterministic admission uses.
+                         "plate_surplus_per_s": growth.get("plate_surplus_per_s"),
+                         "seed_ready": growth.get("seed_ready"),
                          "borrows": next((r.get("code") for r in reversed(results)
                                           if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
                          "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})

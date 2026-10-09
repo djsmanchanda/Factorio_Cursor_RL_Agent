@@ -367,7 +367,14 @@ gated separately and is not changed by the release.
   persisted project names differ; a retry may not count its child packet
   reservations as foreign stock and demand a duplicate bill.
   Before advanced-circuit production, the compact mall retains an eight-assembler
-  ceiling shared by anchors and rotating demand. This protects finite seed
+  opening bank shared by anchors and rotating demand. Once every plate's initial
+  six-drill mine is verified and there is demand, the reserved dense expansion
+  bank may join it, growing the shared ceiling to twelve without the six
+  requesters six ordinary pairs would need. Growth is demand-driven: a measured
+  plate surplus over measured mall consumption, or an explicit blocked item,
+  plus a funded small assembling-machine-1 and long-handed-inserter seed
+  reserve. Unknown six-drill readiness does not pass, and consumption is a rate
+  from the engine's counters, never a stock delta. This protects finite seed
   logistics items while the complete future chemical/coverage bill is unknown.
   Plastic alone cannot release the ceiling: chests, electric furnaces,
   substations and roboports still require downstream production capabilities.

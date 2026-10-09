@@ -66,21 +66,30 @@ def test_pre_advanced_mall_starts_with_one_dense_four_slot_module(monkeypatch) -
     assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 8
 
 
-def test_quad_expansion_uses_catalog_capability_after_iron_release(monkeypatch) -> None:
-    """Catalog availability must unlock expansion; waiting for output is circular."""
+def test_quad_expansion_uses_catalog_capability_at_the_six_drill_checkpoint(monkeypatch) -> None:
+    """Catalog availability must unlock expansion; waiting for output is circular.
+
+    The gate now also requires the verified six-drill checkpoint of every plate
+    and funded demand, both stubbed here so this still proves the catalog point.
+    """
     monkeypatch.setitem(
         LINE_RECIPES, "long-handed-inserter",
         {"machine": "assembling-machine-1", "ingredients": ["iron-plate"],
          "amounts": [1], "product_amount": 1, "craft_time": 0.5},
     )
-    monkeypatch.setattr(builder, "_STARTUP_METAL_STARTERS_OBSERVED", True)
-    monkeypatch.setattr(
-        builder, "_bootstrap_state",
-        lambda recipe: type("State", (), {"lifecycle_state": "released"})()
-        if recipe == "iron-plate" else None,
-    )
     monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
-    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(
+        builder, "_managed_drill_counts",
+        lambda *_a: {"iron-plate": 6, "copper-plate": 6, "stone-brick": 6},
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 4)
+    monkeypatch.setattr(
+        builder.live_base, "available_items",
+        lambda *_a: {"assembling-machine-1": 1, "long-handed-inserter": 2},
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", {"transport-belt"})
+    monkeypatch.setattr(builder, "_BOOTSTRAP_SHARED_PROVIDER_ITEMS", set())
 
     assert builder._dense_bootstrap_mall_enabled(
         object(), "nauvis", "player",

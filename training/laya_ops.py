@@ -201,7 +201,7 @@ class DeterministicSession:
         submission is a reconciliation obligation, not a live readiness claim.
         ``reservation_owners`` names the project holding each reserved item and
         ``demand`` is the shared demand-siting read (never training-local
-        geometry).  ``free_slots`` is left for the mall slot-growth integration.
+        geometry). ``free_slots`` reports measured capacity, or None if unknown.
         """
         from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
@@ -224,9 +224,15 @@ class DeterministicSession:
         districts = {state.recipe: {"lifecycle_state": state.lifecycle_state,
                                    "replacement_submitted": state.replacement_submitted}
                      for state in ab._BOOTSTRAP_DISTRICT_LEDGER.states()}
+        try:
+            limit = ab._bootstrap_mall_slot_limit(self.client, SURFACE, FORCE)
+            capacity = ab._mall_capacity_facts(self.client, SURFACE, self.reference_point, limit)
+        except Exception:
+            capacity = {"committed_slots": None, "slot_limit": None, "free_slots": None, "unlimited": None}
         return {"projects": projects, "loans": loans, "loan_error": loan_error,
                 "bootstrap_districts": districts, "reservation_owners": reservation_owners(projects),
-                "demand": self._demand_facts(), "free_slots": None}
+                "demand": self._demand_facts(), "free_slots": capacity["free_slots"],
+                "mall_capacity": {key: capacity[key] for key in ("committed_slots", "slot_limit", "unlimited")}}
 
     # Item reads are bounded per decision; demand for an item with no built
     # requester (or a failed read) is None -- unknown, never a zero distance.

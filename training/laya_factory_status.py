@@ -23,6 +23,8 @@ from typing import Any
 
 from planners.recipe_data import MACHINE_SPEEDS
 
+from orchestrator import mall_growth
+
 VERSION = "laya-factory-status-v1"
 RAW_ITEMS = frozenset({"iron-ore", "copper-ore", "stone", "coal"})
 SMELTED_ITEMS = frozenset({"iron-plate", "copper-plate", "stone-brick", "steel-plate"})
@@ -218,11 +220,32 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         need["short_inputs"] = sorted(part["name"] for part in (recipe or {}).get("ingredients", ())
                                       if conditions.get(part["name"]) not in (None, "satisfied"))
     needs.sort(key=lambda n: (n["depth"], n["item"]))
+    # Capacity/plate-surplus facts for choosing mall growth, in the same shape
+    # the deterministic admission uses. Measured rates only: a missing counter
+    # stays None, never a stock-delta substitute.
+    plate_production = {
+        item: _measured(measurement, "production", item)
+        for item in mall_growth.PLATE_ITEMS
+    }
+    plate_consumption = {
+        item: _measured(measurement, "consumption", item)
+        for item in mall_growth.PLATE_ITEMS
+    }
+    growth_facts = {
+        "version": mall_growth.VERSION,
+        "measurement_scope": "surface/force counters, including all consumers",
+        "plate_surplus_per_s": mall_growth.plate_surplus(
+            plate_production, plate_consumption,
+        ),
+        "seed_ready": mall_growth.seed_ready(stock),
+        "free_slots": None,  # live slot capacity is owned by the running controller
+    }
     return {
         "version": VERSION, "targets": dict(sorted(targets.items())), "stock_targets": dict(sorted(stock_targets.items())),
         "measured": measurement is not None,
         "window_ticks": None if measurement is None else measurement.get("window_ticks"),
         "needs": needs,
+        "mall_growth": growth_facts,
         "construction": {"pending_ghosts": int(facts.get("pending_ghosts", 0)),
                          "shortfall": construction_shortfall(facts)},
     }
@@ -278,6 +301,15 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
         rows.append(row)
     return {"version": VERSION, "needs": rows, "omitted": max(0, len(board["needs"]) - limit),
             "stock_targets": sorted(board.get("stock_targets") or {}),
+            "mall_growth": {
+                "plate_surplus_per_s": {
+                    item: (None if value is None else round(value, 3))
+                    for item, value in (board.get("mall_growth") or {}).get(
+                        "plate_surplus_per_s", {},
+                    ).items()
+                },
+                "seed_ready": (board.get("mall_growth") or {}).get("seed_ready"),
+            },
             "bottleneck": bottleneck_chain(board), "construction_shortfall": board["construction"]["shortfall"]}
 
 

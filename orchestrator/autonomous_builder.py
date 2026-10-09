@@ -74,6 +74,7 @@ from orchestrator.mall_builder import (
     rebuild_incomplete_mall_cell,
     seed_cell_includes_substation,
 )
+from orchestrator import mall_growth
 from orchestrator.mall_bootstrap import (
     MallBootstrapLoan, MallBootstrapStep,
     _LOAN_REQUEST_HEADROOM_FRACTION,
@@ -3529,8 +3530,9 @@ _GENERATION_CHECK_INTERVAL_TICKS = 1800  # 30s of game time between grid checks
 
 # Before advanced circuits, one gear anchor, one cable anchor, and two
 # demand-driven rotating slots form the opening bank. The pool grows to eight
-# slots as demand rises. Once the iron pioneer is released, reserved dense
-# modules expand that bank to twelve without moving the first mine's mall or
+# slots as demand rises. Once all three plate mines have six drills and
+# demand plus the seed reserve are funded, reserved dense modules expand
+# that bank to twelve without moving the first mine's mall or
 # consuming six new requesters. Advanced-circuit production still releases
 # the independent mall completely.
 _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET = 8
@@ -3560,9 +3562,10 @@ def _bootstrap_mall_slot_limit(
         advanced_started = False
     if advanced_started:
         return None
-    # Once the iron pioneer is gone, the two reserved modules can join the
-    # opening module. This is the reduced-seed path: it reaches twelve slots
-    # without demanding the six requesters required by six ordinary pairs.
+    # The reserved dense modules may join the opening bank only once every
+    # plate's initial six-drill mine is verified and measured demand asks for
+    # the capacity: the reduced-seed path reaches twelve slots without
+    # demanding the six requesters required by six ordinary pairs.
     if _dense_bootstrap_mall_enabled(client, surface, force):
         return DEMAND_MALL_SLOT_TARGET
     # Both live and dry callers may grow the rotating pool to eight slots;
@@ -3570,28 +3573,110 @@ def _bootstrap_mall_slot_limit(
     return _PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET
 
 
+#: Plates (and their ore) whose initial six-drill mine guards mall growth.
+_SIX_DRILL_PLATES = (
+    ("iron-plate", "iron-ore"),
+    ("copper-plate", "copper-ore"),
+    ("stone-brick", "stone"),
+)
+#: Stable survey anchor for the direct starters that must be excluded.
+_MALL_GROWTH_REFERENCE_POINT: Point = (3.0, -1.0)
+
+
+def _managed_drill_counts(
+    client: RconClient, surface: str, force: str,
+) -> dict[str, int | None]:
+    """Per-plate managed drill counts, excluding the removable direct starters.
+
+    A plate the client cannot be probed for is reported ``None`` so unknown
+    readiness never reads as ready.  The direct starter is bootstrap capacity,
+    not a persistent mine, and is excluded from its own checkpoint.
+    """
+    counts: dict[str, int | None] = {}
+    queryable = hasattr(client, "command")
+    for plate, ore in _SIX_DRILL_PLATES:
+        if not queryable:
+            counts[plate] = None
+            continue
+        try:
+            starter = live_base.direct_plate_starter(
+                client, surface, force, plate, ore,
+                _MALL_GROWTH_REFERENCE_POINT,
+            )
+            excluded: tuple[Point, ...] = ()
+            if starter is not None:
+                excluded = (
+                    starter.drill_position, *starter.additional_drill_positions,
+                )
+            counts[plate] = extraction_state.resource_drill_count(
+                client, surface, force, ore, excluded,
+            )
+        except Exception:
+            counts[plate] = None
+    return counts
+
+
+def _mall_capacity_facts(client, surface, reference_point, slot_limit):
+    """Committed slot capacity from the shared allocator's live survey."""
+    try:
+        committed = mall_slot_count(client, surface, reference_point)
+    except Exception:
+        committed = None
+    return {"committed_slots": committed, "slot_limit": slot_limit,
+            "free_slots": None if committed is None or slot_limit is None else max(0, slot_limit - committed),
+            "unlimited": slot_limit is None}
+
+
+def _mall_growth_facts(
+    client: RconClient, surface: str, force: str,
+) -> mall_growth.MallGrowthFacts:
+    """Compose the shared demand-driven admission facts for the dense bank.
+
+    The deterministic runtime has no honest plate production/consumption rate
+    at this seam, so it reports those unknown and lets explicit blocking demand
+    stand in.  A stock delta is not throughput and is never passed as a rate.
+    """
+    reference = _MALL_GROWTH_REFERENCE_POINT
+    capacity = _mall_capacity_facts(client, surface, reference, DEMAND_MALL_SLOT_TARGET)
+    committed = capacity["committed_slots"]
+    stock: Mapping[str, int] | None = None
+    try:
+        stock = _transferable_or_available_stock(client, surface, force)
+        if _MATERIAL_RESERVATION_LEDGER is not None:
+            stock = _MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)
+    except Exception:
+        stock = None
+    return mall_growth.mall_growth_facts(
+        observed_drills=_managed_drill_counts(client, surface, force),
+        committed_slots=committed,
+        slot_limit=DEMAND_MALL_SLOT_TARGET,
+        production_per_s={},
+        mall_consumption_per_s={},
+        unmet_demand=bool(_BLOCKING_MALL_ITEMS or _BOOTSTRAP_SHARED_PROVIDER_ITEMS),
+        stock=stock,
+    )
+
+
 def _dense_bootstrap_mall_enabled(
     client: RconClient, surface: str, force: str,
 ) -> bool:
-    """Whether the top/bottom expansion bay may be admitted.
+    """Whether the top/bottom dense expansion bay may grow.
 
-    The expansion uses the regular-inserter seed geometry and upgrades it
-    later.  Requiring a long-handed line to have already produced an item made
-    this gate circular: nothing else requested long-handed inserters, so the
-    quad bay could never be reached.  A recipe present in the live catalog is
-    the capability signal; the iron pioneer must still be released first so
-    the opening pair bank remains the four-slot bootstrap.
+    Growth is demand-driven and admitted only once every plate's initial
+    six-drill mine is verified and the small AM1 + long-handed seed is funded.
+    The long-handed recipe must exist because the dense bay's vertical
+    transfers are long-handed; a recipe present in the live catalog is the
+    capability signal (waiting for an item made *by* the bay would be
+    circular).  Unknown readiness does not pass.
     """
-    long_handed_ready = "long-handed-inserter" in LINE_RECIPES
-    if not long_handed_ready:
+    if "long-handed-inserter" not in LINE_RECIPES:
         return False
-    if not _iron_starter_released(client, surface, force):
+    if _independent_mall_ready(client, surface, force):
         return False
-    return bool(
-        _STARTUP_METAL_STARTERS_OBSERVED
-        and long_handed_ready
-        and not _independent_mall_ready(client, surface, force)
-    )
+    try:
+        return _mall_growth_facts(client, surface, force).admit
+    except Exception:
+        return False
 
 
 def _quad_bootstrap_mall_enabled(

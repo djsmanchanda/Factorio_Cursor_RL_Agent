@@ -53,6 +53,7 @@ _FAST_FILES = {
     "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",
     "test_fluid_systems.py", "test_infrastructure.py",
+    "test_mall_growth.py",
     "test_material_reservations.py", "test_mission_state.py",
     "test_module_integrity.py", "test_plan_self_collision.py",
     "test_preflight.py", "test_recipe_catalog_contract.py",
