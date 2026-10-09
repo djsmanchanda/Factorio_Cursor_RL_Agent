@@ -82,3 +82,14 @@ def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, mo
     assert report.is_file() and len(calls) == 2
     assert "live observer" in calls[0] and "--session ses_live" in calls[1] and "Live observations" in calls[1]
     assert (tmp_path / "data/now/checkpoint-001.md").is_file()
+
+
+def test_journal_summary_accepts_ops_decision_rows_without_status(tmp_path):
+    # The ops runner records decisions with a summary but no status; the final review must not fail on them.
+    journal = tmp_path / "clean-decisions.jsonl"
+    rows = [{"event": "decision", "run_id": "r", "index": "0", "summary": "extend copper-plate",
+             "choice": {"need_id": "item:copper-plate", "option_id": "op.extend.copper-plate", "probability": 0.7}},
+            {"event": "acceptance", "run_id": "r", "at": "end", "statuses": {"C2": "passed"}}]
+    journal.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    summary = helper.journal_summary(journal, "r")
+    assert summary["decisions"] == 1 and summary["top_choices"] == {"extend copper-plate": 1}
