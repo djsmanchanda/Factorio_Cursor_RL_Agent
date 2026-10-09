@@ -167,6 +167,38 @@ def test_parallel_row_expansion_declares_splitter_merge() -> None:
     )
 
 
+def test_parallel_row_expansion_mirrors_merge_for_lower_reserved_band() -> None:
+    from planners.resource_layouts import generate_parallel_mining_row_expansion
+
+    plan = generate_parallel_mining_row_expansion(
+        [44.5, 47.5, 50.5, 53.5, 56.5, 59.5], -1.5,
+        belt_type="fast-transport-belt", parallel_belt_y=-9.5, merge_x=64.5,
+    )
+    actions = [
+        action for phase in plan["phases"] for action in phase["actions"]
+    ]
+    tunnels = [
+        action for action in actions
+        if "underground-belt" in action["entity"]
+    ]
+    splitter = next(action for action in actions if "splitter" in action["entity"])
+
+    assert [(item["position"]["y"], item["direction"], item["underground_type"])
+            for item in tunnels] == [(-9.5, "south", "input"), (-2.5, "south", "output")]
+    assert splitter["input_priority"] == "left"
+    assert splitter["output_priority"] == "left"
+
+
+def test_regular_belt_cannot_claim_unreachable_lower_band_merge() -> None:
+    from planners.resource_layouts import generate_parallel_mining_row_expansion
+
+    with pytest.raises(ValueError, match="transport-belt underground reach 5"):
+        generate_parallel_mining_row_expansion(
+            [44.5, 47.5, 50.5, 53.5, 56.5, 59.5], -1.5,
+            belt_type="transport-belt", parallel_belt_y=-9.5, merge_x=64.5,
+        )
+
+
 def test_longitudinal_mine_module_adds_one_substation_not_poles() -> None:
     from planners.resource_layouts import generate_shared_belt_batch_expansion
 
@@ -957,6 +989,12 @@ def test_full_straight_corridor_uses_parallel_splitter_band(monkeypatch) -> None
         growth_direction=-1,
     )
     _patch_and_rates(monkeypatch, existing=mine)
+    monkeypatch.setattr(
+        resource_patches, "patch_for_extraction",
+        lambda *_a, **_k: resource_patches.ResourcePatch(
+            (50.0, 5.0), (0.0, -20.0), (60.0, 30.0), 500_000,
+        ),
+    )
     monkeypatch.setattr(live_base, "find_clear_areas", _clear_areas_at((80.0, 80.0)))
     monkeypatch.setattr(live_base, "drill_siting_conflicts", lambda *_a: [])
 

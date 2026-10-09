@@ -111,3 +111,33 @@ def parallel_phase_batch_positions(
     )
     offset = band_order * band_pitch
     return tuple((x, y + offset) for x, y in base)
+
+
+def owned_parallel_band_orders(
+    mine: ResourceMine, requested_drills: int,
+    patch_min: tuple[float, float], patch_max: tuple[float, float],
+) -> tuple[int, ...]:
+    """List the two declared parallel bands that remain inside the patch box.
+
+    The managed district envelope reserves one band on either side of its
+    primary collector. Keep the historical positive-side preference, but
+    allow the mirrored reserved band when that side is blocked. The later
+    live drill, occupancy, and route surveys still decide whether a band is
+    buildable; these bounds only prevent widening the owned district.
+    """
+    if requested_drills <= 0 or requested_drills % 2:
+        raise ValueError("A parallel mining phase must request a positive even drill count")
+    if patch_min[0] > patch_max[0] or patch_min[1] > patch_max[1]:
+        raise ValueError("patch bounds must be ordered")
+    orders = []
+    for order in (1, -1):
+        positions = parallel_phase_batch_positions(
+            mine, requested_drills, band_order=order,
+        )
+        if all(
+            patch_min[0] <= x <= patch_max[0]
+            and patch_min[1] <= y <= patch_max[1]
+            for x, y in positions
+        ):
+            orders.append(order)
+    return tuple(orders)

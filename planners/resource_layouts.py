@@ -346,10 +346,10 @@ def generate_parallel_mining_row_expansion(
 ) -> dict:
     """Build a second paired collector row and merge it into the source lane.
 
-    The parallel belt runs east and feeds the second splitter lane through a
-    vertical underground crossover.  This keeps the two collector rows
-    independent while making the merge explicit; a raw perpendicular T is
-    never emitted.  ``merge_x`` is the tile immediately before the splitter
+    The parallel belt runs east and feeds the splitter lane on its side
+    through a vertical underground crossover. This keeps the two collector
+    rows independent while making the merge explicit; a raw perpendicular T
+    is never emitted. ``merge_x`` is the tile immediately before the splitter
     centre and defaults to the row's east edge.
     """
     if not drill_xs:
@@ -379,7 +379,7 @@ def generate_parallel_mining_row_expansion(
     # y between their two lanes. The previous extra half tile produced an
     # integer x, which is not the centre of an east-facing splitter.
     splitter_x = merge_x
-    side_y = source_belt_y + 1
+    side_y = source_belt_y + (1 if parallel_belt_y > source_belt_y else -1)
     crossover_x = merge_x - 2
     if abs(parallel_belt_y - side_y) < 1:
         raise ValueError("Parallel row is too close for a legal splitter crossover")
@@ -404,13 +404,15 @@ def generate_parallel_mining_row_expansion(
         underground_name = "underground-belt"
     else:
         underground_name = belt_type.replace("transport-belt", "underground-belt")
+    crossover_direction = "north" if parallel_belt_y > source_belt_y else "south"
+    side_priority = "right" if side_y > source_belt_y else "left"
     crossover = [
         {"action_type": "place_ghost", "entity": underground_name,
          "position": {"x": crossover_x, "y": parallel_belt_y},
-         "direction": "north", "underground_type": "input"},
+         "direction": crossover_direction, "underground_type": "input"},
         {"action_type": "place_ghost", "entity": underground_name,
          "position": {"x": crossover_x, "y": side_y},
-         "direction": "north", "underground_type": "output"},
+         "direction": crossover_direction, "underground_type": "output"},
     ]
     side_belt = {
         "action_type": "place_ghost", "entity": belt_type,
@@ -418,8 +420,9 @@ def generate_parallel_mining_row_expansion(
     }
     splitter = {
         "action_type": "place_ghost", "entity": splitter_type,
-        "position": {"x": splitter_x, "y": source_belt_y + 0.5},
-        "direction": "east", "input_priority": "right", "output_priority": "right",
+        "position": {"x": splitter_x, "y": (source_belt_y + side_y) / 2},
+        "direction": "east", "input_priority": side_priority,
+        "output_priority": side_priority,
     }
     replace_trunk_belt = {
         "action_type": "remove_entity", "entity": belt_type,

@@ -10,7 +10,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 from orchestrator import live_base, stage_extraction  # noqa: E402
 from orchestrator.extraction_capacity import (  # noqa: E402
-    parallel_phase_batch_positions, phase_batch_positions,
+    owned_parallel_band_orders, parallel_phase_batch_positions,
+    phase_batch_positions,
 )
 from orchestrator.extraction_state import ResourceMine  # noqa: E402
 
@@ -84,6 +85,76 @@ def test_parallel_band_reuses_existing_columns() -> None:
         (19.5, 4.5), (19.5, 8.5),
         (22.5, 4.5), (22.5, 8.5),
     )
+
+
+def test_owned_parallel_band_search_stays_inside_measured_patch() -> None:
+    mine = ResourceMine(
+        output=(12.5, -1.5), drill_count=6, row_capacity=16,
+        belt_y=-1.5, first_column_x=16.5, haul_head=(24.5, -1.5),
+        growth_direction=-1,
+    )
+
+    assert owned_parallel_band_orders(
+        mine, 6, (15.0, -12.0), (24.0, -6.0),
+    ) == (-1,)
+
+
+def test_blocked_parallel_side_uses_the_other_reserved_band(monkeypatch) -> None:
+    mine = ResourceMine(
+        output=(12.5, -1.5), drill_count=3, row_capacity=3,
+        belt_y=-1.5, first_column_x=16.5, haul_head=(24.5, -1.5),
+        growth_direction=-1,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "find_resource_mines",
+        lambda *_a: [mine],
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "pending_plate_smelter",
+        lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "resource_drill_count",
+        lambda *_a: 6,
+    )
+    monkeypatch.setattr(
+        stage_extraction.extraction_state, "mining_productivity_bonus",
+        lambda *_a: 0.0,
+    )
+    patch = stage_extraction.resource_patches.ResourcePatch(
+        (20.0, 0.0), (15.0, -12.0), (24.0, 10.0), 500_000,
+    )
+    monkeypatch.setattr(
+        stage_extraction.resource_patches, "patch_for_extraction",
+        lambda *_a, **_k: patch,
+    )
+    surveyed_bands = []
+
+    def buildable(_client, _surface, _ore, positions):
+        if not positions:
+            return ()
+        surveyed_bands.append(positions[0][1])
+        return positions if positions[0][1] < 0 else ()
+
+    monkeypatch.setattr(stage_extraction, "buildable_batch_prefix", buildable)
+    monkeypatch.setattr(
+        stage_extraction, "_smelter_layout_geometry",
+        lambda *_a, **_k: (stage_extraction.Rect(0, 0, 2, 2), (0, 0), (2, 0)),
+    )
+    monkeypatch.setattr(
+        stage_extraction.demand_siting, "demand_point", lambda *_a: (0.0, 0.0),
+    )
+
+    plan = stage_extraction.plan_local_extraction(
+        object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
+        belt_type="fast-transport-belt", inserter_type="inserter",
+        reuse_existing=False, owned_smelter_origin=(100.0, 100.0),
+    )
+
+    assert surveyed_bands == [4.5, -11.5]
+    assert len(plan.expansion_positions) == 6
+    assert {y for _x, y in plan.expansion_positions} == {-11.5, -7.5}
+    assert plan.build_plan["parallel_merge"]["parallel_belt_y"] == -9.5
 
 
 def test_a_blocked_column_truncates_the_batch(survey) -> None:
@@ -205,3 +276,15 @@ def test_the_batch_is_no_longer_all_or_nothing() -> None:
 
     assert "expansion drill site" not in source
     assert "cannot mine cleanly" not in source
+
+
+def test_mirrored_merge_splitter_covers_both_connected_lanes():
+    from planners.resource_layouts import generate_parallel_mining_row_expansion
+    plan = generate_parallel_mining_row_expansion(
+        [16.5, 19.5, 22.5], -1.5, belt_type="fast-transport-belt", parallel_belt_y=-9.5,
+    )
+    actions = [a for phase in plan["phases"] for a in phase["actions"]]
+    splitter = next(a for a in actions if a["entity"] == "fast-splitter")
+    outlet = next(a for a in actions if a.get("underground_type") == "output")
+    lane_centers = {splitter["position"]["y"] - 0.5, splitter["position"]["y"] + 0.5}
+    assert lane_centers == {-1.5, outlet["position"]["y"]}

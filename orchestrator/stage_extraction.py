@@ -1068,34 +1068,46 @@ def plan_local_extraction(
             expansion_positions = positions
         else:
             # The owned district remains the source of truth when its first
-            # collector is full or physically blocked. Reuse its straight
-            # trunk and add a splitter-fed parallel band instead of opening a
-            # duplicate mine or deferring the same demand forever.
+            # collector is full or physically blocked. Survey both bands in
+            # the declared district envelope before refusing growth; each
+            # still has to pass live ore and occupancy checks.
             parallel_source = active or observed
-            parallel_positions = extraction_capacity.parallel_phase_batch_positions(
-                parallel_source, requested,
-            )
-            parallel_positions = complete_six_drill_prefix(
-                buildable_batch_prefix(
-                    client, surface, ore, parallel_positions,
-                ),
-            )
-            if parallel_positions:
-                drill_xs = sorted({x for x, _y in parallel_positions})
-                parallel_belt_y = parallel_source.shared_belt_y + (
-                    extraction_capacity.PARALLEL_BAND_PITCH
+            selected_parallel: tuple[tuple[Point, ...], dict, float] | None = None
+            merge_failures: list[str] = []
+            for band_order in extraction_capacity.owned_parallel_band_orders(
+                parallel_source, requested, (patch_min[0], patch_min[1]),
+                (patch_max[0], patch_max[1]),
+            ):
+                candidate_positions = extraction_capacity.parallel_phase_batch_positions(
+                    parallel_source, requested, band_order=band_order,
                 )
-                mine_origin = (drill_xs[0] - 1.5, parallel_belt_y + 3.5)
+                candidate_positions = complete_six_drill_prefix(
+                    buildable_batch_prefix(
+                        client, surface, ore, candidate_positions,
+                    ),
+                )
+                if not candidate_positions:
+                    continue
+                drill_xs = sorted({x for x, _y in candidate_positions})
+                parallel_belt_y = parallel_source.shared_belt_y + (
+                    band_order * extraction_capacity.PARALLEL_BAND_PITCH
+                )
                 try:
-                    build_plan = generate_parallel_mining_row_expansion(
+                    candidate_plan = generate_parallel_mining_row_expansion(
                         drill_xs, parallel_source.shared_belt_y,
                         belt_type=belt_type, parallel_belt_y=parallel_belt_y,
                     )
                 except ValueError as error:
-                    raise DistrictExpansionUnbuildable(
-                        f"The parallel {ore} batch is surveyed but its merge "
-                        f"cannot be built with {belt_type}: {error}"
-                    ) from error
+                    merge_failures.append(f"band {band_order}: {error}")
+                    continue
+                selected_parallel = (
+                    candidate_positions, candidate_plan, parallel_belt_y,
+                )
+                break
+            if selected_parallel is not None:
+                parallel_positions, build_plan, parallel_belt_y = selected_parallel
+                drill_xs = sorted({x for x, _y in parallel_positions})
+                mine_origin = (drill_xs[0] - 1.5, parallel_belt_y + 3.5)
                 drill_count = len(parallel_positions)
                 ore_output = parallel_source.haul_head or parallel_source.output
                 row_drill_count = len(drill_xs)
@@ -1103,11 +1115,16 @@ def plan_local_extraction(
                 first_column_x = min(drill_xs)
                 expansion_positions = parallel_positions
             else:
+                merge_note = (
+                    " Merge geometry rejected: " + "; ".join(merge_failures)
+                    if merge_failures else ""
+                )
                 raise DistrictExpansionUnbuildable(
                     f"The owned {ore} resource district at {parallel_source.output} "
-                    "has no buildable straight or parallel collector batch for "
+                    "has no buildable straight or reserved parallel collector batch for "
                     "the next six-drill checkpoint. Expansion stays in this "
                     "district instead of opening a duplicate mine or refinery."
+                    f"{merge_note}"
                 )
     else:
         mine_origin, drill_count, build_plan, ore_output = surveyed(
