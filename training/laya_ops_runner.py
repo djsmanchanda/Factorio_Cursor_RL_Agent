@@ -397,20 +397,24 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     from orchestrator.baseline_production import baseline_build_order
     started = {plate for plate, stage in stages.items() if stage != "none"}
     goal_blocked = any(src & goal for src in sources.values())
+
+    def mall_slot(item: str) -> None:
+        options.append({
+            "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
+            "summary": f"mall slot for {item}", "params": {"item": item},
+            "features": {"last_code": codes.get(("mall_slot", item), "new"),
+                         "waiting": in_progress(codes.get(("mall_slot", item))),
+                         "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
+                         "shortage": short.get(item, 0),
+                         "borrows": next((r.get("code") for r in reversed(results)
+                                          if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
+                         "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
+
     for item in baseline_build_order():
         chain = plates_in(item, recipes or {})
         if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started and (
                 not recipes or obtainable(recipes, item, stock or {})):
-            options.append({
-                "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
-                "summary": f"mall slot for {item}", "params": {"item": item},
-                "features": {"last_code": codes.get(("mall_slot", item), "new"),
-                             "waiting": in_progress(codes.get(("mall_slot", item))),
-                             "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
-                             "shortage": short.get(item, 0),
-                             "borrows": next((r.get("code") for r in reversed(results)
-                                              if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
-                             "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
+            mall_slot(item)
     # Borrowing a slot to batch an item needs standing slots to borrow from.
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")
     # Producing an item whose chain needs an unstarted plate would make the tooling open that plate's
@@ -419,6 +423,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
+    # A short item may also get its own standing slot, as the deterministic runner's demand-owned slots do
+    # (live 2026-10-10: splitter was only ever offered as a borrowed batch, 112 offers, no standing producer).
+    # The tooling's slot-capacity and funding gates still decide whether the slot can be placed.
+    core = set(baseline_build_order())
+    for item in sorted(producible):
+        if item not in core and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {}):
+            mall_slot(item)
     for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",

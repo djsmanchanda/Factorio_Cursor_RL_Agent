@@ -449,3 +449,20 @@ def test_a_plate_system_still_constructing_is_waiting_until_its_retry_horizon():
     assert menu(1600)["wait.300"]["features"]["constructing"]
     # After the retry horizon the extend is worth asking again.
     assert not menu(1000 + 1800)["op.extend.copper-plate"]["features"]["waiting"]
+
+
+def test_a_short_item_can_get_its_own_standing_mall_slot():
+    # Live 2026-10-10: splitter was only offered as a borrowed batch, never as a standing producer.
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "splitter": {"ingredients": [{"name": "iron-plate", "amount": 5}, {"name": "copper-plate", "amount": 1}]}}
+    built = [{"ok": True, "operation": op, "params": {"recipe": p}} for op in ("starter",) for p in ("iron-plate", "copper-plate")]
+    short = {"ok": False, "operation": "foundation", "params": {"recipe": "iron-plate"}, "code": "material_shortage",
+             "details": {"required": {"splitter": 2}, "available": {}}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    ids = {o["option_id"] for o in compile_options(BOARD, built + [short, slot], recipes=recipes)["options"]}
+    assert {"op.mall_slot.splitter", "op.produce.splitter"} <= ids
+    # Once the slot stands it is not offered again.
+    standing = {"ok": True, "operation": "mall_slot", "params": {"item": "splitter"}}
+    ids = {o["option_id"] for o in compile_options(BOARD, built + [short, slot, standing], recipes=recipes)["options"]}
+    assert "op.mall_slot.splitter" not in ids
