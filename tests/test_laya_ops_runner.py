@@ -356,3 +356,13 @@ def test_starter_retirement_stays_on_the_menu_after_the_plate_goal_is_met():
     met = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": 0.5}]}
     ids = {o["option_id"] for o in compile_options(met, built)["options"]}
     assert "op.retire_starter.iron-plate" in ids and "op.extend.iron-plate" not in ids
+
+
+def test_an_unbuildable_district_is_not_waiting_and_counts_toward_a_stop():
+    from training.laya_ops_runner import in_progress, repeat_fails
+    # Bots are still building: a wait. An exhausted district has nothing under construction.
+    assert in_progress("pending_system_construction")
+    assert not in_progress("district_expansion_unbuildable")
+    refused = [{"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"}, "tick": tick,
+                "code": "district_expansion_unbuildable"} for tick in (1000, 2000, 3000)]
+    assert repeat_fails(refused, ("extend", "copper-plate")) == 3

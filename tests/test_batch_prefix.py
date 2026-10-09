@@ -187,12 +187,15 @@ def test_an_exhausted_corridor_never_opens_an_independent_mine(monkeypatch) -> N
         lambda *_a, **_k: pytest.fail("an existing district cannot spawn a new mine"),
     )
 
-    with pytest.raises(stage_extraction.PendingSystemDeferred, match="district"):
+    with pytest.raises(stage_extraction.DistrictExpansionUnbuildable, match="district") as raised:
         stage_extraction.plan_local_extraction(
             object(), "nauvis", "player", "iron-plate", (0.0, 0.0), 3,
             belt_type="transport-belt", inserter_type="inserter",
             reuse_existing=False,
         )
+    # Nothing is under construction, so this must not read as a wait.
+    assert raised.value.code == "district_expansion_unbuildable"
+    assert raised.value.state == "failed"
 
 
 def test_the_batch_is_no_longer_all_or_nothing() -> None:
