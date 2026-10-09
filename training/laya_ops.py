@@ -179,6 +179,7 @@ class DeterministicSession:
         before = funded_plan_signature(projects)
         try:
             ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
+            ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:
             response = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),

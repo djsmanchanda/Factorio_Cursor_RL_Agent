@@ -89,7 +89,8 @@ from orchestrator.material_reservations import (
 )
 from orchestrator.logistic_chest_budget import plan_dependency_chest_budget
 from orchestrator.parts_mall import (
-    MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
+    MaterialShortage, STARTER_MALL_TARGETS, add_demands, mission_mall_targets, standing_gate_target,
+    wait_for_stock,
 )
 from orchestrator.intermediate_scaling import (
     backlog_seconds,
@@ -4956,6 +4957,49 @@ def _submit_mall_refresh_once(
     return True
 
 
+def _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, stock_gate_target, emit):
+    """Configure the existing producer through the same tier and executor checks."""
+    gate_key = (surface, force, item)
+    prior_target = _MALL_STOCK_GATE_FLOORS.get(gate_key)
+    # Register the current cap for reconciliation, without making it a floor.
+    _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
+    gate_plan = generate_mall_stock_gate_update(
+        item, spec["machine"], list(existing.machine_positions),
+        stock_gate_target,
+    )
+    if hasattr(client, "command"):
+        # Recipe defaults describe new builds, not the tiers already
+        # installed. One batch survey also handles mixed upgrade rows.
+        names = live_base.entity_names_at(
+            client, surface, existing.machine_positions,
+        )
+        for action in gate_plan["phases"][0]["actions"]:
+            point = (action["position"]["x"], action["position"]["y"])
+            actual = names.get(point)
+            if actual not in live_base.ASSEMBLER_TIERS:
+                raise ProductionPrerequisiteDeferred(
+                    f"{item} stock gate waits for its existing assembler at {point}",
+                    code="mall_stock_gate_target_pending", state="constructing",
+                    details={"item": item, "position": list(point), "observed": actual},
+                )
+            action["entity"] = actual
+    gate_plan["surface"], gate_plan["force"] = surface, force
+    for old in tuple(_MALL_REFRESH_SIGNATURES):
+        if prior_target != stock_gate_target and old[:4] == ("stock_gate", surface, force, item):
+            _MALL_REFRESH_SIGNATURES.discard(old)
+    _submit_mall_refresh_once(
+        (
+            "stock_gate", surface, force, item,
+            tuple(existing.machine_positions), stock_gate_target,
+            tuple(a["entity"] for a in gate_plan["phases"][0]["actions"]),
+        ),
+        lambda: _submit(
+            client, bridge, surface, gate_plan,
+            f"mall_stock_gate_{item}", emit,
+        ),
+    )
+
+
 def _refresh_mall_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     plan: _LinePlan, emit: Callable[[str], None], *, upgrade_bootstrap: bool,
@@ -5060,13 +5104,6 @@ def _refresh_mall_cell(
                 mall_storage_limit = _canonical_mall_provider_limit(
                     surface, force, item, mall_storage_limit,
                 )
-            if stock_gate_target is not None:
-                gate_key = (surface, force, item)
-                stock_gate_target = max(
-                    stock_gate_target,
-                    _MALL_STOCK_GATE_FLOORS.get(gate_key, 0),
-                )
-                _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
             # The provider chest has no physical bar. Production is bounded
             # by the assembler's logistic stock gate below, so mixed output
             # and temporary loans cannot strand the chest behind a stale cap.
@@ -5094,38 +5131,14 @@ def _refresh_mall_cell(
                 ),
                 refresh_provider_limit,
             )
-            gate_plan = generate_mall_stock_gate_update(
-                item, spec["machine"], list(existing.machine_positions),
-                stock_gate_target,
-            )
-            if hasattr(client, "command"):
-                # Recipe defaults describe new builds, not the tiers already
-                # installed. One batch survey also handles mixed upgrade rows.
-                names = live_base.entity_names_at(
-                    client, surface, existing.machine_positions,
-                )
-                for action in gate_plan["phases"][0]["actions"]:
-                    point = (action["position"]["x"], action["position"]["y"])
-                    actual = names.get(point)
-                    if actual not in live_base.ASSEMBLER_TIERS:
-                        raise ProductionPrerequisiteDeferred(
-                            f"{item} stock gate waits for its existing assembler at {point}",
-                            code="mall_stock_gate_target_pending", state="constructing",
-                            details={"item": item, "position": list(point), "observed": actual},
-                        )
-                    action["entity"] = actual
-            gate_plan["surface"], gate_plan["force"] = surface, force
-            _submit_mall_refresh_once(
-                (
-                    "stock_gate", surface, force, item,
-                    tuple(existing.machine_positions), stock_gate_target,
-                    tuple(a["entity"] for a in gate_plan["phases"][0]["actions"]),
-                ),
-                lambda: _submit(
-                    client, bridge, surface, gate_plan,
-                    f"mall_stock_gate_{item}", emit,
-                ),
-            )
+        # The stock gate is demand-derived and lives outside the provider
+        # check: a standing cell must cap at what it is actually needed for
+        # even when its provider is not the expected paired topology (dense
+        # banks and borrowed cells), and a historical maximum must never pin
+        # it. Following the current target lets production stop once the
+        # useful level is covered and resume when a new bill opens.
+        if stock_gate_target is not None:
+            _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, stock_gate_target, emit)
     return mall_provider
 
 
@@ -5461,14 +5474,57 @@ def _startup_mall_item_cap(
     return _STARTUP_MALL_ITEM_CAPS[item]
 
 
+def _standing_mall_stock_target(client, surface, force, item, requested=1):
+    """Current open bills plus one normal recipe window and opening reserve."""
+    spec = LINE_RECIPES[item]
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    demand = (ledger.stock_targets().get(item, 0) if ledger is not None else 0)
+    multiple = _released_request_multiple(client, surface, force,
+        standard_mall_request_multiplier(spec["machine"], spec["craft_time"]))
+    reserve = max(dict(STARTER_MALL_TARGETS).get(item, 0),
+                  multiple * max(1, int(spec.get("product_amount", 1))))
+    return standing_gate_target(max(int(requested), demand), reserve)
+
+
+def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, requested=None):
+    """Reconcile only registered, currently built mall recipes; borrowed cells remain owned by their loan."""
+    if not callable(getattr(client, "command", None)):
+        return
+    requested = requested or {}
+    items = {item for s, f, item in _MALL_STOCK_GATE_FLOORS if (s, f) == (surface, force)}
+    items |= set(requested)
+    for item in sorted(items):
+        spec = LINE_RECIPES.get(item, {})
+        if not str(spec.get("machine", "")).startswith("assembling-machine"):
+            continue
+        existing = live_base.find_line(client, surface, force, item, spec["machine"])
+        if existing is None or not existing.machine_positions:
+            continue
+        target = _standing_mall_stock_target(client, surface, force, item, requested.get(item, 1))
+        target = _effective_mall_stock_gate(client, surface, force, item,
+            upgrade_bootstrap=False, requested=target)
+        _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, target, emit)
+
+
 def _effective_mall_stock_gate(
     client: RconClient, surface: str, force: str, item: str, *,
     upgrade_bootstrap: bool, requested: int | None,
 ) -> int | None:
-    """Apply scarce-metal caps to the assembler, not only its output chest."""
+    """Apply scarce-metal caps to the assembler, not only its output chest.
+
+    A real construction target is reconciled with transferable stock here: the
+    logistic stock gate only sees network content, which includes requester-held
+    work-in-progress a bill cannot spend, so the gap is folded into the constant
+    the one time both the build and the refresh paths read it.
+    """
     if upgrade_bootstrap:
         return requested
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    if requested is not None:
+        requested = standing_gate_target(
+            requested,
+            wip_gap=_rationed_mall_wip_gap(client, surface, force, item),
+        )
     if startup_cap is None:
         return requested
     return startup_cap if requested is None else min(startup_cap, requested)
@@ -8158,6 +8214,8 @@ def ensure_produced(
         if promoted is not None:
             MANAGED_INTERMEDIATE_SOURCES[item] = promoted
     if item in MANAGED_INTERMEDIATE_SOURCES:
+        if not upgrade_bootstrap:
+            _refresh_owned_standing_gates(client, bridge, surface, force, emit, requested={item: stock_target})
         _complete_material_producer(item)
         return MANAGED_INTERMEDIATE_SOURCES[item]
     _ensure_chemical_ladder_predecessor(
@@ -8310,11 +8368,15 @@ def ensure_produced(
         _ensure_automation_science_transition(
             client, bridge, surface, force, reference_point, emit,
         )
+    if stock_gate_target is None and not upgrade_bootstrap and str(LINE_RECIPES[item]["machine"]).startswith("assembling-machine"):
+        stock_gate_target = _standing_mall_stock_target(client, surface, force, item, stock_target)
     stock_gate_target = _effective_mall_stock_gate(
         client, surface, force, item,
         upgrade_bootstrap=upgrade_bootstrap,
         requested=stock_gate_target,
     )
+    if stock_gate_target is not None and not upgrade_bootstrap:
+        _MALL_STOCK_GATE_FLOORS.setdefault((surface, force, item), stock_gate_target)
     plan = _plan_line(
         client, surface, force, item, emit,
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,
@@ -13094,6 +13156,7 @@ def run(
             _refresh_logistic_chest_budget(
                 client, surface, force, _MATERIAL_RESERVATION_LEDGER, emit,
             )
+            _refresh_owned_standing_gates(client, bridge, surface, force, emit)
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities, prepped,
             )

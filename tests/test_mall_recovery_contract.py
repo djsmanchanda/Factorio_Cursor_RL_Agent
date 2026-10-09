@@ -245,7 +245,13 @@ def test_unchanged_mall_maintenance_is_submitted_once_per_run(monkeypatch) -> No
     assert submitted == ["mall_provider_limit_splitter", "mall_stock_gate_splitter"]
 
 
-def test_mall_reserve_and_gate_do_not_shrink_later_in_the_run(monkeypatch) -> None:
+def test_mall_provider_reserve_holds_but_stock_gate_follows_demand(
+    monkeypatch,
+) -> None:
+    """The provider capacity does not shrink, but the assembler stock gate
+    follows current demand: a one-off large bill must not pin the standing
+    cell to that maximum once the demand falls back (2026-10-10: >1000 cable
+    and ~860 inserters while the useful target was far smaller)."""
     machines = ((50.5, 32.5), (56.5, 32.5))
     provider = (53.5, 31.5)
     submitted = []
@@ -290,10 +296,10 @@ def test_mall_reserve_and_gate_do_not_shrink_later_in_the_run(monkeypatch) -> No
         if "logistic_condition" in action
     ]
     assert len(provider_updates) == 1
-    assert len(gate_updates) == len(machines)
-    assert {
+    assert len(gate_updates) == 2 * len(machines)
+    assert [
         action["logistic_condition"]["constant"] for action in gate_updates
-    } == {400}
+    ] == [400] * len(machines) + [5] * len(machines)
 
 
 def test_long_blocking_reserve_can_fund_a_second_bootstrap_producer(

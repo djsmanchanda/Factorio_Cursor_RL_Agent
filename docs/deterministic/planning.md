@@ -438,10 +438,16 @@ gated separately and is not changed by the release.
   pass guard remains the tighter detector for real contradictions. Unchanged
   mall requester, provider-limit, and stock-gate configurations are submitted
   once per run and refreshed after any recipe-loan reconfiguration.
-  Within a run, a dedicated mall provider limit and its item stock gate are
-  monotonic: a smaller incidental demand cannot shrink a reserve already being
-  filled. Deliberate shared-provider loan mode remains uncapped and restores the
-  dedicated policy after the loan.
+  Within a run, a dedicated mall provider limit stays monotonic: a smaller
+  incidental demand cannot shrink a reserve already being filled. Its item
+  stock gate does not: the gate is recomputed from the current demand plus the
+  legitimate reserve, reconciled for requester-held work-in-progress that the
+  logistic network counts but a bill cannot spend. Following current demand
+  lets a standing cell stop once the useful target is covered instead of
+  filling to the largest target it ever saw (a one-off 600-cable circuit seed
+  otherwise pinned the cable cell indefinitely), and resume when a new open
+  bill appears. Deliberate shared-provider loan mode remains uncapped and
+  restores the dedicated policy after the loan.
 - Core-mall readiness distinguishes installed capacity from current crafting.
   A real powered, non-loaned assembler stopped by its verified item-specific
   logistic stock cap is ready when that same network holds the cap quantity.
@@ -649,3 +655,11 @@ The same finite dependency budget is refreshed by Laya’s shared operations.
 Discretionary whole bills draw only the unheld pool; claimant allocations
 reduce the remaining hold, and partial dependency holds do not take unrelated
 components before fully fundable producers.
+
+Standing assembler cells receive a default cap even when the caller supplies
+no gate. The target combines current open material bills, the requested batch,
+and one normal recipe window / opening reserve. The existing advanced-circuit
+release still controls the requester window; scarce startup caps still apply.
+Registered built cells reconcile those gates between control actions, including
+cached intermediate sources. A borrowed cell is not rewritten under its old
+recipe. Gates can return to an earlier target after intervening demand.

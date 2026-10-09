@@ -116,6 +116,32 @@ def add_demands(targets: dict[str, int], shortage: MaterialShortage) -> None:
         targets[item] = max(targets.get(item, 0), target)
 
 
+def standing_gate_target(
+    demand: int, reserve: int = 0, *, wip_gap: int = 0,
+) -> int:
+    """The network level one standing mall cell must reach for live demand.
+
+    The cap is the outstanding demand plus the legitimate standing reserve,
+    recomputed from what is open now -- not the largest target the cell ever
+    saw. That matters because one-off bills are large: the electronic-circuit
+    seed once borrowed a cell to make 600 copper cable, and a monotonic floor
+    kept the cable cell filling 600 long after the seed was covered. Following
+    current demand lets production stop when the useful target is met and
+    restart when a new open bill appears.
+
+    ``wip_gap`` is requester-held work-in-progress the logistic network counts
+    as present but a construction bill cannot spend. The assembler's logistic
+    stock gate only sees network content, so folding the gap into the constant
+    makes the gate close when transferable stock -- not requester WIP -- covers
+    the demand. Never returns a bare zero: a target below one would refuse the
+    cell any craft at all.
+    """
+    return max(
+        1,
+        max(0, int(demand)) + max(0, int(reserve)) + max(0, int(wip_gap)),
+    )
+
+
 def wait_for_stock(
     client: RconClient, surface: str, force: str, item: str, target: int,
     emit: Callable[[str], None], *, poll_seconds: float = 5.0,

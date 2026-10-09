@@ -598,6 +598,7 @@ def test_funded_submission_reads_the_replaced_ledger_mapping(monkeypatch):
         ledger.projects = {"mine": MaterialProject(project_id="mine", target_item=None, state="constructing",
             required={"x": 5}, reserved={"x": 5}, source_producers={}, expected_rates={}, eta_seconds={}, priority=1, sequence=1)}
     session = DeterministicSession.__new__(DeterministicSession)
+    session.client, session.bridge, session.emit = object(), object(), lambda _:None
     monkeypatch.setattr(session, "_operations", lambda: {"starter": lambda **_kwargs: submit()})
     assert session.run("starter", recipe="iron-plate")["progress"] is True
 def _started_and_built():
