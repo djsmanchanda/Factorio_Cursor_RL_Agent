@@ -435,3 +435,17 @@ def test_options_carry_known_bills_and_lent_cells():
     text = brief(results, None, None, {}, 0, economics=economics)
     assert "MALL: transport-belt cell lent to make electric-mining-drill (to 2)" in text
     assert "RESERVED: paired_mall_inserter supply_wait missing electronic-circuit 1, inserter 6" in text
+
+
+def test_a_plate_system_still_constructing_is_waiting_until_its_retry_horizon():
+    from training.laya_ops import receipt
+    built = [receipt(op, {"recipe": p}, (0, 0)) for op in ("starter", "foundation") for p in ("iron-plate", "copper-plate")]
+    refused = {"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"}, "tick": 1000,
+               "code": "pending_system_construction"}
+    def menu(tick):
+        return {o["option_id"]: o for o in compile_options(BOARD, built + [refused], tick=tick)["options"]}
+    # Bots are building the copper system: the extend is a wait, and waiting is the constructive choice.
+    assert menu(1600)["op.extend.copper-plate"]["features"]["waiting"]
+    assert menu(1600)["wait.300"]["features"]["constructing"]
+    # After the retry horizon the extend is worth asking again.
+    assert not menu(1000 + 1800)["op.extend.copper-plate"]["features"]["waiting"]
