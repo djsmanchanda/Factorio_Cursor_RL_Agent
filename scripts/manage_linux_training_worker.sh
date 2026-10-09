@@ -14,7 +14,7 @@ Options:
   --stagger-seconds N    Delay between worker actions (default: 2).
   --only N               Act on worker N only (deploy/start/stop/status); others are untouched.
   --root PATH            Native worker-state root (default: ~/.local/share/factorio-rl/training).
-  --runtime-root PATH    Private headless Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.20).
+  --runtime-root PATH    Private headless Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.21).
   --factorio-bin PATH    Native Factorio executable (defaults below --runtime-root).
   --read-data PATH       Factorio read-data root (defaults below --runtime-root).
   --source-save PATH     Copy this disposable seed save during bootstrap.
@@ -47,7 +47,7 @@ ONLY=""
 SLOTS_PER_WORKER=1
 STAGGER_SECONDS=2
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/training"
-RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.20"
+RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.21"
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
