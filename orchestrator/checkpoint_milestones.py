@@ -69,6 +69,8 @@ class MachineEvidence:
     craft_count: int | None = None
     output_count: int | None = None
     name: str | None = None
+    status: str | None = None
+    position: tuple[int, int] | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | Any) -> "MachineEvidence":
@@ -79,6 +81,7 @@ class MachineEvidence:
         producing = _as_bool(value.get("producing", value.get("active")))
         if working is None and healthy is not None and producing is not None:
             working = healthy and producing
+        position = value.get("position")
         return cls(
             recipe=value.get("recipe", value.get("recipe_name")),
             healthy=healthy,
@@ -87,7 +90,17 @@ class MachineEvidence:
             craft_count=_item_counter(value, "craft_count", "crafts", "products_finished"),
             output_count=_item_counter(value, "output_count", "output", "produced"),
             name=value.get("name"),
+            status=value.get("status") if isinstance(value.get("status"), str) else None,
+            position=_position(position),
         )
+
+
+def _position(value: Any) -> tuple[int, int] | None:
+    """Read an observer ``{"x": .., "y": ..}`` position used to match a machine across samples."""
+    if not isinstance(value, Mapping):
+        return None
+    x, y = _as_int(value.get("x")), _as_int(value.get("y"))
+    return None if x is None or y is None else (x, y)
 
 
 @dataclass(frozen=True)
@@ -350,19 +363,61 @@ def _starter_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
     return True
 
 
-def _c1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
-    working = [machine for machine in snapshot.mall_assemblers if machine.working is True]
-    has_recipe = {recipe: any(machine.recipe == recipe for machine in working) for recipe in (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)}
-    count_ok: bool | None = len(working) >= 4 if snapshot.mall_assemblers else None
+# A mall assembler that crafted nothing for this long while otherwise healthy
+# is treated as stopped.  Craft counts are lifetime counters, so an advance
+# inside the window means the counter now exceeds its value one window ago.
+C1_CRAFT_WINDOW_TICKS = 120 * 60
+C1_FULL_OUTPUT_STATUS = "full_output"
+
+
+def _c1_result(
+    snapshot: FactorySnapshot,
+    counted: Sequence[MachineEvidence],
+    version: str,
+) -> CheckpointResult:
+    has_recipe = {recipe: any(machine.recipe == recipe for machine in counted) for recipe in (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)}
+    count_ok: bool | None = len(counted) >= 4 if snapshot.mall_assemblers else None
     checks = {
         "iron_starter_ready": _starter_ready(snapshot, "iron"),
         "copper_starter_ready": _starter_ready(snapshot, "copper"),
         "stone_starter_ready": _starter_ready(snapshot, "stone"),
         "at_least_four_working_mall_assemblers": count_ok,
-        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if working else None,
-        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if working else None,
+        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if counted else None,
+        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if counted else None,
     }
-    return _all_checks("C1", "c1-v1", checks, {"working_mall_count": len(working), "recipes": has_recipe})
+    return _all_checks("C1", version, checks, {"working_mall_count": len(counted), "recipes": has_recipe})
+
+
+def _c1_v1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    return _c1_result(snapshot, [machine for machine in snapshot.mall_assemblers if machine.working is True], "c1-v1")
+
+
+def _crafted_within_window(machine: MachineEvidence, snapshot: FactorySnapshot, history: Sequence[FactorySnapshot]) -> bool:
+    if machine.position is None or machine.craft_count is None or snapshot.tick is None:
+        return False
+    cutoff = snapshot.tick - C1_CRAFT_WINDOW_TICKS
+    for sample in reversed(history):
+        if sample.tick is None or sample.tick > cutoff:
+            continue
+        earlier = next((item for item in sample.mall_assemblers if item.position == machine.position), None)
+        if earlier is None or earlier.craft_count is None:
+            return False
+        return machine.craft_count > earlier.craft_count
+    return False
+
+
+def _c1_v2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    counted = [
+        machine for machine in snapshot.mall_assemblers
+        if machine.working is True
+        or machine.status == C1_FULL_OUTPUT_STATUS
+        or _crafted_within_window(machine, snapshot, history)
+    ]
+    return _c1_result(snapshot, counted, "c1-v2")
+
+
+C1_V1 = MilestoneDefinition("C1", "starter_mall", "c1-v1", _c1_v1)
+C1_V2 = MilestoneDefinition("C1", "starter_mall", "c1-v2", _c1_v2)
 
 
 def _foundation_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
@@ -498,7 +553,7 @@ def _c6(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: S
 
 DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C0", "base", "c0-v1", _c0),
-    MilestoneDefinition("C1", "starter_mall", "c1-v1", _c1),
+    C1_V2,
     MilestoneDefinition("C2", "iron_copper_rollout", "c2-v1", _c2),
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),

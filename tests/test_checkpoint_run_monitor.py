@@ -21,7 +21,7 @@ def _manifest(origin: str = "C0") -> dict:
         "candidate_repository_revision": "abcdef01",
         "checkpoint_fleet": {
             "ordered_checkpoint_ids": ["C0", "C1", "C2"],
-            "predicate_versions": {"C0": "c0-v1", "C1": "c1-v1", "C2": "c2-v1"},
+            "predicate_versions": {"C0": "c0-v1", "C1": "c1-v2", "C2": "c2-v1"},
             "origin_checkpoint_id": origin,
             "result_path": "episode/fleet-result.json",
             "capture_policy": {"on_milestone": True},

@@ -10,12 +10,12 @@ from training.laya_acceptance import acceptance_packet, summary_details
 from training.laya_ops import DeterministicSession
 
 
-def observation(*, working=True, tick=100):
+def observation(*, working=True, tick=100, idle_status="full_output"):
     raw = {"tick": tick, "tick_end": tick + 2, "base_valid": True,
            "starters": {n: {"present": True, "healthy": True, "producing": True, "output_count": 8}
                         for n in ("iron", "copper", "stone")},
            "mall_assemblers": [{"recipe": r, "working": working, "healthy": True, "producing": working,
-                                "craft_count": 7, "status": "working" if working else "full_output",
+                                "craft_count": 7, "status": "working" if working else idle_status,
                                 "position": {"x": i, "y": 0}}
                                for i, r in enumerate(("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt"))]}
     return StructuredObservation(FactorySnapshot.from_mapping(raw), "2026-10-08T00:00:00Z", "fixture", raw)
@@ -30,7 +30,7 @@ def test_all_current_conditions_and_raw_source_survive_export():
     observed = observation()
     exported = packet(observed)
     result = exported["results"]["C1"]
-    assert result["predicate_version"] == "c1-v1"
+    assert result["predicate_version"] == "c1-v2"
     assert len(result["evidence"]["checks"]) == 6
     assert all(result["evidence"]["checks"].values())
     assert exported["statuses"]["C1"] == "passed"
@@ -43,7 +43,7 @@ def test_all_current_conditions_and_raw_source_survive_export():
 def test_stocked_idle_cells_do_not_retract_reach_or_fabricate_current_pass():
     evaluator = CheckpointEvaluator()
     assert packet(observation(), evaluator)["statuses"]["C1"] == "passed"
-    later = packet(observation(working=False, tick=200), evaluator)
+    later = packet(observation(working=False, tick=200, idle_status="no_power"), evaluator)
     result = later["results"]["C1"]
     assert later["statuses"]["C1"] == result["latched_status"] == "passed"
     assert result["status"] == "failed"

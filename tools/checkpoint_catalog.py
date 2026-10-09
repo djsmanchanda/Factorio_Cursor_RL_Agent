@@ -349,7 +349,7 @@ class CheckpointCatalog:
 
 DEFAULT_CHECKPOINT_DEFINITIONS = (
     ("C0", "Base", "c0-v1"),
-    ("C1", "Starter mall", "c1-v1"),
+    ("C1", "Starter mall", "c1-v2"),
     ("C2", "Iron + copper rollout", "c2-v1"),
     ("C3", "Stone rollout", "c3-v1"),
     ("C4", "First plastic", "c4-v1"),

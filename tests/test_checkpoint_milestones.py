@@ -1,6 +1,8 @@
 # Path: tests/test_checkpoint_milestones.py
 # Purpose: Verify structured, versioned, monotonic checkpoint predicates.
 from orchestrator.checkpoint_milestones import (
+    C1_V1,
+    C1_V2,
     CheckpointEvaluator,
     FactorySnapshot,
     PredicateStatus,
@@ -32,7 +34,9 @@ def _snapshot(**overrides):
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6"]
-    assert all(item.predicate_version.endswith("-v1") for item in milestones)
+    versions = {item.checkpoint_id: item.predicate_version for item in milestones}
+    assert versions["C1"] == "c1-v2"
+    assert all(version.endswith("-v1") for key, version in versions.items() if key != "C1")
     assert milestones[-1].name == "advanced_circuit_consumption"
 
 
@@ -47,6 +51,56 @@ def test_c1_requires_four_working_mall_cells_and_required_recipes():
     assert result.passed
     broken = _snapshot(mall_assemblers=[{"recipe": "iron-gear-wheel", "working": True}] * 4)
     assert evaluate_milestone("C1", broken).failed
+
+
+def _mall(craft_counts, status, working=False):
+    recipes = ("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt")
+    return [
+        {
+            "recipe": recipe, "working": working, "status": status,
+            "position": {"x": index, "y": 0}, "craft_count": craft,
+        }
+        for index, (recipe, craft) in enumerate(zip(recipes, craft_counts))
+    ]
+
+
+def test_c1_v2_counts_assembler_idle_on_full_output_that_v1_does_not():
+    mall = [
+        {"recipe": "iron-gear-wheel", "working": True},
+        {"recipe": "copper-cable", "working": True},
+        {"recipe": "electronic-circuit", "working": True},
+        {"recipe": "iron-gear-wheel", "working": False, "status": "full_output"},
+    ]
+    snapshot = _snapshot(mall_assemblers=mall)
+    assert evaluate_milestone("C1", snapshot, milestones=(C1_V1,)).failed
+    assert evaluate_milestone("C1", snapshot, milestones=(C1_V2,)).passed
+
+
+def test_c1_counts_genuinely_stopped_mall_assemblers_under_neither_version():
+    history = [_snapshot(tick=0, mall_assemblers=_mall((5000, 5000, 5000, 5000), "no_power"))]
+    snapshot = _snapshot(tick=7200, mall_assemblers=_mall((5000, 5000, 5000, 5000), "no_power"))
+    for milestone in (C1_V1, C1_V2):
+        assert evaluate_milestone("C1", snapshot, history=history, milestones=(milestone,)).failed
+
+
+def test_c1_v2_counts_craft_advance_inside_window_only():
+    inside = _snapshot(
+        tick=7200,
+        mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items"),
+    )
+    history = [_snapshot(tick=0, mall_assemblers=_mall((1000, 1000, 1000, 1000), "waiting_for_source_items"))]
+    assert evaluate_milestone("C1", inside, history=history, milestones=(C1_V2,)).passed
+    assert evaluate_milestone("C1", inside, history=history, milestones=(C1_V1,)).failed
+
+    stale_history = [
+        _snapshot(tick=0, mall_assemblers=_mall((1000, 1000, 1000, 1000), "waiting_for_source_items")),
+        _snapshot(tick=1000, mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items")),
+    ]
+    stale = _snapshot(
+        tick=14400,
+        mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items"),
+    )
+    assert evaluate_milestone("C1", stale, history=stale_history, milestones=(C1_V2,)).failed
 
 
 def test_c2_requires_six_machine_foundations_and_absent_starters():
