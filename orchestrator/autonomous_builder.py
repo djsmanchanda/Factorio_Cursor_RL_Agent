@@ -7429,8 +7429,15 @@ def _ingredient_sources(
                 f"({stocked[ingredient]}/{required}) for {item}"
                 + ("" if backed else " -- NOTHING IS PRODUCING IT")
             )
+            # A dense-bay producer of the ingredient needs this item as its own
+            # support inserter, so the seed draws stock now and the permanent
+            # producer follows once the item exists (live 2026-10-08 and
+            # 2026-10-09: the long-handed-inserter seed waited for an inserter
+            # cell that needed long-handed inserters, until no_progress).
+            seeds_ingredient_producer = item == quad_support_inserter_type(ingredient)
             if (
                 not backed
+                and not seeds_ingredient_producer
                 and (
                     (
                         ingredient in PERSISTENT_INTERMEDIATES

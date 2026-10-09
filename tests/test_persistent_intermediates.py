@@ -588,3 +588,30 @@ def test_steel_feed_is_continuous_belt_even_for_partial_upgrade(monkeypatch):
     assert modes == {"iron-plate": "belt"}
     assert feeds == {"iron-plate": (8.5, 9.5)}
     assert direct is True
+
+
+def test_long_handed_seed_draws_stocked_inserters_without_a_cyclic_producer(monkeypatch):
+    """A permanent inserter cell is a dense-bay cell whose support inserters are
+    long-handed, so the long-handed seed must not wait for it. Live 2026-10-08
+    and 2026-10-09: the seed scheduled that producer first and the run ended
+    no_progress on long-handed-inserter."""
+    calls = []
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_args: {"inserter": 67},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_args: False)
+    monkeypatch.setattr(builder, "_metal_starter_transition_complete", lambda *_args: True)
+    monkeypatch.setattr(
+        builder, "ensure_produced",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or None,
+    )
+
+    result = builder._ingredient_sources(
+        object(), object(), "nauvis", "player", "long-handed-inserter",
+        (0.0, 0.0), lambda _message: None,
+        _plan("long-handed-inserter", "inserter"),
+        upgrade_bootstrap=False,
+    )
+
+    assert calls == []
+    assert result == {}
