@@ -1259,5 +1259,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # Runtime leaves import this canonical name; share configured ownership globals
+    # when invoked with -m instead of creating a second controller module.
+    sys.modules["tools.opencode_campaign_orchestrator"] = sys.modules[__name__]
     raise SystemExit(main())
 
