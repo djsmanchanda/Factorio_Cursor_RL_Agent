@@ -63,6 +63,8 @@ def _run_main(tmp_path: Path, monkeypatch, *extra: str, speed_kwargs=None) -> tu
         "--blocker-events-file", str(tmp_path / "blockers.jsonl"),
         "--bootstrap-profile", "reduced-v1",
         "--no-helper-agent-review",
+        # Never start a real OpenCode observer from a unit test.
+        "--no-opencode-helper",
     ])
     return result, log.read_text(encoding="utf-8")
 
