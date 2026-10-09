@@ -476,3 +476,127 @@ def test_a_short_item_can_get_its_own_standing_mall_slot():
     standing = {"ok": True, "operation": "mall_slot", "params": {"item": "splitter"}}
     ids = {o["option_id"] for o in compile_options(BOARD, built + [short, slot, standing], recipes=recipes)["options"]}
     assert "op.mall_slot.splitter" not in ids
+
+
+class SteppingPolicy:
+    """Always choose one named option (or the first non-wait) to force a repeated decision."""
+
+    authority = "guided_exploration"
+
+    def __init__(self, option_id):
+        self.option_id = option_id
+
+    def choose(self, state, menu):
+        chosen = next((o for o in menu["options"] if o["option_id"] == self.option_id), None)
+        chosen = chosen or next(o for o in menu["options"] if o["family"] != "wait")
+        return {"option_id": chosen["option_id"], "need_id": chosen["need_id"], "probability": 1.0, "rules": [],
+                "distribution": [{"option_id": chosen["option_id"], "need_id": chosen["need_id"],
+                                  "probability": 1.0, "weight": 1.0, "rules": [], "features": {}}]}
+
+
+class SteppingSession:
+    """A tool call that spends game time (the world runs while it blocks) and returns a shortage."""
+
+    def __init__(self, world, *, block_ticks=0, progress_every=0):
+        self.world, self.block_ticks, self.progress_every, self.calls = world, block_ticks, progress_every, 0
+
+    def run(self, operation, **params):
+        self.calls += 1
+        self.world.tick += self.block_ticks  # The world keeps running inside the blocking call.
+        result = {"ok": False, "operation": operation, "params": params, "code": "material_shortage",
+                  "details": {"required": {"transport-belt": 10}, "available": {}}}
+        if self.progress_every and self.calls % self.progress_every == 0:
+            result["progress"] = True  # A funded plan submitted as a side effect before the incomplete return.
+        return result
+
+    def close(self):
+        pass
+
+
+def test_a_long_blocking_shortage_spends_no_decision_idle_stall_budget(tmp_path):
+    # Live 2026-10-10: one foundation call ate ~12k of the 18k-tick window; that is work, not idle.
+    world = FakeWorld()
+    session = SteppingSession(world, block_ticks=25000)  # One call exceeds STALL_TICKS on its own.
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=4,
+                  measure_ticks=600, seed=1, run_id="long", session=session)
+    assert summary["stop"] == "decision_budget"  # Not falsely stalled by the call's game time.
+    assert summary["stall"]["tool_ticks"] == 25000 and summary["stall"]["idle_ticks"] == 0
+
+
+def test_the_total_game_cap_still_stops_after_a_long_blocking_call(tmp_path):
+    from training.laya_clean_runner import Settings
+    world = FakeWorld()
+    session = SteppingSession(world, block_ticks=25000)
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=50,
+                  measure_ticks=600, seed=1, run_id="cap", session=session, settings=Settings(max_game_ticks=20000))
+    assert summary["stop"] == "window_timeout"  # The independent total game cap still bounds the run.
+
+
+def test_repeated_unchanged_choices_still_stall(tmp_path):
+    world = FakeWorld()
+    session = SteppingSession(world, block_ticks=10)  # Quick retries that never change the world.
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=40,
+                  measure_ticks=600, seed=1, run_id="repeat", session=session)
+    assert summary["stop"] == "stalled"
+    assert summary["decisions"] <= 14 and session.calls == summary["decisions"]
+
+
+def test_a_funded_partial_submission_resets_the_stall_clock(tmp_path):
+    import json
+    world = FakeWorld()
+    # Every fourth decision a funded plan is submitted, so the no-progress streak never reaches the bound.
+    session = SteppingSession(world, block_ticks=10, progress_every=4)
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=20,
+                  measure_ticks=600, seed=1, run_id="funded", session=session)
+    assert summary["stop"] == "decision_budget"
+    assert summary["stall"]["decisions"] < 4
+    rows = [json.loads(line) for line in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
+    funded = [r for r in rows if r["outcome"].get("progress")]
+    # Recorded honestly: a funded partial submission is progress, but it is not an ok/built operation.
+    assert funded and all(not r["outcome"].get("ok") for r in funded)
+
+
+def test_funded_plan_progress_counts_a_funded_submission_not_an_earmark():
+    from orchestrator.material_reservations import MaterialProject
+    from training.laya_ops import funded_plan_progress, funded_plan_signature
+
+    def project(pid, state, reserved):
+        return MaterialProject(project_id=pid, target_item=None, state=state, required={"x": 5},
+                               reserved=reserved, source_producers={}, expected_rates={}, eta_seconds={},
+                               priority=1, sequence=1)
+
+    earmark = {"mine": project("mine", "supply_wait", {"x": 2})}
+    assert funded_plan_signature(earmark) == {}
+    assert not funded_plan_progress({}, earmark)  # A queued unfunded earmark is not a funded submission.
+    ready = {"mine": project("mine", "ready", {"x": 5})}
+    assert funded_plan_signature(ready) == {}
+    assert not funded_plan_progress({}, ready)
+    assert not funded_plan_progress({"mine": 5}, ready)  # Unchanged since the snapshot.
+    grown = {"mine": project("mine", "constructing", {"x": 5})}
+    assert funded_plan_progress({"mine": 2}, grown)  # The reservation grew.
+
+
+def test_repeated_construction_code_without_observed_progress_stalls(tmp_path):
+    world = FakeWorld()
+    class UnchangedConstruction(SteppingSession):
+        def run(self, operation, **params):
+            result = super().run(operation, **params)
+            result["code"] = "pending_system_construction"
+            return result
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=40,
+                  measure_ticks=600, seed=1, run_id="unchanged-construction", session=UnchangedConstruction(world))
+    assert summary["stop"] == "stalled"
+
+
+def test_funded_submission_reads_the_replaced_ledger_mapping(monkeypatch):
+    from types import SimpleNamespace
+    from orchestrator.material_reservations import MaterialProject
+    from training.laya_ops import DeterministicSession, ab
+    ledger = SimpleNamespace(projects={})
+    monkeypatch.setattr(ab, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    def submit():
+        ledger.projects = {"mine": MaterialProject(project_id="mine", target_item=None, state="constructing",
+            required={"x": 5}, reserved={"x": 5}, source_producers={}, expected_rates={}, eta_seconds={}, priority=1, sequence=1)}
+    session = DeterministicSession.__new__(DeterministicSession)
+    monkeypatch.setattr(session, "_operations", lambda: {"starter": lambda **_kwargs: submit()})
+    assert session.run("starter", recipe="iron-plate")["progress"] is True

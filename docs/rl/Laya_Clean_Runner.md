@@ -163,8 +163,15 @@ Geometry supports hash-verified earned-C1 export/resume with
 This is not general restart recovery: the ops runner does not restore its
 history and deterministic ledgers through that geometry checkpoint contract.
 
-Geometry defaults to a 12-decision stall limit; ops uses 18,000 game ticks
-without its tracked progress signals. These signals can miss useful work.
+Geometry defaults to a 12-decision stall limit; ops tracks decision-idle game
+time (waits and time outside blocking operation execution) plus a 12-decision bound on choices without genuine progress. It
+resets on measured goal progress or a new funded plan committed through the shared material ledger (including a side-effect
+submission before an incomplete return); an attempted-but-unfunded ghost is
+not a reset; neither is an unchanged construction status. This is a versioned
+`decision-idle-v2` stopping contract, recorded in the summary alongside both
+limits; results differ from the earlier elapsed-tick contract. Independent total
+game (`--max-game-ticks`) and wall caps still bound
+the run. These signals can miss useful work.
 Unexpected caught tool exceptions and typed blocks are different: a reported
 zero `failures` is not zero operational defects. Escaping errors can skip the
 current run index. Complete-cohort crash/interruption accounting remains a

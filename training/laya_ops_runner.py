@@ -42,7 +42,10 @@ IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rati
                "pending_system_construction"}
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
-STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
+# Decision-idle stall budget: game ticks Laya spends waiting, not the game time one blocking tool
+# call legitimately spends building (a foundation call can eat a whole window). Independent total
+# game/wall caps still bound the run.
+STALL_TICKS = 18000  # five idle game minutes without measurable progress (loan batches are slow by design)
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
 
@@ -454,6 +457,15 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "options": options, "shortfalls": short}
 
 
+def _live_tick(adapter, fallback: int) -> int:
+    """Read the execution boundary without taking a full factory snapshot."""
+    tick = getattr(adapter, "tick", None)
+    try:
+        return int(tick() if callable(tick) else tick) if tick is not None else fallback
+    except (TypeError, ValueError, RuntimeError):
+        return fallback
+
+
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
@@ -467,7 +479,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
+    # The stall clock tracks decision-idle game time and decisions without genuine progress, not the
+    # game ticks one blocking tool call spends building. Total game/wall caps bound the run separately.
+    stall = {"idle_ticks": 0, "since": 0, "tool_ticks": 0, "best_gap": math.inf, "machines": 0,
+             "missing": math.inf, "made": {}, "last_tick": None}
     accept = getattr(session, "acceptance", None)
     acceptance_samples = 0
 
@@ -584,6 +599,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         _append(journal, record)
         if chosen["family"] == "retire_starter":
             check_acceptance(f"before retirement {index}")
+        tool_start_tick = _live_tick(adapter, facts["tick"])
         if chosen["family"] == "wait":
             adapter.advance(chosen["wait_ticks"])
             result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
@@ -598,6 +614,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
+        tool_end_tick = _live_tick(adapter, tool_start_tick)
         after = adapter.query()
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
@@ -607,6 +624,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
+                                  "progress": bool(result.get("progress")),
                                   "ticks": after["tick"] - facts["tick"]})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
@@ -628,16 +646,29 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         made = {item: int((after.get("production") or {}).get(item, 0)) for item in short}
         crafted = any(count > stall["made"].get(item, count) for item, count in made.items())
         stall["made"] = {**stall["made"], **made}
+        # A newly funded, committed construction plan may progress before an incomplete return.
+        # Repeating a construction status or merely reserving a ready bill is not progress.
+        submitted = bool(result.get("progress"))
+        working = False  # A repeated wait code alone is not observed progress.
         progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted
-                      or gap < stall["best_gap"] * 0.95)
+                      or gap < stall["best_gap"] * 0.95 or submitted or working)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
-        if progressed or stall["tick"] is None:
-            stall["tick"] = after["tick"]
-        # Operations decide in seconds of game time, so the stall limit is game time, not a decision count.
-        if after["tick"] - stall["tick"] >= STALL_TICKS:
+        # The stall budget is decision-idle game time, not tool execution: one blocking deterministic call
+        # can spend most of a window on real work (live 2026-10-10: one foundation call ate ~12k of 18k).
+        stall["tool_ticks"] = max(0, tool_end_tick - tool_start_tick)
+        prior_tick = stall["last_tick"] if stall["last_tick"] is not None else facts["tick"]
+        elapsed = max(0, after["tick"] - prior_tick)
+        stall["last_tick"] = after["tick"]
+        stall["idle_ticks"] += max(0, elapsed - (0 if chosen["family"] == "wait" else stall["tool_ticks"]))  # a wait is deliberate idle; a tool call is not
+        if progressed:
+            stall["idle_ticks"], stall["since"] = 0, 0
+        else:
+            stall["since"] += 1
+        if stall["idle_ticks"] >= STALL_TICKS or stall["since"] >= settings.stall_decisions:
             summary["stop"] = "stalled"
-            emit(f"STALLED: {STALL_TICKS} ticks without a built operation, work in progress or goal progress")
+            emit(f"STALLED: {stall['idle_ticks']} idle game ticks / {stall['since']} decisions without a "
+                 "funded submission, work in progress or goal progress")
             break
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"
@@ -648,6 +679,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
+    summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
+                        "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v2",
+                        "idle_tick_limit": STALL_TICKS, "decision_limit": settings.stall_decisions}
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'}")
     return summary

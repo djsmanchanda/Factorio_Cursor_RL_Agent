@@ -41,6 +41,28 @@ PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 
 
+def funded_plan_signature(projects: Mapping) -> dict[str, int]:
+    """Funded construction plans in the shared material ledger: project id -> reserved item count.
+
+    A plan is funded when its whole bill is reserved and committed to construction (``constructing``). A queued unfunded earmark
+    (``supply_wait``) is work in progress, not a funded submission.
+    """
+    return {project_id: sum(project.reserved.values())
+            for project_id, project in projects.items()
+            if project.state == "constructing" and project.reserved}
+
+
+def funded_plan_progress(before: Mapping[str, int], projects: Mapping) -> bool:
+    """Whether a funded plan appeared or grew its reservation since ``before``.
+
+    Read from the shared material-reservation ledger, so a plan the operation
+    submitted as a side effect counts even when it then returned a shortage or a
+    wait. An attempted-but-unfunded ghost does not.
+    """
+    return any(total > before.get(project_id, 0)
+               for project_id, total in funded_plan_signature(projects).items())
+
+
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
     if operation in PRODUCING_OPERATIONS:
@@ -134,15 +156,28 @@ class DeterministicSession:
         return {"lifecycle": ab._bootstrap_state(recipe).lifecycle_state, "submitted": True}
 
     def run(self, operation: str, **params) -> dict:
-        """Run one operation; the tooling's own signals become a typed result."""
+        """Run one operation; the tooling's own signals become a typed result.
+
+        ``progress`` records a funded construction plan the operation submitted
+        through the shared material ledger, including side-effect submissions
+        that happen before an incomplete (shortage or wait) return.
+        """
+        projects = getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {}
+        before = funded_plan_signature(projects)
         try:
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:
-            return {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
-                    "classification": getattr(signal, "classification", None),
-                    "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
-                    "message": str(signal)[:500]}
-        return receipt(operation, params, result)
+            response = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
+                        "classification": getattr(signal, "classification", None),
+                        "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
+                        "message": str(signal)[:500]}
+            response["progress"] = funded_plan_progress(
+                before, getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {})
+            return response
+        response = receipt(operation, params, result)
+        response["progress"] = funded_plan_progress(
+            before, getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {})
+        return response
 
     def economics(self) -> dict:
         """Committed material bills, scoped replacement lifecycles and live mall loans.
