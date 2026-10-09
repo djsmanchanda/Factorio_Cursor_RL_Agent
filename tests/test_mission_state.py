@@ -158,6 +158,7 @@ def test_runner_records_controller_failure_as_structured_blocker(
         "--blocker-events-file", str(blocker_path),
         "--bootstrap-profile", "reduced-v1",
         "--no-helper-agent-review",
+        "--no-opencode-helper",  # never start a real OpenCode observer from a unit test
     ])
 
     payload = json.loads(mission_path.read_text(encoding="utf-8"))
