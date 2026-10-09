@@ -25,6 +25,7 @@ GENERATED_PREFIXES = (
     "runs/",
     "logs/",
     "docs/deterministic/opencode_helper_runs/",
+    "docs/rl/laya_helper_runs/",
 )
 
 CAMPAIGN_FILES = ("CURRENT_STATUS.md",)

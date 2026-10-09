@@ -22,6 +22,10 @@ The ops path is currently a guided sampler over partly strategic wrappers;
 lab-model results do not establish a learned ops policy. Read `training.md`
 for dataset/training work and mechanics references for the selected adapter.
 
+The Laya-only improvement loop runs through the existing campaign controller;
+see [Laya campaign loop](Laya_Campaign_Loop.md) for the CLI, unit invocation,
+runtime backend and fast-gate policy.
+
 ## What RL may learn
 
 Inside disposable training environments, the policy may decide:

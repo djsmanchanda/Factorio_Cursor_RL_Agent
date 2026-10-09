@@ -77,7 +77,9 @@ def prepare(args):
     mods = root / "server/mods"
     manifest["mod_hashes"] = {str(p.relative_to(mods)): file_hash(p) for p in mods.rglob("*")
                              if p.is_file() and p.name != "mod-list.json"}
-    manifest["repository_revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    frozen_identity = ROOT.parent / "freeze.json"
+    manifest["repository_revision"] = (json.loads(frozen_identity.read_text())["revision"] if frozen_identity.exists() else
+                                      subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip())
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "start"))
     if runtime == "disposable_mall":

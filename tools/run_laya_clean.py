@@ -86,6 +86,7 @@ def main(argv=None) -> int:
     p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
                    help="Ops only: stop after the shared checkpoint predicate passes")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
+    p.add_argument("--max-wall-seconds", type=float, help="Cooperative natural episode wall budget; stop after the current operation.")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
     p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
     p.add_argument("--mods-source", type=Path)
@@ -119,13 +120,22 @@ def main(argv=None) -> int:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    source_hash = file_hash(SOURCE_SAVE)
+    source_save = args.source_save.resolve()
+    source_hash = file_hash(source_save)
     run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
     mode = "stepped" if args.stepped else "live"
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    frozen_identity = ROOT.parent / "freeze.json"
+    commit = (json.loads(frozen_identity.read_text())["revision"] if frozen_identity.exists() else
+              subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
+    wall_started = time.monotonic()
+    if args.max_wall_seconds is not None and args.max_wall_seconds <= 0:
+        p.error("max-wall-seconds must be positive")
+    def should_stop():
+        return stop.is_set() or (args.max_wall_seconds is not None and time.monotonic() - wall_started >= args.max_wall_seconds)
     started = local_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
+    runner_error = None
     with runner_pid_record(paths["pid"]):
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
         manifest = json.loads((root / "manifest.json").read_text())
@@ -156,21 +166,29 @@ def main(argv=None) -> int:
                 from training.laya_ops_runner import run as run_ops
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
-                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings,
+                                  should_stop=should_stop, status_path=paths["status"], settings=settings,
                                   until_accepted=args.until_accepted)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
-                              run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
+                              run_id=run_id, emit=log, should_stop=should_stop, status_path=paths["status"],
                               settings=settings, initial_reached=resume['phases_reached'] if resume else ())
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
+            if args.max_wall_seconds is not None and time.monotonic() - wall_started >= args.max_wall_seconds:
+                summary["stop"] = "wall_budget"
+                log(f"WALL LIMIT: declared {args.max_wall_seconds:g}s budget reached; current operation finished")
             if stop.is_set():
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
+        except Exception as error:
+            runner_error = error
+            summary["stop"] = "runner_error"
+            summary["error"] = f"{type(error).__name__}: {error}"
+            log(f"FAILURE: runner_error: {summary['error']}")
         finally:
             end_tick = _game_tick(adapter)
             adapter.close()
-            if file_hash(SOURCE_SAVE) != source_hash:
+            if file_hash(source_save) != source_hash:
                 log("SOURCE SAVE CHANGED during the run")
             log(log.elapsed(start_tick, end_tick))
             log.end()
@@ -190,7 +208,7 @@ def main(argv=None) -> int:
     except Exception as error:  # The ledger is bookkeeping; it never fails a run.
         print(f"RUN LEDGER: not recorded: {error}")
     print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), "speed": speed_status(adapter), **summary}))
-    return 0
+    return 1 if runner_error else 0
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ fix, and even then the reason is recorded and the campaign continues.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 from tools import campaign_loop_log as loop_log
@@ -59,6 +61,11 @@ def mandatory_tests() -> tuple[str, ...]:
     return MANDATORY_CAMPAIGN_TESTS
 
 
+def _backend(config):
+    from tools.campaign_runtime import backend_for
+    return backend_for(config)
+
+
 def git_evidence_file(state_root: Path, cycle: int) -> Path:
     path = loop_log.loop_root(state_root) / f"git-{cycle:04d}.md"
     status = _run_git(["git", "status", "--short"], timeout=60)
@@ -75,14 +82,11 @@ def git_evidence_file(state_root: Path, cycle: int) -> Path:
 
 
 def _verification_commands(config, declared: list[str]) -> list[list[str]]:
-    pytest = [str(config.python), "-m", "pytest", "-q", "--tb=short"]
-    mandatory = [str(Path(__file__).resolve().parents[1] / path) for path in mandatory_tests()]
-    commands = [pytest + mandatory + ["-m", "not slow and not exhaustive"]]
-    changed_tests = [p for p in declared if Path(p).parts[0] == "tests"
-                     and Path(p).name.startswith("test_") and Path(p).suffix == ".py"]
-    if changed_tests:
-        commands.append(pytest + changed_tests)
-    return commands
+    return _backend(config).verification_commands(config, declared)
+
+
+def _verification_passed(config, command: list[str], result) -> bool:
+    return _backend(config).verification_passed(config, command, result)
 
 
 def _parse_declared(fields: dict) -> tuple[list[str], str | None]:
@@ -118,11 +122,22 @@ def _abandon(config, state, fix_id: str, declared: list[str], pre_cycle: set[str
         if not full.is_relative_to(REPO_ROOT) or not full.is_file():
             continue
         tracked = _run_git(["git", "ls-files", "--error-unmatch", "--", path], timeout=60).returncode == 0
-        if tracked and path not in pre_cycle:
+        if path in pre_cycle:
+            # Existing user work remains exactly where it was. Record a copy
+            # for diagnosis, never move or reset the original.
+            target = quarantine / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(full, target)
+            continue
+        if tracked:
+            target = quarantine / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(full, target)
             if _run_git(["git", "checkout", "HEAD", "--", path], timeout=120).returncode == 0:
                 restored.append(path)
                 continue
-        target = quarantine / Path(path).name
+        target = quarantine / path
+        target.parent.mkdir(parents=True, exist_ok=True)
         full.replace(target)
         quarantined.append(path)
     loop_log.record_fix(config.state_root, {
@@ -182,6 +197,10 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
             parsed = decision_fields(output)
         return parsed
 
+    if pending.get("phase") == "committing":
+        return _commit(config, state, fix_id, fields, declared, status_clean_before, sequence,
+                       Path(pending.get("verification_log") or config.observations), pre_cycle)
+
     # ---- FIXING ------------------------------------------------------------
     if not state.pending_fix:
         # Persist the pending record before the first fixer turn so an
@@ -192,6 +211,7 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
                              "before": _fingerprint(config), "pre_cycle_dirty": sorted(pre_cycle),
                              "status_clean_before": status_clean_before}
         _save_state(config.state_file, state)
+        before = state.pending_fix["before"]
     if pending.get("phase") in (None, "fixing"):
         message = ("continue" if pending else fixer_episode_invocation(
             episode, synthesis_path, board, helper.get("path"),
@@ -266,16 +286,30 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
         persist(phase="review", fields=fields, declared=declared, attempts=attempts)
 
     while True:
+        if _backend(config).name == "laya":
+            proof_log = config.opencode_log_dir / f"regression-{fix_id}.log"
+            proof_log.parent.mkdir(parents=True, exist_ok=True)
+            if not _backend(config).regression_proof(config, declared, fields, proof_log):
+                return _abandon(config, state, fix_id, declared, pre_cycle,
+                                f"focused fail-before/pass-after proof failed: {proof_log}")
+            loop_log.record_fix(config.state_root, {"fix_id": fix_id, "regression_log": str(proof_log)})
+
         _progress(config, "VERIFYING", state, fix_id=fix_id)
         verification_log.parent.mkdir(parents=True, exist_ok=True)
         verification_log.write_text("", encoding="utf-8")
         failed = False
         for command in _verification_commands(config, declared):
-            validation = _run_git(command, timeout=900)
+            try:
+                validation = _run_git(command, timeout=900)
+            except (subprocess.TimeoutExpired, TimeoutError) as error:
+                with verification_log.open("a", encoding="utf-8") as handle:
+                    handle.write(f"TIMEOUT: {error}\n")
+                failed = True
+                break
             with verification_log.open("a", encoding="utf-8") as handle:
                 handle.write(f"$ {' '.join(command)}\nreturncode: {validation.returncode}\n")
                 handle.write(validation.stdout + validation.stderr)
-            if validation.returncode:
+            if not _verification_passed(config, command, validation):
                 failed = True
                 break
         if not failed:
@@ -309,6 +343,9 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
         conflict = unsafe_declared(declared, unrelated=user_overlap, repo_root=REPO_ROOT)
         if not categories["unexpected"] and not conflict:
             break
+        if _backend(config).name == "laya":
+            return _abandon(config, state, fix_id, declared, pre_cycle,
+                            f"unsafe worktree changes: {conflict or sorted(categories['unexpected'])}")
         attempts += 1
         loop_log.record_fix(config.state_root, {"fix_id": fix_id,
                                                 "unexpected": sorted(categories["unexpected"]),
@@ -327,6 +364,8 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
             return _abandon(config, state, fix_id, declared, pre_cycle, unsafe)
         declared = new_declared or declared
         persist(phase="committing", fields=fields, declared=declared, attempts=attempts)
+    persist(phase="committing", fields=fields, declared=declared, attempts=attempts,
+            verification_log=str(verification_log))
     return _commit(config, state, fix_id, fields, declared, status_clean_before, sequence,
                    verification_log, pre_cycle)
 
@@ -334,6 +373,18 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
 def _commit(config, state, fix_id: str, fields: dict, declared: list[str], status_clean_before: bool,
             sequence: int, verification_log: Path, pre_cycle: set[str]) -> str:
     from tools.opencode_campaign_orchestrator import REPO_ROOT, _record_milestone, _save_state
+    # Git commit may have succeeded immediately before supervisor interruption.
+    # Its unique fix id and clean declared paths make completion repeatable.
+    if state.pending_fix and state.pending_fix.get("phase") == "committing":
+        latest = _run_git(["git", "log", "-1", "--format=%H %s"], timeout=120).stdout.strip()
+        clean = _run_git(["git", "diff", "HEAD", "--", *declared], timeout=120).stdout.strip() == ""
+        if f"({fix_id})" in latest and clean:
+            revision = latest.split(" ", 1)[0]
+            loop_log.record_fix(config.state_root, {"fix_id": fix_id, "status": "committed", "commit": revision,
+                                                    "files": declared, "introduced_cycle": state.active_cycle})
+            state.pending_fix = None
+            _save_state(config.state_file, state)
+            return "committed"
     conflict = unsafe_declared(declared, unrelated={p for p in pre_cycle}, repo_root=REPO_ROOT)
     if conflict:
         return _abandon(config, state, fix_id, declared, pre_cycle, conflict)
@@ -346,7 +397,7 @@ def _commit(config, state, fix_id: str, fields: dict, declared: list[str], statu
     _record_milestone(fields, fix_id)
     if _run_git(["git", "add", "--", *staged], timeout=120).returncode:
         return _abandon(config, state, fix_id, declared, pre_cycle, "staging the declared files failed")
-    committed = _run_git(["git", "commit", "-m", f"fix(deterministic): verified campaign repair ({fix_id})"],
+    committed = _run_git(["git", "commit", "-m", _backend(config).commit_message(fix_id)],
                          timeout=120)
     if committed.returncode:
         return _abandon(config, state, fix_id, declared, pre_cycle,

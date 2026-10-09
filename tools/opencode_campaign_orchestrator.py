@@ -22,6 +22,8 @@ import fcntl
 import json
 import re
 import shutil
+import os
+import signal
 import subprocess
 import sqlite3
 import sys
@@ -84,6 +86,7 @@ _FINGERPRINT_EXCLUDES = (
     "runs/",
     "logs/",
     "docs/deterministic/opencode_helper_runs/",
+    "docs/rl/laya_helper_runs/",
 )
 
 
@@ -130,6 +133,22 @@ class Config:
     zen_observer_model: str | None = None
     helper_wait_seconds: int = 120
     max_fix_revisions: int = 2
+    # Runtime seam: "deterministic" preserves existing behavior; "laya" drives a
+    # natural Laya episode with a single read-only Muse helper.
+    runtime: str = "deterministic"
+    world_root: Path | None = None
+    code_root: Path | None = None
+    mods_source: Path | None = None
+    run_speed: float = 2.0
+    until_accepted: str = "C6"
+    max_game_ticks: int = 1_440_000
+    run_wall_seconds: int = 21_600
+    seed: int = 0
+    campaign_worktree: Path | None = None
+    mod_builder: Path | None = None
+    stamp_script: Path | None = None
+    stamp_tag_base: int = 30000
+    comparator_roots: tuple[Path, ...] = ()
 
 
 @dataclass
@@ -153,6 +172,7 @@ class State:
     pending_fix: dict | None = None
     active_code_hash: str | None = None
     lifecycle_intent: dict | None = None
+    episode_runtime: dict | None = None
 
 
 def _now() -> str:
@@ -177,6 +197,7 @@ def _load_state(path: Path) -> State:
         campaign_id=payload.get("campaign_id"),
         active_episode_id=payload.get("active_episode_id"),
         lifecycle_intent=payload.get("lifecycle_intent"),
+        episode_runtime=payload.get("episode_runtime"),
         deadline_utc=payload.get("deadline_utc"),
         phase=payload.get("phase"),
         primary_session_id=payload.get("primary_session_id"),
@@ -209,7 +230,26 @@ def _run(command: list[str], *, timeout: int = 120) -> subprocess.CompletedProce
         if remaining <= 0:
             raise TimeoutError("campaign deadline exhausted before command")
         timeout = min(timeout, remaining)
-    return subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=timeout, check=False)
+    model_command = ("opencode" in Path(command[0]).name or
+                     any(Path(token).name == "laya_helper_agent.py" for token in command[:3]) or
+                     (command[0] == "env" and any("OPENCODE_CONFIG_CONTENT=" in token for token in command[:3])))
+    if not model_command:
+        return subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=timeout, check=False)
+    # Model transports belong to this invocation. Bound their entire process
+    # group so a timed-out Python helper cannot leave its OpenCode child alive.
+    process = subprocess.Popen(command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _append(path: Path, text: str) -> None:
@@ -330,7 +370,7 @@ def _snapshot(config: Config, cycle: int, checkpoint: int, offset: int) -> tuple
 
 def _opencode_command(config: Config, message: str, session_id: str | None) -> list[str]:
     command = [
-        config.opencode_bin, "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config.model,
+        config.opencode_bin, "run", "--dir", str(config.campaign_worktree or REPO_ROOT), "--format", "json", "--model", config.model,
         "--variant", config.variant, "--auto",
     ]
     if session_id:
@@ -351,6 +391,21 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int,
         permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow", "external_directory": "allow"}
         policy = {"permission": permissions, "agent": {"build": {"permission": permissions}}}
         command.remove("--auto")
+        command[2:2] = ["--agent", "build"]
+        command = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(policy), *command]
+    elif config.runtime == "laya":
+        # The fixer edits only the campaign branch. Lifecycle and Git writes
+        # belong to this controller; MCP and further delegation remain denied.
+        workspace = str((config.campaign_worktree or REPO_ROOT).resolve())
+        shell = {"*": "allow"}
+        for verb in ("add", "commit", "push", "pull", "fetch", "checkout", "reset", "stash", "worktree", "branch", "merge", "rebase", "cherry-pick", "clean", "config", "update-ref", "tag"):
+            shell[f"*git*{verb}*"] = "deny"
+        for pattern in ("*systemctl*", "*systemd-run*", "*kill *", "*pkill*", "*rcon_client*", "*run_laya_clean*", "*run_laya_saved_world*", "*manage_linux*", "*sync_linux_gui_mods*"):
+            shell[pattern] = "deny"
+        edits = {"*": "deny", workspace + "/**": "allow", workspace + "/.git": "deny", workspace + "/.git/**": "deny"}
+        permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
+                       "external_directory": "allow", "edit": edits, "write": edits, "bash": shell, "task": "deny"}
+        policy = {"permission": permissions, "agent": {"build": {"permission": permissions}}}
         command[2:2] = ["--agent", "build"]
         command = ["env", "OPENCODE_CONFIG_CONTENT=" + json.dumps(policy), *command]
     config.opencode_log_dir.mkdir(parents=True, exist_ok=True)
@@ -422,6 +477,12 @@ def _readonly(config: Config) -> Config:
     return replace(config, read_only=True, model_timeout_seconds=min(config.model_timeout_seconds, 240))
 
 
+def _backend(config: Config):
+    """Select the runtime backend; tolerant of lightweight config stand-ins."""
+    from tools.campaign_runtime import backend_for
+    return backend_for(config)
+
+
 def _tree_fingerprint(observations: Path) -> str:
     """Fingerprint code/test changes while excluding campaign-owned artifacts."""
     command = ["git", "diff", "HEAD", "--binary", "--no-ext-diff", "--", "."]
@@ -464,8 +525,10 @@ def _pin_source(config: Config) -> Path:
     return target
 
 
-def _code_hash() -> str:
-    paths = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "orchestrator", "planners", "core", "tools", "scripts", "factorio_mod", "schemas"], timeout=120).stdout.split("\0")
+def _code_hash(extra: tuple[str, ...] = ()) -> str:
+    paths = _run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z",
+                  "orchestrator", "planners", "core", "tools", "scripts", "factorio_mod", "schemas",
+                  *extra], timeout=120).stdout.split("\0")
     digest = hashlib.sha256()
     for name in sorted(p for p in paths if p):
         path = REPO_ROOT / name
@@ -517,7 +580,7 @@ def _collect_helper(config: Config, episode: str, wait_seconds: int) -> dict:
     started = time.time()
     announced = False
     while True:
-        path, announced = _helper_finding(config, episode)
+        path, announced = _backend(config).helper_finding(config, episode)
         if announced and path:
             return {"episode": episode, "status": "complete", "path": path,
                     "reason": "findings announced complete"}
@@ -536,7 +599,7 @@ def _late_helper(config: Config, state: State, episode: str) -> dict:
     helper = state.helper or {}
     if helper.get("episode") != episode or helper.get("status") != "unavailable":
         return helper
-    path, announced = _helper_finding(config, episode)
+    path, announced = _backend(config).helper_finding(config, episode)
     if path and announced:
         helper.update(status="late", path=path, reason="findings completed after the wait window")
     return helper
@@ -555,7 +618,10 @@ def _milestones(run_text: str) -> dict:
 
 
 def run_campaign(config: Config) -> int:
-    global _COMMAND_DEADLINE
+    global _COMMAND_DEADLINE, REPO_ROOT
+    supervisor_root = REPO_ROOT
+    if config.campaign_worktree is not None:
+        REPO_ROOT = config.campaign_worktree.resolve()
     try:
         if config.dry_run:
             return _run_campaign(config)
@@ -569,6 +635,7 @@ def run_campaign(config: Config) -> int:
             return _run_campaign(config)
     finally:
         _COMMAND_DEADLINE = None
+        REPO_ROOT = supervisor_root
 
 
 def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> tuple[str | None, bool]:
@@ -612,6 +679,11 @@ def _terminal_evidence(config: Config, state: State, episode: str) -> tuple[dict
         # RUN END evidence collection already ran once (controller restart or
         # repeated detection); do not duplicate the wait or finalization.
         return state.helper, board
+    if _backend(config).name == "laya" and not config.dry_run:
+        helper = _backend(config).observe(config, episode)
+        state.helper = helper
+        _save_state(config.state_file, state)
+        return helper, Path(helper.get("path") or board)
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="campaign-terminal") as pool:
         future = None
         if config.aspect_observers and not config.dry_run:
@@ -697,6 +769,27 @@ def _run_campaign(config: Config) -> int:
         _save_state(config.state_file, state)
     reliability_path = config.state_root / "logs/reliability-state.json"
     base_config = config
+    backend = _backend(config)
+    if backend.name == "laya":
+        if not config.dry_run and config.campaign_worktree is None:
+            raise ValueError("Laya requires explicit --campaign-worktree for Git/model edits")
+        if state.episode_runtime:
+            config = backend.restore_config(config, state.episode_runtime)
+    if backend.name == "laya" and not config.dry_run and (config.rcon_port == 27017 or config.game_port == 34199):
+        raise ValueError("a Laya campaign needs private --rcon-port/--game-port, not the deterministic defaults")
+    # A durable completed-cycle ledger entry wins over a state write lost
+    # immediately after append/commit. Never issue a second fix for that cycle.
+    if state.active_cycle and cycle_record(config.state_root, state.campaign_id, state.active_cycle):
+        state.completed_cycles = max(state.completed_cycles, state.active_cycle)
+        state.active_cycle = None
+        state.active_episode_id = None
+        state.lifecycle_intent = None
+        state.episode_runtime = None
+        state.pending_fix = None
+        state.helper = None
+        state.synthesis = None
+        _save_state(config.state_file, state)
+        config = base_config
     existing_sequences = [int(p.stem.split("-")[-1]) for p in config.opencode_log_dir.glob("opencode-*.jsonl") if p.stem.split("-")[-1].isdigit()]
     sequence = max(existing_sequences, default=0) + 1
 
@@ -725,7 +818,7 @@ def _run_campaign(config: Config) -> int:
         sequence += 1
 
     while config.max_cycles == 0 or state.completed_cycles < config.max_cycles:
-        if time.time() >= deadline:
+        if time.time() >= deadline and not (backend.name == "laya" and (state.active_cycle or state.lifecycle_intent)):
             return _stop_campaign(config, state, "DEADLINE_REACHED",
                                   reason="campaign deadline reached",
                                   journal="## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
@@ -743,7 +836,7 @@ def _run_campaign(config: Config) -> int:
             if reliability["phase"] == "research" and base_config.stop_after_acceptance:
                 return _stop_campaign(config, state, "SUCCESS", reason="plastic acceptance certified")
             config = replace(base_config, technology="plastic-bar" if reliability["phase"] == "plastic" else base_config.technology)
-        if config.plastic_reliability and not config.dry_run:
+        if (config.plastic_reliability or backend.name == "laya") and not config.dry_run:
             config = replace(config, source_save=_pin_source(config))
         attempt_hash = _code_hash() if config.plastic_reliability else ""
         cycle = state.completed_cycles + 1
@@ -752,44 +845,65 @@ def _run_campaign(config: Config) -> int:
         # from the absence of a model session ID.
         resuming = state.active_cycle == cycle
         if state.lifecycle_intent:
-            current_episode = _episode_id(config)
-            run_log = config.state_root / "logs/autonomous-run.log"
-            current_log = _current_run_text(run_log.read_text(encoding="utf-8", errors="replace")) if run_log.exists() else ""
-            if (current_episode and current_episode == state.lifecycle_intent.get("expected_episode")
-                    and current_episode in current_log):
+            if backend.name == "laya":
+                config = backend.restore_config(config, state.episode_runtime)
+                # The durable unique root is identity; actual Laya run ids differ
+                # from the campaign experiment id. fresh is idempotent by phase.
+                _COMMAND_DEADLINE = None
+                fresh = backend.fresh(config)
+                _COMMAND_DEADLINE = None if backend.name == "laya" else deadline
+                if fresh.returncode:
+                    raise RuntimeError(f"resumed lifecycle failed: {fresh.stderr}")
                 state.active_cycle = cycle
-                state.active_episode_id = current_episode
+                state.active_episode_id = backend.episode_id(config)
                 state.lifecycle_intent = None
                 _save_state(config.state_file, state)
                 resuming = True
             else:
-                _progress(config, "UNRECOVERABLE_FAILURE", state,
-                          reason="fresh lifecycle interrupted; inspect before retrying")
-                raise RuntimeError("fresh lifecycle intent is unresolved; refusing an automatic second reset")
+                current_episode = backend.episode_id(config)
+                run_log = backend.run_log_path(config)
+                current_log = _current_run_text(run_log.read_text(encoding="utf-8", errors="replace")) if run_log.exists() else ""
+                if (current_episode and current_episode == state.lifecycle_intent.get("expected_episode")
+                        and current_episode in current_log):
+                    state.active_cycle = cycle
+                    state.active_episode_id = current_episode
+                    state.lifecycle_intent = None
+                    _save_state(config.state_file, state)
+                    resuming = True
+                else:
+                    _progress(config, "UNRECOVERABLE_FAILURE", state,
+                              reason="fresh lifecycle interrupted; inspect before retrying")
+                    raise RuntimeError("fresh lifecycle intent is unresolved; refusing an automatic second reset")
         if resuming and config.plastic_reliability:
             attempt_hash = state.active_code_hash or "unknown-start-code"
         adopt_active_run = config.resume_active_run and not resuming
         if resuming:
-            if state.active_episode_id and _episode_id(config) != state.active_episode_id and not config.dry_run:
+            if state.active_episode_id and backend.episode_id(config) != state.active_episode_id and not config.dry_run:
                 raise RuntimeError("active episode provenance changed; refuse to adopt another world")
             _append(config.observations, f"## Cycle {cycle} — resumed ({_now()}); no fresh lifecycle issued.\n")
         else:
             if adopt_active_run:
-                complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
-                if complete or not run_text or not _episode_id(config):
+                complete, run_text = backend.latest_run(config)
+                if complete or not run_text or not backend.episode_id(config):
                     raise RuntimeError("--resume-active-run requires an identified unfinished episode")
             else:
                 config = replace(config, episode_id="episode-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8])
-                state.lifecycle_intent = {"previous_episode": _episode_id(config), "expected_episode": config.episode_id, "cycle": cycle}
+                if backend.name == "laya" and not config.dry_run:
+                    config = backend.allocate_config(config, cycle)
+                    state.episode_runtime = backend.config_identity(config)
+                state.lifecycle_intent = {"previous_episode": backend.episode_id(config), "expected_episode": config.episode_id, "cycle": cycle}
                 state.active_code_hash = attempt_hash
                 _save_state(config.state_file, state)
                 _progress(config, "STARTING_EPISODE", state)
-                fresh = subprocess.CompletedProcess(_fresh_command(config), 0, "dry run", "") if config.dry_run else _run(_fresh_command(config), timeout=900)
+                if backend.name == "laya":
+                    _COMMAND_DEADLINE = None
+                fresh = subprocess.CompletedProcess(backend.fresh_command(config), 0, "dry run", "") if config.dry_run else backend.fresh(config)
+                _COMMAND_DEADLINE = None if backend.name == "laya" else deadline
                 if fresh.returncode:
                     raise RuntimeError(f"fresh lifecycle failed:\n{fresh.stdout}\n{fresh.stderr}")
                 _append(config.observations, f"## Cycle {cycle} — fresh lifecycle ({_now()})\n\n```text\n{(fresh.stdout + fresh.stderr).strip()}\n```\n")
             state.active_cycle = cycle
-            state.active_episode_id = _episode_id(config) or (f"dry-run-{cycle}" if config.dry_run else None)
+            state.active_episode_id = backend.episode_id(config) or (f"dry-run-{cycle}" if config.dry_run else None)
             state.active_code_hash = attempt_hash
             state.lifecycle_intent = None
             # A new episode always gets a new observer team and a clean checkpoint.
@@ -804,9 +918,11 @@ def _run_campaign(config: Config) -> int:
             _save_state(config.state_file, state)
         # The persistent primary is bootstrapped only once per campaign; a
         # fresh episode or a controller restart reuses the same session.
-        _, bootstrapped = _ensure_primary(config, state, cycle, sequence)
+        bootstrapped = False
+        if backend.name == "deterministic":
+            _, bootstrapped = _ensure_primary(config, state, cycle, sequence)
         sequence += 1
-        if not bootstrapped:
+        if not bootstrapped and backend.name == "deterministic":
             previous = cycle_record(config.state_root, state.campaign_id, cycle - 1)
             _primary_turn(config, state, primary_run_transition(
                 config, cycle, state.active_episode_id, state.fixer_session_id,
@@ -820,15 +936,15 @@ def _run_campaign(config: Config) -> int:
         # its first end check so the new RUN START cannot race the old block.
         first_turn_done = resuming
         while True:
-            complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
+            complete, run_text = backend.latest_run(config)
             if (complete or config.dry_run) and first_turn_done:
                 break
-            if time.time() >= deadline:
+            if time.time() >= deadline and backend.name == "deterministic":
                 return _stop_campaign(config, state, "DEADLINE_REACHED",
                                       reason="deadline reached during active episode",
                                       journal="## Campaign stop\n\nWall-clock limit reached during an active run.\n")
             checkpoint += 1
-            snapshot, offset, tick = _snapshot(config, cycle, checkpoint, 0)
+            snapshot, offset, tick = backend.snapshot(config, cycle, checkpoint, 0)
             _append(config.observations, snapshot)
             if tick is not None:
                 state.last_seen_tick = max(state.last_seen_tick or 0, tick)
@@ -836,20 +952,21 @@ def _run_campaign(config: Config) -> int:
                 from tools.campaign_observers import observe_team
                 board = observe_team(config, state.active_episode_id, checkpoint)
                 _append(config.observations, f"Aspect evidence board: {board}\n")
-            _, assessment = _ask_with_continue(_readonly(config), primary_checkpoint(cycle, state.active_episode_id, checkpoint), state.primary_session_id, sequence, require_response=False)
-            if _assistant_text(assessment):
-                _append(config.observations, _assistant_text(assessment))
+            if backend.name == "deterministic":
+                _, assessment = _ask_with_continue(_readonly(config), primary_checkpoint(cycle, state.active_episode_id, checkpoint), state.primary_session_id, sequence, require_response=False)
+                if _assistant_text(assessment):
+                    _append(config.observations, _assistant_text(assessment))
             sequence += 1
             first_turn_done = True
             state.last_checkpoint = checkpoint
             state.last_checkpoint_episode = state.active_episode_id
             _save_state(config.state_file, state)
-            complete, run_text = _latest_run(config.state_root / "logs/autonomous-run.log")
+            complete, run_text = backend.latest_run(config)
             if complete or config.dry_run:
                 break
-            time.sleep(min(config.interval_seconds, max(0, deadline - time.time())))
+            time.sleep(config.interval_seconds if backend.name == "laya" else min(config.interval_seconds, max(0, deadline - time.time())))
 
-        if not config.dry_run:
+        if not config.dry_run and backend.name == "deterministic":
             history_db = config.state_root / "logs/run-history.sqlite"
             history_sources = sorted((config.state_root / "logs/archive").glob("autonomous-run-*.log"))
             history_sources.append(config.state_root / "logs/autonomous-run.log")
@@ -911,7 +1028,22 @@ def _run_campaign(config: Config) -> int:
                                           "wall_time": _now()}
         _save_state(config.state_file, state)
         _progress(config, "WAITING_FOR_HELPER_AND_OBSERVERS", state)
+        if backend.name == "laya":
+            # Natural run and its terminal evidence can finish after the campaign
+            # deadline. No new model fix or episode is allowed afterwards.
+            _COMMAND_DEADLINE = None
         helper, board = _terminal_evidence(config, state, state.active_episode_id)
+        if backend.name == "laya":
+            backend.stop(config)
+            _COMMAND_DEADLINE = deadline
+            if time.time() >= deadline:
+                _finish_cycle(config, state, "deadline-after-natural-run", {}, run_text=run_text)
+                return _stop_campaign(config, state, "DEADLINE_REACHED", reason="natural episode and terminal evidence finished after deadline")
+            if helper.get("status") != "complete":
+                _finish_cycle(config, state, "observer-failed", {}, run_text=run_text)
+                continue
+            _ensure_primary(config, state, cycle, sequence)
+            sequence += 1
         sequence += 1
         _append(config.observations,
                 f"RUN END recorded for episode {state.active_episode_id} at +{state.run_end.get('run_seconds')}s; "
@@ -925,7 +1057,7 @@ def _run_campaign(config: Config) -> int:
             _progress(config, "SYNTHESIZING", state)
             synthesis_output = _primary_turn(config, state, primary_run_end(
                 state.active_episode_id, board, helper.get("status"), helper.get("path"),
-                config.state_root / "logs/latest-context.md", config.observations), sequence)
+                config.state_root / "logs/latest-context.md", config.observations, config), sequence)
             sequence += 1
             synthesis_path = config.state_root / "logs/campaign-loop" / f"synthesis-{cycle:04d}.md"
             _atomic_write(synthesis_path, _assistant_text(synthesis_output) or synthesis_output)
@@ -948,6 +1080,7 @@ def _stop_campaign(config: Config, state: State, phase: str, *, reason: str,
                    journal: str | None = None) -> int:
     """Persist a terminal condition; only genuinely unrecoverable ends land here."""
     _progress(config, phase, state, reason=reason)
+    _save_state(config.state_file, state)
     if journal:
         _append(config.observations, journal)
     return 0
@@ -995,7 +1128,8 @@ def _finish_cycle(config: Config, state: State, outcome: str, fields: dict, *,
         "reason": reason,
         "completed_at": _now(),
     }
-    campaign_loop_log.append_cycle(config.state_root, record)
+    if cycle_record(config.state_root, state.campaign_id, cycle) is None:
+        campaign_loop_log.append_cycle(config.state_root, record)
     if terminal_phase is not None:
         return _stop_campaign(config, state, terminal_phase, reason=reason or outcome)
     state.completed_cycles += 1
@@ -1007,19 +1141,28 @@ def _finish_cycle(config: Config, state: State, outcome: str, fields: dict, *,
     state.synthesis = None
     state.pending_fix = None
     state.pre_cycle_dirty = []
+    state.episode_runtime = None
     _save_state(config.state_file, state)
     return 0
 
 
 def _config(args: argparse.Namespace) -> Config:
+    from tools.campaign_runtime import (
+        LAYA_MODEL, LAYA_OBSERVER_MODEL, LAYA_OBSERVER_VARIANT, LAYA_VARIANT,
+    )
     root = args.state_root.expanduser().resolve()
+    laya = args.runtime == "laya"
+    world_root = args.world_root
+    if world_root is None and laya:
+        world_root = root / "laya-world"
     return Config(
         state_root=root, source_save=args.source_save.expanduser().resolve(), observations=args.observations.resolve(),
         state_file=(args.state_file or root / "logs" / ("reliability-campaign-state.json" if args.plastic_reliability else "opencode-campaign-state.json")).resolve(),
         opencode_log_dir=(args.opencode_log_dir or root / "logs/opencode-campaign").resolve(),
         technology=args.technology, interval_seconds=args.interval_seconds,
         post_run_wait_seconds=args.post_run_wait_seconds, max_cycles=args.max_cycles,
-        max_runtime_seconds=args.max_runtime_hours * 3600, model=args.model, variant=args.variant,
+        max_runtime_seconds=args.max_runtime_hours * 3600, model=args.model or (LAYA_MODEL if laya else DEFAULT_MODEL),
+        variant=args.variant or (LAYA_VARIANT if laya else "auto"),
         # Keep --python unresolved: the runner manager detects the venv via
         # `<python-dir>/../pyvenv.cfg`, and resolving `.venv/bin/python` to
         # the underlying uv interpreter breaks that detection, leaving the
@@ -1030,21 +1173,44 @@ def _config(args: argparse.Namespace) -> Config:
         required_successes=args.required_successes, stop_after_acceptance=args.stop_after_acceptance,
         checkpoint_failures=args.checkpoint_failures, rcon_port=args.rcon_port,
         game_port=args.game_port, runtime_root=args.runtime_root, gui_mods=args.gui_mods,
-        aspect_observers=args.aspect_observers, progress_file=args.progress_file,
-        review_model=args.review_model, review_variant=args.review_variant,
-        observer_model=args.observer_model, observer_variant=args.observer_variant,
-        fixer_model=args.fixer_model, fixer_variant=args.fixer_variant,
+        # Laya uses exactly one read-only Muse writer, never the four-observer team.
+        aspect_observers=False if laya else args.aspect_observers, progress_file=args.progress_file,
+        review_model=args.review_model or (LAYA_MODEL if laya else None), review_variant=args.review_variant or "high",
+        observer_model=args.observer_model or (LAYA_OBSERVER_MODEL if laya else "opencode-go/muse-spark-1.3-contributor"),
+        observer_variant=args.observer_variant or (LAYA_OBSERVER_VARIANT if laya else "high"),
+        fixer_model=args.fixer_model or (LAYA_MODEL if laya else None), fixer_variant=args.fixer_variant or "high",
         zen_observer_model=args.zen_observer_model,
         helper_wait_seconds=args.helper_wait_seconds,
         max_fix_revisions=args.max_fix_revisions,
+        runtime=args.runtime, world_root=world_root, code_root=args.code_root,
+        mods_source=args.mods_source, run_speed=args.speed, until_accepted=args.until_accepted,
+        max_game_ticks=args.max_game_ticks, run_wall_seconds=args.run_wall_seconds, seed=args.seed,
+        campaign_worktree=args.campaign_worktree.resolve() if args.campaign_worktree else None,
+        mod_builder=args.mod_builder, stamp_script=args.stamp_script, stamp_tag_base=args.stamp_tag_base,
+        comparator_roots=tuple(args.comparators or ()),
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint-failures", action="store_true", help="Save failed world and durable sidecars before fixing or resetting (reliability mode).")
     parser.add_argument("--rcon-port", type=int, default=27017)
     parser.add_argument("--game-port", type=int, default=34199)
+    parser.add_argument("--runtime", choices=["deterministic", "laya"], default="deterministic",
+                        help="laya drives a natural Laya episode with a single read-only Muse helper.")
+    parser.add_argument("--world-root", type=Path, help="Laya episode root (default <state-root>/laya-world).")
+    parser.add_argument("--code-root", type=Path, help="Immutable Laya code copy root (default: repository).")
+    parser.add_argument("--mods-source", type=Path, help="Stamped mods copy to hash into freeze.json before prepare.")
+    parser.add_argument("--speed", type=float, default=2.0, help="Declared live game speed for a Laya episode.")
+    parser.add_argument("--until-accepted", default="C6", help="Laya checkpoint predicate that ends the run.")
+    parser.add_argument("--max-game-ticks", type=int, default=1_440_000, help="Natural game-tick bound for a Laya episode.")
+    parser.add_argument("--run-wall-seconds", type=int, default=21_600, help="Natural wall bound mirrored from the runner timeout.")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--campaign-worktree", type=Path, help="Explicit writable Git/model/test tree, separate from frozen supervisor.")
+    parser.add_argument("--mod-builder", type=Path, help="Build frozen current mod sources (--source factorio_mod --output mods).")
+    parser.add_argument("--stamp-script", type=Path, help="Run-kit stamp script (--server-mods --gui-mods --tag).")
+    parser.add_argument("--stamp-tag-base", type=int, default=30000)
+    parser.add_argument("--comparators", type=Path, action="append", help="Prior run root passed explicitly to terminal Muse (repeatable).")
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--gui-mods", type=Path)
     parser.add_argument("--aspect-observers", action="store_true")
@@ -1063,14 +1229,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--post-run-wait-seconds", type=int, default=120)
     parser.add_argument("--max-cycles", type=int, default=0, help="0 stops only on a guard or completion.")
     parser.add_argument("--max-runtime-hours", type=int, default=8, help="0 disables this wall-clock guard.")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--variant", default="auto")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--variant", default=None)
     parser.add_argument("--review-model")
-    parser.add_argument("--review-variant", default="high")
-    parser.add_argument("--observer-model", default="opencode-go/muse-spark-1.3-contributor")
-    parser.add_argument("--observer-variant", default="high")
+    parser.add_argument("--review-variant", default=None)
+    parser.add_argument("--observer-model", default=None)
+    parser.add_argument("--observer-variant", default=None)
     parser.add_argument("--fixer-model")
-    parser.add_argument("--fixer-variant", default="high")
+    parser.add_argument("--fixer-variant", default=None)
     parser.add_argument("--zen-observer-model", default="opencode-zen/muse-spark-1.3")
     parser.add_argument("--opencode-bin", default="opencode")
     parser.add_argument("--python", type=Path, default=REPO_ROOT / ".venv/bin/python")
@@ -1080,7 +1246,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume-active-run", action="store_true", help="Attach an observer to an already-running isolated episode without resetting it.")
     parser.add_argument("--helper-wait-seconds", type=int, default=120, help="Maximum seconds after RUN END to wait for OpenCode helper findings.")
     parser.add_argument("--max-fix-revisions", type=int, default=2, help="Bounded fixer revisions per episode before a candidate is abandoned.")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
     try:
         return run_campaign(_config(args))
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as error:

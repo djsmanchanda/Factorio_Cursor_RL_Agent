@@ -370,3 +370,24 @@ def test_review_rejects_undeclared_new_code_before_commit(tmp_path, monkeypatch)
     assert not any(str(path).endswith('git') for path in [()])
     assert 'hidden_change' in (cfg.observations).read_text()
     assert fix_ledger(cfg.state_root)[list(fix_ledger(cfg.state_root))[-1]]['status'] == 'abandoned'
+
+
+def test_laya_fixer_permissions_scope_edits_and_deny_lifecycle_and_git_writes(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from dataclasses import replace
+    worktree = tmp_path/'campaign-code'
+    cfg = replace(_restart_config(tmp_path), dry_run=False, runtime='laya', campaign_worktree=worktree)
+    seen = {}
+    def run(command, **kwargs):
+        seen['command'] = command
+        return subprocess.CompletedProcess(command, 0, '{"sessionID":"scoped-fixer"}\n', '')
+    monkeypatch.setattr(campaign, '_run', run)
+    campaign._ask(cfg, 'one focused fix', None, 9)
+    assert seen['command'][0] == 'env'
+    policy = json.loads(seen['command'][1].split('=',1)[1])['permission']
+    assert policy['*'] == 'deny'
+    assert policy['edit']['*'] == 'deny' and policy['edit'][str(worktree.resolve())+'/**'] == 'allow'
+    assert policy['bash']['*systemctl*'] == 'deny'
+    assert policy['bash']['*git*commit*'] == 'deny'
+    assert policy['task'] == 'deny'
