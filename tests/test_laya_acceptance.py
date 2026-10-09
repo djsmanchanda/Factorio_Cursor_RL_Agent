@@ -124,6 +124,8 @@ def test_failed_loan_observation_keeps_its_cause(monkeypatch, tmp_path):
     from orchestrator import autonomous_builder as builder
     from orchestrator import mall_bootstrap
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(projects={}))
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", SimpleNamespace(states=lambda: (
+        SimpleNamespace(recipe="copper-plate", lifecycle_state="provisioning", replacement_submitted=True),)))
 
     def failed(*args):
         raise ValueError("malformed loan group")
@@ -134,6 +136,8 @@ def test_failed_loan_observation_keeps_its_cause(monkeypatch, tmp_path):
     result = s.economics()
     assert result["loans"] is None
     assert result["loan_error"] == "ValueError: malformed loan group"
+    assert result["bootstrap_districts"] == {
+        "copper-plate": {"lifecycle_state": "provisioning", "replacement_submitted": True}}
     from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
     monkeypatch.setattr(LiveCheckpointObservationAdapter, "observe", lambda *_: observation())
     assert s.acceptance()["C1"] == "passed"

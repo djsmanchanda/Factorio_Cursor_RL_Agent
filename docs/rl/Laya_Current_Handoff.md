@@ -2,33 +2,43 @@
 
 # Laya current evidence index
 
-Updated October 8, 2026. Start with [the runner contract](Laya_Clean_Runner.md)
+Updated October 9, 2026. Start with [the runner contract](Laya_Clean_Runner.md)
 and [strategy rules](Laya_Strategy_Guidelines.md); read the relevant dated record
 below for evidence. Architecture/ownership remain in [architecture](../architecture.md).
 
+Several dated handoffs and the October 8 audit are local uncommitted records
+in the operator's main checkout; a clean branch/worktree may omit those linked
+files. They are preserved there without adding them to this implementation
+commit. The October 9 verification and current runner contract are tracked.
+
 | Runtime | Latest referenced evidence | Interpretation |
 | --- | --- | --- |
-| Ops over deterministic tooling | [October 8 session](../handoffs/Laya_Session_Handoff_2026-10-08.md), [pre-cleanup audit](Laya_System_Audit_2026-10-08.md) | Frozen loan A/B identity and cutoff; current decision/receipt gaps and confounded weight intervention. |
+| Ops over deterministic tooling | [October 9 lifecycle verification](Laya_Lifecycle_Verification_2026-10-09.md), [October 8 session](../handoffs/Laya_Session_Handoff_2026-10-08.md), [pre-cleanup audit](Laya_System_Audit_2026-10-08.md) | Completed 320-trial review, persistent lifecycle menu repair and bounded 2.1.21 mechanics evidence. |
 | Geometry and earned-world continuations | [October 5 variety campaign](../archive/rl/Laya_Seven_Hour_Variety_2026-10-05.md), [land model](Laya_Land_Grid.md) | Guided geometry/component cohorts; not raw-start ops wins or unseen-terrain proof. |
 | L1–L3 learned lab workflow | [October 3 background result](../archive/rl/Laya_Background_Run_2026-10-03.md) | Separate trained profile, dataset and measured evaluation. |
 | Supplied-input mall | [Mall supply](Laya_Mall_Supply.md), [October 3 coordination](../handoffs/Laya_Mall_Training_Active_Handoff_2026-10-03.md) | Separate economy and ownership record; its age does not prove current process state. |
 
-The last read-only audit verified `laya-ops-loans-20261008b` active, with a
-00:27 IST snapshot of 38 indexed runs, all stalled before C2. Its authorized
-window ends October 8 at 07:52 IST, with an 8h05m hard service cap. This is a
-snapshot, not a liveness guarantee or permission for a successor run.
+The `next-20261008` cohort finished all 320 trials on Factorio 2.1.21. Baseline
+recorded real C1/C2 in 25/160 and 12/160 trials; reducing only non-core mall
+slots to x1 recorded 16/160 and 9/160. Retain baseline weights: the comparison
+does not establish a reliable winner. Earlier loan-campaign interventions and
+power-loss results are separate evidence, including the confounded core weights.
 
-Before resuming, check the referenced run's service and terminal evidence.
-Read the complete run index alongside the report: the current harness can omit
-crashes and leave reports stale. No loan winner or full-window crash-free result
-is recorded here. The other-slots-1 intervention also reduces core-slot weights;
-interpret its final results accordingly. [Variant rules](laya_variants/README.md)
-govern new adoption; earlier handoff instructions are historical context.
+Review found 101 failed trials with ready metal foundations and unfinished
+starter retirement. The isolated `codex/laya-lifecycle-obligations` branch now
+preserves that option across satisfied rates and proxy phases using scoped
+submission facts. Terminal menu replay restored every needed retirement in
+101/101 cases. Two copied failure worlds reached unchanged `c2-v1` after
+scripted recovery, including a safe deferred attempt. This is mechanics
+verification, not a fresh policy success-rate comparison. Both cohort campaigns
+and verification worlds are stopped. The cap remains 40 for future admission;
+it does not mean 40 worlds are running. Check processes before resuming.
 
-Next implementation priorities: truthful transaction/lifecycle receipts and
-stock/bill/lender facts; the observed foundation/steel cycle; faithful replay
-labels and compatible policy training. Later goal actions and shared acceptance
-remain required. No real-base promotion is authorized by these records.
+Next: matched fresh-save evaluation, then diagnose C1's missing capacity,
+input starvation and stock-gating split. Full transaction/economic facts,
+compatible policy training and later goal actions remain required.
+[Variant rules](laya_variants/README.md) govern adoption. No real-base promotion
+or additional large campaign is authorized by these records.
 
 The former September 21 stopped-state handoff is preserved in the
 [archive](../archive/rl/Laya_Current_Handoff_2026-09-21.md). Dated handoffs and

@@ -195,6 +195,7 @@ def test_real_receipt_preserves_retirement_mapping_and_compiles_next_menu():
     from training.laya_ops_runner import retired
     result = receipt("retire_starter", {"recipe": "iron-plate"}, {"lifecycle": "released", "recipe": "iron-plate"})
     assert isinstance(result["result"], dict)
+    assert result["ok"] and result["code"] == "released"
     assert retired([result], "iron-plate")
     base = [{"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}, result]
     assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, base)["options"]}
@@ -205,6 +206,80 @@ def test_legacy_string_receipt_is_unverified_retirement_without_crashing():
     legacy = {"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
               "result": "{'lifecycle': 'released'}"}
     assert retired([legacy], "iron-plate") is False
+
+
+def test_retirement_survives_satisfied_rates_and_later_phase_without_new_capacity():
+    from training.laya_ops import receipt
+    base = [{"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}}]
+    boards = [{"needs": [{"item": "iron-plate", "condition": "satisfied", "goal_required_per_s": 3}]},
+              {"needs": [{"item": "stone-brick", "condition": "short", "goal_required_per_s": 1}]}]
+    for board in boards:
+        options = {o["option_id"]: o for o in compile_options(board, base)["options"]}
+        option = options["op.retire_starter.iron-plate"]
+        assert option["features"]["lifecycle_pending"] and option["features"]["goal_need"]
+        assert option["need_id"] == "lifecycle:iron-plate"
+        assert "op.extend.iron-plate" not in options
+        for lifecycle in ("validating", "retiring", None):
+            unverified = receipt("retire_starter", {"recipe": "iron-plate"}, {"lifecycle": lifecycle})
+            assert not unverified["ok"] and unverified["code"] == "retirement_pending"
+            assert "op.retire_starter.iron-plate" in {o["option_id"] for o in compile_options(board, base + [unverified])["options"]}
+        released = receipt("retire_starter", {"recipe": "iron-plate"}, {"lifecycle": "released"})
+        assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(board, base + [released])["options"]}
+
+
+def test_scoped_submission_recovers_retirement_after_shortage_without_claiming_ready():
+    from training.laya_ops_runner import pending_retirements
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}, SHORT]
+    board = {"needs": []}  # A later proxy phase need not mention plates at all.
+    for lifecycle in ("provisioning", "validating", "retiring", "released", "pioneer"):
+        for submitted in (False, True):
+            districts = {"iron-plate": {"lifecycle_state": lifecycle, "replacement_submitted": submitted}}
+            pending = lifecycle in {"provisioning", "validating", "retiring"} and submitted
+            options = {o["option_id"]: o for o in compile_options(board, results, bootstrap_districts=districts)["options"]}
+            assert ("op.retire_starter.iron-plate" in options) == pending
+            assert pending_retirements(results, districts) == ({"iron-plate"} if pending else set())
+            assert "op.foundation.iron-plate" not in options
+            assert "op.extend.iron-plate" not in options
+            if pending:
+                assert options["op.retire_starter.iron-plate"]["features"]["plate_stage"] == "starter"
+                assert options["op.retire_starter.iron-plate"]["features"]["lifecycle_state"] == lifecycle
+
+
+def test_loop_records_ledger_obligation_and_samples_both_sides_of_retirement(tmp_path):
+    import json
+    from training.laya_ops import receipt
+
+    class PendingSession(FakeSession):
+        lifecycle = "provisioning"
+
+        def economics(self):
+            return {"loans": [], "projects": {}, "bootstrap_districts": {
+                "iron-plate": {"lifecycle_state": self.lifecycle, "replacement_submitted": True}}}
+
+        def acceptance(self):
+            self.calls.append(("acceptance", self.lifecycle))
+            return {"C2": "passed" if self.lifecycle == "released" else "failed"}
+
+        def run(self, operation, **params):
+            self.calls.append((operation, params))
+            self.lifecycle = "released"
+            return receipt(operation, params, {"lifecycle": self.lifecycle})
+
+    class ChooseRetirement(GuidedPolicy):
+        def choose(self, state, menu):
+            choice = super().choose(state, menu)
+            return {**choice, "option_id": "op.retire_starter.iron-plate", "need_id": "lifecycle:iron-plate"}
+
+    session = PendingSession()
+    summary = run(FakeWorld(), ChooseRetirement(3), journal=tmp_path / "journal.jsonl", decisions=1,
+                  measure_ticks=600, seed=3, run_id="t", session=session, until_accepted="C2")
+    assert summary["stop"] == "accepted_window_reached"
+    assert session.calls == [("acceptance", "provisioning"), ("acceptance", "provisioning"),
+                             ("retire_starter", {"recipe": "iron-plate"}),
+                             ("acceptance", "released"), ("acceptance", "released")]
+    row = json.loads((tmp_path / "decision-states.jsonl").read_text())
+    assert row["state"]["observation_digest"]["saved_world"]["bootstrap_districts"]["iron-plate"]["lifecycle_state"] == "provisioning"
+    assert "iron-plate replacement submitted" in row["state"]["brief"]
 
 
 def test_no_produce_for_items_nothing_can_make_yet():

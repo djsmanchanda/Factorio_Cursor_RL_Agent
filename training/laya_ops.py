@@ -49,9 +49,12 @@ def receipt(operation: str, params: dict, result: object) -> dict:
         code = "submitted"
     elif operation == "reserve_steel_seed":
         code = "reserved"
+    elif operation == "retire_starter":
+        code = "released" if isinstance(result, Mapping) and result.get("lifecycle") == "released" else "retirement_pending"
     else:
         code = "done"
-    return {"ok": code != "prerequisite_advanced", "operation": operation, "params": params, "code": code,
+    return {"ok": code not in {"prerequisite_advanced", "retirement_pending"},
+            "operation": operation, "params": params, "code": code,
             "result": dict(result) if isinstance(result, Mapping) else None if result is None else str(result)[:200]}
 
 
@@ -142,9 +145,11 @@ class DeterministicSession:
         return receipt(operation, params, result)
 
     def economics(self) -> dict:
-        """What the tooling has committed: active material projects (reserved and still missing per item) and
-        live mall loans (which cell is lent to make what). ``loans`` is None when the survey fails: unknown,
-        not empty."""
+        """Committed material bills, scoped replacement lifecycles and live mall loans.
+
+        ``loans`` is None when the survey fails: unknown, not empty. District
+        submission is a reconciliation obligation, not a live readiness claim.
+        """
         from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
         projects = {}
@@ -161,7 +166,13 @@ class DeterministicSession:
         except Exception as error:  # A failed survey is an unknown, never "no loans".
             loans = None
             loan_error = f"{type(error).__name__}: {error}"[:200]
-        return {"projects": projects, "loans": loans, "loan_error": loan_error}
+        # This scoped ledger survives shortage returns while bots finish submitted work.
+        # Reading it does not assert readiness; the retirement tool verifies live output.
+        districts = {state.recipe: {"lifecycle_state": state.lifecycle_state,
+                                   "replacement_submitted": state.replacement_submitted}
+                     for state in ab._BOOTSTRAP_DISTRICT_LEDGER.states()}
+        return {"projects": projects, "loans": loans, "loan_error": loan_error,
+                "bootstrap_districts": districts}
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the

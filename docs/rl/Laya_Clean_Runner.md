@@ -2,7 +2,7 @@
 
 # Laya runner contract
 
-Status: migration prototype, updated October 8, 2026. Product intent and
+Status: migration prototype, updated October 9, 2026. Product intent and
 ownership live in [architecture](../architecture.md); delivery order lives in
 [the implementation plan](Laya_Implementation_Plan.md). The deterministic
 workflow remains usable until a separately authorized replacement passes
@@ -46,6 +46,9 @@ by itself proof of delivered output or a standing producer.
 Current geometry transactions preserve submitted plans and pre/post facts.
 Ops receipts distinguish producing output from prerequisite progress and
 preserve mapping results; legacy retirement strings remain unverified.
+Retirement receipts report `released` only for a structured released lifecycle;
+other normal returns report `retirement_pending` with `ok=false`. They remain
+retryable work, rather than completed retirement or a tool exception.
 History/lifecycle features and error containment do not yet satisfy the
 complete contract. See the [audit](Laya_System_Audit_2026-10-08.md)
 for reproductions; documentation cleanup does not repair these implementation gaps.
@@ -62,9 +65,22 @@ The target compact projection keeps facts needed to discriminate available choic
 | Option cost, feasibility and production displaced by a loan | Detailed surveys and alternative geometry |
 | Recent relevant outcomes and facts changed since failure | Full attempt history, rationale and rule-to-fact mappings |
 
-Unknown evidence stays unknown. The ops path currently lacks bills, requester
-draws and lender consequences in its menu/state; several scarcity features
-therefore default to false. Add those facts before training on their values.
+Unknown evidence stays unknown. Ops exposes previously reported shortage bills,
+active reservations and live loan identities. Full prospective costs, requester
+draws and measured displaced production remain missing; scarcity features can
+remain false without bill evidence. Add those facts before training on their values.
+
+Ops exports episode-scoped bootstrap district lifecycle and submission facts
+in the brief, menu features and recorded decision state. A submitted replacement
+remains a `retire_starter` reconciliation alternative until its district is
+released, including after satisfied rates, later proxy phases and shortage
+returns. Local foundation receipts provide a fallback when no district fact
+is available; a scoped district fact takes precedence. Submission does not
+certify readiness. The existing tool still checks owned geometry, construction,
+replacement output in its provider and bot deconstruction. New starter,
+foundation and extension capacity remains demand-driven. The policy chooses
+among these alternatives; pending lifecycle work has `goal_need=true` because
+it serves mission completion. Catalog weights and exploration are unchanged.
 
 Use the [strategy document](Laya_Strategy_Guidelines.md) for preferences.
 Geometry uses `laya_mission_guidelines.json` and ranks applicable rules for its
@@ -96,8 +112,8 @@ budgets still apply, and periodic samples do not prove an unsampled condition
 was never met. Reports retain both proxy and accepted outcomes.
 
 The ops runner saves versioned acceptance samples under
-`evidence/acceptance/<run-id>/` at startup, proxy transitions, every ten
-decisions and termination. Each sample retains predicate versions, individual
+`evidence/acceptance/<run-id>/` at startup, proxy transitions, before and after
+retirement attempts, every ten decisions and termination. Each sample retains predicate versions, individual
 true/false/unknown checks, raw observed machine status/position/counters,
 starter evidence, the survey's start/end ticks, scope, mall targets and loan/
 reservation observations. Run summaries index the latest checks and sample

@@ -36,7 +36,7 @@ from training.laya_mission import current_phase, phase_reached
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
-               "rotating_mall_prerequisite_handoff", "prerequisite_advanced"}
+               "rotating_mall_prerequisite_handoff", "prerequisite_advanced", "retirement_pending"}
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
@@ -73,6 +73,25 @@ def retired(results: list[dict], plate: str) -> bool:
     """The tooling reported the plate's starter retired (its district released)."""
     return any(r.get("ok") and r["operation"] == "retire_starter" and (r.get("params") or {}).get("recipe") == plate
                and isinstance(r.get("result"), Mapping) and r["result"].get("lifecycle") == "released" for r in results)
+
+
+def pending_retirements(results: list[dict], districts: Mapping | None = None) -> set[str]:
+    """Submitted replacements need reconciliation until released, independent of rate demand.
+
+    Scoped ledger facts take precedence over local receipts: a shortage can return
+    after submission, and bots can complete that work without another successful call.
+    Offering reconciliation does not certify readiness or authorize early removal.
+    """
+    pending = {plate for plate, stage in plate_stages(results).items()
+               if stage == "foundation" and not retired(results, plate)}
+    for plate, state in (districts or {}).items():
+        if plate in PLATES:
+            pending.discard(plate)
+            if state.get("replacement_submitted") is True and state.get("lifecycle_state") in {
+                "provisioning", "validating", "retiring",
+            }:
+                pending.add(plate)
+    return pending
 
 
 def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tuple]:
@@ -151,6 +170,7 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
         "TRIED": ("mission.ops-no-blind-retry", "mission.ops-no-idle-loans"),
         "MALL": ("mission.ops-no-idle-loans", "mission.ops-one-batch"),
         "RESERVED": ("mission.ops-shortage",),
+        "LIFECYCLE": ("mission.ops-retire-starter", "mission.phase-goals-first"),
         "SINCE LAST BUILD": ("mission.ops-history-unstick",)}
 
 
@@ -213,6 +233,9 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             tried[name] = [attempts, r.get("code") or ("ok" if r.get("ok") else "error")]
     sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
     if economics is not None:
+        sections["LIFECYCLE"] = [f"{plate} replacement submitted; reconcile before starter release"
+                                 for plate in sorted(pending_retirements(
+                                     results, economics.get("bootstrap_districts")))]
         loans = economics.get("loans")
         sections["MALL"] = (["loans unknown (survey failed)"] if loans is None else
                             [f"{loan['lender']} cell lent to make {loan['making']} (to {loan['target']})" for loan in loans]
@@ -318,13 +341,14 @@ def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set
 
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
-                    stock: Mapping[str, int] | None = None) -> dict:
+                    stock: Mapping[str, int] | None = None, *, bootstrap_districts: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     stuck = unchanged_failures(results, stock or {})
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
+    pending = pending_retirements(results, bootstrap_districts)
     waiting = any(in_progress(c) for c in codes.values())
     # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
     batch_active = any(in_progress(code) for (operation, _), code in codes.items() if operation in ("produce", "mall_slot"))
@@ -334,18 +358,23 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # the starters before any mine-to-refinery foundation).
     starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
     for plate in PLATES:
-        if plate not in unmet and PLATES[plate] not in unmet:
-            continue
-        # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
-        # and retiring the starter once the foundation stands.
-        legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
-                 "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
+        # New capacity follows demand; finishing owned work survives rate/phase changes.
+        legal = ()
+        if plate in unmet or PLATES[plate] in unmet:
+            legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
+                     "foundation": ("extend",)}[stages.get(plate, "none")]
+        if plate in pending:
+            legal += ("retire_starter",)
         for operation in legal:
+            lifecycle_pending = operation == "retire_starter"
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
-                "need_id": f"item:{plate}", "summary": f"{operation} {plate}", "params": {"recipe": plate},
+                "need_id": f"{'lifecycle' if lifecycle_pending else 'item'}:{plate}",
+                "summary": f"{operation} {plate}", "params": {"recipe": plate},
                 "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
-                             "goal_need": plate in goal,
+                             "goal_need": plate in goal or lifecycle_pending,
+                             "lifecycle_pending": lifecycle_pending,
+                             "lifecycle_state": ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state"),
                              # The tooling said it waits on bots or coverage: retry after a wait, not at once.
                              "waiting": in_progress(codes.get((operation, plate))),
                              "unchanged_failure": (operation, plate) in stuck}})
@@ -505,7 +534,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
         economics = session.economics() if hasattr(session, "economics") else None
-        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock),
+        districts = (economics or {}).get("bootstrap_districts")
+        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
+                                             bootstrap_districts=districts),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -524,7 +555,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
                                         "saved_world": {"provider_stock": {"network": stock},
-                                                        "reserved_stock": {"network": dict(reserved)}}},
+                                                        "reserved_stock": {"network": dict(reserved)},
+                                                        "bootstrap_districts": districts}},
                  "guidelines": rules}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
@@ -536,6 +568,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
                   "summary": chosen["summary"]}
         _append(journal, record)
+        if chosen["family"] == "retire_starter":
+            check_acceptance(f"before retirement {index}")
         if chosen["family"] == "wait":
             adapter.advance(chosen["wait_ticks"])
             result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
@@ -566,7 +600,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
         summary["decisions"] = index + 1
-        if summary["decisions"] % 10 == 0:
+        if chosen["family"] == "retire_starter":
+            check_acceptance(f"after retirement {index}")
+        elif summary["decisions"] % 10 == 0:
             check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
