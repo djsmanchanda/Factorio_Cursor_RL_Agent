@@ -375,6 +375,15 @@ gated separately and is not changed by the release.
   its own beneficiary identity; no speculative spare-cell reservation may hold
   the last items needed to build that beneficiary. Existing named reservations
   remain in force when advanced circuits release the slot ceiling.
+  Before the advanced-circuit ladder can produce replacements, the finite kit
+  logistic chests are budgeted for the required startup dependency cells. Each
+  control pass holds every pending dependency's recipe-derived
+  passive-provider/requester requirement (the long-handed dense-support seed
+  and the core logistic-chest producers) and releases it as soon as that
+  dependency is established. The hold is not an owner: committed construction is protected, and
+  complete producers that replenish held items can draw it. Other whole bills
+  are funded from the unheld pool before partial reservations; allocated
+  claimant chests reduce the remaining hold instead of counting twice.
   After advanced circuits, there is no additional global slot ceiling; the
   layout separates forty-eight permanent per-item halves
   from twelve demand-driven halves. A recipe's first cell is allocated from
@@ -635,3 +644,8 @@ No bootstrap inventory grants and no destroy/recreate requester shortcut are
 allowed. Trash settings unsupported on a bot-built requester remain unsupported;
 removing a real building to force those settings is forbidden. Sandbox/training
 fixture creation remains isolated from the deterministic player-force runtime.
+
+The same finite dependency budget is refreshed by Laya’s shared operations.
+Discretionary whole bills draw only the unheld pool; claimant allocations
+reduce the remaining hold, and partial dependency holds do not take unrelated
+components before fully fundable producers.

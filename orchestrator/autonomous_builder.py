@@ -87,6 +87,7 @@ from orchestrator.mall_bootstrap import (
 from orchestrator.material_reservations import (
     MaterialReservationLedger, plan_material_bill, set_active_material_ledger,
 )
+from orchestrator.logistic_chest_budget import plan_dependency_chest_budget
 from orchestrator.parts_mall import (
     MaterialShortage, add_demands, mission_mall_targets, wait_for_stock,
 )
@@ -7952,6 +7953,87 @@ def _missing_chemical_ladder_predecessor(
     ), None)
 
 
+def _pending_startup_dependencies(
+    client: RconClient, surface: str, force: str,
+) -> tuple[str, ...]:
+    """Required startup cells that still need a finite kit logistic chest.
+
+    The long-handed dense support and the core logistic-chest producers come
+    straight from the recipe catalog and the live producer state, never a
+    coordinate.  Chemical rungs count only when they will build a dedicated
+    cell: before the independent mall they borrow an existing cell and consume
+    no new chest.
+    """
+    pending: list[str] = []
+    if (
+        "long-handed-inserter" in LINE_RECIPES
+        and not _production_started(
+            client, surface, force, "long-handed-inserter",
+        )
+    ):
+        pending.append("long-handed-inserter")
+    for item in sorted(_CORE_MALL_RECIPE_ITEMS):
+        if (
+            item in LINE_RECIPES
+            and not _production_started(client, surface, force, item)
+        ):
+            pending.append(item)
+    for rung in CHEMICAL_BOOTSTRAP_LADDER:
+        if rung not in LINE_RECIPES:
+            continue
+        if _chemical_capability_started(client, surface, force, rung):
+            continue
+        if _chemical_uses_rotating_batch(client, surface, force, rung):
+            continue
+        pending.append(rung)
+    return tuple(pending)
+
+
+def _refresh_logistic_chest_budget(
+    client: RconClient, surface: str, force: str,
+    ledger: MaterialReservationLedger | None,
+    emit: Callable[[str], None] | None = None,
+) -> None:
+    """Hold finite kit chests for required startup dependencies this pass.
+
+    The hold is derived prospectively from each dependency's own recipe bill
+    and released as soon as the dependency is established, so it never blocks
+    production indefinitely and never steals an existing reservation.
+    """
+    if ledger is None or not hasattr(client, "command"):
+        return
+    try:
+        pending = _pending_startup_dependencies(client, surface, force)
+        plan = plan_dependency_chest_budget(
+            pending,
+            bill_for=lambda item: compact_mall_project_bill(item),
+            project_id_for=_material_project_id,
+        )
+    except Exception as error:  # advisory hold must never crash a control pass
+        if emit is not None:
+            emit(f"  LOGISTIC CHEST BUDGET: skipped this pass ({error})")
+        return
+    before = (dict(ledger.dependency_budget), ledger.dependency_claimants)
+    ledger.set_dependency_budget(plan.targets, claimants=plan.claimants)
+    if emit is not None and (
+        dict(ledger.dependency_budget), ledger.dependency_claimants
+    ) != before:
+        if ledger.dependency_budget:
+            emit(
+                "  LOGISTIC CHEST BUDGET: holding "
+                + ", ".join(
+                    f"{item}={count}"
+                    for item, count in sorted(ledger.dependency_budget.items())
+                )
+                + " for " + ", ".join(ledger.dependency_claimants)
+            )
+        else:
+            emit(
+                "  LOGISTIC CHEST BUDGET: released; startup dependencies "
+                "are established"
+            )
+
+
 def _defer_steel_blocked_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference_point: Point, emit: Callable[[str], None],
@@ -13009,6 +13091,9 @@ def run(
                 checkpoint_boundary(client, bridge)
             budget.begin_pass()
             _reconcile_bootstrap_work(client, surface, force)
+            _refresh_logistic_chest_budget(
+                client, surface, force, _MATERIAL_RESERVATION_LEDGER, emit,
+            )
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities, prepped,
             )

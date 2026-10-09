@@ -158,6 +158,11 @@ class MaterialReservationLedger:
         self.revision = 0
         self.projects: dict[str, MaterialProject] = {}
         self.bootstrap_supply: dict[str, dict[str, dict[str, int]]] = {}
+        # Prospective hold of finite kit stock for required startup dependency
+        # bills.  It is not an owner: it only keeps discretionary projects from
+        # reserving the held items before the named dependencies need them.
+        self.dependency_budget: dict[str, int] = {}
+        self.dependency_claimants: tuple[str, ...] = ()
         self._load()
 
     def _load(self) -> None:
@@ -174,6 +179,20 @@ class MaterialReservationLedger:
             ):
                 raise MaterialReservationError("Material ledger scope does not match this run")
             self.revision = int(payload["revision"])
+            raw_budget = payload.get("dependency_budget")
+            if raw_budget is not None:
+                if not isinstance(raw_budget, dict):
+                    raise MaterialReservationError("Dependency budget must be an object")
+                self.dependency_budget = _counts(
+                    raw_budget.get("targets", {}), "dependency budget targets",
+                )
+                self.dependency_claimants = tuple(
+                    str(claimant) for claimant in raw_budget.get("claimants", ())
+                )
+                if any(not claimant for claimant in self.dependency_claimants):
+                    raise MaterialReservationError(
+                        "Dependency budget claimants must be non-empty",
+                    )
             raw_supply = payload.get("bootstrap_supply", {})
             if not isinstance(raw_supply, dict):
                 raise MaterialReservationError("Bootstrap supply must be an object")
@@ -208,6 +227,10 @@ class MaterialReservationLedger:
             "force": self.force,
             "revision": self.revision,
             "bootstrap_supply": self.bootstrap_supply,
+            "dependency_budget": {
+                "targets": dict(sorted(self.dependency_budget.items())),
+                "claimants": sorted(self.dependency_claimants),
+            },
             "projects": [
                 project.to_dict()
                 for project in sorted(
@@ -243,6 +266,41 @@ class MaterialReservationLedger:
         }
         self.revision += 1
         self._save()
+
+    def set_dependency_budget(
+        self, targets: Mapping[str, int], *,
+        claimants: Collection[str] = (),
+    ) -> None:
+        """Hold finite stock for required startup dependency bills.
+
+        The hold is not a project: it never appears in ``stock_targets`` and
+        never overwrites another project's reservation.  It only removes the
+        held quantities from the pool that discretionary partial reservations
+        can claim, until the named claimants (the required dependency projects)
+        take them or the budget is cleared.  Items no longer needed must be
+        dropped from ``targets``; passing an empty mapping clears the hold.
+        """
+        normalized = {
+            str(item): int(count) for item, count in targets.items() if int(count) > 0
+        }
+        new_claimants = tuple(dict.fromkeys(str(c) for c in claimants if str(c)))
+        if set(normalized) and not new_claimants:
+            raise MaterialReservationError(
+                "Dependency budget with targets needs at least one claimant",
+            )
+        new_budget = dict(sorted(normalized.items()))
+        if (
+            new_budget == self.dependency_budget
+            and new_claimants == self.dependency_claimants
+        ):
+            return
+        self.dependency_budget = new_budget
+        self.dependency_claimants = new_claimants
+        self.revision += 1
+        self._save()
+
+    def clear_dependency_budget(self) -> None:
+        self.set_dependency_budget({}, claimants=())
 
     @staticmethod
     def _active(project: MaterialProject) -> bool:
@@ -280,13 +338,45 @@ class MaterialReservationLedger:
         # long-handed-inserter cell needed).
         allocations: dict[str, dict[str, int]] = {}
         for project in active:
-            if project.state == "constructing" or all(
-                pool.get(item, 0) >= required for item, required in project.required.items()
+            if project.state == "constructing":
+                allocations[project.project_id] = self._take(project, pool)
+        # Fund required claimants and complete producers that can replenish a
+        # held item. Other complete bills draw only the unheld finite pool.
+        for project in active:
+            required_dependency = project.project_id in self.dependency_claimants
+            replenishes = project.target_item in self.dependency_budget
+            if (project.project_id not in allocations and (required_dependency or replenishes)
+                    and all(pool.get(item, 0) >= count for item, count in project.required.items())):
+                allocations[project.project_id] = self._take(project, pool)
+        # Partial dependencies may claim their finite chest, but leave other
+        # components for fully fundable producers before taking partial holds.
+        for project in active:
+            if project.project_id in self.dependency_claimants and project.project_id not in allocations:
+                held = {}
+                for item in self.dependency_budget:
+                    count = min(project.required.get(item, 0), pool.get(item, 0))
+                    if count:
+                        held[item] = count
+                        pool[item] -= count
+                allocations[project.project_id] = held
+        claimed: Counter[str] = Counter()
+        for project in active:
+            if project.project_id in self.dependency_claimants:
+                claimed.update(allocations.get(project.project_id, {}))
+        for item, count in self.dependency_budget.items():
+            pool[item] = max(0, pool.get(item, 0) - max(0, count - claimed.get(item, 0)))
+        for project in active:
+            if project.project_id not in allocations and all(
+                pool.get(item, 0) >= count for item, count in project.required.items()
             ):
                 allocations[project.project_id] = self._take(project, pool)
         for project in active:
-            if project.project_id not in allocations:
-                allocations[project.project_id] = self._take(project, pool)
+            allocation = allocations.setdefault(project.project_id, {})
+            for item, required in project.required.items():
+                count = min(max(0, required - allocation.get(item, 0)), pool.get(item, 0))
+                if count:
+                    allocation[item] = allocation.get(item, 0) + count
+                    pool[item] -= count
         updated: dict[str, MaterialProject] = {}
         for project in ordered:
             if not self._active(project):
@@ -407,6 +497,23 @@ class MaterialReservationLedger:
         for project in self.projects.values():
             if self._active(project) and project.project_id not in allowed:
                 reserved.update(project.reserved)
+        # A caller that is itself a budget claimant may spend the hold.  The
+        # unclaimed remainder stays hidden from every other transaction.
+        replenishing_caller = any(
+            pid in allowed and project.target_item in self.dependency_budget
+            and project.state in {"ready", "constructing"}
+            for pid, project in self.projects.items()
+        )
+        if not allowed.intersection(self.dependency_claimants) and not replenishing_caller:
+            claimed: Counter[str] = Counter()
+            for project in self.projects.values():
+                if (
+                    self._active(project)
+                    and project.project_id in self.dependency_claimants
+                ):
+                    claimed.update(project.reserved)
+            for item, count in self.dependency_budget.items():
+                reserved[item] += max(0, count - claimed.get(item, 0))
         return {
             item: max(0, int(count) - reserved.get(item, 0))
             for item, count in stock.items()

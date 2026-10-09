@@ -28,6 +28,19 @@
         }
       }
     },
+    "dependency_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["targets", "claimants"],
+      "properties": {
+        "targets": { "$ref": "#/definitions/counts" },
+        "claimants": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/nonEmptyString" },
+          "uniqueItems": true
+        }
+      }
+    },
     "projects": {
       "type": "array",
       "items": { "$ref": "#/definitions/project" }
