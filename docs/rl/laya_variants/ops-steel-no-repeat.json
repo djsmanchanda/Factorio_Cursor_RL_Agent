@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-steel-no-repeat",
+  "description": "Current ops workflow plus one factor: options that failed the same way twice in a row x0.2, three times x0.05 (mission.ops-history-no-repeat, default inert). Single-factor arm for the live-pair-20261010 steel repeats.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-history-no-repeat": {
+      "prefer": [
+        {
+          "when": {
+            "repeat_fails": 2
+          },
+          "weight": 0.2
+        },
+        {
+          "when": {
+            "repeat_fails": 3
+          },
+          "weight": 0.05
+        }
+      ]
+    }
+  }
+}

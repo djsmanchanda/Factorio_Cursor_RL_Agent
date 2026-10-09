@@ -1,0 +1,534 @@
+{
+ "menu": {
+  "needs": [
+   {
+    "condition": "available",
+    "need_id": "item:iron-plate",
+    "options": [
+     "op.extend.iron-plate"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "lifecycle:iron-plate",
+    "options": [
+     "op.retire_starter.iron-plate"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "item:copper-plate",
+    "options": [
+     "op.foundation.copper-plate"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "lifecycle:copper-plate",
+    "options": [
+     "op.retire_starter.copper-plate"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "stock:steel-plate",
+    "options": [
+     "op.steel"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "stock:transport-belt",
+    "options": [
+     "op.mall_slot.transport-belt",
+     "op.produce.transport-belt"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "stock:inserter",
+    "options": [
+     "op.produce.inserter"
+    ]
+   },
+   {
+    "condition": "available",
+    "need_id": "wait",
+    "options": [
+     "wait.300",
+     "wait.1800"
+    ]
+   }
+  ],
+  "options": [
+   {
+    "family": "extend",
+    "features": {
+     "after_success_same_family": false,
+     "bill_known": false,
+     "goal_need": true,
+     "last_code": "new",
+     "lifecycle_pending": false,
+     "lifecycle_state": "provisioning",
+     "plate_stage": "foundation",
+     "repeat_fails": 0,
+     "stuck": false,
+     "tried": false,
+     "unchanged_failure": false,
+     "waiting": false
+    },
+    "need_id": "item:iron-plate",
+    "option_id": "op.extend.iron-plate",
+    "params": {
+     "recipe": "iron-plate"
+    },
+    "product": "iron-plate"
+   },
+   {
+    "family": "retire_starter",
+    "features": {
+     "after_success_same_family": false,
+     "bill_known": false,
+     "goal_need": true,
+     "last_code": "new",
+     "lifecycle_pending": true,
+     "lifecycle_state": "provisioning",
+     "plate_stage": "foundation",
+     "repeat_fails": 0,
+     "stuck": false,
+     "tried": false,
+     "unchanged_failure": false,
+     "waiting": false
+    },
+    "need_id": "lifecycle:iron-plate",
+    "option_id": "op.retire_starter.iron-plate",
+    "params": {
+     "recipe": "iron-plate"
+    },
+    "product": "iron-plate"
+   },
+   {
+    "family": "foundation",
+    "features": {
+     "after_success_same_family": false,
+     "bill_known": true,
+     "goal_need": true,
+     "last_code": "material_shortage",
+     "lifecycle_pending": false,
+     "lifecycle_state": "provisioning",
+     "plate_stage": "starter",
+     "repeat_fails": 1,
+     "stuck": false,
+     "tried": true,
+     "unchanged_failure": true,
+     "waiting": false
+    },
+    "need_id": "item:copper-plate",
+    "option_id": "op.foundation.copper-plate",
+    "params": {
+     "recipe": "copper-plate"
+    },
+    "product": "copper-plate"
+   },
+   {
+    "family": "retire_starter",
+    "features": {
+     "after_success_same_family": false,
+     "bill_known": false,
+     "goal_need": true,
+     "last_code": "wait_expired",
+     "lifecycle_pending": true,
+     "lifecycle_state": "provisioning",
+     "plate_stage": "starter",
+     "repeat_fails": 1,
+     "stuck": false,
+     "tried": true,
+     "unchanged_failure": false,
+     "waiting": false
+    },
+    "need_id": "lifecycle:copper-plate",
+    "option_id": "op.retire_starter.copper-plate",
+    "params": {
+     "recipe": "copper-plate"
+    },
+    "product": "copper-plate"
+   },
+   {
+    "family": "steel",
+    "features": {
+     "after_success_same_family": false,
+     "bill_known": true,
+     "goal_need": true,
+     "last_code": "material_shortage",
+     "repeat_fails": 2,
+     "stuck": false,
+     "tried": true,
+     "waiting": false
+    },
+    "need_id": "stock:steel-plate",
+    "option_id": "op.steel",
+    "params": {},
+    "product": "steel-plate"
+   },
+   {
+    "family": "mall_slot",
+    "features": {
+     "after_success_same_family": false,
+     "batch_active": true,
+     "bill_known": true,
+     "borrows": false,
+     "cell_lent": false,
+     "goal_need": true,
+     "last_code": "wait_expired",
+     "repeat_fails": 2,
+     "shortage": 1,
+     "stuck": false,
+     "tried": true,
+     "unchanged_failure": false,
+     "waiting": false
+    },
+    "need_id": "stock:transport-belt",
+    "option_id": "op.mall_slot.transport-belt",
+    "params": {
+     "item": "transport-belt"
+    },
+    "product": "transport-belt"
+   },
+   {
+    "family": "produce",
+    "features": {
+     "after_success_same_family": false,
+     "batch_active": true,
+     "bill_known": false,
+     "cell_lent": false,
+     "goal_need": false,
+     "last_code": "new",
+     "repeat_fails": 0,
+     "shortage": 18,
+     "stuck": false,
+     "tried": false,
+     "unchanged_failure": false,
+     "waiting": false
+    },
+    "need_id": "stock:inserter",
+    "option_id": "op.produce.inserter",
+    "params": {
+     "item": "inserter",
+     "stock_target": 18
+    },
+    "product": "inserter"
+   },
+   {
+    "family": "produce",
+    "features": {
+     "after_success_same_family": false,
+     "batch_active": true,
+     "bill_known": false,
+     "cell_lent": false,
+     "goal_need": true,
+     "last_code": "production_prerequisite_deferred",
+     "repeat_fails": 1,
+     "shortage": 1,
+     "stuck": false,
+     "tried": true,
+     "unchanged_failure": false,
+     "waiting": true
+    },
+    "need_id": "stock:transport-belt",
+    "option_id": "op.produce.transport-belt",
+    "params": {
+     "item": "transport-belt",
+     "stock_target": 1
+    },
+    "product": "transport-belt"
+   },
+   {
+    "family": "wait",
+    "features": {
+     "constructing": true,
+     "stuck": false
+    },
+    "need_id": "wait",
+    "option_id": "wait.300",
+    "params": null,
+    "product": null
+   },
+   {
+    "family": "wait",
+    "features": {
+     "constructing": true,
+     "stuck": false
+    },
+    "need_id": "wait",
+    "option_id": "wait.1800",
+    "params": null,
+    "product": null
+   }
+  ]
+ },
+ "recorded": {
+  "option_id": "op.steel",
+  "probability": 0.35146487570591656,
+  "repeat_fails": 2,
+  "rules": [
+   "mission.phase-goals-first",
+   "mission.make-construction-items",
+   "mission.ops-steel"
+  ]
+ },
+ "source": {
+  "file": "data/laya-experiments/live-pair-20261010/code/data/laya-saved-world/live-pair-20261010-s50616/evidence/decision-states.jsonl",
+  "index": 78,
+  "phase": "C2",
+  "run_id": "live-pair-20261010-s50616-s50616-1791577258",
+  "tick": 285761
+ },
+ "state": {
+  "brief": "GOAL: mining-productivity-4 via C0 > C1 > C2 > C3 > C4 > C6 > S1\nNOW [mission.phase-goals-first, mission.serve-bottleneck]: C2 iron_copper_rollout: iron-plate 1.25/3.0/s short; copper-plate 0.63/3.0/s short\nNEXT: C3 stone_rollout: stone-brick 1.5/s\nMAJOR [mission.ops-foundation, mission.ops-extend, mission.ops-retire-starter, mission.ops-starters-before-foundations]: +0.0min starter iron-plate | +0.6min starter copper-plate | +2.8min C0 reached | +6.6min starter stone-brick | +7.2min foundation stone-brick -> roboport_coverage_construction_wait | +10.2min C1 reached | +11.0min retire_starter copper-plate -> roboport_coverage_construction_wait | +11.1min foundation copper-plate -> material_shortage (transport-belt 1) | +12.6min foundation iron-plate | +13.0min steel -> material_shortage (inserter 18)\nRECENT [mission.ops-history-no-repeat, mission.ops-history-follow-through, mission.ops-one-batch, mission.ops-retry-after-wait]: retire_starter copper-plate -> roboport_coverage_construction_wait | wait | foundation copper-plate -> material_shortage (transport-belt 1) | produce transport-belt -> temporary_mall_batch x2 | foundation iron-plate -> roboport_coverage_construction_wait | produce transport-belt -> production_prerequisite_deferred | foundation iron-plate -> submitted | steel -> material_shortage (inserter 18) x2\nTRIED [mission.ops-no-blind-retry, mission.ops-no-idle-loans]: reserve_steel_seed 1x last reserved | starter iron-plate 1x last submitted | mall_slot iron-gear-wheel 2x last producing | starter copper-plate 2x last submitted | mall_slot electronic-circuit 2x last producing | mall_slot copper-cable 5x last producing | produce electric-mining-drill 17x last prerequisite_advanced | starter stone-brick 12x last submitted | produce assembling-machine-1 1x last temporary_mall_batch | foundation stone-brick 1x last roboport_coverage_construction_wait | mall_slot transport-belt 8x last production_prerequisite_deferred | retire_starter copper-plate 1x last roboport_coverage_construction_wait | foundation copper-plate 3x last material_shortage | produce transport-belt 3x last production_prerequisite_deferred | foundation iron-plate 2x last submitted | steel 2x last material_shortage\nLIFECYCLE [mission.ops-retire-starter, mission.phase-goals-first]: copper-plate replacement submitted; reconcile before starter release | iron-plate replacement submitted; reconcile before starter release\nMALL [mission.ops-no-idle-loans, mission.ops-one-batch]: no loans\nRESERVED [mission.ops-shortage]: conversion_steel-plate supply_wait missing inserter 2 | paired_mall_iron-gear-wheel constructing missing inserter 2 | paired_mall_transport-belt supply_wait missing inserter 2 | modular_stone-brick_refinery supply_wait missing fast-inserter 1, inserter 12, splitter 3, transport-belt 70\nSINCE LAST BUILD [mission.ops-history-unstick]: 2 decisions",
+  "guidelines": [
+   {
+    "kind": "hard",
+    "rule_id": "rule.plan-legality",
+    "statement": "Candidate plans must pass shared hard validators for Factorio legality, collisions, available resources, fluid purity, and scope."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.no-gifts",
+    "statement": "Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.starter-mines",
+    "statement": "Prefer iron and copper starters first, then stone and mall capacity."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.plate-lines",
+    "statement": "Use approved six-drill mine and smelting modules for later plate capacity; expand against measured demand."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.bot-supply",
+    "statement": "Use logistic bots to supply one or two machines and mall machines."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.belt-transfer",
+    "statement": "Once demand and sustained production exceed what one or two bot-fed machines need, switch to direct belt transfers."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.phase-goals-first",
+    "statement": "Prefer actions that close current goal gaps or unblock them; preserve useful parallel progress."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.serve-bottleneck",
+    "statement": "Prefer the deepest unmet input in the measured bottleneck chain."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.make-construction-items",
+    "statement": "Make construction items that outstanding useful builds are short of."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.steel-for-poles",
+    "statement": "Establish steel before steel-dependent pole and assembler stock is exhausted."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-starter",
+    "statement": "In the current ops adapter, establish a plate's direct starter before its foundation."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-foundation",
+    "statement": "Prefer a mine and six-furnace foundation after its plate starter produces; reconcile the same transaction on retries."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-extend",
+    "statement": "Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-shortage",
+    "statement": "Reconcile current material shortfalls and produce missing items before retrying the blocked transaction."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-wait",
+    "statement": "While relevant bots or coverage are advancing, wait or serve independent work."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-retry-after-wait",
+    "statement": "Retry a construction or coverage wait after observation shows progress or its retry horizon expires."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-mall-slots",
+    "statement": "Prefer gear, cable and circuit producers, then belt capacity, before foundations; preserve their construction budget."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-steel-fence",
+    "statement": "Reserve the funded steel seed's poles before competing builds consume them."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-steel",
+    "statement": "Start the funded steel seed when iron supply is verified and lifecycle admission permits it, including the pioneer-output cycle break."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-retire-starter",
+    "statement": "Retire a starter only after its replacement delivers plates; recover entities and contents with bots."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-no-blind-retry",
+    "statement": "Retry a material-blocked transaction after its required stock or allocation changes; reuse its existing plan."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-one-batch",
+    "statement": "Let a feasible mall batch finish; interrupt when its inputs cannot arrive or its lender blocks a more urgent dependency."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-starters-before-foundations",
+    "statement": "Prefer finishing iron, copper and stone starters before foundations consume their reserved drills."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-history-no-repeat",
+    "statement": "After repeated same-cause failures, prefer a different action until relevant facts change."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-history-follow-through",
+    "statement": "After useful output, prefer continuing related work when it still serves current demand."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-history-unstick",
+    "statement": "After several decisions without useful progress, explore an untried feasible operation."
+   },
+   {
+    "kind": "soft",
+    "rule_id": "mission.ops-no-idle-loans",
+    "statement": "A borrowed cell is a finite batch, not a standing producer; request it for a current shortfall and account for displaced output."
+   }
+  ],
+  "observation_digest": {
+   "factory_status": {
+    "bottleneck": [
+     "copper-plate:under_capacity <- copper-ore:short",
+     "iron-plate:under_capacity <- iron-ore:short"
+    ],
+    "construction_shortfall": {
+     "fast-inserter": 2,
+     "inserter": 8,
+     "splitter": 6,
+     "transport-belt": 247
+    },
+    "needs": [
+     {
+      "capacity": 0.625,
+      "condition": "under_capacity",
+      "item": "copper-plate",
+      "machines": 1,
+      "measured": 0.626,
+      "required": 3.0,
+      "short_inputs": [
+       "copper-ore"
+      ],
+      "stock": 1
+     },
+     {
+      "capacity": 1.25,
+      "condition": "under_capacity",
+      "item": "iron-plate",
+      "machines": 2,
+      "measured": 1.251,
+      "required": 3.0,
+      "short_inputs": [
+       "iron-ore"
+      ],
+      "stock": 1
+     },
+     {
+      "capacity": null,
+      "condition": "short",
+      "item": "copper-ore",
+      "machines": 0,
+      "measured": 1.075,
+      "required": 3.0,
+      "stock": 0
+     },
+     {
+      "capacity": null,
+      "condition": "short",
+      "item": "iron-ore",
+      "machines": 0,
+      "measured": 1.347,
+      "required": 3.0,
+      "stock": 0
+     }
+    ],
+    "omitted": 0,
+    "stock_targets": [],
+    "version": "laya-factory-status-v1"
+   },
+   "mission_phase": "C2",
+   "saved_world": {
+    "bootstrap_districts": {
+     "copper-plate": {
+      "lifecycle_state": "provisioning",
+      "replacement_submitted": true
+     },
+     "iron-plate": {
+      "lifecycle_state": "provisioning",
+      "replacement_submitted": true
+     },
+     "stone-brick": {
+      "lifecycle_state": "provisioning",
+      "replacement_submitted": false
+     }
+    },
+    "provider_stock": {
+     "network": {
+      "assembling-machine-1": 3,
+      "big-electric-pole": 3,
+      "copper-cable": 563,
+      "copper-plate": 1,
+      "electric-furnace": 34,
+      "electric-mining-drill": 4,
+      "electronic-circuit": 4,
+      "iron-gear-wheel": 75,
+      "iron-plate": 1,
+      "medium-electric-pole": 48,
+      "passive-provider-chest": 4,
+      "requester-chest": 7,
+      "roboport": 24,
+      "stone-brick": 230,
+      "substation": 46
+     }
+    },
+    "reserved_stock": {
+     "network": {
+      "assembling-machine-1": 2,
+      "electric-furnace": 8,
+      "electric-mining-drill": 1,
+      "medium-electric-pole": 6,
+      "passive-provider-chest": 4,
+      "requester-chest": 1,
+      "substation": 1
+     }
+    }
+   }
+  }
+ }
+}

@@ -6,7 +6,7 @@ import pytest
 
 from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import MISSION_CATALOG, ROOT, Settings
-from training.laya_guided_policy import load_preferences
+from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_mission import PHASES
 from training.laya_variants import VariantError, apply, load_variant
 
@@ -54,3 +54,34 @@ def test_bad_variants_fail_closed(tmp_path, bad):
     path.write_text(json.dumps({"version": "1.0.0", "variant_id": "bad", **bad}))
     with pytest.raises(VariantError):
         apply(load_variant(path))
+
+
+NO_REPEAT = ROOT / "docs/rl/laya_variants/ops-steel-no-repeat.json"
+OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
+
+
+def test_no_repeat_variant_changes_only_the_history_rule():
+    variant = load_variant(NO_REPEAT)
+    assert set(variant) == {"version", "variant_id", "description", "catalog", "catalog_patch"}
+    assert set(variant["catalog_patch"]) == {"mission.ops-history-no-repeat"}
+    settings, policy, runtime = apply(variant)
+    assert not policy and not runtime
+    base, patched = load_preferences(ROOT / OPS_CATALOG), load_preferences(ROOT / settings.catalog)
+    assert patched["mission.ops-history-no-repeat"] == [{"when": {"repeat_fails": 2}, "weight": 0.2},
+                                                        {"when": {"repeat_fails": 3}, "weight": 0.05}]
+    assert {k for k in set(base) | set(patched) if base.get(k) != patched.get(k)} == {"mission.ops-history-no-repeat"}
+
+
+def test_no_repeat_variant_lowers_steel_after_two_same_failures():
+    fixture = json.loads((ROOT / "tests/fixtures/laya_steel_repeat_state.json").read_text())
+    state, menu = fixture["state"], fixture["menu"]
+    settings, _, _ = apply(load_variant(NO_REPEAT))
+
+    def steel(rows):
+        return next(row for row in rows if row["option_id"] == "op.steel")
+
+    baseline = steel(GuidedPolicy(0, epsilon=0.15, preferences=load_preferences(ROOT / OPS_CATALOG)).distribution(state, menu))
+    variant = steel(GuidedPolicy(0, epsilon=0.15, preferences=load_preferences(ROOT / settings.catalog)).distribution(state, menu))
+    assert baseline["features"]["repeat_fails"] == 2
+    assert "mission.ops-history-no-repeat" not in baseline["rules"] and "mission.ops-history-no-repeat" in variant["rules"]
+    assert variant["probability"] < baseline["probability"]
