@@ -84,7 +84,7 @@ Delegate reading test data, experiment reports and logs to a subagent: Claude Co
 
 - Make the smallest coherent change; avoid unrelated refactors.
 - Append one short `CURRENT_STATUS.md` entry (what, evidence, lifecycle) after a durable milestone. Older entries live in `docs/archive/status/`.
-- Write one dated handoff per session, linked from `Laya_Current_Handoff.md`; update that index when a campaign starts, ends or is adopted. Use absolute dates with IST times. Helper and observer model output goes in `*_helper_runs/`; it is evidence, not authority.
+- Write one dated handoff per session in `docs/handoffs/` (gitignored, local only); record durable facts in tracked docs. Update `Laya_Current_Handoff.md` when a campaign starts, ends or is adopted. Use absolute dates with IST times. Helper and observer model output goes in `*_helper_runs/`; it is evidence, not authority.
 - Commit each verified user-requested fix or feature once, unless told not to. Do not commit plans, diagnosis-only work or unverified changes.
 - RL and Laya subjects use `feat(RL ...): ...` or `fix(RL ...): ...`.
 - Only the main agent manages commits, remotes or pushes. Delegated tasks return changed files plus validation.

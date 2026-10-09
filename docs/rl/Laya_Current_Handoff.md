@@ -8,10 +8,10 @@ below for evidence. Architecture/ownership remain in [architecture](../architect
 
 | Runtime | Latest referenced evidence | Interpretation |
 | --- | --- | --- |
-| Ops over deterministic tooling | [October 8 session](Laya_Session_Handoff_2026-10-08.md), [pre-cleanup audit](Laya_System_Audit_2026-10-08.md) | Frozen loan A/B identity and cutoff; current decision/receipt gaps and confounded weight intervention. |
+| Ops over deterministic tooling | [October 8 session](../handoffs/Laya_Session_Handoff_2026-10-08.md), [pre-cleanup audit](Laya_System_Audit_2026-10-08.md) | Frozen loan A/B identity and cutoff; current decision/receipt gaps and confounded weight intervention. |
 | Geometry and earned-world continuations | [October 5 variety campaign](../archive/rl/Laya_Seven_Hour_Variety_2026-10-05.md), [land model](Laya_Land_Grid.md) | Guided geometry/component cohorts; not raw-start ops wins or unseen-terrain proof. |
 | L1–L3 learned lab workflow | [October 3 background result](../archive/rl/Laya_Background_Run_2026-10-03.md) | Separate trained profile, dataset and measured evaluation. |
-| Supplied-input mall | [Mall supply](Laya_Mall_Supply.md), [October 3 coordination](Laya_Mall_Training_Active_Handoff_2026-10-03.md) | Separate economy and ownership record; its age does not prove current process state. |
+| Supplied-input mall | [Mall supply](Laya_Mall_Supply.md), [October 3 coordination](../handoffs/Laya_Mall_Training_Active_Handoff_2026-10-03.md) | Separate economy and ownership record; its age does not prove current process state. |
 
 The last read-only audit verified `laya-ops-loans-20261008b` active, with a
 00:27 IST snapshot of 38 indexed runs, all stalled before C2. Its authorized

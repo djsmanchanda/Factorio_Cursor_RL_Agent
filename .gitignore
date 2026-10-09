@@ -53,3 +53,7 @@ data/rl-gpu-venv/
 # Local runtime and training logs
 logs/
 docs/rl/laya_variants/generated/
+
+# Session handoffs are local working notes; durable facts go to tracked docs.
+docs/handoffs/*
+!docs/handoffs/README.md
