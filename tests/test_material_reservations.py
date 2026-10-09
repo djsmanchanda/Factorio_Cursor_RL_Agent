@@ -2552,3 +2552,39 @@ def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
 
     assert any("PREEMPT" in message for message in messages)
     assert "RESTORED" in messages
+
+
+def test_waiting_cell_does_not_hold_the_last_unit_its_own_producer_needs(
+    tmp_path: Path,
+) -> None:
+    # Live 2026-10-09 ledger: a quad cell waiting on long-handed inserters held
+    # the last passive-provider chest the long-handed-inserter cell needed.
+    ledger = _ledger(tmp_path)
+    stock = {"passive-provider-chest": 1, "assembling-machine-1": 3, "inserter": 5}
+    waiting = ledger.declare(
+        "quad_mall_assembling-machine-2_top",
+        {"assembling-machine-1": 2, "inserter": 2, "long-handed-inserter": 2,
+         "passive-provider-chest": 1}, stock, priority=100,
+    )
+    assert waiting.reserved["passive-provider-chest"] == 1
+    producer = ledger.declare(
+        "paired_mall_long-handed-inserter",
+        {"assembling-machine-1": 1, "inserter": 3, "passive-provider-chest": 1},
+        stock, target_item="long-handed-inserter", priority=100,
+    )
+
+    assert producer.state == "ready"
+    waiting = ledger.projects[waiting.project_id]
+    assert waiting.state == "supply_wait"
+    # The waiting cell keeps a partial reservation of what remains.
+    assert waiting.reserved == {"assembling-machine-1": 2, "inserter": 2}
+
+
+def test_a_higher_priority_fundable_bill_still_wins_scarce_stock(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    stock = {"passive-provider-chest": 1}
+    ledger.declare("low", {"passive-provider-chest": 1}, stock, priority=10)
+    high = ledger.declare("high", {"passive-provider-chest": 1}, stock, priority=100)
+
+    assert high.state == "ready"
+    assert ledger.projects["low"].state == "supply_wait"

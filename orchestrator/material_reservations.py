@@ -255,25 +255,48 @@ class MaterialReservationLedger:
         project = self.projects.get(project_id)
         return project is not None and self._active(project)
 
+    @staticmethod
+    def _take(project: MaterialProject, pool: dict[str, int]) -> dict[str, int]:
+        """Reserve as much of the project's bill as the pool holds."""
+        reserved: dict[str, int] = {}
+        for item, required in project.required.items():
+            allocated = min(required, pool.get(item, 0))
+            if allocated:
+                reserved[item] = allocated
+                pool[item] = pool.get(item, 0) - allocated
+        return reserved
+
     def _rebalance(self, stock: Mapping[str, int]) -> None:
         pool = {str(item): max(0, int(count)) for item, count in stock.items()}
         ordered = sorted(
             self.projects.values(), key=lambda project: (-project.priority, project.sequence),
         )
+        active = [project for project in ordered if self._active(project)]
+        # Fund committed construction and whole bills first; waiting projects
+        # then keep partial reservations from what is left.  Otherwise a waiting
+        # project can hold the last unit a producer of its own missing item
+        # needs (live 2026-10-08 and 2026-10-09: quad mall cells waiting on
+        # long-handed inserters held the passive-provider chest that the
+        # long-handed-inserter cell needed).
+        allocations: dict[str, dict[str, int]] = {}
+        for project in active:
+            if project.state == "constructing" or all(
+                pool.get(item, 0) >= required for item, required in project.required.items()
+            ):
+                allocations[project.project_id] = self._take(project, pool)
+        for project in active:
+            if project.project_id not in allocations:
+                allocations[project.project_id] = self._take(project, pool)
         updated: dict[str, MaterialProject] = {}
         for project in ordered:
             if not self._active(project):
                 updated[project.project_id] = replace(project, reserved={}, eta_seconds={})
                 continue
-            reserved: dict[str, int] = {}
+            reserved = allocations[project.project_id]
             eta: dict[str, float | None] = {}
             complete = True
             for item, required in project.required.items():
-                allocated = min(required, pool.get(item, 0))
-                if allocated:
-                    reserved[item] = allocated
-                    pool[item] = pool.get(item, 0) - allocated
-                missing = required - allocated
+                missing = required - reserved.get(item, 0)
                 complete = complete and missing == 0
                 rate = project.expected_rates.get(item)
                 eta[item] = 0.0 if missing == 0 else (
