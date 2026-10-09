@@ -284,8 +284,14 @@ def configuration_actions(plan):
             if CONFIGURATION_FIELDS.intersection(a)]
 
 
+def speed_status(adapter: object) -> dict:
+    """Requested and observed game speed for status and index records."""
+    return {"requested": getattr(adapter, "speed", "paused"), "observed": getattr(adapter, "observed_speed", "unknown")}
+
+
 class SavedWorldAdapter:
     runtime = "disposable_saved_world"
+    observed_speed = "unknown"
     surface = "nauvis"
     force = "player"
     def __init__(self, root: Path):
@@ -300,6 +306,14 @@ class SavedWorldAdapter:
         server = self.root / "server"
         self.bridge = GameBridge(server / "script-output", host="127.0.0.1", port=self.manifest["rcon_port"],
                                  password=(server / "rcon-password").read_text().strip(), command_timeout=30)
+
+    def observe_speed(self) -> str:
+        """Read game speed back over RCON; 'unknown' on failure (never fails the run)."""
+        try:
+            self.observed_speed = f"{self.bridge.game_speed():g}"
+        except Exception:
+            self.observed_speed = "unknown"
+        return self.observed_speed
 
     def close(self):
         self.bridge.close()

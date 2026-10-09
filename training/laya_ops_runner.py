@@ -30,6 +30,7 @@ from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import compact_status, compile_status
+from training.laya_saved_world import speed_status
 from training.laya_mall_slots import obtainable
 from training.laya_mission import current_phase, phase_reached
 
@@ -611,7 +612,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
-                                    "authority": policy.authority})
+                                    "authority": policy.authority, "speed": speed_status(adapter)})
         summary["decisions"] = index + 1
         if chosen["family"] == "retire_starter":
             check_acceptance(f"after retirement {index}")

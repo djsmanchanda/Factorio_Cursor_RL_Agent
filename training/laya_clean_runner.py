@@ -41,7 +41,7 @@ from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_o
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
-from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
+from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state, speed_status
 from training import laya_mall_slots as mall_slots
 from training.laya_mall_block import mall_cell_candidates
 
@@ -886,7 +886,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "guidelines": state["guidelines"], "authority": policy.authority,
                                         "decisions": summary["decisions"], "failures": summary["failures"],
                                         "site_plan": site_plan,
-                                        "measured_per_s": record.get("measured_per_s")})
+                                        "measured_per_s": record.get("measured_per_s"),
+                                        "speed": speed_status(adapter)})
             no_legal_build = not any(o["family"] != "wait" for o in menu["options"])
             training = {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase["phase_id"],
                         "no_legal_build": no_legal_build,

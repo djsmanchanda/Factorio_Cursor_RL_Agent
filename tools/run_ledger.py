@@ -146,7 +146,9 @@ def deterministic_entry(lines: list[str], log: Path, *, run_id: str | None = Non
     ended = (started + timedelta(seconds=last_at)).isoformat() if started else None
     return {"system": "deterministic", "run_id": run_id or f"det-{started.isoformat() if started else log.name}",
             "started": started.isoformat() if started else None, "ended": ended, "duration_s": last_at,
-            "commit": commit or "unknown", "target": header.get("target"), "highest_milestone": highest,
+            "commit": commit or "unknown", "target": header.get("target"),
+            "requested_speed": header.get("requested_speed"), "observed_speed": header.get("observed_speed"),
+            "highest_milestone": highest,
             "milestones": milestones, "milestone_source": "log_markers_v1", "outcome": outcome,
             "failure_code": code, "failure_cause": cause, "limiting_factor": None, "decisions": None,
             "log_file": str(log), "root": None}

@@ -39,7 +39,7 @@ from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
 from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
-from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
+from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root, speed_status
 from training.laya_checkpoint import load_bundle, export_bundle, restore_context
 
 SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
@@ -54,6 +54,14 @@ def runner_paths(root: Path) -> dict[str, Path]:
     return {"log": root / "logs/laya-runner.log", "pid": root / "laya-runner.pid.json",
             "heartbeat": root / "laya-runner.heartbeat.json", "journal": root / "evidence/clean-decisions.jsonl",
             "status": root / "evidence/latest-status.json"}
+
+
+def _game_tick(adapter) -> int | None:
+    """Current game tick, or None if it cannot be read (a report field, never a run failure)."""
+    try:
+        return adapter.tick()
+    except Exception:
+        return None
 
 
 def main(argv=None) -> int:
@@ -121,7 +129,16 @@ def main(argv=None) -> int:
     with runner_pid_record(paths["pid"]):
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
         manifest = json.loads((root / "manifest.json").read_text())
+        live_error = None
+        if not args.stepped:  # Unpause before RUN START so the log shows the speed the game runs at.
+            try:
+                adapter.go_live()
+            except Exception as error:  # Re-raised inside the try below, so RUN END is still written.
+                live_error = error
+        adapter.observe_speed()
+        start_tick = _game_tick(adapter)
         log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=speed,
+                  requested_speed="paused" if args.stepped else f"{speed:g}", observed_speed=adapter.observed_speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
                   window=f"proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
@@ -129,8 +146,9 @@ def main(argv=None) -> int:
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
+            if live_error is not None:
+                raise live_error
             if not args.stepped:
-                adapter.go_live()
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
@@ -150,14 +168,17 @@ def main(argv=None) -> int:
             if stop.is_set():
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
         finally:
+            end_tick = _game_tick(adapter)
             adapter.close()
             if file_hash(SOURCE_SAVE) != source_hash:
                 log("SOURCE SAVE CHANGED during the run")
+            log(log.elapsed(start_tick, end_tick))
             log.end()
     # Index the run for later comparisons, then start the read-only post-run review.
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
-             "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
+             "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed,
+             "speed_status": speed_status(adapter), **tag,
              "window": {"until_phase": settings.until_phase, "until_accepted": args.until_accepted,
                         "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
@@ -168,7 +189,7 @@ def main(argv=None) -> int:
         print(f"RUN LEDGER: {entry['outcome']} highest={entry['highest_milestone']} -> {LEDGER}")
     except Exception as error:  # The ledger is bookkeeping; it never fails a run.
         print(f"RUN LEDGER: not recorded: {error}")
-    print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), **summary}))
+    print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), "speed": speed_status(adapter), **summary}))
     return 0
 
 

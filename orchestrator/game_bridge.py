@@ -75,6 +75,31 @@ class GameBridge:
     def command(self, text: str) -> str:
         return self._rcon.command(text)
 
+    def game_tick(self) -> int:
+        reply = self.command("/sc rcon.print(game.tick)").strip()
+        try:
+            return int(reply)
+        except ValueError as error:
+            raise BridgeError(f"game tick read failed: {reply!r}") from error
+
+    def game_speed(self) -> float:
+        reply = self.command("/sc rcon.print(game.speed)").strip()
+        try:
+            return float(reply)
+        except ValueError as error:
+            raise BridgeError(f"game speed read failed: {reply!r}") from error
+
+    def set_game_speed(self, speed: float) -> float:
+        """Set game.speed, read it back, and fail unless the server kept it."""
+        requested = float(speed)
+        self.command(f"/sc game.speed={requested!r}")
+        observed = self.game_speed()
+        if abs(observed - requested) > 1e-9:
+            raise BridgeError(
+                f"game speed not applied: requested={requested:g} observed={observed:g}"
+            )
+        return observed
+
     def _existing_files(self, subdir: Path) -> dict[str, tuple[int, int]]:
         directory = self.script_output / subdir
         if not directory.is_dir():

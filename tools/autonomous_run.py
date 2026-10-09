@@ -17,6 +17,7 @@ import time
 import traceback
 from collections import Counter
 from copy import copy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -654,21 +655,111 @@ def _load_rcon_secret(path: Path) -> str:
     return value
 
 
+_SPEED_RANGE = (0.25, 8.0)
+_GAME_TICKS_PER_SECOND = 60.0
+
+
+def _speed_argument(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"invalid game speed: {text!r}") from error
+    low, high = _SPEED_RANGE
+    if not low <= value <= high:
+        raise argparse.ArgumentTypeError(f"--speed must be between {low:g} and {high:g}")
+    return value
+
+
+def _add_speed_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--speed", type=_speed_argument, default=None,
+        help="Set game.speed once at run start and report it; omit to leave the game speed untouched.",
+    )
+
+
+@dataclass
+class _GameSpeedRecord:
+    requested: float | None
+    bridge: GameBridge | None = None
+    observed: float | None = None
+    start_tick: int | None = None
+    failure: Exception | None = None
+
+    @property
+    def requested_label(self) -> str:
+        return "default" if self.requested is None else f"{self.requested:g}"
+
+    @property
+    def observed_label(self) -> str:
+        return "unknown" if self.observed is None else f"{self.observed:g}"
+
+
+def _prepare_game_speed(args) -> _GameSpeedRecord:
+    """Set (when --speed is given) and read game.speed before RUN START.
+
+    A failed explicit set is recorded as a failure the run must raise; a failed
+    read only leaves the observed speed as unknown.
+    """
+    record = _GameSpeedRecord(requested=getattr(args, "speed", None))
+    try:
+        record.bridge = GameBridge(
+            script_output=args.script_output, host=args.rcon_host, port=args.rcon_port,
+            password=args.rcon_password, command_timeout=30.0,
+        )
+    except Exception as error:
+        record.failure = error
+        return record
+    try:
+        if record.requested is None:
+            record.observed = record.bridge.game_speed()
+        else:
+            record.observed = record.bridge.set_game_speed(record.requested)
+    except Exception as error:
+        record.failure = error
+    try:
+        record.start_tick = record.bridge.game_tick()
+    except Exception:
+        record.start_tick = None
+    return record
+
+
+def _finish_game_speed(record: _GameSpeedRecord, wall_seconds: int) -> str:
+    """Close the speed bridge and report wall seconds and game seconds separately."""
+    end_tick = None
+    if record.bridge is not None:
+        try:
+            end_tick = record.bridge.game_tick()
+        except Exception:
+            end_tick = None
+        try:
+            record.bridge.close()
+        except Exception:
+            pass
+    if record.start_tick is None or end_tick is None:
+        game_seconds = "unknown"
+    else:
+        game_seconds = f"{(end_tick - record.start_tick) / _GAME_TICKS_PER_SECOND:.1f}"
+    return f"ELAPSED: wall_seconds={wall_seconds} game_seconds={game_seconds}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run a real-base production or research target.")
     subcommands = parser.add_subparsers(dest="command", required=True)
     produce = subcommands.add_parser("produce", help="Ensure one item has a working production line.")
     produce.add_argument("item")
+    _add_speed_argument(produce)
     produce.add_argument("--acceptance-seconds", type=int, default=0,
                          help="Require sustained output for this many game seconds (multiple of 10).")
     _add_connection_arguments(produce)
     research = subcommands.add_parser("research", help="Produce a technology's science packs, then queue it.")
     research.add_argument("technology")
+    _add_speed_argument(research)
     _add_connection_arguments(research)
     research_queue = subcommands.add_parser(
         "research-queue", help="Process an ordered persisted research queue.",
     )
     research_queue.add_argument("--queue-file", required=True, type=Path)
+    _add_speed_argument(research_queue)
     _add_connection_arguments(research_queue)
     increase = subcommands.add_parser("increase", help="Rejected until a real-base rate policy exists.")
     increase.add_argument("item")
@@ -711,6 +802,8 @@ def main(argv: list[str] | None = None) -> int:
     blocker_events_path: Path | None = None
     with runner_pid_record(pid_path):
         logger = _RunLogger(log_path)
+        run_started = time.monotonic()
+        speed = _prepare_game_speed(args)
         mission_ledger: MissionStateLedger | None = None
         checkpoint_monitor = None
         heartbeat_stop = threading.Event()
@@ -726,7 +819,9 @@ def main(argv: list[str] | None = None) -> int:
             f"RUN START: command={args.command} "
             f"target={getattr(args, 'item', getattr(args, 'technology', 'research-queue'))} "
             f"surface={args.surface} force={args.force} "
-            f"bootstrap_profile={args.bootstrap_profile} log={log_path}"
+            f"bootstrap_profile={args.bootstrap_profile} "
+            f"requested_speed={speed.requested_label} observed_speed={speed.observed_label} "
+            f"log={log_path}"
         )
         _write_runner_heartbeat(heartbeat_path)
         heartbeat_thread.start()
@@ -742,6 +837,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"to {archived.path}"
             )
         try:
+            if speed.requested is not None and speed.failure is not None:
+                raise speed.failure
             target = getattr(
                 args, "item", getattr(args, "technology", "research-queue"),
             )
@@ -882,6 +979,9 @@ def main(argv: list[str] | None = None) -> int:
                 termination_reason=termination_reason,
             )
             logger.flush_compaction()
+            logger.emit(_finish_game_speed(
+                speed, wall_seconds=int(time.monotonic() - run_started),
+            ))
             logger.emit("RUN END")
             logger.close()
             heartbeat_path.unlink(missing_ok=True)

@@ -47,6 +47,12 @@ class RunLog:
         for line in str(message).splitlines() or [""]:
             self._write(f"+{elapsed}s {line}")
 
+    def elapsed(self, start_tick: int | None, end_tick: int | None) -> str:
+        """Run-level elapsed report: wall seconds, and game seconds from the tick delta (60 ticks = 1 s)."""
+        wall = int(time.monotonic() - self.started)
+        game = "unknown" if start_tick is None or end_tick is None else f"{(end_tick - start_tick) / 60:.1f}"
+        return f"ELAPSED: wall_seconds={wall} game_seconds={game}"
+
     def update(self, **fields: Any) -> None:
         """Fields shown in the heartbeat (decision index, phase, tick)."""
         self.fields.update(fields)
