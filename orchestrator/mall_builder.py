@@ -12,7 +12,9 @@ from orchestrator.extraction_transport import planned_footprint_tiles
 from orchestrator.game_bridge import GameBridge
 from orchestrator.material_reservations import plan_material_bill
 from orchestrator.stage_services import StuckError, _submit, extend_power
+from planners.infrastructure_geometry import footprint_tile_indices
 from planners.mall_layout import generate_paired_mall_layout, recipe_group_name
+from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.quad_mall_layout import (
     DENSE_MALL_MODULE_OFFSETS,
     QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
@@ -501,9 +503,74 @@ def seed_cell_uses_shared_substation(
 def seed_cell_includes_substation(
     reference_point: Point, origin: tuple[int, int], side: str,
 ) -> bool:
-    """Only the first half funds the shared seed substation."""
-    start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
-    return origin == (start[0], start[1]) and side == "left"
+    """Fund one reserved substation per paired cell, sharing the two seed cells."""
+    origins = _cell_origins(reference_point)
+    return side == "left" and origin != origins[1]
+
+
+_SUBSTATION_WIRE_DISTANCE = 18.0
+
+
+def _reserved_mall_substation_positions(reference_point: Point) -> set[Point]:
+    positions = {seed_shared_substation(reference_point)}
+    positions.update(
+        reserved_substation_position(reference_point, origin)
+        for origin in _cell_origins(reference_point)
+    )
+    positions.update(
+        (center[0] + 3.5, center[1] + 2.5)
+        for center in dense_mall_module_centers(reference_point)
+    )
+    return positions
+
+
+def powered_reserved_substation_neighbor(
+    client: RconClient, surface: str, force: str,
+    reference_point: Point, target: Point,
+) -> Point | None:
+    """Find a real powered mall substation close enough to auto-wire `target`.
+
+    Mall substations occupy reserved service tiles. Once a neighboring cell is
+    powered, Factorio's substation wire range joins the next reserved anchor
+    directly; a second pole corridor through the mall is unnecessary. Unknown
+    telemetry falls back to the normal power-extension path.
+    """
+    if not callable(getattr(client, "command", None)):
+        return None
+    candidates = sorted(
+        (
+            position for position in _reserved_mall_substation_positions(reference_point)
+            if position != target and _chebyshev(position, target) <= _SUBSTATION_WIRE_DISTANCE
+        ),
+        key=lambda position: _chebyshev(position, target),
+    )
+    if not candidates:
+        return None
+    margin = _SUBSTATION_WIRE_DISTANCE + 2
+    records = live_base.area_entity_records(
+        client, surface, force,
+        (target[0] - margin, target[1] - margin),
+        (target[0] + margin, target[1] + margin),
+    )
+    substations = {
+        tuple(record["position"])
+        for record in records
+        if record.get("name") == "substation"
+        and not record.get("is_ghost")
+        and record.get("force") == force
+    }
+    for position in candidates:
+        if position not in substations:
+            continue
+        network = live_base.pole_network_id(client, surface, position)
+        if network is None:
+            continue
+        generation = live_base.network_generation_kw(
+            client, surface, force, position,
+        )
+        if generation is not None and generation > 0:
+            return position
+    return None
 
 
 def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]]:
@@ -564,6 +631,194 @@ def planned_cell_reserved_tiles(
     for origin in origins[start:start + count]:
         reserved |= _cell_footprint_tiles(origin)
     return reserved
+
+
+def mall_grid_reserved_tiles(reference_point: Point) -> set[tuple[int, int]]:
+    """Every tile the fixed mall grid reserves, built or not.
+
+    Coverage and power must dodge ALL planned slot, dense-bank and shared
+    substation footprints -- not just the entities that happen to exist -- so a
+    roboport or pole chain cannot land on a slot the mall will fill later. The
+    district geometry is fixed and relative to the mall reference, so the whole
+    reservation is cheap to describe on any map seed.
+    """
+    reserved = set(seed_expansion_reserved_tiles(reference_point))
+    reserved |= footprint_tile_indices(seed_shared_substation(reference_point), 2)
+    for origin in _cell_origins(reference_point):
+        reserved |= _cell_footprint_tiles(origin)
+    return reserved
+
+
+def reserved_substation_position(
+    reference_point: Point, origin: tuple[int, int],
+) -> Point:
+    """The cell's reserved local bank service point, outside every planned slot.
+
+    The substation sits in the inter-row service gap, below the slot's band of
+    machines, inserters and chests, so it is a fixed local anchor the cell's
+    machines sit inside rather than a tile a later slot or pole chain crosses.
+    The two opening seed cells share the one between them.
+    """
+    if seed_cell_uses_shared_substation(reference_point, origin):
+        return seed_shared_substation(reference_point)
+    return (origin[0] + 4.0, origin[1] + 5.0)
+
+
+_MALL_SLOT_SERVICE_RANGE = 9.0  # substation supply area radius
+
+
+def mall_cell_footprint_conflicts(
+    client: RconClient, surface: str, plan: dict,
+) -> tuple[tuple[int, int], ...]:
+    """Planned tiles a live foreign entity already occupies.
+
+    The executor only rejects an entity whose CENTRE matches, so a 1x1 pole
+    sitting under a 2x2 substation, or a stray chest on an inserter tile, slips
+    through and the cell silently fails to build (live 2026-10-09: a ghost chest
+    over a pole cost ~301 s). Only exact planned entities at their exact planned
+    positions are allowed; another chest or inserter elsewhere in the footprint
+    remains a real collision. Unknown surveys fail closed as a typed wait.
+    """
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    def unavailable(reason: str) -> ProductionPrerequisiteDeferred:
+        return ProductionPrerequisiteDeferred(
+            f"mall footprint survey unavailable for {surface}: {reason}; "
+            "parking this slot until it can be checked",
+            code="mall_slot_survey_unavailable",
+            classification="intended_difficulty",
+            state="planned",
+            details={"surface": surface, "reason": reason},
+        )
+
+    if client is None or not callable(getattr(client, "command", None)):
+        raise unavailable("RCON client is unavailable")
+    planned = planned_footprint_tiles(plan)
+    if not planned:
+        return ()
+    planned_entities = {
+        (action["entity"], float(action["position"]["x"]), float(action["position"]["y"]))
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("action_type") in {"place_entity", "place_ghost"}
+        and action.get("entity") and action.get("position")
+    }
+    xs = [x for x, _ in planned]
+    ys = [y for _, y in planned]
+    minimum = (float(min(xs)), float(min(ys)))
+    maximum = (float(max(xs) + 1), float(max(ys) + 1))
+    try:
+        owners = live_base.occupied_tile_owners(
+            client, surface, minimum, maximum,
+        )
+        records = live_base.area_entity_records(
+            client, surface, plan.get("force", "player"), minimum, maximum,
+        )
+        water = live_base.water_tiles(client, surface, minimum, maximum)
+    except Exception as error:
+        # A failed or malformed observation is not evidence that the slot is
+        # clear. Keep the retry typed so the controller can revisit it later.
+        raise unavailable(f"{type(error).__name__}: {error}") from error
+
+    allowed_owner_centres: set[tuple[str, float, float]] = set()
+    foreign_entity_tiles: set[tuple[int, int]] = set()
+    for record in records:
+        position = record["position"]
+        actual_name = (
+            record["ghost_name"] if record.get("is_ghost") else record["name"]
+        )
+        identity = (str(actual_name), float(position[0]), float(position[1]))
+        if identity in planned_entities:
+            allowed_owner_centres.add((
+                str(record["name"]), float(position[0]), float(position[1]),
+            ))
+            if record.get("is_ghost"):
+                allowed_owner_centres.add((
+                    "entity-ghost", float(position[0]), float(position[1]),
+                ))
+            continue
+        if (
+            record.get("force") == "neutral"
+            and record.get("type") in {"tree", "simple-entity"}
+        ):
+            continue
+        footprint_name = str(actual_name)
+        size = ENTITY_FOOTPRINTS.get(footprint_name, 1)
+        foreign_entity_tiles.update(
+            footprint_tile_indices(
+                (float(position[0]), float(position[1])), size,
+            )
+        )
+
+    allowed_tiles: set[tuple[int, int]] = set()
+    for tile, (name, x, y) in owners.items():
+        if (name, x, y) in allowed_owner_centres:
+            allowed_tiles.add(tile)
+
+    occupied_entities = set(owners)
+    conflicts = (
+        (occupied_entities - allowed_tiles)
+        | foreign_entity_tiles
+        | set(water)
+    ) & planned
+    return tuple(sorted(conflicts))
+
+
+def assert_mall_cell_footprint_free(
+    client: RconClient, surface: str, plan: dict, recipe: str,
+    origin: tuple[int, int], side: str,
+) -> None:
+    """Fail clearly when a chosen slot is genuinely occupied."""
+    conflicts = mall_cell_footprint_conflicts(client, surface, plan)
+    if conflicts:
+        raise StuckError(
+            f"compact mall cell for {recipe} at {origin} ({side}) is already "
+            f"occupied by foreign infrastructure: {list(conflicts[:4])}",
+            code="mall_slot_occupied",
+            state="failed",
+            details={
+                "recipe": recipe,
+                "origin": [origin[0], origin[1]],
+                "side": side,
+                "tiles": [list(tile) for tile in conflicts[:16]],
+            },
+        )
+
+
+def _bank_anchor(reference_point: Point) -> Point:
+    """The opening mall bank's fixed centre: the adjacency reference for slots."""
+    return quad_mall_center(reference_point)
+
+
+def _chebyshev(left: Point, right: Point) -> float:
+    return max(abs(left[0] - right[0]), abs(left[1] - right[1]))
+
+
+def _rank_empty_origins(
+    candidates: list[tuple[int, int]], committed: list[tuple[int, int]],
+    reference_point: Point,
+) -> list[tuple[int, int]]:
+    """Order empty cell sites nearest the existing bank first.
+
+    A committed bank makes the next available site the one adjacent to it, so a
+    new cell lands beside the mall instead of at a distant reserved site that
+    then needs its own coverage and a long pole corridor (live 2026-10-10: the
+    long-handed-inserter cell was assigned to the far (46,49) site). With
+    nothing committed yet the fixed origin order is kept, so the seed cells stay
+    first.
+    """
+    if not committed:
+        return list(candidates)
+    anchor = _bank_anchor(reference_point)
+
+    def key(origin: tuple[int, int]) -> tuple[float, float, int, int]:
+        return (
+            min(_chebyshev(origin, other) for other in committed),
+            _chebyshev(origin, anchor),
+            origin[0],
+            origin[1],
+        )
+
+    return sorted(candidates, key=key)
 
 
 def _slot_position(origin: tuple[int, int], side: str) -> Point:
@@ -674,6 +929,11 @@ def _choose_slot(
             empty_origins.append(origin)
     if preferred_open or related_open or other_open:
         return (preferred_open or related_open or other_open)[0]
+    empty_origins = _rank_empty_origins(
+        empty_origins,
+        [origin for origin in origins if states[origin][2] != "-"],
+        reference_point,
+    )
     for origin in empty_origins:
         footprint_min = (origin[0] - 2, origin[1])
         footprint_max = (origin[0] + 12, origin[1] + 7)
@@ -872,7 +1132,7 @@ def build_compact_mall_stage(
         include_substation=seed_cell_includes_substation(
             reference_point, origin, side,
         ),
-        substation_position=seed_shared_substation(reference_point),
+        substation_position=reserved_substation_position(reference_point, origin),
         stock_gate_target=stock_gate_target,
         fill_chest=fill_chest or recipe in {"iron-gear-wheel", "copper-cable"},
         request_multiplier_override=request_multiplier_override,
@@ -884,11 +1144,7 @@ def build_compact_mall_stage(
         origin[0] + 4.5,
         origin[1] + (0.5 if side == "left" else 2.5),
     )
-    substation = (
-        seed_shared_substation(reference_point)
-        if seed_cell_uses_shared_substation(reference_point, origin)
-        else (origin[0] + 4.0, origin[1] + 5.0)
-    )
+    substation = reserved_substation_position(reference_point, origin)
     requester_action = next(
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "requester-chest"
@@ -897,9 +1153,10 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
-    reserved_tiles = planned_footprint_tiles(plan) | planned_cell_reserved_tiles(reference_point, origin)
-    if seed_cell_uses_shared_substation(reference_point, origin):
-        reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
+    assert_mall_cell_footprint_free(
+        client, surface, plan, recipe, origin, side,
+    )
+    reserved_tiles = planned_footprint_tiles(plan) | mall_grid_reserved_tiles(reference_point)
     if callable(getattr(client, "command", None)):
         existing_network = live_base.pole_network_id(
             client, surface, substation,
@@ -910,8 +1167,20 @@ def build_compact_mall_stage(
             )
             if existing_network is not None else None
         )
+        adjacent_power = (
+            powered_reserved_substation_neighbor(
+                client, surface, force, reference_point, substation,
+            )
+            if existing_generation is None or existing_generation <= 0 else None
+        )
+        if adjacent_power is not None:
+            emit(
+                f"  MALL SUBSTATION LINK: reserved substation at {substation} "
+                f"will auto-connect to powered mall anchor {adjacent_power}"
+            )
         if (
             (existing_generation is None or existing_generation <= 0)
+            and adjacent_power is None
             and not extend_power(
                 client, bridge, surface, force, substation, emit,
                 reserved_tiles=reserved_tiles,
@@ -1031,10 +1300,13 @@ def build_quad_mall_stage(
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
     seed_module = center == quad_mall_center(reference_point) and group == "top"
+    assert_mall_cell_footprint_free(
+        client, surface, plan, recipe,
+        (int(center[0]), int(center[1])), group,
+    )
     reserved_tiles = (
         planned_footprint_tiles(plan)
-        | seed_expansion_reserved_tiles(reference_point)
-        | planned_cell_reserved_tiles(reference_point)
+        | mall_grid_reserved_tiles(reference_point)
     )
     substation = (
         seed_shared_substation(reference_point)
@@ -1049,8 +1321,20 @@ def build_quad_mall_stage(
         existing_generation = _existing_network_generation(
             client, surface, force, substation,
         )
+        adjacent_power = (
+            powered_reserved_substation_neighbor(
+                client, surface, force, reference_point, substation,
+            )
+            if existing_generation is None or existing_generation <= 0 else None
+        )
+        if adjacent_power is not None:
+            emit(
+                f"  MALL SUBSTATION LINK: reserved substation at {substation} "
+                f"will auto-connect to powered mall anchor {adjacent_power}"
+            )
         if (
             (existing_generation is None or existing_generation <= 0)
+            and adjacent_power is None
             and not extend_power(
                 client, bridge, surface, force, substation, emit,
                 reserved_tiles=(

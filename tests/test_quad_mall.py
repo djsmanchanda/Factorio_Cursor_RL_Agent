@@ -315,6 +315,9 @@ def test_quad_top_admission_parks_when_power_cannot_stage(monkeypatch) -> None:
 
     center = quad_mall_center((3.0, -1.0))
     monkeypatch.setattr(
+        mall_builder, "mall_cell_footprint_conflicts", lambda *_a: (),
+    )
+    monkeypatch.setattr(
         mall_builder, "preview_quad_mall_allocation",
         lambda *_a, **_k: (center, "top"),
     )
@@ -358,6 +361,9 @@ def test_quad_top_admission_accepts_an_already_powered_shared_seed_anchor(monkey
     from orchestrator import live_base
 
     center = quad_mall_center((3.0, -1.0))
+    monkeypatch.setattr(
+        mall_builder, "mall_cell_footprint_conflicts", lambda *_a: (),
+    )
     monkeypatch.setattr(
         mall_builder, "preview_quad_mall_allocation",
         lambda *_a, **_k: (center, "top"),
@@ -416,6 +422,9 @@ def test_quad_module_places_the_capability_aware_machine(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(mall_builder, "generate_quad_mall_layout", fake_layout)
+    monkeypatch.setattr(
+        mall_builder, "mall_cell_footprint_conflicts", lambda *_a: (),
+    )
     monkeypatch.setattr(
         mall_builder, "preview_quad_mall_allocation",
         lambda *_a, **_k: (quad_mall_center((3.0, -1.0)), "top"),
