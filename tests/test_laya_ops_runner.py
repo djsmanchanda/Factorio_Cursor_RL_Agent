@@ -957,6 +957,25 @@ def test_research_and_lab_options_are_backed_by_live_prerequisites():
     assert "op.produce.lab" not in options(open_status, labs=2)
 
 
+def test_lab_provisioning_waits_for_every_plate_in_its_chain_to_start():
+    # Live 2026-10-10 (episode 20261010T132846Z-324e6177, decision 0): the lab was offered with no plate
+    # started; the toolkit opened copper's foundation ahead of its starter, and copper stayed in
+    # provisioning, which removed its starter for the rest of the run.
+    board = {"needs": [{"item": "copper-plate", "condition": "unbuilt"}, {"item": "iron-plate", "condition": "unbuilt"}]}
+    open_status = {"technology": {"canonical_name": "mining-productivity-4", "state": "available", "target_completed": False}}
+    recipes = {**GOAL_RECIPES, "lab": {"ingredients": [{"name": "electronic-circuit", "amount": 10}]}}
+
+    def options(results):
+        return {o["option_id"] for o in compile_options(
+            board, results, recipes=recipes, research_goal="mining-productivity-4",
+            goal_status=open_status, labs=0)["options"]}
+
+    assert "op.starter.copper-plate" in options([])
+    assert "op.produce.lab" not in options([])
+    assert "op.produce.lab" not in options(_GOAL_STARTERS[:1])  # Iron alone leaves copper unstarted.
+    assert "op.produce.lab" in options(_GOAL_STARTERS)
+
+
 def test_natural_goal_keeps_running_while_construction_advances(tmp_path):
     from training.laya_clean_runner import Settings
 

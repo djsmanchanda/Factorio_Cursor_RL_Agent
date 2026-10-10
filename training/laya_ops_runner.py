@@ -681,8 +681,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "params": {"technology": candidate},
                 "features": {"last_code": codes.get(("research", candidate), "new"),
                              "waiting": in_progress(codes.get(("research", candidate))), "goal_need": True}})
-        # Provision a lab through the shared toolkit when the live fact says none exists yet.
-        if labs == 0 and codes.get(("produce", "lab")) != "ok":
+        # Provision a lab through the shared toolkit when the live fact says none exists yet. Its plates must
+        # be started first: the toolkit opens an unstarted plate's foundation ahead of its starter, which
+        # strands that plate in provisioning and removes its starter (episode 20261010T132846Z-324e6177).
+        if labs == 0 and codes.get(("produce", "lab")) != "ok" and recipes and plates_in("lab", recipes) <= started:
             options.append({
                 "option_id": "op.produce.lab", "family": "produce", "product": "lab", "need_id": "stock:lab",
                 "summary": "produce lab", "params": {"item": "lab", "stock_target": 1},
