@@ -157,3 +157,20 @@ the independently confirmed firewall failure. Restart the owned controller
 from a new physical supervisor freeze; resume the existing terminal episode,
 then let DeepSeek/Haiku continue. No gameplay fix by GPT. Recovery identity and
 exact restart timestamp are recorded under the same campaign root.
+
+### 2026-10-10 21:33 IST — user-authorized one-hour extension applied
+
+The user explicitly extended this campaign by one hour. Launch remains
+2026-10-10 18:58:46IST; initial deadline2026-10-11 00:58:46IST is retained as
+provenance, and the effective absolute deadline is now **2026-10-11 01:58:46IST**
+(seven wall hours from launch). Restarts preserve this effective deadline;
+no additional reset or campaign was created. `campaign.json` records both
+deadlines and the authorization, and `deadline-extension.json` records the
+saved DeepSeek acknowledgement and same-episode controller adoption.
+
+Extension was applied at a safe observation boundary after the current Haiku
+cycle completed. Two autonomous changes have been verified/committed and the
+third frozen run remains active. GPT's original +4h/+6h check points remain;
+a final +7h check observes the extended deadline. Model roles, same branch,
+natural research target, private infrastructure and no-final-run-repair rules
+are unchanged. No gameplay patch accompanied the extension.
