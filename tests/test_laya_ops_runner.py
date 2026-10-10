@@ -868,7 +868,10 @@ def test_repeated_loan_batch_receipt_is_new_then_unchanged_then_progressing(monk
     empty.client, empty.bridge, empty.emit = object(), None, lambda _line: None
     empty.reference_point = (0.0, 0.0)
     monkeypatch.setattr(empty, "_operations", lambda: {"mall_slot": batch})
-    monkeypatch.setattr(laya_ops.live_base, "transferable_items", lambda *_a, **_k: {})
+    monkeypatch.setattr(laya_ops.live_base, "transferable_items", lambda *_a, **_k: {
+        "electronic-circuit": 9, "transport-belt": 8, "iron-plate": 10})
+    monkeypatch.setattr(laya_ops.ab, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(
+        projects={}, allocatable_stock=lambda stock: {item: 0 for item in stock}))
     monkeypatch.setattr(laya_ops.live_base, "chest_contents", lambda *_a, **_k: {})
     unfunded = empty.run("mall_slot", item="splitter")
     assert unfunded["loan_batch"]["inputs_covered"] is False

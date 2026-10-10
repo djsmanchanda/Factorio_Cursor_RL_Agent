@@ -158,7 +158,7 @@ class DeterministicSession:
             except Exception:  # noqa: BLE001 -- a diagnostic read must not stop the loop
                 available = None
         ledger = getattr(ab, "_MATERIAL_RESERVATION_LEDGER", None)
-        available_items = getattr(ledger, "available_items", None)
+        available_items = getattr(ledger, "allocatable_stock", None)
         if available is not None and callable(available_items):
             # Transferable inventory is physical stock, not unallocated stock.
             # With no proven loan claimant, retain other projects' reservations.
