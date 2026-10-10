@@ -674,6 +674,38 @@ def test_a_refused_geometry_stays_unchanged_until_an_operation_succeeds():
     assert options["op.extend.copper-plate"]["last_outcome"] == "no_geometry"
 
 
+def test_an_idempotent_queued_request_does_not_reset_a_geometry_refusal():
+    # Live 2026-10-10 R5 decision-states lines 1216-1219: copper extension refused, then an idempotent
+    # research request (ok, queued, progress=false) reset unchanged_failure and restored weight 1.35 -> 27.
+    from training.laya_ops_runner import unchanged_failures
+    refused = {"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"},
+               "code": "district_expansion_unbuildable", "layout_at": [40, 90]}
+    research = {"ok": True, "operation": "research", "params": {"technology": "mining-productivity-3"},
+                "code": "queued", "progress": False, "result": {"idempotent": True}}
+    wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
+    idle_slot = {"ok": True, "operation": "mall_slot", "params": {"item": "pipe"}, "code": "producing",
+                 "progress": False}
+    built = {"ok": True, "operation": "mall_slot", "params": {"item": "pipe"}, "code": "producing",
+             "progress": True}
+    key = ("extend", "copper-plate")
+    assert unchanged_failures([refused, research, wait], {}) == {key}
+    assert unchanged_failures([refused, research, wait], {}, layout=(40, 90)) == {key}
+    assert unchanged_failures([refused, idle_slot], {}, layout=(40, 90)) == {key}
+    # A submitted plan, or bots finishing earlier work (built layout moved), is a reason to retry once.
+    assert unchanged_failures([refused, built], {}, layout=(40, 90)) == set()
+    assert unchanged_failures([refused, research], {}, layout=(41, 90)) == set()
+    results = _started_and_built() + [{"ok": True, "operation": "foundation", "params": {"recipe": "copper-plate"}},
+                                      refused, research]
+    options = {o["option_id"]: o["features"] for o in compile_options(BOARD, results, layout=(40, 90))["options"]}
+    assert options["op.extend.copper-plate"]["unchanged_failure"]
+
+
+def test_layout_signature_counts_built_machines_and_poles():
+    from training.laya_ops_runner import layout_signature
+    assert layout_signature({"machines": [{}, {}], "poles": [{}]}) == (2, 1)
+    assert layout_signature({"machines": [{}]}) is None
+
+
 def test_a_changed_reservation_allocation_clears_an_unchanged_failure():
     from training.laya_ops_runner import unchanged_failures
     failed = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18},

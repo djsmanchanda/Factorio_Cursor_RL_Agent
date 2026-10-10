@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -107,15 +107,18 @@ def pending_retirements(results: list[dict], districts: Mapping | None = None) -
 
 
 def unchanged_failures(results: list[dict], stock: Mapping[str, int],
-                       allocation: Mapping[str, tuple] | None = None) -> set[tuple]:
+                       allocation: Mapping[str, tuple] | None = None,
+                       layout: Sequence[int] | None = None) -> set[tuple]:
     """(operation, parameter) whose latest attempt was short of materials none of which has since increased,
-    or was refused for lack of buildable geometry with no successful operation since.
+    or was refused for lack of buildable geometry while the layout it read has not changed.
 
     Retrying such an operation changes nothing in the world except, in the tooling's mall path, another
     power bridge to another abandoned slot.  ``allocation`` is the current owner-attributed claim per
     item (training/laya_ops_runner.reservation_allocation); when a required item's claim moved since the
     failure was recorded, its allocation changed, so the failure is no longer unchanged.  A geometry
-    refusal reads the live layout, which only a successful operation changes.
+    refusal reads the live layout: it is reconsidered after a layout-changing receipt, or when ``layout``
+    (``layout_signature`` of the current facts) differs from the snapshot taken at the refusal, which covers
+    bots finishing earlier work.  A queued or idempotent request (e.g. research) changes no layout.
     """
     latest: dict[tuple, dict] = {}
     current_allocation = _canonical_claims(allocation) if allocation is not None else None
@@ -125,7 +128,10 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int],
     stuck = set()
     for key, r in latest.items():
         if outcome_category(r) == "no_geometry":
-            if not _succeeded_since(results, r):
+            seen_layout = r.get("layout_at")
+            moved = (layout is not None and seen_layout is not None
+                     and tuple(layout) != tuple(seen_layout))
+            if not moved and not _layout_changed_since(results, r):
                 stuck.add(key)
             continue
         if not r.get("ok") and r.get("code") == "material_shortage":
@@ -143,10 +149,24 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int],
     return stuck
 
 
-def _succeeded_since(results: list[dict], attempt: Mapping) -> bool:
-    """Whether a successful operation other than a wait ran after ``attempt`` (the layout it saw may have changed)."""
+def layout_signature(facts: Mapping) -> tuple[int, int] | None:
+    """Built machines and poles: completed construction changes it, a queued request does not."""
+    if not isinstance(facts.get("machines"), list) or not isinstance(facts.get("poles"), list):
+        return None
+    return len(facts["machines"]), len(facts["poles"])
+
+
+def _changes_layout(result: Mapping) -> bool:
+    """A successful receipt that built or removed something: a submitted plan or a shape-changing operation."""
+    if not result.get("ok") or result.get("operation") in {"wait", "research"}:
+        return False
+    return bool(result.get("progress")) or result.get("operation") in MAJOR
+
+
+def _layout_changed_since(results: list[dict], attempt: Mapping) -> bool:
+    """Whether a layout-changing receipt followed ``attempt`` (the layout it saw may have changed)."""
     last = max((i for i, r in enumerate(results) if r is attempt), default=-1)
-    return any(r.get("ok") and r["operation"] != "wait" for r in results[last + 1:])
+    return any(_changes_layout(r) for r in results[last + 1:])
 
 
 def _canonical_claims(claims: Mapping | None) -> dict[str, tuple[tuple[str, int], ...]]:
@@ -539,7 +559,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     stock: Mapping[str, int] | None = None, *, bootstrap_districts: Mapping | None = None,
                     allocation: Mapping[str, tuple] | None = None,
                     measurement: Mapping | None = None, research_goal: str | None = None,
-                    goal_status: Mapping | None = None, labs: int | None = None) -> dict:
+                    goal_status: Mapping | None = None, labs: int | None = None,
+                    layout: Sequence[int] | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
@@ -551,7 +572,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     goal_rate = {n["item"]: float(n.get("goal_required_per_s") or 0) for n in board["needs"]}
-    stuck = unchanged_failures(results, stock or {}, allocation)
+    stuck = unchanged_failures(results, stock or {}, allocation, layout)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
     pending = pending_retirements(results, bootstrap_districts)
@@ -911,7 +932,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                              bootstrap_districts=districts, allocation=allocation,
                                              measurement=measurement, research_goal=goal,
-                                             goal_status=goal_status, labs=_lab_count(facts)),
+                                             goal_status=goal_status, labs=_lab_count(facts),
+                                             layout=layout_signature(facts)),
                               results, economics, stock=stock if economics is not None else None)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -963,6 +985,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                    if economics is not None else None)
             result["allocation_at"] = ({item: allocation.get(item, ()) for item in required}
                                        if allocation is not None else None)
+        if outcome_category(result) == "no_geometry":  # The layout this refusal read, for retry comparison.
+            layout_at = layout_signature(facts)
+            result["layout_at"] = list(layout_at) if layout_at is not None else None
         results.append(result)
         tool_end_tick = _live_tick(adapter, tool_start_tick)
         after = adapter.query()
