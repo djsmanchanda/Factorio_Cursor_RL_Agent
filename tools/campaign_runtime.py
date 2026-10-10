@@ -70,11 +70,42 @@ def gate_failures(output: str) -> frozenset[str]:
     return frozenset(match.group("nodeid") for match in _GATE_FAILURE.finditer(output))
 
 
-def gate_acceptable(output: str, known: frozenset[str]) -> bool:
-    """True only when the gate fails on a non-empty subset of known failures."""
+# Exact content of the confirmed firewall baseline (same four in the first frozen
+# source and 120e982). A known node id is accepted only while its actual
+# violations stay within this set.
+KNOWN_IMPORT_FIREWALL_VIOLATIONS = frozenset({
+    "training/laya_lines.py: training runtime cannot import orchestrator.stage_extraction",
+    "training/laya_lines.py: training runtime cannot import "
+    "orchestrator.stage_extraction.paired_mining_drill_positions",
+    "training/laya_ops.py: training runtime cannot import orchestrator.autonomous_builder",
+    "training/laya_ops.py: training runtime cannot import orchestrator.stage_services",
+})
+
+
+def firewall_baseline_unchanged(repo_root: Path) -> bool:
+    """The candidate's import violations, scanned independently, add nothing to the baseline."""
+    from training.isolation import find_import_violations
+    violations = frozenset(find_import_violations(Path(repo_root)))
+    return bool(violations) and violations <= KNOWN_IMPORT_FIREWALL_VIOLATIONS
+
+
+_BASELINE_CONTENT_CHECKS = {
+    "tests/test_training_isolation.py::test_current_repository_obeys_import_firewall":
+        firewall_baseline_unchanged,
+}
+
+
+def gate_acceptable(output: str, known: frozenset[str], *, repo_root: Path) -> bool:
+    """True only when the gate fails on known failures whose actual content is the baseline."""
     failed = gate_failures(output)
     invalid = re.search(r"(?m)^(?:ERROR\b|.*Interrupted:|.*errors? during collection|.*INTERNALERROR>|.*TIMEOUT)", output)
-    return bool(failed) and failed <= frozen(known) and not invalid
+    if not failed or not failed <= frozen(known) or invalid:
+        return False
+    # The same node id can fail for a new reason; confirm what it actually found.
+    return all(
+        node in _BASELINE_CONTENT_CHECKS and _BASELINE_CONTENT_CHECKS[node](repo_root)
+        for node in failed
+    )
 
 
 def frozen(values) -> frozenset[str]:
@@ -606,7 +637,8 @@ class LayaRuntime:
         if result.returncode == 0:
             return True
         if result.returncode == 1 and tuple(command[3:]) == FAST_GATE:
-            return gate_acceptable(result.stdout + result.stderr, KNOWN_BASELINE_GATE_FAILURES)
+            return gate_acceptable(result.stdout + result.stderr, KNOWN_BASELINE_GATE_FAILURES,
+                                   repo_root=Path(config.campaign_worktree))
         return False
 
     def regression_proof(self, config, declared: list[str], fields: dict, log: Path) -> bool:

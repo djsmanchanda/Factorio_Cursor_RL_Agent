@@ -40,7 +40,9 @@ its separate writable campaign branch, which Git, model edits and tests use.
    overlays the new test, requires that exact test to fail before and pass in the candidate, then
    runs the requested fast gate. Collection errors, interrupts, process failures and timeouts fail
    verification. Only the exact pre-existing import-firewall node is tolerated by the gate:
-   `tests/test_training_isolation.py::test_current_repository_obeys_import_firewall`.
+   `tests/test_training_isolation.py::test_current_repository_obeys_import_firewall`, and only
+   while an independent scan of the candidate tree finds no import violation outside the four
+   confirmed baseline strings (`KNOWN_IMPORT_FIREWALL_VIOLATIONS`); the node id alone is not enough.
    There is no CLI allowlist expansion. A new module's regression should fail as a test against
    the earlier behavior, rather than fail collection because its import is absent.
 7. Commit only verified declared files and clean campaign-owned status records. On rejection,

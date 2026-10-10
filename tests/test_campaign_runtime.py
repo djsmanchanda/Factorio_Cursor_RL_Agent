@@ -55,17 +55,39 @@ def test_backend_for_selects_runtime(tmp_path):
     assert isinstance(runtime.backend_for(deterministic), runtime.DeterministicRuntime)
 
 
-def test_fast_gate_accepts_only_known_baseline_failures():
+def _firewall_repo(root, *, extra: bool = False):
+    training = root / "training"
+    training.mkdir(parents=True)
+    (training / "laya_lines.py").write_text("from orchestrator.stage_extraction import paired_mining_drill_positions\n")
+    (training / "laya_ops.py").write_text("from orchestrator import autonomous_builder, stage_services\n")
+    if extra:
+        (training / "laya_new.py").write_text("import orchestrator.autonomous_builder\n")
+    return root
+
+
+def test_fast_gate_accepts_only_known_baseline_failures(tmp_path):
     known = runtime.KNOWN_BASELINE_GATE_FAILURES
+    repo = _firewall_repo(tmp_path / "repo")
     baseline = ("FAILED tests/test_training_isolation.py::"
                 "test_current_repository_obeys_import_firewall\n")
     assert runtime.gate_failures(baseline) == {
         "tests/test_training_isolation.py::test_current_repository_obeys_import_firewall"}
-    assert runtime.gate_acceptable(baseline, known) is True
+    assert runtime.gate_acceptable(baseline, known, repo_root=repo) is True
     new_failure = baseline + "FAILED tests/test_new_behavior.py::test_broken\n"
-    assert runtime.gate_acceptable(new_failure, known) is False
+    assert runtime.gate_acceptable(new_failure, known, repo_root=repo) is False
     # A collection/import error with no FAILED lines is never accepted.
-    assert runtime.gate_acceptable("ImportError: boom\n", known) is False
+    assert runtime.gate_acceptable("ImportError: boom\n", known, repo_root=repo) is False
+
+
+def test_fast_gate_rejects_a_new_violation_inside_the_known_firewall_node(tmp_path):
+    # Audit 2026-10-11: acceptance checked only the failed node id, so a new import violation reported by the
+    # same firewall test would have been accepted as baseline.
+    baseline = ("FAILED tests/test_training_isolation.py::"
+                "test_current_repository_obeys_import_firewall\n")
+    repo = _firewall_repo(tmp_path / "repo", extra=True)
+    assert runtime.gate_acceptable(baseline, runtime.KNOWN_BASELINE_GATE_FAILURES, repo_root=repo) is False
+    # The real repository still carries exactly the confirmed baseline violations, no new one.
+    assert runtime.firewall_baseline_unchanged(Path(runtime.__file__).resolve().parents[1])
 
 
 def test_laya_verification_tolerates_known_gate_failures(tmp_path):
@@ -73,6 +95,7 @@ def test_laya_verification_tolerates_known_gate_failures(tmp_path):
     config = laya_config(tmp_path)
     root = tmp_path / "state"
     root.mkdir(parents=True)
+    _firewall_repo(config.campaign_worktree)  # the candidate tree carries exactly the known violations
     baseline = ("FAILED tests/test_training_isolation.py::"
                 "test_current_repository_obeys_import_firewall\n")
     gate = [str(config.python), "-m", "pytest", *runtime.FAST_GATE]
