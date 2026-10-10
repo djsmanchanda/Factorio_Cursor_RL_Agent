@@ -187,3 +187,13 @@ The adapter records every allocated episode and harness failure and publishes
 GPT checks at approximately launch +2h/+4h/+6h, appends short supervision
 notes, and intervenes only for broken/stopped/misrouted/protocol-violating
 infrastructure. No automatic merge, push, adoption or real-base promotion.
+
+Terminal prose is preserved before machine-envelope validation. If DeepSeek
+renders the six synthesis fields as Markdown, the controller asks the same
+session once for only the exact plain envelope; it never repeats the audit
+merely to reformat it. All six nonempty fields remain required. OpenCode
+session exports stream to a regular file and must parse as JSON before
+replacing a previous valid export (pipe exports can truncate at64KiB).
+A recorded operational recovery retains all failure records; `recovery.json`
+sets the prior-failure count so the repaired controller gets at most three
+new recovery attempts, without changing deadline/session/episode identity.

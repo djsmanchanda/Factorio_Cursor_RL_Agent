@@ -116,7 +116,7 @@ def test_terminal_deadline_observation_uses_same_session_and_no_fix_plan(tmp_pat
     def send(c, state, msg, sequence):
         assert state.primary_session_id == 'real-deepseek'
         messages.append(msg)
-        return json.dumps({'type':'text','part':{'text':('Evidence with cited useful-state stall. '*12)+'\nSYNTHESIS:\nhypothesis: unchanged\nconfidence: high'}})
+        return json.dumps({'type':'text','part':{'text':('Evidence with cited useful-state stall. '*12)+'\nSYNTHESIS:\nhypothesis: unchanged\nconfidence: high\nsupporting: status\ncontradicting: none\ncompeting: unknown\ndiscriminating: observe'}})
     monkeypatch.setattr(orch, '_primary_turn', send)
     result = pp.observe_terminal(c, 'one')
     assert result['status'] == 'complete' and result['observation_only'] is True
@@ -144,3 +144,84 @@ def test_terminal_restart_cannot_start_another_episode(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, '_backend', lambda *a: pytest.fail('new episode after terminal restart'))
     assert orch.run_campaign(c) == 0
     assert orch._load_state(c.state_file).phase == 'SUCCESS'
+
+
+def test_terminal_markdown_report_requests_only_same_session_machine_envelope(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+    from tools import campaign_runtime as runtime
+    c = replace(config(tmp_path), code_root=tmp_path/'episode/code', world_root=tmp_path/'episode/code/data/laya-saved-world/one')
+    c.code_root.parent.mkdir(parents=True)
+    s = orch.State(primary_session_id='real-deepseek', deadline_utc=(datetime.now(timezone.utc)+timedelta(hours=4)).isoformat())
+    orch._save_state(c.state_file, s)
+    monkeypatch.setattr(runtime, 'comparator_records', lambda root: [{'run_id':'one','summary':{'stop':'stalled'}}])
+    prose = 'Evidence: decision 701, useful-state stall, real C0 only. '*10 + '\n### SYNTHESIS\n- **Hypothesis**: supply\n- **Confidence**: high'
+    envelope = 'SYNTHESIS:\nhypothesis: supply\nconfidence: high\nsupporting: decision701\ncontradicting: none\ncompeting: reach\ndiscriminating: menu'
+    calls = []
+    def send(c, state, message, sequence):
+        calls.append((state.primary_session_id, message))
+        return json.dumps({'type':'text','part':{'text':prose if len(calls)==1 else envelope}})
+    monkeypatch.setattr(orch, '_primary_turn', send)
+    result = pp.observe_terminal(c, 'one')
+    assert result['status'] == 'complete'
+    assert len(calls) == 2 and {sid for sid, _ in calls} == {'real-deepseek'}
+    assert 'Do not re-investigate' in calls[1][1]
+    assert (c.code_root.parent/'observer/returned-report.md').read_text() == prose
+    assert Path(result['path']).read_text() == prose+'\n\n'+envelope
+
+
+def test_terminal_partial_envelope_stays_rejected_after_one_same_session_correction(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+    from tools import campaign_runtime as runtime
+    c = replace(config(tmp_path), code_root=tmp_path/'episode/code', world_root=tmp_path/'episode/code/data/laya-saved-world/one')
+    c.code_root.parent.mkdir(parents=True)
+    orch._save_state(c.state_file, orch.State(primary_session_id='real-deepseek',deadline_utc=(datetime.now(timezone.utc)+timedelta(hours=4)).isoformat()))
+    monkeypatch.setattr(runtime, 'comparator_records', lambda root: [{'run_id':'one','summary':{'stop':'stalled'}}])
+    calls = []
+    def send(c, state, message, sequence):
+        calls.append(state.primary_session_id)
+        return json.dumps({'type':'text','part':{'text':'Evidence: preserved bounded terminal report. '*10+'\nSYNTHESIS:\nhypothesis: supply'}})
+    monkeypatch.setattr(orch, '_primary_turn', send)
+    with pytest.raises(RuntimeError, match='incomplete terminal report'):
+        pp.observe_terminal(c, 'one')
+    assert calls == ['real-deepseek','real-deepseek']
+    assert not (c.code_root.parent/'observer/findings.md').exists()
+    assert (c.code_root.parent/'observer/returned-report.md').exists()
+
+
+def test_planner_export_streams_to_file_and_preserves_last_valid_export_on_truncation(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+    c = config(tmp_path)
+    calls = []
+    complete = json.dumps({'messages':[{'sessionID':'real-deepseek','text':'x'*70000}]})
+    def run(command, **kwargs):
+        calls.append(command)
+        assert command[-2:] == ['real-deepseek','--sanitize']
+        assert 'capture_output' not in kwargs
+        kwargs['stdout'].write(complete if len(calls)==1 else complete[:65536])
+        return subprocess.CompletedProcess(command, 0, None, '')
+    monkeypatch.setattr(pp.subprocess, 'run', run)
+    assert pp.export_planner(c, 'real-deepseek') is True
+    target = c.state_root/'agents/deepseek-session-export.json'
+    assert target.read_text() == complete and target.stat().st_size > 65536
+    assert pp.export_planner(c, 'real-deepseek') is False
+    assert target.read_text() == complete
+    assert len(list(target.parent.glob('failed-export-*.json'))) == 1
+
+
+def test_repaired_harness_resume_retains_history_but_gets_bounded_recovery_attempts(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+    c = config(tmp_path)
+    state = orch.State(phase='OBSERVING',primary_session_id='real-deepseek',deadline_utc=(datetime.now(timezone.utc)+timedelta(hours=4)).isoformat())
+    orch._save_state(c.state_file,state)
+    failures=c.state_root/'logs/harness-failures.jsonl'
+    failures.write_text(('{}\n')*3)
+    pp.atomic(c.state_root/'recovery.json', {'failures_before':3})
+    monkeypatch.setattr(orch, '_config', lambda args:c)
+    def interrupted(config):raise RuntimeError('new transport failure')
+    monkeypatch.setattr(orch,'run_campaign',interrupted)
+    monkeypatch.setattr(pp,'final_report',lambda *a,**k:pytest.fail('old failures stopped repaired harness immediately'))
+    with pytest.raises(RuntimeError, match='new transport failure'):
+        pp.main([])
+    assert len(failures.read_text().splitlines()) == 4
+    assert orch._load_state(c.state_file).deadline_utc == state.deadline_utc
+    assert orch._load_state(c.state_file).phase == 'OBSERVING'

@@ -310,7 +310,14 @@ Trace observation -> decision -> plan -> execution -> outcome. Cite paths/decisi
 Separate real accepted checkpoints from proxies; actual research target/stop, requested/observed speed, wall time/ticks.
 Summarize unchanged/worsened outcomes, confounders and unresolved issues. Evidence level single live run; no cohort claim.
 Observation-only/final run={observation_only}. {'Record final findings only; NO subsequent fix or implementation plan.' if observation_only else 'Choose 1–2 focused reusable changes and prepare concrete fresh Haiku handoff: files, implementation plan, regressions failing before/passing after, predicted next-run effects and prior change outcome.'}
-Return a complete report with SYNTHESIS fields: hypothesis, confidence, supporting, contradicting, competing, discriminating.
+Return a complete report, ending with this EXACT plain block, without Markdown heading/bullets/bold/code fence:
+SYNTHESIS:
+hypothesis: one sentence
+confidence: low|medium|high
+supporting: cited evidence
+contradicting: evidence or none
+competing: alternate mechanism
+discriminating: test or observation
 Read only. Do not edit, write reports yourself or delegate; harness publishes returned text."""
     (directory / "request.md").write_text(prompt)
     atomic(record, {"status": "running", "session_id": state.primary_session_id, "episode": episode})
@@ -321,8 +328,29 @@ Read only. Do not edit, write reports yourself or delegate; harness publishes re
     finally:
         orch._COMMAND_DEADLINE = saved_deadline
     text = protocol.assistant_text(output)
-    if len(text) < 300 or not protocol.marker_fields(output, "SYNTHESIS"):
-        raise RuntimeError("DeepSeek returned incomplete terminal report")
+    # Preserve substantive prose before checking its machine envelope. A model
+    # may render the requested block as a Markdown heading and bold bullets;
+    # request only the envelope in the same session, never repeat the audit.
+    (directory / "returned-report.md").write_text(text)
+    required = {"hypothesis", "confidence", "supporting", "contradicting", "competing", "discriminating"}
+    fields = protocol.marker_fields(output, "SYNTHESIS")
+    if len(text) >= 300 and not all(fields.get(key) for key in required):
+        saved_deadline = orch._COMMAND_DEADLINE
+        orch._COMMAND_DEADLINE = None
+        try:
+            envelope = orch._primary_turn(config, state,
+                "Your substantive terminal report is preserved. Do not re-investigate or repeat it. "
+                "Return ONLY this exact plain machine block, with one nonempty value per line, "
+                "no Markdown heading/bullets/bold/code fence: SYNTHESIS:\nhypothesis: ...\n"
+                "confidence: low|medium|high\nsupporting: cited evidence\ncontradicting: ...\n"
+                "competing: ...\ndiscriminating: ...", 950000 + int(time.time()))
+        finally:
+            orch._COMMAND_DEADLINE = saved_deadline
+        (directory / "completion-envelope.jsonl").write_text(envelope)
+        fields = protocol.marker_fields(envelope, "SYNTHESIS")
+        text += "\n\n" + protocol.assistant_text(envelope)
+    if len(protocol.assistant_text(output)) < 300 or not all(fields.get(key) for key in required):
+        raise RuntimeError("DeepSeek returned incomplete terminal report after bounded envelope correction")
     report.write_text(text)
     result = {"episode": episode, "status": "complete", "path": str(report),
               "session_id": state.primary_session_id, "observation_only": observation_only,
@@ -347,6 +375,30 @@ def detect_runner_failure(config) -> None:
     pid = lifecycle.get("pid")
     if pid and lifecycle.get("phase") in {"running", "launching"} and not process_alive(pid):
         raise RuntimeError(f"owned runner {pid} died without natural RUN END; preserve episode {config.episode_id}")
+
+
+def export_planner(config, session_id: str) -> bool:
+    """Give OpenCode a regular output file; its pipe export can truncate at 64 KiB."""
+    target = config.state_root / "agents/deepseek-session-export.json"
+    temporary = target.with_suffix(".exporting")
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with temporary.open("w") as output:
+            result = subprocess.run([config.opencode_bin, "export", session_id, "--sanitize"],
+                                    cwd=config.campaign_worktree, stdout=output,
+                                    stderr=subprocess.PIPE, text=True, timeout=60)
+        if result.returncode:
+            raise ValueError(f"export returncode={result.returncode}")
+        payload = json.loads(temporary.read_text())
+        if not isinstance(payload, dict) or not isinstance(payload.get("messages"), list):
+            raise ValueError("invalid session export shape")
+        temporary.replace(target)
+        return True
+    except (subprocess.TimeoutExpired, ValueError) as error:
+        if temporary.exists():
+            temporary.rename(temporary.with_name(f"failed-export-{time.time_ns()}.json"))
+        event(config, "session-export-failed", session_id=session_id, error=str(error))
+        return False
 
 
 def final_report(config, state, *, failure: str | None = None) -> Path:
@@ -394,13 +446,7 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
                 target = archive / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
-    try:
-        exported = subprocess.run([config.opencode_bin, "export", state.primary_session_id, "--sanitize"],
-                                  cwd=config.campaign_worktree, capture_output=True, text=True, timeout=60)
-        if exported.returncode == 0:
-            (root / "agents/deepseek-session-export.json").write_text(exported.stdout)
-    except subprocess.TimeoutExpired:
-        event(config, "session-export-timeout", session_id=state.primary_session_id)
+    export_planner(config, state.primary_session_id)
     body = ("<!-- Path: campaign/final-report.md | Purpose: Audit every attempted run and improvement handoff. -->\n\n"
             "# DeepSeek / Haiku six-hour Laya campaign\n\n"
             f"Status: {state.phase}. Final report generated {datetime.now(timezone.utc).isoformat()}. "
@@ -464,7 +510,8 @@ def main(argv=None) -> int:
             final_report(config, state, failure=str(error))
             return 0
         # systemd retries twice; never reset D, episode identity or model sessions.
-        failures = len(path.read_text().splitlines())
+        recovery = read(config.state_root / "recovery.json")
+        failures = len(path.read_text().splitlines()) - int(recovery.get("failures_before", 0))
         if failures >= 3 or isinstance(error, KeyboardInterrupt):
             state.phase = "HARNESS_FAILURE"
             orch._save_state(config.state_file, state)

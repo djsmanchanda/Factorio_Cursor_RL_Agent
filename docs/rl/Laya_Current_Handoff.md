@@ -142,3 +142,18 @@ cap. Original deadline survives restart and permits an active natural final
 run to finish later. GPT checks at +2h/+4h/+6h; harness publishes final report
 when final observation ends. No production, GUI, main, merge, push or adoption
 authority. All fixes/commits stay on the same campaign branch.
+
+### 2026-10-10 20:23 IST — harness recovery
+
+User-requested check found the controller stopped after three complete
+DeepSeek reports were rejected for Markdown `SYNTHESIS` formatting. The first
+run naturally stalled after701decisions, realC0 only, no target completion; no
+Haiku cycle/commit occurred. Saved planner ID and original deadline remain
+unchanged. Verified adapter recovery preserves prose, requests one strict
+same-session envelope, streams complete validated session exports, and gives
+bounded operational retries while retaining every historical failure. Four
+regressions fail before/pass after;41 focused tests pass; fast gate retains only
+the independently confirmed firewall failure. Restart the owned controller
+from a new physical supervisor freeze; resume the existing terminal episode,
+then let DeepSeek/Haiku continue. No gameplay fix by GPT. Recovery identity and
+exact restart timestamp are recorded under the same campaign root.
