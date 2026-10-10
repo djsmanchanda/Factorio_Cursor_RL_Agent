@@ -79,7 +79,11 @@ unchanged material failure (`unchanged_failure`), including after JSON persisten
 `demand_distance` relay the shared `orchestrator/demand_siting` read (never
 training-local geometry). Per option, `last_outcome` is one of `delivery`,
 `constructing`, `no_geometry`, `material_failure`, `unchanged_material_failure`,
-`failed` or `unknown`, and survives unrelated waits. The menu's `facts` block
+`failed` or `unknown`, and survives unrelated waits. Zero throughput from full
+output is not scarcity. Most machines `full_output` with accessible (unreserved)
+network stock covering 120 s of demand reads as `output_backed_up`; without that
+stock it reads as `output_blocked` (undelivered). Neither condition offers new
+plate capacity. The menu's `facts` block
 adds `shortfall_feasible` (whether each short item can be made),
 `measured_plate_net` and `measured_force_consumption` from the measurement
 window. Missing per-item rates stay `None`; force consumption is not attributed

@@ -1,5 +1,7 @@
 # Path: tests/test_laya_ops_runner.py | Purpose: Protect Laya's loop over deterministic operations: options from the board and results, doc-rule choices, recorded outcomes.
 
+import pytest
+
 from training.laya_guided_policy import GuidedPolicy
 from training.laya_ops_runner import compile_options, plate_stages, run, shortages
 
@@ -704,6 +706,18 @@ def test_layout_signature_counts_built_machines_and_poles():
     from training.laya_ops_runner import layout_signature
     assert layout_signature({"machines": [{}, {}], "poles": [{}]}) == (2, 1)
     assert layout_signature({"machines": [{}]}) is None
+
+
+@pytest.mark.parametrize("condition", ["output_backed_up", "output_blocked"])
+def test_backpressured_plate_is_not_offered_new_capacity(condition):
+    # R5: full copper output read as zero throughput kept offering copper extension (29 geometry refusals).
+    board = {"needs": [{"item": "iron-plate", "condition": "unbuilt", "goal_required_per_s": 0.5},
+                       {"item": "copper-plate", "condition": condition, "goal_required_per_s": 0.5},
+                       {"item": "copper-ore", "condition": "short", "goal_required_per_s": 0.5}]}
+    results = _started_and_built() + [{"ok": True, "operation": "foundation", "params": {"recipe": "copper-plate"}}]
+    ids = {o["option_id"] for o in compile_options(board, results)["options"]}
+    assert "op.extend.copper-plate" not in ids
+    assert "op.extend.iron-plate" in ids
 
 
 def test_a_changed_reservation_allocation_clears_an_unchanged_failure():

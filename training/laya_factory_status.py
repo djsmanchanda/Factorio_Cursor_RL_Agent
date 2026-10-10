@@ -32,6 +32,12 @@ FURNACE_SPEEDS = {"stone-furnace": 1.0, "steel-furnace": 2.0, "electric-furnace"
 ASSEMBLER_TIERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
 # Satisfied means measured supply covers this share of the required rate.
 SATISFIED_SHARE = 0.95
+# Output-blocked producers with this many seconds of their demand already in
+# accessible network stock are backed up, not short (full chests read as zero
+# throughput). Less stock than that means output is not being delivered.
+BACKLOG_COVER_SECONDS = 120.0
+# Producers already outrunning their consumers: added capacity cannot raise delivery.
+BACKPRESSURE_CONDITIONS = frozenset({"output_backed_up", "output_blocked"})
 
 # Factorio entity_status names grouped into the conditions Laya must separate.
 STATUS_BUCKETS = {
@@ -139,8 +145,13 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
 
 
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
-              required: float, capacity: float | None, measured: float | None) -> str:
-    """Describe the measured condition of one need; never prescribe a remedy."""
+              required: float, capacity: float | None, measured: float | None,
+              stock: int = 0) -> str:
+    """Describe the measured condition of one need; never prescribe a remedy.
+
+    ``stock`` is accessible (unreserved) network stock: full output with enough
+    of it is ``output_backed_up``; full output without it is ``output_blocked``.
+    """
     if measured is not None and measured >= required * SATISFIED_SHARE:
         return "satisfied"
     if item in RAW_ITEMS:
@@ -151,6 +162,8 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
         return "unbuilt"
     for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"), ("blocked", "output_blocked")):
         if buckets.get(bucket, 0) * 2 > machine_count:
+            if condition == "output_blocked" and stock >= max(1.0, required * BACKLOG_COVER_SECONDS):
+                return "output_backed_up"
             return condition
     if capacity is not None and capacity < required * SATISFIED_SHARE:
         return "under_capacity"
@@ -200,7 +213,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             per_machine = machine_rate(tier, item, recipe)
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
-        condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured)
+        condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
+                              int(stock.get(item, 0)))
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({

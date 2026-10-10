@@ -140,3 +140,18 @@ def test_compact_rows_mark_stock_chain_items_with_a_zero_goal():
     board = compile_status({**world([]), "recipes": recipes}, {"iron-plate": 0.5}, stock={"medium-electric-pole": 0.5})
     rows = {r["item"]: r for r in compact_status(board, limit=20)["needs"]}
     assert rows["steel-plate"]["goal"] == 0.0 and rows["iron-plate"]["goal"] == 0.5
+
+
+def test_full_output_with_stock_on_hand_is_backed_up_not_short():
+    # User correction 2026-10-11 (R5): plates sat in full output chests (iron 5000, copper 6369 delivered); zero
+    # throughput there is backpressure, not scarcity. Without enough accessible stock it is undelivered output.
+    furnaces = [machine("electric-furnace", "copper-plate", "full_output", x) for x in (0, 3, 6)]
+    targets = {"copper-cable": 1.0}  # copper-plate demand 0.5/s -> 120 s cover is 60 plates
+    backed = compile_status(world(furnaces, items={"copper-plate": 6369}), targets, flows(copper_plate=0.0))
+    low = compile_status(world(furnaces, items={"copper-plate": 5}), targets, flows(copper_plate=0.0))
+    reserved = compile_status(world(furnaces, items={"copper-plate": 70}, reserved={"copper-plate": 60}),
+                              targets, flows(copper_plate=0.0))
+    condition = lambda board: {n["item"]: n for n in board["needs"]}["copper-plate"]["condition"]
+    assert condition(backed) == "output_backed_up"
+    assert condition(low) == "output_blocked"  # a few plates are not sufficiency
+    assert condition(reserved) == "output_blocked"  # stock reserved by ghosts is not accessible

@@ -29,7 +29,7 @@ from typing import Any
 from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
-from training.laya_factory_status import compact_status, compile_status
+from training.laya_factory_status import BACKPRESSURE_CONDITIONS, compact_status, compile_status
 from training.laya_saved_world import speed_status
 from training.laya_mall_slots import RAW, obtainable
 from training.laya_mission import current_phase, phase_reached
@@ -352,7 +352,8 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
         needs = {n["item"]: n for n in board["needs"]}
         sections["NOW"] = [f"{phase['phase_id']} {phase['name']}: " + "; ".join(
             f"{item} {(needs.get(item) or {}).get('measured_per_s') or 0:.2f}/{rate}/s"
-            + ("" if (needs.get(item) or {}).get("condition") == "satisfied" else " short")
+            + {"satisfied": "", "output_backed_up": " backed-up", "output_blocked": " undelivered"}.get(
+                (needs.get(item) or {}).get("condition"), " short")
             for item, rate in phase["targets"].items())]
         later = ids.index(phase["phase_id"]) + 1
         if later < len(PHASES):
@@ -570,6 +571,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     toolkit, plus a research option when the live status says the technology is open.
     """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
+    # Full output is not scarcity: backed-up or undelivered producers get no new capacity.
+    backpressured = {n["item"] for n in board["needs"] if n["condition"] in BACKPRESSURE_CONDITIONS}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     goal_rate = {n["item"]: float(n.get("goal_required_per_s") or 0) for n in board["needs"]}
     stuck = unchanged_failures(results, stock or {}, allocation, layout)
@@ -588,7 +591,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         district_state = ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state")
         # New capacity follows demand; finishing owned work survives rate/phase changes.
         legal = ()
-        if plate in unmet or PLATES[plate] in unmet:
+        if (plate in unmet or PLATES[plate] in unmet) and plate not in backpressured:
             legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
                      "foundation": ("extend",)}[stages.get(plate, "none")]
         # A district whose replacement is already reserved/validating/retiring has claimed this
