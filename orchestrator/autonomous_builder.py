@@ -71,6 +71,7 @@ from orchestrator.mall_builder import (
     preview_quad_mall_allocation,
     quad_mall_project_bill,
     preview_mall_allocation,
+    seed_vertical_slots_open,
     refresh_paired_mall_requests,
     rebuild_incomplete_mall_cell,
     seed_cell_includes_substation,
@@ -3960,6 +3961,28 @@ def _dense_bootstrap_mall_enabled(
         return False
 
 
+def _seed_vertical_mall_slot_ok(
+    client: RconClient, surface: str, force: str, item: str,
+) -> bool:
+    """Whether a seed pair's north/south slot may host ``item``.
+
+    Its transfers are long-handed, so it needs long-handed stock for the pair
+    or a running long-handed line; the long-handed seed itself stays in a
+    horizontal pair (it cannot wait on its own output).
+    """
+    if item == "long-handed-inserter" or "long-handed-inserter" not in LINE_RECIPES:
+        return False
+    if not callable(getattr(client, "command", None)):
+        return False
+    try:
+        stock = _transferable_or_available_stock(client, surface, force)
+        return stock.get("long-handed-inserter", 0) >= 2 or _production_started(
+            client, surface, force, "long-handed-inserter",
+        )
+    except Exception:
+        return False
+
+
 def _quad_bootstrap_mall_enabled(
     client: RconClient, surface: str, force: str,
     reference_point: Point | None = None, recipe: str | None = None,
@@ -3969,6 +3992,13 @@ def _quad_bootstrap_mall_enabled(
         return False
     if not hasattr(client, "command"):
         return True
+    # The seed pairs' north/south slots reuse their chests and come first; the
+    # quad halves then open on the fresh third module.
+    try:
+        if seed_vertical_slots_open(client, surface, reference_point or (3.0, -1.0)):
+            return False
+    except Exception:
+        return False
     # The long-handed line must be seeded in a horizontal paired cell.  A
     # vertical dense cell needs long-handed supports before it can be built;
     # admitting it with regular supports only creates a producer that cannot
@@ -7740,7 +7770,10 @@ def _reserve_compact_mall_project(
     allocation = (
         preview_quad_mall_allocation(client, surface, item, reference_point)
         if quad_mall else
-        preview_mall_allocation(client, surface, item, reference_point)
+        preview_mall_allocation(
+            client, surface, item, reference_point,
+            vertical_ok=_seed_vertical_mall_slot_ok(client, surface, force, item),
+        )
         if reference_point is not None else None
     )
     project_spec = getattr(plan, "spec", None) or LINE_RECIPES.get(item, {})
@@ -8248,6 +8281,7 @@ def _build_assembled_stage(
             machine_name=spec["machine"],
             demand_slot=getattr(plan, "demand_slot", False),
             quad_mall=quad_mall,
+            vertical_ok=_seed_vertical_mall_slot_ok(client, surface, force, item),
         )
         if item in PERSISTENT_INTERMEDIATES:
             MANAGED_INTERMEDIATE_SOURCES[item] = output
@@ -9056,6 +9090,7 @@ def _bootstrap_demand_cell_affordable(
         preview_mall_allocation(
             client, surface, item, reference_point,
             demand_slot=independent_mall,
+            vertical_ok=_seed_vertical_mall_slot_ok(client, surface, force, item),
         )
     )
     if allocation is None:

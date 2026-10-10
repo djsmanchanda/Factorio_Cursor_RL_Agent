@@ -377,7 +377,15 @@ gated separately and is not changed by the release.
   persisted project names differ; a retry may not count its child packet
   reservations as foreign stock and demand a duplicate bill.
   Before advanced-circuit production, the compact mall retains an eight-assembler
-  opening bank shared by anchors and rotating demand. Once every plate's initial
+  opening bank shared by anchors and rotating demand. Once both seed pairs hold
+  left and right machines, slots five to eight go north/south of those pairs
+  before a third left/right cell opens. Each such slot is one machine plus two
+  long-handed transfers that reuse the pair's requester (a new labelled
+  section) and its top or bottom provider, so it needs no new chest. It needs
+  long-handed stock for its transfers or a running long-handed line; without
+  either, and for the long-handed seed itself, the slot falls back to a left/right
+  cell. The dense quad halves open on the third module only after the seed
+  north/south slots are taken. Once every plate's initial
   six-drill mine is verified and there is demand, the reserved dense expansion
   bank may join it, growing the shared ceiling to twelve without the six
   requesters six ordinary pairs would need. Growth is demand-driven: a measured

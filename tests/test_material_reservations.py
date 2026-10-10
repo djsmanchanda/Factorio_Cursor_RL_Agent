@@ -467,7 +467,7 @@ def test_missing_self_seed_starts_a_borrowed_mall_producer(
     )
     monkeypatch.setattr(
         builder, "preview_mall_allocation",
-        lambda *_a: ((35, 31), "left"),
+        lambda *_a, **_k: ((35, 31), "left"),
     )
     plan = SimpleNamespace(
         mall_storage_limit=2, fill_provider=False, mall_request_multiplier=None,

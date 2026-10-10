@@ -18,7 +18,7 @@ from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.quad_mall_layout import (
     DENSE_MALL_MODULE_OFFSETS,
     QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
-    generate_quad_mall_layout,
+    generate_quad_mall_layout, generate_seed_vertical_slot,
 )
 from planners.recipe_data import LINE_RECIPES
 from planners.stock_gating import stock_gate
@@ -128,6 +128,18 @@ def compact_mall_project_bill(
 ) -> dict[str, int]:
     """Incremental cell-half bill plus one craft of bootstrap ingredients."""
     spec = LINE_RECIPES[recipe]
+    if side in VERTICAL_SIDES:
+        # The seed cell's requester, provider and substation already exist.
+        preview = generate_seed_vertical_slot(
+            recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
+            (0.0, 0.0), side, craft_time=spec["craft_time"],
+            stock_gate_target=stock_gate_target,
+            request_multiplier_override=request_multiplier_override,
+        )
+        bill = Counter(plan_material_bill(preview))
+        for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
+            bill[ingredient] += math.ceil(amount)
+        return dict(sorted(bill.items()))
     preview = generate_paired_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
         (0, 0), side, stock_target=stock_target,
@@ -233,10 +245,13 @@ def quad_mall_slot_count(
 ) -> int:
     """Committed assembler count across the reserved 4 -> 12-slot bank."""
     total = 0
-    for center in dense_mall_module_centers(reference_point):
+    for index, center in enumerate(dense_mall_module_centers(reference_point)):
         top, bottom, requester = _quad_mall_state(client, surface, center)
+        # A seed module's west/east machines are its paired cell's left/right
+        # slots, already counted there; only its north/south machine is new.
+        per_half = 1 if index < SEED_CELL_COUNT else 2
         if requester in {"requester-chest", "entity-ghost"}:
-            total += (2 if top != "-" else 0) + (2 if bottom != "-" else 0)
+            total += (per_half if top != "-" else 0) + (per_half if bottom != "-" else 0)
     return total
 
 
@@ -324,11 +339,12 @@ def mall_entity_positions(
 
 def preview_mall_allocation(
     client: RconClient, surface: str, recipe: str, reference_point: Point, *,
-    demand_slot: bool = False,
+    demand_slot: bool = False, vertical_ok: bool = False,
 ) -> tuple[tuple[int, int], str] | None:
     """Expose the allocator's next stable cell half for exact bill pricing."""
     return _choose_slot(
         client, surface, recipe, reference_point, demand_slot=demand_slot,
+        vertical_ok=vertical_ok,
     )
 
 
@@ -865,6 +881,67 @@ def _district_state(
     return state
 
 
+VERTICAL_SIDES = ("north", "south")
+SEED_CELL_COUNT = 2  # the two opening paired cells are the first dense module centres
+
+
+def seed_vertical_center(origin: tuple[int, int]) -> Point:
+    """The paired cell's central requester, which a vertical slot shares."""
+    return (origin[0] + 4.5, origin[1] + 1.5)
+
+
+def _vertical_slot_position(origin: tuple[int, int], side: str) -> Point:
+    center = seed_vertical_center(origin)
+    offset = QUAD_MALL_MACHINE_OFFSETS[side]
+    return (center[0] + offset[0], center[1] + offset[1])
+
+
+def _vertical_side_clear(
+    client: RconClient, surface: str, origin: tuple[int, int], side: str,
+) -> bool:
+    x, y = _vertical_slot_position(origin, side)
+    center = seed_vertical_center(origin)
+    sign = -1.0 if side == "north" else 1.0
+    transfers = [(center[0], center[1] + sign * 2.0), (center[0], center[1] + sign * 3.0)]
+    machine_min, machine_max = (x - 1.5, y - 1.5), (x + 1.5, y + 1.5)
+    return (
+        live_base.area_clear(client, surface, machine_min, machine_max)
+        and all(live_base.entity_at(client, surface, point) is None for point in transfers)
+        and not resource_patches.box_has_reserved_patch(client, surface, machine_min, machine_max)
+    )
+
+
+def _open_seed_vertical_slot(
+    client: RconClient, surface: str, recipe: str | None, reference_point: Point,
+    states: Mapping[tuple[int, int], tuple[str, str, str]] | None = None,
+) -> tuple[tuple[int, int], str] | None:
+    """The first free north/south slot on a complete seed pair.
+
+    North shares the top provider with the left machine, south the bottom
+    provider with the right one, so an incompatible output pairing is skipped.
+    """
+    origins = _cell_origins(reference_point)[:SEED_CELL_COUNT]
+    states = states if states is not None else _district_state(client, surface, origins)
+    for origin in origins:
+        left, right, requester = states.get(origin, ("-", "-", "-"))
+        if requester != "requester-chest" or left == "-" or right == "-":
+            continue
+        top, bottom, _ = _quad_mall_state(client, surface, seed_vertical_center(origin))
+        for side, occupied, shared in (("north", top, left), ("south", bottom, right)):
+            if occupied != "-" or (recipe is not None and _incompatible_pair(shared, recipe)):
+                continue
+            if _vertical_side_clear(client, surface, origin, side):
+                return origin, side
+    return None
+
+
+def seed_vertical_slots_open(
+    client: RconClient, surface: str, reference_point: Point,
+) -> bool:
+    """Whether a seed pair still has a free, buildable north/south slot."""
+    return _open_seed_vertical_slot(client, surface, None, reference_point) is not None
+
+
 def _side_clear(
     client: RconClient, surface: str, origin: tuple[int, int], side: str,
 ) -> bool:
@@ -886,7 +963,7 @@ def _side_clear(
 
 def _choose_slot(
     client: RconClient, surface: str, recipe: str, reference_point: Point, *,
-    demand_slot: bool = False,
+    demand_slot: bool = False, vertical_ok: bool = False,
 ) -> tuple[tuple[int, int], str] | None:
     """Pick a cell half for `recipe`.
 
@@ -929,6 +1006,11 @@ def _choose_slot(
             empty_origins.append(origin)
     if preferred_open or related_open or other_open:
         return (preferred_open or related_open or other_open)[0]
+    if vertical_ok and not demand_slot:
+        # Reuse a seed pair's requester and providers before opening a new cell.
+        vertical = _open_seed_vertical_slot(client, surface, recipe, reference_point, states)
+        if vertical is not None:
+            return vertical
     empty_origins = _rank_empty_origins(
         empty_origins,
         [origin for origin in origins if states[origin][2] != "-"],
@@ -1095,6 +1177,7 @@ def build_compact_mall_stage(
     machine_name: str | None = None,
     demand_slot: bool = False,
     quad_mall: bool = False,
+    vertical_ok: bool = False,
 ) -> Point:
     """Fill one slot in the centralized dense mall, leaving its pair assignable."""
     if quad_mall:
@@ -1119,10 +1202,18 @@ def build_compact_mall_stage(
         )
     allocation = _choose_slot(
         client, surface, recipe, reference_point, demand_slot=demand_slot,
+        vertical_ok=vertical_ok,
     )
     if allocation is None:
         raise StuckError(f"No assignable slot remains in the compact parts mall for {recipe}")
     origin, side = allocation
+    if side in VERTICAL_SIDES:
+        return _build_seed_vertical_slot(
+            client, bridge, surface, force, recipe, ingredient_sources, reference_point,
+            bring_stage_up, emit, origin, side, stock_gate_target=stock_gate_target,
+            request_multiplier_override=request_multiplier_override,
+            machine_name=machine_name,
+        )
     plan = generate_paired_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
         stock_target=stock_target, product_amount=spec.get("product_amount", 1),
@@ -1202,6 +1293,46 @@ def build_compact_mall_stage(
         origin, stage_area, substation, [machine], emit,
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
         reserved_tiles=reserved_tiles,
+    )
+    _configure_built_mall_recipes(
+        client, bridge, surface, force, recipe,
+        machine_name or spec["machine"], [machine], stock_gate_target, emit,
+    )
+    return provider
+
+
+def _build_seed_vertical_slot(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    recipe: str, ingredient_sources: Mapping[str, Point], reference_point: Point,
+    bring_stage_up: Callable, emit: Callable[[str], None],
+    origin: tuple[int, int], side: str, *, stock_gate_target: int | None = None,
+    request_multiplier_override: int | None = None, machine_name: str | None = None,
+) -> Point:
+    """Add one north/south machine to a seed pair, reusing its requester and provider."""
+    spec = LINE_RECIPES[recipe]
+    center = seed_vertical_center(origin)
+    requester = {"position": {"x": center[0], "y": center[1]}}
+    _clear_stale_side_requests(client, surface, requester, recipe, side)
+    plan = generate_seed_vertical_slot(
+        recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
+        center, side, craft_time=spec["craft_time"], set_recipe=False,
+        stock_gate_target=stock_gate_target,
+        request_multiplier_override=request_multiplier_override,
+        clear_logistic_groups=requester.get("clear_logistic_groups"),
+    )
+    plan["surface"], plan["force"] = surface, force
+    emit(f"compact parts mall for {recipe}: assigning {side} slot of seed cell {origin}, "
+         "reusing its requester and provider")
+    assert_mall_cell_footprint_free(client, surface, plan, recipe, origin, side)
+    _submit(client, bridge, surface, plan, f"seed_vertical_mall_{recipe}_{side}", emit)
+    machine = _vertical_slot_position(origin, side)
+    provider = (center[0], center[1] + (-1.0 if side == "north" else 1.0))
+    bring_stage_up(
+        client, bridge, surface, force, f"compact mall for {recipe}",
+        origin, ((center[0] - 7, center[1] - 7), (center[0] + 7, center[1] + 7)),
+        reserved_substation_position(reference_point, origin), [machine], emit,
+        logistic_chest_positions=[*ingredient_sources.values(), center, provider],
+        reserved_tiles=planned_footprint_tiles(plan) | mall_grid_reserved_tiles(reference_point),
     )
     _configure_built_mall_recipes(
         client, bridge, surface, force, recipe,

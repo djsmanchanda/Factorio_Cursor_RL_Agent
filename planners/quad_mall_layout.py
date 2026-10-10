@@ -38,6 +38,19 @@ def _position(center: tuple[float, float], offset: tuple[float, float]) -> dict:
     return {"x": center[0] + offset[0], "y": center[1] + offset[1]}
 
 
+def _requester_section(
+    recipe: str, label: str, ingredients: list[str], amounts: list[float],
+    craft_time: float, request_multiplier_override: int | None,
+) -> dict:
+    return {
+        "group": recipe_group_name(recipe, label),
+        "requests": recipe_group_requests(ingredients, amounts),
+        "multiplier": request_multiplier_override or max(
+            1, round(15.0 * (0.5 / craft_time))
+        ),
+    }
+
+
 def generate_quad_mall_layout(
     recipe: str, machine: str, ingredients: list[str], amounts: list[float],
     center: tuple[float, float], group: str, *, stock_target: int = 1,
@@ -58,13 +71,9 @@ def generate_quad_mall_layout(
         raise ValueError("Quad mall group must be 'top' or 'bottom'")
     if support_inserter_type not in (None, "long-handed-inserter"):
         raise ValueError("Quad vertical slots require long-handed inserters")
-    section = {
-        "group": recipe_group_name(recipe, group),
-        "requests": recipe_group_requests(ingredients, amounts),
-        "multiplier": request_multiplier_override or max(
-            1, round(15.0 * (0.5 / craft_time))
-        ),
-    }
+    section = _requester_section(
+        recipe, group, ingredients, amounts, craft_time, request_multiplier_override,
+    )
     actions: list[dict] = []
     if group == "top" and include_substation:
         actions.append({
@@ -124,3 +133,47 @@ def generate_quad_mall_layout(
                  "direction": "west" if side == "west" else "east"},
             ])
     return {"phases": [{"name": f"quad_mall_{recipe}_{group}", "actions": actions}]}
+
+
+def generate_seed_vertical_slot(
+    recipe: str, machine: str, ingredients: list[str], amounts: list[float],
+    center: tuple[float, float], side: str, *, craft_time: float,
+    stock_gate_target: int | None = None, set_recipe: bool = True,
+    request_multiplier_override: int | None = None,
+    clear_logistic_groups: list[str] | None = None,
+) -> dict:
+    """One north or south machine on an existing paired seed cell.
+
+    The cell's centre requester gains this recipe's labelled section through
+    ``configure_entity`` and its existing top (north) or bottom (south)
+    provider takes the output, so the slot places no chest, requester or
+    substation: only the machine and its two long-handed transfers.
+    """
+    if side not in {"north", "south"}:
+        raise ValueError("Seed vertical slot side must be 'north' or 'south'")
+    group = "top" if side == "north" else "bottom"
+    template = generate_quad_mall_layout(
+        recipe, machine, ingredients, amounts, center, group,
+        craft_time=craft_time, stock_gate_target=stock_gate_target,
+        set_recipe=set_recipe, request_multiplier_override=request_multiplier_override,
+        support_inserter_type="long-handed-inserter", include_substation=True,
+    )["phases"][0]["actions"]
+    machine_position = _position(center, QUAD_MALL_MACHINE_OFFSETS[side])
+    transfer_y = {-2.0, -3.0} if side == "north" else {2.0, 3.0}
+    configure = {
+        "action_type": "configure_entity", "entity": "requester-chest",
+        "position": _position(center, (0.0, 0.0)),
+        "logistic_sections": [_requester_section(
+            recipe, side, ingredients, amounts, craft_time, request_multiplier_override,
+        )],
+    }
+    if clear_logistic_groups:
+        configure["clear_logistic_groups"] = list(clear_logistic_groups)
+    kept = [
+        action for action in template
+        if action["position"] == machine_position
+        or (action["entity"] == "long-handed-inserter"
+            and action["position"]["x"] == center[0]
+            and action["position"]["y"] - center[1] in transfer_y)
+    ]
+    return {"phases": [{"name": f"seed_vertical_mall_{recipe}_{side}", "actions": [configure, *kept]}]}
