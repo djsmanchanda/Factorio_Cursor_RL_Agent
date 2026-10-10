@@ -59,6 +59,10 @@ BORROW_CODES = {"temporary_mall_batch", "rationed_mall_borrow_deferred"}
 def in_progress(code: str | None) -> bool:
     return bool(code) and (code.endswith("_wait") or code in IN_PROGRESS)
 WAIT_TICKS = (300, 1800)
+# Bootstrap-district lifecycle states where a replacement plan has already claimed the plate's
+# immutable pioneer identity: a fresh starter recomputes a different plan the tooling rejects as a
+# lifecycle conflict (episode 20261010T102842Z-68b348c2). The district is reconciled, not re-opened.
+ACTIVE_DISTRICT_STATES = frozenset({"provisioning", "validating", "retiring"})
 # Rules for operations: the general mission rules plus mission.ops-*, quoting the same strategy doc
 # (the full catalog's geometry rules -- power variants, line sites, quad slots -- do not apply here).
 OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
@@ -96,9 +100,8 @@ def pending_retirements(results: list[dict], districts: Mapping | None = None) -
     for plate, state in (districts or {}).items():
         if plate in PLATES:
             pending.discard(plate)
-            if state.get("replacement_submitted") is True and state.get("lifecycle_state") in {
-                "provisioning", "validating", "retiring",
-            }:
+            if (state.get("replacement_submitted") is True
+                    and state.get("lifecycle_state") in ACTIVE_DISTRICT_STATES):
                 pending.add(plate)
     return pending
 
@@ -549,11 +552,17 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # the starters before any mine-to-refinery foundation).
     starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
     for plate in PLATES:
+        district_state = ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state")
         # New capacity follows demand; finishing owned work survives rate/phase changes.
         legal = ()
         if plate in unmet or PLATES[plate] in unmet:
             legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
                      "foundation": ("extend",)}[stages.get(plate, "none")]
+        # A district whose replacement is already reserved/validating/retiring has claimed this
+        # plate's pioneer identity; a fresh starter would recompute a plan the tooling rejects as
+        # a lifecycle conflict. Skip it and let the policy reconcile or serve other work instead.
+        if district_state in ACTIVE_DISTRICT_STATES:
+            legal = tuple(operation for operation in legal if operation != "starter")
         if plate in pending:
             legal += ("retire_starter",)
         for operation in legal:
@@ -565,7 +574,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
                              "goal_need": plate in goal or lifecycle_pending,
                              "lifecycle_pending": lifecycle_pending,
-                             "lifecycle_state": ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state"),
+                             "lifecycle_state": district_state,
                              # The tooling said it waits on bots or coverage: retry after a wait, not at once.
                              "waiting": in_progress(codes.get((operation, plate))),
                              "unchanged_failure": (operation, plate) in stuck}})

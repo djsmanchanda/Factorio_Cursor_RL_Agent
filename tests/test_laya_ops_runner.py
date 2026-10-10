@@ -1040,3 +1040,19 @@ def test_goal_produce_skips_raw_resource_dependencies_but_keeps_manufactured_tar
     c4_ids = {o["option_id"] for o in
               compile_options(compile_status(facts, {"plastic-bar": 0.5}), [], recipes=recipes)["options"]}
     assert "op.produce.plastic-bar" in c4_ids
+
+
+def test_fresh_starter_is_not_offered_while_a_district_has_reserved_a_replacement():
+    # episode-20261010T102842Z-68b348c2: DECISION 0's produce-lab prerequisite recorded a copper
+    # managed refinery as the copper-plate district's pioneer (lifecycle "provisioning"). A later
+    # direct starter recomputed a different pioneer; the tooling rejected it as
+    # bootstrap_lifecycle_conflict (bug-classified) and the goal run ended. The district is
+    # reconciled, not re-opened, so no fresh starter may be offered for it.
+    claimed = {"copper-plate": {"lifecycle_state": "provisioning", "replacement_submitted": False}}
+    ids = {o["option_id"] for o in compile_options(BOARD, [], bootstrap_districts=claimed)["options"]}
+    assert "op.starter.copper-plate" not in ids
+    assert "op.starter.iron-plate" in ids  # no district for iron: its starter is still legal
+    # A district still in "pioneer" has not reserved a replacement: a same-plan starter retry is legal.
+    pioneer = {"copper-plate": {"lifecycle_state": "pioneer", "replacement_submitted": False}}
+    assert "op.starter.copper-plate" in {
+        o["option_id"] for o in compile_options(BOARD, [], bootstrap_districts=pioneer)["options"]}
