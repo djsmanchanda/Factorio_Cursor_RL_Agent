@@ -490,6 +490,28 @@ class LayaRuntime:
         state_path.write_text(json.dumps(record, indent=2) + "\n")
         return record
 
+    def goal_completed(self, config, episode: str) -> bool:
+        """Require the owned terminal index and verified requested research, not proxy markers."""
+        index = Path(config.world_root).parent / "laya-runs.jsonl"
+        try:
+            with index.open(encoding="utf-8") as stream:
+                for line in stream:
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    if record.get("run_id") != episode or Path(record.get("root", "")).resolve() != Path(config.world_root).resolve():
+                        continue
+                    summary = record.get("summary") or {}
+                    goal = summary.get("goal") or {}
+                    if ((record.get("window") or {}).get("research_goal") == config.technology
+                            and summary.get("stop") == "goal_completed"
+                            and goal.get("verified") is True and goal.get("target_completed") is True):
+                        return True
+        except OSError:
+            pass
+        return False
+
     def latest_run(self, config) -> tuple[bool, str]:
         return latest_run_from_log(self.run_log_path(config))
 

@@ -45,7 +45,7 @@ def goal_evidence(status: Mapping | None) -> dict:
     technology = technology if isinstance(technology, Mapping) else {}
     return {
         "version": GOAL_VERSION,
-        "technology": technology.get("canonical_name") or technology.get("requested_name")
+        "technology": technology.get("requested_name") or technology.get("canonical_name")
         or status.get("current_target"),
         "state": technology.get("state"),
         "target_completed": technology.get("target_completed") is True,

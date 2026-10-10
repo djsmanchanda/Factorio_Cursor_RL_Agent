@@ -72,3 +72,18 @@ def test_times_are_local_and_run_length_is_readable(tmp_path, monkeypatch):
     assert list(csv.DictReader((tmp_path / "l.csv").open()))[0]["run_length"] == "10m 00s"
     monkeypatch.delenv("TZ")
     time.tzset()
+
+
+def test_completed_research_goal_records_success_only_with_verified_evidence(tmp_path):
+    from training.laya_goal import goal_evidence
+    evidence=goal_evidence({'technology':{'requested_name':'mining-productivity-4',
+        'canonical_name':'mining-productivity-3','requested_level':4,'current_level':5,
+        'target_completed':True}})
+    assert evidence['technology']=='mining-productivity-4'
+    index={'run_id':'goal','root':str(tmp_path),'window':{'research_goal':'mining-productivity-4'},
+           'summary':{'stop':'goal_completed','goal':evidence,'accepted':['C0','C6']}}
+    entry=run_ledger.laya_entry(index)
+    assert entry['outcome']=='completed' and entry['failure_cause'] is None
+    assert entry['target']=='mining-productivity-4' and entry['research_goal']['verified'] is True
+    index['summary']['goal']['verified']=False
+    assert run_ledger.laya_entry(index)['outcome']=='error'

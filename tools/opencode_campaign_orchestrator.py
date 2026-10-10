@@ -1102,6 +1102,9 @@ def _run_campaign(config: Config) -> int:
         if backend.name == "laya":
             backend.stop(config)
             _COMMAND_DEADLINE = deadline
+            if helper.get("status") == "complete" and backend.goal_completed(config, state.active_episode_id):
+                return _finish_cycle(config, state, "goal-completed", {}, run_text=run_text,
+                                     terminal_phase="SUCCESS", reason=f"verified research goal {config.technology} completed")
             if time.time() >= deadline:
                 _finish_cycle(config, state, "deadline-after-natural-run", {}, run_text=run_text)
                 return _stop_campaign(config, state, "DEADLINE_REACHED", reason="natural episode and terminal evidence finished after deadline")

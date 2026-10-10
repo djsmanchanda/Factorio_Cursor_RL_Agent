@@ -199,6 +199,9 @@ def laya_entry(index: dict) -> dict:
     stop = summary.get("stop")
     outcome = {"mission_complete": "completed", "stopped": "stopped", "decision_budget": "budget",
                "safe_stop_after_repeated_failures": "safe_stop", "runner_error": "error"}.get(stop, stop)
+    goal = summary.get("goal") or {}
+    if stop == "goal_completed":
+        outcome = "completed" if goal.get("verified") is True else "error"
     last = done[-1] if done else {}
     bottleneck = " | ".join((last.get("board") or {}).get("bottleneck") or []) or None
     # The run's own log is exact; index end times are a fallback (backfilled ones may be guesses).
@@ -210,11 +213,14 @@ def laya_entry(index: dict) -> dict:
             duration = None
     ended = (started + timedelta(seconds=duration)).isoformat() if started and duration is not None else None
     return {"system": "laya", "run_id": index["run_id"], "started": started_text, "ended": ended,
-            "duration_s": duration, "commit": index.get("commit", "unknown"), "target": "mod-playground-mining-productivity-4",
+            "duration_s": duration, "commit": index.get("commit", "unknown"),
+            "target": (index.get("window") or {}).get("research_goal") or "mod-playground-mining-productivity-4",
+            "research_goal": goal,
             "highest_milestone": milestones[-1]["id"] if milestones else None, "milestones": milestones,
             "milestone_source": "measured_phases", "outcome": outcome,
             "failure_code": failures[-1].get("error_type") if failures and outcome == "safe_stop" else None,
-            "failure_cause": (failures[-1].get("error") if failures and outcome == "safe_stop"
+            "failure_cause": (None if outcome == "completed" else
+                              failures[-1].get("error") if failures and outcome == "safe_stop"
                               else f"run {outcome}; phase {last.get('phase')} unmet" if last else outcome),
             "limiting_factor": bottleneck, "decisions": len(done),
             "log_file": str(root / "logs/laya-runner.log"), "root": str(root),

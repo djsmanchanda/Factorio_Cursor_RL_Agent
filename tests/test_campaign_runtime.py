@@ -586,3 +586,29 @@ def test_prior_world_roots_become_explicit_helper_comparison_records(tmp_path):
     assert records == [{**row, 'kind':'laya'}]
     # Full exploratory experiment records are retained rather than filtered out.
     assert records[0]['experiment'] == 'old-live-pair'
+
+
+def test_verified_goal_stops_campaign_without_speculative_fixer(tmp_path, monkeypatch):
+    harness=CycleHarness(tmp_path)
+    harness.install(monkeypatch)
+    monkeypatch.setattr(runtime.LayaRuntime,'goal_completed',lambda *args:True,raising=False)
+    config=laya_config(tmp_path,state_root=harness.state,source_save=harness.source,
+                       state_file=harness.state/'controller.json',observations=harness.state/'journal.md',
+                       opencode_log_dir=harness.state/'agents',technology='mining-productivity-4',max_cycles=1,
+                       game_port=34555,rcon_port=27555,helper_wait_seconds=0)
+    assert campaign.run_campaign(config)==0
+    assert not harness.commits and not harness.prompts
+    assert campaign._load_state(config.state_file).phase=='SUCCESS'
+
+
+def test_goal_completion_requires_owned_indexed_verified_research(tmp_path):
+    config=laya_config(tmp_path,technology='mining-productivity-4')
+    config.world_root.parent.mkdir(parents=True,exist_ok=True)
+    index=config.world_root.parent/'laya-runs.jsonl'
+    row={'run_id':'run-1','root':str(config.world_root),'window':{'research_goal':'mining-productivity-4'},
+         'summary':{'stop':'goal_completed','goal':{'verified':True,'target_completed':True}}}
+    index.write_text(json.dumps(row)+'\n')
+    assert runtime.LayaRuntime().goal_completed(config,'run-1') is True
+    row['summary']['goal']['verified']=False
+    index.write_text(json.dumps(row)+'\n')
+    assert runtime.LayaRuntime().goal_completed(config,'run-1') is False
