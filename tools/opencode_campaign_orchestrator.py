@@ -173,6 +173,10 @@ class State:
     active_code_hash: str | None = None
     lifecycle_intent: dict | None = None
     episode_runtime: dict | None = None
+    # Durable observer-failure control: after terminal evidence fails, one
+    # bounded retry is allowed at a revision; a still-failing same revision
+    # records {"terminal": True} and no new episode may start at it.
+    observer_failure: dict | None = None
 
 
 def _now() -> str:
@@ -209,6 +213,7 @@ def _load_state(path: Path) -> State:
         pre_cycle_dirty=[str(p) for p in payload.get("pre_cycle_dirty", []) if isinstance(p, str)],
         pending_fix=payload.get("pending_fix"),
         active_code_hash=payload.get("active_code_hash"),
+        observer_failure=payload.get("observer_failure"),
         completed_cycles=int(payload.get("completed_cycles", 0)),
         active_cycle=int(payload["active_cycle"]) if isinstance(payload.get("active_cycle"), int) else None,
         last_checkpoint=int(payload.get("last_checkpoint", 0)),
@@ -608,6 +613,50 @@ def _late_helper(config: Config, state: State, episode: str) -> dict:
     return helper
 
 
+def _frozen_revision(config: Config, state: State) -> str:
+    """Frozen code revision for the active episode; HEAD when no freeze exists.
+
+    The same commit string is returned at failure time (freeze.json) and after a
+    restart (HEAD) so an unchanged revision is recognised as unchanged.
+    """
+    experiment = config.episode_id or (state.episode_runtime or {}).get("experiment")
+    if experiment:
+        manifest_path = config.state_root / "episodes" / str(experiment) / "freeze.json"
+        try:
+            revision = json.loads(manifest_path.read_text(encoding="utf-8")).get("revision")
+        except (OSError, ValueError):
+            revision = None
+        if revision:
+            return str(revision)
+    try:
+        return _run(["git", "rev-parse", "HEAD"], timeout=120).stdout.strip() or "unknown"
+    except (OSError, subprocess.SubprocessError, TimeoutError):
+        return "unknown"
+
+
+def _retry_terminal_evidence(config: Config, episode: str, previous: dict) -> dict:
+    """One bounded re-collection of terminal evidence for the SAME episode.
+
+    The runtime observer is never re-invoked and no new episode is started; this
+    only waits once more for a late report or completion marker. It returns a
+    helper-shaped record so the caller can either continue or record a durable
+    terminal failure.
+    """
+    backend = _backend(config)
+    deadline = time.time() + max(0, config.helper_wait_seconds)
+    while True:
+        path, announced = backend.helper_finding(config, episode)
+        if announced and path:
+            return {"episode": episode, "status": "complete", "path": str(path),
+                    "reason": "late observer evidence completed on the bounded retry"}
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return {"episode": episode, "status": "failed", "path": str(path) if path else None,
+                    "reason": "observer evidence still incomplete after one bounded retry "
+                              f"(first: {previous.get('reason')})"}
+        time.sleep(min(5, max(1, remaining)))
+
+
 def _milestones(run_text: str) -> dict:
     milestones = {}
     patterns = {"iron_swap": "BOOTSTRAP SWAP: iron-plate", "copper_swap": "BOOTSTRAP SWAP: copper-plate",
@@ -825,6 +874,18 @@ def _run_campaign(config: Config) -> int:
             return _stop_campaign(config, state, "DEADLINE_REACHED",
                                   reason="campaign deadline reached",
                                   journal="## Campaign stop\n\nWall-clock limit reached; no new episode was started.\n")
+        if state.observer_failure and state.observer_failure.get("terminal") and not config.dry_run:
+            revision = _frozen_revision(config, state)
+            if state.observer_failure.get("revision") == revision:
+                return _stop_campaign(config, state, "HARNESS_FAILURE",
+                                      reason="deliberate harness failure; no new episode at an unchanged revision",
+                                      journal="## Campaign stop\n\nA terminal observer failure was recorded at this "
+                                              "revision; no new episode was started. Commit a change to resume.\n")
+            _append(config.observations,
+                    f"Clearing terminal observer failure: revision changed from "
+                    f"{state.observer_failure.get('revision')} to {revision}.\n")
+            state.observer_failure = None
+            _save_state(config.state_file, state)
         if base_config.plastic_reliability:
             reliability = reliability_state.load(reliability_path)
             baseline = reliability.get("baseline")
@@ -1043,8 +1104,37 @@ def _run_campaign(config: Config) -> int:
                 _finish_cycle(config, state, "deadline-after-natural-run", {}, run_text=run_text)
                 return _stop_campaign(config, state, "DEADLINE_REACHED", reason="natural episode and terminal evidence finished after deadline")
             if helper.get("status") != "complete":
-                _finish_cycle(config, state, "observer-failed", {}, run_text=run_text)
-                continue
+                episode = state.active_episode_id
+                revision = _frozen_revision(config, state)
+                prior = state.observer_failure or {}
+                retried = prior.get("revision") == revision and int(prior.get("attempts", 0)) >= 1
+                if not retried:
+                    # One bounded retry of terminal evidence for the SAME episode;
+                    # never a fresh episode. Records the attempt before waiting so
+                    # a crash cannot silently allow a second retry.
+                    state.observer_failure = {"revision": revision, "episode": episode,
+                                              "attempts": 1, "terminal": False}
+                    _save_state(config.state_file, state)
+                    _append(config.observations,
+                            f"Observer evidence incomplete for {episode} ({helper.get('reason')}); "
+                            f"one bounded terminal evidence retry at revision {revision}.\n")
+                    retry_helper = _retry_terminal_evidence(config, episode, helper)
+                    if retry_helper.get("status") == "complete":
+                        helper = retry_helper
+                        state.helper = retry_helper
+                        state.observer_failure = None
+                        _save_state(config.state_file, state)
+                if helper.get("status") != "complete":
+                    _finish_cycle(config, state, "observer-failed", {}, run_text=run_text)
+                    state.observer_failure = {"revision": revision, "episode": episode,
+                                              "attempts": int(prior.get("attempts", 0)) or 1,
+                                              "terminal": True}
+                    _save_state(config.state_file, state)
+                    return _stop_campaign(config, state, "HARNESS_FAILURE",
+                                          reason=f"terminal observer failure unchanged at revision {revision}: "
+                                                 f"{helper.get('reason')}",
+                                          journal="## Campaign stop\n\nTerminal observer failure; no new episode "
+                                                  "was started at this revision.\n")
             _ensure_primary(config, state, cycle, sequence)
             sequence += 1
         sequence += 1

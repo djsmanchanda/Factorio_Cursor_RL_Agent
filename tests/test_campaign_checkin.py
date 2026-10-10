@@ -97,6 +97,7 @@ def test_counts_new_run_findings_heartbeat_and_commit_delta(setup):
     (episode / "agents/muse").mkdir(parents=True)
     (episode / "freeze.json").write_text('{"commit": "abc"}')
     (episode / "agents/muse/findings.md").write_text("read-only evidence")
+    (episode / "agents/muse/helper-state.json").write_text(json.dumps({"status":"complete"}))
     (episode / "heartbeat.json").write_text('{"phase":"running"}')
     runner.commits = 9
     result = campaign_checkin.checkin(settings, "laya-loop-example.service", run_dir, queue, worktree,
@@ -107,7 +108,7 @@ def test_counts_new_run_findings_heartbeat_and_commit_delta(setup):
         "runs/episode-2/heartbeat.json",
     }
     assert "1 run dirs (+1: runs/episode-2)" in result["note"]
-    assert "findings=1 (1 new/updated)" in result["note"]
+    assert "findings=1 (1 new/updated; completed=1 (+1), placeholder=0)" in result["note"]
     assert "heartbeats=1 (1 new/updated)" in result["note"]
     assert "commits=9 (+1)" in result["note"]
     assert (run_dir / "progress-notes.md").read_text().count("## ") == 2
@@ -125,3 +126,60 @@ def test_refuses_non_laya_runtime_or_unowned_unit(setup, unit, settings_update):
     with pytest.raises(ValueError):
         campaign_checkin.checkin(settings, unit, run_dir, queue, worktree,
                                  runner=FakeRunner(), now=lambda: 1000)
+
+
+def test_placeholder_findings_are_not_counted_as_completed(setup):
+    settings, run_dir, queue, worktree = setup
+    runner = FakeRunner(active=True, commits=8)
+    placeholder = run_dir / "runs/episode-1/agents/muse/findings.md"
+    placeholder.parent.mkdir(parents=True)
+    placeholder.write_text(
+        "<!-- Path: x | Purpose: Read-only Laya Helper findings for run. -->\n\n"
+        "# Laya Helper findings — run\n\n_Review in progress (started 2026-10-10T13:35:54+05:30)._\n")
+    substantive = run_dir / "runs/episode-2/agents/muse/findings.md"
+    substantive.parent.mkdir(parents=True)
+    substantive.write_text("# Findings\n\n## Root cause\nSplitter starvation at the loan gate.\n")
+    (substantive.parent/"helper-state.json").write_text(json.dumps({"status":"complete"}))
+    result = campaign_checkin.checkin(settings, "laya-loop-example.service", run_dir, queue, worktree,
+                                      runner=runner, now=lambda: 1000)
+    assert "findings=2 (2 new/updated; completed=1 (+1), placeholder=1)" in result["note"]
+
+
+def test_validated_stages_are_reported_separately_from_gameplay(setup):
+    settings, run_dir, queue, worktree = setup
+    runner = FakeRunner(active=True, commits=8)
+    loop = run_dir / "logs/campaign-loop/loop.jsonl"
+    loop.parent.mkdir(parents=True)
+    loop.write_text(json.dumps({
+        "campaign_id": "c", "cycle_id": 1, "outcome": "committed", "helper_status": "complete",
+        "fix_status": "committed", "verification_result": "passed", "commit": "cafe0001"}) + "\n")
+    (run_dir / "runs/episode-1/heartbeat.json").parent.mkdir(parents=True)
+    (run_dir / "runs/episode-1/heartbeat.json").write_text('{"phase":"running"}')
+    result = campaign_checkin.checkin(settings, "laya-loop-example.service", run_dir, queue, worktree,
+                                      runner=runner, now=lambda: 1000)
+    assert "Gameplay activity (actor continuity, not validated stages):" in result["note"]
+    assert ("last_cycle[outcome=committed; observer=complete; fixer=committed; "
+            "tests/gate=passed; commit=cafe0001]") in result["note"]
+
+
+def test_deliberate_harness_failure_is_not_auto_resumed(setup):
+    settings, run_dir, queue, worktree = setup
+    (run_dir / "progress.json").write_text('{"phase": "HARNESS_FAILURE"}')
+    runner = FakeRunner(active=False)
+    result = campaign_checkin.checkin(settings, "laya-loop-example.service", run_dir, queue, worktree,
+                                      runner=runner, now=lambda: 1000)
+    assert not any(cmd[:3] == ["systemctl", "--user", "start"] for cmd in runner.commands)
+    assert result["resumed"] is False and result["active"] is False
+    assert result["resume_suppressed"] is True
+    assert "auto-resume suppressed (deliberate terminal failure)" in result["note"]
+
+
+def test_substantive_draft_with_failed_machine_state_is_not_completed(tmp_path):
+    report=tmp_path/'observer/reports/run/findings.md'
+    report.parent.mkdir(parents=True)
+    report.write_text('# Findings\n\nA substantive draft was produced but final verification failed.\n')
+    state=tmp_path/'observer/state.json'
+    state.write_text('{"status":"failed","path":null}')
+    assert campaign_checkin._findings_completed(report) is False
+    state.write_text(json.dumps({'status':'complete','path':str(report)}))
+    assert campaign_checkin._findings_completed(report) is True

@@ -17,6 +17,57 @@ MAX_JSON_BYTES = 1_000_000
 MAX_EVIDENCE_FILES = 2000
 EVIDENCE_NAMES = {"freeze.json", "findings.md", "heartbeat", "heartbeat.json",
                   "laya-runner.heartbeat", "laya-runner.heartbeat.json", "latest-status.json"}
+# A deliberate controller stop that must not be auto-resumed into a fresh retry
+# loop by a check-in timer.
+DELIBERATE_TERMINAL_PHASES = frozenset({"HARNESS_FAILURE"})
+_PLACEHOLDER_MARKERS = ("findings-not-updated", "review in progress", "live observation in progress")
+
+
+def _findings_completed(path: Path) -> bool:
+    """True only when a findings file carries substantive content, not a header/placeholder."""
+    state_path = path.parent / "helper-state.json"
+    for ancestor in path.parents:
+        if ancestor.name == "observer":
+            state_path = ancestor / "state.json"
+            break
+    state = _json(state_path)
+    declared_report = state.get("path") or state.get("report")
+    if state.get("status") != "complete" or (declared_report and Path(declared_report).resolve() != path.resolve()):
+        return False
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("<!--", "<!", "#")):
+            continue
+        lowered = stripped.lower()
+        if lowered.startswith("_") and lowered.endswith("_"):
+            continue
+        if any(marker in lowered for marker in _PLACEHOLDER_MARKERS):
+            continue
+        return True
+    return False
+
+
+def _last_cycle(run_dir: Path) -> dict:
+    """Newest durable loop record, read from a bounded tail; never the committed stage."""
+    path = run_dir / "logs" / "campaign-loop" / "loop.jsonl"
+    try:
+        with path.open("rb") as handle:
+            handle.seek(max(0, path.stat().st_size - 65536))
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            return record
+    return {}
 
 
 def _json(path: Path) -> dict:
@@ -114,12 +165,19 @@ def checkin(settings_path: Path, unit: str, run_dir: Path, queue_note: Path, wor
                               if prior_evidence.get(name) != data)
     new_runs = sorted(set(current_runs) - prior_runs)
 
+    controller = _json(run_dir / "controller.json")
+    progress = _json(run_dir / "progress.json")
+    status = _json(run_dir / "status.json")
+    phase = progress.get("phase", status.get("phase", controller.get("phase", "unknown")))
+    deliberate_stop = phase in DELIBERATE_TERMINAL_PHASES
+
     systemd = runner(["systemctl", "--user", "is-active", unit], timeout=20)
     active = systemd.returncode == 0 and systemd.stdout.strip() == "active"
     checked_at = now()
     restarted = False
     recovery_error = ""
-    if not active and checked_at < deadline:
+    resume_suppressed = not active and checked_at < deadline and deliberate_stop
+    if not active and checked_at < deadline and not deliberate_stop:
         started = runner(["systemctl", "--user", "start", unit], timeout=30)
         if started.returncode:
             recovery_error = f"start failed: {started.stderr[-800:].strip() or 'systemctl returned nonzero'}"
@@ -130,9 +188,6 @@ def checkin(settings_path: Path, unit: str, run_dir: Path, queue_note: Path, wor
             if not active:
                 recovery_error = (f"start returned success but unit remained {verified.stdout.strip() or 'inactive'}"
                                   + (f": {verified.stderr[-500:].strip()}" if verified.stderr.strip() else ""))
-    controller = _json(run_dir / "controller.json")
-    progress = _json(run_dir / "progress.json")
-    status = _json(run_dir / "status.json")
     memory, load = _memory_load(runner)
     git = _git_state(worktree, runner)
     old_commits = previous.get("commit_count")
@@ -140,19 +195,34 @@ def checkin(settings_path: Path, unit: str, run_dir: Path, queue_note: Path, wor
                      if isinstance(old_commits, int) and isinstance(git["commit_count"], int)
                      else None)
     stamp = datetime.fromtimestamp(checked_at, IST).strftime("%Y-%m-%d %H:%M:%S IST")
-    phase = progress.get("phase", status.get("phase", controller.get("phase", "unknown")))
     heartbeat_count = sum("heartbeat" in name for name in current_evidence)
-    finding_count = sum(name.endswith("findings.md") for name in current_evidence)
+    finding_names = [name for name in current_evidence if name.endswith("findings.md")]
+    finding_count = len(finding_names)
     changed_findings = sum(name.endswith("findings.md") for name in changed_evidence)
+    completed_findings = sum(1 for name in finding_names if _findings_completed(run_dir / name))
+    placeholder_findings = finding_count - completed_findings
+    changed_completed = sum(1 for name in changed_evidence
+                            if name.endswith("findings.md") and _findings_completed(run_dir / name))
     changed_heartbeats = sum("heartbeat" in name for name in changed_evidence)
+    # Gameplay activity is what proves the actor is alive; it is distinct from
+    # validated observer/fixer/tests/gate/commit stages below.
     evidence_progress = bool(changed_evidence or new_runs or (commits_added and commits_added > 0))
+    last = _last_cycle(run_dir)
+    tests_stage = last.get("verification_result") or last.get("tests") or "none"
+    stages = (f"outcome={last.get('outcome', 'none')}; observer={last.get('helper_status', 'unknown')}; "
+              f"fixer={last.get('fix_status', 'none')}; tests/gate={tests_stage}; "
+              f"commit={last.get('commit') or 'none'}")
     note = (f"## {stamp}\n"
             f"- Unit `{unit}`: {'active' if active else 'inactive'}; phase={phase}; "
-            f"deadline={'remaining' if checked_at < deadline else 'reached'}; resumed={str(restarted).lower()}.\n"
-            f"- Evidence: {len(current_runs)} run dirs (+{len(new_runs)}: {', '.join(new_runs[:6]) or 'none'}); "
-            f"findings={finding_count} ({changed_findings} new/updated); heartbeats={heartbeat_count} "
-            f"({changed_heartbeats} new/updated); {len(changed_evidence)} evidence files changed; "
-            f"commits={git['commit_count']} (+{commits_added if commits_added is not None else 'n/a'}); head={git['head']}; "
+            f"deadline={'remaining' if checked_at < deadline else 'reached'}; resumed={str(restarted).lower()}"
+            f"{'; auto-resume suppressed (deliberate terminal failure)' if resume_suppressed else ''}.\n"
+            f"- Gameplay activity (actor continuity, not validated stages): {len(current_runs)} run dirs "
+            f"(+{len(new_runs)}: {', '.join(new_runs[:6]) or 'none'}); heartbeats={heartbeat_count} "
+            f"({changed_heartbeats} new/updated); {len(changed_evidence)} evidence files changed.\n"
+            f"- Validated stages: findings={finding_count} ({changed_findings} new/updated; "
+            f"completed={completed_findings} (+{changed_completed}), placeholder={placeholder_findings}); "
+            f"last_cycle[{stages}]; commits={git['commit_count']} "
+            f"(+{commits_added if commits_added is not None else 'n/a'}); head={git['head']}; "
             f"evidence_progress={'yes' if evidence_progress else 'none (observe only; no stop action)'}.\n"
             f"- Controller/progress/status: {json.dumps({'controller': controller, 'progress': progress, 'status': status}, sort_keys=True)[:1800]}\n"
             f"- Recovery: {recovery_error or 'none'}.\n"
@@ -168,7 +238,8 @@ def checkin(settings_path: Path, unit: str, run_dir: Path, queue_note: Path, wor
                                  "active": active, "resumed": restarted, "recovery_error": recovery_error})
     return {"active": active, "resumed": restarted, "at_deadline": checked_at >= deadline,
             "new_runs": new_runs, "changed_evidence": changed_evidence,
-            "commit_count": git["commit_count"], "note": note, "recovery_error": recovery_error}
+            "commit_count": git["commit_count"], "note": note, "recovery_error": recovery_error,
+            "resume_suppressed": resume_suppressed}
 
 
 def main(argv=None) -> int:

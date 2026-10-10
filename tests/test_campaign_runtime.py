@@ -186,6 +186,10 @@ class CycleHarness:
         self.milestones = []
         self.staged = []
         self.fix_started = False
+        self.observe_failed = False
+        self.regression_ok = True
+        self.fresh_calls = 0
+        self.head = "cafe0001"
 
     def install(self, monkeypatch):
         harness = self
@@ -199,6 +203,7 @@ class CycleHarness:
                 "+120s GOAL MET: accepted C0\n+1463s RUN END\n")
 
         def fresh(config):
+            harness.fresh_calls += 1
             harness.world = config.world_root
             write_log()
             return subprocess.CompletedProcess(runtime.LayaRuntime().run_command(config), 0, "started", "")
@@ -206,8 +211,12 @@ class CycleHarness:
         monkeypatch.setattr(runtime.LayaRuntime, "fresh", staticmethod(fresh))
         monkeypatch.setattr(runtime.LayaRuntime, "snapshot", lambda *a: ("## laya snapshot", 0, None))
         monkeypatch.setattr(runtime.LayaRuntime, "helper_finding", lambda *a: (None, False))
-        monkeypatch.setattr(runtime.LayaRuntime, "observe", lambda *a: {"status": "complete", "path": str(harness.tmp / "findings.md")})
-        monkeypatch.setattr(runtime.LayaRuntime, "regression_proof", lambda *a: True)
+        monkeypatch.setattr(runtime.LayaRuntime, "observe",
+                            lambda *a: ({"status": "failed", "path": None, "reason": "terminal helper returncode=1"}
+                                        if harness.observe_failed
+                                        else {"status": "complete",
+                                              "path": str(harness.tmp / "findings.md")}))
+        monkeypatch.setattr(runtime.LayaRuntime, "regression_proof", lambda *a: harness.regression_ok)
         monkeypatch.setattr(campaign, "_record_milestone",
                             lambda fields, fix_id: harness.milestones.append(fix_id))
         monkeypatch.setattr(campaign, "index_log", lambda *_: None)
@@ -222,7 +231,7 @@ class CycleHarness:
                 harness.commits.append(command[-1])
                 return subprocess.CompletedProcess(command, 0, "", "")
             if command[:3] == ["git", "rev-parse", "HEAD"]:
-                return subprocess.CompletedProcess(command, 0, "cafe0001", "")
+                return subprocess.CompletedProcess(command, 0, harness.head, "")
             if "pytest" in command:
                 return subprocess.CompletedProcess(command, 0, "passed", "")
             return subprocess.CompletedProcess(command, 0, "", "")
@@ -279,6 +288,60 @@ def test_laya_cycle_commits_once_with_laya_message_and_no_observer_team(tmp_path
     assert not any("observer for isolated deterministic episode" in prompt for prompt in harness.prompts)
     records = loop_cycles(harness.state)
     assert [record["outcome"] for record in records] == ["committed"]
+    # Each validated stage is recorded truthfully for this successful cycle.
+    record = records[0]
+    assert record["helper_status"] == "complete"
+    assert record["fix_status"] == "committed"
+    assert record["verification_result"] == "passed"
+    assert record["commit"] == "cafe0001"
+
+
+def test_rejected_regression_is_abandoned_and_not_reported_as_committed(tmp_path, monkeypatch):
+    harness = CycleHarness(tmp_path)
+    harness.regression_ok = False
+    harness.install(monkeypatch)
+    assert campaign.main(harness.cli()) == 0
+    assert harness.commits == []
+    record = loop_cycles(harness.state)[0]
+    assert record["outcome"] == "abandoned"
+    assert record["fix_status"] == "abandoned"
+    assert not record["commit"]
+    assert record["verification_result"] is None
+
+
+def test_observer_failure_stops_after_one_bounded_retry_without_new_episode(tmp_path, monkeypatch):
+    harness = CycleHarness(tmp_path)
+    harness.observe_failed = True
+    harness.install(monkeypatch)
+    argv = harness.cli()
+    argv[argv.index("--max-cycles") + 1] = "5"
+    assert campaign.main(argv) == 0
+    state = campaign._load_state(harness.state / "logs/opencode-campaign-state.json")
+    assert state.phase == "HARNESS_FAILURE"
+    assert state.completed_cycles == 1
+    assert state.observer_failure and state.observer_failure["terminal"] is True
+    assert harness.fresh_calls == 1, "no new episode may start after a terminal observer failure"
+    assert [record["outcome"] for record in loop_cycles(harness.state)] == ["observer-failed"]
+
+
+def test_terminal_harness_failure_is_not_auto_resumed_at_same_revision(tmp_path, monkeypatch):
+    harness = CycleHarness(tmp_path)
+    harness.observe_failed = True
+    harness.install(monkeypatch)
+    argv = harness.cli()
+    argv[argv.index("--max-cycles") + 1] = "5"
+    assert campaign.main(argv) == 0
+    assert harness.fresh_calls == 1
+    # A restart at the same frozen revision must not spawn another unchanged episode.
+    harness.install(monkeypatch)
+    assert campaign.main(argv) == 0
+    assert harness.fresh_calls == 1
+    assert campaign._load_state(harness.state / "logs/opencode-campaign-state.json").phase == "HARNESS_FAILURE"
+    # A committed change (new revision) legitimately clears the durable stop.
+    harness.head = "cafe0002"
+    harness.install(monkeypatch)
+    assert campaign.main(argv) == 0
+    assert harness.fresh_calls == 2
 
 
 def test_gate_rejects_known_failure_with_collection_error_or_interrupt(tmp_path):
