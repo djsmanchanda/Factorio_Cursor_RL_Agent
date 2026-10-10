@@ -402,7 +402,10 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int,
             shell[f"*git*{verb}*"] = "deny"
         for pattern in ("*systemctl*", "*systemd-run*", "*kill *", "*pkill*", "*rcon_client*", "*run_laya_clean*", "*run_laya_saved_world*", "*manage_linux*", "*sync_linux_gui_mods*"):
             shell[pattern] = "deny"
-        edits = {"*": "deny", workspace + "/**": "allow", workspace + "/.git": "deny", workspace + "/.git/**": "deny"}
+        # Installed OpenCode requests edit permission with path.relative(project.worktree, file).
+        # --dir pins that worktree; deny parent escapes and Git metadata after the local allow.
+        edits = {"*": "deny", "**": "allow", "../**": "deny", "/**": "deny",
+                 ".git": "deny", ".git/**": "deny"}
         permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
                        "external_directory": "allow", "edit": edits, "write": edits, "bash": shell, "task": "deny"}
         policy = {"permission": permissions, "agent": {"build": {"permission": permissions}}}

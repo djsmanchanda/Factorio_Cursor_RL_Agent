@@ -387,7 +387,27 @@ def test_laya_fixer_permissions_scope_edits_and_deny_lifecycle_and_git_writes(tm
     assert seen['command'][0] == 'env'
     policy = json.loads(seen['command'][1].split('=',1)[1])['permission']
     assert policy['*'] == 'deny'
-    assert policy['edit']['*'] == 'deny' and policy['edit'][str(worktree.resolve())+'/**'] == 'allow'
+    assert policy['edit']['*'] == 'deny' and policy['edit']['**'] == 'allow' and policy['edit']['../**'] == 'deny'
     assert policy['bash']['*systemctl*'] == 'deny'
     assert policy['bash']['*git*commit*'] == 'deny'
     assert policy['task'] == 'deny'
+
+
+def test_fixer_edit_policy_matches_installed_worktree_relative_paths(tmp_path, monkeypatch):
+    import json, fnmatch, subprocess
+    from dataclasses import replace
+    cfg=replace(_restart_config(tmp_path),dry_run=False,runtime='laya',campaign_worktree=tmp_path/'code')
+    captured={}
+    def run(command,**kwargs):
+        captured['command']=command
+        return subprocess.CompletedProcess(command,0,'{"sessionID":"scoped"}\n','')
+    monkeypatch.setattr(campaign,'_run',run)
+    campaign._ask(cfg,'focused fix',None,1)
+    policy=json.loads(captured['command'][1].split('=',1)[1])['permission']['edit']
+    def authorization(request):
+        return next(action for pattern,action in reversed(list(policy.items())) if fnmatch.fnmatchcase(request,pattern))
+    assert authorization('training/example.py') == 'allow'
+    assert authorization('tests/test_example.py') == 'allow'
+    assert authorization('../outside.txt') == 'deny'
+    assert authorization('.git') == 'deny'
+    assert authorization('.git/config') == 'deny'
