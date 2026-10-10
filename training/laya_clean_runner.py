@@ -120,7 +120,11 @@ class LiveWorld(SavedWorldAdapter):
         # Export big poles and iron sticks too, so they can become stock needs.
         if RECIPE_LIST_END not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; recipe list end not found")
-        extra = "".join(f',"{name}"' for name in EXTRA_RECIPES)
+        from training.laya_mission import PHASES
+        # Observe every mission output, including fluids-backed recipes which
+        # are absent from the geometry recipe catalog. Counters drive rates.
+        observed_items = dict.fromkeys((*EXTRA_RECIPES, *(item for phase in PHASES for item in phase["targets"])))
+        extra = "".join(f',"{name}"' for name in observed_items)
         self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
         if RECIPE_LINE not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; machine recipe line not found")

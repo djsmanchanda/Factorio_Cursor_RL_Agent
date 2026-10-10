@@ -326,3 +326,31 @@ def test_a_failed_atomic_submission_is_closed_and_its_footprint_avoided(tmp_path
     assert json.loads((tmp_path / "evidence" / "transaction-x.json").read_text())["status"] == "rejected"
     adapter = type("A", (), {"root": tmp_path})()
     assert {"entity": "electric-mining-drill", "position": {"x": 60.5, "y": 5.5}} in _submitted_entities(adapter)
+
+
+def test_live_measurement_exports_mission_items_including_fluid_recipes(tmp_path, monkeypatch):
+    import shutil, subprocess
+    from pathlib import Path
+    import pytest
+    from training.laya_clean_runner import LiveWorld
+    from training.laya_saved_world import SavedWorldAdapter
+    lua=shutil.which('lua')
+    if not lua:
+        pytest.skip('Lua interpreter required for saved-world counter replay')
+    source=Path('training/laya_saved_world.lua').read_text()
+    monkeypatch.setattr(SavedWorldAdapter,'__init__',lambda self,root:setattr(self,'lua_source',source))
+    world=LiveWorld(tmp_path,2)
+    # Run the actual generated recipe/counter export block; a fluid recipe is
+    # excluded from geometry recipes but its production must still be measured.
+    block=world.lua_source.split('local recipe_names=',1)[1].split('local bounds=',1)[0]
+    script = """local force={recipes={}}; local facts={recipes={},production={},consumption={}}
+local counts={['plastic-bar']=20,['advanced-circuit']=9,['automation-science-pack']=7,['production-science-pack']=5}
+local stats={get_input_count=function(name) return counts[name] or 0 end,get_output_count=function(name) return 0 end}
+local recipe_names="""+block+"""
+assert(facts.production['plastic-bar']==20,'missing plastic counter')
+assert(facts.production['advanced-circuit']==9,'missing circuit counter')
+assert(facts.production['automation-science-pack']==7,'missing science counter')
+assert(facts.production['production-science-pack']==5,'missing production science counter')
+"""
+    result=subprocess.run([lua,'-'],input=script,text=True,capture_output=True)
+    assert result.returncode==0,result.stderr
