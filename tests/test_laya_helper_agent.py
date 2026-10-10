@@ -60,13 +60,9 @@ def test_packet_holds_both_laya_runs_the_reference_and_the_workflow_note(tmp_pat
 
 
 
-_FAKE_WRITE_FINDINGS = r"""python3 - "$last" <<'FAKEPY'
-import re, sys
-from pathlib import Path
-found = re.search(r"Write (.*?) with these sections:", sys.argv[1])
-if found:
-    report = Path(found.group(1))
-    report.write_text(report.read_text() + "\n## Outcome\nObserved terminal evidence.\n")
+_FAKE_WRITE_FINDINGS = r"""python3 - <<'FAKEPY'
+import json
+print(json.dumps({"type":"text","part":{"text":"FINDINGS_REPORT_BEGIN\n## Outcome\nObserved terminal evidence.\nFINDINGS_REPORT_END"}}))
 FAKEPY
 """
 
@@ -279,8 +275,7 @@ def test_muse_permissions_allow_only_its_findings_file(tmp_path, monkeypatch):
     assert permissions['*'] == 'deny'
     assert permissions['read'] == 'allow'
     assert permissions['bash'] == 'deny' and permissions['task'] == 'deny'
-    assert permissions['edit']['*'] == 'deny'
-    assert permissions['edit'][str(report)] == 'allow'
+    assert permissions['edit'] == 'deny' and permissions['write'] == 'deny'
 
 
 def test_comparator_world_roots_resolve_their_own_run_records(tmp_path):
@@ -300,3 +295,27 @@ def test_header_only_report_is_not_marked_complete(tmp_path, monkeypatch):
         helper.final_review('now')
     state = json.loads((helper.DATA_ROOT / 'now/helper-state.json').read_text())
     assert state['status'] == 'failed'
+
+
+def test_report_is_published_by_wrapper_from_readonly_model_response(tmp_path, monkeypatch):
+    from subprocess import CompletedProcess
+    setup(tmp_path, monkeypatch)
+    report_text = '# Laya findings — now\n\n## Outcome\nThe accepted checkpoint is C1; the run stalled on the recorded bill.\n'
+    output = json.dumps({'type':'text', 'sessionID':'ses-report',
+                         'part':{'text':'FINDINGS_REPORT_BEGIN\n'+report_text+'FINDINGS_REPORT_END'}})+'\n'
+    monkeypatch.setattr(helper.subprocess, 'run', lambda command, **kwargs: CompletedProcess(command,0,output,''))
+    report = helper.final_review('now')
+    assert report_text.strip() in report.read_text()
+    assert json.loads((helper.DATA_ROOT/'now/helper-state.json').read_text())['status'] == 'complete'
+
+
+def test_incomplete_report_markers_do_not_publish_or_complete(tmp_path, monkeypatch):
+    import pytest
+    from subprocess import CompletedProcess
+    setup(tmp_path, monkeypatch)
+    output=json.dumps({'type':'text','sessionID':'ses-incomplete',
+                       'part':{'text':'FINDINGS_REPORT_BEGIN\n## Outcome\nPartial draft'}})+'\n'
+    monkeypatch.setattr(helper.subprocess,'run',lambda command,**kwargs:CompletedProcess(command,0,output,''))
+    with pytest.raises(RuntimeError,match='findings document was not updated'):
+        helper.final_review('now')
+    assert json.loads((helper.DATA_ROOT/'now/helper-state.json').read_text())['status'] == 'failed'

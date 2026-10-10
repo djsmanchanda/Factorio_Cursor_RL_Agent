@@ -7,7 +7,8 @@
 Started by tools/run_laya_clean.py when a run ends.  It builds one bounded
 evidence packet (current Laya run, the latest comparable earlier Laya run,
 and the selected deterministic reference), then asks one OpenCode
-session to write ``docs/rl/laya_helper_runs/<run_id>/findings.md``.  The helper
+session to return findings text; this wrapper publishes it to
+``docs/rl/laya_helper_runs/<run_id>/findings.md``. The model
 is read-only: no code edits, commits, lifecycle actions or RCON.
 """
 
@@ -353,7 +354,8 @@ Recent commits:
 {commits}
 ```
 
-Write {report} with these sections:
+Return the complete Markdown findings in your final response between literal FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END lines.
+The wrapper publishes the report to {report}; do not use write or edit tools. Include these sections:
 1. Outcome: run length, mission phases reached (with time from run start), decisions, failures, stop reason, measured production, for this run vs the previous Laya run vs the deterministic reference.
 2. What went well (with evidence lines).
 3. Regressions versus the previous Laya run (or "none observed"), with evidence.
@@ -361,12 +363,33 @@ Write {report} with these sections:
 5. Small improvement suggestions, each with the file it would touch and a measurable prediction for the next run.
 6. Laya workflow changes so the next run is better, under three headings: context management (what the decision state/guidelines/history should carry or drop, token budget), fine-tuning (what data, labels, comparisons or checkpoints to produce from these journals), tooling (options, realizers, observations, validators).
 Respect the project rules in AGENTS.md: no hand-coded situation branches as fixes; learn from outcomes.
-Remain read-only: do not edit code, commit, start/stop servers or runners, send RCON or alter any world. Only write the findings document."""
+Remain read-only: do not edit code, commit, start/stop servers or runners, send RCON or alter any world. Return findings as text only; the wrapper owns all file writes."""
 
 
 def recent_commits() -> str:
     result = subprocess.run(["git", "log", "--oneline", "-10"], cwd=REPO_ROOT, capture_output=True, text=True)
     return result.stdout.strip() or "unavailable"
+
+
+def publish_response(output: str, report: Path, *, append: bool = False) -> bool:
+    """Publish only a complete, explicitly delimited assistant report; never tool payloads."""
+    from tools.campaign_protocol import assistant_text
+    text = assistant_text(output)
+    begin, end = "FINDINGS_REPORT_BEGIN", "FINDINGS_REPORT_END"
+    if text.count(begin) != 1 or text.count(end) != 1 or text.index(end) <= text.index(begin):
+        return False
+    body = text.split(begin, 1)[1].split(end, 1)[0].strip()
+    if not body.startswith("#") or not any(line and not line.startswith("#") for line in body.splitlines()):
+        return False
+    report.parent.mkdir(parents=True, exist_ok=True)
+    if append:
+        with report.open("a", encoding="utf-8") as stream:
+            stream.write("\n" + body + "\n")
+    else:
+        staged = report.with_suffix(".md.tmp")
+        staged.write_text(body + "\n", encoding="utf-8")
+        staged.replace(report)
+    return True
 
 
 def _ask(config: dict, work: Path, message: str, session: str | None, title: str, retry: str,
@@ -378,18 +401,20 @@ def _ask(config: dict, work: Path, message: str, session: str | None, title: str
         command += ["--session", session] if session else ["--title", title]
         report = str(Path(config["report_path"]).resolve())
         env = dict(os.environ)
-        env["OPENCODE_CONFIG_CONTENT"] = json.dumps({"permission": {
-            "*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
-            "bash": "deny", "task": "deny", "external_directory": "allow",
-            "edit": {"*": "deny", report: "allow"},
-            "write": {"*": "deny", report: "allow"},
-        }})
+        permissions = {"*": "deny", "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
+                       "bash": "deny", "task": "deny", "external_directory": "allow",
+                       "edit": "deny", "write": "deny"}
+        env["OPENCODE_CONFIG_CONTENT"] = json.dumps({
+            "permission": permissions, "agent": {"build": {"permission": permissions}}})
+        command[2:2] = ["--agent", "build"]
+
         result = subprocess.run(command + [message], cwd=REPO_ROOT, capture_output=True, text=True,
                                 timeout=timeout, env=env)
         stamp = len(list(work.glob("opencode-*.jsonl")))
         (work / f"opencode-{stamp:03d}.jsonl").write_text(result.stdout + result.stderr)
         session = session or _session_id(result.stdout + result.stderr)
         if result.returncode == 0 and session:
+            publish_response(result.stdout, Path(report), append=config.get("report_mode") == "append")
             return session
         message = retry
     raise RuntimeError(f"OpenCode failed three times; transcripts in {work}")
@@ -479,7 +504,7 @@ def final_review(run_id: str, session: str | None = None, comparators: Sequence[
     try:
         _ask(config, work, message, session, f"Laya Helper {run_id}",
              "Continue the same read-only Laya helper review from where it stopped; finish the findings "
-             f"document at {report}. Do not restart or create another report.")
+             f"response between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END. Do not use write/edit tools.")
         if not report.is_file() or report.read_bytes() == report_before:
             raise RuntimeError("findings document was not updated by the observer")
     except Exception as error:
@@ -519,16 +544,17 @@ def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL
     config["report_path"] = str(report.resolve())
     _header(report, run_id, "Live observation in progress")
     _write_record(run_id, "running", report=report, comparators=comparators)
+    config["report_mode"] = "append"
     status = root / "evidence/latest-status.json"
     pid_record = root / "laya-runner.pid.json"
     session, seen, deadline, checkpoint = None, 0, time.monotonic() + max_hours * 3600, 0
     intro = f"""You are the read-only live observer for Laya run {run_id} (repository {REPO_ROOT}).
 All times are local time ({zone_label()}). {WORKFLOW_NOTE}
-You will receive a checkpoint every {interval // 60} minutes. At each checkpoint append at most 10 lines under a
-'## Live observations' heading in {report}: timestamped (local time) notes on stalls, wasted decisions, blocked needs,
+You will receive a checkpoint every {interval // 60} minutes. At each checkpoint return at most 10 lines between
+FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END, under a '## Live observations' heading: timestamped (local time) notes on stalls, wasted decisions, blocked needs,
 suspected root causes with the evidence line, and one falsifiable signal to watch next. Do not repeat unchanged state.
 Strategy rules Laya reads: docs/rl/Laya_Strategy_Guidelines.md and docs/rl/laya_mission_guidelines.json (prefer entries
-steer the guided policy). Remain read-only: only write {report}; no code edits, commits, lifecycle actions or RCON."""
+steer the guided policy). Remain read-only: no file writes, code edits, commits, lifecycle actions or RCON. The wrapper appends your response to {report}."""
     while time.monotonic() < deadline:
         new, seen_now = _run_slice_since(log, run_id, seen)
         ended = any(line.rstrip().endswith("RUN END") for line in new)
@@ -539,10 +565,10 @@ steer the guided policy). Remain read-only: only write {report}; no code edits, 
             latest = status.read_text()[:20000] if status.is_file() else "{}"
             packet.write_text(f"# Checkpoint {checkpoint} — {local_stamp()}\n\n## New runner log lines\n```text\n"
                               f"{compact_log(new, budget=12000)}\n```\n## Latest decision status (JSON)\n```json\n{latest}\n```\n")
-            message = (intro if session is None else "") + f"\nCheckpoint {checkpoint}: read {packet} and append to {report}."
+            message = (intro if session is None else "") + f"\nCheckpoint {checkpoint}: read {packet} and return notes between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END."
             try:
                 session = _ask(config, work, message, session, f"Laya Observer {run_id}",
-                               f"Continue the read-only live observation; process {packet} and append to {report}.", timeout=900)
+                               f"Continue the read-only live observation; process {packet} and return notes between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END.", timeout=900)
             except Exception as error:  # A failed checkpoint is noted; the final review still runs.
                 with report.open("a") as out:
                     out.write(f"\n_Checkpoint {checkpoint} failed: {type(error).__name__}: {str(error)[:200]}_\n")

@@ -222,5 +222,8 @@ Coordinate shared mall/adapter files through their latest ownership handoff.
 
 Campaign helpers accept explicit `--config`, `--report-root`, `--data-root`, and
 `--comparators` JSON records, so findings and state stay outside frozen code.
-Muse tool permissions deny shell and delegation and permit edits only to its
-findings path. The wrapper writes the evidence packet and lifecycle records.
+Muse permissions allow file readers and deny all edits, shell, MCP and delegation.
+It returns a complete Markdown report between FINDINGS_REPORT_BEGIN and
+FINDINGS_REPORT_END; the wrapper validates and atomically publishes that response.
+The wrapper also owns evidence packets and lifecycle records. A placeholder or
+truncated response cannot establish observer completion.
