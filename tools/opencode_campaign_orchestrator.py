@@ -140,9 +140,11 @@ class Config:
     code_root: Path | None = None
     mods_source: Path | None = None
     run_speed: float = 2.0
-    until_accepted: str = "C6"
-    max_game_ticks: int = 1_440_000
-    run_wall_seconds: int = 21_600
+    # A natural Laya goal run has no default proxy checkpoint, total game-tick cap or
+    # wall cap (and no 6h episode assumption); an explicit experiment sets them.
+    until_accepted: str | None = None
+    max_game_ticks: int | None = None
+    run_wall_seconds: int | None = None
     seed: int = 0
     campaign_worktree: Path | None = None
     mod_builder: Path | None = None
@@ -1295,9 +1297,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--code-root", type=Path, help="Immutable Laya code copy root (default: repository).")
     parser.add_argument("--mods-source", type=Path, help="Stamped mods copy to hash into freeze.json before prepare.")
     parser.add_argument("--speed", type=float, default=2.0, help="Declared live game speed for a Laya episode.")
-    parser.add_argument("--until-accepted", default="C6", help="Laya checkpoint predicate that ends the run.")
-    parser.add_argument("--max-game-ticks", type=int, default=1_440_000, help="Natural game-tick bound for a Laya episode.")
-    parser.add_argument("--run-wall-seconds", type=int, default=21_600, help="Natural wall bound mirrored from the runner timeout.")
+    parser.add_argument("--until-accepted", default=None,
+                        help="Explicit experiment: Laya checkpoint predicate that ends the run (default: none; a goal run ends on verified research).")
+    parser.add_argument("--max-game-ticks", type=int, default=None,
+                        help="Explicit experiment: total game-tick cap for a Laya episode (default: no cap).")
+    parser.add_argument("--run-wall-seconds", type=int, default=None,
+                        help="Explicit experiment: episode wall cap (default: no cap).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--campaign-worktree", type=Path, help="Explicit writable Git/model/test tree, separate from frozen supervisor.")
     parser.add_argument("--mod-builder", type=Path, help="Build frozen current mod sources (--source factorio_mod --output mods).")

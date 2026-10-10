@@ -33,6 +33,9 @@ from training.laya_factory_status import compact_status, compile_status
 from training.laya_saved_world import speed_status
 from training.laya_mall_slots import obtainable
 from training.laya_mission import current_phase, phase_reached
+from training.laya_goal import (
+    GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
+)
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
@@ -113,7 +116,7 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int],
     current_allocation = _canonical_claims(allocation) if allocation is not None else None
     for r in results:
         params = r.get("params") or {}
-        latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
+        latest[(r["operation"], params.get("recipe") or params.get("item") or params.get("technology"))] = r
     stuck = set()
     for key, r in latest.items():
         if not r.get("ok") and r.get("code") == "material_shortage":
@@ -520,15 +523,19 @@ def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, *, bootstrap_districts: Mapping | None = None,
                     allocation: Mapping[str, tuple] | None = None,
-                    measurement: Mapping | None = None) -> dict:
+                    measurement: Mapping | None = None, research_goal: str | None = None,
+                    goal_status: Mapping | None = None, labs: int | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
     an unchanged material failure when the claim moved.  ``measurement`` supplies the window's measured
-    plate surplus vs mall consumption, where available.
+    plate surplus vs mall consumption, where available.  ``research_goal`` adds a goal-item ``produce``
+    option for every unsatisfied mission target (plastic, advanced circuits, science) via the shared
+    toolkit, plus a research option when the live status says the technology is open.
     """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+    goal_rate = {n["item"]: float(n.get("goal_required_per_s") or 0) for n in board["needs"]}
     stuck = unchanged_failures(results, stock or {}, allocation)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
@@ -610,6 +617,15 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
+    # Generic goal produce options: every unsatisfied mission target (plastic, advanced circuits, science)
+    # gets an ``ensure_produced`` option through the shared toolkit.  Unlike a borrowed mall batch it is not
+    # gated on ``obtainable``: the operation itself builds the missing prerequisite stages.
+    if recipes:
+        for item in sorted(goal):
+            if item in PLATES or codes.get(("produce", item)) == "ok" or item in producible:
+                continue
+            if plates_in(item, recipes) <= started:
+                producible[item] = max(1, int(math.ceil(goal_rate.get(item, 1.0) * 60)))
     # A short item may also get its own standing slot, as the deterministic runner's demand-owned slots do
     # (live 2026-10-10: splitter was only ever offered as a borrowed batch, 112 offers, no standing producer).
     # The tooling's slot-capacity and funding gates still decide whether the slot can be placed.
@@ -617,15 +633,47 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     for item in sorted(producible):
         if item not in core and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {}):
             mall_slot(item)
-    for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
+    ranked = sorted(producible.items(), key=lambda kv: -kv[1])
+    ordered = [kv for kv in ranked if kv[0] in goal] + ([kv for kv in ranked if kv[0] not in goal] if slots else [])
+    for item, missing in ordered[:MAX_PRODUCE]:
+        goal_item = item in goal
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
-            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": missing},
+            "summary": f"produce {item} ({'goal' if goal_item else 'short'} {missing})",
+            "params": {"item": item, "stock_target": missing},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
-                         "goal_need": bool(sources.get(item, set()) & goal)}})
+                         "goal_need": goal_item or bool(sources.get(item, set()) & goal)}})
+    # Research and lab options for a goal run, authorized by the live research prerequisites: the tooling
+    # only accepts a technology the force has enabled. A blind queue (unknown status) is not offered.
+    if research_goal:
+        technology = (goal_status or {}).get("technology") if isinstance(goal_status, Mapping) else None
+        technology = technology if isinstance(technology, Mapping) else {}
+        state = technology.get("state")
+        candidate = research_goal if state in ("available", "current") else None
+        if (state == "future" and technology.get("enabled") is True
+                and isinstance(technology.get("current_level"), int)
+                and isinstance(technology.get("requested_level"), int)
+                and technology["current_level"] < technology["requested_level"]):
+            candidate = technology.get("canonical_name")
+        if candidate and not research_goal_satisfied(goal_status):
+            options.append({
+                "option_id": f"op.research.{candidate}", "family": "research", "product": candidate,
+                "need_id": f"research:{candidate}", "summary": f"research {candidate} toward {research_goal}",
+                "params": {"technology": candidate},
+                "features": {"last_code": codes.get(("research", candidate), "new"),
+                             "waiting": in_progress(codes.get(("research", candidate))), "goal_need": True}})
+        # Provision a lab through the shared toolkit when the live fact says none exists yet.
+        if labs == 0 and codes.get(("produce", "lab")) != "ok":
+            options.append({
+                "option_id": "op.produce.lab", "family": "produce", "product": "lab", "need_id": "stock:lab",
+                "summary": "produce lab", "params": {"item": "lab", "stock_target": 1},
+                "features": {"last_code": codes.get(("produce", "lab"), "new"),
+                             "waiting": in_progress(codes.get(("produce", "lab"))),
+                             "unchanged_failure": ("produce", "lab") in stuck, "batch_active": batch_active,
+                             "goal_need": True}})
     outcomes = option_outcomes(results)
     for option in options:  # Laya's own recent decisions, per option
         params = option["params"]
@@ -671,6 +719,30 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "options": options, "shortfalls": short, "facts": facts}
 
 
+def _lab_count(facts: Mapping | None) -> int | None:
+    """Observed lab count from the live facts; ``None`` when the observation cannot say."""
+    facts = facts if isinstance(facts, Mapping) else {}
+    counts = facts.get("infrastructure_counts")
+    if isinstance(counts, Mapping):
+        return int(counts.get("lab", 0))
+    machines = facts.get("machines")
+    if isinstance(machines, list):
+        return sum(1 for machine in machines if isinstance(machine, Mapping) and machine.get("name") == "lab")
+    labs = facts.get("labs")
+    return labs if isinstance(labs, int) else None
+
+
+def _goal_status(session: Any, technology: str) -> Mapping | None:
+    """Read the goal's live research state; an unsupported or failed read is unknown, never success."""
+    reader = getattr(session, "goal_status", None)
+    if not callable(reader):
+        return None
+    try:
+        return reader(technology)
+    except Exception as error:  # noqa: BLE001 -- observation must never stop the run
+        return {"error": f"{type(error).__name__}: {error}"[:200]}
+
+
 def _live_tick(adapter, fallback: int) -> int:
     """Read the execution boundary without taking a full factory snapshot."""
     tick = getattr(adapter, "tick", None)
@@ -683,9 +755,16 @@ def _live_tick(adapter, fallback: int) -> int:
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
-        until_accepted: str | None = None) -> dict:
-    """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls."""
+        until_accepted: str | None = None, goal: str | None = None) -> dict:
+    """Observe -> board -> operations -> choose -> run one -> record.
+
+    A natural *goal* run (``goal``/``settings.goal_technology``) ends only on a
+    verified research ``target_completed``, a hard failure, or a measured
+    complete stall over the declared observation window.  Proxy rate-ladder
+    completion and the decision-count stall cutoff do not end a goal run.
+    """
     from training.laya_ops import DeterministicSession
+    goal = goal or settings.goal_technology
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
@@ -696,9 +775,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     # The stall clock tracks decision-idle game time and decisions without genuine progress, not the
     # game ticks one blocking tool call spends building. Total game/wall caps bound the run separately.
     stall = {"idle_ticks": 0, "since": 0, "tool_ticks": 0, "best_gap": math.inf, "machines": 0,
-             "missing": math.inf, "made": {}, "last_tick": None}
+             "missing": math.inf, "made": {}, "last_tick": None, "last_state": None, "changed_tick": None}
     accept = getattr(session, "acceptance", None)
     acceptance_samples = 0
+    last_phase = None
+    goal_status = None
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
@@ -751,9 +832,18 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
             summary["stop"] = "window_timeout"
             break
+        # The verified goal is a completed research target, never a rate proxy: check live research first.
+        if goal:
+            goal_status = _goal_status(session, goal)
+            if research_goal_satisfied(goal_status):
+                summary["stop"] = "goal_completed"
+                summary["goal"] = goal_evidence(goal_status)
+                emit(f"GOAL COMPLETE: {goal} verified target_completed")
+                break
         phase = current_phase(reached)
         board = compile_status(facts, phase["targets"], measurement) if phase else None
         while phase and phase_reached(board):
+            last_phase = phase
             reached.append(phase["phase_id"])
             summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
             _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
@@ -763,12 +853,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             stall.update(since=0, best_gap=math.inf)
             phase = current_phase(reached)
             board = compile_status(facts, phase["targets"], measurement) if phase else None
+        if phase is not None:
+            last_phase = phase
         if until_accepted and until_accepted in summary.get("accepted", []):
             summary["stop"] = "accepted_window_reached"
             break
         if phase is None:
-            summary["stop"] = "proxy_mission_complete_without_acceptance" if until_accepted else "mission_complete"
-            break
+            if not goal:
+                summary["stop"] = "proxy_mission_complete_without_acceptance" if until_accepted else "mission_complete"
+                break
+            # A goal run keeps the final rate scope as an observation surface; the ladder is not the goal.
+            if last_phase is None:
+                summary["stop"] = "mission_complete"
+                break
+            phase = last_phase
+            board = compile_status(facts, phase["targets"], measurement)
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
@@ -781,7 +880,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         allocation = reservation_allocation(economics) if economics is not None else None
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                              bootstrap_districts=districts, allocation=allocation,
-                                             measurement=measurement),
+                                             measurement=measurement, research_goal=goal,
+                                             goal_status=goal_status, labs=_lab_count(facts)),
                               results, economics, stock=stock if economics is not None else None)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -874,21 +974,60 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                       or gap < stall["best_gap"] * 0.95 or submitted or working)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
-        # The stall budget is decision-idle game time, not tool execution: one blocking deterministic call
-        # can spend most of a window on real work (live 2026-10-10: one foundation call ate ~12k of 18k).
         stall["tool_ticks"] = max(0, tool_end_tick - tool_start_tick)
-        prior_tick = stall["last_tick"] if stall["last_tick"] is not None else facts["tick"]
-        elapsed = max(0, after["tick"] - prior_tick)
-        stall["last_tick"] = after["tick"]
-        stall["idle_ticks"] += max(0, elapsed - (0 if chosen["family"] == "wait" else stall["tool_ticks"]))  # a wait is deliberate idle; a tool call is not
-        if progressed:
-            stall["idle_ticks"], stall["since"] = 0, 0
+        if goal:
+            # Measured complete stall: the whole relevant, productive state is unchanged across the
+            # declared observation window. A pending status alone does not reset it.
+            relevant = set(short) | set((board.get("construction") or {}).get("shortfall") or {})
+            relevant |= {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+            after_stock: dict[str, int] = {}
+            for network in (after.get("networks") or {}).values():
+                for name, count in (network.get("items") or {}).items():
+                    after_stock[name] = after_stock.get(name, 0) + int(count)
+            # Tool calls may take minutes while research and loan steps advance.
+            # Re-read them before deciding that the whole window was unchanged.
+            goal_status = _goal_status(session, goal)
+            after_economics = session.economics() if hasattr(session, "economics") else economics
+            signature = useful_state(after, relevant_items=sorted(relevant), stock=after_stock,
+                                     goal_status=goal_status, economics=after_economics)
+            if signature != stall["last_state"]:
+                stall["last_state"], stall["changed_tick"] = signature, after["tick"]
+                stall["since"], stall["idle_ticks"] = 0, 0
+            else:
+                stall["since"] += 1
+                base = stall["changed_tick"] if stall["changed_tick"] is not None else samples[0][0]
+                stall["idle_ticks"] = max(0, after["tick"] - base)
+            window = observation_window(settings)
+            summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
+                                "tool_ticks": stall["tool_ticks"], "version": "useful-state-window-v1",
+                                "observation_ticks": window, "changed_tick": stall["changed_tick"],
+                                "useful": signature}
+            if window and stall["idle_ticks"] >= window:
+                summary["stop"] = "stalled"
+                emit(f"STALLED: useful state unchanged over {stall['idle_ticks']} game ticks "
+                     f"(declared window {window})")
+                break
         else:
-            stall["since"] += 1
-        if stall["idle_ticks"] >= STALL_TICKS or stall["since"] >= settings.stall_decisions:
-            summary["stop"] = "stalled"
-            emit(f"STALLED: {stall['idle_ticks']} idle game ticks / {stall['since']} decisions without a "
-                 "funded submission, work in progress or goal progress")
+            # The stall budget is decision-idle game time, not tool execution: one blocking deterministic call
+            # can spend most of a window on real work (live 2026-10-10: one foundation call ate ~12k of 18k).
+            prior_tick = stall["last_tick"] if stall["last_tick"] is not None else facts["tick"]
+            elapsed = max(0, after["tick"] - prior_tick)
+            stall["last_tick"] = after["tick"]
+            stall["idle_ticks"] += max(0, elapsed - (0 if chosen["family"] == "wait" else stall["tool_ticks"]))
+            if progressed:
+                stall["idle_ticks"], stall["since"] = 0, 0
+            else:
+                stall["since"] += 1
+            if stall["idle_ticks"] >= STALL_TICKS or stall["since"] >= settings.stall_decisions:
+                summary["stop"] = "stalled"
+                emit(f"STALLED: {stall['idle_ticks']} idle game ticks / {stall['since']} decisions without a "
+                     "funded submission, work in progress or goal progress")
+                break
+        if goal and (result.get("code") in {"tool_error", "untyped_stuck"}
+                     or (result.get("classification") == "bug" and result.get("state") == "failed")):
+            summary["stop"] = "hard_failure"
+            summary["hard_failure"] = {"code": result.get("code"), "message": result.get("message"),
+                                       "operation": result.get("operation"), "params": result.get("params")}
             break
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"
@@ -899,9 +1038,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
-    summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
-                        "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v2",
-                        "idle_tick_limit": STALL_TICKS, "decision_limit": settings.stall_decisions}
+    if not goal:
+        summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
+                            "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v2",
+                            "idle_tick_limit": STALL_TICKS, "decision_limit": settings.stall_decisions}
+    elif "goal" not in summary:
+        # Expose version and stall evidence even when the run ended on the decision budget or a failure.
+        summary["goal"] = goal_evidence(goal_status) if goal_status is not None else {"version": GOAL_VERSION,
+                                                                                     "verified": False}
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'}")
     return summary

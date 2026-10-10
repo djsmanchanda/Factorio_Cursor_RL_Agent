@@ -125,9 +125,33 @@ checkpoint flags as though they were identical.
 
 Ops experiments can use `--until-accepted C2` to stop when that unchanged
 shared predicate passes. This option is separate from `--until-phase C2`,
-which stops at the rate proxy; the two cannot be combined. Game/wall/stall
+which stops at the rate proxy; the two cannot be combined. Explicit experiment
 budgets still apply, and periodic samples do not prove an unsampled condition
 was never met. Reports retain both proxy and accepted outcomes.
+
+### Natural goal contract
+
+The latest user goal is a **completed research technology** (`--research-goal`,
+default `mining-productivity-4`). A goal run ends only on:
+
+- a verified `target_completed` for the requested level from the live
+  `research_status` payload (`training/laya_goal.py`), or
+- a hard failure (three consecutive typed tool errors), or
+- a **measured complete stall**: the relevant useful state is unchanged across
+  the whole declared observation window (`--stall-observation-ticks`, default
+  18000 game ticks).
+
+Rate proxies are observations, never the goal: reaching the C6/S1 rate ladder,
+a high science-pack rate, a running research or a *queued* target does not end a
+goal run, and the 12-decision choice-count cutoff is not applied. Relevant
+useful state is ghost/construction progress, delivery or crafting of required
+inputs, research progress, funded plans and loans -- not arbitrary surplus
+output. Runs expose `goal` evidence and the `useful-state-window-v1` stall
+version/counters in the summary. A natural campaign episode sets no total
+game/wall cap and no 6h wall assumption by default; those remain explicit
+`--until-accepted`/`--max-game-ticks`/`--run-wall-seconds` experiment options.
+The 8h campaign deadline only prohibits *new* episodes and fixes; an active
+natural run and its terminal evidence may finish beyond it.
 
 The ops runner saves versioned acceptance samples under
 `evidence/acceptance/<run-id>/` at startup, proxy transitions, before and after
@@ -156,9 +180,11 @@ non-regression. A phase marker or fixture result grants no production authority.
 
 Console: `tools/laya_ops_server.py`, normally loopback `127.0.0.1:9140`.
 CLI: `tools/run_laya_clean.py prepare|run|stop --root data/laya-saved-world/<name>`.
-Live execution is the default; `--decisions 0` removes the decision-count cap,
-not stall/game/wall limits. Ops tooling requires a live clock because it waits
-on bots in wall time; geometry also has the paused `--stepped` path.
+Live execution is the default; `--decisions 0` removes the decision-count cap.
+A natural goal run uses `--research-goal <technology>` and has no default stall,
+game or wall limit beyond the measured-window stall. Ops tooling requires a live
+clock because it waits on bots in wall time; geometry also has the paused
+`--stepped` path.
 Lifecycle and mod procedures remain in [Factorio operations](../factorio_operations.md).
 
 Artifacts: `logs/laya-runner.log`, PID/heartbeat sidecars,
@@ -201,15 +227,19 @@ Geometry supports hash-verified earned-C1 export/resume with
 This is not general restart recovery: the ops runner does not restore its
 history and deterministic ledgers through that geometry checkpoint contract.
 
-Geometry defaults to a 12-decision stall limit; ops tracks decision-idle game
-time (waits and time outside blocking operation execution) plus a 12-decision bound on choices without genuine progress. It
-resets on measured goal progress or a new funded plan committed through the shared material ledger (including a side-effect
-submission before an incomplete return); an attempted-but-unfunded ghost is
-not a reset; neither is an unchanged construction status. This is a versioned
-`decision-idle-v2` stopping contract, recorded in the summary alongside both
-limits; results differ from the earlier elapsed-tick contract. Independent total
-game (`--max-game-ticks`) and wall caps still bound
-the run. These signals can miss useful work.
+Geometry defaults to a 12-decision stall limit; a non-goal ops run tracks
+decision-idle game time (waits and time outside blocking operation execution)
+plus a 12-decision bound on choices without genuine progress, resetting on
+measured goal progress or a new funded plan committed through the shared
+material ledger (a versioned `decision-idle-v2` contract). A **goal** run uses
+the `useful-state-window-v1` contract instead: no choice-count cutoff, and a
+stall only when the relevant useful state (ghosts, required-input crafting or
+delivery, research progress, funded plans, loans) is unchanged over the entire
+declared observation window. A pending status alone never resets it; an
+attempted-but-unfunded ghost is not a reset. Independent total game
+(`--max-game-ticks`) and wall caps are off by default for natural goal runs and
+only apply when an experiment explicitly sets them. These signals can miss
+useful work.
 Unexpected caught tool exceptions and typed blocks are different: a reported
 zero `failures` is not zero operational defects. Escaping errors can skip the
 current run index. Complete-cohort crash/interruption accounting remains a

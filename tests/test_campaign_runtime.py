@@ -121,16 +121,27 @@ def test_laya_briefs_do_not_request_observer_team(tmp_path):
     assert "Muse helper" in run_end and "observer board" not in run_end.lower()
 
 
-def test_laya_run_command_is_natural_terminal_speed2_c6(tmp_path):
+def test_laya_run_command_is_natural_goal_without_default_caps(tmp_path):
     config = laya_config(tmp_path, game_port=34555, rcon_port=27555)
     run_cmd = runtime.LayaRuntime().run_command(config)
     joined = " ".join(run_cmd)
-    assert "--speed 2" in joined and "--until-accepted C6" in joined
-    assert "--max-game-ticks 1440000" in joined and "--actions deterministic" in joined
+    assert "--speed 2" in joined and "--actions deterministic" in joined
+    # The goal is the verified research target; no proxy checkpoint or cap ends a natural run by default.
+    assert "--research-goal mining-productivity-4" in joined
+    assert "--until-accepted" not in joined and "--max-game-ticks" not in joined and "--max-wall-seconds" not in joined
     assert "--decisions 0" not in joined
     prepare = " ".join(runtime.LayaRuntime().prepare_command(config))
     assert "--game-port 34555" in prepare and "--rcon-port 27555" in prepare
     assert "--source-save" in prepare and "--mods-source" in prepare
+
+
+def test_explicit_experiment_caps_are_honored_but_not_defaulted(tmp_path):
+    args = campaign._parser().parse_args(["--runtime", "laya", "--dry-run"])
+    config = campaign._config(args)
+    assert config.until_accepted is None and config.max_game_ticks is None and config.run_wall_seconds is None
+    explicit = laya_config(tmp_path, until_accepted="C4", max_game_ticks=500_000, run_wall_seconds=3600)
+    joined = " ".join(runtime.LayaRuntime().run_command(explicit))
+    assert "--until-accepted C4" in joined and "--max-game-ticks 500000" in joined and "--max-wall-seconds 3600" in joined
 
 
 def test_freeze_manifest_records_identity_and_mod_hashes(tmp_path):
@@ -354,12 +365,16 @@ def test_gate_rejects_known_failure_with_collection_error_or_interrupt(tmp_path)
         assert not backend.verification_passed(config, command, subprocess.CompletedProcess(command, rc, baseline + extra, ''))
 
 
-def test_laya_run_disables_live_helper_and_declares_cooperative_wall_budget(tmp_path):
+def test_laya_run_disables_live_helper_and_honors_an_explicit_wall_budget(tmp_path):
     config = laya_config(tmp_path, code_root=tmp_path / 'episode' / 'code')
     command = runtime.LayaRuntime().run_command(config)
     assert command[1] == str(config.code_root / 'tools/run_laya_clean.py')
     assert '--no-helper' in command
-    assert command[command.index('--max-wall-seconds') + 1] == '21600'
+    # No wall cap by default; an explicit experiment cap is mirrored to the runner.
+    assert '--max-wall-seconds' not in command
+    capped = laya_config(tmp_path, code_root=tmp_path / 'episode' / 'code', run_wall_seconds=21_600)
+    capped_command = runtime.LayaRuntime().run_command(capped)
+    assert capped_command[capped_command.index('--max-wall-seconds') + 1] == '21600'
 
 
 def test_campaign_uses_writable_git_cwd_separate_from_supervisor(tmp_path):
@@ -468,6 +483,10 @@ def test_two_real_adapter_cycles_use_distinct_frozen_sources_and_terminal_observ
     assert {identity['revision'] for identity in identities} == {'rev-one', 'rev-two'}
     assert len({identity['world_root'] for identity in identities}) == 2
     assert all(identity['requested_game_speed'] == 2 for identity in identities)
+    # The frozen evidence records the verified research goal and that no proxy checkpoint/cap ended it.
+    assert all(identity['research_goal'] == 'mining-productivity-4' for identity in identities)
+    assert all(identity['until_accepted'] is None and identity['max_game_ticks'] is None
+               and identity['max_wall_seconds'] is None for identity in identities)
     assert all(set(identity['mod_hashes']) == {'factorio_cursor_rl_agent', 'factorio_laya_agent', 'factorio_training_lab'} for identity in identities)
     assert len([event for event in events if event[0] == 'prepare']) == 2
     assert len([event for event in events if event[0] == 'observer']) == 2

@@ -66,6 +66,13 @@ class Settings:
     rate_window_ticks: int = 7200
     until_phase: str | None = None
     max_game_ticks: int | None = None
+    # A natural goal run ignores ``stall_decisions`` and ends a stall only when
+    # its relevant useful state is unchanged across this whole window.  None
+    # disables the guard entirely.
+    stall_observation_ticks: int | None = 18000
+    # The verified research goal.  When set, proxy rate completion (C6/science
+    # rates/queued research) never ends the run.
+    goal_technology: str | None = None
     request_multiplier: int | None = None
     dependency_context: bool = False
     # Gated, rotating mall slots (training/laya_mall_slots.py). Default since 2026-10-05: C2 was

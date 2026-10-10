@@ -18,6 +18,7 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -81,6 +82,11 @@ def receipt(operation: str, params: dict, result: object) -> dict:
         code = "producing" if result is not None else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
         code = "submitted"
+    elif operation == "research":
+        rejected = isinstance(result, Mapping) and result.get("ok") is False
+        code = "research_rejected" if rejected else "queued"
+        return {"ok": not rejected, "operation": operation, "params": params, "code": code,
+                "result": dict(result) if isinstance(result, Mapping) else None}
     elif operation == "reserve_steel_seed":
         code = "reserved"
     elif operation == "retire_starter":
@@ -247,7 +253,31 @@ class DeterministicSession:
             # Roboport chain toward a position (construction or logistic reach).
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
+            # Queue the goal technology on this force through the mod's own research command.
+            "research": lambda technology: self._set_research(technology),
         }
+
+    def _set_research(self, technology: str) -> dict:
+        """Set the research target via the mod's set_research; the report names the canonical target."""
+        path = self.bridge.set_research(technology, force=FORCE)
+        report = json.loads(Path(path).read_text())
+        if not report.get("ok"):
+            return {"ok": False, "technology": technology, "error": report.get("error")}
+        return {"technology": report.get("canonical_name") or technology, "idempotent": report.get("idempotent")}
+
+    def research_status(self, technology: str | None = None) -> dict:
+        """Read live research state (optionally for one technology) through the mod's read-only command."""
+        path = self.bridge.research_status(force=FORCE, technology=technology)
+        return json.loads(Path(path).read_text())
+
+    def science_status(self) -> dict:
+        """Read live research/lab telemetry for this force."""
+        path = self.bridge.science_status(SURFACE, FORCE)
+        return json.loads(Path(path).read_text())
+
+    def goal_status(self, technology: str) -> dict:
+        """The goal technology's live research state (target_completed is the verified success flag)."""
+        return self.research_status(technology)
 
     def _retire_starter(self, recipe: str) -> dict:
         """The tooling retires the starter only after the refinery's measured output and chest evidence."""

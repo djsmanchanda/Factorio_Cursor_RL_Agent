@@ -106,10 +106,10 @@ def primary_run_transition(config, cycle: int, episode: str, fixer_session: str 
     if _laya(config):
         return f"""Starting Laya run {cycle}/{episode} for {config.technology}.
 
-This is a fresh Laya episode at declared speed {config.run_speed:g} with natural terminal bounds
-(until accepted {config.until_accepted}, max {config.max_game_ticks} game ticks, wall bound
-{config.run_wall_seconds}s). A single read-only Muse helper observes it; do not create an observer team and
-do not reuse anything across runs.
+This is a fresh Laya episode at declared speed {config.run_speed:g}. It ends only on the verified research
+goal {config.technology} (``target_completed``), a hard failure, or a measured complete stall; rate
+proxies (C6/science rates/queued research) do not end it.{" Explicit experiment caps: until_accepted=" + str(config.until_accepted) + ", max_game_ticks=" + str(config.max_game_ticks) + ", wall_seconds=" + str(config.run_wall_seconds) + "." if (config.until_accepted or config.max_game_ticks or config.run_wall_seconds) else " No total game/wall cap is set."}
+A single read-only Muse helper observes it; do not create an observer team and do not reuse anything across runs.
 The persistent campaign fixer remains session {fixer_session or 'not yet created'}.
 Run context: {run_context}
 Evidence root: {evidence_root}

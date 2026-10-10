@@ -59,3 +59,21 @@ Owned unit: laya-loop-20261010.service; confirmed requested=observed speed 2;
 private game/RCON ports 34986/27986. First live episode c61abd5.
 Campaign evidence: data/laya-experiments/laya-loop-20261010; two-hour checks
 append there and to the local data/live-run-kit/next-round.md.
+
+## October 10 natural goal intent (cx-natural-target worktree)
+
+Latest explicit user intent: the goal is a **completed** `mining-productivity-4`
+research target. A goal run ends only on a verified `target_completed`, a hard
+failure, or a measured complete stall over the declared observation window.
+Automatic C6/proxy mission completion and the 12-decision stall cutoff no longer
+end a goal run; science rates and a *queued* research are observations, not
+success. Natural campaign episodes set no default total game/wall cap and no 6h
+episode wall assumption (`tools/campaign_runtime.py`, `Config`); explicit
+`--until-accepted`/`--max-game-ticks`/`--run-wall-seconds` remain experiment
+options. The 8h campaign deadline only prohibits new episodes/fixes; an active
+natural run and its terminal evidence may finish beyond it. Goal produce
+options for plastic/advanced-circuit/science and authorized research/lab options
+now come from the shared toolkit (`training/laya_ops_runner.compile_options`,
+`training/laya_ops.DeterministicSession`). Contract and evidence:
+`training/laya_goal.py` (`laya-goal-v1`, `useful-state-window-v1`), summarized in
+the run summary `goal`/`stall` fields. Seeded weights are unchanged.

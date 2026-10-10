@@ -40,10 +40,14 @@ LAYA_VARIANT = "high"
 LAYA_OBSERVER_MODEL = "opencode-go/muse-spark-1.3-contributor"
 LAYA_OBSERVER_VARIANT = "xhigh"
 
-# Natural terminal bounds for one Laya episode.
-LAYA_UNTIL_ACCEPTED = "C6"
-LAYA_MAX_GAME_TICKS = 1_440_000
-LAYA_RUN_WALL_SECONDS = 21_600
+# A natural Laya episode ends only on the verified research goal, a hard
+# failure, or a measured complete stall.  There is no default proxy checkpoint,
+# total game-tick cap, wall cap or 6h episode assumption; an explicit experiment
+# may still set ``until_accepted``/``max_game_ticks``/``run_wall_seconds``.
+LAYA_UNTIL_ACCEPTED = None
+LAYA_MAX_GAME_TICKS = None
+LAYA_RUN_WALL_SECONDS = None
+LAYA_RESEARCH_GOAL = "mining-productivity-4"
 
 # The fixed fast gate for this fix round.  A candidate passes when the only
 # failures are already-known baseline failures; any new failure rejects it.
@@ -213,16 +217,24 @@ class LayaRuntime:
         return command
 
     def run_command(self, config) -> list[str]:
-        return [
+        command = [
             str(config.python), str(Path(config.code_root or REPO_ROOT) / "tools/run_laya_clean.py"), "run",
             "--root", str(config.world_root), "--seed", str(config.seed),
             "--experiment", str(config.episode_id or "laya-campaign"),
-            "--speed", f"{config.run_speed:g}", "--actions", "deterministic",
-            "--until-accepted", config.until_accepted,
-            "--max-game-ticks", str(config.max_game_ticks),
-            "--max-wall-seconds", str(config.run_wall_seconds), "--no-helper",
+            "--speed", f"{config.run_speed:g}", "--actions", "deterministic", "--no-helper",
             "--source-save", str(config.source_save),
         ]
+        # Explicit experiment caps only; a natural goal run sets none of them.
+        if config.until_accepted:
+            command += ["--until-accepted", str(config.until_accepted)]
+        if config.max_game_ticks:
+            command += ["--max-game-ticks", str(config.max_game_ticks)]
+        if config.run_wall_seconds:
+            command += ["--max-wall-seconds", str(config.run_wall_seconds)]
+        goal = config.technology or LAYA_RESEARCH_GOAL
+        if goal:
+            command += ["--research-goal", str(goal)]
+        return command
 
     def fresh_command(self, config) -> list[str]:
         return self.run_command(config)
@@ -313,6 +325,8 @@ class LayaRuntime:
         source = Path(config.source_save)
         identity = {**self.config_identity(config), "requested_game_speed": config.run_speed,
                     "game_port": config.game_port, "rcon_port": config.rcon_port,
+                    "research_goal": config.technology,
+                    "until_accepted": config.until_accepted,
                     "max_game_ticks": config.max_game_ticks, "max_wall_seconds": config.run_wall_seconds,
                     "stamp_output": stamped.stdout.strip(), "source_save": str(source)}
         manifest = freeze_manifest(

@@ -911,3 +911,105 @@ def test_with_economics_relays_generic_batch_progress_for_the_option_item():
         compile_options(BOARD, results, recipes=recipes), results,
         {"projects": {}, "loans": []})["options"]}
     assert none["op.mall_slot.splitter"]["features"]["batch_status"] is None
+GOAL_RECIPES = {
+    "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+    "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+    "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
+    "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
+    "plastic-bar": {"ingredients": [{"name": "petroleum-gas", "amount": 20}, {"name": "coal", "amount": 1}]},
+    "advanced-circuit": {"ingredients": [{"name": "plastic-bar", "amount": 2}, {"name": "copper-cable", "amount": 4}]},
+    "automation-science-pack": {"ingredients": [{"name": "copper-plate", "amount": 1}, {"name": "iron-gear-wheel", "amount": 1}]},
+}
+_GOAL_STARTERS = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+
+
+def test_goal_targets_get_generic_produce_options_before_any_shortage():
+    # C4 could not build plastic: the mission target was never offered because only shortages were producible.
+    board = {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": 0.5},
+                       {"item": "advanced-circuit", "condition": "unbuilt", "goal_required_per_s": 0.25},
+                       {"item": "automation-science-pack", "condition": "unbuilt", "goal_required_per_s": 0.5}]}
+    ids = {o["option_id"] for o in
+           compile_options(board, _GOAL_STARTERS, recipes=GOAL_RECIPES)["options"]}
+    assert {"op.produce.plastic-bar", "op.produce.advanced-circuit", "op.produce.automation-science-pack"} <= ids
+
+
+def test_research_and_lab_options_are_backed_by_live_prerequisites():
+    board = {"needs": [{"item": "automation-science-pack", "condition": "unbuilt", "goal_required_per_s": 0.5}]}
+    open_status = {"technology": {"canonical_name": "mining-productivity-4", "state": "available", "target_completed": False}}
+
+    def options(goal_status, labs):
+        return {o["option_id"] for o in compile_options(
+            board, _GOAL_STARTERS, recipes=GOAL_RECIPES, research_goal="mining-productivity-4",
+            goal_status=goal_status, labs=labs)["options"]}
+
+    assert "op.research.mining-productivity-4" in options(open_status, labs=2)
+    # Unknown status, a completed target, or an unopened technology never queues research blindly.
+    assert "op.research.mining-productivity-4" not in options(None, labs=2)
+    done = {"technology": {"canonical_name": "mining-productivity-4", "state": "completed", "target_completed": True}}
+    assert "op.research.mining-productivity-4" not in options(done, labs=2)
+    future = {"technology": {"canonical_name": "mining-productivity-4", "state": "future", "target_completed": False}}
+    assert "op.research.mining-productivity-4" not in options(future, labs=2)
+    # No lab observed: provision one through the shared toolkit instead.
+    assert "op.produce.lab" in options(open_status, labs=0)
+    assert "op.produce.lab" not in options(open_status, labs=2)
+
+
+def test_natural_goal_keeps_running_while_construction_advances(tmp_path):
+    from training.laya_clean_runner import Settings
+
+    class BuildingWorld(FakeWorld):
+        def __init__(self):
+            super().__init__()
+            self.observations = 0
+        def query(self):
+            self.observations += 1
+            facts = super().query()
+            facts['pending_ghosts'] = max(0, 100 - self.observations)
+            return facts
+
+    world = BuildingWorld()
+    class BuildingSession(FakeSession):
+        def run(self, operation, **params):
+            self.calls.append((operation, params))
+            world.advance(100)
+            return {'ok': False, 'operation': operation, 'params': params,
+                    'code': 'pending_system_construction'}
+        def goal_status(self, technology):
+            return {'technology': {'requested_name': technology, 'target_completed': False},
+                    'research_progress': 0.0}
+
+    settings = Settings()
+    # The prior runner accepts Settings but ignores the new goal field, so this
+    # regression exercises actual premature stopping without a collection error.
+    object.__setattr__(settings, 'goal_technology', 'mining-productivity-4')
+    object.__setattr__(settings, 'stall_observation_ticks', 18000)
+    summary = run(world, GuidedPolicy(3), journal=tmp_path/'building.jsonl', decisions=14,
+                  measure_ticks=600, seed=3, run_id='building', session=BuildingSession(), settings=settings)
+    assert summary['decisions'] == 14
+    assert summary['stop'] == 'decision_budget'
+
+
+def test_future_repeatable_goal_offers_current_live_level():
+    board={'needs':[]}
+    status={'technology':{'state':'future','enabled':True,'canonical_name':'mining-productivity-3',
+                          'current_level':3,'requested_level':4,'target_completed':False}}
+    menu=compile_options(board, [], research_goal='mining-productivity-4',goal_status=status,labs=1)
+    research=[o for o in menu['options'] if o['family']=='research']
+    assert [o['params']['technology'] for o in research] == ['mining-productivity-3']
+
+
+def test_natural_goal_stops_on_first_hard_tool_failure(tmp_path):
+    from training.laya_clean_runner import Settings
+    class FailedSession(FakeSession):
+        def run(self, operation, **params):
+            return {'ok':False,'operation':operation,'params':params,'code':'untyped_stuck',
+                    'state':'failed','classification':'bug','message':'shared-tool invariant failed'}
+        def goal_status(self, technology):
+            return {'technology':{'requested_name':technology,'target_completed':False}}
+    settings=Settings()
+    object.__setattr__(settings,'goal_technology','mining-productivity-4')
+    object.__setattr__(settings,'stall_observation_ticks',18000)
+    summary=run(FakeWorld(),GuidedPolicy(3),journal=tmp_path/'hard.jsonl',decisions=6,
+                measure_ticks=600,seed=3,run_id='hard',session=FailedSession(),settings=settings)
+    assert summary['decisions'] == 1
+    assert summary['stop'] == 'hard_failure'

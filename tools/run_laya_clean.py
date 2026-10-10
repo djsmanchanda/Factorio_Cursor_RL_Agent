@@ -85,6 +85,9 @@ def main(argv=None) -> int:
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
                    help="Ops only: stop after the shared checkpoint predicate passes")
+    p.add_argument("--research-goal",
+                   help="Natural goal run: end only when this technology's target_completed is verified "
+                        "(no rate-proxy or decision-count stall cutoff)")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--max-wall-seconds", type=float, help="Cooperative natural episode wall budget; stop after the current operation.")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
@@ -151,7 +154,7 @@ def main(argv=None) -> int:
                   requested_speed="paused" if args.stepped else f"{speed:g}", observed_speed=adapter.observed_speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
-                  window=f"proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
+                  window=f"goal={args.research_goal or settings.goal_technology or '-'} proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
@@ -167,7 +170,8 @@ def main(argv=None) -> int:
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
                                   should_stop=should_stop, status_path=paths["status"], settings=settings,
-                                  until_accepted=args.until_accepted)
+                                  until_accepted=args.until_accepted,
+                                  goal=args.research_goal or settings.goal_technology)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
@@ -197,7 +201,8 @@ def main(argv=None) -> int:
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
              "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed,
              "speed_status": speed_status(adapter), **tag,
-             "window": {"until_phase": settings.until_phase, "until_accepted": args.until_accepted,
+             "window": {"research_goal": args.research_goal or settings.goal_technology,
+                        "until_phase": settings.until_phase, "until_accepted": args.until_accepted,
                         "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
     with RUN_INDEX.open("a") as out:
