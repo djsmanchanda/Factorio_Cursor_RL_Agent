@@ -61,6 +61,7 @@ from orchestrator.mall_builder import (
     mall_cell_needs_rebuild,
     mall_demand_slot_count,
     mall_entity_positions,
+    mall_grid_reserved_tiles,
     mall_slot_is_demand,
     mall_slot_count,
     mall_slot_uses_shared_provider,
@@ -3259,7 +3260,7 @@ def build_mining_stage(
 def _serve_direct_plate_starter(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ore: str, starter: live_base.DirectPlateStarter,
-    emit: Callable[[str], None], *, submit: bool,
+    emit: Callable[[str], None], reference_point: Point, *, submit: bool,
 ) -> Point:
     """Build or service the removable direct drill -> furnace starter."""
     drill_count = 2 if recipe in {"iron-plate", "stone-brick"} else 1
@@ -3275,6 +3276,15 @@ def _serve_direct_plate_starter(
         pole_side=starter.pole_side,
     )
     plan["surface"], plan["force"] = surface, force
+    # The fixed mall grid reserves every planned slot, dense-bank module and
+    # shared substation long before they exist. Covering and powering the first
+    # starter must dodge that same shared reservation, or an initial roboport or
+    # pole hop lands on a future mall slot (live 2026-10-10: a roboport ghost at
+    # (40,26) intersected the north quad). Union the grid with the starter's own
+    # footprint so every coverage/power callback sees one reservation.
+    reserved_tiles = (
+        mall_grid_reserved_tiles(reference_point) | planned_footprint_tiles(plan)
+    )
     if submit:
         # Stage construction service and connect the local pole island while
         # the complete future footprint is still known and clear. The starter
@@ -3283,7 +3293,6 @@ def _serve_direct_plate_starter(
             # Claim the starter's own poles before its extra bridge spends
             # construction stock; otherwise staging power first can consume
             # the exact two anchors the stone blueprint still needs.
-            starter_footprint = planned_footprint_tiles(plan)
             assert_affordable(
                 client, surface, force, plan, f"direct_{recipe}_starter",
                 emit, reserve_project=True,
@@ -3294,11 +3303,11 @@ def _serve_direct_plate_starter(
             # out-of-range terminal poles unable to dispatch forever.
             _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
-                reserved_tiles=starter_footprint,
+                reserved_tiles=reserved_tiles,
             )
             if not extend_power(
                 client, bridge, surface, force, positions["power"], emit,
-                reserved_tiles=starter_footprint,
+                reserved_tiles=reserved_tiles,
                 avoid_resources=False,
             ):
                 raise StuckError(
@@ -3309,14 +3318,14 @@ def _serve_direct_plate_starter(
             client, bridge, surface, plan, f"direct_{recipe}_starter", emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
-                reserved_tiles=planned_footprint_tiles(plan),
+                reserved_tiles=reserved_tiles,
             ),
         )
     else:
         _ensure_power_anchor_on_generated_network(
             client, bridge, surface, force, positions["power"],
             f"direct {recipe} starter", emit,
-            reserved_tiles=planned_footprint_tiles(plan),
+            reserved_tiles=reserved_tiles,
         )
     area = _plan_area(plan, padding=10.0)
     machines = [
@@ -3341,7 +3350,7 @@ def _serve_direct_plate_starter(
                 _ensure_power_anchor_on_generated_network(
                     client, bridge, surface, force, (point["x"], point["y"]),
                     f"direct {recipe} starter", emit,
-                    reserved_tiles=planned_footprint_tiles(plan),
+                    reserved_tiles=reserved_tiles,
                 )
     stuck = _diagnose_machines(
         client, surface, machines, emit, bridge=bridge, force=force,
@@ -3373,7 +3382,7 @@ def _bootstrap_direct_plate_line(
         )
         return _serve_direct_plate_starter(
             client, bridge, surface, force, recipe, ore, standing, emit,
-            submit=False,
+            reference_point, submit=False,
         )
     site = live_base.direct_plate_starter_site(
         client, surface, force, ore, reference_point,
@@ -3393,7 +3402,8 @@ def _bootstrap_direct_plate_line(
     if recipe in {"iron-plate", "copper-plate"}:
         _STARTUP_METAL_STARTERS_OBSERVED = True
     return _serve_direct_plate_starter(
-        client, bridge, surface, force, recipe, ore, site, emit, submit=True,
+        client, bridge, surface, force, recipe, ore, site, emit,
+        reference_point, submit=True,
     )
 
 

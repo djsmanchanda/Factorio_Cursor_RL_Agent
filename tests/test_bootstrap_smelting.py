@@ -5,6 +5,7 @@ import pytest
 
 from orchestrator import autonomous_builder as builder
 from orchestrator import live_base
+from orchestrator.mall_builder import mall_grid_reserved_tiles
 from planners.bootstrap_smelting import (
     direct_smelter_positions,
     generate_direct_smelter,
@@ -13,6 +14,10 @@ from planners.bootstrap_smelting import (
     retire_logistic_smelter_plan,
 )
 from planners.plan_validation import validate_no_collisions
+from planners.infrastructure import ROBOPORT_SIZE
+from planners.roboport_coverage import footprint_tiles, plan_coverage_roboports
+
+_REFERENCE = (3.0, -1.0)
 
 
 def test_direct_starter_matches_the_live_reference_stack() -> None:
@@ -173,13 +178,14 @@ def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> No
 
     builder._serve_direct_plate_starter(
         _LiveClient(), object(), "nauvis", "player", "stone-brick", "stone",
-        starter, lambda _message: None, submit=True,
+        starter, lambda _message: None, _REFERENCE, submit=True,
     )
 
     assert events[:3] == ["coverage", "power", "blueprint"]
     assert len(set(verified)) == 2
     assert coverage_reservations == [
-        builder.planned_footprint_tiles(
+        mall_grid_reserved_tiles(_REFERENCE)
+        | builder.planned_footprint_tiles(
             generate_direct_smelter(
                 "stone-brick", "stone", (54.5, -64.5), "north",
                 pole_side=1,
@@ -210,7 +216,7 @@ def test_uncovered_direct_starter_never_submits_a_power_chain(monkeypatch) -> No
         builder._serve_direct_plate_starter(
             _LiveClient(), object(), "nauvis", "player",
             "stone-brick", "stone", starter, lambda _message: None,
-            submit=True,
+            _REFERENCE, submit=True,
         )
 
 
@@ -303,3 +309,65 @@ def test_legacy_logistic_cell_remains_recognizable_for_retirement_only() -> None
         action["action_type"] == "remove_entity"
         for action in actions
     )
+
+
+def test_direct_starter_first_coverage_reserves_the_whole_mall_grid(monkeypatch) -> None:
+    """The first direct starter's coverage must dodge the shared mall grid.
+
+    Live 2026-10-10: the initial starter reserved only its own footprint, so its
+    first coverage chain placed a roboport ghost at (40,26) that intersected the
+    future north quad. The reference point's mall_grid_reserved_tiles must reach
+    the starter's very first coverage call, and the exact first candidate that
+    call plans must stay off the bank.
+    """
+    class _LiveClient:
+        def command(self, _text: str) -> str:
+            return ""
+
+    starter = live_base.DirectPlateStarter((61.5, 24.5), "north", 1)
+    reservations: list[set[tuple[int, int]]] = []
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "direct_plate_starter_site",
+        lambda *_a, **_k: starter,
+    )
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_ensure_plan_construction_coverage",
+        lambda *_a, **kwargs: reservations.append(kwargs["reserved_tiles"]),
+    )
+    monkeypatch.setattr(builder, "extend_power", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: {})
+    monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_ensure_power_anchor_on_generated_network",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(builder, "_diagnose_machines", lambda *_a, **_k: [])
+    monkeypatch.setattr(builder, "_record_bootstrap_pioneer", lambda *_a: None)
+
+    builder._bootstrap_direct_plate_line(
+        _LiveClient(), object(), "nauvis", "player", "iron-plate",
+        _REFERENCE, lambda _message: None,
+    )
+
+    assert reservations, "the starter must plan construction coverage first"
+    first = reservations[0]
+    bank = mall_grid_reserved_tiles(_REFERENCE)
+    assert bank <= first
+    assert builder.planned_footprint_tiles(
+        generate_direct_smelter(
+            "iron-plate", "iron-ore", (61.5, 24.5), "north", pole_side=1,
+        )
+    ) <= first
+
+    # The unguarded first candidate lands its 4x4 footprint on the bank (the
+    # exact (40,26) tile seen live); the candidate planned with the starter's
+    # reservation stays clear.
+    source, target = (-1.0, 27.0), (79.0, 27.0)
+    unguarded = plan_coverage_roboports([source], [target])
+    guarded = plan_coverage_roboports([source], [target], obstacles=first)
+    assert footprint_tiles(unguarded[0], ROBOPORT_SIZE) & bank
+    assert not footprint_tiles(guarded[0], ROBOPORT_SIZE) & bank
