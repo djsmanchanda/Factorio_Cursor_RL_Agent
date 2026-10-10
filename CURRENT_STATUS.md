@@ -12,36 +12,7 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - Evidence: The v2 mining-selector process is absent and has no final adapter/evaluations; last telemetry reached optimizer step 123/188, while the newest complete atomic recovery snapshot is step 100. The temporary cleaned dataset is absent and must be rebuilt before resume. No runtime, save, model, service, or deployed mod was changed while producing the handoff.
 - Lifecycle: none. GPU training may be resumed from step 100 after rebuilding the 2,111-case dataset; Factorio and the deterministic workflow remain unchanged.
 
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
 - 2026-09-25: Migrated the isolated deterministic server and four disposable native RL workers to private Factorio 2.1.20 headless runtime (`build 87512`). Managers, campaign/dashboard defaults, current docs, active fixture versions, and persisted read-data configs now agree. The 2.1.20 changelog removals are guarded: the training Lua does not read `LuaPlayer.spectator` or `fuel_category`; spectator-controller assignment remains in use. Evidence: 33 focused tests, Python/shell/Lua syntax checks, matching deployed mod trees, 2.1.20 launch banners for all five instances, and read-only RCON tick probes (deterministic `2075404`; workers 01–04 `6468928`, `749758`, `751062`, `750269`). GUI mod copies were synchronized; deterministic server and all four workers are running, while the deterministic Python runner remains stopped.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-25: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
 
 ## [2026-09-25] Laya L0 exploration loop live on 2.1.20
 - Commits: 64ff454, 7b83d6e, c2735f1, 3bc5f1b, 1f1a4dc, b2ebbb6, 0910a72.
@@ -72,16 +43,6 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - Parallel batches at 8x (32 episodes/115 s), deeper build-variant layer, counterfactual labels (398 faithful, noise ~180 ticks), 2048-context training, held-out evaluation.
 - Held-out (32 seeds): features-only policy trained on counterfactual labels beats the rollout on 30/32 (median cost 5,806 vs 7,751); Laya v1 26/32, median 14,279 (wait.1s loop; needs policy iteration + decision cost).
 - Lifecycle: training lab redeployed to workers 01-03 (and GUI profile); workers 01-03 running at speed 1.
-
-- 2026-09-28: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-28: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-28: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-28: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-09-28: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
 
 ## [2026-09-29] Stepped policy iteration beats the scripted rollout (overnight)
 - Commits: c8b5b8f (16-slot, policy-iteration labels, decision cost), 7f51f6b (stepped paused-clock episodes), 7fbdcad (demand-scaling level 2), 2ed47e6/e72468c (demand + time features, phase-independent rate windows, overnight driver).
@@ -299,16 +260,6 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: aligned native training/server/campaign managers and dashboard defaults with the already-installed 2.1.21 engine (build 87673); updated current operations/training docs and documented version-matched rollback. Retained historical 2.1.20 evidence and fixtures.
 - Evidence: 63 focused manager/dashboard tests, shell syntax and whitespace checks pass. Read-only live RCON confirms deterministic Nauvis/player with both project mods on 2.1.21; installed GUI is also 2.1.21 and all 21 persisted worker read-data configs match. Disposable mall smoke on loopback 34221/27221 verified exact kit/50+50 bots, bot-funded gear production (13 gears), zero pending ghosts, request multipliers 1/4/15 and unchanged source hash. Evidence: data/laya-saved-world/factorio-2.1.21-smoke-20261009/upgrade-validation.json.
 - Lifecycle: test host stopped; existing deterministic server preserved and standard workers remain stopped. No mod deployment or further Factorio/GUI restart required; future manager launches use 2.1.21. The private 2.1.20 runtime remains available; rollback also requires a compatible pre-upgrade save copy. No policy-performance claim or experiment adoption.
-
-- 2026-10-09: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-09: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-09: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-09: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-09: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
 
 ## [2026-10-09] AGENTS.md modernized; docs archived
 - What: AGENTS.md reframed around deterministic showcase, Laya focus and RL test bed, with experiment/adoption rules and subagent log reading. Rotated status entries before 2026-09-25 into docs/archive/status/. Archived 33 superseded handoffs, finished experiment reports, multi-model plans and point-in-time reviews to docs/archive/{rl,deterministic}/ with retargeted links; replaced the August roadmap. Open leads are listed in docs/archive/README.md.
