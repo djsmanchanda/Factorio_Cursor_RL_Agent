@@ -151,6 +151,10 @@ class Config:
     stamp_script: Path | None = None
     stamp_tag_base: int = 30000
     comparator_roots: tuple[Path, ...] = ()
+    agent_topology: str = "legacy"
+    claude_bin: str = "claude"
+    campaign_branch: str | None = None
+    min_fix_budget_seconds: int = 1800
 
 
 @dataclass
@@ -179,6 +183,8 @@ class State:
     # bounded retry is allowed at a revision; a still-failing same revision
     # records {"terminal": True} and no new episode may start at it.
     observer_failure: dict | None = None
+    fixer_cycle: int | None = None
+    final_validation_started: bool = False
 
 
 def _now() -> str:
@@ -201,6 +207,8 @@ def _load_state(path: Path) -> State:
         raise ValueError(f"campaign state must be an object: {path}")
     return State(
         campaign_id=payload.get("campaign_id"),
+        fixer_cycle=payload.get("fixer_cycle"),
+        final_validation_started=bool(payload.get("final_validation_started", False)),
         active_episode_id=payload.get("active_episode_id"),
         lifecycle_intent=payload.get("lifecycle_intent"),
         episode_runtime=payload.get("episode_runtime"),
@@ -237,7 +245,7 @@ def _run(command: list[str], *, timeout: int = 120) -> subprocess.CompletedProce
         if remaining <= 0:
             raise TimeoutError("campaign deadline exhausted before command")
         timeout = min(timeout, remaining)
-    model_command = ("opencode" in Path(command[0]).name or
+    model_command = ("claude" in Path(command[0]).name or "opencode" in Path(command[0]).name or
                      any(Path(token).name == "laya_helper_agent.py" for token in command[:3]) or
                      (command[0] == "env" and any("OPENCODE_CONFIG_CONTENT=" in token for token in command[:3])))
     if not model_command:
@@ -389,6 +397,9 @@ def _opencode_command(config: Config, message: str, session_id: str | None) -> l
 
 def _ask(config: Config, message: str, session_id: str | None, sequence: int,
          retry: int = 0) -> tuple[str | None, str]:
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not config.read_only and not config.dry_run:
+        from tools.campaign_pingpong import ask_haiku
+        return ask_haiku(config, message, session_id)
     if config.dry_run:
         return session_id or "dry-run-session", "CAMPAIGN_DECISION:\nstatus: dry-run\n"
     command = _opencode_command(config, message, session_id)
@@ -432,13 +443,18 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int,
     _atomic_write(transport, output)
     if result.returncode:
         raise RuntimeError(f"OpenCode exited {result.returncode}; inspect {transport}")
-    return session_id or _session_id(output), output
+    returned = _session_id(output)
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and returned != session_id:
+        raise RuntimeError("DeepSeek session continuity violation")
+    return session_id or returned, output
 
 
 def _ask_with_continue(config: Config, message: str, session_id: str | None,
                        sequence: int, *, require_response: bool = True,
                        retries: int | None = None) -> tuple[str | None, str]:
     """Recover a congested model call until it responds or the campaign ends."""
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        retries = 1 if retries is None else retries
     active_session = session_id
     prompt = message
     attempt = 0
@@ -454,6 +470,8 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
             return active_session, output
         except Exception as error:
             transport = config.opencode_log_dir / f"opencode-{sequence:04d}{'' if attempt == 0 else f'-continue-{attempt}'}.jsonl"
+            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not config.read_only:
+                active_session = _load_state(config.state_file).fixer_session_id or active_session
             if active_session is None and transport.exists():
                 active_session = _session_id(transport.read_text(encoding="utf-8", errors="replace"))
             if retries is not None and attempt >= retries:
@@ -696,6 +714,8 @@ def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> 
     """Bootstrap the persistent primary only when no usable session exists."""
     if state.primary_session_id:
         return state.primary_session_id, False
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        raise RuntimeError("Saved Hi-bootstrap DeepSeek session is required; never create a replacement")
     session, _ = _ask_with_continue(_readonly(config), primary_bootstrap(config, cycle), None, sequence, require_response=False)
     if session is None:
         raise RuntimeError("OpenCode did not return a persistent primary session ID")
@@ -705,6 +725,12 @@ def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> 
 
 
 def _ensure_fixer(config: Config, state: State, sequence: int = 0) -> str | None:
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if state.fixer_cycle != state.active_cycle:
+            state.fixer_session_id = None
+            state.fixer_cycle = state.active_cycle
+            _save_state(config.state_file, state)
+        return state.fixer_session_id
     if state.fixer_session_id:
         return state.fixer_session_id
     fixer_config = replace(config, model=config.fixer_model or config.model,
@@ -813,6 +839,11 @@ def _run_campaign(config: Config) -> int:
     if config.plastic_reliability and (config.acceptance_seconds < 10 or config.acceptance_seconds > 600 or config.acceptance_seconds % 10 or config.required_successes < 3):
         raise ValueError("reliability requires >=3 successes and a 10–600 second window in 10-second increments")
     state = _load_state(config.state_file)
+    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        from tools.campaign_pingpong import validate_campaign
+        validate_campaign(config, state)
+        if state.phase in {"SUCCESS", "DEADLINE_REACHED", "HARNESS_FAILURE"}:
+            return 0
     if config.max_runtime_seconds and state.deadline_utc is None:
         state.deadline_utc = datetime.fromtimestamp(time.time() + config.max_runtime_seconds, timezone.utc).isoformat()
         _save_state(config.state_file, state)
@@ -858,6 +889,8 @@ def _run_campaign(config: Config) -> int:
                     f"{pending.get('episode')}; active episode is {state.active_episode_id}.\n")
             state.pending_fix = None
             _save_state(config.state_file, state)
+    if state.pending_fix and time.time() >= deadline and getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        return _stop_campaign(config, state, "DEADLINE_REACHED", reason="unfinished candidate retained unverified; observation only")
     if state.pending_fix and not config.dry_run:
         from tools.campaign_fix_flow import run_fix_cycle
         outcome = run_fix_cycle(config, state, state.active_cycle or state.completed_cycles + 1,
@@ -953,6 +986,10 @@ def _run_campaign(config: Config) -> int:
                 if complete or not run_text or not backend.episode_id(config):
                     raise RuntimeError("--resume-active-run requires an identified unfinished episode")
             else:
+                if time.time() >= deadline:
+                    return _stop_campaign(config, state, "DEADLINE_REACHED", reason="no new run at deadline")
+                if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and deadline - time.time() < config.min_fix_budget_seconds:
+                    state.final_validation_started = True
                 config = replace(config, episode_id="episode-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8])
                 if backend.name == "laya" and not config.dry_run:
                     config = backend.allocate_config(config, cycle)
@@ -995,6 +1032,9 @@ def _run_campaign(config: Config) -> int:
                 config.state_root / "logs/latest-context.md", config.state_root,
                 Path(previous["synthesis_path"]) if previous and previous.get("synthesis_path") else None), sequence)
             sequence += 1
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            from tools.campaign_pingpong import notify_run
+            notify_run(config, state)
         _progress(config, "OBSERVING", state)
         checkpoint = max(state.last_checkpoint, 0)
         # A resumed episode may already have ended while the controller was
@@ -1105,6 +1145,9 @@ def _run_campaign(config: Config) -> int:
             if helper.get("status") == "complete" and backend.goal_completed(config, state.active_episode_id):
                 return _finish_cycle(config, state, "goal-completed", {}, run_text=run_text,
                                      terminal_phase="SUCCESS", reason=f"verified research goal {config.technology} completed")
+            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and state.final_validation_started:
+                return _finish_cycle(config, state, "final-validation", {}, run_text=run_text,
+                                     terminal_phase="DEADLINE_REACHED", reason="final frozen validation observed without a subsequent fix")
             if time.time() >= deadline:
                 _finish_cycle(config, state, "deadline-after-natural-run", {}, run_text=run_text)
                 return _stop_campaign(config, state, "DEADLINE_REACHED", reason="natural episode and terminal evidence finished after deadline")
@@ -1164,10 +1207,21 @@ def _run_campaign(config: Config) -> int:
                                "hypothesis_id": hypothesis_id}
             _save_state(config.state_file, state)
 
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and deadline - time.time() < config.min_fix_budget_seconds:
+            _finish_cycle(config, state, "reserve-final-validation", {}, run_text=run_text)
+            continue
+
         # ---- fixing through commit, all revisions in the same sessions ------
         from tools.campaign_fix_flow import run_fix_cycle
         outcome = run_fix_cycle(config, state, cycle, state.active_episode_id, synthesis_path,
                                 board, helper, sequence)
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            if outcome == "abandoned":
+                return _finish_cycle(config, state, outcome, {}, run_text=run_text,
+                                     terminal_phase="HARNESS_FAILURE", reason="bounded candidate verification failed; no unchanged retry churn")
+            if outcome in {"no-change", "stop"}:
+                state.final_validation_started = True
+                _save_state(config.state_file, state)
         state.helper = _late_helper(config, state, state.active_episode_id)
         _finish_cycle(config, state, outcome, {}, run_text=run_text)
     return _stop_campaign(config, state, "SUCCESS",
@@ -1286,11 +1340,17 @@ def _config(args: argparse.Namespace) -> Config:
         campaign_worktree=args.campaign_worktree.resolve() if args.campaign_worktree else None,
         mod_builder=args.mod_builder, stamp_script=args.stamp_script, stamp_tag_base=args.stamp_tag_base,
         comparator_roots=tuple(args.comparators or ()),
+        agent_topology=args.agent_topology, claude_bin=args.claude_bin,
+        campaign_branch=args.campaign_branch, min_fix_budget_seconds=args.min_fix_budget_seconds,
     )
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--agent-topology", choices=["legacy", "deepseek-haiku"], default="legacy")
+    parser.add_argument("--claude-bin", default="claude")
+    parser.add_argument("--campaign-branch")
+    parser.add_argument("--min-fix-budget-seconds", type=int, default=1800)
     parser.add_argument("--checkpoint-failures", action="store_true", help="Save failed world and durable sidecars before fixing or resetting (reliability mode).")
     parser.add_argument("--rcon-port", type=int, default=27017)
     parser.add_argument("--game-port", type=int, default=34199)

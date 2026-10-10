@@ -323,7 +323,7 @@ class LayaRuntime:
         if stamped.returncode:
             raise RuntimeError(f"mod stamping failed: {stamped.stderr}")
         source = Path(config.source_save)
-        identity = {**self.config_identity(config), "requested_game_speed": config.run_speed,
+        identity = {**self.config_identity(config), "seed": config.seed, "requested_game_speed": config.run_speed,
                     "game_port": config.game_port, "rcon_port": config.rcon_port,
                     "research_goal": config.technology,
                     "until_accepted": config.until_accepted,
@@ -354,6 +354,9 @@ class LayaRuntime:
         """Idempotent prepare/launch using per-episode durable lifecycle phases."""
         from tools import opencode_campaign_orchestrator as orch
         self.freeze(config)
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            from tools.campaign_pingpong import require_edit_window
+            require_edit_window(config, orch._load_state(config.state_file))
         lifecycle = self._lifecycle_record(config)
         log = self.run_log_path(config)
         if self.episode_id(config):
@@ -385,6 +388,8 @@ class LayaRuntime:
                 raise RuntimeError(f"runner {pid} ended before RUN START; see {console}") from error
             process = None
         else:
+            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+                require_edit_window(config, orch._load_state(config.state_file))
             self._lifecycle_record(config, phase="launching")
             with console.open("ab") as stream:
                 process = subprocess.Popen(command, cwd=config.code_root, stdin=subprocess.DEVNULL,
@@ -402,6 +407,9 @@ class LayaRuntime:
 
     def observe(self, config, episode: str) -> dict:
         """Exactly one terminal helper invocation, no live model checkpoints."""
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            from tools.campaign_pingpong import observe_terminal
+            return observe_terminal(config, episode)
         from tools import opencode_campaign_orchestrator as orch
         directory = Path(config.code_root).parent / "observer"
         directory.mkdir(exist_ok=True)
@@ -513,7 +521,12 @@ class LayaRuntime:
         return False
 
     def latest_run(self, config) -> tuple[bool, str]:
-        return latest_run_from_log(self.run_log_path(config))
+        result = latest_run_from_log(self.run_log_path(config))
+        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not result[0]:
+            from tools.campaign_pingpong import detect_runner_failure
+            detect_runner_failure(config)
+            result = latest_run_from_log(self.run_log_path(config))
+        return result
 
     def snapshot(self, config, cycle: int, checkpoint: int, offset: int):
         if config.dry_run:
@@ -591,6 +604,16 @@ class LayaRuntime:
     def regression_proof(self, config, declared: list[str], fields: dict, log: Path) -> bool:
         """Replay the new focused test against HEAD, then require candidate pass."""
         from tools import opencode_campaign_orchestrator as orch
+        nodes = [node.strip() for node in fields.get("regression", "").split(",") if node.strip()]
+        if len(nodes) > 1:
+            logs = []
+            passed = True
+            for index, node in enumerate(nodes):
+                proof = log.with_name(log.stem + f"-{index + 1}" + log.suffix)
+                passed = self.regression_proof(config, declared, {**fields, "regression": node}, proof) and passed
+                logs.append(proof.read_text())
+            log.write_text("\n".join(logs))
+            return passed
         changes_code = any(Path(path).suffix in {".py", ".lua", ".sh"} and not path.startswith("tests/") for path in declared)
         if not changes_code and fields.get("kind", "behavior") not in {"behavior", "feature", "fix"}:
             return True

@@ -118,3 +118,27 @@ seconds on a copper-pioneer lifecycle contradiction. Its second Muse report
 is complete and the next synthesis/fix cycle is active. No gameplay milestone
 improvement or adoption claim follows from these two early failures. Main
 production/server untouched; neither push nor merge into main occurred.
+
+## 2026-10-10 18:57 IST — DeepSeek / Claude Haiku six-hour campaign configuration
+
+Latest explicit user instructions supersede older role/branch instructions for
+this campaign: persistent OpenCode Go DeepSeek V4.1 Flash/high, fresh first-party
+Claude Haiku5.5/xhigh per implementation cycle, no Muse, one branch
+`t3/laya-deepseek-haiku-6h`. Owning entrypoint `tools.campaign_pingpong` reuses
+the existing campaign state machine. Setup checks: 54 focused passes, ten
+fail-before/pass-after proofs, fixed fast gate 1095 passes/3 skips and only the
+independently confirmed import-firewall failure. Transport fixtures verified
+actual model/effort/session identities and scoped writes/tests with Git denied.
+
+Campaign evidence: `data/laya-experiments/deepseek-haiku-20261010T130511Z/`; unit
+`laya-deepseek-haiku-20261010T130511Z.service`. The launcher writes original
+launch time/deadline (launch + six hours) into `campaign.json` and controller
+state before starting user systemd. Consult those records for authoritative
+launch/health status; this configuration entry alone is not live-run evidence.
+Saved DeepSeek session: `ses_eda145d5effeFvcUDEekKSe2xo`. Private game/RCON ports
+34988/27988, seed50616, requested speed2; observed speed belongs to each run.
+Natural completed mining-productivity-4 target; no total episode/tick/decision
+cap. Original deadline survives restart and permits an active natural final
+run to finish later. GPT checks at +2h/+4h/+6h; harness publishes final report
+when final observation ends. No production, GUI, main, merge, push or adoption
+authority. All fixes/commits stay on the same campaign branch.

@@ -612,3 +612,46 @@ def test_goal_completion_requires_owned_indexed_verified_research(tmp_path):
     row['summary']['goal']['verified']=False
     index.write_text(json.dumps(row)+'\n')
     assert runtime.LayaRuntime().goal_completed(config,'run-1') is False
+
+
+def test_pingpong_two_cycles_keep_deepseek_and_refresh_only_haiku(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+    from datetime import datetime, timedelta, timezone
+    harness = CycleHarness(tmp_path)
+    harness.install(monkeypatch)
+    args = campaign._parser().parse_args(harness.cli() + [
+        '--agent-topology', 'deepseek-haiku', '--campaign-branch', pp.BRANCH,
+        '--fixer-model', pp.HAIKU, '--fixer-variant', 'xhigh',
+        '--observer-model', pp.DEEPSEEK, '--observer-variant', 'high'])
+    config = campaign._config(args)
+    config = campaign.replace(config, max_cycles=2)
+    deadline = (datetime.now(timezone.utc)+timedelta(hours=6)).isoformat()
+    campaign._save_state(config.state_file, campaign.State(primary_session_id='real-deepseek', deadline_utc=deadline))
+    pp.atomic(config.state_root/'campaign.json', {'deadline_utc':deadline,'deepseek_session_id':'real-deepseek'})
+    original_run = campaign._run
+    def run(cmd, **kw):
+        if cmd == ['git','branch','--show-current']:
+            return subprocess.CompletedProcess(cmd, 0, pp.BRANCH, '')
+        return original_run(cmd, **kw)
+    monkeypatch.setattr(campaign, '_run', run)
+    deliveries, notifications = [], []
+    monkeypatch.setattr(pp, 'relay_completion', lambda config, state, fix, output: deliveries.append((state.primary_session_id, state.fixer_session_id)))
+    monkeypatch.setattr(pp, 'notify_run', lambda config, state: notifications.append(state.primary_session_id))
+    def ask(config, prompt, session, sequence, retry=0):
+        state = campaign._load_state(config.state_file)
+        if not config.read_only:
+            assert state.fixer_cycle == state.active_cycle
+            assert session is None, 'every cycle must begin a fresh Claude session'
+            harness.fix_started = True
+            return f'actual-haiku-{state.active_cycle}', ('CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: fix.py\ntest: passed\nprediction: fewer stalls\nreason: focused\n')
+        assert session == 'real-deepseek'
+        if 'REVIEW_DECISION' in prompt:
+            return session, 'REVIEW_DECISION:\nstatus: approved\nreason: evidence'
+        return session, 'SYNTHESIS:\nhypothesis: shortage\nconfidence: high\nsupporting: log'
+    monkeypatch.setattr(campaign, '_ask', ask)
+    assert campaign.run_campaign(config) == 0
+    state = campaign._load_state(config.state_file)
+    assert state.primary_session_id == 'real-deepseek' and state.deadline_utc == deadline
+    assert state.completed_cycles == 2 and len(harness.commits) == 2
+    assert deliveries == [('real-deepseek', 'actual-haiku-1'), ('real-deepseek', 'actual-haiku-2')]
+    assert notifications == ['real-deepseek', 'real-deepseek']

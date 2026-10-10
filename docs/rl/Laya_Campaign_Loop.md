@@ -135,3 +135,55 @@ Before an unattended launch, verify installed OpenCode permissions with disposab
 exercise the complete controller cycle. The October10 round2 evidence is in the local
 data/live-fixes/codex_helper_runs/20261010-round2/: Muse published a preserved-run report through
 the wrapper; DeepSeek edited scoped source and was denied outside/.git/lifecycle operations.
+
+## DeepSeek / Claude Haiku six-hour profile (October 10, 2026)
+
+The user-requested `--agent-topology deepseek-haiku` profile supersedes the
+older model-role topology above for this campaign. Its owning entrypoint is
+`python -m tools.campaign_pingpong`, using the existing orchestrator,
+`campaign_fix_flow` and `campaign_runtime` state machine. It requires the one
+branch `t3/laya-deepseek-haiku-6h`, an explicit writable campaign worktree,
+`opencode-go/deepseek-v4.1-flash/high` for observer/planner and
+`claude-haiku-5-5/xhigh` through the first-party Claude CLI for implementation.
+There is no Muse or additional model team.
+
+Before launch, send exactly `Hi` through OpenCode, persist its **returned**
+session ID immediately, then initialize instructions using `run --session ID`.
+The profile refuses to create a replacement planner session. Save the original
+launch time, launch + six-hour deadline, exact routes and planner ID in
+`<campaign>/campaign.json`; the controller validates them on every restart.
+Store all evidence under `data/laya-experiments/deepseek-haiku-<timestamp>/`.
+
+Each implementation cycle begins a new Claude `-p --model claude-haiku-5-5
+--effort xhigh` invocation without a session or worktree flag. Its returned
+real ID is persisted as soon as the transport emits it; corrections use only
+`--resume ID`. Saved native transcripts verify actual effort/model/provider.
+Only the controller stages/commits. Haiku receives the saved planner ID,
+findings, previous change/outcome, plan/prediction and verification contracts.
+Every completion packet is relayed verbatim through OpenCode to that saved ID,
+with acknowledged delivery recorded before review. The subsequent run
+notification adds its verified commit and frozen run identity to the same ID.
+
+The exact fast gate remains `pytest tests -m fast -k
+"not test_runner_records_controller"`. Independently run baseline verification
+before launch; never enlarge the fixed known-failure set. Each behavior needs
+its own focused test that fails against committed HEAD and passes in the
+candidate. Multiple behaviors declare comma-separated regression node IDs.
+
+Use disposable private ports, save roots and a campaign-local stamping cache;
+never deploy to the production server or GUI profile. Episodes retain the
+natural useful-state contract and verified completed research target. No new
+run starts at/after the original deadline, including after preparation. No
+new edits/commits/Haiku start at/after it. An active natural episode and final
+DeepSeek observations may finish later. Reserve the final 30 minutes for one
+frozen validation; final findings receive no subsequent fix. Unfinished
+candidates are copied to `unverified-candidates/` and remain explicitly
+unverified. A failed bounded candidate does not trigger repeated unchanged runs.
+
+Run under user systemd with `Restart=on-failure`, `KillMode=process` and
+`RuntimeMaxSec=infinity`; restarts retain the same episode/session/deadline.
+The adapter records every allocated episode and harness failure and publishes
+`final-report.md`, `run-records.json`, ledgers, transcripts, diffs and gates.
+GPT checks at approximately launch +2h/+4h/+6h, appends short supervision
+notes, and intervenes only for broken/stopped/misrouted/protocol-violating
+infrastructure. No automatic merge, push, adoption or real-base promotion.
