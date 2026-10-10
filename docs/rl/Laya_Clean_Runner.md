@@ -95,7 +95,10 @@ released, including after satisfied rates, later proxy phases and shortage
 returns. Local foundation receipts provide a fallback when no district fact
 is available; a scoped district fact takes precedence. Submission does not
 certify readiness. The existing tool still checks owned geometry, construction,
-replacement output in its provider and bot deconstruction. New starter,
+replacement output in its provider and bot deconstruction. Every operation
+pass also applies that same evidence, so a delivered replacement's starter
+machinery retires even when `retire_starter` is not chosen, and a retained
+starter provider is reclaimed once empty ([planning](../deterministic/planning.md)). New starter,
 foundation and extension capacity remains demand-driven. The policy chooses
 among these alternatives; pending lifecycle work has `goal_need=true` because
 it serves mission completion. Catalog weights and exploration are unchanged.

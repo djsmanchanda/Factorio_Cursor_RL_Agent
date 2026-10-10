@@ -2283,6 +2283,38 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
     return {pair.split("=")[0]: int(pair.split("=")[1]) for pair in raw.split(",") if pair}
 
 
+def logistic_storage_room(
+    client: RconClient, surface: str, force: str, position: Point,
+) -> tuple[int, int] | None:
+    """(stacks needed, empty storage stacks) to deconstruct the chest at ``position``.
+
+    Needed counts every content stack plus the chest item. Only empty stacks
+    in the covering network's storage chests count as room (conservative), so
+    bots are never sent to haul cargo they cannot put down. None: no network.
+    """
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local p={" + str(position[0]) + "," + str(position[1]) + "};"
+        "local c=s.find_entities_filtered{position=p,radius=0.4,force=f,"
+        "type={'container','logistic-container'},limit=1}[1];"
+        "if not c then rcon.print('NONE') return end;"
+        "local n=s.find_logistic_network_by_position(p,f);"
+        "if not n then rcon.print('NONE') return end;"
+        "local need=1;local inv=c.get_inventory(defines.inventory.chest);"
+        "if inv then for _,it in pairs(inv.get_contents()) do "
+        "need=need+math.ceil(it.count/prototypes.item[it.name].stack_size) end end;"
+        "local free=0;for _,st in pairs(n.storages or {}) do "
+        "local si=st.get_inventory(defines.inventory.chest);"
+        "if si then free=free+si.count_empty_stacks() end end;"
+        "rcon.print(need..' '..free)"
+    )
+    raw = _sc(client, lua)
+    parts = raw.split()
+    if raw == "NONE" or len(parts) != 2:
+        return None
+    return int(parts[0]), int(parts[1])
+
+
 def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"

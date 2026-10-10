@@ -302,6 +302,8 @@ class DeterministicSession:
         try:
             ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
             ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit)
+            # Starter teardown follows delivered replacement output on every pass, not only when chosen.
+            ab._advance_bootstrap_starter_retirements(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:
             response = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),

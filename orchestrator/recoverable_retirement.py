@@ -18,6 +18,14 @@ class RecoverableRetirementError(RuntimeError):
     """An exact owned teardown could not be completed through construction bots."""
 
 
+class RecoverableRetirementPending(RecoverableRetirementError):
+    """Every order was accepted, but bots had not finished when the wait ended.
+
+    The orders stay in the world, so a caller that persisted its exact targets
+    can resume by re-issuing the same orders later.
+    """
+
+
 def _remove_actions(plan: dict) -> tuple[dict, ...]:
     actions = tuple(
         action
@@ -128,7 +136,7 @@ def retire_entities_via_bots(
         if not remaining:
             return len(matching)
         if time.monotonic() >= deadline:
-            raise RecoverableRetirementError(
+            raise RecoverableRetirementPending(
                 f"Timed out waiting for construction bots to recover {label}; "
                 f"{len(remaining)} exact entity(s) remain"
             )

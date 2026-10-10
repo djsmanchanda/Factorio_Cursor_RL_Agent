@@ -111,8 +111,18 @@ gated separately and is not changed by the release.
   resumes the named district and reports whether it must reserve the district,
   construct the replacement, or repair its power or transport. Starter absence
   alone is not the readiness signal.
-- A migration is incomplete while any recognized starter chest or furnace
-  remains. Producing plates somewhere else is not sufficient evidence.
+- A migration is incomplete while any recognized starter drill, furnace or
+  inserter remains. Producing plates somewhere else is not sufficient evidence.
+- Starter machinery retires on the first control pass after the replacement
+  has measured output and at least one plate in its own provider; one working
+  unit of the six suffices. The teardown is persisted before it is ordered, so
+  a bot timeout resumes on a later pass instead of failing. The starter's
+  passive provider is not torn down with it (district state version 2,
+  `retained_providers`): its stock stays on the network, and it is reclaimed
+  once empty. It is reclaimed while still holding items only when an active
+  project's chest is unfunded, no unreserved chest is in stock and none can be
+  manufactured now. Either reclaim waits until the network's storage has an
+  empty stack for every stack the bots will carry.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   After advanced-circuit output releases the independent mall, iron demand continues

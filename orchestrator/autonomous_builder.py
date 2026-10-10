@@ -109,7 +109,7 @@ from orchestrator.extraction_route import live_route_preflight
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity
 from orchestrator.recoverable_retirement import (
-    RecoverableRetirementError, retire_entities_via_bots,
+    RecoverableRetirementError, RecoverableRetirementPending, retire_entities_via_bots,
 )
 from orchestrator.extraction_transport import (
     planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
@@ -598,6 +598,36 @@ def _reconcile_submitted_bootstrap_replacement(
             ),
         )
     plan = _submitted_bootstrap_plan(state)
+    vertical_mirror = _bootstrap_replacement_vertical_mirror(state)
+    belt_tiles = sum(
+        1 for action in state.transport_actions
+        if "transport-belt" in action.get("entity", "")
+    )
+    emit(
+        f"BOOTSTRAP DISTRICT: reconciling submitted {state.recipe} replacement; "
+        "checking construction, coverage, power, transport, and measured output"
+    )
+    # Recover starter materials before waiting for the rest of this
+    # blueprint. Retirement does not cancel its remaining ghosts/bill.
+    _retire_starter_after_first_output(
+        client, bridge, surface, force, state, emit,
+        vertical_mirror=vertical_mirror,
+    )
+    _bring_modular_refinery_up(
+        client, bridge, surface, force, state.recipe, plan,
+        state.replacement_furnaces, state.replacement_origin, emit,
+        feed_grace_seconds=transport_grace_seconds(_DEFAULT_BELT, belt_tiles),
+        variant="basic", vertical_mirror=vertical_mirror,
+    )
+    _retire_standing_bootstrap_cells(
+        client, bridge, surface, force, state.recipe, state.ore,
+        state.transport_source, emit,
+    )
+    return state.replacement_provider
+
+
+def _bootstrap_replacement_vertical_mirror(state: BootstrapDistrictState) -> bool:
+    """Which approved refinery orientation owns the persisted provider."""
     normal_provider = refinery_interfaces(
         state.replacement_furnaces,
         origin_x=state.replacement_origin[0],
@@ -611,55 +641,72 @@ def _reconcile_submitted_bootstrap_replacement(
         variant="basic", vertical_mirror=True,
     ).provider
     if state.replacement_provider == normal_provider:
-        vertical_mirror = False
-    elif state.replacement_provider == mirrored_provider:
-        vertical_mirror = True
-    else:
-        raise _bootstrap_lifecycle_stuck(
-            state.recipe,
-            BootstrapLifecycleError(
-                f"{state.recipe} persisted provider {state.replacement_provider} "
-                "matches neither approved refinery orientation"
-            ),
-        )
-    belt_tiles = sum(
-        1 for action in state.transport_actions
-        if "transport-belt" in action.get("entity", "")
+        return False
+    if state.replacement_provider == mirrored_provider:
+        return True
+    raise _bootstrap_lifecycle_stuck(
+        state.recipe,
+        BootstrapLifecycleError(
+            f"{state.recipe} persisted provider {state.replacement_provider} "
+            "matches neither approved refinery orientation"
+        ),
     )
-    emit(
-        f"BOOTSTRAP DISTRICT: reconciling submitted {state.recipe} replacement; "
-        "checking construction, coverage, power, transport, and measured output"
+
+
+def _replacement_delivered(
+    client: RconClient, surface: str, state: BootstrapDistrictState,
+) -> bool:
+    """Measured replacement output and at least one plate in its own provider.
+
+    Any working unit counts; the rest of the six-furnace blueprint may still
+    be ghosts or idle.
+    """
+    return bool(
+        state.replacement_provider is not None
+        and _measured_bootstrap_replacement_output(client, surface, state.recipe, state) > 0
+        and live_base.chest_contents(
+            client, surface, state.replacement_provider,
+        ).get(state.recipe, 0) > 0
     )
-    if state.lifecycle_state in {"provisioning", "validating"}:
-        if (
-            _measured_bootstrap_replacement_output(client, surface, state.recipe, state) > 0
-            and live_base.chest_contents(client, surface, state.replacement_provider).get(state.recipe, 0) > 0
-        ):
-            anchor = refinery_interfaces(
-                state.replacement_furnaces, origin_x=state.replacement_origin[0],
-                origin_y=state.replacement_origin[1], variant="basic",
-                vertical_mirror=vertical_mirror,
-            ).power_anchor
-            _ensure_power_anchor_on_generated_network(
-                client, bridge, surface, force, anchor, "first-output replacement", emit,
-            )
-            # Recover starter materials before waiting for the rest of this
-            # blueprint. Retirement does not cancel its remaining ghosts/bill.
-            _retire_standing_bootstrap_cells(
-                client, bridge, surface, force, state.recipe, state.ore,
-                state.transport_source, emit,
-            )
-    _bring_modular_refinery_up(
-        client, bridge, surface, force, state.recipe, plan,
-        state.replacement_furnaces, state.replacement_origin, emit,
-        feed_grace_seconds=transport_grace_seconds(_DEFAULT_BELT, belt_tiles),
-        variant="basic", vertical_mirror=vertical_mirror,
+
+
+def _retire_starter_after_first_output(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    state: BootstrapDistrictState, emit: Callable[[str], None], *,
+    vertical_mirror: bool | None = None, require_direct_starter: bool = False,
+) -> bool:
+    """Retire the starter's machinery once the replacement first delivers.
+
+    ``require_direct_starter`` lets the per-pass caller skip districts with no
+    direct starter (e.g. the mall-first opening) before any power work.
+    """
+    if state.lifecycle_state not in {"provisioning", "validating"}:
+        return False
+    if not _replacement_delivered(client, surface, state):
+        return False
+    source = state.transport_source or state.replacement_provider
+    if require_direct_starter:
+        try:
+            if live_base.direct_plate_starter(
+                client, surface, force, state.recipe, state.ore, source,
+            ) is None:
+                return False
+        except Exception:
+            pass  # survey unavailable: the retirement path re-checks
+    if vertical_mirror is None:
+        vertical_mirror = _bootstrap_replacement_vertical_mirror(state)
+    anchor = refinery_interfaces(
+        state.replacement_furnaces, origin_x=state.replacement_origin[0],
+        origin_y=state.replacement_origin[1], variant="basic",
+        vertical_mirror=vertical_mirror,
+    ).power_anchor
+    _ensure_power_anchor_on_generated_network(
+        client, bridge, surface, force, anchor, "first-output replacement", emit,
     )
     _retire_standing_bootstrap_cells(
-        client, bridge, surface, force, state.recipe, state.ore,
-        state.transport_source, emit,
+        client, bridge, surface, force, state.recipe, state.ore, source, emit,
     )
-    return state.replacement_provider
+    return True
 
 
 def _restore_bootstrap_reservations() -> None:
@@ -2542,7 +2589,14 @@ def _retire_standing_bootstrap_cells(
         starter = None
     if lifecycle is not None:
         assert ledger is not None
-        if starter is None and lifecycle.lifecycle_state == "retiring":
+        if lifecycle.lifecycle_state == "retiring" and lifecycle.starter_geometry is not None:
+            # Resume the persisted teardown: a partly removed stack is no
+            # longer recognizable by the live survey.
+            starter = None
+            removed += _finish_direct_starter_retirement(
+                client, bridge, surface, force, lifecycle, emit,
+            )
+        elif starter is None and lifecycle.lifecycle_state == "retiring":
             try:
                 lifecycle = ledger.mark_released(recipe)
             except BootstrapLifecycleError as error:
@@ -2576,16 +2630,38 @@ def _retire_standing_bootstrap_cells(
                 )
                 consume_wait(f"measured_{recipe}_replacement_output")
                 return 0
+            retained = retire_direct_smelter_plan(
+                recipe, ore, starter.drill_position, starter.output_direction,
+                pole_side=starter.pole_side,
+            )["retained"]
             try:
                 if lifecycle.lifecycle_state == "provisioning":
                     lifecycle = ledger.mark_validating(
                         recipe, measured,
                     )
-                if lifecycle.lifecycle_state == "validating":
-                    lifecycle = ledger.mark_retiring(recipe)
+                # Persist the exact teardown before ordering it (a version-1
+                # retiring state gains its geometry here).
+                lifecycle = ledger.mark_retiring(
+                    recipe,
+                    starter_geometry={
+                        "drill_position": list(starter.drill_position),
+                        "output_direction": starter.output_direction,
+                        "pole_side": starter.pole_side,
+                    },
+                    retained_providers=[
+                        (float(item["position"]["x"]), float(item["position"]["y"]))
+                        for item in retained
+                    ],
+                )
             except BootstrapLifecycleError as error:
                 raise _bootstrap_lifecycle_stuck(recipe, error) from error
+            starter = None
+            removed += _finish_direct_starter_retirement(
+                client, bridge, surface, force, lifecycle, emit,
+            )
     if starter is not None:
+        # Unmanaged compatibility path: no ledger would remember a retained
+        # provider, so the whole stack is removed as before.
         starter_plan = generate_direct_smelter(
             recipe, ore, starter.drill_position, starter.output_direction,
             pole_side=starter.pole_side,
@@ -2601,7 +2677,7 @@ def _retire_standing_bootstrap_cells(
         ]
         plan = retire_direct_smelter_plan(
             recipe, ore, starter.drill_position, starter.output_direction,
-            pole_side=starter.pole_side,
+            pole_side=starter.pole_side, retain_provider=False,
         )
         plan["surface"], plan["force"] = surface, force
         try:
@@ -2625,19 +2701,6 @@ def _retire_standing_bootstrap_cells(
         )
         if recipe in {"iron-plate", "copper-plate"}:
             _release_metal_starter_limits_if_complete(client, surface, force)
-        if lifecycle is not None:
-            try:
-                remaining = live_base.direct_plate_starter(
-                    client, surface, force, recipe, ore, ore_output,
-                )
-                if remaining is None:
-                    lifecycle = ledger.mark_released(recipe)
-                    emit(
-                        f"BOOTSTRAP DISTRICT: {recipe} pioneer absence verified; "
-                        "lifecycle released"
-                    )
-            except BootstrapLifecycleError as error:
-                raise _bootstrap_lifecycle_stuck(recipe, error) from error
     try:
         standing = live_base.bootstrap_cell_origins(client, surface, force, ore)
     except Exception:  # survey unavailable (dry harness): no legacy cell to retire
@@ -2742,6 +2805,214 @@ def _retire_standing_bootstrap_cells(
             "mine-side logistic intake"
         )
     return removed
+
+
+def _finish_direct_starter_retirement(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    lifecycle: BootstrapDistrictState, emit: Callable[[str], None],
+) -> int:
+    """Order (or re-order) the persisted machinery teardown and release on absence.
+
+    A bot timeout leaves the district ``retiring``: the next pass re-issues the
+    same exact orders, which is idempotent, instead of failing the run. The
+    retained provider is not a target, so its stock cannot hold this back.
+    """
+    assert _BOOTSTRAP_DISTRICT_LEDGER is not None and lifecycle.starter_geometry
+    recipe, ore = lifecycle.recipe, lifecycle.ore
+    geometry = lifecycle.starter_geometry
+    drill = (float(geometry["drill_position"][0]), float(geometry["drill_position"][1]))
+    direction, pole_side = str(geometry["output_direction"]), int(geometry["pole_side"])
+    plan = retire_direct_smelter_plan(recipe, ore, drill, direction, pole_side=pole_side)
+    plan["surface"], plan["force"] = surface, force
+    try:
+        retire_entities_via_bots(
+            client, bridge, surface, force, plan, f"direct_{recipe}_starter", emit,
+        )
+    except RecoverableRetirementPending as error:
+        emit(
+            f"BOOTSTRAP RETIRE PENDING: {error}; the persisted {recipe} teardown "
+            "resumes next pass"
+        )
+        consume_wait(f"{recipe}_starter_retirement")
+        return 0
+    except RecoverableRetirementError as error:
+        raise StuckError(
+            str(error), code="starter_deconstruction_failed",
+            classification="bug", state="retiring",
+            details={"recipe": recipe, "starter_kind": "direct"},
+        ) from error
+    starter_poles = [
+        (
+            str(action["entity"]),
+            (float(action["position"]["x"]), float(action["position"]["y"])),
+        )
+        for action in generate_direct_smelter(
+            recipe, ore, drill, direction, pole_side=pole_side,
+        )["phases"][0]["actions"]
+        if action.get("entity") == "medium-electric-pole"
+    ]
+    _retire_unused_starter_power_branch(
+        client, bridge, surface, force, starter_poles, recipe, emit,
+    )
+    kept = lifecycle.retained_providers
+    emit(
+        f"BOOTSTRAP SWAP: {recipe} replacement has delivered output; construction "
+        f"bots recovered the direct starter's machinery at {drill}"
+        + (f"; its provider at {', '.join(map(str, kept))} stays until drained" if kept else "")
+    )
+    try:
+        _BOOTSTRAP_DISTRICT_LEDGER.mark_released(recipe)
+    except BootstrapLifecycleError as error:
+        raise _bootstrap_lifecycle_stuck(recipe, error) from error
+    emit(f"BOOTSTRAP DISTRICT: {recipe} pioneer absence verified; lifecycle released")
+    if recipe in {"iron-plate", "copper-plate"}:
+        _release_metal_starter_limits_if_complete(client, surface, force)
+    return 1
+
+
+_STARTER_PROVIDER_CHEST = "passive-provider-chest"
+# Retained providers whose reclaim was ordered; absence afterwards is the reclaim.
+_STARTER_PROVIDER_RECLAIM_ORDERED: dict[Point, str] = {}
+_STARTER_PROVIDER_LAST_NOTE: dict[Point, str] = {}
+
+
+def _starter_provider_early_reclaim_reason(
+    client: RconClient, surface: str, force: str,
+) -> str | None:
+    """Whether current work needs a chest that only a nonempty retained provider can give.
+
+    All three must hold: an active project's chest is unfunded, no unreserved
+    chest is in transferable stock, and no chest can be manufactured now
+    (no live chest producer and its prerequisite inputs are not started).
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return None
+    chest = _STARTER_PROVIDER_CHEST
+    active = [
+        project for project_id, project in ledger.projects.items()
+        if ledger.project_is_active(project_id)
+    ]
+    if not any(
+        project.required.get(chest, 0) > project.reserved.get(chest, 0)
+        for project in active
+    ):
+        return None
+    reserved = sum(project.reserved.get(chest, 0) for project in active)
+    if _transferable_or_available_stock(client, surface, force).get(chest, 0) > reserved:
+        return None
+    if _production_started(client, surface, force, chest):
+        return None
+    if not _core_mall_prerequisites(client, surface, force, chest):
+        return None
+    return "chest_needed_no_stock_cannot_manufacture"
+
+
+def _reclaim_retained_starter_providers(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    state: BootstrapDistrictState, emit: Callable[[str], None],
+) -> int:
+    """Reclaim a retired starter's provider once empty, or under the early exception.
+
+    Reclaim is ordered without waiting; a later pass records it when the chest
+    is gone. Nothing is ordered unless the network's storage has an empty
+    stack for every stack the bots will carry, so a full storage cannot strand
+    every construction bot again.
+    """
+    ledger = _BOOTSTRAP_DISTRICT_LEDGER
+    assert ledger is not None
+    reclaimed = 0
+
+    def note(position: Point, message: str) -> None:
+        if _STARTER_PROVIDER_LAST_NOTE.get(position) != message:
+            _STARTER_PROVIDER_LAST_NOTE[position] = message
+            emit(message)
+
+    for position in state.retained_providers:
+        observed = live_base.entity_signatures_at(
+            client, surface, force, [position],
+        ).get(position, {"name": "NONE"})["name"]
+        if observed != _STARTER_PROVIDER_CHEST:
+            reason = _STARTER_PROVIDER_RECLAIM_ORDERED.pop(position, None)
+            ledger.reclaim_retained_provider(
+                state.recipe, position,
+                f"retained_provider_reclaimed_{reason}" if reason else "retained_provider_absent",
+            )
+            _STARTER_PROVIDER_LAST_NOTE.pop(position, None)
+            emit(
+                f"BOOTSTRAP PROVIDER: {state.recipe} starter provider at {position} "
+                + (f"reclaimed ({reason})" if reason else f"is gone (now {observed}); no longer retained")
+            )
+            reclaimed += 1
+            continue
+        if position in _STARTER_PROVIDER_RECLAIM_ORDERED:
+            continue
+        held = sum(live_base.chest_contents(client, surface, position).values())
+        reason = "drained" if held == 0 else _starter_provider_early_reclaim_reason(
+            client, surface, force,
+        )
+        if reason is None:
+            note(position, f"BOOTSTRAP PROVIDER: keeping {state.recipe} starter provider at "
+                           f"{position} while it drains ({held} item(s) left)")
+            continue
+        room = live_base.logistic_storage_room(client, surface, force, position)
+        if room is None or room[1] < room[0]:
+            note(position, f"BOOTSTRAP PROVIDER: keeping {state.recipe} starter provider at "
+                           f"{position} ({reason}); logistic storage has "
+                           f"{'no network' if room is None else f'{room[1]} empty stack(s) for {room[0]}'}")
+            continue
+        plan = {"surface": surface, "force": force, "phases": [{
+            "name": f"reclaim_{state.recipe}_starter_provider",
+            "actions": [{"action_type": "remove_entity", "entity": _STARTER_PROVIDER_CHEST,
+                         "position": {"x": position[0], "y": position[1]}}],
+        }]}
+        try:
+            retire_entities_via_bots(
+                client, bridge, surface, force, plan,
+                f"{state.recipe}_starter_provider", emit, timeout=0.0,
+            )
+        except RecoverableRetirementPending:
+            pass
+        except RecoverableRetirementError as error:
+            note(position, f"BOOTSTRAP PROVIDER: reclaim of {state.recipe} starter provider "
+                           f"at {position} was rejected ({error}); retrying later")
+            continue
+        _STARTER_PROVIDER_RECLAIM_ORDERED[position] = reason
+    return reclaimed
+
+
+def _advance_bootstrap_starter_retirements(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    emit: Callable[[str], None],
+) -> None:
+    """Every control pass: retire delivered starters, then drain-and-reclaim their providers.
+
+    This uses the same delivered-output evidence as ``retire_starter``, so the
+    machinery goes on the first pass after one replacement unit's plate
+    reaches its provider, whether or not that operation is chosen.
+    """
+    ledger = _BOOTSTRAP_DISTRICT_LEDGER
+    if ledger is None or not callable(getattr(client, "command", None)):
+        return
+    for state in ledger.states():
+        try:
+            if state.lifecycle_state == "retiring" and state.starter_geometry is not None:
+                _retire_standing_bootstrap_cells(
+                    client, bridge, surface, force, state.recipe, state.ore,
+                    state.transport_source or state.replacement_provider, emit,
+                )
+            elif state.replacement_submitted:
+                _retire_starter_after_first_output(
+                    client, bridge, surface, force, state, emit,
+                    require_direct_starter=True,
+                )
+            current = ledger.load(state.recipe)
+            if current is not None and current.retained_providers:
+                _reclaim_retained_starter_providers(
+                    client, bridge, surface, force, current, emit,
+                )
+        except WorkStateSignal as signal:
+            emit(f"BOOTSTRAP LIFECYCLE: {state.recipe} pass deferred: {signal}")
 
 
 def _build_initial_plate_smelter(
@@ -13260,6 +13531,7 @@ def run(
                 client, surface, force, _MATERIAL_RESERVATION_LEDGER, emit,
             )
             _refresh_owned_standing_gates(client, bridge, surface, force, emit)
+            _advance_bootstrap_starter_retirements(client, bridge, surface, force, emit)
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities, prepped,
             )
