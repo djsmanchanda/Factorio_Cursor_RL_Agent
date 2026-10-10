@@ -98,3 +98,23 @@ wall or12-decision cuts. Actual hard failures and measured unchanged useful stat
 do. A fresh separate campaign is authorized by the user's October10 direction;
 never resume or extend the expired campaign. Its new launch identity is recorded
 in data/laya-experiments/laya-loop-20261010b/ when it starts.
+
+## 2026-10-10 16:09 IST — fresh loop active, complete improvement cycle proven
+
+Unit laya-loop-20261010b.service, branch codex/laya-loop-20261010b, root in the
+main checkout data/laya-experiments/laya-loop-20261010b. Initial frozen source
+ed909b7; first game started15:42:47IST with requested=observed2, research
+goal=mining-productivity-4 and no total tick/wall/decision budget. Deadline
+23:42:41IST applies to new cycles/fixes; active natural episodes may finish
+afterward. Checks17:42/19:42/21:42/23:42 inspect validated stages and safe resumption.
+
+The first episode hard-failed at4wall seconds on unsupported raw-ore crafting.
+Muse published its complete report; DeepSeek corrected generic raw-resource
+produce eligibility using existing classification; its regression failed on
+committed HEAD and passed in the candidate; gate had only known firewall
+failure; review approved; controller committed8c0dab7 at15:58:42 and launched
+a new physical freeze. The rerun got past that failure and hard-failed at45wall
+seconds on a copper-pioneer lifecycle contradiction. Its second Muse report
+is complete and the next synthesis/fix cycle is active. No gameplay milestone
+improvement or adoption claim follows from these two early failures. Main
+production/server untouched; neither push nor merge into main occurred.
