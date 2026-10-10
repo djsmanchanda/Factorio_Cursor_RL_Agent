@@ -976,6 +976,40 @@ def test_lab_provisioning_waits_for_every_plate_in_its_chain_to_start():
     assert "op.produce.lab" in options(_GOAL_STARTERS)
 
 
+def test_lab_gate_sees_lab_in_the_live_recipe_catalog(monkeypatch, tmp_path):
+    # Live 2026-10-10 (episode 20261010T150809Z-df0bcce7, decision 0): the lab was offered with no plate started.
+    # The exported catalog never named "lab", so plates_in("lab") was empty and the gate above passed. The synthetic
+    # lab recipe in the previous test hid that; here the recipes are limited to what LiveWorld exports.
+    import re
+    from pathlib import Path
+    from training.laya_clean_runner import LiveWorld
+    from training.laya_ops_runner import plates_in
+    from training.laya_saved_world import SavedWorldAdapter
+    source = Path("training/laya_saved_world.lua").read_text()
+    monkeypatch.setattr(SavedWorldAdapter, "__init__", lambda self, root: setattr(self, "lua_source", source))
+    block = LiveWorld(tmp_path, 2).lua_source.split("local recipe_names={", 1)[1].split("}", 1)[0]
+    exported = set(re.findall(r'"([^"]+)"', block))
+    # The game's ingredients for the lab's chain; each recipe is kept only when the catalog exports it.
+    chain = {"lab": ("electronic-circuit", "iron-gear-wheel", "transport-belt"),
+             "electronic-circuit": ("iron-plate", "copper-cable"), "copper-cable": ("copper-plate",),
+             "iron-gear-wheel": ("iron-plate",), "transport-belt": ("iron-gear-wheel", "iron-plate")}
+    recipes = {name: {"ingredients": [{"name": part, "amount": 1} for part in parts]}
+               for name, parts in chain.items() if name in exported}
+    assert "lab" in exported
+    assert plates_in("lab", recipes) == {"iron-plate", "copper-plate"}
+    board = {"needs": [{"item": "copper-plate", "condition": "unbuilt"}, {"item": "iron-plate", "condition": "unbuilt"}]}
+    open_status = {"technology": {"canonical_name": "mining-productivity-4", "state": "available", "target_completed": False}}
+
+    def lab_offered(results):
+        return "op.produce.lab" in {o["option_id"] for o in compile_options(
+            board, results, recipes=recipes, research_goal="mining-productivity-4",
+            goal_status=open_status, labs=0)["options"]}
+
+    assert not lab_offered([])
+    assert not lab_offered(_GOAL_STARTERS[:1])
+    assert lab_offered(_GOAL_STARTERS)
+
+
 def test_natural_goal_keeps_running_while_construction_advances(tmp_path):
     from training.laya_clean_runner import Settings
 
