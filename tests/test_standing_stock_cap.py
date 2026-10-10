@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from orchestrator import autonomous_builder as builder
+from orchestrator.live_base import LineState
 from planners.plan_validation import actions
 from planners.stock_gating import stock_gate
 
@@ -141,3 +142,58 @@ def test_registered_owned_cell_follows_open_bill_changes_without_new_build(monke
         builder._refresh_owned_standing_gates(client, object(), 'nauvis','player',lambda _:None)
     targets = [next(a['logistic_condition']['constant'] for a in actions(p) if 'logistic_condition' in a) for p in submitted]
     assert len(targets) == 3 and targets[0] == targets[2] > targets[1]
+
+
+def _standing_refresh_over_line(monkeypatch, positions, *, borrowed_at) -> list[dict]:
+    """Run the standing refresh over one electronic-circuit line, some cells on loan."""
+    submitted: list[dict] = []
+    line = LineState(
+        recipe="electronic-circuit", machine_count=len(positions), working_count=0,
+        output_position=None, machine_positions=tuple(positions),
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_released_request_multiple", lambda *_a: 1)
+    monkeypatch.setattr(builder, "_rationed_mall_wip_gap", lambda *_a: 0)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: line)
+    monkeypatch.setattr(
+        builder.live_base, "entity_names_at",
+        lambda _client, _surface, points: {point: "assembling-machine-1" for point in points},
+    )
+    monkeypatch.setattr(
+        builder, "active_bootstrap_loans",
+        lambda *_a: [SimpleNamespace(machine_position=point) for point in borrowed_at],
+    )
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _client, _bridge, _surface, plan, _name, _emit: submitted.append(plan),
+    )
+    builder._refresh_owned_standing_gates(
+        SimpleNamespace(command=lambda _: ""), object(), "nauvis", "player",
+        lambda _message: None, requested={"electronic-circuit": 1},
+    )
+    return submitted
+
+
+def test_standing_refresh_leaves_a_loan_owned_cell_to_its_loan(monkeypatch) -> None:
+    """2026-10-10 C4: a splitter loan's electronic-circuit step (target 5) sat
+    disabled at 3 for 15 decisions because the standing refresh re-capped the
+    borrowed cell every decision, overriding the loan gate."""
+    submitted = _standing_refresh_over_line(
+        monkeypatch, [(45.5, 38.5)], borrowed_at=[(45.5, 38.5)],
+    )
+
+    assert submitted == []
+
+
+def test_standing_refresh_still_gates_owned_cells_beside_a_loan(monkeypatch) -> None:
+    """Only the borrowed cell is released; a free twin keeps its standing cap."""
+    submitted = _standing_refresh_over_line(
+        monkeypatch, [(45.5, 38.5), (42.5, 30.5)], borrowed_at=[(45.5, 38.5)],
+    )
+    gated = {
+        (action["position"]["x"], action["position"]["y"])
+        for plan in submitted for action in plan["phases"][0]["actions"]
+    }
+
+    assert gated == {(42.5, 30.5)}

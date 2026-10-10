@@ -5588,6 +5588,7 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
     requested = requested or {}
     items = {item for s, f, item in _MALL_STOCK_GATE_FLOORS if (s, f) == (surface, force)}
     items |= set(requested)
+    borrowed = {loan.machine_position for loan in active_bootstrap_loans(client, surface, force)}
     for item in sorted(items):
         spec = LINE_RECIPES.get(item, {})
         if not str(spec.get("machine", "")).startswith("assembling-machine"):
@@ -5595,6 +5596,13 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
         existing = live_base.find_line(client, surface, force, item, spec["machine"])
         if existing is None or not existing.machine_positions:
             continue
+        # A borrowed cell's gate follows its loan step; a standing cap below
+        # that step would disable the cell again on every decision.
+        if borrowed.intersection(existing.machine_positions):
+            owned = tuple(point for point in existing.machine_positions if point not in borrowed)
+            if not owned:
+                continue
+            existing = replace(existing, machine_positions=owned)
         target = _standing_mall_stock_target(client, surface, force, item, requested.get(item, 1))
         target = _effective_mall_stock_gate(client, surface, force, item,
             upgrade_bootstrap=False, requested=target)
