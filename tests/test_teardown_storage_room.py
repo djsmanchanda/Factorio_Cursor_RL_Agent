@@ -74,6 +74,21 @@ def test_shared_helper_orders_when_storage_has_room(monkeypatch):
     assert len(orders) == 1
 
 
+def test_shared_helper_waits_without_a_covering_network(monkeypatch):
+    monkeypatch.setattr(retirement.live_base, "entity_signatures_at",
+                        lambda *_a: {(1.5, 2.5): {"name": "electric-furnace"}})
+    monkeypatch.setattr(retirement, "load_json", lambda report: report)
+    monkeypatch.setattr(retirement.live_base, "teardown_storage_room", lambda *_a: None)
+    orders = []
+    with pytest.raises(retirement.RecoverableRetirementStorageWait, match="covering"):
+        retirement.retire_entities_via_bots(
+            Client(), _bridge(orders), "nauvis", "player",
+            _plan(("electric-furnace", 1.5, 2.5)), "iron_starter", lambda _m: None,
+            timeout=0,
+        )
+    assert orders == []
+
+
 def test_mine_retirement_defers_chests_that_storage_cannot_take(monkeypatch):
     mine = ResourceMine(output=(10.5, 20.5), drill_count=6, expansion_step=1, row_capacity=3)
     monkeypatch.setattr(mine_retirement, "find_resource_mines", lambda *_a: [mine])

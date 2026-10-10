@@ -50,6 +50,13 @@ def require_teardown_storage_room(
     if not targets or not callable(getattr(client, "command", None)):
         return
     room = live_base.teardown_storage_room(client, surface, force, targets)
+    if room is None:
+        # The caller has verified live targets. Unknown storage coverage does
+        # not prove that bots can return their recovered items.
+        raise RecoverableRetirementStorageWait(
+            f"{label} waits for a covering logistic network with proven storage room",
+            needed=1, free=0,
+        )
     if room is not None and room[1] < room[0]:
         raise RecoverableRetirementStorageWait(
             f"{label} waits for logistic storage: {room[0]} stack(s) to recover, "
