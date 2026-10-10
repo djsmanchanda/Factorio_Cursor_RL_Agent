@@ -1016,3 +1016,27 @@ def test_natural_goal_stops_on_first_hard_tool_failure(tmp_path):
                 measure_ticks=600,seed=3,run_id='hard',session=FailedSession(),settings=settings)
     assert summary['decisions'] == 1
     assert summary['stop'] == 'hard_failure'
+
+
+def test_goal_produce_skips_raw_resource_dependencies_but_keeps_manufactured_targets():
+    from training.laya_factory_status import compile_status
+    # The saved-world helper exports solid recipes only; raw ore has none.
+    recipes = {
+        "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}], "product_amount": 1, "energy_ticks": 192},
+        "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}], "product_amount": 1, "energy_ticks": 192},
+    }
+    facts = {"recipes": recipes, "machines": [], "networks": {}, "pending_ghosts": 0,
+             "production": {}, "consumption": {}}
+    # Episode episode-20261010T101241Z-a476f94f: goal_demand gives the C0 board's raw ore
+    # dependency a goal_required_per_s, so the generic goal-produce path offered
+    # op.produce.iron-ore. ensure_produced mines ore through a starter/mine, never an
+    # assembler, so it raised untyped_stuck at decision 0 and ended the run.
+    c0_ids = {o["option_id"] for o in
+              compile_options(compile_status(facts, {"iron-plate": 0.5, "copper-plate": 0.5}), [],
+                              recipes=recipes)["options"]}
+    assert "op.produce.iron-ore" not in c0_ids and "op.produce.copper-ore" not in c0_ids
+    # A manufactured goal target absent from the live recipe facts (plastic is fluid-backed)
+    # must still be offered: the generic path exists for exactly these.
+    c4_ids = {o["option_id"] for o in
+              compile_options(compile_status(facts, {"plastic-bar": 0.5}), [], recipes=recipes)["options"]}
+    assert "op.produce.plastic-bar" in c4_ids

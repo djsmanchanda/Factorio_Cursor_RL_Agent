@@ -31,7 +31,7 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import compact_status, compile_status
 from training.laya_saved_world import speed_status
-from training.laya_mall_slots import obtainable
+from training.laya_mall_slots import RAW, obtainable
 from training.laya_mission import current_phase, phase_reached
 from training.laya_goal import (
     GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
@@ -615,14 +615,21 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # foundation ahead of its starter (bootstrap_lifecycle_conflict): not legal yet.
     # Nor an item whose chain needs something nothing can make yet (requester chests need advanced circuits,
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
-    producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
+    # ``produce`` runs ``ensure_produced``, which needs an assembler or dedicated cell.  A raw
+    # resource (ore, stone, coal, wood) has neither -- it is mined by a starter/mine/foundation,
+    # never assembled -- so it is never a produce target even when goal_demand lists it as a
+    # dependency (episode 20261010T101241Z-a476f94f offered op.produce.iron-ore, which raised
+    # untyped_stuck at decision 0).
+    producible = {i: m for i, m in short.items() if i not in RAW and plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
-    # Generic goal produce options: every unsatisfied mission target (plastic, advanced circuits, science)
-    # gets an ``ensure_produced`` option through the shared toolkit.  Unlike a borrowed mall batch it is not
-    # gated on ``obtainable``: the operation itself builds the missing prerequisite stages.
+    # Generic goal produce options: every unsatisfied manufactured mission target (plastic, advanced
+    # circuits, science) gets an ``ensure_produced`` option through the shared toolkit.  Unlike a
+    # borrowed mall batch it is not gated on ``obtainable``: the operation itself builds the missing
+    # prerequisite stages.  Raw dependencies are excluded above.
     if recipes:
         for item in sorted(goal):
-            if item in PLATES or codes.get(("produce", item)) == "ok" or item in producible:
+            if (item in PLATES or item in RAW or codes.get(("produce", item)) == "ok"
+                    or item in producible):
                 continue
             if plates_in(item, recipes) <= started:
                 producible[item] = max(1, int(math.ceil(goal_rate.get(item, 1.0) * 60)))
