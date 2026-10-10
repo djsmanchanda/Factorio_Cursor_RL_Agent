@@ -50,9 +50,12 @@ service ownership or reset authority.
 The integration branch claude/live-fixes-integration contains the verified queued
 repairs and [Laya campaign loop](Laya_Campaign_Loop.md). The selected fast gate
 has 994 passes, one skip and the pre-existing import-firewall failure. This is
-unit/fake integration evidence. The authorized eight-hour exploratory loop will
-run on a separate branch from physical frozen sources, speed 2, natural episode
+unit/fake integration evidence. The authorized eight-hour exploratory loop started October 10 at 05:29 IST
+on branch codex/laya-loop-20261010 from physical frozen sources, speed 2, natural episode
 stops, one report-only Muse xhigh and one focused DeepSeek high repair per cycle.
 No main merge, push, adoption or production-server promotion is implied.
+Campaign deadline: October 10 at 13:27:33 IST (original deadline retained).
+Owned unit: laya-loop-20261010.service; confirmed requested=observed speed 2;
+private game/RCON ports 34986/27986. First live episode c61abd5.
 Campaign evidence: data/laya-experiments/laya-loop-20261010; two-hour checks
 append there and to the local data/live-run-kit/next-round.md.
