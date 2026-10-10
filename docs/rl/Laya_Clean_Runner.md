@@ -74,7 +74,7 @@ prospective bill it last reported (`bill`), whether that bill is known
 the reported project, current network stock and active reservations establish
 availability; otherwise they stay `None`. `reservation_owner`
 names the reported claimant, and a changed owner claim clears an otherwise
-unchanged material failure (`unchanged_failure`), including after JSON persistence.
+unchanged material failure (`unchanged_failure`), including after JSON persistence. A `no_geometry` refusal is unchanged the same way until a later successful non-wait operation runs.
 `demand_point`/
 `demand_distance` relay the shared `orchestrator/demand_siting` read (never
 training-local geometry). Per option, `last_outcome` is one of `delivery`,

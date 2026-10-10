@@ -108,12 +108,14 @@ def pending_retirements(results: list[dict], districts: Mapping | None = None) -
 
 def unchanged_failures(results: list[dict], stock: Mapping[str, int],
                        allocation: Mapping[str, tuple] | None = None) -> set[tuple]:
-    """(operation, parameter) whose latest attempt was short of materials none of which has since increased.
+    """(operation, parameter) whose latest attempt was short of materials none of which has since increased,
+    or was refused for lack of buildable geometry with no successful operation since.
 
     Retrying such an operation changes nothing in the world except, in the tooling's mall path, another
     power bridge to another abandoned slot.  ``allocation`` is the current owner-attributed claim per
     item (training/laya_ops_runner.reservation_allocation); when a required item's claim moved since the
-    failure was recorded, its allocation changed, so the failure is no longer unchanged.
+    failure was recorded, its allocation changed, so the failure is no longer unchanged.  A geometry
+    refusal reads the live layout, which only a successful operation changes.
     """
     latest: dict[tuple, dict] = {}
     current_allocation = _canonical_claims(allocation) if allocation is not None else None
@@ -122,6 +124,10 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int],
         latest[(r["operation"], params.get("recipe") or params.get("item") or params.get("technology"))] = r
     stuck = set()
     for key, r in latest.items():
+        if outcome_category(r) == "no_geometry":
+            if not _succeeded_since(results, r):
+                stuck.add(key)
+            continue
         if not r.get("ok") and r.get("code") == "material_shortage":
             seen = r.get("stock_at") or {}
             required = (r.get("details") or {}).get("required") or {}
@@ -135,6 +141,12 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int],
                         continue  # the reservation owner/claim moved: worth reconsidering
                 stuck.add(key)
     return stuck
+
+
+def _succeeded_since(results: list[dict], attempt: Mapping) -> bool:
+    """Whether a successful operation other than a wait ran after ``attempt`` (the layout it saw may have changed)."""
+    last = max((i for i, r in enumerate(results) if r is attempt), default=-1)
+    return any(r.get("ok") and r["operation"] != "wait" for r in results[last + 1:])
 
 
 def _canonical_claims(claims: Mapping | None) -> dict[str, tuple[tuple[str, int], ...]]:

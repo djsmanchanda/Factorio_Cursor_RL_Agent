@@ -655,6 +655,25 @@ def test_last_outcome_survives_unrelated_waits_and_marks_unchanged_material_fail
     assert options["op.foundation.copper-plate"]["last_outcome"] == "material_failure"
 
 
+def test_a_refused_geometry_stays_unchanged_until_an_operation_succeeds():
+    # Live 2026-10-10 (episode 20261010T165751Z-253e3b7f): extend copper-plate was refused for an unbuildable
+    # district 948 times, each time re-offered at full weight because only material failures were unchanged.
+    from training.laya_ops_runner import unchanged_failures
+    refused = {"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"},
+               "code": "district_expansion_unbuildable"}
+    wait = {"ok": True, "operation": "wait", "params": {"ticks": 300}}
+    built = {"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"}, "code": "released"}
+    # Waits and repeated refusals leave the same layout, so the refusal is not a fresh retry.
+    assert unchanged_failures([refused, wait, refused, wait], {}) == {("extend", "copper-plate")}
+    # A successful operation may have changed the layout: one retry is worth making.
+    assert unchanged_failures([refused, built], {}) == set()
+    assert unchanged_failures([refused, built, refused], {}) == {("extend", "copper-plate")}
+    results = _started_and_built() + [{"ok": True, "operation": "foundation", "params": {"recipe": "copper-plate"}}, refused]
+    options = {o["option_id"]: o["features"] for o in compile_options(BOARD, results)["options"]}
+    assert options["op.extend.copper-plate"]["unchanged_failure"]
+    assert options["op.extend.copper-plate"]["last_outcome"] == "no_geometry"
+
+
 def test_a_changed_reservation_allocation_clears_an_unchanged_failure():
     from training.laya_ops_runner import unchanged_failures
     failed = dict(SHORT, stock_at={"transport-belt": 4, "inserter": 18},
