@@ -2283,35 +2283,56 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
     return {pair.split("=")[0]: int(pair.split("=")[1]) for pair in raw.split(",") if pair}
 
 
-def logistic_storage_room(
-    client: RconClient, surface: str, force: str, position: Point,
+def teardown_storage_room(
+    client: RconClient, surface: str, force: str,
+    targets: Sequence[tuple[str, Point]],
 ) -> tuple[int, int] | None:
-    """(stacks needed, empty storage stacks) to deconstruct the chest at ``position``.
+    """(stacks needed, empty storage stacks) to deconstruct ``targets`` through bots.
 
-    Needed counts every content stack plus the chest item. Only empty stacks
-    in the covering network's storage chests count as room (conservative), so
-    bots are never sent to haul cargo they cannot put down. None: no network.
+    Needed counts every item the bots will carry: each entity's own item plus
+    all of its inventories, held inserter stacks and belt lines. Free space
+    already in partial storage stacks of the same item absorbs some of it
+    first; the rest needs empty storage stacks in the network whose
+    construction area covers the targets, which is where bots unload. None:
+    no target found or no covering network (bots cannot reach it either).
     """
+    if not targets:
+        return None
+    literal = ",".join(
+        "{'" + name + "'," + str(x) + "," + str(y) + "}" for name, (x, y) in targets
+    )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local p={" + str(position[0]) + "," + str(position[1]) + "};"
-        "local c=s.find_entities_filtered{position=p,radius=0.4,force=f,"
-        "type={'container','logistic-container'},limit=1}[1];"
-        "if not c then rcon.print('NONE') return end;"
-        "local n=s.find_logistic_network_by_position(p,f);"
-        "if not n then rcon.print('NONE') return end;"
-        "local need=1;local inv=c.get_inventory(defines.inventory.chest);"
-        "if inv then for _,it in pairs(inv.get_contents()) do "
-        "need=need+math.ceil(it.count/prototypes.item[it.name].stack_size) end end;"
-        "local free=0;for _,st in pairs(n.storages or {}) do "
-        "local si=st.get_inventory(defines.inventory.chest);"
+        "local need={};local net=nil;local found=false;"
+        "local function add(n,c) if c and c>0 then need[n]=(need[n] or 0)+c end end;"
+        "local function inv(i) if i and i.valid then for _,it in pairs(i.get_contents()) do add(it.name,it.count) end end end;"
+        "for _,t in ipairs({" + literal + "}) do "
+        "for _,e in pairs(s.find_entities_filtered{name=t[1],position={t[2],t[3]},radius=0.4,force=f}) do "
+        "found=true;net=net or s.find_logistic_networks_by_construction_area({t[2],t[3]},f)[1];"
+        "local items=e.prototype.items_to_place_this;if items and items[1] then "
+        "add(items[1].name or items[1],items[1].count or 1) end;"
+        "local ok,m=pcall(function() return e.get_max_inventory_index() end);"
+        "if ok and m then for i=1,m do pcall(function() inv(e.get_inventory(i)) end) end end;"
+        "pcall(function() local h=e.held_stack;if h and h.valid_for_read then add(h.name,h.count) end end);"
+        "pcall(function() for l=1,e.get_max_transport_line_index() do "
+        "for _,it in pairs(e.get_transport_line(l).get_contents()) do add(it.name,it.count) end end end) "
+        "end end;"
+        "if not found or not net then rcon.print('NONE') return end;"
+        "local stacks=0;local free=0;"
+        "for _,st in pairs(net.storages or {}) do local si=st.get_inventory(defines.inventory.chest);"
         "if si then free=free+si.count_empty_stacks() end end;"
-        "rcon.print(need..' '..free)"
+        "for n,c in pairs(need) do local size=prototypes.item[n].stack_size;local partial=0;"
+        "for _,st in pairs(net.storages or {}) do local si=st.get_inventory(defines.inventory.chest);"
+        "if si then partial=partial+math.max(0,si.get_insertable_count(n)-si.count_empty_stacks()*size) end end;"
+        "stacks=stacks+math.ceil(math.max(0,c-partial)/size) end;"
+        "rcon.print(stacks..' '..free)"
     )
     raw = _sc(client, lua)
     parts = raw.split()
-    if raw == "NONE" or len(parts) != 2:
+    if raw == "NONE":
         return None
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise TelemetryError(f"malformed teardown storage survey: {raw[:120]!r}")
     return int(parts[0]), int(parts[1])
 
 

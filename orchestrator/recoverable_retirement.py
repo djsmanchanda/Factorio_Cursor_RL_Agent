@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.work_state import WorkStateSignal
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -24,6 +25,36 @@ class RecoverableRetirementPending(RecoverableRetirementError):
     The orders stay in the world, so a caller that persisted its exact targets
     can resume by re-issuing the same orders later.
     """
+
+
+class RecoverableRetirementStorageWait(RecoverableRetirementPending, WorkStateSignal):
+    """Nothing was ordered: logistic storage cannot take what the bots would carry.
+
+    Ordering anyway is how every construction bot ended up hovering with cargo
+    over a full storage network. This is a typed supply wait, never a bug.
+    """
+
+    def __init__(self, message: str, *, needed: int, free: int) -> None:
+        WorkStateSignal.__init__(
+            self, message, code="teardown_storage_wait",
+            classification="intended_difficulty", state="supply_wait",
+            details={"stacks_needed": needed, "empty_storage_stacks": free},
+        )
+
+
+def require_teardown_storage_room(
+    client: RconClient, surface: str, force: str,
+    targets: tuple[tuple[str, Point], ...], label: str,
+) -> None:
+    """Refuse to order a bot teardown whose cargo has nowhere to go."""
+    if not targets or not callable(getattr(client, "command", None)):
+        return
+    room = live_base.teardown_storage_room(client, surface, force, targets)
+    if room is not None and room[1] < room[0]:
+        raise RecoverableRetirementStorageWait(
+            f"{label} waits for logistic storage: {room[0]} stack(s) to recover, "
+            f"{room[1]} empty storage stack(s)", needed=room[0], free=room[1],
+        )
 
 
 def _remove_actions(plan: dict) -> tuple[dict, ...]:
@@ -84,6 +115,10 @@ def retire_entities_via_bots(
     matching = _matching_actions(client, surface, force, actions)
     if not matching:
         return 0
+    require_teardown_storage_room(client, surface, force, tuple(
+        (action["entity"], (float(action["position"]["x"]), float(action["position"]["y"])))
+        for action in matching
+    ), label)
 
     block = f"recoverable_{label}"
     deconstruction_actions = [

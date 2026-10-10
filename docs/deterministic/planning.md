@@ -123,6 +123,15 @@ gated separately and is not changed by the release.
   project's chest is unfunded, no unreserved chest is in stock and none can be
   manufactured now. Either reclaim waits until the network's storage has an
   empty stack for every stack the bots will carry.
+- No bot teardown is ordered while storage cannot take its cargo. This covers
+  the shared recoverable-retirement helper (starter machinery, poles, legacy
+  cells, steam), mine retirement and promoted mall halves. The cargo counted
+  is each entity's own item plus its inventories, held stacks and belt lines;
+  partial storage stacks absorb matching items, and the rest needs empty
+  stacks in the covering construction network. A shortfall is a typed
+  `teardown_storage_wait` supply wait and is retried later. Promoted mall
+  halves go through bots rather than executor removal, which destroys
+  contents.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   After advanced-circuit output releases the independent mall, iron demand continues

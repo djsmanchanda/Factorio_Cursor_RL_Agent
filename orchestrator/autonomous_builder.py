@@ -110,7 +110,8 @@ from orchestrator.extraction_route import live_route_preflight
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity
 from orchestrator.recoverable_retirement import (
-    RecoverableRetirementError, RecoverableRetirementPending, retire_entities_via_bots,
+    RecoverableRetirementError, RecoverableRetirementPending,
+    RecoverableRetirementStorageWait, retire_entities_via_bots,
 )
 from orchestrator.extraction_transport import (
     planned_entity_count, planned_footprint_tiles, preflight_ingredient_transport,
@@ -2686,6 +2687,8 @@ def _retire_standing_bootstrap_cells(
                 client, bridge, surface, force, plan,
                 f"direct_{recipe}_starter", emit,
             )
+        except RecoverableRetirementStorageWait:
+            raise
         except RecoverableRetirementError as error:
             raise StuckError(
                 str(error), code="starter_deconstruction_failed",
@@ -2716,6 +2719,8 @@ def _retire_standing_bootstrap_cells(
                 client, bridge, surface, force, plan,
                 f"legacy_logistic_{recipe}_starter", emit,
             )
+        except RecoverableRetirementStorageWait:
+            raise
         except RecoverableRetirementError as error:
             raise StuckError(
                 str(error), code="starter_deconstruction_failed",
@@ -2791,6 +2796,8 @@ def _retire_standing_bootstrap_cells(
                     client, bridge, surface, force, intake_plan,
                     f"legacy_{ore}_logistic_intake", emit,
                 )
+            except RecoverableRetirementStorageWait:
+                raise
             except RecoverableRetirementError as error:
                 raise StuckError(
                     str(error), code="starter_deconstruction_failed",
@@ -2956,7 +2963,9 @@ def _reclaim_retained_starter_providers(
             note(position, f"BOOTSTRAP PROVIDER: keeping {state.recipe} starter provider at "
                            f"{position} while it drains ({held} item(s) left)")
             continue
-        room = live_base.logistic_storage_room(client, surface, force, position)
+        room = live_base.teardown_storage_room(
+            client, surface, force, [(_STARTER_PROVIDER_CHEST, position)],
+        )
         if room is None or room[1] < room[0]:
             note(position, f"BOOTSTRAP PROVIDER: keeping {state.recipe} starter provider at "
                            f"{position} ({reason}); logistic storage has "
@@ -2972,6 +2981,10 @@ def _reclaim_retained_starter_providers(
                 client, bridge, surface, force, plan,
                 f"{state.recipe}_starter_provider", emit, timeout=0.0,
             )
+        except RecoverableRetirementStorageWait as error:
+            note(position, f"BOOTSTRAP PROVIDER: keeping {state.recipe} starter provider at "
+                           f"{position} ({reason}); {error}")
+            continue
         except RecoverableRetirementPending:
             pass
         except RecoverableRetirementError as error:
@@ -5149,6 +5162,47 @@ def _existing_stage_chests(
     if chest is None or math.dist(chest, last_machine) > _STAGE_CHEST_REACH:
         return []
     return [chest]
+
+
+def _retire_promoted_mall_slot(
+    client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
+    position: Point, retirement: dict, emit: Callable[[str], None],
+) -> bool:
+    """Recover a promoted mall half's machine, inserters and provider through bots.
+
+    The executor's remove_entity destroys an entity with its contents; bots
+    keep the items. Nothing is ordered while storage cannot take the cargo.
+    The requester section is cleared only once the teardown is ordered.
+    """
+    actions = retirement["phases"][0]["actions"]
+    points = [(float(a["position"]["x"]), float(a["position"]["y"]))
+              for a in actions if a["action_type"] == "remove_entity"]
+    standing = live_base.entity_signatures_at(client, surface, force, points)
+    removals = [
+        a for a in actions if a["action_type"] == "remove_entity"
+        and standing.get((float(a["position"]["x"]), float(a["position"]["y"])), {}).get("name") == a["entity"]
+    ]
+    label = f"promoted_mall_{item}_{position[0]}_{position[1]}"
+    if removals:
+        try:
+            retire_entities_via_bots(
+                client, bridge, surface, force,
+                {"surface": surface, "force": force,
+                 "phases": [{"name": f"retire_{label}", "actions": removals}]},
+                label, emit, timeout=0.0,
+            )
+        except RecoverableRetirementStorageWait as error:
+            emit(f"  MALL RETIRE DEFERRED: {error}")
+            return False
+        except RecoverableRetirementPending:
+            pass  # ordered; bots finish while the new line runs
+    settings = [a for a in actions if a["action_type"] != "remove_entity"]
+    if settings:
+        _submit(client, bridge, surface,
+                {"surface": surface, "force": force,
+                 "phases": [{"name": f"clear_{label}", "actions": settings}]},
+                f"clear_{label}", emit)
+    return True
 
 
 def _paired_mall_provider(
@@ -8256,12 +8310,10 @@ def _build_assembled_stage(
                     item, spec["machine"], position, provider,
                     preserve_provider=preserve_provider,
                 )
-                retirement["surface"], retirement["force"] = surface, force
-                _submit(
-                    client, bridge, surface, retirement,
-                    f"retire_promoted_mall_{item}_{position[0]}_{position[1]}", emit,
-                )
-                retired += 1
+                if _retire_promoted_mall_slot(
+                    client, bridge, surface, force, item, position, retirement, emit,
+                ):
+                    retired += 1
             if retired:
                 emit(
                     f"  MALL RETIRE: the {item} line is up; released {retired} "

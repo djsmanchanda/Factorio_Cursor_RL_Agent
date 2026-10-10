@@ -217,7 +217,7 @@ def _reclaim_world(monkeypatch, *, contents: dict, room=(1, 5), present=True) ->
     monkeypatch.setattr(builder.live_base, "entity_signatures_at",
                         lambda _c, _s, _f, ps: {p: {"name": CHEST if state["present"] else "NONE"} for p in ps})
     monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: dict(contents))
-    monkeypatch.setattr(builder.live_base, "logistic_storage_room", lambda *_a: room)
+    monkeypatch.setattr(builder.live_base, "teardown_storage_room", lambda *_a: room)
     orders: list[dict] = []
 
     def order(_c, _b, _s, _f, plan, _label, _e, **kwargs):
@@ -320,3 +320,25 @@ def test_version_one_district_reads_as_version_two_and_schema_accepts_retained(t
 
     with pytest.raises(BootstrapLifecycleError):
         BootstrapDistrictState.from_json(json.dumps(dict(payload, lifecycle_state="provisioning")))
+
+
+def test_starter_machinery_waits_for_storage_room_then_resumes(tmp_path, monkeypatch):
+    # Furnace output and inserter hands are cargo too: nothing is ordered until storage can take it.
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    world = _World(tmp_path)
+    calls = _live(monkeypatch, world)
+    room = iter(((6, 0), (6, 9)))
+    monkeypatch.setattr(builder.live_base, "teardown_storage_room", lambda *_a: next(room))
+    messages: list[str] = []
+
+    def retire():
+        return builder._retire_standing_bootstrap_cells(
+            _Client(), world, "nauvis", "player", "iron-plate", "iron-ore", (0.0, 0.0), messages.append,
+        )
+
+    assert retire() == 0 and world.ordered == []
+    assert ledger.load("iron-plate").lifecycle_state == "retiring"
+    assert any("waits for logistic storage" in m for m in messages)
+    assert retire() == 1
+    assert ledger.load("iron-plate").lifecycle_state == "released" and calls["limits"] == 1
