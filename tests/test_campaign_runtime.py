@@ -563,6 +563,55 @@ def test_resumed_launch_waits_existing_pid_instead_of_duplicate_prepare(tmp_path
     assert backend._lifecycle_record(config)['run_id'] == 'actual-id'
 
 
+def _expired_deepseek_config(tmp_path):
+    config = laya_config(tmp_path, code_root=tmp_path / 'episode/code', agent_topology='deepseek-haiku',
+                         episode_id='campaign-experiment')
+    config.code_root.parent.mkdir()
+    (config.world_root / 'logs').mkdir(parents=True)
+    campaign._save_state(config.state_file, campaign.State(
+        campaign_id='test-campaign', deadline_utc='2000-01-01T00:00:00+00:00'))
+    return config
+
+
+def test_after_deadline_restart_adopts_a_run_launched_before_the_deadline(tmp_path, monkeypatch):
+    # Audit 2026-10-11: fresh froze and enforced the edit window before adopting, so a controller that
+    # crashed before saving active_episode_id raised after D and left its live pre-D run unobserved.
+    config = _expired_deepseek_config(tmp_path)
+    (config.code_root.parent / 'freeze.json').write_text('{"experiment": "campaign-experiment"}')
+    (config.world_root / 'logs/laya-runner.log').write_text('RUN START: ts=2026-10-10T00:00:00Z run_id=pre-d\n')
+    backend = runtime.LayaRuntime()
+    backend._lifecycle_record(config, phase='running', run_id='pre-d')
+    monkeypatch.setattr(campaign, '_run', lambda *args, **kwargs: pytest.fail('no freeze/prepare after D'))
+    monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('no launch after D'))
+
+    assert backend.fresh(config).returncode == 0
+    assert backend.episode_id(config) == 'pre-d'
+
+
+def test_after_deadline_restart_waits_for_a_pre_deadline_launch_pid(tmp_path, monkeypatch):
+    config = _expired_deepseek_config(tmp_path)
+    (config.code_root.parent / 'freeze.json').write_text('{"experiment": "campaign-experiment"}')
+    backend = runtime.LayaRuntime()
+    backend._lifecycle_record(config, phase='launching', pid=123)
+    monkeypatch.setattr(runtime.os, 'kill', lambda *args: None)
+    monkeypatch.setattr(campaign, '_run', lambda *args, **kwargs: pytest.fail('no freeze/prepare after D'))
+    monkeypatch.setattr(runtime.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('duplicate launch'))
+    monkeypatch.setattr(runtime.time, 'sleep', lambda *args: (config.world_root / 'logs/laya-runner.log').write_text(
+        'RUN START: ts=2026-10-10T00:00:00Z run_id=pre-d\n'))
+
+    assert backend.fresh(config).returncode == 0
+    assert backend._lifecycle_record(config)['run_id'] == 'pre-d'
+
+
+def test_after_deadline_restart_refuses_new_freeze_before_any_work(tmp_path, monkeypatch):
+    config = _expired_deepseek_config(tmp_path)
+    backend = runtime.LayaRuntime()
+    monkeypatch.setattr(runtime.LayaRuntime, 'freeze', lambda *args: pytest.fail('freeze after D'))
+
+    with pytest.raises(TimeoutError):
+        backend.fresh(config)
+
+
 def test_behavior_fix_requires_a_declared_focused_regression(tmp_path):
     backend = runtime.LayaRuntime()
     config = laya_config(tmp_path)

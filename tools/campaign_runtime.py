@@ -353,10 +353,18 @@ class LayaRuntime:
     def fresh(self, config) -> subprocess.CompletedProcess[str]:
         """Idempotent prepare/launch using per-episode durable lifecycle phases."""
         from tools import opencode_campaign_orchestrator as orch
-        self.freeze(config)
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        deepseek = getattr(config, "agent_topology", "legacy") == "deepseek-haiku"
+        if deepseek:
             from tools.campaign_pingpong import require_edit_window
-            require_edit_window(config, orch._load_state(config.state_file))
+            lifecycle = self._lifecycle_record(config)
+            # Adopting a run already frozen and launched before D is observation;
+            # it must survive a restart after D. Any new freeze, prepare or
+            # launch is edit-window activity and is refused before its first step.
+            adopting = (Path(config.code_root).parent / "freeze.json").exists() and bool(
+                self.episode_id(config) or lifecycle.get("phase") == "launching")
+            if not adopting:
+                require_edit_window(config, orch._load_state(config.state_file))
+        self.freeze(config)
         lifecycle = self._lifecycle_record(config)
         log = self.run_log_path(config)
         if self.episode_id(config):
@@ -388,7 +396,7 @@ class LayaRuntime:
                 raise RuntimeError(f"runner {pid} ended before RUN START; see {console}") from error
             process = None
         else:
-            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            if deepseek:
                 require_edit_window(config, orch._load_state(config.state_file))
             self._lifecycle_record(config, phase="launching")
             with console.open("ab") as stream:
