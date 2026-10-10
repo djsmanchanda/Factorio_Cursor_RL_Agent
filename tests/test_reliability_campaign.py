@@ -124,6 +124,10 @@ def run_fix(tmp_path, monkeypatch, *, fixer_outputs, review_outputs, pytest_resu
     board.write_text('board')
     calls = []
     declared = declared_files.split(', ')
+    # Milestones go to a scratch status file, never the repository's CURRENT_STATUS.md.
+    status = tmp_path / 'CURRENT_STATUS.md'
+    status.write_text('# status\n')
+    monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
 
     def ask(config, prompt, session, sequence, retry=0):
         calls.append(prompt)
