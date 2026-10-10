@@ -802,3 +802,112 @@ def test_menu_exposes_feasible_shortfalls_and_scoped_measures_where_measured():
     assert "mall_consumption" not in facts
     # Without a measurement window the rates are unknown, not zero.
     assert compile_options(BOARD, results, recipes=recipes)["facts"]["measured_plate_net"] is None
+
+
+def test_repeated_loan_batch_receipt_is_new_then_unchanged_then_progressing(monkeypatch):
+    """Live d99d5eb9: four nominal temporary_mall_batch retries with crafts 0/1
+    and zero delivery could not be told apart. The receipt must classify the
+    first sight as new (a zero first craft is not yet a stall), a repeated
+    identical batch as unchanged, and a moving counter as progressing."""
+    from types import SimpleNamespace
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+    from orchestrator.mall_bootstrap import MallBootstrapLoan
+    from planners.recipe_data import LINE_RECIPES
+    from training import laya_ops
+    from training.laya_ops import DeterministicSession
+
+    monkeypatch.setitem(LINE_RECIPES, "splitter", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "transport-belt", "iron-plate"],
+        "amounts": [1, 1, 1], "product_amount": 1, "craft_time": 2.0,
+    })
+    loan = MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="splitter", target_count=1,
+        side="left", requester_position=(36.5, 45.5), current_recipe="splitter",
+        step_recipe="splitter", step_target_count=1, step_baseline_finished=0,
+        step_required_crafts=1, step_minimum_crafts=1,
+        machine_name="assembling-machine-1",
+    )
+    counter = {"value": 0}
+    monkeypatch.setattr(laya_ops.mall_bootstrap, "active_bootstrap_loans", lambda *_a, **_k: (loan,))
+    monkeypatch.setattr(laya_ops.ab, "_bootstrap_loan_products_finished",
+                        lambda *_a, **_k: counter["value"])
+    monkeypatch.setattr(laya_ops.live_base, "transferable_items",
+                        lambda *_a, **_k: {"splitter": 0, "electronic-circuit": 9,
+                                           "transport-belt": 8, "iron-plate": 10})
+    monkeypatch.setattr(laya_ops.live_base, "chest_contents",
+                        lambda *_a, **_k: {"electronic-circuit": 9, "transport-belt": 8,
+                                           "iron-plate": 10})
+    monkeypatch.setattr(laya_ops.live_base, "entity_status_name", lambda *_a, **_k: "working")
+    monkeypatch.setattr(laya_ops.ab, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(projects={}))
+
+    session = DeterministicSession.__new__(DeterministicSession)
+    session.client, session.bridge, session.emit = object(), None, lambda _line: None
+    session.reference_point = (0.0, 0.0)
+
+    def batch(**_kwargs):
+        raise ProductionPrerequisiteDeferred(
+            "splitter is being made as a temporary bootstrap mall batch",
+            code="temporary_mall_batch", state="supply_wait",
+            details={"item": "splitter", "target": 1},
+        )
+
+    monkeypatch.setattr(session, "_operations", lambda: {"mall_slot": batch})
+
+    first = session.run("mall_slot", item="splitter")
+    assert first["loan_batch"]["status"] == "new" and first["progress"] is True
+    assert first["loan_batch"]["owner"] == "copper-cable"
+    assert first["loan_batch"]["step_recipe"] == "splitter"
+    assert first["loan_batch"]["counter"] == 0
+
+    again = session.run("mall_slot", item="splitter")
+    assert again["loan_batch"]["status"] == "unchanged" and again["progress"] is False
+
+    # A new loan that cannot cover its inputs is recorded but is not funded progress.
+    empty = DeterministicSession.__new__(DeterministicSession)
+    empty.client, empty.bridge, empty.emit = object(), None, lambda _line: None
+    empty.reference_point = (0.0, 0.0)
+    monkeypatch.setattr(empty, "_operations", lambda: {"mall_slot": batch})
+    monkeypatch.setattr(laya_ops.live_base, "transferable_items", lambda *_a, **_k: {})
+    monkeypatch.setattr(laya_ops.live_base, "chest_contents", lambda *_a, **_k: {})
+    unfunded = empty.run("mall_slot", item="splitter")
+    assert unfunded["loan_batch"]["inputs_covered"] is False
+    assert unfunded["progress"] is False
+
+    counter["value"] = 1
+    advanced = session.run("mall_slot", item="splitter")
+    assert advanced["loan_batch"]["status"] == "progressing" and advanced["progress"] is True
+    assert advanced["loan_batch"]["crafts_done"] == 1
+
+
+def test_with_economics_relays_generic_batch_progress_for_the_option_item():
+    from training.laya_ops_runner import with_economics
+
+    recipes = {"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+               "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
+               "splitter": {"ingredients": [{"name": "iron-plate", "amount": 5},
+                                            {"name": "copper-plate", "amount": 1}]}}
+    built = [{"ok": True, "operation": op, "params": {"recipe": p}}
+             for op in ("starter",) for p in ("iron-plate", "copper-plate")]
+    short = {"ok": False, "operation": "foundation", "params": {"recipe": "iron-plate"},
+             "code": "material_shortage", "details": {"required": {"splitter": 2}, "available": {}}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    results = built + [short, slot]
+    economics = {"projects": {}, "loans": [{
+        "lender": "copper-cable", "making": "splitter", "target": 1, "status": "progressing",
+        "step_recipe": "splitter", "crafts_done": 1, "remaining_bill": {"splitter": 1},
+        "missing_inputs": {"electronic-circuit": 2},
+    }]}
+    options = {o["option_id"]: o for o in
+               with_economics(compile_options(BOARD, results, recipes=recipes), results, economics)["options"]}
+    features = options["op.mall_slot.splitter"]["features"]
+    assert features["batch_status"] == "progressing"
+    assert features["batch_step"] == "splitter"
+    assert features["batch_crafts"] == 1
+    assert features["batch_remaining_bill"] == {"splitter": 1}
+    assert features["batch_missing_inputs"] == {"electronic-circuit": 2}
+    # An item with no active loan is unknown, never "unchanged".
+    none = {o["option_id"]: o for o in with_economics(
+        compile_options(BOARD, results, recipes=recipes), results,
+        {"projects": {}, "loans": []})["options"]}
+    assert none["op.mall_slot.splitter"]["features"]["batch_status"] is None

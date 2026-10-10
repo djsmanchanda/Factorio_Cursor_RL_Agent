@@ -383,6 +383,8 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
     bills = shorts_of(results)
     loans = (economics or {}).get("loans")
     lent = {loan["lender"] for loan in loans or ()}
+    # One active loan per made item (a second would only preempt the first).
+    loans_by_making = {loan.get("making"): loan for loan in loans or ()}
     projects = (economics or {}).get("projects")
     demand = (economics or {}).get("demand") or {}
     for option in menu["options"]:
@@ -447,6 +449,14 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
                                                  if fact and "distance" in fact else None)
         if option["family"] in ("produce", "mall_slot"):
             option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
+            # Generic batch facts: the item's own active loan, when it has one.
+            # Unknown (no loan / failed survey) stays None, never "unchanged".
+            loan = loans_by_making.get(option["product"])
+            option["features"]["batch_status"] = (loan or {}).get("status")
+            option["features"]["batch_step"] = (loan or {}).get("step_recipe")
+            option["features"]["batch_crafts"] = (loan or {}).get("crafts_done")
+            option["features"]["batch_remaining_bill"] = (loan or {}).get("remaining_bill")
+            option["features"]["batch_missing_inputs"] = (loan or {}).get("missing_inputs")
     # Free mall-slot capacity, where the survey knows it (main integrates the growth operation itself).
     menu.setdefault("facts", {})["free_slots"] = (economics or {}).get("free_slots")
     return menu

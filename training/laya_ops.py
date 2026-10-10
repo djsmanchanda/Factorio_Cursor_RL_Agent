@@ -24,6 +24,8 @@ from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
 from orchestrator import demand_siting
+from orchestrator import live_base
+from orchestrator import mall_bootstrap
 from orchestrator import stage_services
 from orchestrator.bootstrap_district import BootstrapDistrictLedger
 from orchestrator.bootstrap_work import BootstrapWorkLedger
@@ -41,6 +43,14 @@ PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in 
 # missing stage, which is progress but not the requested postcondition.
 PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
+# Outcomes that mean "the tooling is running a finite bootstrap-loan batch":
+# the receipt must carry its own progress facts so a stopper can tell a newly
+# funded or measurably advancing batch from a repeated unchanged one.
+LOAN_BATCH_CODES = {"temporary_mall_batch", "rationed_mall_borrow_deferred"}
+
+#: Sentinel distinguishing "read spendable stock for me" from a caller-supplied
+#: (possibly None/unknown) shared stock map.
+_UNSET = object()
 
 
 def funded_plan_signature(projects: Mapping) -> dict[str, int]:
@@ -124,6 +134,85 @@ class DeterministicSession:
                                                    reference_point=reference_point)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
+        # Progress classification for repeated loan-batch receipts runs on this
+        # process only; each entry is one borrowed cell's last observed digest.
+        self._loan_batch_seen: dict[tuple, tuple] = {}
+
+    def _loan_batch_facts(
+        self, loan, *, available: Mapping[str, int] | None | object = _UNSET,
+    ) -> dict:
+        """Live facts for one active loan; every probe is guarded and unknown stays None.
+
+        ``available`` may be a shared spendable-stock read so a survey of
+        several loans does not re-query the network per cell.
+        """
+        if available is _UNSET:
+            try:
+                available = live_base.transferable_items(self.client, SURFACE, FORCE)
+            except Exception:  # noqa: BLE001 -- a diagnostic read must not stop the loop
+                available = None
+        ledger = getattr(ab, "_MATERIAL_RESERVATION_LEDGER", None)
+        available_items = getattr(ledger, "available_items", None)
+        if available is not None and callable(available_items):
+            # Transferable inventory is physical stock, not unallocated stock.
+            # With no proven loan claimant, retain other projects' reservations.
+            available = available_items(available)
+        try:
+            products_finished = ab._bootstrap_loan_products_finished(self.client, SURFACE, loan)
+        except Exception:  # noqa: BLE001
+            products_finished = None
+        try:
+            requester_contents = live_base.chest_contents(self.client, SURFACE, loan.requester_position)
+        except Exception:  # noqa: BLE001
+            requester_contents = None
+        try:
+            producer_status = live_base.entity_status_name(self.client, SURFACE, loan.machine_position)
+        except Exception:  # noqa: BLE001
+            producer_status = None
+        return mall_bootstrap.bootstrap_loan_facts(
+            loan, products_finished=products_finished, requester_contents=requester_contents,
+            available=available, producer_status=producer_status,
+        )
+
+    @staticmethod
+    def _loan_batch_key(loan) -> tuple:
+        return (loan.original_recipe, loan.target_item,
+                round(loan.machine_position[0], 2), round(loan.machine_position[1], 2))
+
+    def _loan_batch_status(self, loan, facts: Mapping) -> str:
+        """Read-only batch progress class against the run's remembered digest."""
+        seen = getattr(self, "_loan_batch_seen", None) or {}
+        previous = seen.get(self._loan_batch_key(loan))
+        if previous is None:
+            return "new"
+        return "progressing" if previous != mall_bootstrap.bootstrap_loan_signature(facts) else "unchanged"
+
+    def _loan_batch_diagnostics(self, item: str | None, *, remember: bool) -> dict | None:
+        """The active loan making ``item``, with a truthful progress class.
+
+        ``new`` -- first sight of this funded/active batch (a zero craft counter
+        on its first sample is not itself a stall); ``progressing`` -- the step,
+        counter, bill, inputs, or producer status moved since last seen;
+        ``unchanged`` -- repeated with identical facts. Nothing is
+        special-cased: any item's loan is described the same way.
+        """
+        if not item:
+            return None
+        try:
+            loans = mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
+        except Exception:  # noqa: BLE001 -- a failed survey is unknown, not "no loan"
+            return None
+        loan = next((candidate for candidate in loans if candidate.target_item == item), None)
+        if loan is None:
+            return None
+        facts = self._loan_batch_facts(loan)
+        status = self._loan_batch_status(loan, facts)
+        if remember:
+            seen = getattr(self, "_loan_batch_seen", None)
+            if seen is None:
+                seen = self._loan_batch_seen = {}
+            seen[self._loan_batch_key(loan)] = mall_bootstrap.bootstrap_loan_signature(facts)
+        return {**facts, "status": status}
 
     def _operations(self) -> dict[str, Callable[..., object]]:
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
@@ -173,7 +262,10 @@ class DeterministicSession:
 
         ``progress`` records a funded construction plan the operation submitted
         through the shared material ledger, including side-effect submissions
-        that happen before an incomplete (shortage or wait) return.
+        that happen before an incomplete (shortage or wait) return. A repeated
+        bootstrap-loan batch additionally reports its own facts under
+        ``loan_batch``: a newly sighted or measurably advancing batch counts as
+        progress, a repeated unchanged one does not.
         """
         projects = getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {}
         before = funded_plan_signature(projects)
@@ -186,12 +278,33 @@ class DeterministicSession:
                         "classification": getattr(signal, "classification", None),
                         "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
                         "message": str(signal)[:500]}
-            response["progress"] = funded_plan_progress(
-                before, getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {})
-            return response
-        response = receipt(operation, params, result)
+        else:
+            response = receipt(operation, params, result)
         response["progress"] = funded_plan_progress(
             before, getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {})
+        return self._attach_loan_batch(response, params)
+
+    def _attach_loan_batch(self, response: dict, params: Mapping) -> dict:
+        """Relay the active loan's truthful facts and let genuine batch work count.
+
+        Only item-producing operations can borrow a mall cell, so the live loan
+        survey is skipped for starters, foundations, coverage and retirement --
+        and for a producing/mall receipt that already built something, since a
+        success is its own progress. The batch's own advance is progress only
+        for a loan-batch outcome, so a successful producing/mall receipt keeps
+        its funded-plan progress meaning. A newly funded batch's zero first
+        craft is not a stall.
+        """
+        if response.get("operation") not in PRODUCING_OPERATIONS or response.get("ok"):
+            return response
+        item = params.get("item") or params.get("recipe")
+        loan_batch = self._loan_batch_diagnostics(item, remember=True)
+        if loan_batch is None:
+            return response
+        response["loan_batch"] = loan_batch
+        if response.get("code") in LOAN_BATCH_CODES:
+            new_funded = loan_batch["status"] == "new" and loan_batch.get("inputs_covered") is True
+            response["progress"] = bool(response.get("progress")) or new_funded or loan_batch["status"] == "progressing"
         return response
 
     def economics(self) -> dict:
@@ -203,7 +316,6 @@ class DeterministicSession:
         ``demand`` is the shared demand-siting read (never training-local
         geometry). ``free_slots`` reports measured capacity, or None if unknown.
         """
-        from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
         projects = {}
         for project in ledger.projects.values():
@@ -214,8 +326,18 @@ class DeterministicSession:
                                                 "missing": missing}
         loan_error = None
         try:
-            loans = [{"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count}
-                     for loan in active_bootstrap_loans(self.client, SURFACE, FORCE)]
+            active = mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
+            try:
+                spendable = live_base.transferable_items(self.client, SURFACE, FORCE)
+            except Exception:  # noqa: BLE001 -- known-unknown, not zero stock
+                spendable = None
+            loans = []
+            for loan in active:
+                facts = self._loan_batch_facts(loan, available=spendable)
+                # Read-only classification: economics never advances the run's
+                # own seen-state, or an acceptance survey would mask progress.
+                facts["status"] = self._loan_batch_diagnostics_status(loan, facts)
+                loans.append(facts)
         except Exception as error:  # A failed survey is an unknown, never "no loans".
             loans = None
             loan_error = f"{type(error).__name__}: {error}"[:200]

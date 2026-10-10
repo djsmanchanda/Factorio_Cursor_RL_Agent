@@ -53,6 +53,7 @@ _FAST_FILES = {
     "test_campaign_runtime.py", "test_campaign_writable_root.py", "test_laya_campaign_runner_budget.py", "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",
     "test_fluid_systems.py", "test_infrastructure.py",
+    "test_laya_ops_runner.py", "test_mall_bootstrap.py",
     "test_mall_growth.py",
     "test_material_reservations.py", "test_mission_state.py",
     "test_module_integrity.py", "test_plan_self_collision.py",
