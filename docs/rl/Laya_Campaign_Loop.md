@@ -20,15 +20,17 @@ its separate writable campaign branch, which Git, model edits and tests use.
    Source files are read-only; generated evidence has dedicated mutable directories.
 3. Prepare a fresh world beneath that frozen code's `data/laya-saved-world/<id>` to satisfy the
    saved-world ownership validator. Launch the frozen CLI with deterministic operations, speed 2,
-   accepted C6 goal, 1,440,000 game-tick budget and a declared 21,600-second cooperative wall budget.
-   Wall expiration stops after the current operation and writes a terminal reason; it does not
-   kill Factorio or interrupt a submitted operation. Runner crashes also get indexed terminal evidence.
+   verified `mining-productivity-4` research goal. Natural episodes have no total tick, wall or
+   decision-count cap. A hard tooling failure ends the run; complete stalls require an unchanged
+   useful-state observation window (construction, required inputs, loan crafts and research).
+   Explicit experiment caps remain available when separately requested. Runner crashes also get indexed terminal evidence.
 4. During active play, checkpoints append bounded status/log snapshots. They do not call models.
    After the natural run ends, invoke exactly one terminal read-only Muse helper through
    `laya_helper_agent.py`: `opencode-go/muse-spark-1.3-contributor`, variant `xhigh`.
    The controller supplies an explicit config, report/transport directories and prior-run comparators.
    Root arguments are translated to one structured `comparators.json` file for the helper API.
-   Reports and machine completion state live under `episodes/<id>/observer/`.
+   Reports and machine completion state live under `episodes/<id>/observer/`. Muse has reader-only
+   tools; it returns delimited report text which the wrapper validates and publishes.
 5. Once terminal evidence is recorded, stop only that episode's owned disposable Laya server.
    With a complete observer report and remaining campaign time, the persistent DeepSeek primary
    synthesizes/reviews and the persistent fixer implements **one focused fix** using
@@ -46,9 +48,10 @@ its separate writable campaign branch, which Git, model edits and tests use.
    Fresh episodes always export committed HEAD, so rejected dirt never becomes deployed source.
    Durable committing/cycle records prevent repeating a successful commit after a restart.
 
-A failed observer produces a counted cycle with its evidence and no speculative fix. An interrupted
-terminal invocation waits for its announced completion without starting a second observer. If still
-incomplete, record the failure and rerun the committed revision in the next fresh episode.
+A failed observer receives one bounded re-collection of evidence for the same episode, then
+`HARNESS_FAILURE` stops new episodes at the unchanged revision. Check-ins must not resume that
+deliberate stop. Gameplay activity and completed observer/fixer/test/gate/commit stages are distinct;
+placeholders are never completed reports. An interrupted terminal invocation is preserved.
 An incomplete saved-world prepare is preserved for diagnosis; it is never automatically prepared twice.
 
 ## Invocation
@@ -69,7 +72,7 @@ build, rather than passing an installed mods directory from an earlier revision.
   --gui-mods <authorized GUI mods directory> --stamp-tag-base <unused tag> \
   --game-port <private game port> --rcon-port <private RCON port> \
   --python <repo>/.venv/bin/python --seed 50616 \
-  --speed 2 --until-accepted C6 --max-game-ticks 1440000 --run-wall-seconds 21600 \
+  --speed 2 --technology mining-productivity-4 \
   --max-runtime-hours 8 --max-cycles 0 \
   --comparators <repo>/data/laya-experiments/live-pair-20261010d/code/data/laya-saved-world/live-pair-20261010d-s50616 \
   --observations <campaign state>/journal.md --progress-file <campaign state>/progress.json \
@@ -86,14 +89,15 @@ is allocated; each new episode derives fresh paths below the campaign state dire
 
 The controller persists the original 8-hour deadline in
 `logs/opencode-campaign-state.json`; restarting with the same state file never grants another 8 hours.
-It starts no new episode or fix after that deadline. A run started before the deadline finishes its
-natural budget and terminal observer evidence, even if that extends beyond the campaign window.
+It starts no new episode or fix after that deadline. A run started before the deadline finishes on its
+verified goal, hard failure or measured complete stall, followed by terminal observer evidence, even if that extends beyond the campaign window.
 The controller then stops its owned server and exits. Terminal observer waits are bounded; before
 expiry they use the remaining campaign time, and after a natural run crossing expiry they use the
 configured bounded terminal-evidence allowance. Timed-out model process groups are cleaned up.
 
-Do **not** use `RuntimeMaxSec=8h`, which could interrupt the active episode. The persisted controller
-deadline is the 8-hour boundary. A 15-hour emergency unit ceiling covers 8h + one 6h run + evidence.
+Do **not** use a finite `RuntimeMaxSec` on this natural-run campaign: it would impose an
+unrequested episode cutoff. The persisted controller deadline is the eight-hour boundary for
+starting new episodes/fixes, not a kill deadline for the last active episode.
 Use `KillMode=process` so a supervisor failure does not kill the isolated active episode; the restarted
 controller adopts the same persisted root and PID instead of preparing another world.
 
@@ -107,7 +111,7 @@ ExecStart=<absolute invocation above>
 Restart=on-failure
 RestartSec=30
 KillMode=process
-RuntimeMaxSec=15h
+RuntimeMaxSec=infinity
 ```
 
 Before launch/resume, inspect `systemctl --user list-units 'laya-*'` and persisted deadlines.
@@ -122,3 +126,12 @@ selective commit, original-deadline resumption, existing-PID launch recovery, an
 Runner tests cover cooperative wall stops, pinned provenance and crash indexing. These are unit/fake
 integration evidence; they do not establish live gameplay improvement, mod join compatibility or
 adoption eligibility. Verify those separately in the requested isolated live campaign.
+
+A verified goal completion in the owned terminal index, plus completed observer evidence, ends
+the campaign successfully without a speculative fixer or another fresh world. C0–C6 and rate
+proxies remain observations; research queued alone is not completion.
+
+Before an unattended launch, verify installed OpenCode permissions with disposable fixtures and
+exercise the complete controller cycle. The October10 round2 evidence is in the local
+data/live-fixes/codex_helper_runs/20261010-round2/: Muse published a preserved-run report through
+the wrapper; DeepSeek edited scoped source and was denied outside/.git/lifecycle operations.

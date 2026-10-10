@@ -50,7 +50,7 @@ service ownership or reset authority.
 The integration branch claude/live-fixes-integration contains the verified queued
 repairs and [Laya campaign loop](Laya_Campaign_Loop.md). The selected fast gate
 has 994 passes, one skip and the pre-existing import-firewall failure. This is
-unit/fake integration evidence. The authorized eight-hour exploratory loop started October 10 at 05:29 IST
+unit/fake integration evidence. The first eight-hour exploratory loop started October10 at05:29IST
 on branch codex/laya-loop-20261010 from physical frozen sources, speed 2, natural episode
 stops, one report-only Muse xhigh and one focused DeepSeek high repair per cycle.
 No main merge, push, adoption or production-server promotion is implied.
@@ -77,3 +77,24 @@ now come from the shared toolkit (`training/laya_ops_runner.compile_options`,
 `training/laya_ops.DeterministicSession`). Contract and evidence:
 `training/laya_goal.py` (`laya-goal-v1`, `useful-state-window-v1`), summarized in
 the run summary `goal`/`stall` fields. Seeded weights are unchanged.
+
+## October10 completed loop and repairs
+
+The first loop ended13:38:40IST after35 naturally stalled runs,2866 decisions,
+maximum realC3 in9/35 and noC4–C6. All35 Muse completions failed because installed
+OpenCode uses worktree-relative edit requests while the policy supplied absolute
+paths. No DeepSeek fix or commit occurred. Placeholder reports fooled oversight.
+Read the preserved final audit and Luna plan under the main checkout's
+data/laya-experiments/laya-loop-20261010/. These repeats are exploratory evidence.
+
+Round2 repairs now publish strictly read-only Muse responses through the wrapper,
+fix relative-path source permissions, stop observer failure churn, validate
+machine completion and separate gameplay from improvement stages, carry shared
+mall reservations into initial starter coverage, measure mission output counters,
+and expose loan/bill/craft progress with claimant-safe material availability.
+The active target is verified mining-productivity-4. C6/science-rate proxies and
+queued research do not end a natural goal run; there are no default total tick,
+wall or12-decision cuts. Actual hard failures and measured unchanged useful state
+do. A fresh separate campaign is authorized by the user's October10 direction;
+never resume or extend the expired campaign. Its new launch identity is recorded
+in data/laya-experiments/laya-loop-20261010b/ when it starts.
