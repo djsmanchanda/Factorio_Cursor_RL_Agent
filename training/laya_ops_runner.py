@@ -21,6 +21,8 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 from __future__ import annotations
 
 import math
+import traceback
+import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -1012,8 +1014,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             try:
                 result = session.run(chosen["family"], **chosen["params"])
             except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
+                error_path = journal.parent / f"tool-error-{index:04d}-{uuid.uuid4().hex[:8]}.log"
+                error_path.write_text(f"run_id={run_id} operation={chosen['family']} params={chosen['params']}\n"
+                                      + traceback.format_exc())
                 result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
-                          "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
+                          "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400],
+                          "traceback_file": str(error_path)}
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
         if result.get("code") == "material_shortage":  # Preserve known snapshots for retry comparison.
@@ -1035,7 +1041,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                                                       "params", "features")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
-                                                                 "message", "result")},
+                                                                 "message", "result", "traceback_file")},
                                   "progress": bool(result.get("progress")),
                                   "ticks": after["tick"] - facts["tick"]})
         status_payload = {"run_id": run_id, "index": index, "tick": after["tick"], "phase": phase,
@@ -1121,7 +1127,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                      or (result.get("classification") == "bug" and result.get("state") == "failed")):
             summary["stop"] = "hard_failure"
             summary["hard_failure"] = {"code": result.get("code"), "message": result.get("message"),
-                                       "operation": result.get("operation"), "params": result.get("params")}
+                                       "operation": result.get("operation"), "params": result.get("params"),
+                                       "traceback_file": result.get("traceback_file")}
             break
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"

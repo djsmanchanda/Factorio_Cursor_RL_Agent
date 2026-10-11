@@ -365,3 +365,7 @@ Added `tools/persistent_factorio.py` for isolated server profiles, process valid
 ### 2026-10-11 16:24 IST — persistent Laya console launch path
 
 Replaced the legacy fresh-world path for persistent Laya with archive/reset on the configured server, isolated service controls and frozen deterministic-action runners. Preflight all three mods before creating a world and preserve nested subprocess errors. Six console/lifecycle regressions fail before/pass after;20 focused tests pass, fast gate1159 passes with only the unchanged four-import firewall baseline.
+
+### 2026-10-11 16:40 IST — Factorio 2.1 assembler inputs and tool-error evidence
+
+Corrected the loan's own-input survey to `defines.inventory.crafter_input`; the removed assembler enum caused the lab unpack crash introduced by0a50565. Caught tool errors now retain full tracebacks and cite them in structured outcomes/terminal failures. Three regressions fail before/pass after;97 focused tests pass and fast gate1162 passes with only the confirmed unchanged four-import firewall baseline.

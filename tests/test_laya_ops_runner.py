@@ -83,6 +83,29 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
 
 
+def test_caught_tool_errors_preserve_the_exact_stack_for_audit(tmp_path):
+    import json
+    from pathlib import Path
+
+    class BrokenSession(FakeSession):
+        def run(self, operation, **params):
+            raise ValueError("inventory index expected, got nil")
+
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=6,
+                  measure_ticks=600, seed=3, run_id="error-run", session=BrokenSession())
+    rows = [json.loads(line) for line in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
+    errors = [row["outcome"] for row in rows if row["outcome"]["code"] == "tool_error"]
+    assert errors and summary["failures"] == len(errors)
+    paths = [Path(error["traceback_file"]) for error in errors]
+    assert len(set(paths)) == len(paths)
+    for path in paths:
+        text = path.read_text()
+        assert "run_id=error-run" in text
+        assert "Traceback (most recent call last)" in text
+        assert 'raise ValueError("inventory index expected, got nil")' in text
+        assert "ValueError: inventory index expected, got nil" in text
+
+
 def test_accepted_window_does_not_stop_at_a_rate_proxy(tmp_path, monkeypatch):
     from training import laya_ops_runner as ops
     checks = iter([True, True, True, False])

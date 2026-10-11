@@ -2326,7 +2326,7 @@ def machine_input_contents(client, surface, position):
     x, y = position
     raw = _sc(client, f"local s=game.surfaces[{json.dumps(surface)}];local out={{}};"
               f"local e=s.find_entities_filtered{{type='assembling-machine',position={{{x},{y}}},radius=0.05,limit=1}}[1];"
-              "if e then local inv=e.get_inventory(defines.inventory.assembling_machine_input);"
+              "if e then local inv=e.get_inventory(defines.inventory.crafter_input);"
               "if inv then for _,it in pairs(inv.get_contents()) do out[#out+1]=it.name..'='..it.count end end end;"
               "rcon.print(table.concat(out,','))")
     return {name: int(count) for name, count in (item.split("=") for item in raw.split(",") if item)}
