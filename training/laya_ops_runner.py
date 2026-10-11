@@ -1004,11 +1004,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                                                  "message", "result")},
                                   "progress": bool(result.get("progress")),
                                   "ticks": after["tick"] - facts["tick"]})
-        _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
+        status_payload = {"run_id": run_id, "index": index, "tick": after["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
-                                    "authority": policy.authority, "speed": speed_status(adapter)})
+                                    "authority": policy.authority, "speed": speed_status(adapter)}
         summary["decisions"] = index + 1
         if chosen["family"] == "retire_starter":
             check_acceptance(f"after retirement {index}")
@@ -1060,12 +1060,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                 "tool_ticks": stall["tool_ticks"], "version": "useful-state-window-v1",
                                 "observation_ticks": window, "changed_tick": stall["changed_tick"],
                                 "useful": signature}
+            _write_status(status_path, {**status_payload, "progress": summary["stall"]})
             if window and stall["idle_ticks"] >= window:
                 summary["stop"] = "stalled"
                 emit(f"STALLED: useful state unchanged over {stall['idle_ticks']} game ticks "
                      f"(declared window {window})")
                 break
         else:
+            _write_status(status_path, status_payload)
             # The stall budget is decision-idle game time, not tool execution: one blocking deterministic call
             # can spend most of a window on real work (live 2026-10-10: one foundation call ate ~12k of 18k).
             prior_tick = stall["last_tick"] if stall["last_tick"] is not None else facts["tick"]

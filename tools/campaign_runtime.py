@@ -255,6 +255,8 @@ class LayaRuntime:
             "--speed", f"{config.run_speed:g}", "--actions", "deterministic", "--no-helper",
             "--source-save", str(config.source_save),
         ]
+        if getattr(config, "agent_topology", "legacy") == "deepseek-codex":
+            command += ["--stall-observation-ticks", "0"]
         # Explicit experiment caps only; a natural goal run sets none of them.
         if config.until_accepted:
             command += ["--until-accepted", str(config.until_accepted)]
@@ -384,7 +386,7 @@ class LayaRuntime:
     def fresh(self, config) -> subprocess.CompletedProcess[str]:
         """Idempotent prepare/launch using per-episode durable lifecycle phases."""
         from tools import opencode_campaign_orchestrator as orch
-        deepseek = getattr(config, "agent_topology", "legacy") == "deepseek-haiku"
+        deepseek = getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}
         if deepseek:
             from tools.campaign_pingpong import require_edit_window
             lifecycle = self._lifecycle_record(config)
@@ -433,7 +435,7 @@ class LayaRuntime:
             with console.open("ab") as stream:
                 process = subprocess.Popen(command, cwd=config.code_root, stdin=subprocess.DEVNULL,
                                            stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
-            self._lifecycle_record(config, phase="launching", pid=process.pid)
+            self._lifecycle_record(config, phase="launching", pid=process.pid, launched_at=time.time())
         wait_deadline = time.time() + 900
         while time.time() < wait_deadline:
             if self.episode_id(config):
@@ -446,7 +448,7 @@ class LayaRuntime:
 
     def observe(self, config, episode: str) -> dict:
         """Exactly one terminal helper invocation, no live model checkpoints."""
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
             from tools.campaign_pingpong import observe_terminal
             return observe_terminal(config, episode)
         from tools import opencode_campaign_orchestrator as orch
@@ -561,7 +563,7 @@ class LayaRuntime:
 
     def latest_run(self, config) -> tuple[bool, str]:
         result = latest_run_from_log(self.run_log_path(config))
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not result[0]:
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and not result[0]:
             from tools.campaign_pingpong import detect_runner_failure
             detect_runner_failure(config)
             result = latest_run_from_log(self.run_log_path(config))

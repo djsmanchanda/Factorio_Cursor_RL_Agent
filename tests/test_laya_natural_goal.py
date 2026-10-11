@@ -149,6 +149,18 @@ def test_a_blocked_unchanged_full_window_stalls(tmp_path):
     assert summary["stall"]["observation_ticks"] == 3000 and summary["stall"]["idle_ticks"] >= 3000
 
 
+def test_live_status_publishes_useful_progress_for_independent_wall_watchdog(tmp_path):
+    world = _World()
+    path = tmp_path / 'latest-status.json'
+    summary = run(world, _StepPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=2,
+                  measure_ticks=600, seed=1, run_id="observed", session=_AdvancingSession(world),
+                  status_path=path, settings=Settings(goal_technology="mining-productivity-4", stall_observation_ticks=None))
+    live = json.loads(path.read_text())
+    assert live['progress'] == json.loads(json.dumps(summary['stall']))
+    assert live['progress']['useful']['research_progress'] == .2
+    assert live['tick'] == world.tick
+
+
 def test_verified_target_completed_ends_the_run(tmp_path):
     class DoneSession(_AdvancingSession):
         def __init__(self, world):

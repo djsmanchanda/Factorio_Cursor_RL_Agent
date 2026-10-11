@@ -87,3 +87,11 @@ def test_runner_crash_still_indexes_terminal_evidence_for_observer(runner_harnes
     assert row['summary']['stop'] == 'runner_error'
     assert 'first hard operation failure' in row['summary']['error']
     assert harness.messages[-1] == 'RUN END'
+
+
+def test_wall_watchdog_profile_disables_tick_stall_guard(runner_harness, monkeypatch):
+    def run_ops(*args, settings, **kwargs):
+        assert settings.stall_observation_ticks is None
+        return {'decisions': 1, 'stop': 'requested'}
+    monkeypatch.setattr(laya_ops_runner, 'run', run_ops)
+    assert cli.main([*runner_harness.argv, '--stall-observation-ticks', '0']) == 0

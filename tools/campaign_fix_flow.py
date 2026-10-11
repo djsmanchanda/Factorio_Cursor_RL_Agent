@@ -114,7 +114,7 @@ def _ensure_fixer(config, state):
 def _abandon(config, state, fix_id: str, declared: list[str], pre_cycle: set[str], reason: str) -> str:
     """Restore the pre-fix worktree for clean paths; quarantine the rest."""
     from tools.opencode_campaign_orchestrator import REPO_ROOT
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         from tools.campaign_pingpong import require_edit_window
         require_edit_window(config, state)
     quarantine = loop_log.loop_root(config.state_root) / "quarantine" / fix_id
@@ -161,7 +161,7 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
     from tools.opencode_campaign_orchestrator import REPO_ROOT, _progress, _save_state
 
     dry_run = config.dry_run
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         from tools.campaign_pingpong import require_edit_window
         require_edit_window(config, state)
     pending = state.pending_fix or {}
@@ -189,7 +189,7 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
         session, output = _ask(config, message, state.fixer_session_id, sequence)
         if session:
             state.fixer_session_id = session
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
             from tools.campaign_pingpong import relay_completion
             relay_completion(config, state, fix_id, output)
         parsed = decision_fields(output)
@@ -203,10 +203,10 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
                 state.fixer_session_id, sequence)
             if session:
                 state.fixer_session_id = session
-            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+            if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
                 relay_completion(config, state, fix_id, output)
             parsed = decision_fields(output)
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not parsed.get("status"):
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and not parsed.get("status"):
             raise RuntimeError("Haiku omitted completion decision after bounded correction")
         return parsed
 
@@ -344,7 +344,7 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
             return _abandon(config, state, fix_id, declared, pre_cycle, unsafe)
         declared = new_declared or declared
         persist(phase="review", fields=fields, declared=declared, attempts=attempts)
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
             return run_fix_cycle(config, state, cycle, episode, synthesis_path, board, helper, sequence + 1)
 
     # ---- COMMITTING --------------------------------------------------------
@@ -388,7 +388,7 @@ def run_fix_cycle(config, state, cycle: int, episode: str, synthesis_path: Path,
 def _commit(config, state, fix_id: str, fields: dict, declared: list[str], status_clean_before: bool,
             sequence: int, verification_log: Path, pre_cycle: set[str]) -> str:
     from tools.opencode_campaign_orchestrator import REPO_ROOT, _record_milestone, _save_state
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         from tools.campaign_pingpong import require_edit_window
         require_edit_window(config, state)
     # Git commit may have succeeded immediately before supervisor interruption.

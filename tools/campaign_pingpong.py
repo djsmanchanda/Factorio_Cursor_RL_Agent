@@ -55,8 +55,10 @@ def require_edit_window(config, state) -> None:
 
 
 def validate_campaign(config, state) -> None:
+    codex = getattr(config, "agent_topology", "legacy") == "deepseek-codex"
+    fixer_model, fixer_effort = ("gpt-6.1-sol", "high") if codex else (HAIKU, "xhigh")
     if (config.runtime != "laya" or config.model != DEEPSEEK or config.variant != "high"
-            or config.fixer_model != HAIKU or config.fixer_variant != "xhigh"
+            or config.fixer_model != fixer_model or config.fixer_variant != fixer_effort
             or config.observer_model != DEEPSEEK or config.observer_variant != "high"
             or config.campaign_branch != BRANCH or config.run_speed != 2
             or config.technology != "mining-productivity-4"
@@ -71,6 +73,12 @@ def validate_campaign(config, state) -> None:
         raise RuntimeError("original absolute deadline changed")
     if state.primary_session_id != original.get("deepseek_session_id"):
         raise RuntimeError("saved DeepSeek session drift")
+    if codex:
+        from tools.campaign_codex import root_identity
+        root_identity(config)
+        launch = datetime.fromisoformat(original["launch_utc"]).timestamp()
+        if datetime.fromisoformat(state.deadline_utc).timestamp() != launch + 21600 or datetime.fromisoformat(original["wrap_deadline_utc"]).timestamp() != launch + 25200:
+            raise RuntimeError("six-hour deadline or one-hour overrun drift")
     from tools import opencode_campaign_orchestrator as orch
     branch = orch._run(["git", "branch", "--show-current"]).stdout.strip()
     if branch != config.campaign_branch:
@@ -238,7 +246,7 @@ def relay_completion(config, state, fix_id: str, output: str) -> None:
     atomic(record, {"delivered": False, "fix_id": fix_id, "packet": str(packet_path),
                    "from": state.fixer_session_id, "to": state.primary_session_id})
     # The packet bytes between markers are unaltered. Additional commit/run facts arrive separately.
-    message = (f"Haiku completion packet for {fix_id}, from session {state.fixer_session_id}. "
+    message = (f"Implementer completion packet for {fix_id}, from session {state.fixer_session_id}. "
                "Verbatim relay to your saved session; review follows.\n\n" + packet)
     response = orch._primary_turn(config, state, message, 700000 + int(time.time()))
     if not protocol.assistant_text(response):
@@ -302,6 +310,7 @@ def observe_terminal(config, episode: str) -> dict:
         row for root in config.comparator_roots for row in comparator_records(root)]})
     observation_only = time.time() >= datetime.fromisoformat(state.deadline_utc).timestamp() or state.final_validation_started
     report = directory / "findings.md"
+    implementer = "owning GPT-6.1-Sol/high T3 thread" if getattr(config, "agent_topology", "legacy") == "deepseek-codex" else "fresh Haiku"
     prompt = f"""TERMINAL RUN {episode}. You are the SAME persistent observer/planner {state.primary_session_id}.
 Collect bounded evidence from {evidence}, {config.world_root}/evidence/latest-status.json,
 {config.world_root}/evidence/clean-decisions.jsonl, {config.world_root}/logs/laya-runner.log and freeze.json.
@@ -309,7 +318,9 @@ Compare preceding run and previous change: {config.state_root}/logs/campaign-loo
 Trace observation -> decision -> plan -> execution -> outcome. Cite paths/decision indices/ticks.
 Separate real accepted checkpoints from proxies; actual research target/stop, requested/observed speed, wall time/ticks.
 Summarize unchanged/worsened outcomes, confounders and unresolved issues. Evidence level single live run; no cohort claim.
-Observation-only/final run={observation_only}. {'Record final findings only; NO subsequent fix or implementation plan.' if observation_only else 'Choose 1–2 focused reusable changes and prepare concrete fresh Haiku handoff: files, implementation plan, regressions failing before/passing after, predicted next-run effects and prior change outcome.'}
+The harness stops a run after 30 wall minutes without demonstrable useful progress; diagnose what prevented new work.
+Busy retries, no-op research calls and stock oscillation are not progress. No manual chest or extra starter chest is authorized.
+Observation-only/final run={observation_only}. {'Record final findings only; NO subsequent fix or implementation plan.' if observation_only else 'Choose 1–2 focused reusable changes and prepare concrete ' + implementer + ' handoff: files, implementation plan, regressions failing before/passing after, predicted next-run effects and prior change outcome.'}
 Return a complete report, ending with this EXACT plain block, without Markdown heading/bullets/bold/code fence:
 SYNTHESIS:
 hypothesis: one sentence
@@ -412,12 +423,22 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
         lifecycle = read(episode / "lifecycle.json")
         world = Path(freeze["world_root"]) if freeze else None
         records = comparator_records(world) if world else []
+        timing = []
+        if world and (world / 'logs/laya-runner.log').exists():
+            timing = [line for line in (world / 'logs/laya-runner.log').read_text().splitlines()
+                      if 'ELAPSED:' in line or line.startswith('RUN START:') or line.endswith(' RUN END')]
         runs.append({"experiment": episode.name, "freeze": freeze, "lifecycle": lifecycle,
-                     "runs": records, "observer": read(episode / "observer/state.json")})
+                     "runs": records, "timing_evidence": timing,
+                     "progress_watchdog": read(episode / 'progress-watchdog.json'),
+                     "forced_stop": read(episode / 'forced-stop.json'),
+                     "observer": read(episode / "observer/state.json")})
         details.append(f"### {episode.name}\n\nFreeze: [{episode.name}/freeze.json](episodes/{episode.name}/freeze.json). "
                        f"Lifecycle: [record](episodes/{episode.name}/lifecycle.json).\n\n```json\n"
                        + json.dumps({"revision": freeze.get("revision"), "seed": config.seed,
-                                     "records": records, "lifecycle": lifecycle}, indent=2) + "\n```\n")
+                                     "records": records, "lifecycle": lifecycle,
+                                     "timing_evidence": timing,
+                                     "progress_watchdog": read(episode / 'progress-watchdog.json'),
+                                     "forced_stop": read(episode / 'forced-stop.json')}, indent=2) + "\n```\n")
         findings = episode / "observer/findings.md"
         if findings.exists():
             details.append("DeepSeek observations, bottlenecks, predictions and comparison:\n\n" + findings.read_text() + "\n")
@@ -447,13 +468,15 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
     export_planner(config, state.primary_session_id)
+    codex = getattr(config, "agent_topology", "legacy") == "deepseek-codex"
+    implementer = "owning GPT-6.1-Sol/high T3 thread" if codex else "fresh Haiku"
     body = ("<!-- Path: campaign/final-report.md | Purpose: Audit every attempted run and improvement handoff. -->\n\n"
-            "# DeepSeek / Haiku six-hour Laya campaign\n\n"
+            f"# DeepSeek / {implementer} six-hour Laya campaign\n\n"
             f"Status: {state.phase}. Final report generated {datetime.now(timezone.utc).isoformat()}. "
             f"Original deadline {state.deadline_utc}. Branch `{config.campaign_branch}`. "
             "No merge, push, adoption or production promotion.\n\n"
             "## Configuration and identities\n\n```json\n" + json.dumps(config_record, indent=2) + "\n```\n\n"
-            f"Persistent DeepSeek session `{state.primary_session_id}`; [Haiku cycle IDs](agents/haiku-sessions.json). "
+            f"Persistent DeepSeek session `{state.primary_session_id}`; implementer native session `{state.fixer_session_id}`. "
             "[Transport/bootstrap/model evidence](agents/), [all handoffs](agents/handoffs.jsonl).\n\n"
             "Evidence: focused proofs/fast gate are **unit tests**; fake lifecycle tests are **replay/integration**. "
             f"This campaign attempted {len(runs)} allocated episodes, exploratory **single live runs**, "
@@ -462,7 +485,7 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
             "Same save/seed/speed/engine are intended matches; changing code, load, stochastic policy draws and "
             "mod stamps are confounders. Missing values remain unknown.\n\n"
             "## Every attempted episode\n\n" + "\n".join(details) + "\n"
-            "## Haiku changes, tests, predictions and commits\n\n" + ", ".join(logs) + "\n\n")
+            "## Implementer changes, tests, predictions and commits\n\n" + ", ".join(logs) + "\n\n")
     for packet in packets:
         body += f"### [{packet.name}]({packet.relative_to(root)})\n\n" + packet.read_text() + "\n\n"
     body += ("Verification logs and captured review diffs: [agents](agents/). "
@@ -476,15 +499,15 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
              "## Audit checklist\n\n"
              "- [ ] Original launch/deadline unchanged and all run starts before D.\n"
              "- [ ] One saved real DeepSeek session across every message.\n"
-             "- [ ] New real Haiku session per cycle; corrections reuse only that cycle.\n"
-             "- [ ] All verbatim completions acknowledged by saved DeepSeek session.\n"
+             + ("- [ ] Implementation handoffs address the same owning GPT thread/native session (user replacement of Haiku).\n" if codex else "- [ ] New real Haiku session per cycle; corrections reuse only that cycle.\n")
+             + "- [ ] All verbatim completions acknowledged by saved DeepSeek session.\n"
              "- [ ] Every behavior has fail-before/pass-after proof; fixed gate failures confirmed.\n"
              "- [ ] Scoped commits stay on campaign branch and have subsequent frozen validation evidence.\n"
              "- [ ] Every allocated episode/crash/transport failure is counted; real checkpoints separated from proxies.\n"
              "- [ ] Target success means verified completed research; all other outcomes retain exact stop reason.\n"
              "- [ ] Production untouched; no merge/push/adoption; final run has no subsequent fix.\n"
-             "- [ ] Two-hour supervision notes, transcripts, diffs and unverified candidates retained.\n\n"
-             "Checklist is for independent audit; unchecked entries are not assertions of completed validation.\n")
+             + ("- [ ] No scheduled check-ins; 30-minute progress watchdog and absolute seven-hour wrap evidence retained.\n\n" if codex else "- [ ] Two-hour supervision notes, transcripts, diffs and unverified candidates retained.\n\n")
+             + "Checklist is for independent audit; unchecked entries are not assertions of completed validation.\n")
     report.write_text(body)
     atomic(root / "run-records.json", runs)
     return report
@@ -494,6 +517,9 @@ def main(argv=None) -> int:
     from tools import opencode_campaign_orchestrator as orch
     args = orch._parser().parse_args(argv)
     config = orch._config(args)
+    if config.agent_topology == "deepseek-codex":
+        from tools.campaign_codex import main as codex_main
+        return codex_main(config)
     try:
         code = orch.run_campaign(config)
     except (Exception, KeyboardInterrupt) as error:

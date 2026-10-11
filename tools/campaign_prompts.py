@@ -146,12 +146,14 @@ def primary_run_end(episode: str, board: Path, helper_status: str, helper_path: 
                     run_context: Path, observations: Path, config=None) -> str:
     helper = f"OpenCode helper findings: {helper_path} (status: {helper_status})" if helper_path \
         else f"OpenCode helper findings: unavailable (status: {helper_status})"
-    if config is not None and getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
-        return f"""RUN END {episode}. Your own complete findings/Haiku handoff are at {helper_path}.
+    if config is not None and getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
+        implementer = "GPT-6.1-Sol/high in the owning T3 thread" if config.agent_topology == "deepseek-codex" else "fresh Claude Haiku5.5/xhigh"
+        return f"""RUN END {episode}. Your own complete findings/implementation handoff are at {helper_path}.
 Read that report and current bounded context {run_context}. Compare previous change/outcome.
 Return a concise implementation handoff with 1–2 focused reusable changes, cited evidence,
 files, regression guards, predicted next-run effect, unresolved issues and SYNTHESIS block.
-Do not edit or delegate; fresh Claude Haiku5.5/xhigh implements your plan on the same branch.
+Do not edit or delegate; {implementer} implements your plan on the same branch.
+A complete lack of demonstrable useful progress for 30 wall minutes is stopped by the harness; diagnose the blocker before a fix.
 If the previous run or proposed fix provides no new evidence, say no-change and explain it."""
     if config is not None and _laya(config):
         return f"""RUN END detected for episode {episode}. Begin terminal evidence collection.

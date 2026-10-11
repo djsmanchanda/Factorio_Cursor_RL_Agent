@@ -88,6 +88,7 @@ def main(argv=None) -> int:
     p.add_argument("--research-goal",
                    help="Natural goal run: end only when this technology's target_completed is verified "
                         "(no rate-proxy or decision-count stall cutoff)")
+    p.add_argument("--stall-observation-ticks", type=int, help="Useful-state tick window; 0 disables it for a wall-clock campaign watchdog.")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--max-wall-seconds", type=float, help="Cooperative natural episode wall budget; stop after the current operation.")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
@@ -116,6 +117,10 @@ def main(argv=None) -> int:
     settings, policy_options, runtime = apply_variant(variant)
     settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
                                    max_game_ticks=args.max_game_ticks or settings.max_game_ticks)
+    if args.stall_observation_ticks is not None:
+        if args.stall_observation_ticks < 0:
+            p.error("stall-observation-ticks must be >= 0")
+        settings = dataclasses.replace(settings, stall_observation_ticks=args.stall_observation_ticks or None)
     speed = float(runtime.get("speed", args.speed))
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
@@ -183,6 +188,12 @@ def main(argv=None) -> int:
                 summary["stop"] = "wall_budget"
                 log(f"WALL LIMIT: declared {args.max_wall_seconds:g}s budget reached; current operation finished")
             if stop.is_set():
+                request = paths["status"].parent / "campaign-stop.json"
+                if request.exists():
+                    stopped = json.loads(request.read_text())
+                    if stopped.get("run_id") == run_id:
+                        summary["stop"] = stopped["reason"]
+                        summary["campaign_stop"] = stopped
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
         except Exception as error:
             runner_error = error

@@ -264,6 +264,16 @@ def _run(command: list[str], *, timeout: int = 120) -> subprocess.CompletedProce
             os.killpg(process.pid, signal.SIGKILL)
             stdout, stderr = process.communicate()
         raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr)
+    except BaseException:
+        # An absolute campaign wrap can interrupt a model call independently
+        # of its ordinary timeout. Its owned transport must not keep running.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+        raise
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
@@ -397,7 +407,10 @@ def _opencode_command(config: Config, message: str, session_id: str | None) -> l
 
 def _ask(config: Config, message: str, session_id: str | None, sequence: int,
          retry: int = 0) -> tuple[str | None, str]:
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not config.read_only and not config.dry_run:
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and not config.read_only and not config.dry_run:
+        if config.agent_topology == "deepseek-codex":
+            from tools.campaign_codex import ask_root
+            return ask_root(config, message, session_id)
         from tools.campaign_pingpong import ask_haiku
         return ask_haiku(config, message, session_id)
     if config.dry_run:
@@ -444,7 +457,7 @@ def _ask(config: Config, message: str, session_id: str | None, sequence: int,
     if result.returncode:
         raise RuntimeError(f"OpenCode exited {result.returncode}; inspect {transport}")
     returned = _session_id(output)
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and returned != session_id:
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and returned != session_id:
         raise RuntimeError("DeepSeek session continuity violation")
     return session_id or returned, output
 
@@ -453,7 +466,7 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
                        sequence: int, *, require_response: bool = True,
                        retries: int | None = None) -> tuple[str | None, str]:
     """Recover a congested model call until it responds or the campaign ends."""
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         retries = 1 if retries is None else retries
     active_session = session_id
     prompt = message
@@ -470,7 +483,7 @@ def _ask_with_continue(config: Config, message: str, session_id: str | None,
             return active_session, output
         except Exception as error:
             transport = config.opencode_log_dir / f"opencode-{sequence:04d}{'' if attempt == 0 else f'-continue-{attempt}'}.jsonl"
-            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and not config.read_only:
+            if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and not config.read_only:
                 active_session = _load_state(config.state_file).fixer_session_id or active_session
             if active_session is None and transport.exists():
                 active_session = _session_id(transport.read_text(encoding="utf-8", errors="replace"))
@@ -714,7 +727,7 @@ def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> 
     """Bootstrap the persistent primary only when no usable session exists."""
     if state.primary_session_id:
         return state.primary_session_id, False
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         raise RuntimeError("Saved Hi-bootstrap DeepSeek session is required; never create a replacement")
     session, _ = _ask_with_continue(_readonly(config), primary_bootstrap(config, cycle), None, sequence, require_response=False)
     if session is None:
@@ -725,6 +738,12 @@ def _ensure_primary(config: Config, state: State, cycle: int, sequence: int) -> 
 
 
 def _ensure_fixer(config: Config, state: State, sequence: int = 0) -> str | None:
+    if getattr(config, "agent_topology", "legacy") == "deepseek-codex":
+        from tools.campaign_codex import root_identity
+        state.fixer_session_id = root_identity(config)["codex_session_id"]
+        state.fixer_cycle = state.active_cycle
+        _save_state(config.state_file, state)
+        return state.fixer_session_id
     if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
         if state.fixer_cycle != state.active_cycle:
             state.fixer_session_id = None
@@ -839,7 +858,7 @@ def _run_campaign(config: Config) -> int:
     if config.plastic_reliability and (config.acceptance_seconds < 10 or config.acceptance_seconds > 600 or config.acceptance_seconds % 10 or config.required_successes < 3):
         raise ValueError("reliability requires >=3 successes and a 10–600 second window in 10-second increments")
     state = _load_state(config.state_file)
-    if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         from tools.campaign_pingpong import validate_campaign
         validate_campaign(config, state)
         if state.phase in {"SUCCESS", "DEADLINE_REACHED", "HARNESS_FAILURE"}:
@@ -889,7 +908,7 @@ def _run_campaign(config: Config) -> int:
                     f"{pending.get('episode')}; active episode is {state.active_episode_id}.\n")
             state.pending_fix = None
             _save_state(config.state_file, state)
-    if state.pending_fix and time.time() >= deadline and getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+    if state.pending_fix and time.time() >= deadline and getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
         return _stop_campaign(config, state, "DEADLINE_REACHED", reason="unfinished candidate retained unverified; observation only")
     if state.pending_fix and not config.dry_run:
         from tools.campaign_fix_flow import run_fix_cycle
@@ -988,7 +1007,7 @@ def _run_campaign(config: Config) -> int:
             else:
                 if time.time() >= deadline:
                     return _stop_campaign(config, state, "DEADLINE_REACHED", reason="no new run at deadline")
-                if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and deadline - time.time() < config.min_fix_budget_seconds:
+                if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and deadline - time.time() < config.min_fix_budget_seconds:
                     state.final_validation_started = True
                 config = replace(config, episode_id="episode-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8])
                 if backend.name == "laya" and not config.dry_run:
@@ -1032,7 +1051,7 @@ def _run_campaign(config: Config) -> int:
                 config.state_root / "logs/latest-context.md", config.state_root,
                 Path(previous["synthesis_path"]) if previous and previous.get("synthesis_path") else None), sequence)
             sequence += 1
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
             from tools.campaign_pingpong import notify_run
             notify_run(config, state)
         _progress(config, "OBSERVING", state)
@@ -1063,6 +1082,9 @@ def _run_campaign(config: Config) -> int:
                 if _assistant_text(assessment):
                     _append(config.observations, _assistant_text(assessment))
             sequence += 1
+            if getattr(config, "agent_topology", "legacy") == "deepseek-codex" and checkpoint % 5 == 0:
+                from tools.campaign_codex import observe_checkpoint
+                observe_checkpoint(config, state, checkpoint)
             first_turn_done = True
             state.last_checkpoint = checkpoint
             state.last_checkpoint_episode = state.active_episode_id
@@ -1145,7 +1167,7 @@ def _run_campaign(config: Config) -> int:
             if helper.get("status") == "complete" and backend.goal_completed(config, state.active_episode_id):
                 return _finish_cycle(config, state, "goal-completed", {}, run_text=run_text,
                                      terminal_phase="SUCCESS", reason=f"verified research goal {config.technology} completed")
-            if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and state.final_validation_started:
+            if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and state.final_validation_started:
                 return _finish_cycle(config, state, "final-validation", {}, run_text=run_text,
                                      terminal_phase="DEADLINE_REACHED", reason="final frozen validation observed without a subsequent fix")
             if time.time() >= deadline:
@@ -1207,7 +1229,7 @@ def _run_campaign(config: Config) -> int:
                                "hypothesis_id": hypothesis_id}
             _save_state(config.state_file, state)
 
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku" and deadline - time.time() < config.min_fix_budget_seconds:
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"} and deadline - time.time() < config.min_fix_budget_seconds:
             _finish_cycle(config, state, "reserve-final-validation", {}, run_text=run_text)
             continue
 
@@ -1215,7 +1237,7 @@ def _run_campaign(config: Config) -> int:
         from tools.campaign_fix_flow import run_fix_cycle
         outcome = run_fix_cycle(config, state, cycle, state.active_episode_id, synthesis_path,
                                 board, helper, sequence)
-        if getattr(config, "agent_topology", "legacy") == "deepseek-haiku":
+        if getattr(config, "agent_topology", "legacy") in {"deepseek-haiku", "deepseek-codex"}:
             if outcome == "abandoned":
                 return _finish_cycle(config, state, outcome, {}, run_text=run_text,
                                      terminal_phase="HARNESS_FAILURE", reason="bounded candidate verification failed; no unchanged retry churn")
@@ -1347,7 +1369,7 @@ def _config(args: argparse.Namespace) -> Config:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--agent-topology", choices=["legacy", "deepseek-haiku"], default="legacy")
+    parser.add_argument("--agent-topology", choices=["legacy", "deepseek-haiku", "deepseek-codex"], default="legacy")
     parser.add_argument("--claude-bin", default="claude")
     parser.add_argument("--campaign-branch")
     parser.add_argument("--min-fix-budget-seconds", type=int, default=1800)
