@@ -23,6 +23,13 @@ from training.laya_starter_kit import verify_starter_kit
 
 def manager(root, action):
     manifest = json.loads((root / "manifest.json").read_text())
+    if manifest.get("persistent_server"):
+        if action == "stop":
+            return "persistent server retained; stop its user systemd unit explicitly"
+        if action != "start":
+            raise SavedWorldError("persistent server lifecycle requires its explicit user service")
+        return subprocess.run(["systemctl", "--user", "start", manifest["server_unit"]],
+                              check=True, capture_output=True, text=True).stdout.strip()
     return subprocess.run([
         "bash", str(root / "frozen/scripts/manage_linux_deterministic_server.sh"), action,
         "--root", str(root / "server"), "--fleet-mode", "--bootstrap-profile", "supplied-v1",

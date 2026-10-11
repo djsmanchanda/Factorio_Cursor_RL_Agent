@@ -107,6 +107,40 @@ the GUI client before joining this server. Loading the training-lab mod does
 not create a training surface or alter Nauvis; training remains isolated by its
 separate worker roots, saves, ports, and explicit commands.
 
+### Persistent isolated Laya and deterministic servers
+
+The user-requested persistent pair is separate from production and campaigns:
+
+| Runtime | Game / RCON | User service | Private world |
+|---|---|---|---|
+| Laya | `127.0.0.1:34992` / `27992` | `factorio-laya-persistent.service` | `data/laya-saved-world/persistent-laya` |
+| Deterministic | `127.0.0.1:34993` / `27993` | `factorio-deterministic-persistent.service` | `data/persistent-factorio/deterministic` |
+
+Profiles and lifecycle evidence live in `data/persistent-factorio/`. The
+enabled user services own Factorio independently of Python runners. Start or
+restart the corresponding service to resume its current save; stopping a
+persistent Laya runner retains the server. Explicit server shutdown uses
+`systemctl --user stop <service>`. Neither service resets, redeploys mods,
+synchronizes GUI files or snapshots its save into the repository source save.
+They have no runtime deadline; campaign deadlines belong to their controllers.
+User services start with the user's service manager; boot without login is
+not configured by this setup.
+
+`tools/persistent_factorio.py` validates dedicated roots, protected ports and
+process identity, delegates server lifecycle through the existing manager's
+fleet mode, and verifies exclusive runtime activation. Probe with
+`python -m tools.persistent_factorio probe --profile data/persistent-factorio/laya.json`
+(or `deterministic.json`). Keep passwords in the private mode-600 files.
+Changes to mods still require an explicitly authorized stopped-server
+deployment and matching GUI synchronization. Never reset these worlds as a
+side effect of preparing a fresh experiment; archive and create a separate
+episode instead.
+
+Laya's Operations Console implementation is `tools/laya_ops_server.py`,
+default `http://127.0.0.1:9140`. It requires an explicit current-world pointer
+and is not started or attached by the persistent server setup. The older
+`tools/laya_console_server.py` on `9138` serves a distinct training workflow.
+
 ### Native deterministic control center
 
 The control center is `tools/dashboard_server.py`; it is a Python server and
