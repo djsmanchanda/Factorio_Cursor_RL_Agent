@@ -26,6 +26,16 @@ the current guided sampler's weights.
 | `mission.science` | After advanced circuits, manufacture and deliver the required science packs to labs and complete mining-productivity-4 research. |
 | `mission.no-gifts` | Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items. |
 
+The current scenario prohibits lab production options until both plastic (C4)
+and advanced-circuit (C6) production rate phases have been measured. Unlocked
+recipes, banked lab stock and construction shortages cannot bypass admission.
+This explicit user constraint is enforced across produce and mall-slot options.
+
+Standing mall limits only increase, by at least 20% per increase (rounded up).
+Measured phase producers can run ungated; finite borrowed batches retain exact
+craft budgets. Dependency chest holds follow each actual operation's bill and
+transaction so independent funded production can continue.
+
 Science production alone is not mission completion. Recipe, technology and rate
 facts come from the world and the versioned objective, not historical handoffs.
 

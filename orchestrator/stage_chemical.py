@@ -1200,6 +1200,24 @@ def _expand_remote_crude_if_starved(
         emit(f"  OIL EXPANSION WAIT: {type(error).__name__}: {error}")
 
 
+def chemical_startup_project(item: str) -> tuple[str, dict[str, int]]:
+    """Prospective machine packet bill for finite-chest startup budgeting."""
+    from orchestrator.material_reservations import plan_material_bill
+    packets = {
+        "plastic-bar": ("chemical_refinery_and_plastic_machines", 2),
+        "sulfur": ("chemical_sulfur_machines", 2),
+        "sulfuric-acid": ("acid_water_source_and_machine", 1),
+    }
+    project, count = packets[item]
+    row = generate_fluid_machine_row(item, count, 0, 0)
+    if item == "plastic-bar":
+        _direct_single_belt_feed(row, "coal")
+    else:
+        _swap_infinity_chests(row, {})
+    _publish_output_chest(row)
+    return project, plan_material_bill(strip_local_power(row, remove_substations=False))
+
+
 def ensure_oil_cell(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage,

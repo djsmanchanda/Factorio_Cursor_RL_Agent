@@ -1031,7 +1031,7 @@ def test_research_and_lab_options_are_backed_by_live_prerequisites():
     def options(goal_status, labs):
         return {o["option_id"] for o in compile_options(
             board, _GOAL_STARTERS, recipes=GOAL_RECIPES, research_goal="mining-productivity-4",
-            goal_status=goal_status, labs=labs)["options"]}
+            goal_status=goal_status, labs=labs, reached_phases=("C4", "C6"))["options"]}
 
     assert "op.research.mining-productivity-4" in options(open_status, labs=2)
     # Unknown status, a completed target, or an unopened technology never queues research blindly.
@@ -1056,12 +1056,33 @@ def test_lab_provisioning_waits_for_every_plate_in_its_chain_to_start():
     def options(results):
         return {o["option_id"] for o in compile_options(
             board, results, recipes=recipes, research_goal="mining-productivity-4",
-            goal_status=open_status, labs=0)["options"]}
+            goal_status=open_status, labs=0, reached_phases=("C4", "C6"))["options"]}
 
     assert "op.starter.copper-plate" in options([])
     assert "op.produce.lab" not in options([])
     assert "op.produce.lab" not in options(_GOAL_STARTERS[:1])  # Iron alone leaves copper unstarted.
     assert "op.produce.lab" in options(_GOAL_STARTERS)
+
+
+def test_lab_is_absent_from_bootstrap_even_with_outstanding_lab_demand():
+    results = _GOAL_STARTERS + [{"operation": "mall_slot", "ok": True,
+                               "params": {"item": "iron-gear-wheel"}}]
+    menu = compile_options(
+        {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": .5}]},
+        results, recipes=GOAL_RECIPES, research_goal="mining-productivity-4", labs=0,
+        queued_targets={"lab": 4}, material_stock={"lab": 1})
+    assert not any(o.get("product") == "lab" for o in menu["options"])
+    assert "op.produce.plastic-bar" in {o["option_id"] for o in menu["options"]}
+
+
+@pytest.mark.parametrize("reached", [(), ("C4",), ("C6",), ("C4", "C6")])
+def test_lab_options_require_both_plastic_and_advanced_circuit_phases(reached):
+    menu = compile_options(BOARD, _GOAL_STARTERS, recipes=GOAL_RECIPES,
+                           research_goal="mining-productivity-4", labs=0,
+                           queued_targets={"lab": 4}, material_stock={"lab": 0},
+                           reached_phases=reached)
+    lab_options = [o for o in menu["options"] if o.get("product") == "lab"]
+    assert bool(lab_options) == ({"C4", "C6"} <= set(reached))
 
 
 def test_lab_gate_sees_lab_in_the_live_recipe_catalog(monkeypatch, tmp_path):
@@ -1091,7 +1112,7 @@ def test_lab_gate_sees_lab_in_the_live_recipe_catalog(monkeypatch, tmp_path):
     def lab_offered(results):
         return "op.produce.lab" in {o["option_id"] for o in compile_options(
             board, results, recipes=recipes, research_goal="mining-productivity-4",
-            goal_status=open_status, labs=0)["options"]}
+            goal_status=open_status, labs=0, reached_phases=("C4", "C6"))["options"]}
 
     assert not lab_offered([])
     assert not lab_offered(_GOAL_STARTERS[:1])

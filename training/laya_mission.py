@@ -19,6 +19,15 @@ from training.laya_factory_status import goal_met
 
 MISSION_ID = "mod-playground-mining-productivity-4"
 
+# User-defined product admission, separate from Factorio recipe legality.
+# These phases latch measured production; unlocked recipes or banked stock
+# alone do not establish that the preceding production stages ran.
+PRODUCT_PHASE_PREREQUISITES = {"lab": frozenset({"C4", "C6"})}
+
+
+def product_phase_ready(item: str | None, reached: Sequence[str]) -> bool:
+    return PRODUCT_PHASE_PREREQUISITES.get(item, frozenset()) <= set(reached)
+
 PHASES: tuple[dict, ...] = (
     # User priority 2026-10-03: iron and copper starters before the mall or stone.
     {"phase_id": "C0", "name": "iron_copper_starter",

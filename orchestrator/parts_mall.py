@@ -116,18 +116,24 @@ def add_demands(targets: dict[str, int], shortage: MaterialShortage) -> None:
         targets[item] = max(targets.get(item, 0), target)
 
 
+def increased_standing_limit(previous: int, requested: int) -> int:
+    """Keep a standing limit, or grow it by at least twenty percent."""
+    previous, requested = max(0, int(previous)), max(1, int(requested))
+    if not previous:
+        return requested
+    if requested <= previous:
+        return previous
+    return max(requested, (6 * previous + 4) // 5)
+
+
 def standing_gate_target(
     demand: int, reserve: int = 0, *, wip_gap: int = 0,
 ) -> int:
     """The network level one standing mall cell must reach for live demand.
 
-    The cap is the outstanding demand plus the legitimate standing reserve,
-    recomputed from what is open now -- not the largest target the cell ever
-    saw. That matters because one-off bills are large: the electronic-circuit
-    seed once borrowed a cell to make 600 copper cable, and a monotonic floor
-    kept the cable cell filling 600 long after the seed was covered. Following
-    current demand lets production stop when the useful target is met and
-    restart when a new open bill appears.
+    This computes the requested demand plus reserve. Standing configuration
+    then preserves its numeric peak and applies minimum twenty-percent growth;
+    finite borrowed batches keep their separate exact craft budget.
 
     ``wip_gap`` is requester-held work-in-progress the logistic network counts
     as present but a construction bill cannot spend. The assembler's logistic

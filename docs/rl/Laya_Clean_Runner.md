@@ -135,6 +135,11 @@ changes need shared training/inference representation and a recorded comparison.
 C0/C1/C2/C3/C4/C6/S1. They use production counters and a 95% rate threshold;
 the measurement can be shorter than its requested window. Reached phases are
 retained. S1 tests science-pack production, not completed research.
+Lab production and lab mall-slot options are absent until both measured C4 and
+C6 are retained. This scenario admission applies before shortage ranking and
+to final options; recipe availability or existing stock does not satisfy it.
+Shared standing mall limits never decrease and grow by at least 20% when
+increased; exact finite loan budgets remain separate.
 
 These proxies do not establish `orchestrator/checkpoint_milestones.py` acceptance:
 its C1 requires healthy starters and four working mall assemblers; C2 requires

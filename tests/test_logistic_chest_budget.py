@@ -276,3 +276,37 @@ def test_laya_uses_the_shared_dependency_budget_before_operations(monkeypatch):
     monkeypatch.setattr(session, '_operations', lambda: {'reserve_steel_seed': lambda:True})
     session.run('reserve_steel_seed')
     assert len(calls) == 1
+
+def test_steel_seed_budget_uses_its_real_transaction_and_chest_bill(tmp_path, monkeypatch):
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_pending_startup_dependencies", lambda *_: ("steel-plate",))
+    builder._refresh_logistic_chest_budget(_fake_client(), "nauvis", "player", ledger)
+    assert ledger.dependency_budget == {"passive-provider-chest": 1}
+    assert ledger.dependency_claimants == ("conversion_steel-plate",)
+    from planners.steel_bootstrap import steel_seed
+    from orchestrator.material_reservations import plan_material_bill
+    bill = plan_material_bill(steel_seed((.5, .5), "east", mined=True))
+    stock = dict(bill)
+    # A discretionary waiting cell must not steal the seed's chest.
+    ledger.declare("optional", {"passive-provider-chest": 1, "requester-chest": 1}, stock)
+    seed = ledger.declare("conversion_steel-plate", bill, stock, target_item="steel-plate")
+    assert seed.state == "ready"
+    assert seed.reserved["passive-provider-chest"] == 1
+
+@pytest.mark.parametrize("item,project", [
+    ("plastic-bar", "chemical_refinery_and_plastic_machines"),
+    ("sulfur", "chemical_sulfur_machines"),
+    ("sulfuric-acid", "acid_water_source_and_machine"),
+])
+def test_chemical_budget_claims_the_actual_machine_packet(tmp_path, monkeypatch, item, project):
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_pending_startup_dependencies", lambda *_: (item,))
+    builder._refresh_logistic_chest_budget(_fake_client(), "nauvis", "player", ledger)
+    from orchestrator.stage_chemical import chemical_startup_project
+    owner, bill = chemical_startup_project(item)
+    assert owner == project
+    assert ledger.dependency_claimants == (project,)
+    assert ledger.dependency_budget == {
+        name: count for name, count in bill.items() if name in FINITE_LOGISTIC_CHESTS}
+    packet = ledger.declare(project, bill, bill, target_item=item)
+    assert packet.state == "ready"

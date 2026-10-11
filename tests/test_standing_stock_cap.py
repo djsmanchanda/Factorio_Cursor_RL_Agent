@@ -1,5 +1,5 @@
 # Path: tests/test_standing_stock_cap.py
-# Purpose: A standing mall cell caps its output at the demand-derived stock target instead of filling its provider or keeping the largest target it ever saw.
+# Purpose: A standing mall cell caps its output at the demand-derived stock target with increase-only limits and at least 20% growth.
 
 from __future__ import annotations
 
@@ -44,11 +44,10 @@ def _drive_refresh(monkeypatch, submitted, *, stock_gate_target: int) -> None:
     )
 
 
-def test_a_standing_gate_follows_current_demand_not_a_historical_max(
+def test_a_standing_gate_never_decreases_after_a_large_bill(
     monkeypatch,
 ) -> None:
-    """A previous large bill (a one-off 600-cable/inserter batch) must not pin a
-    standing cell to keep filling 600 after the demand falls back."""
+    """Lower subsequent demand preserves the established standing limit."""
     submitted: list[dict] = []
     _drive_refresh(monkeypatch, submitted, stock_gate_target=600)
     _drive_refresh(monkeypatch, submitted, stock_gate_target=50)
@@ -59,7 +58,7 @@ def test_a_standing_gate_follows_current_demand_not_a_historical_max(
         if "logistic_condition" in action
     ]
 
-    assert gates == [stock_gate("transport-belt", 50)] * 2
+    assert gates == [stock_gate("transport-belt", 600)] * 2
 
 
 def test_standing_gate_target_is_demand_plus_reserve_plus_wip() -> None:
@@ -121,8 +120,8 @@ def test_gate_reapplies_a_previous_target_after_intervening_demand(monkeypatch):
     _drive_refresh(monkeypatch, submitted, stock_gate_target=80)
     _drive_refresh(monkeypatch, submitted, stock_gate_target=50)
     gates = [p for p in submitted if any("logistic_condition" in a for a in actions(p))]
-    assert len(gates) == 3
-    assert next(a['logistic_condition'] for a in actions(submitted[-1]) if 'logistic_condition' in a) == stock_gate('transport-belt', 50)
+    assert len(gates) == 2
+    assert next(a['logistic_condition'] for a in actions(submitted[-1]) if 'logistic_condition' in a) == stock_gate('transport-belt', 80)
 
 
 def test_registered_owned_cell_follows_open_bill_changes_without_new_build(monkeypatch):
@@ -141,7 +140,7 @@ def test_registered_owned_cell_follows_open_bill_changes_without_new_build(monke
         demanded['copper-cable'] = needed
         builder._refresh_owned_standing_gates(client, object(), 'nauvis','player',lambda _:None)
     targets = [next(a['logistic_condition']['constant'] for a in actions(p) if 'logistic_condition' in a) for p in submitted]
-    assert len(targets) == 3 and targets[0] == targets[2] > targets[1]
+    assert targets == [600]
 
 
 def _standing_refresh_over_line(monkeypatch, positions, *, borrowed_at) -> list[dict]:
@@ -227,10 +226,10 @@ def test_measured_standing_twins_ungate_then_rejoin_current_demand(monkeypatch):
     gated = refresh({})
     assert [a["logistic_condition"]["constant"] for a in gated] == [101, 101]
     demanded.clear()
-    assert [a["logistic_condition"]["constant"] for a in refresh({})] == [2, 2]
+    assert [a["logistic_condition"]["constant"] for a in refresh({})] == [101, 101]
     loans.clear()  # A restored cell rejoins the same canonical target.
     assert len(refresh({})) == 3
-    assert all(a["logistic_condition"]["constant"] == 2 for a in actions(submitted[-1]))
+    assert all(a["logistic_condition"]["constant"] == 101 for a in actions(submitted[-1]))
 
 
 def test_open_bill_overrides_scarce_metal_cap_and_shrinks_when_closed(monkeypatch):
@@ -244,3 +243,32 @@ def test_open_bill_overrides_scarce_metal_cap_and_shrinks_when_closed(monkeypatc
     assert target() == 140  # One aggregate bill, including WIP a builder cannot spend.
     demanded.clear()
     assert target() == 5  # Optional reserves alone do not bypass starter rationing.
+
+@pytest.fixture(autouse=True)
+def isolated_standing_registry(monkeypatch):
+    monkeypatch.setattr(builder, "_MALL_STOCK_GATE_FLOORS", {})
+    monkeypatch.setattr(builder, "_MALL_ITEM_PROVIDER_LIMITS", {})
+    monkeypatch.setattr(builder, "_MALL_REFRESH_SIGNATURES", set())
+
+
+def test_small_standing_increases_round_up_twenty_percent(monkeypatch):
+    submitted = []
+    for target in (50, 53, 55, 52, 54, 58, 61):
+        _drive_refresh(monkeypatch, submitted, stock_gate_target=target)
+    gates = [a["logistic_condition"]["constant"] for p in submitted
+             for a in actions(p) if "logistic_condition" in a]
+    assert gates == [50, 50, 60, 60, 72, 72]
+    assert [builder._canonical_mall_provider_limit("nauvis", "player", "inserter", n)
+            for n in (50, 53, 55, 52, 54, 58, 61)] == [50, 60, 60, 60, 60, 60, 72]
+
+
+def test_ungating_retains_peak_and_only_submits_on_configuration_change(monkeypatch):
+    submitted = []
+    for target in (50, None, None, 25, 53):
+        monkeypatch.setattr(builder, "_submit", lambda _c, _b, _s, plan, _n, _e: submitted.append(plan))
+        builder._configure_owned_mall_gate(object(), object(), "nauvis", "player", "transport-belt",
+            _standing_plan().existing, _standing_plan().spec, target, lambda _: None)
+    gate_plans = [p for p in submitted if any(
+        "logistic_condition" in a or "clear_logistic_condition" in a for a in actions(p))]
+    assert len(gate_plans) == 4
+    assert builder._MALL_STOCK_GATE_FLOORS[("nauvis", "player", "transport-belt")] == 60

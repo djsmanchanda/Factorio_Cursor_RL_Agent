@@ -494,16 +494,15 @@ gated separately and is not changed by the release.
   pass guard remains the tighter detector for real contradictions. Unchanged
   mall requester, provider-limit, and stock-gate configurations are submitted
   once per run and refreshed after any recipe-loan reconfiguration.
-  Within a run, a dedicated mall provider limit stays monotonic: a smaller
-  incidental demand cannot shrink a reserve already being filled. Its item
-  stock gate does not: the gate is recomputed from the current demand plus the
-  legitimate reserve, reconciled for requester-held work-in-progress that the
-  logistic network counts but a bill cannot spend. Following current demand
-  lets a standing cell stop once the useful target is covered instead of
-  filling to the largest target it ever saw (a one-off 600-cable circuit seed
-  otherwise pinned the cable cell indefinitely), and resume when a new open
-  bill appears. Deliberate shared-provider loan mode remains uncapped and
-  restores the dedicated policy after the loan.
+  Within a run, standing assembler gates and numeric provider limits never
+  decrease. An increase is at least 20%, rounded up: 50 requested as 53 becomes
+  60; requests 55, 52 and 58 keep 60. Current demand, reserve and requester-held
+  work-in-progress determine the proposed target before this growth policy.
+  Measured phase producers may run ungated, retaining their numeric peak for
+  restoration. Finite borrowed recipes keep their exact craft budgets.
+  Startup chest budgets use the actual operation's transaction and planner
+  bill: steel claims conversion_steel-plate with one provider and no requester;
+  chemical products claim their machine packets, not fictitious paired cells.
 - Core-mall readiness distinguishes installed capacity from current crafting.
   A real powered, non-loaned assembler stopped by its verified item-specific
   logistic stock cap is ready when that same network holds the cap quantity.

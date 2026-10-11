@@ -34,7 +34,7 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
 from training.laya_factory_status import BACKPRESSURE_CONDITIONS, compact_status, compile_status
 from training.laya_saved_world import speed_status
 from training.laya_mall_slots import RAW, obtainable
-from training.laya_mission import current_phase, phase_reached
+from training.laya_mission import current_phase, phase_reached, product_phase_ready
 from training.laya_goal import (
     GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
 )
@@ -572,7 +572,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     measurement: Mapping | None = None, research_goal: str | None = None,
                     goal_status: Mapping | None = None, labs: int | None = None,
                     layout: Sequence[int] | None = None, queued_targets: Mapping | None = None,
-                    material_stock: Mapping | None = None, pending_precursors: Sequence[str] = ()) -> dict:
+                    material_stock: Mapping | None = None, pending_precursors: Sequence[str] = (),
+                    reached_phases: Sequence[str] = ()) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
@@ -718,6 +719,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # A short item may also get its own standing slot, as the deterministic runner's demand-owned slots do
     # (live 2026-10-10: splitter was only ever offered as a borrowed batch, 112 offers, no standing producer).
     # The tooling's slot-capacity and funding gates still decide whether the slot can be placed.
+    producible = {item: missing for item, missing in producible.items()
+                  if product_phase_ready(item, reached_phases)}
     core = set(baseline_build_order())
     for item in sorted(producible):
         if item not in core and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {}):
@@ -766,6 +769,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "waiting": in_progress(codes.get(("produce", "lab"))),
                              "unchanged_failure": ("produce", "lab") in stuck, "batch_active": batch_active,
                              "goal_need": True}})
+    # Apply the mission's product admission to every path, including automatic
+    # lab provisioning and baseline slots. A shortage cannot bypass it.
+    options = [option for option in options
+               if product_phase_ready(option.get("product"), reached_phases)]
     outcomes = option_outcomes(results)
     for option in options:  # Laya's own recent decisions, per option
         params = option["params"]
@@ -980,7 +987,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                              bootstrap_districts=districts, allocation=allocation,
                                              measurement=measurement, research_goal=goal,
-                                             goal_status=goal_status, labs=_lab_count(facts),
+                                             goal_status=goal_status, labs=_lab_count(facts), reached_phases=reached,
                                              layout=layout_signature(facts),
                                              queued_targets=(economics or {}).get("mall_targets"),
                                              material_stock=(economics or {}).get("material_stock"),

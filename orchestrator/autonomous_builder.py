@@ -93,7 +93,7 @@ from orchestrator.material_reservations import (
 )
 from orchestrator.logistic_chest_budget import plan_dependency_chest_budget
 from orchestrator.parts_mall import (
-    MaterialShortage, STARTER_MALL_TARGETS, add_demands, mission_mall_targets, standing_gate_target,
+    MaterialShortage, STARTER_MALL_TARGETS, add_demands, mission_mall_targets, standing_gate_target, increased_standing_limit,
     wait_for_stock,
 )
 from orchestrator.intermediate_scaling import (
@@ -5414,9 +5414,14 @@ def _submit_mall_refresh_once(
 def _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, stock_gate_target, emit):
     """Configure the existing producer through the same tier and executor checks."""
     gate_key = (surface, force, item)
-    prior_target = _MALL_STOCK_GATE_FLOORS.get(gate_key)
-    # Register the current cap for reconciliation, without making it a floor.
-    _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
+    # Measured production may run ungated; retain the numeric peak for restore.
+    if stock_gate_target is not None:
+        stock_gate_target = increased_standing_limit(
+            _MALL_STOCK_GATE_FLOORS.get(gate_key, 0), stock_gate_target,
+        )
+        _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
+    else:
+        _MALL_STOCK_GATE_FLOORS.setdefault(gate_key, 0)
     gate_plan = generate_mall_stock_gate_update(
         item, spec["machine"], list(existing.machine_positions),
         stock_gate_target,
@@ -5438,15 +5443,16 @@ def _configure_owned_mall_gate(client, bridge, surface, force, item, existing, s
                 )
             action["entity"] = actual
     gate_plan["surface"], gate_plan["force"] = surface, force
+    signature = (
+        "stock_gate", surface, force, item,
+        tuple(existing.machine_positions), stock_gate_target,
+        tuple(a["entity"] for a in gate_plan["phases"][0]["actions"]),
+    )
     for old in tuple(_MALL_REFRESH_SIGNATURES):
-        if prior_target != stock_gate_target and old[:4] == ("stock_gate", surface, force, item):
+        if old[:4] == signature[:4] and old != signature:
             _MALL_REFRESH_SIGNATURES.discard(old)
     _submit_mall_refresh_once(
-        (
-            "stock_gate", surface, force, item,
-            tuple(existing.machine_positions), stock_gate_target,
-            tuple(a["entity"] for a in gate_plan["phases"][0]["actions"]),
-        ),
+        signature,
         lambda: _submit(
             client, bridge, surface, gate_plan,
             f"mall_stock_gate_{item}", emit,
@@ -5585,12 +5591,7 @@ def _refresh_mall_cell(
                 ),
                 refresh_provider_limit,
             )
-        # The stock gate is demand-derived and lives outside the provider
-        # check: a standing cell must cap at what it is actually needed for
-        # even when its provider is not the expected paired topology (dense
-        # banks and borrowed cells), and a historical maximum must never pin
-        # it. Following the current target lets production stop once the
-        # useful level is covered and resume when a new bill opens.
+        # Standing gates preserve their peak even outside paired topology.
         if stock_gate_target is not None:
             _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, stock_gate_target, emit)
     return mall_provider
@@ -6130,7 +6131,7 @@ def _canonical_mall_provider_limit(
     the same count the next time its cell refreshes.
     """
     key = (surface, force, item)
-    canonical = max(int(proposed), _MALL_ITEM_PROVIDER_LIMITS.get(key, 0))
+    canonical = increased_standing_limit(_MALL_ITEM_PROVIDER_LIMITS.get(key, 0), proposed)
     _MALL_ITEM_PROVIDER_LIMITS[key] = canonical
     return canonical
 _PARALLEL_BOOTSTRAP_RESERVE_ITEMS = frozenset({
@@ -8671,6 +8672,19 @@ def _pending_startup_dependencies(
     return tuple(pending)
 
 
+def _startup_dependency_project(item: str) -> tuple[str, Mapping[str, int]]:
+    """Price the operation that will actually build a dependency."""
+    if item == "steel-plate":
+        from planners.steel_bootstrap import steel_seed
+        return "conversion_steel-plate", plan_material_bill(
+            steel_seed((.5, .5), "east", mined=True),
+        )
+    if LINE_RECIPES.get(item, {}).get("machine", "").startswith("assembling-machine"):
+        return _material_project_id(item), compact_mall_project_bill(item)
+    from orchestrator.stage_chemical import chemical_startup_project
+    return chemical_startup_project(item)
+
+
 def _refresh_logistic_chest_budget(
     client: RconClient, surface: str, force: str,
     ledger: MaterialReservationLedger | None,
@@ -8688,8 +8702,8 @@ def _refresh_logistic_chest_budget(
         pending = _pending_startup_dependencies(client, surface, force)
         plan = plan_dependency_chest_budget(
             pending,
-            bill_for=lambda item: compact_mall_project_bill(item),
-            project_id_for=_material_project_id,
+            bill_for=lambda item: _startup_dependency_project(item)[1],
+            project_id_for=lambda item: _startup_dependency_project(item)[0],
         )
     except Exception as error:  # advisory hold must never crash a control pass
         if emit is not None:
@@ -9002,7 +9016,11 @@ def ensure_produced(
         requested=stock_gate_target,
     )
     if stock_gate_target is not None and not upgrade_bootstrap:
-        _MALL_STOCK_GATE_FLOORS.setdefault((surface, force, item), stock_gate_target)
+        gate_key = (surface, force, item)
+        stock_gate_target = increased_standing_limit(
+            _MALL_STOCK_GATE_FLOORS.get(gate_key, 0), stock_gate_target,
+        )
+        _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
     plan = _plan_line(
         client, surface, force, item, emit,
         upgrade_bootstrap=upgrade_bootstrap, stock_target=stock_target,

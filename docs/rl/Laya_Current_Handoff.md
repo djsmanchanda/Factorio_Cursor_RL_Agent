@@ -216,3 +216,13 @@ Preserved planned, unsubmitted foundation continuations across satisfied rates a
 ### 2026-10-12 — robot occupancy and helper publication repair
 
 Shared candidate/occupancy and mall footprint checks exclude non-blocking flying robots while preserving structural, ghost and terrain blockers. Helper publication retains an adjacent external heading; final reviews retry missing Outcome sections in the same session with a fixed bound. Evidence:7 fail-before/pass-after cases,149 focused/shared passes,3/3 saved transcript publication replays; fast gate1190 passes/3 skips and the independently unchanged four-import failure. Lifecycle:new frozen Laya runner/helper; no mod deployment or Factorio restart. The original collision entity remains unknown and gameplay improvement is unverified.
+
+### 2026-10-12 03:51 IST — user mall and lab constraints; dependency chest ownership repaired
+
+Standing numeric mall limits now retain their peak and grow by at least 20%;
+lab options require measured plastic and advanced-circuit phases. Startup chest
+holds now price real steel/chemical packet bills under their real transaction
+identities. Evidence: seven limit/budget regressions failed before repair;
+272 focused passes, fast gate 1197 passes/3 skips with only the unchanged
+four-import firewall failure. Lifecycle: new frozen Python runner required;
+no mod deployment. Live throughput improvement remains unproven.
