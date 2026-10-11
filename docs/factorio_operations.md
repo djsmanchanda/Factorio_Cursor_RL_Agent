@@ -137,9 +137,12 @@ side effect of preparing a fresh experiment; archive and create a separate
 episode instead.
 
 Laya's Operations Console implementation is `tools/laya_ops_server.py`,
-default `http://127.0.0.1:9140`. It requires an explicit current-world pointer
-and runs under `laya-operations-console.service`, now attached to the persistent
-Laya world. Starting the console does not start a gameplay runner. The older
+default `http://127.0.0.1:9140`. It requires an explicit current-world pointer.
+It can run under `laya-operations-console.service` or directly in a terminal;
+keep the background service stopped/disabled while using a foreground instance
+to avoid duplicate listeners. The user currently runs the foreground OC in a
+Workspace3 terminal, attached to the persistent Laya world. Starting the
+console does not start Factorio or a gameplay runner. The older
 `tools/laya_console_server.py` on `9138` serves a distinct training workflow.
 
 The persistent console's **Start fresh episode** action archives the current
