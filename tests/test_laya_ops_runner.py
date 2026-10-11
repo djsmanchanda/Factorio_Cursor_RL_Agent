@@ -1197,3 +1197,46 @@ def test_fresh_starter_is_not_offered_while_a_district_has_reserved_a_replacemen
     pioneer = {"copper-plate": {"lifecycle_state": "pioneer", "replacement_submitted": False}}
     assert "op.starter.copper-plate" in {
         o["option_id"] for o in compile_options(BOARD, [], bootstrap_districts=pioneer)["options"]}
+
+
+@pytest.mark.parametrize("pending", [True, False, None])
+def test_unsubmitted_foundation_continues_after_its_starter_meets_demand(pending):
+    board = {"needs": [{"item": "copper-plate", "condition": "satisfied"},
+                       {"item": "stone-brick", "condition": "unbuilt", "goal_required_per_s": .25}]}
+    results = [{"operation": "starter", "ok": True, "params": {"recipe": p}}
+               for p in ("iron-plate", "copper-plate")]
+    results.append({"operation": "foundation", "ok": False, "params": {"recipe": "copper-plate"},
+                    "code": "roboport_coverage_construction_wait"})
+    districts = {"copper-plate": {"lifecycle_state": "provisioning", "replacement_submitted": False,
+                                  "replacement_planned": True, "construction_pending": pending}}
+    menu = compile_options(board, results, bootstrap_districts=districts)
+    options = {o["option_id"]: o for o in menu["options"]}
+    continuation = options["op.foundation.copper-plate"]
+    assert continuation["features"]["lifecycle_pending"]
+    assert continuation["features"]["waiting"]
+    assert "op.starter.stone-brick" not in options
+    assert "op.extend.copper-plate" not in options
+    districts["copper-plate"].update(replacement_submitted=True, construction_pending=False)
+    ids = {o["option_id"] for o in compile_options(board, results, bootstrap_districts=districts)["options"]}
+    assert "op.foundation.copper-plate" not in ids
+    assert {"op.retire_starter.copper-plate", "op.starter.stone-brick"} <= ids
+
+
+def test_ops_runner_passes_current_phase_rate_targets_before_prepare(tmp_path, monkeypatch):
+    from training import laya_ops_runner as ops
+    from training.laya_mission import PHASES
+
+    class RateSession(FakeSession):
+        def set_rate_targets(self, targets):
+            self.targets = targets
+
+        def prepare_decision(self):
+            self.calls.append(("prepare", self.targets))
+
+    session = RateSession()
+    reached = iter([True, False, False])
+    monkeypatch.setattr(ops, "phase_reached", lambda _: next(reached, False))
+    run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=2,
+        measure_ticks=600, seed=3, run_id="rates", session=session)
+    assert [params for operation, params in session.calls if operation == "prepare"] == [
+        PHASES[0]["targets"], PHASES[1]["targets"]]

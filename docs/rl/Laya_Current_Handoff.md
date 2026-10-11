@@ -208,3 +208,7 @@ Enabled DeepSeek V4.1 Flash/high live and final review by default, with a durabl
 ### 2026-10-11 — funded finite bootstrap recovery
 
 Repaired sole-precursor lending: finite batches reserve their complete transferable input bill, retain a durable craft budget, count owned inputs, resume interrupted reservations and restore the producer on completion or input loss. Compact-cell pipeline admission now uses its own allocated stock. Evidence:342 focused passes;7 fail-before/pass-after regressions; fast gate1183 passes/3 skips with only the independently unchanged four-import firewall baseline. Read-only selection against the preserved mall and copied ledger confirms a funded lender; live batch delivery remains untested.
+
+### 2026-10-12 — pending foundation and mall cap reconciliation
+
+Preserved planned, unsubmitted foundation continuations across satisfied rates and coverage completion; reconciled shared mall gates on wait turns and phase changes, retained finite-loan ownership, and let admitted bills exceed optional startup caps. Control-disabled producers keep their measured rates and receive a distinct diagnosis. Evidence:106 focused passes,8 fail-before/pass-after regressions, offline decision259 menu replay; fast gate1190 passes/one skip and the independently unchanged four-import baseline failure. Lifecycle:new frozen Laya runner; no mod deployment or Factorio restart required. Live improvement remains unverified.

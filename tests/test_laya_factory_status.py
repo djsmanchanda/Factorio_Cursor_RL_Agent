@@ -155,3 +155,14 @@ def test_full_output_with_stock_on_hand_is_backed_up_not_short():
     assert condition(backed) == "output_backed_up"
     assert condition(low) == "output_blocked"  # a few plates are not sufficiency
     assert condition(reserved) == "output_blocked"  # stock reserved by ghosts is not accessible
+
+
+def test_control_disabled_producer_is_not_reported_as_a_rate_shortage():
+    facts = world([machine("assembling-machine-1", "copper-cable", "disabled_by_control_behavior")],
+                  items={"copper-cable": 275})
+    board = compile_status(facts, {"copper-cable": .5}, flows(copper_cable=0))
+    cable = board["needs"][0]
+    assert cable["condition"] == "control_disabled"
+    assert cable["measured_per_s"] == 0
+    from training.laya_factory_status import goal_met
+    assert not goal_met(cable)  # Configuration is not proof of throughput.

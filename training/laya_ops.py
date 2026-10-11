@@ -144,11 +144,19 @@ class DeterministicSession:
         # process only; each entry is one borrowed cell's last observed digest.
         self._loan_batch_seen: dict[tuple, tuple] = {}
 
+    def set_rate_targets(self, targets: Mapping[str, float]) -> None:
+        """Declare the phase's measured products to shared stock maintenance."""
+        self.rate_targets = {item for item, rate in targets.items() if rate > 0}
+
     def prepare_decision(self):
         """Use the deterministic queue's current survey and completed-loan handoff."""
         ab._survey_pass(self.client, SURFACE, FORCE, self.mall_targets, self.priorities)
         ab._release_completed_construction_loans(self.client, self.bridge, SURFACE, FORCE,
                                                  self.reference_point, self.emit)
+        # Wait turns still reconcile open bills, and restored cells rejoin
+        # their standing role before the next measured observation.
+        ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit,
+                                        rate_targets=getattr(self, "rate_targets", ()))
 
     def _loan_batch_facts(
         self, loan, *, available: Mapping[str, int] | None | object = _UNSET,
@@ -307,7 +315,8 @@ class DeterministicSession:
         before = funded_plan_signature(projects)
         try:
             ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
-            ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit)
+            ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit,
+                                            rate_targets=getattr(self, "rate_targets", ()))
             # Starter teardown follows delivered replacement output on every pass, not only when chosen.
             ab._advance_bootstrap_starter_retirements(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)
@@ -396,6 +405,7 @@ class DeterministicSession:
                 except Exception:
                     pass  # unknown never certifies that owned construction finished
             districts[state.recipe] = {"lifecycle_state": state.lifecycle_state,
+                                        "replacement_planned": bool(state.replacement_actions),
                                         "replacement_submitted": state.replacement_submitted,
                                         "construction_pending": pending}
         try:

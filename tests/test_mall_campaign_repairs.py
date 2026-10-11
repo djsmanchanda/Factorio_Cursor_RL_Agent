@@ -180,6 +180,20 @@ def test_laya_shortage_is_retained_in_the_deterministic_queue(monkeypatch):
     assert "inserter" in b._BLOCKING_MALL_ITEMS
 
 
+def test_prepare_reconciles_caps_on_wait_turns_after_loan_restoration(monkeypatch):
+    s = object.__new__(DeterministicSession)
+    s.client = object(); s.bridge = object(); s.reference_point = (0, 0)
+    s.emit = lambda _: None; s.mall_targets = {}; s.priorities = object()
+    events = []
+    monkeypatch.setattr(b, "_survey_pass", lambda *_: events.append("survey"))
+    monkeypatch.setattr(b, "_release_completed_construction_loans", lambda *_: events.append("restore"))
+    monkeypatch.setattr(b, "_refresh_owned_standing_gates",
+                        lambda *_a, **kw: events.append(("gates", kw["rate_targets"])))
+    s.set_rate_targets({"copper-cable": .5, "stone-brick": .25})
+    s.prepare_decision()
+    assert events == ["survey", "restore", ("gates", {"copper-cable", "stone-brick"})]
+
+
 def test_shared_project_queue_uses_aggregate_bill_not_missing_quantity(monkeypatch, tmp_path):
     from orchestrator.material_reservations import MaterialReservationLedger
     from orchestrator.priority_list import PriorityList

@@ -5940,13 +5940,14 @@ def _standing_mall_stock_target(client, surface, force, item, requested=1):
     return standing_gate_target(max(int(requested), demand), reserve)
 
 
-def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, requested=None):
+def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, requested=None, rate_targets=()):
     """Reconcile only registered, currently built mall recipes; borrowed cells remain owned by their loan."""
     if not callable(getattr(client, "command", None)):
         return
     requested = dict(requested or {})
+    measured_items = set(rate_targets)
     items = {item for s, f, item in _MALL_STOCK_GATE_FLOORS if (s, f) == (surface, force)}
-    items |= set(requested)
+    items |= set(requested) | measured_items
     loans = active_bootstrap_loans(client, surface, force)
     borrowed = {loan.machine_position for loan in loans}
     # A loan's ingredient demand belongs to an existing producer before it
@@ -5975,11 +5976,13 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
             if not owned:
                 continue
             existing = replace(existing, machine_positions=owned)
-        target = _standing_mall_stock_target(client, surface, force, item, requested.get(item, 1))
-        target = _effective_mall_stock_gate(client, surface, force, item,
-            upgrade_bootstrap=False, requested=target)
-        if requested.get(item):
-            target = max(target or 0, requested[item] + _rationed_mall_wip_gap(client, surface, force, item))
+        target = None
+        if item not in measured_items:
+            target = _standing_mall_stock_target(client, surface, force, item, requested.get(item, 1))
+            target = _effective_mall_stock_gate(client, surface, force, item,
+                upgrade_bootstrap=False, requested=target)
+            if requested.get(item):
+                target = max(target or 0, requested[item] + _rationed_mall_wip_gap(client, surface, force, item))
         _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, target, emit)
 
 
@@ -5997,14 +6000,20 @@ def _effective_mall_stock_gate(
     if upgrade_bootstrap:
         return requested
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    wip_gap = _rationed_mall_wip_gap(client, surface, force, item)
     if requested is not None:
         requested = standing_gate_target(
             requested,
-            wip_gap=_rationed_mall_wip_gap(client, surface, force, item),
+            wip_gap=wip_gap,
         )
     if startup_cap is None:
         return requested
-    return startup_cap if requested is None else min(startup_cap, requested)
+    capped = startup_cap if requested is None else min(startup_cap, requested)
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    demand = ledger.stock_targets().get(item, 0) if ledger is not None else 0
+    # Ration optional reserves, never prevent an admitted construction bill
+    # from reaching its transferable target. Closing the bill restores the cap.
+    return max(capped, int(demand) + wip_gap) if demand > 0 else capped
 
 def _has_producer(
     client: RconClient, surface: str, force: str, ingredient: str,

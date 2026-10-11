@@ -197,3 +197,50 @@ def test_standing_refresh_still_gates_owned_cells_beside_a_loan(monkeypatch) -> 
     }
 
     assert gated == {(42.5, 30.5)}
+
+
+def test_measured_standing_twins_ungate_then_rejoin_current_demand(monkeypatch):
+    positions = ((10.5, 10.5), (16.5, 10.5), (22.5, 10.5))
+    demanded = {"electronic-circuit": 100}
+    submitted = []
+    monkeypatch.setattr(builder, "_MALL_STOCK_GATE_FLOORS", {})
+    monkeypatch.setattr(builder, "_MALL_REFRESH_SIGNATURES", set())
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(stock_targets=lambda: demanded))
+    monkeypatch.setattr(builder, "_released_request_multiple", lambda *_: 1)
+    monkeypatch.setattr(builder, "_rationed_mall_wip_gap", lambda *_: 0)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_: None)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_: LineState(
+        recipe="electronic-circuit", machine_count=len(positions), working_count=0,
+        output_position=None, machine_positions=positions))
+    monkeypatch.setattr(builder.live_base, "entity_names_at",
+                        lambda _c, _s, points: {p: "assembling-machine-1" for p in points})
+    loans = [SimpleNamespace(machine_position=positions[-1])]
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_: loans)
+    monkeypatch.setattr(builder, "_submit", lambda _c, _b, _s, plan, _n, _e: submitted.append(plan))
+    client = SimpleNamespace(command=lambda _: "")
+    def refresh(rates):
+        builder._refresh_owned_standing_gates(client, object(), "nauvis", "player", lambda _: None,
+                                             rate_targets=rates)
+        return list(actions(submitted[-1]))
+    ungated = refresh({"electronic-circuit": .5})
+    assert len(ungated) == 2 and all(a["clear_logistic_condition"] for a in ungated)
+    gated = refresh({})
+    assert [a["logistic_condition"]["constant"] for a in gated] == [101, 101]
+    demanded.clear()
+    assert [a["logistic_condition"]["constant"] for a in refresh({})] == [2, 2]
+    loans.clear()  # A restored cell rejoins the same canonical target.
+    assert len(refresh({})) == 3
+    assert all(a["logistic_condition"]["constant"] == 2 for a in actions(submitted[-1]))
+
+
+def test_open_bill_overrides_scarce_metal_cap_and_shrinks_when_closed(monkeypatch):
+    demanded = {"electronic-circuit": 100}
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(stock_targets=lambda: demanded))
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_: 5)
+    monkeypatch.setattr(builder, "_rationed_mall_wip_gap", lambda *_: 40)
+    def target():
+        return builder._effective_mall_stock_gate(object(), "nauvis", "player", "electronic-circuit",
+                                                 upgrade_bootstrap=False, requested=100)
+    assert target() == 140  # One aggregate bill, including WIP a builder cannot spend.
+    demanded.clear()
+    assert target() == 5  # Optional reserves alone do not bypass starter rationing.

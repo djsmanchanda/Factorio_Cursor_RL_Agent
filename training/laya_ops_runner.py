@@ -596,7 +596,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         supply = material_stock if material_stock is not None else (stock or {})
         targets = {item: int(count) for item, count in queued_targets.items() if int(count) > int(supply.get(item, 0))}
         short = {item: count - int(supply.get(item, 0)) for item, count in targets.items()}
-    active_builds = {plate for plate, district in (bootstrap_districts or {}).items()
+    # A reserved foundation awaiting coverage has no submitted ghosts yet.
+    # Its transaction still owns the bootstrap admission slot and must remain
+    # selectable even when its starter satisfies the current phase's rate.
+    provisioning = {plate for plate, district in (bootstrap_districts or {}).items()
+                    if district.get("lifecycle_state") == "provisioning"
+                    and district.get("replacement_planned") is True
+                    and district.get("replacement_submitted") is False}
+    active_builds = provisioning | {plate for plate, district in (bootstrap_districts or {}).items()
                      if district.get("construction_pending") is True or
                      (district.get("construction_pending") is None and district.get("replacement_submitted")
                       and ("construction_pending" in district or
@@ -626,10 +633,12 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             legal = ()  # Finish this owned bootstrap construction before opening another.
         elif active_builds:
             legal = tuple(operation for operation in legal if operation != "extend")
+        if plate in provisioning:
+            legal = ("foundation",)  # Resume the stored transaction, not a new plan.
         if plate in pending:
             legal += ("retire_starter",)
         for operation in legal:
-            lifecycle_pending = operation == "retire_starter"
+            lifecycle_pending = operation == "retire_starter" or plate in provisioning
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
                 "need_id": f"{'lifecycle' if lifecycle_pending else 'item'}:{plate}",
@@ -909,6 +918,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if should_stop():
             summary["stop"] = "stopped"
             break
+        set_rates = getattr(session, "set_rate_targets", None)
+        if callable(set_rates):
+            active_phase = current_phase(reached) or last_phase
+            set_rates(active_phase["targets"] if active_phase else {})
         prepare = getattr(session, "prepare_decision", None)
         if callable(prepare):
             prepare()

@@ -92,6 +92,14 @@ work. Full prospective requester draws and measured displaced production remain
 missing; scarcity features can remain false without bill evidence. Add those facts
 before training on their values.
 
+`disabled_by_control_behavior` is reported as `control_disabled`, preserving
+the measured rate. It does not prove either ingredient scarcity or satisfied
+throughput. On every decision, including waits, ops reconciles shared standing
+gates after completed loans restore. Current phase target products run ungated
+while their rates are measured, as specified by `mission.stock-gates`; on phase
+change they rejoin demand-derived caps. Borrowed cells retain their finite
+loan gates. This configuration never substitutes stock for measured output.
+
 Ops exports episode-scoped bootstrap district lifecycle and submission facts
 in the brief, menu features and recorded decision state. A submitted replacement
 remains a `retire_starter` reconciliation alternative until its district is
@@ -106,6 +114,12 @@ starter provider is reclaimed once empty ([planning](../deterministic/planning.m
 foundation and extension capacity remains demand-driven. The policy chooses
 among these alternatives; pending lifecycle work has `goal_need=true` because
 it serves mission completion. Catalog weights and exploration are unchanged.
+
+`replacement_planned` distinguishes a stored foundation from a submitted one.
+A provisioning district with a planned, unsubmitted replacement keeps its
+`foundation` continuation even when starter rates are satisfied or its coverage
+ghosts have finished. That transaction retains bootstrap construction admission
+until submission; afterward the ordinary retirement reconciliation applies.
 
 Use the [strategy document](Laya_Strategy_Guidelines.md) for preferences.
 Geometry uses `laya_mission_guidelines.json` and ranks applicable rules for its

@@ -45,6 +45,7 @@ STATUS_BUCKETS = {
     "power": {"no_power", "low_power"},
     "starved": {"item_ingredient_shortage", "fluid_ingredient_shortage", "no_ingredients", "no_input_fluid"},
     "blocked": {"full_output", "waiting_for_space_in_destination"},
+    "control": {"disabled_by_control_behavior"},
 }
 
 
@@ -160,7 +161,8 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
         return "recipe_unavailable"
     if machine_count == 0:
         return "unbuilt"
-    for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"), ("blocked", "output_blocked")):
+    for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"),
+                              ("blocked", "output_blocked"), ("control", "control_disabled")):
         if buckets.get(bucket, 0) * 2 > machine_count:
             if condition == "output_blocked" and stock >= max(1.0, required * BACKLOG_COVER_SECONDS):
                 return "output_backed_up"
