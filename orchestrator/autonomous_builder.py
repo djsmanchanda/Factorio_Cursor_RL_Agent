@@ -6001,6 +6001,7 @@ def _effective_mall_stock_gate(
     if upgrade_bootstrap:
         return requested
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
+    binding_target = int(requested or 0) if item in _BLOCKING_MALL_ITEMS else 0
     wip_gap = _rationed_mall_wip_gap(client, surface, force, item)
     if requested is not None:
         requested = standing_gate_target(
@@ -6012,8 +6013,11 @@ def _effective_mall_stock_gate(
     capped = startup_cap if requested is None else min(startup_cap, requested)
     ledger = _MATERIAL_RESERVATION_LEDGER
     demand = ledger.stock_targets().get(item, 0) if ledger is not None else 0
-    # Ration optional reserves, never prevent an admitted construction bill
-    # from reaching its transferable target. Closing the bill restores the cap.
+    # Named queue deficits include precursors of not-yet-funded batches.
+    # Replenish those too; a five-circuit cap cannot fund a thirteen-circuit bill.
+    demand = max(demand, binding_target)
+    # Ration optional reserves before standing growth is applied, while real
+    # construction/precursor demand must reach its transferable target.
     return max(capped, int(demand) + wip_gap) if demand > 0 else capped
 
 def _has_producer(

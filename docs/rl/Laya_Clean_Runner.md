@@ -311,3 +311,8 @@ Research queue membership is a live option fact. A target already current or
 queued is not offered for re-queueing, including its canonical ranged
 technology name; removal from the queue restores the choice. Queue membership
 never proves completed research.
+
+Only current phase products below their measured rate goal run ungated. A met
+peer rejoins its standing limit while the phase's remaining products advance;
+falling below the goal reopens measured production. This prevents an unfinished
+stone goal from leaving gear/cable output unbounded throughout construction.

@@ -32,8 +32,8 @@ recipes, banked lab stock and construction shortages cannot bypass admission.
 This explicit user constraint is enforced across produce and mall-slot options.
 
 Standing mall limits only increase, by at least 20% per increase (rounded up).
-Measured phase producers can run ungated; finite borrowed batches retain exact
-craft budgets. Dependency chest holds follow each actual operation's bill and
+Phase producers below their measured rate goal can run ungated; a met peer
+rejoins its standing limit. Finite borrowed batches retain exact craft budgets. Dependency chest holds follow each actual operation's bill and
 transaction so independent funded production can continue.
 
 Science production alone is not mission completion. Recipe, technology and rate

@@ -419,3 +419,13 @@ ranged names respected. Six regressions failed before/pass after;253 focused
 passes and preserved research-status replay; fast gate1202 passes/3 skips,
 only the unchanged four-import firewall failure. Lifecycle: new frozen Python
 runner required; no mod deployment. Sustained throughput remains unproven.
+
+### 2026-10-12 04:20 IST — measured-peer gating and queued precursor supply repaired
+
+Met phase products now rejoin their numeric standing gates while unmet peers
+remain ungated; a later measured gap reopens production. Named binding
+precursor demand now bypasses optional starter caps before its batch can
+reserve a full bill. Two regressions fail before/pass after;255 focused
+passes; fast gate1204 passes/3 skips with only the unchanged four-import
+firewall failure. Lifecycle: new frozen Python runner required; no mod
+deployment. Sustained throughput remains unproven.

@@ -888,6 +888,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     accept = getattr(session, "acceptance", None)
     acceptance_samples = 0
     last_phase = None
+    measured_rate_phase = None
+    measured_rate_targets = {}
     goal_status = None
 
     def check_acceptance(event: str) -> None:
@@ -938,7 +940,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         set_rates = getattr(session, "set_rate_targets", None)
         if callable(set_rates):
             active_phase = current_phase(reached) or last_phase
-            set_rates(active_phase["targets"] if active_phase else {})
+            set_rates(
+                measured_rate_targets if active_phase and active_phase["phase_id"] == measured_rate_phase
+                else active_phase["targets"] if active_phase else {}
+            )
         prepare = getattr(session, "prepare_decision", None)
         if callable(prepare):
             prepare()
@@ -987,6 +992,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
+        # Ungate only measured products still below their rate goal. A ready
+        # peer rejoins its standing limit while slower peers keep progressing.
+        unmet_rate_items = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
+        measured_rate_phase = phase["phase_id"]
+        measured_rate_targets = {item: rate for item, rate in phase["targets"].items() if item in unmet_rate_items}
+        if callable(set_rates):
+            set_rates(measured_rate_targets)
         stock: dict[str, int] = {}
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():

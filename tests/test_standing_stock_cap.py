@@ -272,3 +272,17 @@ def test_ungating_retains_peak_and_only_submits_on_configuration_change(monkeypa
         "logistic_condition" in a or "clear_logistic_condition" in a for a in actions(p))]
     assert len(gate_plans) == 4
     assert builder._MALL_STOCK_GATE_FLOORS[("nauvis", "player", "transport-belt")] == 60
+
+
+def test_queued_binding_precursor_bypasses_optional_cap_without_admitted_bill(monkeypatch):
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", SimpleNamespace(stock_targets=lambda: {}))
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_: 5)
+    monkeypatch.setattr(builder, "_rationed_mall_wip_gap", lambda *_: 0)
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", {"electronic-circuit"})
+    assert builder._effective_mall_stock_gate(
+        object(), "nauvis", "player", "electronic-circuit",
+        upgrade_bootstrap=False, requested=13) == 13
+    builder._BLOCKING_MALL_ITEMS.clear()
+    assert builder._effective_mall_stock_gate(
+        object(), "nauvis", "player", "electronic-circuit",
+        upgrade_bootstrap=False, requested=13) == 5

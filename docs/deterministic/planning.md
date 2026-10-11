@@ -498,8 +498,9 @@ gated separately and is not changed by the release.
   decrease. An increase is at least 20%, rounded up: 50 requested as 53 becomes
   60; requests 55, 52 and 58 keep 60. Current demand, reserve and requester-held
   work-in-progress determine the proposed target before this growth policy.
-  Measured phase producers may run ungated, retaining their numeric peak for
-  restoration. Finite borrowed recipes keep their exact craft budgets.
+  Phase producers below their measured rate goal may run ungated, retaining
+  their numeric peak for restoration. A met product rejoins its standing limit
+  while another phase product remains short. Finite borrowed recipes keep their exact craft budgets.
   Startup chest budgets use the actual operation's transaction and planner
   bill: steel claims conversion_steel-plate with one provider and no requester;
   chemical products claim their machine packets, not fictitious paired cells.
@@ -727,3 +728,7 @@ Required finite-chest dependencies include every unstarted iron, copper and
 stone direct starter. Each uses its own direct_smelter planner bill and
 direct_<recipe>_starter claimant; later chemical holds cannot starve these
 upstream sources. The hold releases when measured production starts.
+
+Named binding construction shortages include queued precursor demand even
+before a finite batch can reserve its full input bill. Such demand can exceed
+optional starter caps; the numeric standing growth policy still applies.

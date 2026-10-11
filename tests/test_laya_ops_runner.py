@@ -1290,3 +1290,32 @@ def test_research_already_in_live_queue_is_not_offered_again(state, current_leve
     status["current_research"] = None
     status["research_queue"] = []
     assert len(research()) == 1
+
+
+def test_met_phase_product_rejoins_gate_before_phase_peer_is_ready(tmp_path, monkeypatch):
+    from training import laya_ops_runner as ops
+    original_status = ops.compile_status
+    observations = 0
+    def status(*args, **kwargs):
+        nonlocal observations
+        board = original_status(*args, **kwargs)
+        for need in board["needs"]:
+            if need["item"] == "iron-plate":
+                need["condition"] = "satisfied" if observations == 0 else "short"
+        observations += 1
+        return board
+    monkeypatch.setattr(ops, "compile_status", status)
+    class Rates(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.targets = {}
+            self.at_operation = []
+        def set_rate_targets(self, targets):
+            self.targets = targets
+        def run(self, operation, **params):
+            self.at_operation.append(dict(self.targets))
+            return super().run(operation, **params)
+    session = Rates()
+    run(FakeWorld(), GuidedPolicy(3), journal=tmp_path/"rates.jsonl", decisions=2,
+        measure_ticks=600, seed=3, run_id="rates", session=session)
+    assert session.at_operation == [{"copper-plate": .5}, {"iron-plate": .5, "copper-plate": .5}]
