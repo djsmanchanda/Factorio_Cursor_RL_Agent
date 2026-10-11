@@ -97,7 +97,7 @@ function renderLatest(latest) {
     : "none";
   const choice = latest.choice || {};
   $("last-choice").textContent = `[${choice.need_id}] ${choice.summary} · p=${Number(choice.probability || 0).toFixed(3)} · authority ${latest.authority}`;
-  $("menu").textContent = Object.entries(latest.menu || {}).map(([need, opts]) => `${need}\n  - ${opts.join("\n  - ")}`).join("\n");
+  $("menu").textContent = Object.entries(latest.menu || {}).map(([need, opts]) => `${need}\n  - ${(Array.isArray(opts) ? opts : [opts]).join("\n  - ")}`).join("\n");
   const stock = Object.entries(latest.stock || {}).filter(([, v]) => v > 0);
   $("stock-count").textContent = `${stock.length} items`;
   fill($("stock-body"), stock.map(([item, count]) => {

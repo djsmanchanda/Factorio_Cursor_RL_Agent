@@ -381,3 +381,7 @@ Repaired sole-precursor lending: finite batches reserve their complete transfera
 ### 2026-10-12 — pending foundation and mall cap reconciliation
 
 Preserved planned, unsubmitted foundation continuations across satisfied rates and coverage completion; reconciled shared mall gates on wait turns and phase changes, retained finite-loan ownership, and let admitted bills exceed optional startup caps. Control-disabled producers keep their measured rates and receive a distinct diagnosis. Evidence:106 focused passes,8 fail-before/pass-after regressions, offline decision259 menu replay; fast gate1190 passes/one skip and the independently unchanged four-import baseline failure. Lifecycle:new frozen Laya runner; no mod deployment or Factorio restart required. Live improvement remains unverified.
+
+### 2026-10-12 — console decision-menu compatibility
+
+Fixed the OC menu renderer to accept current string summaries and legacy option lists, preventing its update loop from aborting before decisions/helper panels refresh. Evidence:both formats verified in the collaborative browser, JavaScript syntax passed, fast gate1190 passes/one skip with the unchanged four-import baseline failure. Lifecycle:reload the console page; gameplay runner and Factorio need no restart.
