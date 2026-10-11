@@ -597,7 +597,7 @@ def test_post_starter_demands_round_up_to_complete_stacks(monkeypatch) -> None:
         )
 
 
-def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
+def test_rotating_splitter_batch_keeps_a_margin_after_metal_transition(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -610,10 +610,10 @@ def test_rotating_splitter_batch_targets_one_stack_after_metal_transition(
 
     assert builder._rationed_mall_spare_target(
         object(), "nauvis", "player", "splitter", 3,
-    ) == 50
+    ) == 4
 
 
-def test_every_rotating_batch_uses_full_stacks_after_metal_transition(
+def test_rotating_batch_avoids_full_stack_inflation_after_metal_transition(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
@@ -625,11 +625,11 @@ def test_every_rotating_batch_uses_full_stacks_after_metal_transition(
 
     assert builder._rationed_mall_spare_target(
         object(), "nauvis", "player", "fast-inserter", 1,
-    ) == 50
+    ) == 2
 
 
-def test_post_starter_stack_is_required_before_recipe_switch(monkeypatch) -> None:
-    """A one-item fast-inserter demand becomes a blocking 50-item batch."""
+def test_post_starter_bill_is_not_inflated_before_recipe_switch(monkeypatch) -> None:
+    """A one-item bill reaches the finite-batch path without stack inflation."""
     monkeypatch.setitem(
         builder.LINE_RECIPES, "fast-inserter",
         {
@@ -657,8 +657,8 @@ def test_post_starter_stack_is_required_before_recipe_switch(monkeypatch) -> Non
     )
 
     assert (ready, output) == (False, None)
-    assert observed == [50]
-    assert any("finish the complete stack" in message for message in messages)
+    assert observed == [1]
+    assert not any("finish the complete stack" in message for message in messages)
 
 
 def test_post_starter_expensive_machine_keeps_deployment_sized_batch(
@@ -674,7 +674,7 @@ def test_post_starter_expensive_machine_keeps_deployment_sized_batch(
 
     assert builder._rationed_mall_spare_target(
         object(), "nauvis", "player", "assembling-machine-2", 4,
-    ) == 4
+    ) == 5
 
 
 def test_post_starter_intermediate_keeps_exact_blocking_target(monkeypatch) -> None:
@@ -854,7 +854,7 @@ def test_post_metal_reserve_yields_controller_to_construction_demand(
     assert serviced == []
 
 
-def test_rotating_machine_batch_keeps_two_bounded_spares(monkeypatch) -> None:
+def test_rotating_machine_batch_keeps_a_rounded_spare(monkeypatch) -> None:
     monkeypatch.setattr(
         builder, "mall_reserve_for",
         lambda *_args: MallReserve(50, 50, 1),
@@ -865,7 +865,7 @@ def test_rotating_machine_batch_keeps_two_bounded_spares(monkeypatch) -> None:
 
     assert builder._rationed_mall_spare_target(
         object(), "nauvis", "player", "oil-refinery", 1,
-    ) == 3
+    ) == 2
 
 
 # --- the persisted-target trap ---------------------------------------------
@@ -1122,7 +1122,7 @@ def test_ready_pass_serves_at_most_three_tasks(monkeypatch) -> None:
 # --- spares on top: at least 20% more, rounded up ------------------------
 
 def test_rationed_spare_makes_at_least_twenty_percent_more(monkeypatch) -> None:
-    """A 148-belt bill retires only after ~178 transferable belts exist."""
+    """A 148-belt bill has 185 transferable units including its 25% margin."""
     monkeypatch.setattr(
         builder, "mall_reserve_for",
         lambda *_args: MallReserve(1000, 1000, 10),
@@ -1136,14 +1136,14 @@ def test_rationed_spare_makes_at_least_twenty_percent_more(monkeypatch) -> None:
 
     assert builder._rationed_mall_spare_target(
         client, "nauvis", "player", "transport-belt", 148,
-    ) == 178
+    ) == 185
     assert builder._rationed_mall_spare_target(
         client, "nauvis", "player", "transport-belt", 10,
-    ) == 12
+    ) == 13
 
 
 def test_rationed_spare_covers_requester_wip_gap(monkeypatch) -> None:
-    """16 belts locked in requesters force the batch to 164, not 150."""
+    """Requester WIP remains accounted for within the 25% spare requirement."""
     monkeypatch.setattr(
         builder, "mall_reserve_for",
         lambda *_args: MallReserve(1000, 1000, 10),
@@ -1162,7 +1162,7 @@ def test_rationed_spare_covers_requester_wip_gap(monkeypatch) -> None:
 
     assert builder._rationed_mall_spare_target(
         client, "nauvis", "player", "transport-belt", 148,
-    ) == 178
+    ) == 185
 
 
 def test_rationed_ready_needs_transferable_spares_not_force_stock(
@@ -1463,9 +1463,9 @@ def test_scarce_startup_keeps_tight_batch() -> None:
     assert builder._scarce_metal_startup(object(), "nauvis", "player") is True
 
 
-def test_flowing_metal_keeps_grown_reserve(monkeypatch) -> None:
-    """Post-transition belts keep the grown standing reserve instead of the
-    need-plus-margin squeeze: X stacks ready, growing past the bill."""
+def test_flowing_metal_keeps_finite_batch_bounded(monkeypatch) -> None:
+    """Finite construction batches stay bounded after metal transition,
+    even when the standing provider reserve would be larger."""
     messages: list[str] = []
     monkeypatch.setattr(
         builder, "_rationed_mall_batch", lambda *_a, **_k: False,
@@ -1498,8 +1498,8 @@ def test_flowing_metal_keeps_grown_reserve(monkeypatch) -> None:
     )
 
     assert ready
-    assert produced.get("stock_target") == 400
-    assert any("MALL STANDING RESERVE" in message for message in messages)
+    assert produced.get("stock_target") == 160
+    assert any("MALL TEMPORARY RESERVE" in message for message in messages)
 
 
 def test_scarce_metal_squeezes_to_need_plus_margin(monkeypatch) -> None:

@@ -112,6 +112,7 @@ identifies inherited decisions and missing observations.
 | `mission.ops-steel-fence` | Reserve the funded steel seed's poles before competing builds consume them. |
 | `mission.ops-steel` | Start the funded steel seed when iron supply is verified and lifecycle admission permits it, including the pioneer-output cycle break. |
 | `mission.ops-shortage` | Reconcile current material shortfalls and produce missing items before retrying the blocked transaction. |
+| `mission.ops-pending-first` | Give pending construction priority over new work, and its missing precursors priority over the final item. |
 | `mission.ops-one-batch` | Let a feasible mall batch finish; interrupt when its inputs cannot arrive or its lender blocks a more urgent dependency. |
 | `mission.ops-no-blind-retry` | Retry a material-blocked transaction after its required stock or allocation changes; reuse its existing plan. |
 | `mission.ops-wait` | While relevant bots or coverage are advancing, wait or serve independent work. |

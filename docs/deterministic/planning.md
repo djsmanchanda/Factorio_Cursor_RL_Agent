@@ -193,6 +193,9 @@ gated separately and is not changed by the release.
   during conversion recovery queues its bill once and yields to the scheduler;
   it cannot recursively retry itself or swallow hard planner failures.
   Pipe production is not a prerequisite for this beltless steel seed.
+  The fallback sites the actual one-drill steel plan in each orientation and
+  pole side, rather than requiring the larger two-lane iron starter. Both
+  belt-side and mined candidates protect the district's expansion reservations.
   After advanced-circuit production is proven, a complete six-furnace steel
   refinery replaces it. A normal splitter is added beyond an unused iron-belt
   terminal, preserving the existing provider and leaving the second output
@@ -290,10 +293,10 @@ gated separately and is not changed by the release.
   and buffer inventories are committed work-in-progress, not transferable
   construction stock: blueprint affordability and new-cell ingredient
   sourcing count only ordinary, passive-provider, and storage containers.
-  The need-plus-margin squeeze applies only while starter metal carries the
-  base; once the direct iron/copper replacements are healthy and released,
-  pre-core items keep their grown standing reserve past the bill and build
-  ahead instead of stopping at need-plus-margin.
+  Finite construction batches target the bill plus 25% spare output, rounded
+  up, including after starter retirement. Requester headroom remains a separate
+  bounded 20% ingredient buffer. Transferable shortfalls from locked WIP can
+  require a larger output margin; optional spares yield to binding work.
   Optional core-mall promotion must yield unchanged supply waits to the
   queued-work scheduler in the same pass. A completed prerequisite may be
   stopped at its stock cap until its loan receives the next scheduling turn;
@@ -317,6 +320,14 @@ gated separately and is not changed by the release.
   borrowed indefinitely. Completed spare ceilings also release without unrelated
   construction pressure; unfinished optional spares retain the existing handoff
   policy.
+  Prerequisite credit changes a loan's serialized identity. Restoration and
+  promotion must clear the installed requester tag as well as the newly
+  credited identity, preserving the paired machine's unrelated sections.
+  A standing ingredient producer receives the batch's required stock gate
+  before another rotating cell is assigned that ingredient. Its last real
+  producer cannot lend its machine to its own downstream batch. Usable batch
+  ingredients are unreserved transferable stock plus that batch's own requester
+  and machine inputs; another requester's buffer is committed to that consumer.
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
   ends the current pass, and the predecessor loan begins only after the next
   live observation confirms that restoration.
@@ -352,19 +363,13 @@ gated separately and is not changed by the release.
   a spare-phase loan is configuration drift, not progress. Foundation-blocked
   items rate 100 while queued and retire with their demand; a binding loan
   below its blocking bill is shielded from preempt by non-binding batches.
-  After both metal districts validate and release their pioneers, the
-  controller stops scarcity-sized recipe switching. Cheap, high-volume
-  construction consumables (belts, inserters, poles, pipes, splitters, and
-  circuits) round up to a complete item stack and to additional complete stacks
-  when the bill is larger. Expensive production machines retain their exact
-  deployment bill: four required AM2s must not become a fifty-machine batch.
-  Other recipe intermediates also retain their exact blocking bill, so four
-  required iron sticks cannot delay expansion behind a hundred-stick batch.
-  Electronic circuits and splitters begin filling as
-  non-binding reserve work while the stone district opens. Before that phase,
-  low-demand batches target their blocking bill plus at least 20% spares
-  (rounded up, covering requester/buffer WIP), and retire only once that
-  transferable stock exists. Upstream belt batches additionally reserve the
+  Finite batches do not round a small bill up to a whole stack after metal
+  transition. A four-item bill normally produces five, not fifty; standing
+  producer reserves remain separate. Binding construction can proceed as soon
+  as its exact transferable bill is available while extras continue in the
+  background. Pending items outrank new builds, and their missing recipe
+  precursors outrank the final items.
+  Upstream belt batches additionally reserve the
   recipe-derived draw of queued belt consumers plus two crafts of input that a
   stock-capped assembler can preload; three splitters therefore add 20 belts
   (12 consumed and 8 retained) before the ordinary spare/WIP margin. A demand

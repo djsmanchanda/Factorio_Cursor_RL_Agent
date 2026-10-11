@@ -606,6 +606,7 @@ def bootstrap_loan_plan(
 def restore_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
     provider_fill_chest: bool = False,
+    previous_group: str | None = None,
 ) -> dict:
     """Restore the original recipe and request group after the seed is stocked.
 
@@ -639,7 +640,9 @@ def restore_bootstrap_loan_plan(
                 # Original mall groups are shared by every matching cell on
                 # this side. Leave them intact while the unique loan group is
                 # removed, or restoring one borrower would rewrite its peers.
-                "clear_logistic_groups": [loan.group],
+                "clear_logistic_groups": list(dict.fromkeys(
+                    group for group in (loan.group, previous_group) if group
+                )),
                 "logistic_sections": [requester_section],
             },
             {
@@ -659,6 +662,7 @@ def restore_bootstrap_loan_plan(
 def promote_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, stock_target: int,
     clear_original_groups: bool = False,
+    previous_group: str | None = None,
 ) -> dict:
     """Keep a completed borrowed cell as the permanent target producer.
 
@@ -677,7 +681,9 @@ def promote_bootstrap_loan_plan(
         loan.target_item, loan.provider_position, stock_target,
         fill_chest=True,
     )["phases"][0]["actions"][0]
-    clear_groups = [loan.group]
+    clear_groups = list(dict.fromkeys(
+        group for group in (loan.group, previous_group) if group
+    ))
     if clear_original_groups:
         # A core promotion may be entered from a legacy/no-step loan whose
         # unique tag is not the only request group still on the shared chest.

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -4712,13 +4713,16 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
             if plan is not None:
                 break
         if plan is None:
-            site = live_base.direct_plate_starter_site(client, surface, force, "iron-ore", reference_point)
+            variants = [(direction, side) for direction in VECTORS for side in (-1, 1)]
+            templates = [steel_seed((.5, .5), direction, mined=True, pole_side=side)
+                         for direction, side in variants]
+            reservations = {tile for tiles in state.reservations.values() for tile in tiles}
+            site = live_base.mining_plan_site(client, surface, force, "iron-ore", reference_point,
+                                             templates, reserved_tiles=reservations)
             if site is not None:
-                candidate = steel_seed(site.drill_position, site.output_direction, mined=True)
-                area = _plan_area(candidate, padding=1)
-                occupied = live_base.occupied_tiles(client, surface, *area)
-                if not planned_footprint_tiles(candidate) & occupied:
-                    plan = candidate
+                index, position = site
+                direction, side = variants[index]
+                plan = steel_seed(position, direction, mined=True, pole_side=side)
         if plan is None:
             raise ProductionPrerequisiteDeferred(
                 "no collision-free compact steel seed fits beside iron or on a free patch",
@@ -5903,7 +5907,7 @@ def _mall_request_multiplier(
         return min(
             multiplier,
             max(batch_crafts, math.ceil(
-                batch_crafts * (1 + _RATIONED_MALL_SPARE_FRACTION),
+                batch_crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION),
             )),
         )
     if item == "transport-belt" or item in _STARTUP_MALL_REQUESTER_ITEMS:
@@ -5940,10 +5944,23 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
     """Reconcile only registered, currently built mall recipes; borrowed cells remain owned by their loan."""
     if not callable(getattr(client, "command", None)):
         return
-    requested = requested or {}
+    requested = dict(requested or {})
     items = {item for s, f, item in _MALL_STOCK_GATE_FLOORS if (s, f) == (surface, force)}
     items |= set(requested)
-    borrowed = {loan.machine_position for loan in active_bootstrap_loans(client, surface, force)}
+    loans = active_bootstrap_loans(client, surface, force)
+    borrowed = {loan.machine_position for loan in loans}
+    # A loan's ingredient demand belongs to an existing producer before it
+    # belongs to another rotating cell. Recompute it while the loan is live.
+    for loan in loans:
+        if not getattr(loan, "target_item", None):
+            continue  # Ownership is known even when optional batch demand is not.
+        actual, usable = _bootstrap_loan_stock(client, surface, force, loan.target_item)
+        held = _loan_owned_inputs(client, surface, loan)
+        usable = dict(Counter(usable) + held)
+        step = next_bootstrap_step(loan.target_item, loan.production_target, usable, actual)
+        if step is not None:
+            requested[step.recipe] = max(requested.get(step.recipe, 0), step.target_count)
+    items |= set(requested)
     for item in sorted(items):
         spec = LINE_RECIPES.get(item, {})
         if not str(spec.get("machine", "")).startswith("assembling-machine"):
@@ -5961,6 +5978,8 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
         target = _standing_mall_stock_target(client, surface, force, item, requested.get(item, 1))
         target = _effective_mall_stock_gate(client, surface, force, item,
             upgrade_bootstrap=False, requested=target)
+        if requested.get(item):
+            target = max(target or 0, requested[item] + _rationed_mall_wip_gap(client, surface, force, item))
         _configure_owned_mall_gate(client, bridge, surface, force, item, existing, spec, target, emit)
 
 
@@ -6060,7 +6079,7 @@ _RATIONED_MALL_EXTRA_SPARES = 2
 #: belts were added by hand. User standard: make at least 20% more than
 #: needed, rounded up, so a few belts spent on splitters never stall the
 #: blueprint they were made for.
-_RATIONED_MALL_SPARE_FRACTION = 0.20
+_RATIONED_MALL_SPARE_FRACTION = 0.25
 #: The two permanent mall anchors: one gear and one cable assembler that no
 #: recipe loan may borrow or reconfigure. Second gear/cable cells, circuits,
 #: and belts are rotational -- covered by the same guard as duplicates, never
@@ -6199,12 +6218,21 @@ def _bootstrap_loan_stock(
 ) -> tuple[dict[str, int], dict[str, int]]:
     """Physical stock plus the share not reserved away from this producer."""
     actual = live_base.available_items(client, surface, force)
+    spendable = (live_base.transferable_items(client, surface, force)
+                 if callable(getattr(client, "command", None)) else actual)
     ledger = _MATERIAL_RESERVATION_LEDGER
     usable = (
-        ledger.allocatable_stock(actual, claimant=_material_project_id(target_item))
-        if ledger is not None else dict(actual)
+        ledger.allocatable_stock(spendable, claimant=_material_project_id(target_item))
+        if ledger is not None else dict(spendable)
     )
     return actual, usable
+
+
+def _loan_owned_inputs(client, surface, loan):
+    """A batch may use its own delivered inputs, not another requester's buffer."""
+    held = Counter(live_base.chest_contents(client, surface, loan.requester_position))
+    held.update(live_base.machine_input_contents(client, surface, loan.machine_position))
+    return held
 
 
 def _loan_step_cell_fed(
@@ -6354,6 +6382,7 @@ def _restore_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *, reason: str,
     reference_point: Point | None = None,
+    previous_group: str | None = None,
 ) -> None:
     """Restore the borrowed cell before another dependency may claim it."""
     global _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
@@ -6368,6 +6397,7 @@ def _restore_bootstrap_loan(
         shared_provider = True
     plan = restore_bootstrap_loan_plan(
         loan,
+        previous_group=previous_group,
         provider_stock_target=_MALL_ITEM_PROVIDER_LIMITS.get(
             (surface, force, loan.original_recipe),
         ),
@@ -6524,6 +6554,30 @@ def _emit_loan_cell_telemetry(
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
 
 
+def _supply_loan_from_standing_producer(client, bridge, surface, force, loan, step, emit):
+    """Raise a real, unborrowed producer's cap instead of duplicating its recipe."""
+    if not callable(getattr(client, "command", None)):
+        return False
+    if step.recipe == loan.target_item:
+        return False  # The final-item loan already owns its producer.
+    spec = LINE_RECIPES.get(step.recipe, {})
+    if spec.get("machine") not in live_base.ASSEMBLER_TIERS:
+        return False
+    borrowed = {entry.machine_position for entry in active_bootstrap_loans(client, surface, force)}
+    borrowed.add(loan.machine_position)
+    line = live_base.find_line(client, surface, force, step.recipe, spec["machine"], include_ghosts=False)
+    positions = tuple(p for p in getattr(line, "machine_positions", ()) if p not in borrowed)
+    if not positions:
+        return False
+    target = step.target_count + _rationed_mall_wip_gap(client, surface, force, step.recipe)
+    _configure_owned_mall_gate(client, bridge, surface, force, step.recipe,
+                              replace(line, machine_positions=positions), spec, target, emit)
+    for position in positions:
+        _deliver_cell_ingredients(client, bridge, surface, force, step.recipe, position, emit)
+    emit(f"  MALL EXISTING SUPPLY: {loan.target_item} waits for {step.recipe} through {target}; raised its standing producer gate")
+    return True
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
@@ -6562,6 +6616,9 @@ def _submit_bootstrap_loan(
             **actual,
             loan.target_item: int(spendable.get(loan.target_item, 0)),
         }
+        # Only this requester's/machine's inputs are in flight for this loan.
+        # A peer's 15x buffer cannot satisfy the bill we are about to schedule.
+        usable = dict(Counter(usable) + _loan_owned_inputs(client, surface, loan))
     target_spendable: int | None = (
         int(spendable.get(loan.target_item, 0))
         if spendable is not None else None
@@ -6694,7 +6751,7 @@ def _submit_bootstrap_loan(
         if predecessor is not None:
             _restore_bootstrap_loan(
                 client, bridge, surface, force, loan, emit,
-                reference_point=reference_point,
+                reference_point=reference_point, previous_group=live_loan_group,
                 reason=(
                     f"chemical handoff from {step.recipe} to missing "
                     f"{predecessor}"
@@ -6761,7 +6818,7 @@ def _submit_bootstrap_loan(
                     stock_target=_canonical_mall_provider_limit(
                         surface, force, loan.target_item, promotion_target,
                     ),
-                    clear_original_groups=True,
+                    clear_original_groups=True, previous_group=live_loan_group,
                 )
                 plan["surface"], plan["force"] = surface, force
                 _submit(
@@ -6783,7 +6840,7 @@ def _submit_bootstrap_loan(
                 )
             _restore_bootstrap_loan(
                 client, bridge, surface, force, loan, emit,
-                reference_point=reference_point,
+                reference_point=reference_point, previous_group=live_loan_group,
                 reason=(
                     f"{loan.target_item} fulfilled its required {loan.target_count}; "
                     f"preserving {loan.original_recipe} baseline machine quota "
@@ -6800,7 +6857,7 @@ def _submit_bootstrap_loan(
             and not _pipe_is_temporary_batch(client, surface, force)
         ):
             plan = promote_bootstrap_loan_plan(
-                loan,
+                loan, previous_group=live_loan_group,
                 stock_target=_canonical_mall_provider_limit(
                     surface, force, loan.target_item,
                     loan.production_target,
@@ -6826,7 +6883,7 @@ def _submit_bootstrap_loan(
             )
         _restore_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
-            reference_point=reference_point,
+            reference_point=reference_point, previous_group=live_loan_group,
             reason=(
                 f"{loan.target_item} required {loan.target_count}, "
                 f"spare ceiling {loan.production_target}"
@@ -6836,6 +6893,11 @@ def _submit_bootstrap_loan(
             f"restored borrowed {loan.original_recipe} producer after "
             + ("spare production was preempted" if preempted else "seed completion")
         )
+
+    if step is not None and _supply_loan_from_standing_producer(
+        client, bridge, surface, force, loan, step, emit,
+    ):
+        return f"{loan.target_item} waits for its standing {step.recipe} producer"
 
     # The machine gate freezes at whatever step target was live at configure
     # time, while the loan's ambition advances to the spare ceiling without
@@ -7133,6 +7195,7 @@ def _borrow_free_mall_cell(
     product into that chest and make safe restoration ambiguous.
     """
     stock = live_base.available_items(client, surface, force)
+    prerequisites = _queued_mall_prerequisites(target_item)
     recipes = [
         recipe for recipe, spec in LINE_RECIPES.items()
         if recipe != target_item
@@ -7186,6 +7249,10 @@ def _borrow_free_mall_cell(
             # Counts are real machines only: borrowing the sole working cell
             # while an unbuilt ghost poses as its duplicate strands the
             # recipe (2026-09-04 cable collapse).
+            continue
+        if original_recipe in prerequisites and line.machine_count <= 1:
+            # The last real producer of a batch input cannot be its lender.
+            # Preloaded stock only delays the resulting self-dependency.
             continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
@@ -9033,31 +9100,11 @@ def _rationed_mall_spare_target(
     client: RconClient, surface: str, force: str, item: str, required: int,
 ) -> int:
     """Bound optional rotating-slot output without delaying its current bill."""
-    reserve = mall_reserve_for(client, surface, force, item, required)
-    if _metal_starter_transition_complete(client, surface, force):
-        # Once starter metal is gone, cheap high-volume construction stock is
-        # cheaper to carry than to recipe-switch repeatedly. Expensive
-        # production machines retain their exact deployment bill: a stack of
-        # 50 AM2s consumed minutes and starved useful expansion in the 15:59
-        # run without any downstream need for those machines.
-        if item in _POST_STARTER_FULL_STACK_BATCH_ITEMS:
-            return max(required, reserve.storage_count)
-        return required
-    if item == "splitter":
-        iron_available = (
-            live_base.available_items(client, surface, force).get("iron-plate", 0)
-            if hasattr(client, "command") else 0
-        )
-        if iron_available >= 50:
-            return max(required, 15)
-    if reserve.storage_count <= required:
-        return required
     spare = max(
-        _RATIONED_MALL_EXTRA_SPARES,
         math.ceil(required * _RATIONED_MALL_SPARE_FRACTION),
         _rationed_mall_wip_gap(client, surface, force, item),
     )
-    return min(reserve.storage_count, required + spare)
+    return required + spare
 
 
 def _rationed_mall_completion_target(
@@ -9642,21 +9689,6 @@ def _ensure_mall_item(
                 "rung": "steel-plate",
             },
         )
-    if (
-        item in _POST_STARTER_FULL_STACK_BATCH_ITEMS
-        and LINE_RECIPES[item].get("machine") in live_base.ASSEMBLER_TIERS
-        and _metal_starter_transition_complete(client, surface, force)
-    ):
-        stack_target = mall_reserve_for(
-            client, surface, force, item, target,
-        ).storage_count
-        if stack_target > target:
-            emit(
-                f"  POST-STARTER STACK BATCH: {item} demand {target} rounds "
-                f"to {stack_target}; finish the complete stack before "
-                "switching recipes"
-            )
-            target = stack_target
     mode = "background reserve" if background else "stock target"
     if item == "steel-plate":
         emit(
@@ -9777,7 +9809,7 @@ def _ensure_mall_item(
         return True, None
     try:
         reserve = mall_reserve_for(client, surface, force, item, target)
-        if temporary_precore and _scarce_metal_startup(client, surface, force):
+        if temporary_precore:
             # Scarce opening only: a pre-advanced-circuit construction item is a demand
             # batch, not a one-stack standing reserve. Keep the current bill
             # plus at least a 20% spare margin (rounded up); advanced circuits
@@ -12857,6 +12889,17 @@ def _loan_craft_proof_crafts(
     return proved
 
 
+def _reconcile_stage_deliveries(ledger, ghost_bill):
+    """A provider requested only to fund a ghost is obsolete once that item has no ghosts."""
+    if ledger is None:
+        return
+    for project_id, project in tuple(ledger.projects.items()):
+        if (project_id.startswith("deliver_") and ledger.project_is_active(project_id)
+                and set(project.required) == {"passive-provider-chest"}
+                and ghost_bill.get(project_id.removeprefix("deliver_"), 0) == 0):
+            ledger.complete(project_id)
+
+
 def _survey_pass(
     client: RconClient, surface: str, force: str, mall_targets: dict[str, int],
     priorities: PriorityList, prepped: set[str] | frozenset[str] = frozenset(),
@@ -12887,6 +12930,8 @@ def _survey_pass(
         live_base.pending_construction_items(client, surface, force)
         if hasattr(client, "command") else {}
     )
+    if hasattr(client, "command"):
+        _reconcile_stage_deliveries(_MATERIAL_RESERVATION_LEDGER, ghost_bill)
     for item, count in ghost_bill.items():
         if count > stock.get(item, 0):
             mall_targets[item] = max(mall_targets.get(item, 0), count)
@@ -13046,7 +13091,9 @@ def _promote_material_bill_prerequisites(
         return
     promote = getattr(priorities, "promote", None)
     for item, target in sorted(missing.items()):
-        mall_targets[item] = max(int(mall_targets.get(item, 0)), target)
+        # Queue an absolute stock target, not the deficit. With two available
+        # and five required, producing through three cannot fund the bill.
+        mall_targets[item] = max(int(mall_targets.get(item, 0)), ledger.required_stock(item))
         _BLOCKING_MALL_ITEMS.add(item)
         if promote is not None:
             promote(item, mall_targets[item], tick)

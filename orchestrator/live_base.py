@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -356,6 +357,61 @@ def direct_plate_starter_site(
               for index in range(0, len(additional), 2)),
     )
 
+
+
+def mining_plan_site(client, surface, force, ore, near, plans, *, reserved_tiles=(), search_radius=400):
+    """Site the actual small mining plans, anchored at (0.5, 0.5), without inventing a larger starter."""
+    from orchestrator.extraction_transport import planned_footprint_tiles
+    from planners.plan_validation import actions
+    templates = []
+    for plan in plans:
+        placements = []
+        for action in actions(plan):
+            p = action["position"]
+            direction = action.get("direction", "north")
+            placements.append("{name=" + json.dumps(action["entity"]) +
+                              f",x={p['x'] - .5},y={p['y'] - .5},direction=defines.direction.{direction}" + "}")
+        tiles = ["{" + f"{x},{y}" + "}" for x, y in sorted(planned_footprint_tiles(plan))]
+        templates.append("{placements={" + ",".join(placements) + "},tiles={" + ",".join(tiles) + "}}")
+    reserved = "{" + ",".join("[" + json.dumps(f"{x},{y}") + "]=true" for x, y in sorted(reserved_tiles)) + "}"
+    x, y = near
+    area = "{{" + f"{x-search_radius},{y-search_radius}" + "},{" + f"{x+search_radius},{y+search_radius}" + "}}"
+    lua = (
+        f"local s=game.surfaces[{json.dumps(surface)}];local f=game.forces[{json.dumps(force)}];"
+        "local templates={" + ",".join(templates) + "};local reserved=" + reserved + ";"
+        "local rs=s.find_entities_filtered{name=" + json.dumps(ore) + ",type='resource',area=" + area + "};"
+        f"table.sort(rs,function(a,b) return (a.position.x-{x})^2+(a.position.y-{y})^2 < (b.position.x-{x})^2+(b.position.y-{y})^2 end);"
+        "for i=1,math.min(#rs,4096) do local p=rs[i].position;local pure=true;"
+        "for _,r in pairs(s.find_entities_filtered{type='resource',area={{p.x-2.5,p.y-2.5},{p.x+2.5,p.y+2.5}}}) do "
+        f"if r.name~={json.dumps(ore)} then pure=false end end;"
+        "if pure then for index,t in ipairs(templates) do local clear=true;"
+        "for _,tile in ipairs(t.tiles) do if reserved[(math.floor(p.x)+tile[1])..','..(math.floor(p.y)+tile[2])] then clear=false;break end end;"
+        "if clear then for _,a in ipairs(t.placements) do local ok,valid=pcall(function() return s.can_place_entity{"
+        "name=a.name,position={p.x+a.x,p.y+a.y},direction=a.direction,force=f,build_check_type=defines.build_check_type.manual} end);"
+        "if not ok or not valid then clear=false;break end end end;"
+        "if clear then rcon.print(index..' '..p.x..' '..p.y);return end end end end;rcon.print('NONE')"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    index, x, y = raw.split()
+    index = int(index) - 1
+    if not 0 <= index < len(plans):
+        raise TelemetryError("mining plan survey returned an unknown template")
+    return index, (float(x), float(y))
+
+
+def unbuilt_plan_items(client, surface, force, plan):
+    """Missing real placements in one owned plan; ghosts are still unfinished work."""
+    from planners.plan_validation import actions
+    placements = [a for a in actions(plan) if a.get("action_type") in {"place_entity", "place_ghost"}]
+    encoded = "{" + ",".join("{name=" + json.dumps(a["entity"]) +
+                                f",x={a['position']['x']},y={a['position']['y']}" + "}" for a in placements) + "}"
+    raw = _sc(client, f"local s=game.surfaces[{json.dumps(surface)}];local f=game.forces[{json.dumps(force)}];local out={{}};"
+              "for _,a in ipairs(" + encoded + ") do if #s.find_entities_filtered{name=a.name,force=f,position={a.x,a.y},radius=0.05}==0 "
+              "then out[#out+1]=a.name end end;rcon.print(table.concat(out,','))")
+    from collections import Counter
+    return dict(Counter(item for item in raw.split(",") if item))
 
 
 def drill_siting_conflicts(
@@ -2263,6 +2319,17 @@ def logistic_network_ids(
             continue
         served[tuple(positions[int(index) - 1])] = None if network == "-" else int(network)
     return served
+
+
+def machine_input_contents(client, surface, position):
+    """Inputs already committed to this assembler, never another cell's WIP."""
+    x, y = position
+    raw = _sc(client, f"local s=game.surfaces[{json.dumps(surface)}];local out={{}};"
+              f"local e=s.find_entities_filtered{{type='assembling-machine',position={{{x},{y}}},radius=0.05,limit=1}}[1];"
+              "if e then local inv=e.get_inventory(defines.inventory.assembling_machine_input);"
+              "if inv then for _,it in pairs(inv.get_contents()) do out[#out+1]=it.name..'='..it.count end end end;"
+              "rcon.print(table.concat(out,','))")
+    return {name: int(count) for name, count in (item.split("=") for item in raw.split(",") if item)}
 
 
 def chest_contents(client: RconClient, surface: str, position: Point) -> dict[str, int]:

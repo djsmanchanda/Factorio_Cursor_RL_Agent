@@ -135,7 +135,7 @@ class DeterministicSession:
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()
         # Construction targets of the run (what the mission will build): the steel fence reads them.
-        self.mall_targets, _, _ = ab._open_the_run(self.client, self.bridge, SURFACE, FORCE, goal_item, (),
+        self.mall_targets, _, self.priorities = ab._open_the_run(self.client, self.bridge, SURFACE, FORCE, goal_item, (),
                                                    self.script_output, emit, bootstrap_profile_name=PROFILE,
                                                    reference_point=reference_point)
         ab._restore_bootstrap_reservations()
@@ -143,6 +143,12 @@ class DeterministicSession:
         # Progress classification for repeated loan-batch receipts runs on this
         # process only; each entry is one borrowed cell's last observed digest.
         self._loan_batch_seen: dict[tuple, tuple] = {}
+
+    def prepare_decision(self):
+        """Use the deterministic queue's current survey and completed-loan handoff."""
+        ab._survey_pass(self.client, SURFACE, FORCE, self.mall_targets, self.priorities)
+        ab._release_completed_construction_loans(self.client, self.bridge, SURFACE, FORCE,
+                                                 self.reference_point, self.emit)
 
     def _loan_batch_facts(
         self, loan, *, available: Mapping[str, int] | None | object = _UNSET,
@@ -306,6 +312,9 @@ class DeterministicSession:
             ab._advance_bootstrap_starter_retirements(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:
+            if isinstance(signal, ab.MaterialShortage):
+                ab.add_demands(self.mall_targets, signal)
+                ab._mark_binding_demands(signal)
             response = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
                         "classification": getattr(signal, "classification", None),
                         "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
@@ -357,6 +366,7 @@ class DeterministicSession:
                 projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
                                                 "missing": missing}
         loan_error = None
+        spendable = None
         try:
             active = mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
             try:
@@ -368,22 +378,36 @@ class DeterministicSession:
                 facts = self._loan_batch_facts(loan, available=spendable)
                 # Read-only classification: economics never advances the run's
                 # own seen-state, or an acceptance survey would mask progress.
-                facts["status"] = self._loan_batch_diagnostics_status(loan, facts)
+                facts["status"] = self._loan_batch_status(loan, facts)
                 loans.append(facts)
         except Exception as error:  # A failed survey is an unknown, never "no loans".
             loans = None
             loan_error = f"{type(error).__name__}: {error}"[:200]
         # This scoped ledger survives shortage returns while bots finish submitted work.
         # Reading it does not assert readiness; the retirement tool verifies live output.
-        districts = {state.recipe: {"lifecycle_state": state.lifecycle_state,
-                                   "replacement_submitted": state.replacement_submitted}
-                     for state in ab._BOOTSTRAP_DISTRICT_LEDGER.states()}
+        districts = {}
+        for state in ab._BOOTSTRAP_DISTRICT_LEDGER.states():
+            pending = None
+            if callable(getattr(self.client, "command", None)):
+                plan = (ab._submitted_bootstrap_plan(state) if state.replacement_actions else
+                        {"phases": [{"actions": state.pioneer_actions}]})
+                try:
+                    pending = bool(live_base.unbuilt_plan_items(self.client, SURFACE, FORCE, plan))
+                except Exception:
+                    pass  # unknown never certifies that owned construction finished
+            districts[state.recipe] = {"lifecycle_state": state.lifecycle_state,
+                                        "replacement_submitted": state.replacement_submitted,
+                                        "construction_pending": pending}
         try:
             limit = ab._bootstrap_mall_slot_limit(self.client, SURFACE, FORCE)
             capacity = ab._mall_capacity_facts(self.client, SURFACE, self.reference_point, limit)
         except Exception:
             capacity = {"committed_slots": None, "slot_limit": None, "free_slots": None, "unlimited": None}
+        targets = dict(getattr(self, "mall_targets", {}))
         return {"projects": projects, "loans": loans, "loan_error": loan_error,
+                "mall_targets": targets, "blocking_items": sorted(ab._BLOCKING_MALL_ITEMS),
+                "precursors": {item: sorted(ab._queued_mall_prerequisites(item)) for item in targets},
+                "material_stock": spendable,
                 "bootstrap_districts": districts, "reservation_owners": reservation_owners(projects),
                 "demand": self._demand_facts(), "free_slots": capacity["free_slots"],
                 "mall_capacity": {key: capacity[key] for key in ("committed_slots", "slot_limit", "unlimited")}}

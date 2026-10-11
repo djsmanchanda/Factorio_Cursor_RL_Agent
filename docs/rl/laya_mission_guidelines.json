@@ -22,6 +22,29 @@
       "prefer": []
     },
     {
+      "rule_id": "mission.ops-pending-first",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Give pending construction priority over new work, and its missing precursors priority over the final item.",
+      "prefer": [
+        {
+          "when": {
+            "pending_work": true
+          },
+          "weight": 8.0
+        },
+        {
+          "when": {
+            "precursor_work": true
+          },
+          "weight": 16.0
+        }
+      ]
+    },
+    {
       "rule_id": "mission.grid-growth",
       "kind": "soft",
       "scopes": [

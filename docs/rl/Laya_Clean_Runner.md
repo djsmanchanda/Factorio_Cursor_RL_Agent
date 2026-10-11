@@ -264,3 +264,18 @@ It returns a complete Markdown report between FINDINGS_REPORT_BEGIN and
 FINDINGS_REPORT_END; the wrapper validates and atomically publishes that response.
 The wrapper also owns evidence packets and lifecycle records. A placeholder or
 truncated response cannot establish observer completion.
+
+## Pending bootstrap construction and shared mall queue
+
+Ops keeps the deterministic runtime's persistent priority queue, surveys it
+before decisions and services completed recipe loans. Current queue targets
+replace historical shortage receipts for production admission; operations
+receive absolute targets, not deficit counts. Pending material work and its
+recipe prerequisites carry explicit priority facts into the quoted doc rules.
+Seeded exploration is retained. Bootstrap completes the active owned plan before
+admitting another plate construction or unrelated chemical/lab work; its
+material suppliers, needed chemical precursors and retirement/reconciliation
+operations remain available.
+All real placements must exist before that construction fact clears, even if
+first delivered output has already permitted starter retirement. Steel site
+refusals are geometry evidence: unchanged layout does not imply bots progressing.

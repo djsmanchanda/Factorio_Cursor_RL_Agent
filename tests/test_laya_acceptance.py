@@ -163,7 +163,7 @@ def test_failed_loan_observation_keeps_its_cause(monkeypatch, tmp_path):
     assert result["loans"] is None
     assert result["loan_error"] == "ValueError: malformed loan group"
     assert result["bootstrap_districts"] == {
-        "copper-plate": {"lifecycle_state": "provisioning", "replacement_submitted": True}}
+        "copper-plate": {"lifecycle_state": "provisioning", "replacement_submitted": True, "construction_pending": None}}
     from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
     monkeypatch.setattr(LiveCheckpointObservationAdapter, "observe", lambda *_: observation())
     assert s.acceptance()["C1"] == "passed"

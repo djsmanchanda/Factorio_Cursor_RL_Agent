@@ -180,7 +180,7 @@ def _canonical_claims(claims: Mapping | None) -> dict[str, tuple[tuple[str, int]
 
 
 # The tooling found no batch it can build next (terminal); nothing is under construction.
-NO_GEOMETRY = {"district_expansion_unbuildable"}
+NO_GEOMETRY = {"district_expansion_unbuildable", "steel_seed_site_wait"}
 
 
 def outcome_category(result: Mapping | None) -> str:
@@ -197,10 +197,10 @@ def outcome_category(result: Mapping | None) -> str:
     code = result.get("code")
     if not code:
         return "unknown"
-    if in_progress(code) or result.get("state") == "constructing":
-        return "constructing"
     if code in NO_GEOMETRY or code.endswith("_unbuildable"):
         return "no_geometry"
+    if in_progress(code) or result.get("state") == "constructing":
+        return "constructing"
     if code == "material_shortage":
         return "material_failure"
     return "failed"
@@ -426,9 +426,17 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
     loans_by_making = {loan.get("making"): loan for loan in loans or ()}
     projects = (economics or {}).get("projects")
     demand = (economics or {}).get("demand") or {}
+    pending = set((economics or {}).get("blocking_items") or ())
+    precursors = {part for item in pending
+                  for part in ((economics or {}).get("precursors") or {}).get(item, ())}
     for option in menu["options"]:
         if option["family"] == "wait":
             continue
+        product = option.get("product")
+        option["features"]["pending_work"] = product in pending
+        option["features"]["precursor_work"] = product in precursors
+        if product in pending or product in precursors:
+            option["features"]["goal_need"] = True
         params = option["params"]
         key = (option["family"], params.get("recipe") or params.get("item"))
         short = bills.get(key)
@@ -561,7 +569,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     allocation: Mapping[str, tuple] | None = None,
                     measurement: Mapping | None = None, research_goal: str | None = None,
                     goal_status: Mapping | None = None, labs: int | None = None,
-                    layout: Sequence[int] | None = None) -> dict:
+                    layout: Sequence[int] | None = None, queued_targets: Mapping | None = None,
+                    material_stock: Mapping | None = None, pending_precursors: Sequence[str] = ()) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
@@ -578,6 +587,18 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     stuck = unchanged_failures(results, stock or {}, allocation, layout)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
+    targets = {}
+    if queued_targets is not None:
+        # The deterministic queue retires met demand and retains aggregate
+        # bills. Receipt shortages are historical evidence, not a live queue.
+        supply = material_stock if material_stock is not None else (stock or {})
+        targets = {item: int(count) for item, count in queued_targets.items() if int(count) > int(supply.get(item, 0))}
+        short = {item: count - int(supply.get(item, 0)) for item, count in targets.items()}
+    active_builds = {plate for plate, district in (bootstrap_districts or {}).items()
+                     if district.get("construction_pending") is True or
+                     (district.get("construction_pending") is None and district.get("replacement_submitted")
+                      and ("construction_pending" in district or
+                           district.get("lifecycle_state") in ACTIVE_DISTRICT_STATES))}
     pending = pending_retirements(results, bootstrap_districts)
     waiting = any(in_progress(c) for c in codes.values())
     # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
@@ -599,6 +620,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         # a lifecycle conflict. Skip it and let the policy reconcile or serve other work instead.
         if district_state in ACTIVE_DISTRICT_STATES:
             legal = tuple(operation for operation in legal if operation != "starter")
+        if active_builds and plate not in active_builds:
+            legal = ()  # Finish this owned bootstrap construction before opening another.
+        elif active_builds:
+            legal = tuple(operation for operation in legal if operation != "extend")
         if plate in pending:
             legal += ("retire_starter",)
         for operation in legal:
@@ -674,6 +699,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     if recipes:
         for item in sorted(goal):
             if (item in PLATES or item in RAW or codes.get(("produce", item)) == "ok"
+                    or (active_builds and item not in short and item not in pending_precursors)
                     or item in producible):
                 continue
             if plates_in(item, recipes) <= started:
@@ -692,7 +718,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
             "summary": f"produce {item} ({'goal' if goal_item else 'short'} {missing})",
-            "params": {"item": item, "stock_target": missing},
+            "params": {"item": item, "stock_target": targets.get(item, missing)},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),
@@ -720,7 +746,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         # Provision a lab through the shared toolkit when the live fact says none exists yet. Its plates must
         # be started first: the toolkit opens an unstarted plate's foundation ahead of its starter, which
         # strands that plate in provisioning and removes its starter (episode 20261010T132846Z-324e6177).
-        if labs == 0 and codes.get(("produce", "lab")) != "ok" and recipes and plates_in("lab", recipes) <= started:
+        if (labs == 0 and (not active_builds or "lab" in short)
+                and codes.get(("produce", "lab")) != "ok" and recipes and plates_in("lab", recipes) <= started):
             options.append({
                 "option_id": "op.produce.lab", "family": "produce", "product": "lab", "need_id": "stock:lab",
                 "summary": "produce lab", "params": {"item": "lab", "stock_target": 1},
@@ -880,6 +907,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if should_stop():
             summary["stop"] = "stopped"
             break
+        prepare = getattr(session, "prepare_decision", None)
+        if callable(prepare):
+            prepare()
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
@@ -936,7 +966,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                              bootstrap_districts=districts, allocation=allocation,
                                              measurement=measurement, research_goal=goal,
                                              goal_status=goal_status, labs=_lab_count(facts),
-                                             layout=layout_signature(facts)),
+                                             layout=layout_signature(facts),
+                                             queued_targets=(economics or {}).get("mall_targets"),
+                                             material_stock=(economics or {}).get("material_stock"),
+                                             pending_precursors=tuple({part for parts in
+                                                 ((economics or {}).get("precursors") or {}).values() for part in parts})),
                               results, economics, stock=stock if economics is not None else None)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
