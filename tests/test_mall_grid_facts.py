@@ -349,3 +349,61 @@ def test_unknown_footprint_survey_defers_safely_with_diagnostic(monkeypatch) -> 
     assert raised.value.code == "mall_slot_survey_unavailable"
     assert raised.value.state == "planned"
     assert "malformed survey" in str(raised.value)
+
+
+@pytest.mark.parametrize("robot_type", ["logistic-robot", "construction-robot", "combat-robot"])
+def test_flying_robot_does_not_occupy_a_mall_half_or_hide_a_real_blocker(monkeypatch, robot_type):
+    spec = LINE_RECIPES["electronic-circuit"]
+    plan = mall_builder.generate_paired_mall_layout(
+        "electronic-circuit", spec["machine"], spec["ingredients"], spec["amounts"],
+        (32, 32), "right", craft_time=spec["craft_time"], include_substation=False)
+    tile, centre = (40, 34), (40.5, 34.5)
+    records = [{"name": robot_type, "type": robot_type, "force": "player",
+                "position": centre, "is_ghost": False}]
+    monkeypatch.setattr(mall_builder.live_base, "occupied_tile_owners",
+                        lambda *_: {tile: (robot_type, *centre)})
+    monkeypatch.setattr(mall_builder.live_base, "area_entity_records", lambda *_: records)
+    monkeypatch.setattr(mall_builder.live_base, "water_tiles", lambda *_: set())
+    client = SimpleNamespace(command=lambda _: "")
+    assert mall_cell_footprint_conflicts(client, "nauvis", plan) == ()
+    records.append({"name": "medium-electric-pole", "type": "electric-pole", "force": "player",
+                    "position": centre, "is_ghost": False})
+    assert mall_cell_footprint_conflicts(client, "nauvis", plan) == (tile,)
+
+
+@pytest.mark.lua
+def test_live_placement_surveys_ignore_flying_robots_but_keep_a_real_chest():
+    import shutil
+    import subprocess
+    from orchestrator import live_base
+    lua = shutil.which("lua")
+    if not lua:
+        pytest.skip("Lua interpreter unavailable")
+
+    class LuaClient:
+        blocker = False
+
+        def command(self, command):
+            world = '''
+local box={left_top={x=40.1,y=34.1},right_bottom={x=40.9,y=34.9}}
+local entities={}
+for _,kind in ipairs({'logistic-robot','construction-robot','combat-robot'}) do
+  entities[#entities+1]={name=kind,type=kind,force={name='player'},position={x=40.5,y=34.5},bounding_box=box}
+end
+if BLOCKER then entities[#entities+1]={name='passive-provider-chest',type='logistic-container',
+  force={name='player'},position={x=40.5,y=34.5},bounding_box=box} end
+game={surfaces={nauvis={find_entities_filtered=function(_) return entities end,
+  find_tiles_filtered=function(_) return {} end,
+  get_tile=function() return {valid=true,name='grass-1'} end}}}
+rcon={print=function(value) print(value) end}
+'''.replace("BLOCKER", "true" if self.blocker else "false")
+            return subprocess.run([lua, "-"], input=world + command.removeprefix("/sc "),
+                                  text=True, capture_output=True, check=True).stdout
+
+    client = LuaClient()
+    for blocked in (False, True):
+        client.blocker = blocked
+        assert live_base.area_clear(client, "nauvis", (38, 32), (42, 36)) is not blocked
+        assert live_base.occupied_tiles(client, "nauvis", (38, 32), (42, 36)) == ({(40, 34)} if blocked else set())
+        assert live_base.occupied_tile_owners(client, "nauvis", (38, 32), (42, 36)) == (
+            {(40, 34): ("passive-provider-chest", 40.5, 34.5)} if blocked else {})

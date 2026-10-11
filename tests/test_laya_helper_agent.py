@@ -358,3 +358,54 @@ def test_incomplete_report_markers_do_not_publish_or_complete(tmp_path, monkeypa
     with pytest.raises(RuntimeError,match='findings document was not updated'):
         helper.final_review('now')
     assert json.loads((helper.DATA_ROOT/'now/helper-state.json').read_text())['status'] == 'failed'
+
+
+def test_adjacent_external_heading_is_preserved_in_live_findings(tmp_path):
+    report = tmp_path / "findings.md"
+    report.write_text("# Existing report\n")
+    output = json.dumps({"type": "text", "part": {"text":
+        "## Live observations\n\nFINDINGS_REPORT_BEGIN\n- Cable is producing.\nFINDINGS_REPORT_END"}})
+    assert helper.publish_response(output, report, append=True)
+    assert report.read_text() == "# Existing report\n\n## Live observations\n\n- Cable is producing.\n"
+
+
+def test_final_review_repairs_live_only_response_in_the_saved_session(tmp_path, monkeypatch):
+    from subprocess import CompletedProcess
+    setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(helper, "recent_commits", lambda: "f2aa507 baseline")
+    calls = []
+    responses = iter([
+        "## Live observations\nFINDINGS_REPORT_BEGIN\n- Run ended on mall_slot_occupied.\nFINDINGS_REPORT_END",
+        "FINDINGS_REPORT_BEGIN\n## Outcome\nRun ended after 140 wall seconds on mall_slot_occupied.\nFINDINGS_REPORT_END",
+    ])
+    def invoke(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0, json.dumps({"type": "text", "sessionID": "ses-existing",
+            "part": {"text": next(responses)}}) + "\n", "")
+    monkeypatch.setattr(helper.subprocess, "run", invoke)
+    report = helper.final_review("now", session="ses-existing")
+    assert len(calls) == 2
+    assert all(c[c.index("--session") + 1] == "ses-existing" for c in calls)
+    assert "## Outcome" in calls[1][-1] and "FINDINGS_REPORT_BEGIN" in calls[1][-1]
+    assert "140 wall seconds" in report.read_text()
+    assert json.loads((helper.DATA_ROOT / "now/helper-state.json").read_text())["status"] == "complete"
+
+
+def test_live_notes_cannot_be_marked_as_final_review_after_bounded_retries(tmp_path, monkeypatch):
+    import pytest
+    from subprocess import CompletedProcess
+    setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(helper, "recent_commits", lambda: "f2aa507 baseline")
+    calls = []
+    output = json.dumps({"type": "text", "sessionID": "ses-existing", "part": {"text":
+        "## Live observations\nFINDINGS_REPORT_BEGIN\n- Cable is producing.\nFINDINGS_REPORT_END"}}) + "\n"
+    def invoke(command, **kwargs):
+        calls.append(command)
+        return CompletedProcess(command, 0, output, "")
+    monkeypatch.setattr(helper.subprocess, "run", invoke)
+    with pytest.raises(RuntimeError, match="missing.*Outcome"):
+        helper.final_review("now", session="ses-existing")
+    assert len(calls) == 3
+    assert all(c[c.index("--session") + 1] == "ses-existing" for c in calls)
+    state = json.loads((helper.DATA_ROOT / "now/helper-state.json").read_text())
+    assert state["status"] == "failed"

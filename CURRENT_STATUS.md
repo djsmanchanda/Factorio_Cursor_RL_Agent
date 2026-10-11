@@ -385,3 +385,7 @@ Preserved planned, unsubmitted foundation continuations across satisfied rates a
 ### 2026-10-12 — console decision-menu compatibility
 
 Fixed the OC menu renderer to accept current string summaries and legacy option lists, preventing its update loop from aborting before decisions/helper panels refresh. Evidence:both formats verified in the collaborative browser, JavaScript syntax passed, fast gate1190 passes/one skip with the unchanged four-import baseline failure. Lifecycle:reload the console page; gameplay runner and Factorio need no restart.
+
+### 2026-10-12 — robot occupancy and helper publication repair
+
+Shared candidate/occupancy and mall footprint checks exclude non-blocking flying robots while preserving structural, ghost and terrain blockers. Helper publication retains an adjacent external heading; final reviews retry missing Outcome sections in the same session with a fixed bound. Evidence:7 fail-before/pass-after cases,149 focused/shared passes,3/3 saved transcript publication replays; fast gate1190 passes/3 skips and the independently unchanged four-import failure. Lifecycle:new frozen Laya runner/helper; no mod deployment or Factorio restart. The original collision entity remains unknown and gameplay improvement is unverified.

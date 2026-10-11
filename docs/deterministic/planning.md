@@ -274,6 +274,9 @@ gated separately and is not changed by the release.
   the effective gate covers that bill plus requester-held WIP that construction
   cannot spend, then returns to the optional-stock cap once the bill closes.
   Standing twins share this target; loan-owned machines keep their finite gate.
+  Flying logistic, construction and combat robots are transient observations,
+  not occupied building tiles. Candidate and footprint surveys exclude them;
+  real structures, foreign ghosts and water still block placement.
 - Reduced supply begins entirely on assembling-machine-1 and regular inserters;
   neither upgraded tier is part of the starter contract. Solid compact cells,
   including the permanent assembling-machine-2 and fast-inserter producers,

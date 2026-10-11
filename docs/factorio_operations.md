@@ -177,6 +177,13 @@ Factorio command channel, no edits and no Git ownership. It observes every ten
 minutes and finishes on the run's end, with no default twelve-hour observer
 cutoff. It proposes evidence-backed fixes; it does not start an improvement loop.
 
+Helper report headings belong inside the `FINDINGS_REPORT_BEGIN`/`END`
+envelope. The publisher also preserves a heading immediately preceding a
+complete envelope. Final review requires a newly published Outcome section;
+live observations alone trigger at most two additional requests in the same
+saved session, then an explicit failure. Partial/failed reports remain evidence
+and do not become completed reviews.
+
 Persistent-run helper state/transcripts live at
 `data/persistent-factorio/helper-state/<run_id>/`; findings live at
 `docs/rl/laya_helper_runs/<run_id>/findings.md` and appear in the OC helper panel.

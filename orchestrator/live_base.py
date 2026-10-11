@@ -14,6 +14,10 @@ from planners.recipe_data import DRILL_MINING_AREAS, drill_mining_reach
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
+FLYING_ROBOT_TYPES = frozenset({"logistic-robot", "construction-robot", "combat-robot"})
+# These entities have no building collision footprint. Use the same fact for
+# candidate selection, final footprint checks and transport occupancy.
+_NO_FLYING_ROBOTS_LUA = " and ".join(f"e.type~='{kind}'" for kind in sorted(FLYING_ROBOT_TYPES))
 ASSEMBLER_TIERS = (
     "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
 )
@@ -503,7 +507,7 @@ def area_clear(
         "local n=0;for _,e in pairs(s.find_entities_filtered{area={{" +
         str(min_point[0]) + "," + str(min_point[1]) + "},{" +
         str(max_point[0]) + "," + str(max_point[1]) +
-        "}}}) do if e.type~='resource' then n=n+1 end end;" + resource_scan +
+        "}}}) do if e.type~='resource' and " + _NO_FLYING_ROBOTS_LUA + " then n=n+1 end end;" + resource_scan +
         "local bad_tiles=0;"
         "for x=" + str(math.floor(min_point[0])) + "," + str(math.ceil(max_point[0])) + " do "
         "for y=" + str(math.floor(min_point[1])) + "," + str(math.ceil(max_point[1])) + " do "
@@ -1099,7 +1103,7 @@ def occupied_tiles(
         "local area={{" + str(min_point[0]) + "," + str(min_point[1]) + "},"
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
         + water_scan + "for _,e in pairs(s.find_entities_filtered{area=area}) do "
-        "if " + resource_check + "e.type~='character' and "
+        "if " + resource_check + _NO_FLYING_ROBOTS_LUA + " and e.type~='character' and "
         + clutter_check + "not ignored[e.name] then "
         "local b=e.bounding_box;"
         "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
@@ -1369,9 +1373,6 @@ _TRANSPORT_LIVE_CATEGORIES = frozenset({
     "live_entity", "entity_ghost", "tile_ghost", "terrain",
     "deconstruction_order",
 })
-_TRANSIENT_TRANSPORT_ENTITY_TYPES = frozenset({
-    "logistic-robot", "construction-robot", "combat-robot",
-})
 _CARDINAL_DIRECTIONS = frozenset({"north", "east", "south", "west"})
 _UNDERGROUND_TYPES = frozenset({"input", "output"})
 
@@ -1416,8 +1417,7 @@ def transport_occupancy_snapshot(
         "string.format('%.3f',e.position.y),table.concat(tiles,':')},'|') end;"
         "for _,e in pairs(s.find_entities_filtered{area=area}) do "
         "if e.type~='character' and e.type~='resource' and "
-        "e.type~='logistic-robot' and e.type~='construction-robot' and "
-        "e.type~='combat-robot' then "
+        + _NO_FLYING_ROBOTS_LUA + " then "
         "local category='live_entity';local name=e.name;"
         "if e.type=='entity-ghost' then category='entity_ghost';name=e.ghost_name "
         "elseif e.type=='tile-ghost' then category='tile_ghost';name=e.ghost_name end;"
@@ -1442,7 +1442,7 @@ def transport_occupancy_snapshot(
         # Flying robots have no stable collision footprint and can cross an
         # arbitrary route between the survey and the next tick. The Lua query
         # excludes them; keep this parser guard for an older/stale mod reply.
-        if name in _TRANSIENT_TRANSPORT_ENTITY_TYPES:
+        if name in FLYING_ROBOT_TYPES:
             continue
         if category not in _TRANSPORT_LIVE_CATEGORIES:
             raise TelemetryError(
@@ -2008,7 +2008,7 @@ def occupied_tile_owners(
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
         "for _,e in pairs(s.find_entities_filtered{area=area}) do "
         "if " + ("" if include_resources else "e.type~='resource' and ")
-        + "e.type~='character' and "
+        + _NO_FLYING_ROBOTS_LUA + " and e.type~='character' and "
         "not (e.force and e.force.name=='neutral' and "
         "(e.type=='tree' or e.type=='simple-entity')) then "
         "local b=e.bounding_box;"

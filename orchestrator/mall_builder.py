@@ -736,6 +736,7 @@ def mall_cell_footprint_conflicts(
         raise unavailable(f"{type(error).__name__}: {error}") from error
 
     allowed_owner_centres: set[tuple[str, float, float]] = set()
+    transient_owner_centres: set[tuple[str, float, float]] = set()
     foreign_entity_tiles: set[tuple[int, int]] = set()
     for record in records:
         position = record["position"]
@@ -743,6 +744,9 @@ def mall_cell_footprint_conflicts(
             record["ghost_name"] if record.get("is_ghost") else record["name"]
         )
         identity = (str(actual_name), float(position[0]), float(position[1]))
+        if record.get("type") in live_base.FLYING_ROBOT_TYPES:
+            transient_owner_centres.add((str(record["name"]), float(position[0]), float(position[1])))
+            continue
         if identity in planned_entities:
             allowed_owner_centres.add((
                 str(record["name"]), float(position[0]), float(position[1]),
@@ -770,7 +774,9 @@ def mall_cell_footprint_conflicts(
         if (name, x, y) in allowed_owner_centres:
             allowed_tiles.add(tile)
 
-    occupied_entities = set(owners)
+    occupied_entities = {tile for tile, owner in owners.items()
+                         if owner not in transient_owner_centres
+                         and owner[0] not in live_base.FLYING_ROBOT_TYPES}
     conflicts = (
         (occupied_entities - allowed_tiles)
         | foreign_entity_tiles

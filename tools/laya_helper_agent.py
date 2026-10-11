@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -358,6 +359,7 @@ Recent commits:
 ```
 
 Return the complete Markdown findings in your final response between literal FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END lines.
+Put the report title and all section headings INSIDE those delimiters, starting with a Markdown heading.
 The wrapper publishes the report to {report}; do not use write or edit tools. Include these sections:
 1. Outcome: run length, mission phases reached (with time from run start), decisions, failures, stop reason, measured production, for this run vs the previous Laya run vs the deterministic reference.
 2. What went well (with evidence lines).
@@ -382,6 +384,14 @@ def publish_response(output: str, report: Path, *, append: bool = False) -> bool
     if text.count(begin) != 1 or text.count(end) != 1 or text.index(end) <= text.index(begin):
         return False
     body = text.split(begin, 1)[1].split(end, 1)[0].strip()
+    if body and not body.startswith("#"):
+        # Some observers place their heading immediately before the envelope.
+        # Preserve that assistant-authored heading without importing outside
+        # prose or relaxing completeness checks on the envelope itself.
+        prefix = text.split(begin, 1)[0].rstrip()
+        heading = prefix.splitlines()[-1] if prefix else ""
+        if re.fullmatch(r"#{1,6} .+", heading):
+            body = heading + "\n\n" + body
     if not body.startswith("#") or not any(line and not line.startswith("#") for line in body.splitlines()):
         return False
     report.parent.mkdir(parents=True, exist_ok=True)
@@ -554,11 +564,21 @@ def final_review(run_id: str, session: str | None = None, comparators: Sequence[
         message += ("\nKeep the '## Live observations' section you wrote during the run; add the six sections after it "
                     "and say which live observations the final evidence confirmed or refuted.")
     try:
-        _ask(config, work, message, session, f"Laya Helper {run_id}",
-             "Continue the same read-only Laya helper review from where it stopped; finish the findings "
-             f"response between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END. Do not use write/edit tools.")
-        if not report.is_file() or report.read_bytes() == report_before:
-            raise RuntimeError("findings document was not updated by the observer")
+        retry = ("Continue the same read-only Laya helper review from where it stopped; finish the findings "
+                 "response between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END. Put the title and all six "
+                 "section headings, including '## Outcome', INSIDE the delimiters. Read the terminal evidence "
+                 f"packet {packet}; live checkpoint notes alone are not the final review. Do not use write/edit tools.")
+        for attempt in range(3):
+            session = _ask(config, work, message, session, f"Laya Helper {run_id}", retry)
+            if not report.is_file() or report.read_bytes() == report_before:
+                error = "findings document was not updated by the observer"
+            elif not re.search(r"^#{1,6}\s+(?:\d+[.)]\s*)?Outcome\b", report.read_text(), re.MULTILINE | re.IGNORECASE):
+                error = "final findings missing an Outcome section; live notes alone are incomplete"
+            else:
+                break
+            if attempt == 2:
+                raise RuntimeError(error)
+            message = retry
     except Exception as error:
         _write_record(run_id, "failed", report=report, comparators=comparators,
                       error=f"{type(error).__name__}: {str(error)[:300]}")
@@ -606,7 +626,8 @@ def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL
     intro = f"""You are the read-only live observer for Laya run {run_id} (repository {REPO_ROOT}).
 All times are local time ({zone_label()}). {WORKFLOW_NOTE}
 You will receive a checkpoint every {interval // 60} minutes. At each checkpoint return at most 10 lines between
-FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END, under a '## Live observations' heading: timestamped (local time) notes on stalls, wasted decisions, blocked needs,
+FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END. Put the '## Live observations' heading INSIDE those delimiters,
+followed by timestamped (local time) notes on stalls, wasted decisions, blocked needs,
 suspected root causes with the evidence line, and one falsifiable signal to watch next. Do not repeat unchanged state.
 Strategy rules Laya reads: docs/rl/Laya_Strategy_Guidelines.md and docs/rl/laya_mission_guidelines.json (prefer entries
 steer the guided policy). Remain read-only: no file writes, code edits, commits, lifecycle actions or RCON. The wrapper appends your response to {report}."""
