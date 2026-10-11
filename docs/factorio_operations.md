@@ -142,6 +142,31 @@ and runs under `laya-operations-console.service`, now attached to the persistent
 Laya world. Starting the console does not start a gameplay runner. The older
 `tools/laya_console_server.py` on `9138` serves a distinct training workflow.
 
+The persistent console's **Start fresh episode** action archives the current
+save, controller ledgers, reports and logs under
+`data/persistent-factorio/history/`, resets only Laya's private world to
+`saves/mod_playground.zip`, and starts a new run on the same `34992/27992`
+endpoints. The deterministic server is independent. A phase record preserves
+failed reset attempts; do not retry a partial reset blindly. **Start Laya
+runner** continues the current world, while **Stop Laya runner** leaves the
+server available. Explicit server controls use its owning user service.
+
+Persistent runners use deterministic actions, seed50616, the actual
+`mining-productivity-4` goal and configured speed. Each executes an immutable
+Git archive under `data/persistent-factorio/runs/<identity>/code` in a separate
+user-systemd unit. `freeze.json` pins code hashes, baseline, exact reused
+stamped mods, model-independent policy configuration and ports. The frozen
+adapter registers only the one explicit isolated world owned by this
+repository. No post-run model helper starts automatically. The run's own log,
+journal, status and `run-owner.json` remain accessible through the console;
+runner exit does not stop Factorio. Existing GUI-compatible mod stamps are
+reused without redeployment when their recorded hashes match.
+
+Fresh nonpersistent preparation must supply all three runtime mods. The
+console inherits its current world's mod source; preparation preflights the
+set before creating a directory, and subprocess failures preserve the inner
+error. A directory left by the old failed path is evidence, not a started run.
+
 ### Native deterministic control center
 
 The control center is `tools/dashboard_server.py`; it is a Python server and

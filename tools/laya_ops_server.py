@@ -250,6 +250,9 @@ class Operations:
             raise OperationError("The Laya runner is already running.")
         if not _pid_alive(root / "server/factorio.pid"):
             raise OperationError("Factorio is not running for this episode; start the server first.")
+        if (_read_json(root / "manifest.json") or {}).get("persistent_server"):
+            from tools.persistent_laya_run import launch
+            return launch(root, self.python, self.speed)
         stdout = (root / "logs/laya-runner.stdout.log")
         stdout.parent.mkdir(parents=True, exist_ok=True)
         with stdout.open("a") as out:
@@ -277,6 +280,11 @@ class Operations:
         if _pid_alive(root / "server/factorio.pid"):
             return "Factorio is already running."
         manifest = _read_json(root / "manifest.json")
+        if manifest.get("persistent_server"):
+            from tools.persistent_laya_run import profile_for_world, service
+            _, profile, _ = profile_for_world(root)
+            service(profile, "start")
+            return f"Persistent Factorio started for {root.name}."
         subprocess.run(["bash", str(root / "frozen/scripts/manage_linux_deterministic_server.sh"), "start",
                         "--root", str(root / "server"), "--fleet-mode", "--bootstrap-profile", "supplied-v1",
                         "--game-port", str(manifest["game_port"]), "--rcon-port", str(manifest["rcon_port"]),
@@ -288,16 +296,27 @@ class Operations:
         runner = self._stop_runner()
         if not _pid_alive(root / "server/factorio.pid"):
             return runner + " Factorio was not running."
+        if (_read_json(root / "manifest.json") or {}).get("persistent_server"):
+            from tools.persistent_laya_run import profile_for_world, service
+            _, profile, _ = profile_for_world(root)
+            service(profile, "stop")
+            return runner + " Persistent Factorio server stopped."
         return runner + " " + self._cli("stop", "--root", str(root))
 
     def _fresh_episode(self) -> str:
         current = self.root()
+        if current is not None and (_read_json(current / "manifest.json") or {}).get("persistent_server"):
+            from tools.persistent_laya_run import fresh_world
+            self._stop_runner()
+            backup = fresh_world(current)
+            return f"Previous world archived at {backup}. " + self._start_runner()
         if current is not None:
             self._stop_runner()
             if _pid_alive(current / "server/factorio.pid"):
                 self._cli("stop", "--root", str(current))
         root = WORLDS / ("clean-" + now_local().strftime("%Y%m%d-%H%M%S"))
-        self._cli("prepare", "--root", str(root))
+        extra = ["--mods-source", str(current / "server/mods")] if current is not None else []
+        self._cli("prepare", "--root", str(root), *extra)
         POINTER.write_text(json.dumps({"root": str(root)}) + "\n")
         return "Fresh episode prepared from saves/mod_playground.zip. " + self._start_runner()
 

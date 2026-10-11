@@ -24,6 +24,7 @@ from planners.quad_mall_layout import DENSE_MALL_MODULE_OFFSETS
 PROFILE = "saved-world-v1"
 ROOT = Path(__file__).resolve().parents[1]
 TEST_ROOT = ROOT / "data" / "laya-saved-world"
+PERSISTENT_WORLD = None
 BOUNDS = {"x_min": -128, "y_min": -128, "x_max_exclusive": 128, "y_max_exclusive": 128}
 SCOPE = {"surface": "nauvis", "force": "player", "bounds": BOUNDS}
 FACTS_VALIDATOR = Draft7Validator(json.loads((ROOT / "schemas/laya_saved_world.schema.json").read_text()))
@@ -39,9 +40,25 @@ def file_hash(path):
 
 def owned_root(path: Path) -> Path:
     path = path.resolve()
+    if path == PERSISTENT_WORLD:
+        return path
     if not path.is_relative_to(TEST_ROOT.resolve()) or path == TEST_ROOT.resolve():
         raise SavedWorldError("saved-world roots must be dedicated children of data/laya-saved-world")
     return path
+
+
+def register_persistent_world(path: Path, owner_repository: Path) -> None:
+    """Allow one explicit shared world to be operated by its frozen runner copy."""
+    global PERSISTENT_WORLD
+    path = path.resolve()
+    expected = owner_repository.resolve() / "data/laya-saved-world/persistent-laya"
+    if path != expected:
+        raise SavedWorldError("persistent runner world differs from its owning repository")
+    manifest = json.loads((path / "manifest.json").read_text())
+    if (manifest.get("persistent_server") is not True or manifest.get("production_authority") is not False
+            or manifest.get("runtime_selection") != "laya"):
+        raise SavedWorldError("persistent runner requires an isolated Laya world")
+    PERSISTENT_WORLD = path
 
 
 def verify_instance(root: Path, *, runtime="disposable_saved_world") -> dict:

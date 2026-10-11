@@ -46,8 +46,11 @@ SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
 
 def saved_world(action: str, root: Path, *extra: str) -> str:
-    return subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), action, "--root", str(root), *extra],
-                          check=True, capture_output=True, text=True).stdout.strip()
+    result = subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), action, "--root", str(root), *extra],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout).strip())
+    return result.stdout.strip()
 
 
 def runner_paths(root: Path) -> dict[str, Path]:

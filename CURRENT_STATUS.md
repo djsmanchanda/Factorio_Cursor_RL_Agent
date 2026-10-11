@@ -358,14 +358,10 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 
 Repaired loan identity restoration, requester WIP accounting, shared queue/precursor priority, aggregate stock targets, dedicated-producer gate reuse, bounded25% finite spares, bootstrap build completion and steel seed siting. Evidence: 373 scoped passes; 15 fail-before regressions plus one existing guard pass after; fast1140 passes/3 skips with only independently identical four-import firewall baseline. Lifecycle: Python/doc changes need a new frozen validation run; stopped episode, source save and GUI mods unchanged. Evidence: `data/laya-experiments/single-run-20261011T081349Z/repairs/20261011T150230IST/report.md`. No live goal-success claim.
 
-### 2026-10-11 15:25 IST — repaired single-run validation launched
+### 2026-10-11 — persistent server lifetime support
 
-User-requested isolated run `single-run-20261011T095020Z-s50616-1791712325` active under `laya-single-20261011T095020Z.service`, frozen0a50565, seed50616, requested=observed2, goal completed mining-productivity-4. Private server34992/27992; exact GUI-mod compatibility verified. One missing-cache setup failure preserved before RUN START; same setup resumed without a duplicate episode. Evidence `data/laya-experiments/single-run-20261011T095020Z/launch-verification.json`. Lifecycle: no edits/redeployment under this frozen run; natural goal/hard-failure or30-wall-minute no-progress watchdog, no automatic fix/next run.
+Added `tools/persistent_factorio.py` for isolated server profiles, process validation and service generation; saved-world runner shutdown retains explicitly persistent servers. Seven focused tests pass; fast gate1148 passes with the unchanged four-import firewall baseline.
 
-### 2026-10-11 16:06 IST — persistent isolated servers verified
+### 2026-10-11 16:24 IST — persistent Laya console launch path
 
-Laya retains the last failed run's final world on34992/27992; a separate deterministic base-save copy runs on34993/27993. Enabled user services own server lifetime independently of runners. Both survive graceful restart with increasing saved ticks and unchanged addresses; Laya runner-stop retains its PID. Matching stamped mods and exclusive namespace activation verified live (Laya2x, deterministic1x). Seven focused tests pass; final fast gate 1148 passes/3 skips with only the independently identical four-import firewall failure. Original source and frozen final save hashes unchanged. Evidence `data/persistent-factorio/lifecycle-proof.json` and `verification.json`. Lifecycle: both servers started; automatic gameplay runners stopped, Laya lab-unpack failure unresolved; no GUI deployment or production action.
-
-### 2026-10-11 16:09 IST — Laya Operations Console started
-
-Enabled `laya-operations-console.service` on http://127.0.0.1:9140/, with current-world pointer to `data/laya-saved-world/persistent-laya` (game34992/RCON27992). Page and six JSON endpoints return200; status proves Factorio running and automatic runner stopped. Evidence `data/persistent-factorio/console-proof.json`. Lifecycle: console only started; both private servers retained, no gameplay run/reset/deployment.
+Replaced the legacy fresh-world path for persistent Laya with archive/reset on the configured server, isolated service controls and frozen deterministic-action runners. Preflight all three mods before creating a world and preserve nested subprocess errors. Six console/lifecycle regressions fail before/pass after;20 focused tests pass, fast gate1159 passes with only the unchanged four-import firewall baseline.

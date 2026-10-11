@@ -77,7 +77,7 @@
       <div class="action-grid">
         <button data-action="start_runner"><strong>Start Laya runner</strong><span>Live, no decision limit, on the current world. Stops on mission complete, safe stop, or Stop.</span></button>
         <button data-action="stop_runner" class="quiet"><strong>Stop Laya runner</strong><span>Stop after the current decision; Factorio keeps running.</span></button>
-        <button data-action="fresh_episode" data-confirm="FRESH_EPISODE" class="danger"><strong>Start fresh episode</strong><span>Stop runner and server, copy saves/mod_playground.zip into a new disposable world, start the live runner.</span></button>
+        <button data-action="fresh_episode" data-confirm="FRESH_EPISODE" class="danger"><strong>Start fresh episode</strong><span>Archive the current world and start from the base save. A persistent server keeps its address.</span></button>
         <button data-action="start_server"><strong>Start Factorio server</strong><span>Restart this episode's isolated server from its own saved state.</span></button>
         <button data-action="stop_server" data-confirm="STOP_SERVER" class="danger"><strong>Stop Factorio server</strong><span>Stop the runner, then save and stop this episode's server.</span></button>
         <button data-action="sync_gui_mods" data-confirm="SYNC_GUI_MODS" class="warn"><strong>Sync GUI mods</strong><span>Copy this server's project mods into ~/.factorio/mods (backup kept) so the client can join.</span></button>
