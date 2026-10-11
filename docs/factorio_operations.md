@@ -138,7 +138,8 @@ episode instead.
 
 Laya's Operations Console implementation is `tools/laya_ops_server.py`,
 default `http://127.0.0.1:9140`. It requires an explicit current-world pointer
-and is not started or attached by the persistent server setup. The older
+and runs under `laya-operations-console.service`, now attached to the persistent
+Laya world. Starting the console does not start a gameplay runner. The older
 `tools/laya_console_server.py` on `9138` serves a distinct training workflow.
 
 ### Native deterministic control center

@@ -365,3 +365,7 @@ User-requested isolated run `single-run-20261011T095020Z-s50616-1791712325` acti
 ### 2026-10-11 16:06 IST — persistent isolated servers verified
 
 Laya retains the last failed run's final world on34992/27992; a separate deterministic base-save copy runs on34993/27993. Enabled user services own server lifetime independently of runners. Both survive graceful restart with increasing saved ticks and unchanged addresses; Laya runner-stop retains its PID. Matching stamped mods and exclusive namespace activation verified live (Laya2x, deterministic1x). Seven focused tests pass; final fast gate 1148 passes/3 skips with only the independently identical four-import firewall failure. Original source and frozen final save hashes unchanged. Evidence `data/persistent-factorio/lifecycle-proof.json` and `verification.json`. Lifecycle: both servers started; automatic gameplay runners stopped, Laya lab-unpack failure unresolved; no GUI deployment or production action.
+
+### 2026-10-11 16:09 IST — Laya Operations Console started
+
+Enabled `laya-operations-console.service` on http://127.0.0.1:9140/, with current-world pointer to `data/laya-saved-world/persistent-laya` (game34992/RCON27992). Page and six JSON endpoints return200; status proves Factorio running and automatic runner stopped. Evidence `data/persistent-factorio/console-proof.json`. Lifecycle: console only started; both private servers retained, no gameplay run/reset/deployment.
