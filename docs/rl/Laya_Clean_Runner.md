@@ -302,3 +302,7 @@ operations remain available.
 All real placements must exist before that construction fact clears, even if
 first delivered output has already permitted starter retirement. Steel site
 refusals are geometry evidence: unchanged layout does not imply bots progressing.
+
+Plate stock shortages use the starter/foundation/extension operation family;
+they do not create assembler mall-slot or generic produce options. Calling the
+cached plate producer repeatedly cannot add capacity.

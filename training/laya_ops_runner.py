@@ -702,8 +702,10 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # never assembled -- so it is never a produce target even when goal_demand lists it as a
     # dependency (episode 20261010T101241Z-a476f94f offered op.produce.iron-ore, which raised
     # untyped_stuck at decision 0).
-    producible = {i: m for i, m in short.items() if i not in RAW and plates_in(i, recipes or {}) <= started
-                  and obtainable(recipes, i, stock or {})} if recipes else short
+    # Plates have starter/foundation/extension operations. Their cached produce
+    # path reports success without adding capacity; it is not a mall recipe.
+    producible = {i: m for i, m in short.items() if i not in RAW and i not in PLATES and plates_in(i, recipes or {}) <= started
+                  and obtainable(recipes, i, stock or {})} if recipes else {i: m for i, m in short.items() if i not in RAW and i not in PLATES}
     # Generic goal produce options: every unsatisfied manufactured mission target (plastic, advanced
     # circuits, science) gets an ``ensure_produced`` option through the shared toolkit.  Unlike a
     # borrowed mall batch it is not gated on ``obtainable``: the operation itself builds the missing

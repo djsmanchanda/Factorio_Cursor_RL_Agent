@@ -1261,3 +1261,16 @@ def test_ops_runner_passes_current_phase_rate_targets_before_prepare(tmp_path, m
         measure_ticks=600, seed=3, run_id="rates", session=session)
     assert [params for operation, params in session.calls if operation == "prepare"] == [
         PHASES[0]["targets"], PHASES[1]["targets"]]
+
+
+def test_plate_stock_shortages_never_offer_assembler_production():
+    board = {"needs": [{"item": "stone-brick", "condition": "unbuilt"}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
+               {"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}},
+               {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}]
+    menu = compile_options(board, results, recipes={"iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
+                                    "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]}},
+                           queued_targets={"iron-plate": 19}, material_stock={"iron-plate": 2})
+    assert not any(o["family"] in {"produce", "mall_slot"} and o.get("product") == "iron-plate"
+                   for o in menu["options"])
+    assert "op.starter.stone-brick" in {o["option_id"] for o in menu["options"]}

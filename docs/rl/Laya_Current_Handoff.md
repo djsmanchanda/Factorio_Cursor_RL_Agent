@@ -226,3 +226,13 @@ identities. Evidence: seven limit/budget regressions failed before repair;
 272 focused passes, fast gate 1197 passes/3 skips with only the unchanged
 four-import firewall failure. Lifecycle: new frozen Python runner required;
 no mod deployment. Live throughput improvement remains unproven.
+
+### 2026-10-12 04:01 IST — plate no-op menus and incomplete power search repaired
+
+Observed 15 plate produce/mall-slot no-op choices in a46-decision validation run;
+plate stock shortages now stay in their construction operation family. Shared
+power fallback searches shorter legal hops beyond the coarse lattice. Both
+regressions fail before/pass after;84 focused passes; captured private copper
+terrain replay finds7 legal hops; fast gate1199 passes/3 skips with only the
+unchanged four-import firewall failure. Lifecycle: new frozen Python runner
+required; no mod deployment. Sustained scale improvement remains unproven.

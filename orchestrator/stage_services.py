@@ -1010,12 +1010,13 @@ def _searched_bridge_hops(
     """
     cardinal = max(2, int(spacing) - 1)
     diagonal = max(1, int((spacing - 1) / 1.415))
-    steps = [(cardinal, 0), (-cardinal, 0), (0, cardinal), (0, -cardinal)]
+    # A fixed hop lattice can miss every gap in otherwise legal terrain.
+    # Shorter hops let the route leave that lattice without weakening blockers.
+    steps = [(dx, dy) for hop in range(cardinal, 0, -1)
+             for dx, dy in ((hop, 0), (-hop, 0), (0, hop), (0, -hop))]
     if not orthogonal:
-        steps.extend([
-            (diagonal, diagonal), (diagonal, -diagonal),
-            (-diagonal, diagonal), (-diagonal, -diagonal),
-        ])
+        steps.extend((dx, dy) for hop in range(diagonal, 0, -1)
+                     for dx, dy in ((hop, hop), (hop, -hop), (-hop, hop), (-hop, -hop)))
     margin = 96
     min_x, max_x = min(start[0], end[0]) - margin, max(start[0], end[0]) + margin
     min_y, max_y = min(start[1], end[1]) - margin, max(start[1], end[1]) + margin
@@ -1044,7 +1045,11 @@ def _searched_bridge_hops(
                 continue
             if nxt in blocked:
                 continue
-            moved = spent[node] + distance(position(node), position(nxt))
+            wire_span = distance(position(node), position(nxt))
+            if wire_span > spacing:
+                continue
+            # Prefer fewer poles among routes of equal physical length.
+            moved = spent[node] + wire_span + 0.01
             if nxt not in spent or moved < spent[nxt]:
                 spent[nxt] = moved
                 came[nxt] = node

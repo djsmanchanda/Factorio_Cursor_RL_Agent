@@ -718,3 +718,7 @@ release still controls the requester window; scarce startup caps still apply.
 Registered built cells reconcile those gates between control actions, including
 cached intermediate sources. A borrowed cell is not rewritten under its old
 recipe. Gates can return to an earlier target after intervening demand.
+
+Power route fallback searches shorter legal wire hops as well as the widest
+hop. A fixed hop lattice must not declare terrain impassable when an off-lattice
+pole route exists. Resource/structure blockers and wire reach remain enforced.

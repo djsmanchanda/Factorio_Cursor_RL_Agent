@@ -248,3 +248,13 @@ def test_power_bridge_uses_full_medium_pole_reach_on_a_diagonal() -> None:
 def test_power_bridge_uses_exact_nine_tile_axial_hop() -> None:
     """Supply-area width must not shorten a legal nine-tile copper link."""
     assert _power_bridge_hops((0.5, 0.5), (18.5, 0.5), 9.0, set()) == [(9.5, 0.5)]
+
+
+def test_power_search_can_escape_a_blocked_coarse_hop_lattice():
+    from orchestrator.stage_services import _searched_bridge_hops
+    start, end = (.5, .5), (24.5, .5)
+    blocked = {(8, 0), (-8, 0), (0, 8), (0, -8)}
+    hops = _searched_bridge_hops(start, end, 9, blocked, orthogonal=True)
+    assert hops
+    assert not {(math.floor(x), math.floor(y)) for x, y in hops} & blocked
+    assert all(math.dist(a, b) <= 9 for a, b in zip([start, *hops], [*hops, end]))
