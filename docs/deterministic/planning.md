@@ -722,3 +722,8 @@ recipe. Gates can return to an earlier target after intervening demand.
 Power route fallback searches shorter legal wire hops as well as the widest
 hop. A fixed hop lattice must not declare terrain impassable when an off-lattice
 pole route exists. Resource/structure blockers and wire reach remain enforced.
+
+Required finite-chest dependencies include every unstarted iron, copper and
+stone direct starter. Each uses its own direct_smelter planner bill and
+direct_<recipe>_starter claimant; later chemical holds cannot starve these
+upstream sources. The hold releases when measured production starts.

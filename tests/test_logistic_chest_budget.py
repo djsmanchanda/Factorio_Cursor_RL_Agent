@@ -310,3 +310,26 @@ def test_chemical_budget_claims_the_actual_machine_packet(tmp_path, monkeypatch,
         name: count for name, count in bill.items() if name in FINITE_LOGISTIC_CHESTS}
     packet = ledger.declare(project, bill, bill, target_item=item)
     assert packet.state == "ready"
+
+
+@pytest.mark.parametrize("item", ["iron-plate", "copper-plate", "stone-brick"])
+def test_direct_starters_are_required_chest_claimants(tmp_path, monkeypatch, item):
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, name: name != item)
+    monkeypatch.setattr(builder, "_chemical_capability_started", lambda *_: True)
+    assert item in builder._pending_startup_dependencies(_fake_client(), "nauvis", "player")
+    monkeypatch.setattr(builder, "_pending_startup_dependencies", lambda *_: (item, "steel-plate", "plastic-bar"))
+    builder._refresh_logistic_chest_budget(_fake_client(), "nauvis", "player", ledger)
+    from planners.bootstrap_smelting import generate_direct_smelter
+    from orchestrator.material_reservations import plan_material_bill
+    ore = builder.LINE_RECIPES[item]["ingredients"][0]
+    bill = plan_material_bill(generate_direct_smelter(item, ore, (.5, .5), "east"))
+    assert f"direct_{item}_starter" in ledger.dependency_claimants
+    assert ledger.dependency_budget["passive-provider-chest"] == 3
+    # All providers are held for dependencies; the earlier starter must still
+    # receive its own one, instead of deadlocking before chemistry exists.
+    stock = dict(bill, **{"passive-provider-chest": 3})
+    ledger.declare("optional", {"passive-provider-chest": 1, "requester-chest": 1}, stock)
+    starter = ledger.declare(f"direct_{item}_starter", bill, stock)
+    assert starter.state == "ready"
+    assert starter.reserved["passive-provider-chest"] == 1

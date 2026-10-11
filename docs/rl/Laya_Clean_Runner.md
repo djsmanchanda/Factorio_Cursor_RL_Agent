@@ -306,3 +306,8 @@ refusals are geometry evidence: unchanged layout does not imply bots progressing
 Plate stock shortages use the starter/foundation/extension operation family;
 they do not create assembler mall-slot or generic produce options. Calling the
 cached plate producer repeatedly cannot add capacity.
+
+Research queue membership is a live option fact. A target already current or
+queued is not offered for re-queueing, including its canonical ranged
+technology name; removal from the queue restores the choice. Queue membership
+never proves completed research.

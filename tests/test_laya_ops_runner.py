@@ -1274,3 +1274,19 @@ def test_plate_stock_shortages_never_offer_assembler_production():
     assert not any(o["family"] in {"produce", "mall_slot"} and o.get("product") == "iron-plate"
                    for o in menu["options"])
     assert "op.starter.stone-brick" in {o["option_id"] for o in menu["options"]}
+
+
+@pytest.mark.parametrize("state,current_level", [("available", 4), ("current", 4), ("future", 3)])
+def test_research_already_in_live_queue_is_not_offered_again(state, current_level):
+    status = {"current_research": "mining-productivity-3",
+              "research_queue": ["mining-productivity-3"],
+              "technology": {"canonical_name": "mining-productivity-3", "state": state,
+                             "enabled": True, "current_level": current_level,
+                             "requested_level": 4, "target_completed": False}}
+    def research():
+        return [o for o in compile_options({"needs": []}, [], research_goal="mining-productivity-4",
+                                           goal_status=status, labs=1)["options"] if o["family"] == "research"]
+    assert research() == []
+    status["current_research"] = None
+    status["research_queue"] = []
+    assert len(research()) == 1

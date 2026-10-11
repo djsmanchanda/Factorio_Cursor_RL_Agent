@@ -236,3 +236,13 @@ regressions fail before/pass after;84 focused passes; captured private copper
 terrain replay finds7 legal hops; fast gate1199 passes/3 skips with only the
 unchanged four-import firewall failure. Lifecycle: new frozen Python runner
 required; no mod deployment. Sustained scale improvement remains unproven.
+
+### 2026-10-12 04:09 IST — upstream starter claims and queued-research churn repaired
+
+Required finite-chest dependencies now include unstarted iron/copper/stone
+starters with real direct-smelter bills and transaction identities. Live current
+or queued research is no longer offered for duplicate requests, with canonical
+ranged names respected. Six regressions failed before/pass after;253 focused
+passes and preserved research-status replay; fast gate1202 passes/3 skips,
+only the unchanged four-import firewall failure. Lifecycle: new frozen Python
+runner required; no mod deployment. Sustained throughput remains unproven.

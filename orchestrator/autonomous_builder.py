@@ -8647,7 +8647,12 @@ def _pending_startup_dependencies(
     cell: before the independent mall they borrow an existing cell and consume
     no new chest.
     """
-    pending: list[str] = []
+    # Upstream plate/brick starters are dependencies too: reserving every
+    # chest for chemistry must not prevent its earlier material sources.
+    pending: list[str] = [
+        item for item in PLATE_FOUNDATION_BUILD_ORDER
+        if not _production_started(client, surface, force, item)
+    ]
     if (
         "long-handed-inserter" in LINE_RECIPES
         and not _production_started(
@@ -8674,6 +8679,11 @@ def _pending_startup_dependencies(
 
 def _startup_dependency_project(item: str) -> tuple[str, Mapping[str, int]]:
     """Price the operation that will actually build a dependency."""
+    if item in PLATE_FOUNDATION_BUILD_ORDER:
+        ore = LINE_RECIPES[item]["ingredients"][0]
+        return f"direct_{item}_starter", plan_material_bill(
+            generate_direct_smelter(item, ore, (.5, .5), "east"),
+        )
     if item == "steel-plate":
         from planners.steel_bootstrap import steel_seed
         return "conversion_steel-plate", plan_material_bill(

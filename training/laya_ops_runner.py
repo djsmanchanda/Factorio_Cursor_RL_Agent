@@ -752,6 +752,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and isinstance(technology.get("requested_level"), int)
                 and technology["current_level"] < technology["requested_level"]):
             candidate = technology.get("canonical_name")
+        queued = set((goal_status or {}).get("research_queue") or ())
+        current_research = (goal_status or {}).get("current_research")
+        if current_research:
+            queued.add(current_research)
+        # Ranged technologies use a canonical prototype name for the queued
+        # level. Queue membership is live evidence, not a past receipt latch.
+        if candidate in queued or technology.get("canonical_name") in queued:
+            candidate = None
         if candidate and not research_goal_satisfied(goal_status):
             options.append({
                 "option_id": f"op.research.{candidate}", "family": "research", "product": candidate,
