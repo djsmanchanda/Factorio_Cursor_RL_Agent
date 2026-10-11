@@ -97,6 +97,45 @@ def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, mo
     assert (tmp_path / "data/now/checkpoint-001.md").is_file()
 
 
+@pytest.mark.fast
+def test_default_observer_waits_for_actual_run_end_beyond_twelve_hours(tmp_path, monkeypatch):
+    setup(tmp_path, monkeypatch)
+    root = tmp_path / "now"
+    log = root / "logs/laya-runner.log"
+    log.write_text("RUN START: ts=2026-10-03T21:00:00+05:30 run_id=now\n")
+    (root / "laya-runner.pid.json").write_text("{}")
+    clock = [0]
+    calls = []
+    monkeypatch.setattr(helper.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(helper, "_ask", lambda *args, **kwargs: calls.append(args[2]) or "ses-long")
+    def wait(*args):
+        clock[0] += 13 * 3600
+        with log.open("a") as stream:
+            stream.write("+46800s RUN END\n")
+    monkeypatch.setattr(helper, "_wait_for_checkpoint_or_end", wait)
+    monkeypatch.setattr(helper, "final_review", lambda *_args: tmp_path / "reports/now/findings.md")
+    helper.observe("now", log, root)
+    assert len(calls) == 2
+    assert "RUN END" in (tmp_path / "data/now/checkpoint-002.md").read_text()
+
+
+@pytest.mark.fast
+def test_failed_bootstrap_stops_instead_of_allocating_replacement_sessions(tmp_path, monkeypatch):
+    import pytest
+    setup(tmp_path, monkeypatch)
+    root = tmp_path / "now"
+    (root / "laya-runner.pid.json").write_text("{}")
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("bootstrap returned no resumable session")
+    monkeypatch.setattr(helper, "_ask", fail)
+    monkeypatch.setattr(helper, "_wait_for_checkpoint_or_end", lambda *_: pytest.fail("failed observer retried"))
+    with pytest.raises(RuntimeError, match="no resumable session"):
+        helper.observe("now", root / "logs/laya-runner.log", root)
+    assert len(calls) == 1
+
+
 def test_journal_summary_accepts_ops_decision_rows_without_status(tmp_path):
     # The ops runner records decisions with a summary but no status; the final review must not fail on them.
     journal = tmp_path / "clean-decisions.jsonl"

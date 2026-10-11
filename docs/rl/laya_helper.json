@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
-  "purpose": "Post-run OpenCode review of each clean Laya run (tools/laya_helper_agent.py).",
-  "model": "opencode-go/muse-spark-1.3-contributor",
-  "variant": "xhigh",
+  "purpose": "Read-only live observation and final DeepSeek review of each Laya run (tools/laya_helper_agent.py).",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "variant": "high",
   "deterministic_reference": {
     "label": "episode-20260917T233217Z-d3a714fc (2026-09-18 05:02 IST, 5726 s)",
     "log": "~/.local/share/factorio-rl/deterministic/logs/archive/autonomous-run-20260918-094813-006966.log",

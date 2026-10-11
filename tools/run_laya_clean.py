@@ -68,6 +68,7 @@ def _game_tick(adapter) -> int | None:
 
 
 def main(argv=None) -> int:
+    global RUN_INDEX
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["prepare", "run", "stop"])
     p.add_argument("--root", required=True, type=Path)
@@ -78,7 +79,10 @@ def main(argv=None) -> int:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--stepped", action="store_true", help="Paused fixed-tick stepping instead of live play")
     p.add_argument("--speed", type=float, default=1.0, help="Live game speed")
-    p.add_argument("--no-helper", action="store_true", help="Skip the post-run Laya Helper review")
+    p.add_argument("--no-helper", action="store_true", help="Disable the live/final Laya Helper")
+    p.add_argument("--helper-report-root", type=Path, help="Mutable helper findings directory outside frozen code")
+    p.add_argument("--helper-data-root", type=Path, help="Mutable helper session/transcript directory")
+    p.add_argument("--run-index", type=Path, help="Shared run index for helper comparisons across frozen copies")
     p.add_argument("--actions", choices=["geometry", "deterministic"], default="geometry",
                    help="deterministic: Laya chooses among the deterministic runtime's operations "
                         "(training/laya_ops_runner.py); geometry: Laya's own build generators")
@@ -100,6 +104,8 @@ def main(argv=None) -> int:
     p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     args = p.parse_args(argv)
+    if args.run_index:
+        RUN_INDEX = args.run_index.resolve()
     if args.until_accepted and (args.actions != "deterministic" or args.until_phase):
         p.error("until-accepted requires deterministic actions and cannot be combined with until-phase")
     root = owned_root(args.root)
@@ -165,7 +171,10 @@ def main(argv=None) -> int:
                   window=f"goal={args.research_goal or settings.goal_technology or '-'} proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
-            log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
+            helper_options = {name: value for name, value in {
+                "report_root": args.helper_report_root, "data_root": args.helper_data_root,
+                "run_index_path": args.run_index}.items() if value is not None}
+            log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve(), **helper_options))
         try:
             if live_error is not None:
                 raise live_error

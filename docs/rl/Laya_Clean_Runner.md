@@ -198,7 +198,11 @@ Artifacts: `logs/laya-runner.log`, PID/heartbeat sidecars,
 `evidence/clean-decisions.jsonl`, `evidence/decision-states.jsonl`,
 `evidence/latest-status.json`, and geometry transaction receipts. The local run
 index is `data/laya-saved-world/laya-runs.jsonl`; the shared ledger is maintained
-by `tools/run_ledger.py`. The helper is optional (`--no-helper` disables it).
+by `tools/run_ledger.py`. The default helper is read-only OpenCode Go DeepSeek
+V4.1 Flash/high, started at RUN START and continued through final review in one
+saved session per run. `--no-helper` explicitly disables it. OC persistent runs
+enable it with an independent user service and mutable evidence paths outside
+frozen code.
 Read terminal evidence before a cached status board or experiment report.
 
 ### Helper evidence packet
@@ -259,7 +263,7 @@ Coordinate shared mall/adapter files through their latest ownership handoff.
 
 Campaign helpers accept explicit `--config`, `--report-root`, `--data-root`, and
 `--comparators` JSON records, so findings and state stay outside frozen code.
-Muse permissions allow file readers and deny all edits, shell, MCP and delegation.
+Helper permissions allow file readers and deny all edits, shell, MCP and delegation.
 It returns a complete Markdown report between FINDINGS_REPORT_BEGIN and
 FINDINGS_REPORT_END; the wrapper validates and atomically publishes that response.
 The wrapper also owns evidence packets and lifecycle records. A placeholder or

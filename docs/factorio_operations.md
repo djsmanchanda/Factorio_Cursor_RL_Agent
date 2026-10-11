@@ -160,10 +160,32 @@ Git archive under `data/persistent-factorio/runs/<identity>/code` in a separate
 user-systemd unit. `freeze.json` pins code hashes, baseline, exact reused
 stamped mods, model-independent policy configuration and ports. The frozen
 adapter registers only the one explicit isolated world owned by this
-repository. No post-run model helper starts automatically. The run's own log,
+repository. DeepSeek's read-only helper starts automatically at RUN START;
+its own user-systemd service survives runner exit and publishes the final
+review. The run's own log,
 journal, status and `run-owner.json` remain accessible through the console;
 runner exit does not stop Factorio. Existing GUI-compatible mod stamps are
 reused without redeployment when their recorded hashes match.
+
+The default helper route is `opencode-go/deepseek-v4.1-flash`, variant `high`.
+It bootstraps with `Hi`, records the real returned session ID before sending
+observer instructions, and resumes that ID for checkpoints and final review.
+Session/model mismatches fail instead of substituting another agent. Failed
+bootstrap/transport attempts retain transcripts and stop after bounded retries;
+manual resumption uses the saved state. It has reader-only permissions, no
+Factorio command channel, no edits and no Git ownership. It observes every ten
+minutes and finishes on the run's end, with no default twelve-hour observer
+cutoff. It proposes evidence-backed fixes; it does not start an improvement loop.
+
+Persistent-run helper state/transcripts live at
+`data/persistent-factorio/helper-state/<run_id>/`; findings live at
+`docs/rl/laya_helper_runs/<run_id>/findings.md` and appear in the OC helper panel.
+The shared `data/persistent-factorio/laya-runs.jsonl` index follows archived
+world evidence on a fresh reset, preventing previous runs from reading the
+new world's logs. Frozen helper code and configuration remain pinned while
+these evidence directories are mutable. `--no-helper` remains an explicit CLI
+opt-out; OC launches enable the helper by default. No Muse call is made by this
+default path.
 
 Fresh nonpersistent preparation must supply all three runtime mods. The
 console inherits its current world's mod source; preparation preflights the

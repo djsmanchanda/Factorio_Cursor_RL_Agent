@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Path: tools/laya_helper_agent.py
-# Purpose: After every clean Laya run, have a read-only OpenCode Muse helper compare it with prior Laya and selected deterministic evidence.
+# Purpose: Observe each Laya run with a read-only DeepSeek helper and publish its final comparison.
 
 """Laya post-run helper.
 
-Started by tools/run_laya_clean.py when a run ends.  It builds one bounded
+Started by tools/run_laya_clean.py at RUN START. It observes bounded checkpoints,
+then builds one bounded final
 evidence packet (current Laya run, the latest comparable earlier Laya run,
 and the selected deterministic reference), then asks one OpenCode
 session to return findings text; this wrapper publishes it to
@@ -15,6 +16,7 @@ is read-only: no code edits, commits, lifecycle actions or RCON.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -51,12 +53,13 @@ WORKFLOW_NOTE = """The two systems are different workflows; compare outcomes and
 - Deterministic runner (tools/autonomous_run.py -> orchestrator/autonomous_builder.py): a hand-written
   cascade that picks the deepest missing stage, builds belt-fed mines/furnace lines, a rotating mall and
   the oil/plastic chain with stage builders, and logs SURVEY/DEMAND/BLOCKER/STUCK lines.
-- Clean Laya runner (tools/run_laya_clean.py -> training/laya_clean_runner.py): live, unlimited, on a
-  disposable copy of saves/mod_playground.zip. Each decision: status board (goal demand, measured supply,
+- Laya runner (tools/run_laya_clean.py): OC uses --actions deterministic -> training/laya_ops_runner.py
+  over the shared deterministic operation library. --actions geometry uses training/laya_clean_runner.py.
+  Both are live on isolated copied saves. Each decision: status board (goal demand, measured supply,
   machine conditions, bottleneck chain) -> need-tagged legal options (site plan reservations, power rules,
-  live legality/funding checks) -> policy choice -> saved-world adapter builds funded ghosts -> measured
-  outcome. The policy is seeded exploration until a compatible Laya checkpoint exists, so poor choices may
-  be the policy, not the tooling. Mission ladder: C0 iron/copper starter, C1 starter mall, C2/C3 rollouts,
+  live legality/funding checks) -> guided doc-rule policy with seeded exploration -> deterministic
+  tooling or saved-world geometry builds funded ghosts -> measured outcome. No compatible learned
+  checkpoint is used by the OC ops path. Mission ladder: C0 iron/copper starter, C1 starter mall, C2/C3 rollouts,
   C4 plastic, C6 advanced circuits, S1 science. Design: docs/rl/Laya_Clean_Runner.md; strategy rules:
   docs/rl/Laya_Strategy_Guidelines.md."""
 
@@ -392,10 +395,25 @@ def publish_response(output: str, report: Path, *, append: bool = False) -> bool
     return True
 
 
+def _saved_session(config: dict, work: Path, session: str | None = None) -> str | None:
+    path = work / "helper-session.json"
+    if not path.exists():
+        return session
+    saved = json.loads(path.read_text())
+    if any(saved[key] != config[key] for key in ("model", "variant")):
+        raise RuntimeError("recorded helper model/variant differs from the requested configuration")
+    if session is not None and session != saved["session_id"]:
+        raise RuntimeError("helper session continuity violation")
+    return saved["session_id"]
+
+
 def _ask(config: dict, work: Path, message: str, session: str | None, title: str, retry: str,
          timeout: int = 1800) -> str:
     """One OpenCode turn (new or resumed session), resumed up to twice on failure; returns the session id."""
-    for attempt in range(3):
+    session = _saved_session(config, work, session)
+
+    def invoke(text: str):
+        nonlocal session
         command = [OPENCODE[0], "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config["model"],
                    "--variant", config["variant"], "--auto"]
         command += ["--session", session] if session else ["--title", title]
@@ -408,14 +426,45 @@ def _ask(config: dict, work: Path, message: str, session: str | None, title: str
             "permission": permissions, "agent": {"build": {"permission": permissions}}})
         command[2:2] = ["--agent", "build"]
 
-        result = subprocess.run(command + [message], cwd=REPO_ROOT, capture_output=True, text=True,
-                                timeout=timeout, env=env)
         stamp = len(list(work.glob("opencode-*.jsonl")))
-        (work / f"opencode-{stamp:03d}.jsonl").write_text(result.stdout + result.stderr)
-        session = session or _session_id(result.stdout + result.stderr)
+        transcript = work / f"opencode-{stamp:03d}.jsonl"
+        def persist(output):
+            nonlocal session
+            returned = _session_id(output)
+            if returned and session and returned != session:
+                raise RuntimeError("OpenCode returned a different helper session")
+            session = session or returned
+            if session:
+                path = work / "helper-session.json"
+                staged = path.with_suffix(".tmp")
+                staged.write_text(json.dumps({"session_id": session, "model": config["model"],
+                                              "variant": config["variant"]}, indent=2) + "\n")
+                staged.replace(path)
+        try:
+            result = subprocess.run(command + [text], cwd=REPO_ROOT, capture_output=True, text=True,
+                                    timeout=timeout, env=env)
+        except subprocess.TimeoutExpired as error:
+            decode = lambda value: value.decode(errors="replace") if isinstance(value, bytes) else (value or "")
+            output = decode(error.stdout) + decode(error.stderr)
+            transcript.write_text(output)
+            persist(output)
+            raise
+        output = result.stdout + result.stderr
+        transcript.write_text(output)
+        persist(output)
+        return result
+
+    if session is None and config["model"] == "opencode-go/deepseek-v4.1-flash":
+        greeting = invoke("Hi")
+        if greeting.returncode or session is None:
+            raise RuntimeError(f"DeepSeek helper bootstrap failed; transcripts in {work}")
+    for attempt in range(3):
+        result = invoke(message)
         if result.returncode == 0 and session:
-            publish_response(result.stdout, Path(report), append=config.get("report_mode") == "append")
+            publish_response(result.stdout, Path(config["report_path"]), append=config.get("report_mode") == "append")
             return session
+        if session is None:
+            raise RuntimeError(f"OpenCode failed without a resumable session; transcripts in {work}")
         message = retry
     raise RuntimeError(f"OpenCode failed three times; transcripts in {work}")
 
@@ -448,6 +497,9 @@ def _write_record(run_id: str, status: str, *, report: Path | None = None,
                "report": str(report) if report is not None else None,
                "comparators": [run.get("run_id") for run in comparators],
                "error": error, "updated": local_stamp()}
+    session_path = work / "helper-session.json"
+    if session_path.exists():
+        payload.update(json.loads(session_path.read_text()))
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     temporary.replace(path)
@@ -536,7 +588,7 @@ def _wait_for_checkpoint_or_end(log: Path, run_id: str, seen: int, pid_record: P
             return
 
 
-def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL_S, max_hours: float = 12,
+def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL_S, max_hours: float | None = None,
             comparators: Sequence[dict] = ()) -> Path:
     """Live observer: checkpoint notes every ``interval`` seconds, then the final review in the same session."""
     config = load_config()
@@ -547,7 +599,10 @@ def observe(run_id: str, log: Path, root: Path, interval: int = OBSERVE_INTERVAL
     config["report_mode"] = "append"
     status = root / "evidence/latest-status.json"
     pid_record = root / "laya-runner.pid.json"
-    session, seen, deadline, checkpoint = None, 0, time.monotonic() + max_hours * 3600, 0
+    session = _saved_session(config, work)
+    seen = 0
+    deadline = float("inf") if max_hours is None else time.monotonic() + max_hours * 3600
+    checkpoint = len(list(work.glob("checkpoint-*.md")))
     intro = f"""You are the read-only live observer for Laya run {run_id} (repository {REPO_ROOT}).
 All times are local time ({zone_label()}). {WORKFLOW_NOTE}
 You will receive a checkpoint every {interval // 60} minutes. At each checkpoint return at most 10 lines between
@@ -559,6 +614,12 @@ steer the guided policy). Remain read-only: no file writes, code edits, commits,
         new, seen_now = _run_slice_since(log, run_id, seen)
         ended = any(line.rstrip().endswith("RUN END") for line in new)
         runner_alive = pid_record.exists()
+        if status.is_file():
+            latest_run = json.loads(status.read_text()).get("run_id")
+            if latest_run and latest_run != run_id:
+                # A fresh world reused the address; finish the old run's own
+                # indexed/archived evidence rather than observing its successor.
+                break
         if new or session is None:
             checkpoint += 1
             packet = work / f"checkpoint-{checkpoint:03d}.md"
@@ -569,9 +630,10 @@ steer the guided policy). Remain read-only: no file writes, code edits, commits,
             try:
                 session = _ask(config, work, message, session, f"Laya Observer {run_id}",
                                f"Continue the read-only live observation; process {packet} and return notes between FINDINGS_REPORT_BEGIN and FINDINGS_REPORT_END.", timeout=900)
-            except Exception as error:  # A failed checkpoint is noted; the final review still runs.
+            except Exception as error:  # Stop after bounded transport retries; never allocate an untracked replacement.
                 with report.open("a") as out:
                     out.write(f"\n_Checkpoint {checkpoint} failed: {type(error).__name__}: {str(error)[:200]}_\n")
+                raise
             seen = seen_now
         if ended or not runner_alive:
             break
@@ -583,15 +645,30 @@ steer the guided policy). Remain read-only: no file writes, code edits, commits,
     return final_review(run_id, session, comparators)
 
 
-def launch(run_id: str, log: Path, root: Path | None = None, comparators_path: Path | None = None) -> str:
+def launch(run_id: str, log: Path, root: Path | None = None, comparators_path: Path | None = None,
+           *, report_root: Path | None = None, data_root: Path | None = None,
+           run_index_path: Path | None = None) -> str:
     """Start the helper detached from the runner; with ``root`` it observes live from RUN START."""
-    out = DATA_ROOT / run_id / "helper.log"
+    out = (data_root or DATA_ROOT) / run_id / "helper.log"
     out.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, str(Path(__file__)), "--run-id", run_id, "--log", str(log)]
     if root is not None:
         command += ["--observe-root", str(root)]
     if comparators_path is not None:
         command += ["--comparators", str(comparators_path)]
+    for flag, value in [("--report-root", report_root), ("--data-root", data_root), ("--run-index", run_index_path)]:
+        if value is not None:
+            command += [flag, str(value)]
+    if data_root is not None and run_index_path is not None:
+        # A detached child still shares its runner's systemd cgroup. Give the
+        # observer its own service so it survives RUN END and publishes review.
+        unit = "laya-helper-" + hashlib.sha256(run_id.encode()).hexdigest()[:16]
+        subprocess.run(["systemd-run", "--user", "--unit", unit,
+                        "--property", f"WorkingDirectory={REPO_ROOT}", "--property", "Restart=no",
+                        "--setenv", "PATH=" + os.environ.get("PATH", ""),
+                        "--property", f"StandardOutput=append:{out}", "--property", "StandardError=inherit",
+                        *command], check=True, capture_output=True, text=True)
+        return f"unit={unit}.service log={out}"
     with out.open("ab") as handle:
         process = subprocess.Popen(command, cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=handle,
                                    stderr=subprocess.STDOUT, start_new_session=True)
@@ -599,13 +676,14 @@ def launch(run_id: str, log: Path, root: Path | None = None, comparators_path: P
 
 
 def main(argv=None) -> int:
-    global CONFIG, REPORT_ROOT, DATA_ROOT
+    global CONFIG, REPORT_ROOT, DATA_ROOT, RUN_INDEX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--log", type=Path, help="Runner log (observed live, and the completion line is appended)")
     parser.add_argument("--config", type=Path, help="Explicit helper model/reference configuration")
     parser.add_argument("--report-root", type=Path, help="Campaign-owned findings directory")
     parser.add_argument("--data-root", type=Path, help="Campaign-owned helper state directory")
+    parser.add_argument("--run-index", type=Path, help="Shared actor run index outside frozen code")
     parser.add_argument("--observe-root", type=Path, help="Episode root: observe live from RUN START, then review")
     parser.add_argument("--comparators", type=Path, action="append",
                         help="JSON list of explicit comparator run records (run_id/commit/root/kind)")
@@ -618,6 +696,8 @@ def main(argv=None) -> int:
         REPORT_ROOT = args.report_root.resolve()
     if args.data_root is not None:
         DATA_ROOT = args.data_root.resolve()
+    if args.run_index is not None:
+        RUN_INDEX = args.run_index.resolve()
     OPENCODE[0] = args.opencode_bin
     try:
         comparators = load_comparators(args.comparators)
@@ -638,7 +718,9 @@ def main(argv=None) -> int:
             pass
         line = f"LAYA HELPER: stopped after failure: {type(error).__name__}: {str(error)[:300]}"
     if args.log:
-        with args.log.open("a") as out:
+        indexed = next((record for record in run_index() if record["run_id"] == args.run_id), None)
+        completion_log = (Path(indexed["root"]) / "logs/laya-runner.log") if indexed else args.log
+        with completion_log.open("a") as out:
             out.write(line + "\n")
     print(line)
     return 0 if "complete" in line else 1

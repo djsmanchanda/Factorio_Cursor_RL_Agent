@@ -200,3 +200,7 @@ Replaced the legacy fresh-world path for persistent Laya with archive/reset on t
 Corrected the loan's own-input survey to `defines.inventory.crafter_input`; the removed assembler enum caused the lab unpack crash introduced by0a50565. Caught tool errors now retain full tracebacks and cite them in structured outcomes/terminal failures. Three regressions fail before/pass after;97 focused tests pass and fast gate1162 passes with only the confirmed unchanged four-import firewall baseline.
 
 Single-operation replay of the same failed save now starts the lab prerequisite loan with its assembler working; lab delivery and research completion remain unproven.
+
+### 2026-10-11 — automatic DeepSeek helper for fresh OC runs
+
+Enabled DeepSeek V4.1 Flash/high live and final review by default, with a durable per-run session, bounded transport retries and an independent helper service. Shared evidence paths and archived run-index roots preserve comparisons across frozen runners. Unit evidence:41 focused passes;10 regressions fail before/pass after; fast gate1172 passes/3 skips with only the independently unchanged four-import firewall baseline. Actual installed-model session and report publication verified; gameplay effect untested.

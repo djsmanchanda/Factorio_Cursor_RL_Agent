@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -73,6 +74,16 @@ def fresh_world(world):
             if path.exists():
                 path.rename(destination / name)
     phase("archived")
+    # Index rows must follow their archived evidence, not the reused live root.
+    index = ROOT / "data/persistent-factorio/laya-runs.jsonl"
+    if index.exists():
+        rows = [json.loads(line) for line in index.read_text().splitlines() if line.strip()]
+        for row in rows:
+            if Path(row["root"]).resolve() == world:
+                row["root"] = str(backup / "world")
+        staged = index.with_suffix(".tmp")
+        staged.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        staged.replace(index)
     (server / "saves").mkdir()
     for path in (server / "logs", server / "script-output", world / "logs", world / "evidence"):
         path.mkdir()
@@ -112,6 +123,9 @@ def freeze_runner(world, speed, seed):
               "game_port": profile["game_port"], "rcon_port": profile["rcon_port"],
               "source_sha256": manifest["source_sha256"], "mod_hashes": manifest["mod_hashes"],
               "code_hashes": {str(p.relative_to(code)): file_hash(p) for p in code.rglob("*") if p.is_file()}}
+    helper = json.loads((code / "docs/rl/laya_helper.json").read_text())
+    frozen["helper"] = {key: helper[key] for key in ("model", "variant")}
+    frozen["helper"]["opencode_bin"] = shutil.which("opencode")
     path = episode / "freeze.json"
     path.write_text(json.dumps(frozen, indent=2) + "\n")
     return path
@@ -124,6 +138,7 @@ def launch(world, python, speed, seed=50616):
     code = freeze.parent / "code"
     unit = "laya-persistent-run-" + freeze.parent.name
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--property", f"WorkingDirectory={code}",
+                    "--setenv", "PATH=" + os.environ.get("PATH", ""),
                     "--property", "Restart=no", "--property", "TimeoutStopSec=120",
                     "--property", f"StandardOutput=append:{world / 'logs/laya-runner.stdout.log'}",
                     "--property", "StandardError=inherit",
@@ -154,8 +169,12 @@ def main():
     from training.laya_saved_world import register_persistent_world
     register_persistent_world(world, Path(facts["owner_repository"]))
     from tools.run_laya_clean import main as run
+    owner = Path(facts["owner_repository"])
     return run(["run", "--root", str(world), "--actions", facts["actions"], "--research-goal", facts["goal"],
-                "--seed", str(facts["seed"]), "--speed", str(facts["speed"]), "--no-helper",
+                "--seed", str(facts["seed"]), "--speed", str(facts["speed"]),
+                "--helper-report-root", str(owner / "docs/rl/laya_helper_runs"),
+                "--helper-data-root", str(owner / "data/persistent-factorio/helper-state"),
+                "--run-index", str(owner / "data/persistent-factorio/laya-runs.jsonl"),
                 "--source-save", str(world / "baseline.zip"), "--experiment", freeze.parent.name])
 
 

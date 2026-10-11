@@ -72,6 +72,36 @@ def test_fresh_refuses_foreign_profile_before_any_service_action(world, monkeypa
     assert (world / "server/saves/mod_playground.zip").read_bytes() == b"previous world"
 
 
+def test_fresh_run_comparator_follows_archived_evidence(world, monkeypatch):
+    index = persistent_laya_run.ROOT / "data/persistent-factorio/laya-runs.jsonl"
+    index.write_text(json.dumps({"run_id": "previous", "root": str(world)}) + "\n")
+    monkeypatch.setattr(persistent_laya_run, "service", lambda *_: None)
+    backup = persistent_laya_run.fresh_world(world)
+    record = json.loads(index.read_text())
+    assert record["root"] == str(backup / "world")
+    assert (Path(record["root"]) / "evidence/old.json").exists()
+
+
+def test_frozen_oc_run_enables_helper_with_shared_evidence_paths(world, monkeypatch, tmp_path):
+    owner = persistent_laya_run.ROOT
+    episode = tmp_path / "episode";code = episode / "code";code.mkdir(parents=True)
+    freeze = episode / "freeze.json"
+    freeze.write_text(json.dumps({"world": str(world), "owner_repository": str(owner), "code_hashes": {},
+                                 "mod_hashes": {}, "source_sha256": laya_saved_world.file_hash(world / "baseline.zip"),
+                                 "actions": "deterministic", "goal": "mining-productivity-4", "speed": 2, "seed": 50616}))
+    monkeypatch.setattr(persistent_laya_run, "ROOT", code)
+    monkeypatch.setattr(laya_saved_world, "PERSISTENT_WORLD", None)
+    monkeypatch.setattr(persistent_laya_run.sys, "argv", ["runner", "--freeze", str(freeze)])
+    calls = []
+    monkeypatch.setattr(run_laya_clean, "main", lambda argv: calls.append(argv) or 0)
+    assert persistent_laya_run.main() == 0
+    command = calls[0]
+    assert "--no-helper" not in command
+    assert command[command.index("--helper-report-root") + 1] == str(owner / "docs/rl/laya_helper_runs")
+    assert command[command.index("--helper-data-root") + 1] == str(owner / "data/persistent-factorio/helper-state")
+    assert command[command.index("--run-index") + 1] == str(owner / "data/persistent-factorio/laya-runs.jsonl")
+
+
 def test_launch_executes_frozen_copy_under_separate_user_unit(world, monkeypatch, tmp_path):
     freeze = tmp_path / "run/freeze.json"
     freeze.parent.mkdir();freeze.write_text('{"game_port":34992}')
