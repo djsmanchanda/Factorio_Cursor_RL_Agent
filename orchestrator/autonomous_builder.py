@@ -6222,7 +6222,9 @@ def _bootstrap_loan_stock(
                  if callable(getattr(client, "command", None)) else actual)
     ledger = _MATERIAL_RESERVATION_LEDGER
     usable = (
-        ledger.allocatable_stock(spendable, claimant=_material_project_id(target_item))
+        ledger.allocatable_stock(spendable, claimants=(
+            _material_project_id(target_item), f"loan_inputs_{target_item}",
+        ))
         if ledger is not None else dict(spendable)
     )
     return actual, usable
@@ -6408,6 +6410,8 @@ def _restore_bootstrap_loan(
         client, bridge, surface, plan,
         f"restore_bootstrap_loan_{loan.target_item}", emit,
     )
+    if loan.funded_batch and _MATERIAL_RESERVATION_LEDGER is not None:
+        _MATERIAL_RESERVATION_LEDGER.complete(f"loan_inputs_{loan.target_item}")
     _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
     _MALL_REFRESH_SIGNATURES.clear()
     emit(
@@ -6667,11 +6671,45 @@ def _submit_bootstrap_loan(
         loan, actual, usable,
     )
     planning_target = (
-        loan.production_target if minimum_fulfilled else loan.target_count
+        loan.production_target if minimum_fulfilled or loan.funded_batch else loan.target_count
     )
     step = next_bootstrap_step(
         loan.target_item, planning_target, planning_usable, planning_actual,
     )
+    if loan.funded_batch:
+        # A sole precursor lender may only make this already-funded batch.
+        # Persist its craft budget even when bots immediately consume output;
+        # never recursively turn it into another precursor or refill forever.
+        persisted = _bootstrap_loan_persisted_step(loan, actual)
+        remaining = step.crafts if step is not None else 0
+        if persisted is not None and products_finished is not None:
+            remaining = max(0, loan.step_required_crafts -
+                            (products_finished - loan.step_baseline_finished))
+            step = persisted if remaining else None
+        needed = _bootstrap_batch_input_bill(loan.target_item, remaining)
+        if step is not None and (step.recipe != loan.target_item or
+                any(usable.get(item, 0) < count for item, count in needed.items())):
+            _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                    reference_point=reference_point, previous_group=live_loan_group,
+                                    reason="funded batch inputs unavailable; restore its precursor before retrying")
+            return f"restored {loan.original_recipe}; finite batch inputs unavailable"
+        # Inputs already in this loan's requester/machine are no longer in
+        # the transferable pool. Release their hold, and the consumed portion,
+        # so the shared queue does not demand a second copy of the batch.
+        ledger = _MATERIAL_RESERVATION_LEDGER
+        if ledger is not None:
+            owned = _loan_owned_inputs(client, surface, loan)
+            bill = {item: count - owned.get(item, 0) for item, count in
+                    _bootstrap_batch_input_bill(loan.target_item, remaining, headroom=True).items()
+                    if count > owned.get(item, 0)}
+            project_id = f"loan_inputs_{loan.target_item}"
+            if bill:
+                stock = live_base.transferable_items(client, surface, force)
+                ledger.declare(project_id, bill, stock, target_item=loan.target_item,
+                               priority=100, hold_until_producing=True)
+                ledger.mark_constructing(project_id, stock)
+            else:
+                ledger.complete(project_id)
     if not completed_prerequisite and loan.step_recipe is not None:
         persisted = _bootstrap_loan_persisted_step(loan, actual)
         if (
@@ -6783,6 +6821,11 @@ def _submit_bootstrap_loan(
                 details={"target": step.recipe, "rung": predecessor},
             )
     if step is None:
+        if loan.funded_batch:
+            _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                    reference_point=reference_point, previous_group=live_loan_group,
+                                    reason="finite funded batch completed; restore its sole precursor")
+            return f"restored borrowed {loan.original_recipe} after its funded batch"
         if loan.target_item in CORE_MALL_PRODUCERS:
             # A core producer is allowed to reclaim a completed temporary
             # batch, BUT ONLY IF the host recipe has surplus capacity above
@@ -7187,6 +7230,7 @@ def _borrow_free_mall_cell(
     reference_point: Point, *, allowed_original_recipes: frozenset[str] | None,
     allow_shared_provider: bool, require_stocked_original: bool,
     excluded_origins: set[tuple[float, float]],
+    batch_target: int | None = None,
 ) -> tuple[str, Point, tuple[int, int], str, str] | None:
     """Find one borrowable cell outside every active loan's own cell.
 
@@ -7251,9 +7295,11 @@ def _borrow_free_mall_cell(
             # recipe (2026-09-04 cable collapse).
             continue
         if original_recipe in prerequisites and line.machine_count <= 1:
-            # The last real producer of a batch input cannot be its lender.
-            # Preloaded stock only delays the resulting self-dependency.
-            continue
+            # A finite, fully banked batch need not produce more of its
+            # displaced input. Unfunded recursive loans still need that source.
+            if batch_target is None or _funded_bootstrap_batch(
+                    client, surface, force, target_item, batch_target) is None:
+                continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
             if located is None:
@@ -7636,6 +7682,29 @@ def _feeder_waiter_preempts(
     return None
 
 
+def _bootstrap_batch_input_bill(item: str, crafts: int, *, headroom: bool = False) -> dict[str, int]:
+    """Immediate inputs for a finite final-recipe batch, including requester headroom."""
+    if headroom:
+        crafts = math.ceil(crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION))
+    spec = LINE_RECIPES[item]
+    return {str(name): math.ceil(float(amount) * crafts)
+            for name, amount in zip(spec["ingredients"], spec["amounts"], strict=True) if crafts > 0}
+
+
+def _funded_bootstrap_batch(client, surface, force, item, target):
+    """A sole precursor may lend only inputs no other consumer has claimed."""
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    spec = LINE_RECIPES.get(item, {})
+    if ledger is None or spec.get("fluid_ingredients") or not spec.get("ingredients"):
+        return None
+    stock = _transferable_or_available_stock(client, surface, force)
+    free = ledger.allocatable_stock(stock, claimant=f"loan_inputs_{item}")
+    crafts = math.ceil(max(0, target - free.get(item, 0)) /
+                       max(1, float(spec.get("product_amount", 1))))
+    bill = _bootstrap_batch_input_bill(item, crafts, headroom=True)
+    return (bill, stock) if bill and all(free.get(name, 0) >= count for name, count in bill.items()) else None
+
+
 def _start_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_item: str, target_count: int, reference_point: Point,
@@ -7659,6 +7728,7 @@ def _start_bootstrap_loan(
         allow_shared_provider=allow_shared_provider,
         require_stocked_original=require_stocked_original,
         excluded_origins={_loan_cell_origin(loan) for loan in existing},
+        batch_target=max(target_count, spare_target_count or target_count),
     )
     if borrowed is None:
         if not existing:
@@ -7731,6 +7801,25 @@ def _start_bootstrap_loan(
             reference_point=reference_point,
         )
     original_recipe, machine_position, origin, side, machine_name = borrowed
+    funded_batch = False
+    if original_recipe in _queued_mall_prerequisites(target_item):
+        line = live_base.find_line(client, surface, force, original_recipe, machine_name, include_ghosts=False)
+        if line is not None and line.machine_count <= 1:
+            funding = _funded_bootstrap_batch(client, surface, force, target_item,
+                                             max(target_count, spare_target_count or target_count))
+            if funding is None:
+                return None
+            bill, stock = funding
+            ledger = _MATERIAL_RESERVATION_LEDGER
+            project_id = f"loan_inputs_{target_item}"
+            project = ledger.declare(project_id, bill, stock, target_item=target_item,
+                                     priority=100, hold_until_producing=True)
+            if any(project.reserved.get(name, 0) < count for name, count in bill.items()):
+                ledger.complete(project_id)
+                return None
+            ledger.mark_constructing(project_id, stock)
+            funded_batch = True
+            emit(f"  MALL FUNDED BATCH: {target_item} reserved its finite inputs before borrowing {original_recipe}")
     if existing:
         emit(
             f"  MALL BOOTSTRAP LOAN PARALLEL: {target_item} starts on a free "
@@ -7751,6 +7840,7 @@ def _start_bootstrap_loan(
         requester_position=requester_position,
         current_recipe=original_recipe,
         machine_name=machine_name,
+        funded_batch=funded_batch,
     )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loan, emit,
@@ -7955,7 +8045,7 @@ def _reserve_compact_mall_project(
         emit(f"  MATERIAL PROJECT READY: {project_id} has its complete startup bill")
         return
     if _material_bill_pipeline_ready(
-        bill, stock,
+        bill, project.reserved,
         is_scheduled=lambda name: construction_supply_chain_is_scheduled(
             client, surface, force, name,
         ),

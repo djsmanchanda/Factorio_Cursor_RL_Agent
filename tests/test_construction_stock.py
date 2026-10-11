@@ -977,7 +977,7 @@ def test_material_project_starts_at_half_stock(monkeypatch) -> None:
     """A half-stocked cell whose missing inputs are produced starts now."""
     messages: list[str] = []
     ledger = SimpleNamespace(
-        declare=lambda *_a, **_k: SimpleNamespace(state="ready"),
+        declare=lambda *_a, **_k: SimpleNamespace(state="ready", reserved={"assembling-machine-1": 1}),
         shortage_targets=lambda _project, _stock: {"iron-plate": 1},
     )
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
@@ -1012,7 +1012,7 @@ def test_material_project_starts_at_half_stock(monkeypatch) -> None:
 def test_material_project_waits_without_producer_backing(monkeypatch) -> None:
     """A half-stocked cell still waits when a missing input is unproduced."""
     ledger = SimpleNamespace(
-        declare=lambda *_a, **_k: SimpleNamespace(state="ready"),
+        declare=lambda *_a, **_k: SimpleNamespace(state="ready", reserved={"assembling-machine-1": 1}),
         shortage_targets=lambda _project, _stock: {"iron-plate": 1},
     )
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)

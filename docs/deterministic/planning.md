@@ -325,7 +325,14 @@ gated separately and is not changed by the release.
   credited identity, preserving the paired machine's unrelated sections.
   A standing ingredient producer receives the batch's required stock gate
   before another rotating cell is assigned that ingredient. Its last real
-  producer cannot lend its machine to its own downstream batch. Usable batch
+  producer may lend only for a finite final-recipe batch whose complete inputs,
+  including optional spares and requester headroom, are banked in unreserved
+  transferable stock. The batch reserves those inputs before reconfiguration;
+  its durable requester tag preserves the finite craft budget across restarts.
+  It restores the precursor after completion or loss of input coverage, never
+  recursively retargeting or permanently promoting that sole producer. Inputs
+  already delivered to the loan's requester/machine and completed crafts reduce
+  the remaining reservation instead of demanding another copy. Usable batch
   ingredients are unreserved transferable stock plus that batch's own requester
   and machine inputs; another requester's buffer is committed to that consumer.
   Chemical-ladder handoffs use the same boundary: restoring a downstream loan
@@ -383,7 +390,10 @@ gated separately and is not changed by the release.
   the phase-bounded bootstrap pool. A lone transport-belt cell facing a large
   backlog may do the same. The extra cell still needs its exact bill
   and shared provider; it is capacity allocation, not free starter supply.
-  A cell bill whose shortfall is reserved but flowing -- scheduled producer
+  A compact cell's half-bill admission uses its own allocated stock, rather
+  than physical stock held by another reservation. Every unallocated bill item
+  must have a scheduled producer; merely seeing that item in a chest cannot
+  certify funding. A cell bill whose shortfall is reserved but flowing -- scheduled producer
   chain plus spendable stock on hand -- draws from that flow instead of
   waiting out the reserve; a stagnant stockpile with no scheduled producer
   still blocks. A coherent foundation's combined preflight and its submitted

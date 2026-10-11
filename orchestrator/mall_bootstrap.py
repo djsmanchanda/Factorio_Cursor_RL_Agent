@@ -23,6 +23,7 @@ _LOAN_V1_PREFIX = f"{_LOAN_PREFIX}v1:"
 _LOAN_V2_PREFIX = f"{_LOAN_PREFIX}v2:"
 _LOAN_V3_PREFIX = f"{_LOAN_PREFIX}v3:"
 _LOAN_V4_PREFIX = f"{_LOAN_PREFIX}v4:"
+_LOAN_V5_PREFIX = f"{_LOAN_PREFIX}v5:"
 _ASSEMBLER_TIERS = {
     "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
 }
@@ -51,6 +52,7 @@ class MallBootstrapLoan:
     step_minimum_crafts: int | None = None
     completed_step_targets: tuple[tuple[str, int], ...] = ()
     machine_name: str = "assembling-machine-1"
+    funded_batch: bool = False
 
     @property
     def production_target(self) -> int:
@@ -58,6 +60,12 @@ class MallBootstrapLoan:
 
     @property
     def group(self) -> str:
+        # V5 wraps the existing step identity, preserving its parser contract.
+        base = self._base_group
+        return _LOAN_V5_PREFIX + base[len(_LOAN_PREFIX):] if self.funded_batch else base
+
+    @property
+    def _base_group(self) -> str:
         if (
             self.step_recipe is None
             or self.step_baseline_finished is None
@@ -151,6 +159,8 @@ def parse_bootstrap_loan_group(
     str, str, int, int | None, str, str | None, int | None, int | None,
     int | None, int | None, tuple[tuple[str, int], ...],
 ] | None:
+    if group.startswith(_LOAN_V5_PREFIX):
+        group = _LOAN_PREFIX + group[len(_LOAN_V5_PREFIX):]
     if group.startswith(_LOAN_V1_PREFIX):
         fields = group[len(_LOAN_V1_PREFIX):].split(":")
         if len(fields) != 4:
@@ -396,6 +406,7 @@ def active_bootstrap_loans(
             step_minimum_crafts=minimum,
             completed_step_targets=completed,
             machine_name=left_machine if side == "left" else right_machine,
+            funded_batch=group.startswith(_LOAN_V5_PREFIX),
         ))
     return tuple(loans)
 

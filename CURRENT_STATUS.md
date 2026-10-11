@@ -373,3 +373,7 @@ Corrected the loan's own-input survey to `defines.inventory.crafter_input`; the 
 ### 2026-10-11 — automatic DeepSeek helper for fresh OC runs
 
 Enabled DeepSeek V4.1 Flash/high live and final review by default, with a durable per-run session, bounded transport retries and an independent helper service. Shared evidence paths and archived run-index roots preserve comparisons across frozen runners. Unit evidence:41 focused passes;10 regressions fail before/pass after; fast gate1172 passes/3 skips with only the independently unchanged four-import firewall baseline. Actual installed-model session and report publication verified; gameplay effect untested.
+
+### 2026-10-11 — funded finite bootstrap recovery
+
+Repaired sole-precursor lending: finite batches reserve their complete transferable input bill, retain a durable craft budget, count owned inputs, resume interrupted reservations and restore the producer on completion or input loss. Compact-cell pipeline admission now uses its own allocated stock. Evidence:342 focused passes;7 fail-before/pass-after regressions; fast gate1183 passes/3 skips with only the independently unchanged four-import firewall baseline. Read-only selection against the preserved mall and copied ledger confirms a funded lender; live batch delivery remains untested.
