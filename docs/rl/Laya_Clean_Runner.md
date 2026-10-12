@@ -350,3 +350,10 @@ exact loan machine's recipe, force and zero craft progress before holding it.
 Its completed output and input claims persist while the lender is restored. An
 in-flight craft is left running until an observed boundary. A restarted controller
 releases only its recorded machine holds before resuming queue reconciliation.
+
+Live smoke tightened continuation semantics: ready work precedes deferred
+polling, and deferred peers poll by oldest last attempt before priority.
+`infrastructure_construction_wait` retains exact pending entities and parks
+that job until a batched survey confirms them built. Cooperative mall creation
+persists the selected cell half and submits its funded ghosts before power
+work can yield; restart/retry uses that same allocation.

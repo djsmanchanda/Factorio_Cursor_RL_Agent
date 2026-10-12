@@ -200,8 +200,15 @@ class DeterministicSession:
         stock = economics.get("material_stock")
         owned = {}
         loans = economics.get("loans") or []
+        pending_positions = tuple({tuple(e["position"]) for job in self.queue.jobs.values()
+                                   for e in job.checkpoint.get("pending_entities", [])})
+        pending_names = (live_base.entity_names_at(self.client, SURFACE, pending_positions)
+                         if pending_positions else {})
         for job in self.queue.jobs.values():
             proof = {"reserved": {}}
+            pending = job.checkpoint.get("pending_entities", [])
+            if pending:
+                proof["pending_ready"] = all(pending_names.get(tuple(e["position"])) == e["entity"] for e in pending)
             current_stock = int((stock or {}).get(job.item, 0))
             # A single finite item job serves its parents' aggregate bill. Loan
             # craft counters are scoped to its own machine and step baseline.
@@ -328,11 +335,12 @@ class DeterministicSession:
                                                  "minimum_machines": 1+(existing.machine_count if existing else 0)},
                                priority=demanded.priority+1, tick=facts["tick"], kind="capacity")
         def execute(job, params):
-            with execution_slice():
+            with execution_slice(checkpoint=job.checkpoint, persist=self.queue.save):
                 result = self.run(job.operation, **params)
             if result.get("loan_batch") is not None:
                 self._queue_snapshot(facts, {"material_stock": stock, "loans": [result["loan_batch"]]})
-            self.emit(f"QUEUE {job.job_id} priority={job.priority}: {result.get('code')}")
+            self.emit(f"QUEUE {job.job_id} priority={job.priority}: {result.get('code')}"
+                      + (f" -- {result.get('message', '')[:180]}" if not result.get("ok") else ""))
             return result
         with execution_slice():
             receipts = self.queue.pulse(snapshot, execute, can_produce=self._queue_can_produce,

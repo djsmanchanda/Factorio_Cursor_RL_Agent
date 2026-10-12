@@ -7,6 +7,7 @@ import math
 from collections import Counter
 from collections.abc import Callable, Mapping
 
+from orchestrator.execution_slice import cooperative, checkpoint, persist_checkpoint
 from orchestrator import live_base, resource_patches
 from orchestrator.extraction_transport import planned_footprint_tiles
 from orchestrator.game_bridge import GameBridge
@@ -1206,13 +1207,20 @@ def build_compact_mall_stage(
             "what is inserted, so a mall cell for it could never be counted again "
             "and would be rebuilt every pass. It needs a smelting stage."
         )
-    allocation = _choose_slot(
-        client, surface, recipe, reference_point, demand_slot=demand_slot,
-        vertical_ok=vertical_ok,
-    )
+    saved = checkpoint()
+    allocation_key = f"mall_allocation:{surface}:{force}:{recipe}"
+    allocation = saved.get(allocation_key) if saved is not None else None
+    if allocation is None:
+        allocation = _choose_slot(
+            client, surface, recipe, reference_point, demand_slot=demand_slot,
+            vertical_ok=vertical_ok,
+        )
     if allocation is None:
         raise StuckError(f"No assignable slot remains in the compact parts mall for {recipe}")
-    origin, side = allocation
+    origin, side = tuple(allocation[0]), allocation[1]
+    if saved is not None and allocation_key not in saved:
+        saved[allocation_key] = [list(origin), side]
+        persist_checkpoint()
     if side in VERTICAL_SIDES:
         return _build_seed_vertical_slot(
             client, bridge, surface, force, recipe, ingredient_sources, reference_point,
@@ -1254,6 +1262,10 @@ def build_compact_mall_stage(
         client, surface, plan, recipe, origin, side,
     )
     reserved_tiles = planned_footprint_tiles(plan) | mall_grid_reserved_tiles(reference_point)
+    if cooperative():
+        # Claim the approved geometry with funded ghosts before infrastructure
+        # can yield. A retry retains this exact half; peers see its occupancy.
+        _submit(client, bridge, surface, plan, f"paired_mall_{recipe}", emit)
     if callable(getattr(client, "command", None)):
         existing_network = live_base.pole_network_id(
             client, surface, substation,
@@ -1287,7 +1299,8 @@ def build_compact_mall_stage(
                 f"compact mall for {recipe} cannot stage generated power beside "
                 f"its planned substation at {substation}"
             )
-    _submit(client, bridge, surface, plan, f"paired_mall_{recipe}", emit)
+    if not cooperative():
+        _submit(client, bridge, surface, plan, f"paired_mall_{recipe}", emit)
     chests = [
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]

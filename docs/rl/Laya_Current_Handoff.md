@@ -283,3 +283,13 @@ proxies C0–C3; final shared accepted C0/C2; no plastic/advanced circuits/resea
 completion. The final window repeatedly retried inserter cells against provider
 chest holds. Archived evidence remains separate from the upcoming queue run.
 New lifecycle: frozen private fresh episode on34992/27992, observed personally.
+
+### 2026-10-12 14:08 IST — first queue smoke stopped, continuation correction verified
+
+Run `persistent-laya-s50616-1791793608` (a90a80f) was personally observed and
+stopped after286wall seconds/22 decisions. C0 proxy/acceptance only; no mall
+output. Repeated infrastructure waits abandoned allocations and deferred
+high-priority peers delayed gear service. Exact pending-entity waits, ready-first
+fair polling and persisted mall allocation/funded ghost submission fix that
+mechanism.162 focused passes; fast1227 passes/3 skips with only known firewall
+failure. The next frozen private smoke starts through the same OC endpoints.

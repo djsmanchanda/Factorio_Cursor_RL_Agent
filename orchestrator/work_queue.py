@@ -147,6 +147,9 @@ class WorkQueue:
             # Credit is a monotonic sum from the owning job's lane/delivery record.
             job.delivered = max(job.delivered, int(evidence.get('delivered', 0)))
             job.reserved = dict(evidence.get('reserved', job.reserved))
+            if job.checkpoint.get('pending_entities') and evidence.get('pending_ready') is True:
+                job.checkpoint.pop('pending_entities')
+                job.state, job.reason, job.retry_tick = 'ready', '', self.tick
             if evidence.get('complete') is True or (
                 job.kind in {'production', 'spare'} and stock is not None and job.target > 0
                 and job.delivered + int(evidence.get('stock', stock.get(job.item, 0))) >= job.target
@@ -161,18 +164,24 @@ class WorkQueue:
         candidates = [j for j in self.jobs.values()
                       if j.state != 'complete' and j.retry_tick <= self.tick
                       and j.blocked_signature is None
+                      and not j.checkpoint.get('pending_entities')
                       and not j.reason.startswith('dependency_cycle:')
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
                           for higher in self.jobs.values()))
                       and all(self.jobs[d].state == 'complete' for d in j.dependencies)]
-        return sorted(candidates, key=lambda j: (-(j.priority + age_bonus(self.tick-j.created_tick)),
-                                                  j.sequence, j.job_id))
+        return sorted(candidates, key=lambda j: (
+            j.state == 'blocked',
+            j.checkpoint.get('last_attempt_tick', -1) if j.state == 'blocked' else 0,
+            -(j.priority + age_bonus(self.tick-j.created_tick)), j.sequence, j.job_id))
 
     def record(self, job, receipt, snapshot, *, can_produce: Callable[[str], bool]):
         details = receipt.get('details') or {}
         code = receipt.get('code') or ''
         job.checkpoint['receipt'] = receipt
+        job.checkpoint['last_attempt_tick'] = self.tick
+        if code == 'infrastructure_construction_wait' and details.get('pending'):
+            job.checkpoint['pending_entities'] = details['pending']
         job.retry_tick = self.tick + 120
         if code == 'material_shortage':
             job.required = {i: int(n) for i, n in (details.get('required') or {}).items() if int(n) > 0}

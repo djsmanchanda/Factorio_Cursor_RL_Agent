@@ -278,3 +278,70 @@ def test_new_consumer_cannot_reuse_old_delivery_credit(tmp_path):
     next_batch = q.enqueue('produce', drills.params, priority=100, tick=120, parent=another.job_id)
     assert next_batch.state == 'ready' and next_batch.delivered == 0
     assert next_batch.checkpoint['lane_floors'] == {'old-lane':6}
+
+
+def test_deferred_high_priority_polls_do_not_starve_other_ready_work(tmp_path):
+    q = queue(tmp_path)
+    for item in ('inserter','transport-belt','electronic-circuit','electric-mining-drill'):
+        j=q.enqueue('produce', {'item':item,'stock_target':6}, priority=100, tick=0)
+        j.state, j.retry_tick = 'blocked', 0
+        j.checkpoint['last_attempt_tick']=90
+    gear=q.enqueue('mall_slot', {'item':'iron-gear-wheel'}, priority=50, tick=0)
+    calls=[]
+    q.pulse(snapshot(120), lambda j,p: (calls.append(j.item) or {'ok':False,'code':'production_prerequisite_deferred'}),
+            can_produce=lambda _:True, max_jobs=1)
+    assert calls==['iron-gear-wheel']
+    gear.state='blocked'
+    gear.checkpoint['last_attempt_tick']=0
+    calls.clear()
+    q.pulse(snapshot(240), lambda j,p: (calls.append(j.item) or {'ok':False,'code':'production_prerequisite_deferred'}),
+            can_produce=lambda _:True, max_jobs=1)
+    assert calls==['iron-gear-wheel']
+
+
+def test_submitted_infrastructure_is_not_replanned_before_bots_finish(tmp_path):
+    q=queue(tmp_path)
+    job=q.enqueue('mall_slot', {'item':'iron-gear-wheel'}, priority=50,tick=0)
+    q.record(job, {'ok':False,'code':'infrastructure_construction_wait',
+                  'details':{'pending':[{'entity':'big-electric-pole','position':[14,2]}]}},
+             snapshot(), can_produce=lambda _:True)
+    calls=[]
+    execute=lambda j,p:(calls.append(j.job_id) or {'ok':True,'code':'producing'})
+    q.pulse(snapshot(600,owned={job.job_id:{'pending_ready':False}}),execute,can_produce=lambda _:True)
+    assert calls==[]
+    q.pulse(snapshot(601,owned={job.job_id:{'pending_ready':True}}),execute,can_produce=lambda _:True)
+    assert calls==[job.job_id]
+
+
+def test_mall_allocation_survives_power_yield_and_claims_ghosts_first(monkeypatch):
+    import pytest
+    from copy import deepcopy
+    from orchestrator import mall_builder as mall
+    from orchestrator.stage_services import StuckError
+    client=SimpleNamespace(command=lambda _: '')
+    checkpoint={}
+    events,plans,saved=[],[],[]
+    choose=[]
+    def choose_slot(*a,**k):
+        choose.append(True)
+        return (9,0),'left'
+    monkeypatch.setattr(mall,'_choose_slot',choose_slot)
+    monkeypatch.setattr(mall,'_clear_stale_side_requests',lambda *a:None)
+    monkeypatch.setattr(mall,'assert_mall_cell_footprint_free',lambda *a:None)
+    monkeypatch.setattr(mall.live_base,'pole_network_id',lambda *a:None)
+    monkeypatch.setattr(mall,'powered_reserved_substation_neighbor',lambda *a:None)
+    def submit(c,b,s,plan,*a):
+        events.append('mall_ghosts')
+        plans.append(deepcopy(plan))
+    def power(*a,**k):
+        events.append('power')
+        raise StuckError('pending power',code='infrastructure_construction_wait',state='constructing')
+    monkeypatch.setattr(mall,'_submit',submit)
+    monkeypatch.setattr(mall,'extend_power',power)
+    for _ in range(2):
+        with execution_slice(checkpoint=checkpoint,persist=lambda:saved.append(True)):
+            with pytest.raises(StuckError,match='pending power'):
+                mall.build_compact_mall_stage(client,object(),'private','player','iron-gear-wheel',{},(3,-1),
+                                              lambda *a:None,lambda _:None)
+    assert events==['mall_ghosts','power','mall_ghosts','power']
+    assert plans[0]==plans[1] and choose==[True] and saved==[True]

@@ -450,3 +450,14 @@ opening stock includes fast inserters; roboport coverage/linking uses square
 metrics and49-tile spacing.207 focused passes; fast gate1224 passes/3 skips and
 only the unchanged four-import firewall failure. Lifecycle: launch a new frozen
 Python runner; no Lua deployment. Sustained scale improvement awaits live evidence.
+
+### 2026-10-12 14:08 IST — deferred work fairness and durable mall construction
+
+The first queue smoke exposed high-priority deferral polling ahead of ready
+mall work, plus abandoned cell selections after asynchronous power yields.
+Ready work now precedes deferred polls; deferred peers rotate fairly. Exact
+pending infrastructure parks its owner until built. Mall allocation persists
+and funded ghosts claim the chosen half before power can yield.162 focused
+passes; fast gate1227 passes/3 skips, unchanged four-import firewall failure.
+Lifecycle: new frozen Python run; no Lua deployment. First smoke stopped and
+preserved at286s; no mall output improvement claimed for that smoke.
