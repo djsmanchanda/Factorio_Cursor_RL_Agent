@@ -977,27 +977,23 @@ def _apply_remedy(
             )
         acted = nearest is not None
     elif remedy == "stage_power":
-        # A remedy that changes nothing must not be retried. extend_power
-        # returns False without emitting when there is no pole at the
-        # recorded position or no second network to bridge to; the previous
-        # code discarded that, so the loop re-ran an identical no-op for
-        # every remaining round and reported only a bare timeout.
+        # A generated anchor is usable even when machines lie beyond its
+        # supply area. Verify each consumer after connecting that anchor.
         acted = extend_power_for_stage(substation_position)
-        if not acted:
-            # A scaffold can already be on the source network while one or
-            # more machines sit outside its supply area (for example, the
-            # second row of a two-row mine). In that shape the substation has
-            # no *other* powered network to bridge from, but the stranded
-            # machines still need individual hookup poles.
-            statuses = live_base.entity_statuses(
-                client, surface, machine_positions,
-            )
-            stranded = [
-                position for position in machine_positions
-                if statuses.get(tuple(position)) == "no_power"
-            ]
-            for position in stranded:
-                acted |= extend_power_for_stage(position)
+        # A scaffold can already be on the source network while one or
+        # more machines sit outside its supply area (for example, the
+        # second row of a two-row mine). In that shape the substation has
+        # no *other* powered network to bridge from, but the stranded
+        # machines still need individual hookup poles.
+        statuses = live_base.entity_statuses(
+            client, surface, machine_positions,
+        )
+        stranded = [
+            position for position in machine_positions
+            if statuses.get(tuple(position)) == "no_power"
+        ]
+        for position in stranded:
+            acted |= extend_power_for_stage(position)
         if not acted:
             raise StuckError(
                 f"{name}: {description}, but no power bridge can be built from "

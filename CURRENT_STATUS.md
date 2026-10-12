@@ -613,3 +613,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   cycle checks preserve credits. Rotating handoffs count owned requester/WIP.
   325focused/1278fast passes,3skip/inherited firewall. Lifecycle:new private
   freeze/no Lua deploy; chemistry construction observed,output pending.
+
+- 2026-10-12 20:56 IST: Actual4refineries/2plasticplants/3pumpjacks;2pumps unpowered
+  despite generated central anchor. Shared stagepower now connects every
+  stranded consumer.111focused/1278fast passes,3skip/inherited firewall.
+  Lifecycle:new private freeze,no Lua deploy; product/science outcome pending.

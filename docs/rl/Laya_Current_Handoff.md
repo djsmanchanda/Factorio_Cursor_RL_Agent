@@ -762,3 +762,21 @@ resetting delivery credits.325focused tests pass. Fast gate pending; next
 private Python freeze required,no mod deploy. Plastic/science output still0.
 
 Final stale-cell/WIP fast gate:1,278passed,three skipped,only inherited four-import firewall failure.
+
+### 2026-10-12 20:56 IST — generated anchor does not prove consumer power coverage
+
+Run persistent-laya-s50616-1791818450(3dda5c1) built four real refineries,two plastic plants,
+three real pumpjacks and pipeline packets. The first pumpjack worked, but
+(-284.5,-88.5) and(-278.5,-90.5) reportedno_power/energy0. Repeated oil service
+said2machinesunpowered while extend_power accepted the anchor(-298,-78)
+on generatingnetwork1. The shared remedy only tried machine hookups when
+the anchor returnedFalse; that conflicts with its usable-position contract.
+
+Stage-power remediation now surveys and connects every stranded machine
+after its anchor, even when the anchor was already usable. Geometry, material
+funding and bot construction remain shared.111focused power/chemical/mine
+tests pass; regression covers bothFalse/True anchor results. Fast gate running.
+Stopped private runner gracefully; next Python freeze,no Lua deployment.
+Plastic/advanced output remains at baseline392/297,coal0; no science yet.
+
+Final power fast gate:1,278passed,three skipped,only inherited four-import firewall failure.

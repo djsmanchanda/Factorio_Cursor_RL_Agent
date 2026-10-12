@@ -723,12 +723,13 @@ def test_coverage_remedy_targets_the_stranded_ghost_not_stage_origin(monkeypatch
     assert acted
     assert targets == [(25.5, -49.5)]
 
-def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch) -> None:
+@pytest.mark.parametrize('anchor_usable', [False, True])
+def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch, anchor_usable) -> None:
     calls = []
 
     def fake_extend(_client, _bridge, _surface, _force, position, _emit):
         calls.append(position)
-        return position == (59.5, -63.5)
+        return anchor_usable if position == (48.0, -70.0) else position == (59.5, -63.5)
 
     monkeypatch.setattr(builder, "extend_power", fake_extend)
     monkeypatch.setattr(
