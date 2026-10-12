@@ -56,11 +56,11 @@ def test_new_cells_are_chosen_adjacent_to_the_committed_bank(monkeypatch) -> Non
         object(), "nauvis", "electronic-circuit", _REFERENCE,
     )
 
-    assert (origin, side) == ((35, 43), "left")
+    assert (origin, side) == ((47, 41), "left")
     assert origin not in committed
-    # The old first-in-list empty site was much farther from the bank.
+    # Nearest-open ranking still works within the supplied cross lattice.
     first_uncommitted = next(o for o in origins if o not in committed)
-    assert first_uncommitted == (57, 31)
+    assert first_uncommitted == (32, 41)
 
 
 def test_adjacency_ranking_keeps_the_seed_order_when_nothing_is_committed() -> None:
@@ -110,11 +110,15 @@ def test_reserved_substation_sits_outside_every_planned_slot_band() -> None:
     for origin in origins[2:]:
         position = reserved_substation_position(_REFERENCE, origin)
         tiles = footprint_tiles(position, 2)
-        # The slot's machines, inserters and chests occupy y+0..y+3.
-        assert all(y >= origin[1] + 4 for _x, y in tiles)
+        # The inter-module corner clears all four machine footprints.
+        for side in ("left", "right", "north", "south"):
+            machine = (mall_builder._vertical_slot_position(origin, side)
+                       if side in {"north", "south"} else mall_builder._slot_position(origin, side))
+            assert not tiles & footprint_tiles(machine, 3)
         # It must still be inside the substation's own supply reach of the cell.
-        for side in ("left", "right"):
-            machine = mall_builder._slot_position(origin, side)
+        for side in ("left", "right", "north", "south"):
+            machine = (mall_builder._vertical_slot_position(origin, side)
+                       if side in {"north", "south"} else mall_builder._slot_position(origin, side))
             assert max(
                 abs(position[0] - machine[0]), abs(position[1] - machine[1]),
             ) <= _MALL_SLOT_SERVICE_RANGE

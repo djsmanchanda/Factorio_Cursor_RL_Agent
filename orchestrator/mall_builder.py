@@ -20,16 +20,15 @@ from planners.quad_mall_layout import (
     DENSE_MALL_MODULE_OFFSETS,
     QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
     generate_quad_mall_layout, generate_seed_vertical_slot,
+    repeating_mall_module_offsets,
 )
 from planners.recipe_data import LINE_RECIPES
 from planners.stock_gating import stock_gate
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
-# Keep two tiles between adjacent machine footprints while removing the old
-# five-tile horizontal and four-tile vertical dead space.  The 2x2 substation
-# still clears the next row at six tiles; five would overlap the lower-row
-# input inserter.
+# Legacy paired-row dimensions retained for historical layout evidence.
+# Current origins come from the shared four-slot cross lattice.
 _CELL_PITCH = (11, 6)
 _CELL_COLUMNS = 3
 _CELL_ROWS = 10
@@ -135,10 +134,13 @@ def compact_mall_project_bill(
         # The seed cell's requester, provider and substation already exist.
         preview = generate_seed_vertical_slot(
             recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
-            (0.0, 0.0), side, craft_time=spec["craft_time"],
+            seed_vertical_center(tuple(allocation[0])) if allocation is not None else (0.0, 0.0),
+            side, craft_time=spec["craft_time"],
             stock_gate_target=stock_gate_target,
             request_multiplier_override=request_multiplier_override,
         )
+        if client is not None and surface is not None and allocation is not None:
+            _reconcile_built_mall_plan(client, surface, force, preview)
         bill = Counter(plan_material_bill(preview))
         for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
             bill[ingredient] += math.ceil(amount)
@@ -197,7 +199,8 @@ def saved_mall_allocation(surface, force, recipe):
     return (tuple(value[0]), value[1]) if value is not None else None
 
 
-def idle_mall_allocations(client, surface, force, reference_point, *, demand_slot=False, states=None):
+def idle_mall_allocations(client, surface, force, reference_point, *, demand_slot=False, states=None,
+                          vertical_states=None):
     """Built no-recipe halves of this declared mall, excluding another job's claim."""
     origins = _cell_origins(reference_point)
     origins = origins[-_DEMAND_CELL_COUNT:] if demand_slot else origins[:-_DEMAND_CELL_COUNT]
@@ -205,9 +208,14 @@ def idle_mall_allocations(client, surface, force, reference_point, *, demand_slo
     candidates = [(origin, side) for origin in origins
                   for side, value in zip(("left", "right"), states[origin][:2], strict=True)
                   if value == "?" and states[origin][2] == "requester-chest"]
+    vertical_states = vertical_states if vertical_states is not None else _vertical_mall_states(client, surface, origins)
+    candidates.extend((origin, side) for origin in origins
+        for side, value in zip(VERTICAL_SIDES, vertical_states[origin], strict=True)
+        if value == "?" and states[origin][2] == "requester-chest")
     if not candidates:
         return []
-    points = [_slot_position(origin, side) for origin,side in candidates]
+    points = [(_vertical_slot_position(origin, side) if side in VERTICAL_SIDES else _slot_position(origin, side))
+              for origin,side in candidates]
     records = live_base.area_entity_records(client, surface, force,
         (min(x for x,y in points)-5, min(y for x,y in points)-2),
         (max(x for x,y in points)+5, max(y for x,y in points)+2))
@@ -215,7 +223,7 @@ def idle_mall_allocations(client, surface, force, reference_point, *, demand_slo
              and not r.get("is_ghost") and not r.get("deconstructed")}
     result = []
     for origin, side in candidates:
-        position = _slot_position(origin, side)
+        position = (_vertical_slot_position(origin, side) if side in VERTICAL_SIDES else _slot_position(origin, side))
         machine = built.get(position)
         requester = built.get((origin[0]+4.5, origin[1]+1.5))
         if (machine and machine.get("force") == force and machine.get("type") == "assembling-machine"
@@ -270,11 +278,11 @@ def quad_support_inserter_type(recipe: str) -> str:
 
 
 def dense_mall_module_centers(reference_point: Point) -> tuple[Point, ...]:
-    """Return the fixed 4, 8, and 12-slot module centres."""
+    """Requester centres of the repeated four-slot district."""
     first = quad_mall_center(reference_point)
     return tuple(
         (first[0] + dx, first[1] + dy)
-        for dx, dy in DENSE_MALL_MODULE_OFFSETS
+        for dx, dy in repeating_mall_module_offsets()
     )
 
 
@@ -314,16 +322,9 @@ def _quad_mall_state(client: RconClient, surface: str, center: Point) -> tuple[s
 def quad_mall_slot_count(
     client: RconClient, surface: str, reference_point: Point,
 ) -> int:
-    """Committed assembler count across the reserved 4 -> 12-slot bank."""
-    total = 0
-    for index, center in enumerate(dense_mall_module_centers(reference_point)):
-        top, bottom, requester = _quad_mall_state(client, surface, center)
-        # A seed module's west/east machines are its paired cell's left/right
-        # slots, already counted there; only its north/south machine is new.
-        per_half = 1 if index < SEED_CELL_COUNT else 2
-        if requester in {"requester-chest", "entity-ghost"}:
-            total += (per_half if top != "-" else 0) + (per_half if bottom != "-" else 0)
-    return total
+    """Committed north/south assemblers across the repeated district."""
+    states = _vertical_mall_states(client, surface, _cell_origins(reference_point))
+    return sum(value != "-" for pair in states.values() for value in pair)
 
 
 def preview_quad_mall_allocation(
@@ -369,7 +370,8 @@ def mall_demand_slot_count(
     """Live or ghosted slots in the post-plastic demand-capacity bank."""
     origins = _cell_origins(reference_point)[-_DEMAND_CELL_COUNT:]
     states = _district_state(client, surface, origins)
-    return sum(
+    vertical = _vertical_mall_states(client, surface, origins)
+    return sum(value != "-" for pair in vertical.values() for value in pair) + sum(
         recipe != "-"
         for left, right, _requester in states.values()
         for recipe in (left, right)
@@ -537,22 +539,9 @@ def next_shared_provider_retrofit_plan(
 
 
 def _cell_origins(reference_point: Point) -> list[tuple[int, int]]:
-    """Stable district with the two staggered seed cells first."""
+    """The supplied cross pattern repeats without switching to paired rows."""
     start = (round(reference_point[0]) + 32, round(reference_point[1]) + 32)
-    seed = [(start[0], start[1]), (start[0] + 6, start[1] + 5)]
-    candidates = [
-        (start[0] + column * _CELL_PITCH[0], start[1] + row * _CELL_PITCH[1])
-        for row in range(_CELL_ROWS + 4) for column in range(_CELL_COLUMNS)
-    ]
-    def overlaps_seed(origin: tuple[int, int]) -> bool:
-        left, top = origin
-        right, bottom = left + 12, top + 7
-        return any(
-            left < sx + 12 and right > sx and top < sy + 7 and bottom > sy
-            for sx, sy in seed
-        )
-    rest = [origin for origin in candidates if origin not in seed and not overlaps_seed(origin)]
-    return seed + rest[: 30 - len(seed)]
+    return [(start[0]+int(dx), start[1]+int(dy)) for dx,dy in repeating_mall_module_offsets()]
 
 
 def seed_shared_substation(reference_point: Point) -> Point:
@@ -668,7 +657,7 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
 
     Reserving only the submitted half let a bridge pole or roboport land in a
     future top/bottom half.  Every module is cheap to describe from the same
-    relative geometry, so reserve all three modules up front; this remains
+    relative geometry, so reserve the repeated district up front; this remains
     relative to the mall reference and works on other map seeds.
     """
     spec = LINE_RECIPES["iron-gear-wheel"]
@@ -699,8 +688,13 @@ def _cell_footprint_tiles(origin: tuple[int, int]) -> set[tuple[int, int]]:
         plan = generate_paired_mall_layout(
             "iron-gear-wheel", spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
             craft_time=spec["craft_time"], set_recipe=False, include_substation=side == "left",
-            substation_position=(origin[0] + 4.0, origin[1] + 5.0), shared_provider=False,
+            substation_position=(origin[0] + 8.0, origin[1] + 4.0), shared_provider=False,
         )
+        tiles |= planned_footprint_tiles(plan)
+    for side in VERTICAL_SIDES:
+        plan = generate_seed_vertical_slot("iron-gear-wheel", spec["machine"],
+            spec["ingredients"], spec["amounts"], seed_vertical_center(origin), side,
+            craft_time=spec["craft_time"], set_recipe=False)
         tiles |= planned_footprint_tiles(plan)
     return tiles
 
@@ -744,14 +738,13 @@ def reserved_substation_position(
 ) -> Point:
     """The cell's reserved local bank service point, outside every planned slot.
 
-    The substation sits in the inter-row service gap, below the slot's band of
-    machines, inserters and chests, so it is a fixed local anchor the cell's
-    machines sit inside rather than a tile a later slot or pole chain crosses.
+    The substation sits in the clear corner between staggered cross modules.
+    It reaches every side without occupying a future machine or transfer arm.
     The two opening seed cells share the one between them.
     """
     if seed_cell_uses_shared_substation(reference_point, origin):
         return seed_shared_substation(reference_point)
-    return (origin[0] + 4.0, origin[1] + 5.0)
+    return (origin[0] + 8.0, origin[1] + 4.0)
 
 
 _MALL_SLOT_SERVICE_RANGE = 9.0  # substation supply area radius
@@ -976,6 +969,25 @@ def _vertical_slot_position(origin: tuple[int, int], side: str) -> Point:
     return (center[0] + offset[0], center[1] + offset[1])
 
 
+def _vertical_mall_states(client, surface, origins):
+    """One bounded census includes built no-recipe machines and owned ghosts."""
+    if not callable(getattr(client, "command", None)):
+        return {o: _quad_mall_state(client, surface, seed_vertical_center(o))[:2] for o in origins}
+    literal = ",".join("{"+str(x)+","+str(y)+"}" for x,y in origins)
+    lua = ("local s=game.surfaces["+repr(surface)+"];local out={};"
+           "for i,o in ipairs({"+literal+"}) do for _,dy in ipairs({-3.5,6.5}) do "
+           "local e=s.find_entities_filtered{position={o[1]+4.5,o[2]+dy},radius=0.1,"
+           "force='player',type={'assembling-machine','entity-ghost'},limit=1}[1];"
+           "local v='-';if e then local ok,r=pcall(function() return e.get_recipe() end);"
+           "if e.type=='assembling-machine' or (e.ghost_name or ''):find('assembling%-machine') then "
+           "v=ok and r and r.name or '?' end end;out[#out+1]=v end end;"
+           "rcon.print(table.concat(out,','))")
+    values=client.command('/sc '+lua).strip().split(',')
+    if len(values) != 2*len(origins):
+        raise StuckError('vertical mall census unavailable',code='mall_slot_survey_unavailable',state='planned')
+    return {origin: tuple(values[2*i:2*i+2]) for i,origin in enumerate(origins)}
+
+
 def _vertical_side_clear(
     client: RconClient, surface: str, origin: tuple[int, int], side: str,
 ) -> bool:
@@ -993,20 +1005,21 @@ def _vertical_side_clear(
 
 def _open_seed_vertical_slot(
     client: RconClient, surface: str, recipe: str | None, reference_point: Point,
-    states: Mapping[tuple[int, int], tuple[str, str, str]] | None = None,
+    states: Mapping[tuple[int, int], tuple[str, str, str]] | None = None, vertical_states=None,
 ) -> tuple[tuple[int, int], str] | None:
     """The first free north/south slot on a complete seed pair.
 
     North shares the top provider with the left machine, south the bottom
     provider with the right one, so an incompatible output pairing is skipped.
     """
-    origins = _cell_origins(reference_point)[:SEED_CELL_COUNT]
+    origins = list(states) if states is not None else _cell_origins(reference_point)
     states = states if states is not None else _district_state(client, surface, origins)
+    vertical_states = vertical_states if vertical_states is not None else _vertical_mall_states(client, surface, origins)
     for origin in origins:
         left, right, requester = states.get(origin, ("-", "-", "-"))
         if requester != "requester-chest" or left == "-" or right == "-":
             continue
-        top, bottom, _ = _quad_mall_state(client, surface, seed_vertical_center(origin))
+        top, bottom = vertical_states[origin]
         for side, occupied, shared in (("north", top, left), ("south", bottom, right)):
             if occupied != "-" or (recipe is not None and _incompatible_pair(shared, recipe)):
                 continue
@@ -1059,9 +1072,11 @@ def _choose_slot(
     )
     states = _district_state(client, surface, origins)
     preferred_open: list[tuple[tuple[int, int], str]] = []
+    vertical_states = _vertical_mall_states(client, surface, origins)
     claims = (runtime_checkpoint() or {}).get("mall_allocations", {})
     for origin, side, _machine in idle_mall_allocations(
-            client, surface, "player", reference_point, demand_slot=demand_slot, states=states):
+            client, surface, "player", reference_point, demand_slot=demand_slot, states=states,
+            vertical_states=vertical_states):
         claim_key = f"{surface}:player:{origin[0]}:{origin[1]}:{side}"
         if claims.get(claim_key, recipe) == recipe:
             return origin, side
@@ -1071,6 +1086,18 @@ def _choose_slot(
     for origin in origins:
         left, right, requester_name = states[origin]
         left_present, right_present = left != "-", right != "-"
+        if left_present and right_present and requester_name == "requester-chest":
+            if vertical_ok:
+                vertical = _open_seed_vertical_slot(client, surface, recipe, reference_point,
+                    {origin: states[origin]}, {origin: vertical_states[origin]})
+                if vertical is not None:
+                    return vertical
+            elif (cooperative() and recipe != "long-handed-inserter"
+                  and "long-handed-inserter" in LINE_RECIPES
+                  and any(value == "-" for value in vertical_states[origin])):
+                raise StuckError('four-slot mall waits for long-handed transfers',
+                    code='production_prerequisite_deferred', state='supply_wait',
+                    details={'predecessor':'long-handed-inserter','required_stock':2})
         if left_present != right_present and requester_name == "requester-chest":
             side = "right" if left_present else "left"
             if not _side_clear(client, surface, origin, side):
@@ -1092,9 +1119,9 @@ def _choose_slot(
             empty_origins.append(origin)
     if preferred_open or related_open or other_open:
         return (preferred_open or related_open or other_open)[0]
-    if vertical_ok and not demand_slot:
+    if vertical_ok:
         # Reuse a seed pair's requester and providers before opening a new cell.
-        vertical = _open_seed_vertical_slot(client, surface, recipe, reference_point, states)
+        vertical = _open_seed_vertical_slot(client, surface, recipe, reference_point, states, vertical_states)
         if vertical is not None:
             return vertical
     empty_origins = _rank_empty_origins(
@@ -1119,8 +1146,8 @@ def locate_mall_cell(
 ) -> tuple[tuple[int, int], str] | None:
     """Inverse of slot allocation: which declared cell half holds this machine.
 
-    The district is deterministic from `reference_point` (row-major, fixed
-    pitch), so a machine either sits on exactly one declared slot or outside
+    The district is deterministic from `reference_point` (a fixed staggered
+    lattice), so a machine either sits on exactly one declared slot or outside
     the mall entirely."""
     target = (float(machine_position[0]), float(machine_position[1]))
     for origin in _cell_origins(reference_point):
@@ -1427,6 +1454,8 @@ def _build_seed_vertical_slot(
     plan["surface"], plan["force"] = surface, force
     emit(f"compact parts mall for {recipe}: assigning {side} slot of seed cell {origin}, "
          "reusing its requester and provider")
+    if callable(getattr(client, "command", None)):
+        _reconcile_built_mall_plan(client, surface, force, plan)
     assert_mall_cell_footprint_free(client, surface, plan, recipe, origin, side)
     _submit(client, bridge, surface, plan, f"seed_vertical_mall_{recipe}_{side}", emit)
     machine = _vertical_slot_position(origin, side)

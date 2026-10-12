@@ -24,14 +24,19 @@ QUAD_MALL_GROUP_MACHINES = {
     "bottom": ("east", "south"),
 }
 
-# Three reserved module centres form the 4 -> 12 expansion bank.  The offsets
-# follow the supplied dense blueprint's staggered arrangement: the first
-# module is the opening four-machine bank, and the two later modules sit above
-# and to the right without moving the machines already built.
-# The three requester centres follow the supplied expandable blueprint.  The
-# first centre reuses the opening paired cell; the other two add the upper and
-# lower expansion modules without moving the seed machines.
-DENSE_MALL_MODULE_OFFSETS = ((0.0, 0.0), (6.0, 5.0), (-3.0, 10.0))
+# October12 user blueprint: six repeated left/right/up/down crosses. The
+# two lattice vectors preserve this stagger as the district grows further.
+DENSE_MALL_MODULE_OFFSETS = ((0.0, 0.0), (6.0, 5.0), (-3.0, 10.0),
+                             (3.0, 15.0), (-9.0, 5.0), (12.0, 10.0))
+
+
+def repeating_mall_module_offsets(count: int = 30):
+    offsets = list(DENSE_MALL_MODULE_OFFSETS)
+    candidates = {(6.0*i-3.0*j, 5.0*i+10.0*j)
+                  for i in range(-count, count+1) for j in range(-count, count+1)
+                  if 5*i+10*j >= 0}
+    offsets.extend(sorted(candidates-set(offsets), key=lambda p: (p[0]**2+p[1]**2,p[1],p[0])))
+    return tuple(offsets[:count])
 
 
 def _position(center: tuple[float, float], offset: tuple[float, float]) -> dict:

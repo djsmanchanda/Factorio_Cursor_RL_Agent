@@ -743,3 +743,20 @@ Roboport logistics covers a50×50 square and construction a110×110 square.
 Coverage, nearest-port selection and chain linking use Chebyshev distance.
 49-tile links leave one tile of overlap under the50-tile engine limit; local
 relocation still checks footprints, reserved tiles, power and connectivity.
+
+### Repeating mall cross (user blueprint, October 12, 2026)
+
+The shared mall repeats four assembler positions around one requester: left and
+right at three tiles, up and down at five tiles. Each horizontal side has a
+provider; its vertical neighbour shares that provider using two long-handed
+inserters. The supplied six-module stagger continues on lattice vectors (6,5)
+and (-3,10). Every future cross footprint is reserved before routing services;
+substations occupy the clear corners between modules. New cells retain this
+pattern instead of returning to separate paired rows.
+
+After the horizontal positions, allocation uses up then down before opening
+another module when the transfers are funded. Missing long-handed support is a
+queued precursor, not permission to build a wrongly fed vertical machine. The
+executor can assign built empty vertical positions too. Capacity counts all
+four sides, including ghosted and built no-recipe vertical machines, using a
+batched census rather than a per-module RCON loop.

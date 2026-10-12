@@ -306,12 +306,12 @@ def test_seed_power_bridge_reserves_all_dense_module_tiles() -> None:
     assert (36, 42) in reserved
 
 
-def test_dense_bank_has_three_reserved_module_centres() -> None:
+def test_dense_bank_repeats_the_user_six_cross_module_pattern() -> None:
     centers = dense_mall_module_centers((3.0, -1.0))
 
-    assert len(centers) == 3
+    assert len(centers) == 30
     assert centers[0] == quad_mall_center((3.0, -1.0))
-    assert len(set(centers)) == 3
+    assert len(set(centers)) == 30
 
 
 def test_quad_top_admission_parks_when_power_cannot_stage(monkeypatch) -> None:

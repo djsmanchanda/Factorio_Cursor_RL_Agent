@@ -335,3 +335,15 @@ fast1234 pass/3 skip, only the unchanged four-import firewall failure.
 Read-only preserved-world replay reduces circuit/belt construction bills to
 startup inputs alone. Lifecycle: fresh frozen private runner after the user's
 four-slot repeating-layout work; no mod deployment. Throughput is unverified.
+
+### 2026-10-12 15:35 IST — supplied repeating cross geometry verified
+
+The user clarified left/right/up/down and supplied a six-requester/24-assembler
+blueprint. Shared allocation now repeats its stagger, reserves all four sides,
+uses up/down slots beyond the two seed pairs, queues missing long-handed
+support and counts built no-recipe/ghost vertical slots in one batched census.
+232 focused tests pass, including exact supplied placement/direction comparison
+and collision validation across30 repeated modules. Fast gate1234 pass/3 skip;
+only the unchanged four-import firewall failure. Private engine read-only census
+confirms the user's recreated pattern is discoverable. Committed next before
+fresh private freeze; no adoption, production action or mod deployment.

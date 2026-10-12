@@ -142,3 +142,53 @@ def test_vertical_slot_needs_long_handed_supply(monkeypatch, item, stock, produc
     monkeypatch.setattr(builder, "_production_started", lambda *_a: producing)
 
     assert builder._seed_vertical_mall_slot_ok(Client(), "nauvis", "player", item) is expected
+
+
+def test_supplied_blueprint_repeats_six_crosses_and_expansion_keeps_clearance():
+    import json
+    from pathlib import Path
+    fixture=json.loads((Path(__file__).parent/'fixtures/user_repeating_cross_mall.json').read_text())
+    reference=tuple(fixture['reference'])
+    origins=mall._cell_origins(reference)
+    centres=mall.dense_mall_module_centers(reference)
+    supplied={tuple(e['position'].values()) for e in fixture['entities'] if e['name']=='requester-chest'}
+    assert set(centres[:6]) == supplied
+    plans=[]
+    expected=set()
+    for origin in origins:
+        for side in ('left','right'):
+            spec=LINE_RECIPES['iron-gear-wheel']
+            p=generate_paired_mall_layout('iron-gear-wheel','assembling-machine-1',spec['ingredients'],spec['amounts'],
+                origin,side,craft_time=spec['craft_time'],include_substation=mall.seed_cell_includes_substation(reference,origin,side),
+                substation_position=mall.reserved_substation_position(reference,origin))
+            if side=='right':
+                p['phases'][0]['actions']=[a for a in p['phases'][0]['actions'] if a['entity']!='requester-chest']
+            plans.append(('iron-gear-wheel',p))
+        for side in ('north','south'):
+            plans.append(('iron-gear-wheel',generate_seed_vertical_slot('iron-gear-wheel','assembling-machine-1',
+                spec['ingredients'],spec['amounts'],mall.seed_vertical_center(origin),side,craft_time=spec['craft_time'])))
+        if origin in origins[:6]:
+            for _,plan in plans[-4:]:
+                for phase in plan['phases']:
+                    for a in phase['actions']:
+                        if a['entity']!='substation' and a['action_type'].startswith('place'):
+                            expected.add((a['entity'],a['position']['x'],a['position']['y'],a.get('direction')))
+    directions={0:'north',4:'east',8:'south',12:'west'}
+    actual={(e['name'],e['position']['x'],e['position']['y'],
+             directions.get(e.get('direction',0)) if 'inserter' in e['name'] else None)
+            for e in fixture['entities'] if e['name']!='substation'}
+    assert actual==expected
+    validate_no_collisions(plans)
+
+
+def test_vertical_order_repeats_after_the_opening_modules(full_seed_pairs, monkeypatch):
+    origins=mall._cell_origins(REFERENCE)
+    later=origins[2]
+    states={o:('iron-gear-wheel','copper-cable','requester-chest') for o in origins}
+    vertical={o:('pipe','pipe') for o in origins}
+    vertical[later]=('-','-')
+    monkeypatch.setattr(mall,'_district_state',lambda *a: states)
+    monkeypatch.setattr(mall,'_vertical_mall_states',lambda *a: vertical)
+    assert mall._choose_slot(object(),'nauvis','pipe',REFERENCE,vertical_ok=True)==(later,'north')
+    vertical[later]=('pipe','-')
+    assert mall._choose_slot(object(),'nauvis','pipe',REFERENCE,vertical_ok=True)==(later,'south')

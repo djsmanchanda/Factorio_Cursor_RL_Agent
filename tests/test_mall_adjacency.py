@@ -26,5 +26,5 @@ def test_new_cells_are_chosen_adjacent_to_the_committed_bank(monkeypatch) -> Non
         object(), "nauvis", "electronic-circuit", _REFERENCE,
     )
 
-    assert (origin, side) == ((35, 43), "left")
+    assert (origin, side) == ((47, 41), "left")
     assert origin not in committed

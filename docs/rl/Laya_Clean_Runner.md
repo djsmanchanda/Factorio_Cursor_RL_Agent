@@ -376,3 +376,7 @@ missing producible ancestor, preserving another job's allocation. Installed
 continuations retain their exact geometry, resume at the slot cap, and reserve
 only missing construction plus startup inputs. They do not re-enter the
 borrower search or pay for an already-installed assembler a second time.
+
+The user's supplied four-slot cross blueprint is now the shared district
+geometry beyond the opening bank. Up/down slots remain executor-assignable
+throughout expansion; long-handed support shortages enter the precursor queue.
