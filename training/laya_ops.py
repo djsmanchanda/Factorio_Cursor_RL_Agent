@@ -358,7 +358,10 @@ class DeterministicSession:
         """Use the deterministic queue's current survey and completed-loan handoff."""
         if hasattr(self, "queue"):
             loans = []
-            for loan in mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE):
+            active_loans = mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
+            from orchestrator.craft_boundary import recover_orphan_drains
+            recover_orphan_drains(self.client, SURFACE, FORCE, active_loans)
+            for loan in active_loans:
                 facts = self._loan_batch_facts(loan)
                 loans.append(facts)
             tick = int(self.client.command("/sc rcon.print(game.tick)").strip())

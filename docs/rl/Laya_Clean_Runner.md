@@ -365,3 +365,7 @@ craft completes with no next input; only then may configuration hold/change it.
 Feeder flags and the previous gate connection live in the world-scoped runtime
 checkpoint and restore after the transaction. This does not change standing
 numeric limits or manufacture an item/progress credit.
+
+Feeder-drain cleanup applies to same-recipe configuration as well as a changed
+recipe. Maintenance restores drain records whose borrower has released or
+moved to another recipe, so an abandoned pause cannot starve a standing source.

@@ -2,6 +2,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from orchestrator.work_queue import WorkQueue
 from orchestrator.execution_slice import execution_slice
 from training.laya_ops import DeterministicSession
@@ -349,7 +351,8 @@ def test_mall_allocation_survives_power_yield_and_claims_ghosts_first(monkeypatc
     assert plans[0]==plans[1] and choose==[True] and saved==[True]
 
 
-def test_drain_finishes_gated_craft_without_another_input_and_survives_restart(tmp_path):
+@pytest.mark.parametrize('restore_same_recipe', [False, True])
+def test_drain_finishes_gated_craft_without_another_input_and_survives_restart(tmp_path, restore_same_recipe):
     import json, re, subprocess
     import pytest
     from orchestrator.stage_services import _hold_recipe_changes, StuckError
@@ -411,8 +414,23 @@ print('STATE='..encode(state))
     assert q.runtime['craft_drains']['1.00:1.00']['feeders'][0]['disabled'] is False
     # Engine completes the already-funded in-flight craft with no next input.
     client.state.update(progress=0,finished=9)
+    if restore_same_recipe:
+        plan['phases'][0]['actions'][0]['recipe']='copper-cable'
     with execution_slice(runtime=q.runtime,persist=q.save):
         with _hold_recipe_changes(client,'private','player',plan):
-            assert client.state['machine_disabled'] is True
+            assert client.state['machine_disabled'] is (not restore_same_recipe)
     assert not client.state['machine_disabled'] and not client.state['feeding_disabled']
     assert client.state['connected'] is True and q.runtime['craft_drains']=={}
+
+
+def test_released_borrower_cannot_leave_precursor_feeders_parked(tmp_path, monkeypatch):
+    from orchestrator import craft_boundary as boundary
+    q=queue(tmp_path)
+    q.runtime={'craft_drains':{'1.00:1.00':{'x':1,'y':1,'recipe':'electronic-circuit'},
+                               '2.00:2.00':{'x':2,'y':2,'recipe':'transport-belt'}}}
+    calls=[]
+    monkeypatch.setattr(boundary,'release_drains',lambda c,s,f,actors:calls.extend(actors))
+    active=[SimpleNamespace(machine_position=(2,2),current_recipe='transport-belt')]
+    with execution_slice(runtime=q.runtime,persist=q.save):
+        boundary.recover_orphan_drains(object(),'private','player',active)
+    assert calls==[{'x':1,'y':1,'recipe':'electronic-circuit'}]

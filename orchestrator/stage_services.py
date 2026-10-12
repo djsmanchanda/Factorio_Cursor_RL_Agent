@@ -571,8 +571,9 @@ def _hold_recipe_changes(client, surface, force, plan):
                    "radius=0.1,type='assembling-machine',force="+json.dumps(force)+
                    ",limit=1}[1];if e then e.disabled_by_script=a.disabled end end")
             client.command("/sc " + lua)
-            from orchestrator.craft_boundary import release_drains
-            release_drains(client, surface, force, held)
+        from orchestrator.craft_boundary import release_drains
+        release_drains(client, surface, force,
+                       [{"x": a["position"]["x"], "y": a["position"]["y"]} for a in changes])
 
 
 def _submit(

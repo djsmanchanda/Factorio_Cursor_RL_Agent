@@ -83,3 +83,14 @@ def release_drains(client, surface, force, held):
     for key in released:
         drains.pop(key)
     persist_checkpoint()
+
+
+def recover_orphan_drains(client, surface, force, loans):
+    """A released/reconfigured borrower must not keep its source feeder parked."""
+    state = runtime_checkpoint()
+    if state is None:
+        return
+    live = {f"{l.machine_position[0]:.2f}:{l.machine_position[1]:.2f}": l.current_recipe for l in loans}
+    orphaned = [r for key, r in state.get('craft_drains', {}).items()
+                if key not in live or live[key] != r['recipe']]
+    release_drains(client, surface, force, orphaned)

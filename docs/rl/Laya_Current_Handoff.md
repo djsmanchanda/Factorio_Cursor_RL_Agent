@@ -312,3 +312,13 @@ through OC; preserved before the next fresh archive. Shared craft-drain mechanic
 now finish the current craft without a next input and restore exact feeder/gate
 flags. Native-Lua conservation/restart test and private engine crafts8→9/progress0
 verification pass.140 focused/1229 fast pass; only unchanged firewall baseline.
+
+### 2026-10-12 14:53 IST — resumed production and detached feeder recovery
+
+The cd55526 run `persistent-laya-s50616-1791796045` produced belts/drills/circuits
+and grew from three to seven assemblers, but a later interval produced no new
+circuits. The saved drain on circuit cell(39.5,33.5) outlived its borrower:
+restoring an identical recipe skipped cleanup. Stopped through OC and preserved.
+Cleanup now applies to same-recipe configuration, and maintenance recovers
+released/reconfigured borrowers' drain records.142 focused/1231 fast pass; three
+skips and only unchanged firewall failure. A new private freeze follows.

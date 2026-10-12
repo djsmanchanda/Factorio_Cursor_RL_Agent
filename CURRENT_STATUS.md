@@ -481,3 +481,13 @@ checkpoints retain pending drains. Native-Lua conservation/restart regression,
 140 focused passes; fast1229 passes/3 skips, only known firewall failure. Private
 engine verified crafts8→9, progress→0, hold and restore. Lifecycle: fresh frozen
 Python runner; no mod deployment. Natural throughput improvement still to observe.
+
+### 2026-10-12 14:53 IST — same-recipe handoffs release feeder drains
+
+Personal observation found seven assemblers but circuit output remained flat:
+a completed borrower restored its original circuit recipe and left the feeder
+parked because cleanup was tied to a recipe change. All recipe configurations
+now release their owned drain; maintenance recovers drains whose borrower has
+released or changed recipe. Same/different-recipe conservation/restart and
+orphan regressions pass;142 focused/1231 fast passes, three skips and only known
+firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
