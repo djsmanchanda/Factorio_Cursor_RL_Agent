@@ -191,7 +191,9 @@ class WorkQueue:
                       and j.blocked_signature is None
                       and not j.checkpoint.get('pending_entities')
                       and (not j.reason.startswith('dependency_cycle:')
-                           or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True)
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
+                           or (j.dependencies and all(self.jobs[d].state == 'complete' for d in j.dependencies)))
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
                           for higher in self.jobs.values()))

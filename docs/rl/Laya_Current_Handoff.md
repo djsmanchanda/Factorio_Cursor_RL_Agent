@@ -509,3 +509,21 @@ Coverage repair therefore never ran for that cell. Shared lookup now derives
 vertical requester/provider offsets from planners.quad_mall_layout constants.
 Exact private27992 read resolves provider63.5,44.5 for assembler63.5,48.5;
 317focused/1256fast pass,3skip/knownfirewall. New private freeze follows.
+
+### 2026-10-12 17:17 IST — live manufacturing recovery; stale cycle dispatch repaired
+
+9e87e01 private run persistent-laya-s50616-1791805239 observed personally
+through>300wall seconds. Exact craft counters: inserter0→42 andlonghand15→46
+early; next178.967game-second window produced121inserters,20fast,162circuits,
+158belts,6splitters,4drills. Physical mall grew8→10actors andstone starter
+worked. Iron measured1.25→2.829→3.748/s; six replacement furnaces work and
+retire_starter.iron is complete (provider retained to drain real stock).
+ProxyC0/C1 reached, C2 active; deterministic acceptance/research unproven.
+Slower construction emerged: assembler job remained ready with rejected-cycle
+marker despite actuallonghand dependencycomplete; new builds had consumedseed
+stock. Queue now lets retained completed dependencies or exact funded bill
+reopen dispatch, while unchanged self-seed shortage still waits.319focus/
+1258fast pass,3skip/knownfirewall. Stoppedbeforeedits; next privatefreeze.
+Remaining geometric evidence: iron direct_belt_approach_wait at(-8.5,50.5),
+copper district_expansion_unbuildable at(77.5,-39.5). Do not call manufacturing
+stuck while actual output continues.

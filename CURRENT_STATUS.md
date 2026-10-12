@@ -550,3 +550,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
 - 2026-10-12 17:10 IST: Vertical provider recognition now uses shared cross offsets;
   actual private lookup resolves63.5,44.5 for blocked inserter.317focused/
   1256fast pass,3skip/knownfirewall. Lifecycle: frozen private resumption.
+
+- 2026-10-12 17:17 IST: Private9e87e01 recovery produced121inserters/20fast/162circuits
+  in179game seconds, grew8→10mall actors, stoneworking, iron1.25→3.748/s.
+  Stale rejected-cycle markers now permit funded/completed-dependency work.
+  319focused/1258fast pass,3skip/knownfirewall. Lifecycle: private newfreeze.

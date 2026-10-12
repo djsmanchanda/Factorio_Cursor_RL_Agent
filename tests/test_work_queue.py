@@ -776,3 +776,24 @@ def test_only_configured_physical_assemblers_prove_producer_presence(tmp_path):
                     {'name':'assembling-machine-1','recipe':'splitter'}):
         assert s._queue_snapshot({'tick':0,'machines':[machine]}, {})['owned'][job.job_id]['producer_present'] is False
     assert s._queue_snapshot({'tick':0,'machines':[{'name':'assembling-machine-1','recipe':'inserter'}]}, {})['owned'][job.job_id]['producer_present'] is True
+
+
+def test_rejected_bootstrap_cycle_marker_yields_after_real_dependencies_finish(tmp_path):
+    q=queue(tmp_path)
+    job=q.enqueue('produce',{'item':'assembling-machine-1','stock_target':6},priority=100,tick=0)
+    support=q.enqueue('produce',{'item':'long-handed-inserter','stock_target':12},priority=101,tick=0,parent=job.job_id)
+    job.reason='dependency_cycle:'+job.job_id
+    assert job not in q.ready(snapshot())
+    support.state='complete'
+    assert job in q.ready(snapshot())  # Revalidates/borrows a seed; no material is granted.
+    q.record(job,{'ok':False,'code':'material_shortage','details':{'required':{'assembling-machine-1':1}}},
+             snapshot(),can_produce=lambda _:True)
+    assert job not in q.ready(snapshot())  # An unchanged self-seed shortage still waits.
+
+
+def test_exact_funded_seed_breaks_cycle_but_an_unfunded_empty_dependency_set_does_not(tmp_path):
+    q=queue(tmp_path)
+    job=q.enqueue('produce',{'item':'assembling-machine-1','stock_target':6},priority=100,tick=0)
+    job.reason='dependency_cycle:'+job.job_id
+    assert job not in q.ready(snapshot())
+    assert job in q.ready(snapshot(owned={job.job_id:{'funded':True}}))

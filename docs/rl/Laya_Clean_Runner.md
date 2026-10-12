@@ -435,3 +435,7 @@ healthy demand wait, so a covered requester cannot mask a disconnected machine.
 Shared provider lookup recognizes up/down slots through the declared cross
 layout offsets, so their existing-cell maintenance uses the same ownership and
 coverage path as left/right cells.
+
+A rejected bootstrap-cycle edge does not permanently disable a job after its
+real retained dependencies finish or its exact kit is funded. The operation
+then revalidates/produces a seed; unchanged material signatures still wait.
