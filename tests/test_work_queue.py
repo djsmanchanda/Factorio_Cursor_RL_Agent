@@ -355,8 +355,7 @@ def test_mall_allocation_survives_power_yield_and_claims_ghosts_first(monkeypatc
     assert plans[0]==plans[1] and choose==[True] and saved==[True]
 
 
-@pytest.mark.parametrize('restore_same_recipe', [False, True])
-def test_drain_finishes_gated_craft_without_another_input_and_survives_restart(tmp_path, restore_same_recipe):
+def test_drain_finishes_gated_craft_without_another_input_and_survives_restart(tmp_path):
     import json, re, subprocess
     import pytest
     from orchestrator.stage_services import _hold_recipe_changes, StuckError
@@ -408,23 +407,34 @@ print('STATE='..encode(state))
     q=queue(tmp_path)
     plan={'phases':[{'actions':[{'action_type':'configure_entity','entity':'assembling-machine-1',
                                  'position':{'x':1,'y':1},'recipe':'electronic-circuit'}]}]}
-    with execution_slice(runtime=q.runtime,persist=q.save):
+    job=q.enqueue('produce',{'item':'electronic-circuit','stock_target':1},priority=100,tick=0)
+    with execution_slice(checkpoint=job.checkpoint,runtime=q.runtime,persist=q.save):
         with pytest.raises(StuckError,match='completed craft'):
             with _hold_recipe_changes(client,'private','player',plan): pass
     assert client.state['input']==0 and client.state['held']==0 and client.state['chest']==21
     assert client.state['feeding_disabled'] and not client.state['connected']
     assert client.state['progress']==0.75 and client.state['finished']==8  # No manufactured progress.
     q=queue(tmp_path)
+    job=next(iter(q.jobs.values()))
     assert q.runtime['craft_drains']['1.00:1.00']['feeders'][0]['disabled'] is False
+    assert job.checkpoint['craft_handoffs']=={'1.00:1.00':'electronic-circuit'}
     # Engine completes the already-funded in-flight craft with no next input.
     client.state.update(progress=0,finished=9)
-    if restore_same_recipe:
-        plan['phases'][0]['actions'][0]['recipe']='copper-cable'
-    with execution_slice(runtime=q.runtime,persist=q.save):
+    with execution_slice(checkpoint=job.checkpoint,runtime=q.runtime,persist=q.save):
+        from orchestrator.craft_boundary import recover_orphan_drains
+        # A waiting new borrower has no loan tag yet. Recovery and ordinary
+        # same-recipe maintenance must both leave its completed boundary held.
+        recover_orphan_drains(client,'private','player',[],
+                              pending_handoffs=job.checkpoint['craft_handoffs'])
+        maintenance={'phases':[{'actions':[{**plan['phases'][0]['actions'][0], 'recipe':'copper-cable'}]}]}
+        with _hold_recipe_changes(client,'private','player',maintenance): pass
+        assert client.state['feeding_disabled'] and not client.state['connected']
+        assert '1.00:1.00' in q.runtime['craft_drains']
         with _hold_recipe_changes(client,'private','player',plan):
-            assert client.state['machine_disabled'] is (not restore_same_recipe)
+            assert client.state['machine_disabled']
     assert not client.state['machine_disabled'] and not client.state['feeding_disabled']
     assert client.state['connected'] is True and q.runtime['craft_drains']=={}
+    assert job.checkpoint['craft_handoffs']=={}
 
 
 def test_released_borrower_cannot_leave_precursor_feeders_parked(tmp_path, monkeypatch):

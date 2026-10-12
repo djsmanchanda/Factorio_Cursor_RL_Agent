@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from orchestrator.execution_slice import runtime_checkpoint, persist_checkpoint
+from orchestrator.execution_slice import checkpoint, runtime_checkpoint, persist_checkpoint
 
 
 def _literal(value):
@@ -56,6 +56,12 @@ def request_drain(client, surface, force, changes):
         state['craft_drains'] = json.loads(reply)
     except json.JSONDecodeError as error:
         raise RuntimeError(f'Craft drain command failed: {reply[:300]}') from error
+    owner = checkpoint()
+    if owner is not None:
+        for actor in records:
+            key = f"{actor['x']:.2f}:{actor['y']:.2f}"
+            if key in state['craft_drains']:
+                owner.setdefault('craft_handoffs', {})[key] = actor['recipe']
     persist_checkpoint()
 
 
@@ -82,15 +88,21 @@ def release_drains(client, surface, force, held):
         released.append(key)
     for key in released:
         drains.pop(key)
+        owner = checkpoint()
+        if owner is not None:
+            owner.get('craft_handoffs', {}).pop(key, None)
     persist_checkpoint()
 
 
-def recover_orphan_drains(client, surface, force, loans):
+def recover_orphan_drains(client, surface, force, loans, *, pending_handoffs=()):
     """A released/reconfigured borrower must not keep its source feeder parked."""
     state = runtime_checkpoint()
     if state is None:
         return
     live = {f"{l.machine_position[0]:.2f}:{l.machine_position[1]:.2f}": l.current_recipe for l in loans}
+    # A new borrower has no live loan tag until its recipe transaction succeeds.
+    # Its queued checkpoint already owns the drain; resumption must retain it.
+    pending = set(pending_handoffs)
     orphaned = [r for key, r in state.get('craft_drains', {}).items()
-                if key not in live or live[key] != r['recipe']]
+                if key not in pending and (key not in live or live[key] != r['recipe'])]
     release_drains(client, surface, force, orphaned)

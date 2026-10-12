@@ -572,8 +572,9 @@ def _hold_recipe_changes(client, surface, force, plan):
                    ",limit=1}[1];if e then e.disabled_by_script=a.disabled end end")
             client.command("/sc " + lua)
         from orchestrator.craft_boundary import release_drains
-        release_drains(client, surface, force,
-                       [{"x": a["position"]["x"], "y": a["position"]["y"]} for a in changes])
+        # Same-recipe gate/request maintenance is not a handoff. Releasing its
+        # drain here refills/re-gates the actor before the waiting job can switch.
+        release_drains(client, surface, force, held)
 
 
 def _submit(

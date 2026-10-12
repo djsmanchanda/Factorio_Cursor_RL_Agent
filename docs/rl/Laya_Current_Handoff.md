@@ -632,3 +632,24 @@ and completion are not yet verified live.
 
 Final fast verification: 1,269 passed, three skipped; only the unchanged
 four-import firewall baseline failed. New shared lab/mission regressions pass.
+
+### 2026-10-12 20:06 IST — pending recipe handoffs retain drain ownership
+
+Private run persistent-laya-s50616-1791809957 advanced into oil equipment,
+but plastic/advanced/science output remained zero. Three funded equipment
+jobs repeatedly returned craft_boundary_wait while stocked source assemblers
+were frozen mid-craft. A new borrower has no live loan tag until configuration
+succeeds: recovery discarded that pending drain, and same-recipe maintenance
+also released it. Jobs now persist their pending handoff ownership; recovery
+retains it and only actual recipe changes release feeders. A native-Lua
+regression exercises both paths across queue reload. 77 focused tests pass;
+scoped fast gate has only the unchanged four-import firewall failure. The
+unscoped command collected frozen archive copies and failed collection;
+the corrected gate explicitly targets tests/. Existing controller test remains
+excluded as in prior verification.
+
+Runner was stopped gracefully at 29 decisions/1053 wall seconds, no failures,
+with the private world preserved. New frozen Python runner required; no mod
+deployment. Frozen runs can disable their automatic helper explicitly; personal
+observation uses that opt-out because requested T3 codex/Luna delegation tools
+are unavailable. Actual chemical/science output remains unverified.

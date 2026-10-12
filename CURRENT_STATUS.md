@@ -578,3 +578,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   and correctly excludes labs. Added shared bot-funded lab delivery with exact
   resumption and network/power checks. Lifecycle: new frozen private runner;
   live chemical/science/research progress remains to be verified.
+
+- 2026-10-12 20:06 IST: Queued recipe handoffs keep craft drains across recovery and
+  same-recipe maintenance. 77 focused passes; scoped fast gate only inherited
+  firewall failure. Lifecycle: new frozen private runner, helper disabled for
+  personal observation; chemical/science live outcome pending.

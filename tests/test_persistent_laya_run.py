@@ -82,13 +82,15 @@ def test_fresh_run_comparator_follows_archived_evidence(world, monkeypatch):
     assert (Path(record["root"]) / "evidence/old.json").exists()
 
 
-def test_frozen_oc_run_enables_helper_with_shared_evidence_paths(world, monkeypatch, tmp_path):
+@pytest.mark.parametrize('helper_enabled', [True, False])
+def test_frozen_run_records_helper_choice_with_shared_evidence_paths(world, monkeypatch, tmp_path, helper_enabled):
     owner = persistent_laya_run.ROOT
     episode = tmp_path / "episode";code = episode / "code";code.mkdir(parents=True)
     freeze = episode / "freeze.json"
     freeze.write_text(json.dumps({"world": str(world), "owner_repository": str(owner), "code_hashes": {},
                                  "mod_hashes": {}, "source_sha256": laya_saved_world.file_hash(world / "baseline.zip"),
-                                 "actions": "deterministic", "goal": "mining-productivity-4", "speed": 2, "seed": 50616}))
+                                 "actions": "deterministic", "goal": "mining-productivity-4", "speed": 2, "seed": 50616,
+                                 "helper": {"enabled": helper_enabled}}))
     monkeypatch.setattr(persistent_laya_run, "ROOT", code)
     monkeypatch.setattr(laya_saved_world, "PERSISTENT_WORLD", None)
     monkeypatch.setattr(persistent_laya_run.sys, "argv", ["runner", "--freeze", str(freeze)])
@@ -96,7 +98,7 @@ def test_frozen_oc_run_enables_helper_with_shared_evidence_paths(world, monkeypa
     monkeypatch.setattr(run_laya_clean, "main", lambda argv: calls.append(argv) or 0)
     assert persistent_laya_run.main() == 0
     command = calls[0]
-    assert "--no-helper" not in command
+    assert ("--no-helper" in command) is (not helper_enabled)
     assert command[command.index("--helper-report-root") + 1] == str(owner / "docs/rl/laya_helper_runs")
     assert command[command.index("--helper-data-root") + 1] == str(owner / "data/persistent-factorio/helper-state")
     assert command[command.index("--run-index") + 1] == str(owner / "data/persistent-factorio/laya-runs.jsonl")

@@ -101,7 +101,7 @@ def fresh_world(world):
     return backup
 
 
-def freeze_runner(world, speed, seed):
+def freeze_runner(world, speed, seed, helper_enabled=True):
     _, profile, manifest = profile_for_world(world)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     episode = ROOT / "data/persistent-factorio/runs" / identity()
@@ -126,15 +126,16 @@ def freeze_runner(world, speed, seed):
     helper = json.loads((code / "docs/rl/laya_helper.json").read_text())
     frozen["helper"] = {key: helper[key] for key in ("model", "variant")}
     frozen["helper"]["opencode_bin"] = shutil.which("opencode")
+    frozen["helper"]["enabled"] = helper_enabled
     path = episode / "freeze.json"
     path.write_text(json.dumps(frozen, indent=2) + "\n")
     return path
 
 
-def launch(world, python, speed, seed=50616):
+def launch(world, python, speed, seed=50616, *, helper_enabled=True):
     world = Path(world).resolve()
     (world / "logs").mkdir(exist_ok=True)
-    freeze = freeze_runner(world, speed, seed)
+    freeze = freeze_runner(world, speed, seed, helper_enabled)
     code = freeze.parent / "code"
     unit = "laya-persistent-run-" + freeze.parent.name
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--property", f"WorkingDirectory={code}",
@@ -175,7 +176,8 @@ def main():
                 "--helper-report-root", str(owner / "docs/rl/laya_helper_runs"),
                 "--helper-data-root", str(owner / "data/persistent-factorio/helper-state"),
                 "--run-index", str(owner / "data/persistent-factorio/laya-runs.jsonl"),
-                "--source-save", str(world / "baseline.zip"), "--experiment", freeze.parent.name])
+                "--source-save", str(world / "baseline.zip"), "--experiment", freeze.parent.name,
+                *([] if facts.get("helper", {}).get("enabled", True) else ["--no-helper"])])
 
 
 if __name__ == "__main__":

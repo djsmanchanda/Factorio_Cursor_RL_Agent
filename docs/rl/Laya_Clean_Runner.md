@@ -351,7 +351,7 @@ Preemption verifies a fully funded urgent input bill and atomically checks the
 exact loan machine's recipe, force and zero craft progress before holding it.
 Its completed output and input claims persist while the lender is restored. An
 in-flight craft is left running until an observed boundary. A restarted controller
-releases only its recorded machine holds before resuming queue reconciliation.
+releases only its recorded machine holds before resuming queue reconciliation. Pending recipe handoffs own their craft drains in the job checkpoint even before a loan tag exists. Recovery retains those drains; ordinary same-recipe gate maintenance cannot release their feeders. Only an actual recipe transaction or abandoned-owner recovery releases them.
 
 Live smoke tightened continuation semantics: ready work precedes deferred
 polling, and deferred peers poll by oldest last attempt before priority.

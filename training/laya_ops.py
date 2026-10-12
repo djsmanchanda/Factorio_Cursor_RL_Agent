@@ -295,8 +295,10 @@ class DeterministicSession:
             lower.checkpoint.pop("hold_position", None)
             lower.checkpoint["preemption_wait"] = {"for": urgent.job_id, "reason": "craft in progress"}
             from orchestrator.craft_boundary import request_drain
-            request_drain(self.client, SURFACE, FORCE, [{"entity": loan.machine_name,
-                          "position": {"x": position[0], "y": position[1]}, "recipe": urgent.item}])
+            from orchestrator.execution_slice import execution_slice
+            with execution_slice(checkpoint=lower.checkpoint, runtime=self.queue.runtime, persist=self.queue.save):
+                request_drain(self.client, SURFACE, FORCE, [{"entity": loan.machine_name,
+                              "position": {"x": position[0], "y": position[1]}, "recipe": urgent.item}])
             self.queue.save()
             return False
         lower.checkpoint.pop("preemption_wait", None)
@@ -466,7 +468,9 @@ class DeterministicSession:
             loans = []
             active_loans = mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
             from orchestrator.craft_boundary import recover_orphan_drains
-            recover_orphan_drains(self.client, SURFACE, FORCE, active_loans)
+            pending = {key for job in self.queue.jobs.values() if job.state != "complete"
+                       for key in job.checkpoint.get("craft_handoffs", {})}
+            recover_orphan_drains(self.client, SURFACE, FORCE, active_loans, pending_handoffs=pending)
             for loan in active_loans:
                 facts = self._loan_batch_facts(loan)
                 loans.append(facts)
